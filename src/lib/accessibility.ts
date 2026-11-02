@@ -38,7 +38,33 @@ export interface AccessibilityBridge {
    * is the desktop).
    */
   set(preferences: { reduceMotion: boolean; reduceTransparency: boolean; highContrast: boolean }): Promise<void>;
+  /** Whether din-shell is there to zoom the screen, filter its colours and help with the keyboard. */
+  status(): Promise<{ screen: boolean }>;
+  /** Tell din-shell the screen's settings; a no-op without it. */
+  setScreen(settings: ScreenAccessibility): Promise<void>;
 }
+
+/** What din-shell does for Settings → Accessibility (native/din-compositor/src/session/accessibility.rs). */
+export interface ScreenAccessibility {
+  zoomKeys: boolean;
+  colorFilter: ColorFilter;
+  stickyKeys: boolean;
+  slowKeys: boolean;
+  bounceKeys: boolean;
+}
+
+export const COLOR_FILTERS = ['none', 'invert', 'grayscale', 'protanopia', 'deuteranopia', 'tritanopia'] as const;
+export type ColorFilter = (typeof COLOR_FILTERS)[number];
+
+/** How Settings names each colour filter. */
+export const COLOR_FILTER_NAMES: Record<ColorFilter, string> = {
+  none: 'None',
+  invert: 'Invert colors',
+  grayscale: 'Grayscale',
+  protanopia: 'Red-green (protanopia)',
+  deuteranopia: 'Green-red (deuteranopia)',
+  tritanopia: 'Blue-yellow (tritanopia)',
+};
 
 declare global {
   interface Dinos {

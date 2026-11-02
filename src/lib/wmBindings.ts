@@ -160,6 +160,14 @@ export const WM_BINDING_HELP: { group: string; bindings: { keys: string[]; label
     ],
   },
   {
+    group: 'Zoom (when turned on in Settings → Accessibility)',
+    bindings: [
+      { keys: ['Super', 'Alt', '8'], label: 'Zoom the screen in, or back out' },
+      { keys: ['Super', 'Alt', '='], label: 'Zoom further in' },
+      { keys: ['Super', 'Alt', '−'], label: 'Zoom further out' },
+    ],
+  },
+  {
     group: 'Cursor effects (when turned on in Settings → Cursors)',
     bindings: [
       { keys: ['Super', 'Shift', 'K'], label: 'Show where the pointer is (or shake the mouse)' },

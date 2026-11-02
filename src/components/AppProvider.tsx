@@ -85,8 +85,16 @@ function useApplyZoom(zoomLevel: number) {
   }, [zoomLevel]);
 }
 
-/** Apply Settings → Accessibility to the document root, and pass it on to guests and Linux apps. */
-function useApplyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize }: AppConfig) {
+/**
+ * Apply Settings → Accessibility to the document root, and pass it on to
+ * guests and Linux apps, and to din-shell for the screen.
+ */
+function useApplyAccessibility(config: AppConfig) {
+  const { reduceMotion, reduceTransparency, increaseContrast, textSize } = config;
+  const { screenZoomKeys: zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys } = config;
+  useEffect(() => {
+    void getAccessibilityBridge()?.setScreen({ zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys }).catch(() => {});
+  }, [zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys]);
   useEffect(() => {
     applyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize });
   }, [reduceMotion, reduceTransparency, increaseContrast, textSize]);

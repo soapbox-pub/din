@@ -16,15 +16,51 @@
 // happen. Only where Din is the desktop (DinOS): on GNOME the same keys are
 // the user's GNOME settings, which Din leaves alone (desktop-settings.mts).
 //
+// The screen: under din-shell, its zoom keys, colour filter and keyboard
+// aids (sticky, slow and bounce keys) are its own, so they reach everything
+// on the screen. Din tells it them in $XDG_RUNTIME_DIR/din-shell-accessibility,
+// which it watches (native/din-compositor/src/session/accessibility.rs).
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { app, ipcMain, webContents } from 'electron';
 import { settingsOwner } from './desktop-settings.mts';
 import { holdDebugger, holdsDebugger, releaseDebugger } from './guest-debugger.mts';
 import { runCommand } from './system.mts';
 
 const HOLDER = 'media-features';
+
+/** Whether Din is on din-shell, which names its Wayland socket so (session/mod.rs). */
+const onShell = process.env.WAYLAND_DISPLAY === 'din-shell' && !!process.env.XDG_RUNTIME_DIR;
+
+const COLOR_FILTERS = ['none', 'invert', 'grayscale', 'protanopia', 'deuteranopia', 'tritanopia'];
+/** How long slow keys wants a key held, and bounce keys leaves a key alone after it comes up, in ms. */
+const SLOW_KEYS_MS = 300;
+const BOUNCE_KEYS_MS = 300;
+
+async function tellShell(raw: unknown): Promise<void> {
+  const s = (raw ?? {}) as Record<string, unknown>;
+  for (const key of ['zoomKeys', 'stickyKeys', 'slowKeys', 'bounceKeys']) {
+    if (typeof s[key] !== 'boolean') throw new Error(`${key} is not a boolean`);
+  }
+  if (typeof s.colorFilter !== 'string' || !COLOR_FILTERS.includes(s.colorFilter)) throw new Error('Unknown colour filter');
+  if (!onShell) return;
+  const file = path.join(process.env.XDG_RUNTIME_DIR!, 'din-shell-accessibility');
+  const temp = `${file}.${process.pid}`;
+  const text = [
+    `zoom-keys=${s.zoomKeys ? 1 : 0}`,
+    `filter=${s.colorFilter}`,
+    `sticky-keys=${s.stickyKeys ? 1 : 0}`,
+    `slow-keys=${s.slowKeys ? SLOW_KEYS_MS : 0}`,
+    `bounce-keys=${s.bounceKeys ? BOUNCE_KEYS_MS : 0}`,
+  ].join('\n');
+  // Renamed into place, so din-shell never reads half of it.
+  await fs.writeFile(temp, `${text}\n`);
+  await fs.rename(temp, file);
+}
 
 /** What was last written, so an unchanged preference isn't written again. */
 let applied = '';
@@ -58,6 +94,16 @@ export function registerAccessibilityHandlers(options: {
     contents.on('did-start-navigation', (event) => {
       if (event.isMainFrame && !event.isSameDocument && features.some((f) => f.value)) applyMediaFeatures(contents);
     });
+  });
+
+  ipcMain.handle('accessibility:status', (event) => {
+    assertShellSender(event);
+    return { screen: onShell };
+  });
+
+  ipcMain.handle('accessibility:screen', async (event, settings: unknown) => {
+    assertShellSender(event);
+    await tellShell(settings);
   });
 
   ipcMain.handle('accessibility:set', async (event, preferences: unknown) => {

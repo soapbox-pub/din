@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AppConfig, BlossomServerMetadata, RelayMetadata } from '@/contexts/AppContext';
 import { DesktopThemeSchema, ProfileThemeMetadataSchema } from '@/lib/profileTheme';
+import { COLOR_FILTERS } from '@/lib/accessibility';
 
 // Zod schema for RelayMetadata validation
 const RelayMetadataSchema = z.object({
@@ -65,6 +66,11 @@ export const AppConfigSchema = z.object({
   reduceTransparency: z.boolean(),
   increaseContrast: z.boolean(),
   textSize: z.number().min(100).max(200),
+  screenZoomKeys: z.boolean(),
+  colorFilter: z.enum(COLOR_FILTERS),
+  stickyKeys: z.boolean(),
+  slowKeys: z.boolean(),
+  bounceKeys: z.boolean(),
   clockFormat: z.enum(['auto', '12', '24']),
   clockShowDate: z.boolean(),
   clockShowSeconds: z.boolean(),

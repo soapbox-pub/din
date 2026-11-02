@@ -994,12 +994,21 @@ expose('datetime', {
 // Accessibility bridge (window.dinos.accessibility), backed by
 // electron/accessibility.mts: Reduce motion, Reduce transparency and
 // Increase contrast, for web pages and apps (as CSS media features) and the
-// Linux apps Din runs (GSettings, on DinOS).
+// Linux apps Din runs (GSettings, on DinOS); and the screen's zoom, colour
+// filter and keyboard aids, for din-shell to apply.
 expose('accessibility', {
   /**
    * @param {{ reduceMotion: boolean, reduceTransparency: boolean, highContrast: boolean }} preferences
    */
   set: (preferences) => ipcRenderer.invoke('accessibility:set', preferences),
+
+  /** { screen }: whether din-shell is there to zoom, filter and help with the keyboard. */
+  status: () => ipcRenderer.invoke('accessibility:status'),
+
+  /**
+   * @param {{ zoomKeys: boolean, colorFilter: string, stickyKeys: boolean, slowKeys: boolean, bounceKeys: boolean }} settings
+   */
+  setScreen: (settings) => ipcRenderer.invoke('accessibility:screen', settings),
 });
 
 // Mouse bridge (window.dinos.mouse), backed by electron/mouse.mts: Settings →

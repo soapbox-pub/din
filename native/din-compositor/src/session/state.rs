@@ -53,7 +53,7 @@ use smithay::{
     },
 };
 
-use super::{cursor, drm, gamma, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
+use super::{accessibility, cursor, drm, gamma, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
 
 /// CLOCK_MONOTONIC, the clock presentation times are in.
 const CLOCK_MONOTONIC: u32 = 1;
@@ -113,6 +113,7 @@ pub struct State {
     pub cursor: cursor::Cursors,
     pub shake: shake::Shake,
     pub mouse: mouse::Mouse,
+    pub accessibility: accessibility::Accessibility,
     pub dnd_icon: Option<DndIcon>,
     /// Keys the compositor took (a VT switch), whose release it takes too.
     pub suppressed_keys: Vec<Keysym>,
@@ -212,6 +213,7 @@ impl State {
             cursor: cursor::Cursors::load(),
             shake: shake::Shake::default(),
             mouse: mouse::Mouse::default(),
+            accessibility: accessibility::Accessibility::default(),
             dnd_icon: None,
             suppressed_keys: Vec::new(),
             pointer_devices: 0,

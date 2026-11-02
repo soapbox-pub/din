@@ -20,14 +20,19 @@
 //! and one of its own for displays with no screen, which deckmon adds to
 //! extend the desktop onto a TV (virtual_output.rs).
 //!
+//! Settings → Accessibility's zoom, colour filters and keyboard aids are
+//! the compositor's, so they reach every app (accessibility.rs).
+//!
 //! The Wayland socket is `din-shell` in XDG_RUNTIME_DIR. The compositor exits
 //! when Din does, with its exit status.
 
+mod accessibility;
 mod cursor;
 mod drm;
 mod edid;
 mod gamma;
 mod input;
+mod keys;
 mod magic_mouse;
 mod mouse;
 mod output_management;

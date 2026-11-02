@@ -70,7 +70,15 @@ import {
 } from '@/lib/display';
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
-import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, TEXT_SIZE_STEP, clampTextSize } from '@/lib/accessibility';
+import {
+  COLOR_FILTERS,
+  COLOR_FILTER_NAMES,
+  MAX_TEXT_SIZE,
+  MIN_TEXT_SIZE,
+  TEXT_SIZE_STEP,
+  clampTextSize,
+  getAccessibilityBridge,
+} from '@/lib/accessibility';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
 import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
@@ -3456,6 +3464,11 @@ function AccessibilitySection() {
   const { config, updateConfig } = useAppContext();
   const set = (patch: Partial<AppConfig>) => updateConfig((current) => ({ ...current, ...patch }));
   const textSize = clampTextSize(config.textSize);
+  // Zoom, colour filters and the keyboard aids are din-shell's.
+  const [screen, setScreen] = useState(false);
+  useEffect(() => {
+    getAccessibilityBridge()?.status().then((s) => setScreen(s.screen), () => setScreen(false));
+  }, []);
 
   return (
     <SectionShell title="Accessibility">
@@ -3519,6 +3532,59 @@ function AccessibilitySection() {
         value={config.zoomLevel}
         onChange={(percent) => set({ zoomLevel: clampZoom(percent) })}
       />
+
+      {screen ? (
+        <>
+          <SubHeading>Zoom</SubHeading>
+          <SettingSwitchRow
+            id="screen-zoom-keys"
+            icon={ZoomIn}
+            label="Zoom the screen with the keyboard"
+            description="Super+Alt+8 zooms in on the display the pointer’s on, or back out, and Super+Alt+= and Super+Alt+− zoom further in or out. Move the pointer to an edge to see what’s there."
+            checked={config.screenZoomKeys}
+            onCheckedChange={(screenZoomKeys) => set({ screenZoomKeys })}
+          />
+
+          <SubHeading>Color filters</SubHeading>
+          <ChoiceRow
+            label="Color filter"
+            description="Changes the colors of everything on the screen, Linux apps included. Screenshots keep the real colors. The color blindness filters move the colors you can’t tell apart to ones you can."
+            value={config.colorFilter}
+            choices={COLOR_FILTERS.map((value) => ({ value, name: COLOR_FILTER_NAMES[value] }))}
+            onChange={(colorFilter) => set({ colorFilter })}
+          />
+
+          <SubHeading>Keyboard</SubHeading>
+          <SettingSwitchRow
+            id="sticky-keys"
+            icon={Keyboard}
+            label="Sticky keys"
+            description="Press Shift, Ctrl, Alt or Super and let go, and it stays down for the next key, so shortcuts need one key at a time. Press it twice to keep it down until you press it again."
+            checked={config.stickyKeys}
+            onCheckedChange={(stickyKeys) => set({ stickyKeys })}
+          />
+          <SettingSwitchRow
+            id="slow-keys"
+            icon={Keyboard}
+            label="Slow keys"
+            description="A key only types once it’s been held for a moment, so brushing past one doesn’t."
+            checked={config.slowKeys}
+            onCheckedChange={(slowKeys) => set({ slowKeys })}
+          />
+          <SettingSwitchRow
+            id="bounce-keys"
+            icon={Keyboard}
+            label="Bounce keys"
+            description="A key pressed again just after it came up is ignored, so a shaky press types once."
+            checked={config.bounceKeys}
+            onCheckedChange={(bounceKeys) => set({ bounceKeys })}
+          />
+        </>
+      ) : (
+        <FallbackCard icon={ZoomIn}>
+          Zooming the screen, color filters, and sticky, slow and bounce keys are for DinOS. Here, the desktop Din runs in has its own.
+        </FallbackCard>
+      )}
     </SectionShell>
   );
 }

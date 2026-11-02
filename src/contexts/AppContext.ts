@@ -1,6 +1,7 @@
 import { createContext } from "react";
 import type { DesktopTheme, ProfileThemeMetadata } from "@/lib/profileTheme";
 import type { DesktopIconSize } from "@/lib/desktopIcons";
+import type { ColorFilter } from "@/lib/accessibility";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -204,6 +205,19 @@ export interface AppConfig {
   increaseContrast: boolean;
   /** Text size, as a percentage (100 = normal), without scaling the rest of the layout as zoom does. */
   textSize: number;
+  /**
+   * The screen, done by din-shell so it reaches every app
+   * (src/lib/accessibility.ts): Super+Alt+8, = and - zoom the screen.
+   */
+  screenZoomKeys: boolean;
+  /** A colour filter on the whole screen: inverted, greyscale, or corrected for a colour blindness. */
+  colorFilter: ColorFilter;
+  /** Shift, Ctrl, Alt or Super pressed on its own stays down for the next key. */
+  stickyKeys: boolean;
+  /** A key only counts once it's been held a moment. */
+  slowKeys: boolean;
+  /** A key pressed again just after it came up is left out. */
+  bounceKeys: boolean;
   /** Whether clocks (menu bar, boot and lock screens) show 12- or 24-hour time. */
   clockFormat: ClockFormat;
   /** Whether the menu-bar clock shows the weekday and date beside the time. */

@@ -2,7 +2,9 @@
 //!
 //! Everything goes to Din (or the popup holding a grab), except
 //! Ctrl+Alt+F1..F12, which switch to another virtual terminal: with Din hung,
-//! that's the way to a text login.
+//! that's the way to a text login; and Super+Alt+8, = and -, which zoom the
+//! screen when Settings → Accessibility says so (accessibility.rs). Keys go
+//! through the keyboard aids first (keys.rs).
 
 use smithay::{
     backend::input::{
@@ -22,13 +24,22 @@ use smithay::{
         },
         touch::{DownEvent, MotionEvent as TouchMotion, UpEvent},
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    input::keyboard::Keycode,
+    reexports::{
+        calloop::timer::{TimeoutAction, Timer},
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
     utils::{Logical, Point, SERIAL_COUNTER},
     wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint},
 };
 use tracing::warn;
 
-use super::{magic_mouse, state::State};
+use super::{
+    accessibility::{self, ZoomKey},
+    keys::KeyAction,
+    magic_mouse,
+    state::State,
+};
 
 impl State {
     pub fn process_input(&mut self, event: InputEvent<LibinputInputBackend>) {
@@ -169,16 +180,42 @@ impl State {
     }
 
     fn on_key(&mut self, event: <LibinputInputBackend as smithay::backend::input::InputBackend>::KeyboardKeyEvent) {
+        let time = event.time_msec();
+        let outcome = self.accessibility.keys.key(event.key_code().raw(), event.state() == KeyState::Pressed, time);
+        if let Some((code, ms)) = outcome.wait {
+            let _ = self.handle.insert_source(Timer::from_duration(std::time::Duration::from_millis(ms.into())), move |_, _, state| {
+                let keys = state.accessibility.keys.slow_key_held(code);
+                let now = std::time::Duration::from(state.clock.now()).as_millis() as u32;
+                state.deliver_keys(&keys, now);
+                TimeoutAction::Drop
+            });
+        }
+        self.deliver_keys(&outcome.keys, time);
+    }
+
+    /// Passes KEYS on to the keyboard, as pressed at TIME.
+    pub fn deliver_keys(&mut self, keys: &[KeyAction], time: u32) {
+        for key in keys {
+            let state = if key.pressed { KeyState::Pressed } else { KeyState::Released };
+            self.deliver_key(Keycode::new(key.code), state, time);
+        }
+    }
+
+    fn deliver_key(&mut self, code: Keycode, state: KeyState, time: u32) {
         let Some(keyboard) = self.seat.get_keyboard() else { return };
         let serial = SERIAL_COUNTER.next_serial();
-        let state = event.state();
+        let zoom_keys = self.accessibility.settings.zoom_keys;
         let mut suppressed = std::mem::take(&mut self.suppressed_keys);
-        let vt = keyboard.input(self, event.key_code(), state, serial, event.time_msec(), |_, _, handle| {
+        let taken = keyboard.input(self, code, state, serial, time, |_, modifiers, handle| {
             let keysym = handle.modified_sym();
             if state == KeyState::Pressed {
                 if let Some(vt) = vt_for(keysym) {
                     suppressed.push(keysym);
-                    return FilterResult::Intercept(Some(vt));
+                    return FilterResult::Intercept(Some(Taken::Vt(vt)));
+                }
+                if let Some(zoom) = accessibility::zoom_key(modifiers, keysym).filter(|_| zoom_keys) {
+                    suppressed.push(keysym);
+                    return FilterResult::Intercept(Some(Taken::Zoom(zoom)));
                 }
                 FilterResult::Forward
             } else if let Some(i) = suppressed.iter().position(|k| *k == keysym) {
@@ -189,10 +226,14 @@ impl State {
             }
         });
         self.suppressed_keys = suppressed;
-        if let Some(Some(vt)) = vt {
-            if let Err(err) = self.backend.session.change_vt(vt) {
-                warn!("switching to VT {vt}: {err}");
+        match taken {
+            Some(Some(Taken::Vt(vt))) => {
+                if let Err(err) = self.backend.session.change_vt(vt) {
+                    warn!("switching to VT {vt}: {err}");
+                }
             }
+            Some(Some(Taken::Zoom(zoom))) => self.zoom_by(zoom),
+            _ => {}
         }
     }
 
@@ -250,7 +291,12 @@ impl State {
         pointer.motion(self, under.clone(), &MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time });
         pointer.frame(self);
         self.shake.moved(location, self.clock.now().into());
-        self.queue_redraw_pointer();
+        if self.accessibility.zoom > 1.001 {
+            // The whole zoomed display moves with the pointer, and one it's left goes back to normal.
+            self.queue_redraw_all();
+        } else {
+            self.queue_redraw_pointer();
+        }
 
         // A constraint takes effect once the pointer is inside it.
         if let Some((surface, origin)) = under {
@@ -337,6 +383,12 @@ impl State {
         }
         best.map_or(location, |(_, p)| p)
     }
+}
+
+/// A key the compositor took for itself.
+enum Taken {
+    Vt(i32),
+    Zoom(ZoomKey),
 }
 
 /// The VT Ctrl+Alt+F<N> switches to (XKB maps it to XF86Switch_VT_<N>).

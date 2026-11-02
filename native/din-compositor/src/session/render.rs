@@ -1,6 +1,7 @@
 //! What's drawn on a display: Din's window with its popups, a drag's icon and
 //! the pointer, as render elements for any rectangle of the layout (a
-//! display, or the part of one a screenshot asks for).
+//! display, or the part of one a screenshot asks for), magnified about the
+//! pointer while the screen is zoomed (accessibility.rs).
 
 use smithay::{
     backend::renderer::{
@@ -9,6 +10,7 @@ use smithay::{
             memory::MemoryRenderBufferRenderElement,
             render_elements,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            utils::RescaleRenderElement,
         },
         gles::GlesRenderer,
     },
@@ -25,9 +27,15 @@ use super::{cursor::Cursors, state::DndIcon};
 pub const BACKDROP: [f32; 4] = [0.043, 0.059, 0.078, 1.0];
 
 render_elements! {
-    pub OutputElement<=GlesRenderer>;
+    pub SceneElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
+}
+
+render_elements! {
+    pub OutputElement<=GlesRenderer>;
+    Scene=SceneElement,
+    Zoomed=RescaleRenderElement<SceneElement>,
 }
 
 /// What a frame is drawn from.
@@ -41,6 +49,8 @@ pub struct Scene<'a> {
     /// the pointer draws the theme's arrow that big in place of any other.
     pub magnify: f64,
     pub dnd_icon: Option<&'a DndIcon>,
+    /// How many times the screen's magnified about the pointer; 1 isn't.
+    pub zoom: f64,
 }
 
 /// The elements for AREA of the layout at SCALE, front to back, positioned
@@ -54,7 +64,7 @@ pub fn elements(
 ) -> Vec<OutputElement> {
     let scale_xy = Scale::from(scale);
     let origin = area.loc;
-    let mut elements: Vec<OutputElement> = Vec::new();
+    let mut elements: Vec<SceneElement> = Vec::new();
 
     if let Some(pointer) = scene.pointer.filter(|p| with_pointer && area.to_f64().contains(*p)) {
         let at = pointer - origin.to_f64();
@@ -92,7 +102,7 @@ pub fn elements(
                         Some(size.into()),
                         Kind::Cursor,
                     ) {
-                        elements.push(OutputElement::Memory(element));
+                        elements.push(SceneElement::Memory(element));
                     }
                 } else {
                     tracing::warn!("shake: the cursor theme has no arrow to draw big");
@@ -135,7 +145,7 @@ pub fn elements(
                         Some(size.into()),
                         Kind::Cursor,
                     ) {
-                        elements.push(OutputElement::Memory(element));
+                        elements.push(SceneElement::Memory(element));
                     }
                 }
             }
@@ -146,10 +156,24 @@ pub fn elements(
         let Some(location) = scene.space.element_location(window) else { continue };
         let location = (location - window.geometry().loc - origin).to_physical_precise_round(scale_xy);
         elements.extend(
-            smithay::backend::renderer::element::AsRenderElements::<GlesRenderer>::render_elements::<OutputElement>(
+            smithay::backend::renderer::element::AsRenderElements::<GlesRenderer>::render_elements::<SceneElement>(
                 window, renderer, location, scale_xy, 1.0,
             ),
         );
     }
-    elements
+
+    // Zoomed about the pointer, which so stays over what it's pointing at:
+    // what's under it on screen is what's under it on the layout, and input
+    // needs no translating.
+    let zoom_about = scene.pointer.filter(|p| scene.zoom > 1.001 && area.to_f64().contains(*p));
+    match zoom_about {
+        Some(pointer) => {
+            let about = (pointer - origin.to_f64()).to_physical(scale_xy).to_i32_round();
+            elements
+                .into_iter()
+                .map(|e| OutputElement::Zoomed(RescaleRenderElement::from_element(e, about, scene.zoom)))
+                .collect()
+        }
+        None => elements.into_iter().map(OutputElement::Scene).collect(),
+    }
 }

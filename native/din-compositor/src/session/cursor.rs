@@ -22,7 +22,7 @@ use smithay::{
 use tracing::{info, warn};
 use xcursor::{CursorTheme, parser::parse_xcursor};
 
-use super::{mouse, state::State};
+use super::{accessibility, mouse, state::State};
 
 /// The file Din tells the pointer's settings in, in XDG_RUNTIME_DIR.
 const SETTINGS_FILE: &str = "din-shell-pointer";
@@ -154,12 +154,14 @@ fn to_image(image: &xcursor::parser::Image) -> Image {
     }
 }
 
-/// Reads what Din says about the pointer and the mouse (mouse.rs) now, and
+/// Reads what Din says about the pointer, the mouse (mouse.rs) and
+/// accessibility (accessibility.rs) now, and
 /// again each time it says something new.
 pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
     let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) else { return };
     state.read_pointer_settings(&dir.join(SETTINGS_FILE));
     state.read_mouse_settings(&dir.join(mouse::SETTINGS_FILE));
+    state.read_accessibility_settings(&dir.join(accessibility::SETTINGS_FILE));
     let Ok(cdir) = CString::new(dir.as_os_str().as_encoded_bytes()) else { return };
     // SAFETY: plain syscalls; the fd is owned from here on.
     let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
@@ -177,6 +179,7 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
         let mut buf = [0u8; 4096];
         let mut changed = false;
         let mut mouse_changed = false;
+        let mut accessibility_changed = false;
         loop {
             // SAFETY: reading into a buffer of the size given.
             let n = unsafe { libc::read(fd.as_fd().as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
@@ -191,6 +194,7 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
                 let name = name.split(|&b| b == 0).next().unwrap_or_default();
                 changed |= name == SETTINGS_FILE.as_bytes();
                 mouse_changed |= name == mouse::SETTINGS_FILE.as_bytes();
+                accessibility_changed |= name == accessibility::SETTINGS_FILE.as_bytes();
                 at += header + len;
             }
         }
@@ -199,6 +203,9 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
         }
         if mouse_changed {
             state.read_mouse_settings(&dir.join(mouse::SETTINGS_FILE));
+        }
+        if accessibility_changed {
+            state.read_accessibility_settings(&dir.join(accessibility::SETTINGS_FILE));
         }
         Ok(PostAction::Continue)
     });

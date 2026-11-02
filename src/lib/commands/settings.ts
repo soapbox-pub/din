@@ -1,5 +1,6 @@
 import type { AppConfig } from '@/contexts/AppContext';
 import { effectsFor } from '@/lib/effects';
+import { COLOR_FILTERS } from '@/lib/accessibility';
 import { CLICK_EFFECTS, TRAIL_EFFECTS } from '@/lib/cursorEffects';
 import { getNotificationState, setDoNotDisturb } from '@/lib/notificationCenter';
 import { coerce } from './parse';
@@ -82,6 +83,14 @@ const SETTINGS: Setting[] = [
   { key: 'accessibility.reduce-transparency', field: 'reduceTransparency', help: 'Solid panels, menus and windows instead of frosted glass', param: bool },
   { key: 'accessibility.increase-contrast', field: 'increaseContrast', help: 'Stronger borders, secondary text and focus rings; also reduces transparency', param: bool },
   { key: 'accessibility.text-size', field: 'textSize', help: 'Text size in percent, without zooming the rest', param: { type: 'integer', min: 100, max: 200 } },
+  { key: 'accessibility.zoom-keys', field: 'screenZoomKeys', help: 'Super+Alt+8, = and - zoom the screen (DinOS)', param: bool },
+  {
+    key: 'accessibility.color-filter', field: 'colorFilter', help: 'A colour filter on the whole screen (DinOS)',
+    param: { type: 'string', choices: [...COLOR_FILTERS] },
+  },
+  { key: 'accessibility.sticky-keys', field: 'stickyKeys', help: 'Modifiers pressed on their own stay down for the next key (DinOS)', param: bool },
+  { key: 'accessibility.slow-keys', field: 'slowKeys', help: 'Keys only count once held a moment (DinOS)', param: bool },
+  { key: 'accessibility.bounce-keys', field: 'bounceKeys', help: 'A key pressed again just after it came up is ignored (DinOS)', param: bool },
   { key: 'datetime.clock-format', field: 'clockFormat', help: '12- or 24-hour time, or the locale’s', param: { type: 'string', choices: ['auto', '12', '24'] } },
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },
   { key: 'datetime.show-seconds', field: 'clockShowSeconds', help: 'The menu bar shows seconds', param: bool },

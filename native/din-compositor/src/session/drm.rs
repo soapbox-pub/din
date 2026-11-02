@@ -111,6 +111,8 @@ pub struct Backend {
     next_id: u64,
     /// How long before a refresh a frame is committed.
     max_render_time: Duration,
+    /// Whether gamma tables go out inverted (accessibility.rs).
+    pub invert: bool,
 }
 
 /// A connected display.
@@ -136,6 +138,8 @@ pub struct Head {
     pub gamma_size: u32,
     /// A gamma table a client set (red, green, then blue), to restore after a VT switch.
     pub gamma: Option<Vec<u16>>,
+    /// The colour matrix blob set on its CRTC, to destroy when it's replaced.
+    ctm_blob: Option<u64>,
 }
 
 /// What a head is.
@@ -371,6 +375,7 @@ impl Backend {
             active: true,
             next_id: 1,
             max_render_time,
+            invert: false,
         })
     }
 
@@ -404,9 +409,50 @@ impl Backend {
                 &identity
             }
         };
+        // Inverted colours (accessibility.rs): each channel's table back to front.
+        let inverted: Vec<u16>;
+        let ramp = if self.invert {
+            inverted = ramp.chunks(size).flat_map(|channel| channel.iter().rev().copied()).collect();
+            &inverted
+        } else {
+            ramp
+        };
         let (red, rest) = ramp.split_at(size);
         let (green, blue) = rest.split_at(size);
         self.drm.device().set_gamma(crtc, red, green, blue).map_err(|err| format!("setting gamma: {err}"))
+    }
+
+    /// Sets a CRTC's colour matrix (row by row, for RGB columns), or takes it off with None.
+    pub fn set_ctm(&mut self, id: u64, matrix: Option<[f64; 9]>) -> Result<(), String> {
+        let Some(index) = self.heads.iter().position(|h| h.id == id) else { return Err("no such display".into()) };
+        let Some(crtc) = self.heads[index].crtc() else { return Err("the display has no CRTC".into()) };
+        let device = self.drm.device();
+        let props = device.get_properties(crtc).map_err(|err| format!("reading its properties: {err}"))?;
+        let prop = props
+            .iter()
+            .map(|(handle, _)| *handle)
+            .find(|handle| device.get_property(*handle).is_ok_and(|info| info.name().to_bytes() == b"CTM"))
+            .ok_or("the display has no colour matrix")?;
+        let value = match matrix {
+            Some(matrix) => {
+                // drm_color_ctm: S31.32 sign-magnitude fixed point.
+                let fixed: [u64; 9] = matrix.map(|v| {
+                    let magnitude = ((v.abs() * (1u64 << 32) as f64) as u64) & !(1 << 63);
+                    if v < 0.0 { magnitude | 1 << 63 } else { magnitude }
+                });
+                match device.create_property_blob(&fixed).map_err(|err| format!("making the matrix: {err}"))? {
+                    smithay::reexports::drm::control::property::Value::Blob(blob) => blob,
+                    _ => return Err("making the matrix: not a blob".into()),
+                }
+            }
+            None => 0,
+        };
+        device.set_property(crtc, prop, value).map_err(|err| format!("setting the matrix: {err}"))?;
+        let old = std::mem::replace(&mut self.heads[index].ctm_blob, (value != 0).then_some(value));
+        if let Some(old) = old {
+            let _ = device.destroy_property_blob(old);
+        }
+        Ok(())
     }
 
     fn surface_feedback(&mut self, surface: &Surface) -> Option<SurfaceFeedback> {
@@ -530,6 +576,7 @@ impl State {
             transform: Transform::Normal,
             gamma_size,
             gamma: None,
+            ctm_blob: None,
         });
         if let Err(err) = self.enable_head(id) {
             warn!("{err}");
@@ -596,6 +643,7 @@ impl State {
             transform: Transform::Normal,
             gamma_size: 0,
             gamma: None,
+            ctm_blob: None,
         });
         if let Err(err) = self.enable_head(id) {
             self.backend.heads.retain(|h| h.id != id);
@@ -688,6 +736,9 @@ impl State {
         self.space.map_output(&output, position);
         if let Some(gamma) = self.backend.heads[index].gamma.clone() {
             let _ = self.backend.set_gamma(id, Some(&gamma));
+        }
+        if self.accessibility.settings.filter != Default::default() {
+            self.apply_color_filter_to(id);
         }
         self.queue_redraw(id);
         Ok(())
@@ -802,6 +853,7 @@ impl State {
             cursors: &mut self.cursor,
             magnify: self.shake.scale(),
             dnd_icon: self.dnd_icon.as_ref(),
+            zoom: self.accessibility.zoom,
         };
         let elements = render::elements(&mut scene, renderer, area, scale, true);
         let now: Duration = self.clock.now().into();
@@ -952,6 +1004,13 @@ impl State {
             if let Some(gamma) = &head.gamma {
                 let _ = self.backend.set_gamma(head.id, Some(gamma));
             }
+        }
+        // The colour filter, which another VT may have changed too.
+        if self.accessibility.settings.filter != Default::default() {
+            for head in &mut self.backend.heads {
+                head.ctm_blob = None;
+            }
+            self.apply_color_filter();
         }
     }
 }
