@@ -10,7 +10,10 @@ accessory is paired and trusted. An accessory already bonded gets its key
 again, which needs nothing more; plugged into another computer since, it's
 ours again. A new bond is only read when bluetoothd starts, so it restarts,
 which drops other Bluetooth connections for a moment (Din connects the
-headphones again, electron/bluetooth.mts).
+headphones again, electron/bluetooth.mts). The bond says the accessory is
+BR/EDR: without that, bluetoothd doesn't add it to the kernel's list of
+devices allowed to connect, and the kernel then refuses to let it wake the
+computer.
 
 The accessory waits to be called, so when it's unplugged it's connected.
 
@@ -119,7 +122,8 @@ def pair(node):
     for section in ("General", "LinkKey"):
         if not info.has_section(section):
             info.add_section(section)
-    info["General"].update({"Name": name, "Class": cls, "Trusted": "true", "Blocked": "false"})
+    info["General"].update({"Name": name, "Class": cls, "Trusted": "true", "Blocked": "false",
+                            "SupportedTechnologies": "BR/EDR;"})
     info["LinkKey"].update({"Key": key[::-1].hex().upper(), "Type": "4", "PINLength": "0"})
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
