@@ -1047,7 +1047,7 @@ export function registerWifiHandlers(options: {
     const rows = terseRows(
       await nmcli(
         [
-          '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ',
+          '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ,DEVICE',
           'device', 'wifi', 'list',
           '--rescan', rescan === true ? 'no' : 'auto',
         ],
@@ -1056,9 +1056,10 @@ export function registerWifiHandlers(options: {
     );
 
     // One entry per SSID (strongest signal wins; hidden networks skipped).
+    // Not Quick Share's hotspot, which NetworkManager lists as its own device's network while it's up.
     const bySsid = new Map<string, WifiNetwork>();
-    for (const [inUse, ssid, signal, security, freq] of rows) {
-      if (!ssid) continue;
+    for (const [inUse, ssid, signal, security, freq, device] of rows) {
+      if (!ssid || device === HOTSPOT_IFACE) continue;
       const network: WifiNetwork = {
         ssid,
         inUse: inUse === '*',
