@@ -100,54 +100,38 @@ declare global {
 // ---------------------------------------------------------------------------
 
 /**
- * Why the app (or this window) was opened. The files it was opened with
- * come to `launchQueue`'s consumer.
+ * A window's launches come to the web's `launchQueue` consumer (Launch
+ * Handling): its own first, then each time a running single-instance app is
+ * launched again or a Dock shortcut is chosen (the window already focused).
+ * The launch parameters are the `targetURL`'s query (a string as itself,
+ * anything else as JSON; `src/shared/launch.ts` reads them), on the URL of
+ * the manifest shortcut that launched it, if one did. What the window saved
+ * for Din to reopen it with is its Navigation API state
+ * (`navigation.updateCurrentEntry({ state })`): when Din reopens it after
+ * restarting, or after the app crashed, `navigation.currentEntry.getState()`
+ * has it back by the time `din.ready` resolves. JSON, up to 512 KB (more is
+ * dropped, with a warning).
  */
-export interface LaunchContext {
-  /**
-   * `new` for a fresh window; `relaunch` when a running single-instance app
-   * is launched again; `restore` when Din reopened the window on starting
-   * again, as it was before (its `params` too, and its `state`).
-   */
-  reason: 'new' | 'relaunch' | 'restore';
-  /** App-defined launch parameters, as passed to `din.app.open()` or a shortcut. */
-  params: Record<string, unknown>;
-  /** The manifest shortcut that launched it, by `id`, if any. */
-  shortcut: string | null;
-  /**
-   * What this window last gave `din.app.saveState`: on `restore`, and when
-   * the window is reopened after its app crashed. Null otherwise.
-   */
-  state: unknown;
-  /**
-   * The app that launched it with `din.app.open`, by id, as the desktop saw
-   * it (an app can't say it's another); null when it was the user or the
-   * desktop.
-   */
-  opener: string | null;
-}
-
 export interface DinApp {
-  /** The app's id: the host of its `din://` URL (`file-<host>` for an app from a folder, at `din+file://<host>/`). */
-  readonly id: string;
-  /** How this window was launched. */
-  readonly launch: LaunchContext;
   /**
-   * A running single-instance app was launched again, or a Dock shortcut was
-   * chosen. The window is already focused.
+   * The app that launched the launch `launchQueue`'s consumer is hearing,
+   * with `din.app.open`, by id, as the desktop saw it (an app can't say it's
+   * another); null when it was the user or the desktop.
    */
-  onLaunch(cb: (ctx: LaunchContext) => void): Unsubscribe;
+  readonly opener: string | null;
   /**
    * The app has drawn its first useful frame: the desktop drops the window's
    * splash. Called automatically on `load` if the app never calls it.
    */
   ready(): void;
   /**
-   * Launch another app (or a new window of this one) with launch
-   * parameters, and files it holds for the new window to open (they come
-   * to its `launchQueue`).
+   * Launch another app with launch parameters (its `targetURL`'s query),
+   * and files it holds for the new window to open (they come to its
+   * `launchQueue`).
    */
   open(appId: string, params?: Record<string, unknown>, files?: FileSystemHandle[]): Promise<void>;
+  /** A new window of this app, as `open` would launch it. */
+  openWindow(params?: Record<string, unknown>, files?: FileSystemHandle[]): Promise<void>;
   /**
    * Open files in whichever app the desktop has for them (Files' default).
    * A Windows program (.exe) runs, through Wine, for an app with `fs`;
@@ -172,14 +156,6 @@ export interface DinApp {
     get(key: string): Promise<unknown>;
     set(key: string, value: unknown): void;
   };
-  /**
-   * Keep what this window shows (its tabs, the folder it's in), for when Din
-   * reopens it after restarting: it comes back as `launch.state`, with
-   * `launch.reason` `restore`. JSON, up to 512 KB (more is dropped, with a
-   * warning); each call replaces the last, and null forgets it. Save as it
-   * changes: Din can stop at any time.
-   */
-  saveState(state: unknown): void;
   /**
    * localStorage keys this app kept on the desktop's origin before it moved
    * out are copied in before the app's code runs (the manifest's
@@ -817,7 +793,7 @@ export interface DinManifest {
   start_url?: string;
   theme_color?: string;
   background_color?: string;
-  /** Dock and launcher shortcuts. A shortcut's `din.params` become the launch params. */
+  /** Dock and launcher shortcuts. The `url`'s query is the launch's parameters, and `din.params` are added to them. */
   shortcuts?: {
     name: string;
     url: string;

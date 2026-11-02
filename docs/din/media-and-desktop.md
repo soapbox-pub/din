@@ -134,7 +134,7 @@ await din.app.open('assistant', {
 ```
 
 The conversation starts at once, with the intent's context ahead of the
-request (shown in it as "From Studio: Take 3"), only when `launch.opener`
+request (shown in it as "From Studio: Take 3"), only when `din.app.opener`
 is an app the intent trusts. For any other app, a new conversation opens in
 the folder with the request in the composer, for the user to send.
 

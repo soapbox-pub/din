@@ -15,32 +15,23 @@
   "shortcuts": [
     {
       "name": "Library",
-      "url": "/",
+      "url": "/?show=library",
       "din": {
-        "id": "library",
-        "params": {
-          "show": "library"
-        }
+        "id": "library"
       }
     },
     {
       "name": "Mini Player",
-      "url": "/",
+      "url": "/?show=mini",
       "din": {
-        "id": "mini",
-        "params": {
-          "show": "mini"
-        }
+        "id": "mini"
       }
     },
     {
       "name": "Use Din's Own Skin",
-      "url": "/",
+      "url": "/?show=din-skin",
       "din": {
-        "id": "din-skin",
-        "params": {
-          "show": "din-skin"
-        }
+        "id": "din-skin"
       }
     }
   ],

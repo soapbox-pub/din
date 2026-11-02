@@ -1,7 +1,8 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLaunchFiles } from '@/shared/fileHandles';
 import { cleanFsError } from '@/lib/fs';
-import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
+import { DRAG_MIME, type FrameMode, type Rect } from '@/sdk';
+import { onLaunch, windowLaunch, type Launch } from '@/shared/launch';
 import { useCurrentDrag, useDin, useMediaQuery, useSnapped, useWindowSize, useWindowTitle } from '@/sdk/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { openHandles, skinKindOf, skinsDir } from './media/actions';
@@ -225,26 +226,25 @@ async function wearInstalledSkin(path: string): Promise<boolean> {
 
 /** Open what Files (or a Dock shortcut, or the App Store) asked for. */
 function useLaunches(setMessage: (message: string) => void) {
-  const din = useDin();
   const queryClient = useQueryClient();
   useEffect(() => {
-    const take = ({ params, shortcut }: LaunchContext) => {
+    const take = ({ params }: Launch) => {
       if (typeof params.skin === 'string') {
         void wearInstalledSkin(params.skin).then((worn) => {
           if (worn) void queryClient.invalidateQueries({ queryKey: ['music', 'skins'] });
         });
       }
       // A jump-list shortcut from the Dock or the apps menu.
-      const show = shortcut ?? (typeof params.show === 'string' ? params.show : null);
+      const show = typeof params.show === 'string' ? params.show : null;
       if (show === 'din-skin') setPrefs({ skin: { kind: 'din' } });
       else if (show === 'mini') setPrefs({ skin: { kind: 'din' }, mini: true });
       else if (show === 'library') setPrefs({ skin: { kind: 'din' }, mini: false, tab: 'library' });
     };
-    take(din.app.launch);
-    return din.app.onLaunch(take);
-  }, [din, setMessage, queryClient]);
+    take(windowLaunch());
+    return onLaunch(take);
+  }, [setMessage, queryClient]);
   useLaunchFiles((files) => {
-    const how = din.app.launch.params.how === 'enqueue' ? 'enqueue' : 'play';
+    const how = windowLaunch().params.how === 'enqueue' ? 'enqueue' : 'play';
     void openHandles(files, how).then((message) => message && setMessage(message));
   });
 }

@@ -12,8 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { LaunchContext } from '@/sdk/din';
-import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   calendarTemplate,
   coordOf,
@@ -36,6 +35,7 @@ import { EventEditor } from './calendar/EventEditor';
 import { eventLink, type EventAction, type Shown } from './calendar/menu';
 import { MonthView } from './calendar/MonthView';
 import { blankDraft, defaultSlot, draftOf, useNow, ViewContext, type ViewActions } from './calendar/model';
+import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCalendarData, usePubkey, usePublish, writeRelays } from './calendar/nostr';
 import { Sidebar } from './calendar/Sidebar';
 import { INVITED, MINE, sourceOf, sourcesOf, useSourcePrefs, type Source } from './calendar/sources';
@@ -59,13 +59,13 @@ function isView(v: unknown): v is View {
   return v === 'day' || v === 'week' || v === 'month';
 }
 
-function savedOf(launch: LaunchContext): Saved | null {
-  const s = launch.state as Partial<Saved> | null;
+function savedOf(state: unknown): Saved | null {
+  const s = state as Partial<Saved> | null;
   return s && isView(s.view) && typeof s.date === 'string' ? { view: s.view, date: s.date } : null;
 }
 
 /** A launch's `{ date, view }`: the day (and view) to show. */
-function targetOf(launch: Pick<LaunchContext, 'params'>): { date: Date | null; view: View | null } {
+function targetOf(launch: Pick<Launch, 'params'>): { date: Date | null; view: View | null } {
   const { date, view } = launch.params;
   return { date: typeof date === 'string' ? parseIsoDate(date) : null, view: isView(view) ? view : null };
 }
@@ -79,10 +79,9 @@ type Editor = { draft: EventDraft; editing: CalendarEvent | null };
 /**
  * Calendar: the user's NIP-52 calendar events and the ones they're invited
  * to, by day, week or month. Launch params `{ date: 'YYYY-MM-DD', view }`
- * show a day; the New Event shortcut starts one.
+ * show a day; `new` (the New Event shortcut's) starts one.
  */
 export function Calendar() {
-  const din = useDin();
   const pubkey = usePubkey();
   const data = useCalendarData(pubkey);
   const calendar = data.calendar;
@@ -91,15 +90,15 @@ export function Calendar() {
   const now = useNow();
   const today = useMemo(() => startOfDay(now), [now]);
 
-  const [saved] = useState(() => (din.app.launch.reason === 'restore' ? savedOf(din.app.launch) : null));
+  const [saved] = useState(() => (wasReopened() ? savedOf(restoredState()) : null));
   const [view, setViewState] = useState<View>(() => {
-    const v = saved?.view ?? targetOf(din.app.launch).view ?? localStorage.getItem(VIEW_KEY);
+    const v = saved?.view ?? targetOf(windowLaunch()).view ?? localStorage.getItem(VIEW_KEY);
     return isView(v) ? v : 'week';
   });
-  const [date, setDate] = useState<Date>(() => (saved ? parseIsoDate(saved.date) : targetOf(din.app.launch).date) ?? new Date());
+  const [date, setDate] = useState<Date>(() => (saved ? parseIsoDate(saved.date) : targetOf(windowLaunch()).date) ?? new Date());
   const [selected, setSelected] = useState<{ coord: string; rect: DOMRect } | null>(null);
   const [editor, setEditor] = useState<Editor | null>(() => {
-    if (din.app.launch.shortcut !== 'new-event' || din.app.launch.reason === 'restore') return null;
+    if (!('new' in windowLaunch().params) || wasReopened()) return null;
     const [start, end] = defaultSlot(new Date());
     return { draft: blankDraft(start, end, false, null), editing: null };
   });
@@ -115,7 +114,7 @@ export function Calendar() {
     localStorage.setItem(VIEW_KEY, v);
   }, []);
 
-  useEffect(() => din.app.saveState({ view, date: isoDate(date) } satisfies Saved), [din, view, date]);
+  useEffect(() => saveState({ view, date: isoDate(date) } satisfies Saved), [view, date]);
 
   const sources = useMemo(() => sourcesOf(calendar, prefs.colors), [calendar, prefs.colors]);
 
@@ -146,19 +145,15 @@ export function Calendar() {
   useWindowTitle(titleOf(view, date));
 
   // Launched again (the menu bar's clock, a shortcut): go where it says.
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        const t = targetOf(launch);
-        if (t.date) setDate(t.date);
-        if (t.view) setView(t.view);
-        if (launch.shortcut === 'new-event') {
-          const [start, end] = defaultSlot(t.date ?? new Date());
-          setEditor({ draft: blankDraft(start, end, false, null), editing: null });
-        }
-      }),
-    [din, setView],
-  );
+  useOnLaunch((launch) => {
+    const t = targetOf(launch);
+    if (t.date) setDate(t.date);
+    if (t.view) setView(t.view);
+    if ('new' in launch.params) {
+      const [start, end] = defaultSlot(t.date ?? new Date());
+      setEditor({ draft: blankDraft(start, end, false, null), editing: null });
+    }
+  });
 
   const run = useCallback(
     async (templates: EventTemplate[], failure: string): Promise<boolean> => {

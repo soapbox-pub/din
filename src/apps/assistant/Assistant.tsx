@@ -31,7 +31,7 @@ import { useAssistantHost } from '@/shared/assistant/host';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import type { LaunchContext } from '@/sdk';
+import { useOnLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { moveItem } from '@/hooks/useDragReorder';
 import {
   useActiveSessions,
@@ -233,7 +233,7 @@ function initialTabs(sessionID: string | null, directory: string | null): TabsSt
  * cursor in its sudo password request); with `directory` instead (Files'
  * "Open in Assistant"),
  * it opens a new conversation in that folder. One window: launching it again
- * comes through `din.app.onLaunch`.
+ * comes through `launchQueue` (`useOnLaunch`).
  */
 export function Assistant() {
   return (
@@ -244,7 +244,7 @@ export function Assistant() {
 }
 
 /** What a launch asks for: a conversation, or a new one (in a folder). */
-function launchRequest({ params }: LaunchContext): {
+function launchRequest({ params }: Pick<Launch, 'params'>): {
   sessionID: string | null;
   directory: string | null;
   focusPassword: boolean;
@@ -269,13 +269,13 @@ function AssistantWindow() {
   const ready = useAssistantReady();
   const { data: status } = useAssistantStatus();
   const [{ tabs, activeId }, setState] = useState(() => {
-    const { sessionID, directory } = launchRequest(din.app.launch);
+    const { sessionID, directory } = launchRequest(windowLaunch());
     // An intent opens its own conversation, once it's started (below).
-    return initialTabs(sessionID, intentOf(din.app.launch) ? null : directory);
+    return initialTabs(sessionID, intentOf(windowLaunch(), din.app.opener, wasReopened()) ? null : directory);
   });
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const [passwordFocus, setPasswordFocus] = useState<PasswordFocus | null>(() => {
-    const { sessionID, focusPassword } = launchRequest(din.app.launch);
+    const { sessionID, focusPassword } = launchRequest(windowLaunch());
     return sessionID && focusPassword ? { sessionID, key: 1 } : null;
   });
   const [closed, setClosed] = useState<AssistantTab[]>([]);
@@ -317,28 +317,25 @@ function AssistantWindow() {
   );
   const ranIntent = useRef<unknown>(null);
   useEffect(() => {
-    const intent = intentOf(din.app.launch);
-    if (!intent || ranIntent.current === din.app.launch.params.nonce) return;
-    ranIntent.current = din.app.launch.params.nonce;
+    const launch = windowLaunch();
+    const intent = intentOf(launch, din.app.opener, wasReopened());
+    if (!intent || ranIntent.current === launch.params.nonce) return;
+    ranIntent.current = launch.params.nonce;
     runIntent(intent);
   }, [din, runIntent]);
 
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        const intent = intentOf(launch);
-        if (intent) {
-          if (ranIntent.current === launch.params.nonce) return;
-          ranIntent.current = launch.params.nonce;
-          runIntent(intent);
-          return;
-        }
-        const { sessionID, directory, focusPassword } = launchRequest(launch);
-        setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
-        setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
-      }),
-    [din, runIntent],
-  );
+  useOnLaunch((launch) => {
+    const intent = intentOf(launch, din.app.opener);
+    if (intent) {
+      if (ranIntent.current === launch.params.nonce) return;
+      ranIntent.current = launch.params.nonce;
+      runIntent(intent);
+      return;
+    }
+    const { sessionID, directory, focusPassword } = launchRequest(launch);
+    setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
+    setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
+  });
 
   useEffect(() => saveAssistantTabs(tabs, activeId), [tabs, activeId]);
 

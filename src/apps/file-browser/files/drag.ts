@@ -64,7 +64,7 @@ export function draggedFiles(e: React.DragEvent): DraggedFiles | null {
   if (current?.kind !== 'files') return null;
   // Another Files window said what it's dragging.
   const other = otherWindowDrag();
-  if (other && current.source === window.din?.app.id && current.count === other.paths.length) {
+  if (other && current.source === 'file-browser' && current.count === other.paths.length) {
     return {
       paths: other.paths,
       allFolders: current.folders,

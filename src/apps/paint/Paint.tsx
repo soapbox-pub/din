@@ -4,6 +4,7 @@ import { cleanFsError } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -223,7 +224,7 @@ function twinkle(s: Surface, x: number, y: number, c: Packed, big: boolean) {
  */
 export function Paint() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const [launchFile] = useState(windowLaunchFile);
 
   const [initial] = useState(() => ({

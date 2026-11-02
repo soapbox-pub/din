@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
-import type { LaunchContext } from '@/sdk/din';
+import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   addGroup,
@@ -65,8 +65,8 @@ function isSource(v: unknown): v is Source {
   return s.kind === 'all' || (s.kind === 'group' && typeof s.name === 'string') || (s.kind === 'phone' && typeof s.id === 'string');
 }
 
-function savedOf(launch: LaunchContext): Saved | null {
-  const s = launch.state as Partial<Saved> | null;
+function savedOf(state: unknown): Saved | null {
+  const s = state as Partial<Saved> | null;
   return s && isSource(s.source) ? { source: s.source, selected: typeof s.selected === 'string' ? s.selected : null } : null;
 }
 
@@ -107,10 +107,10 @@ export function Contacts() {
   const { phones, contacts: phoneLists, loading: phonesLoading, ready: phonesReady } = usePhones();
   const canMessage = !!din.system.phone && phones.length > 0;
 
-  const [saved] = useState(() => (din.app.launch.reason === 'restore' ? savedOf(din.app.launch) : null));
+  const [saved] = useState(() => (wasReopened() ? savedOf(restoredState()) : null));
   const [picked, setSource] = useState<Source>(() => saved?.source ?? { kind: 'all' });
   const [selected, setSelected] = useState<string[]>(() => {
-    const target = din.app.launch.params.contact;
+    const target = windowLaunch().params.contact;
     if (typeof target === 'string') return [target];
     return saved?.selected ? [saved.selected] : [];
   });
@@ -118,7 +118,7 @@ export function Contacts() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortByState] = useState<SortBy>(() => (localStorage.getItem(SORT_KEY) === 'given' ? 'given' : 'family'));
   const [editor, setEditor] = useState<{ draft: Contact; was: StoredContact | null } | null>(() =>
-    din.app.launch.shortcut === 'new-contact' && din.app.launch.reason !== 'restore' ? { draft: blankContact(), was: null } : null,
+    'new' in windowLaunch().params && !wasReopened() ? { draft: blankContact(), was: null } : null,
   );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<StoredContact[] | null>(null);
@@ -190,7 +190,7 @@ export function Contacts() {
   const sourceTitle = source.kind === 'all' ? 'All Contacts' : source.kind === 'group' ? source.name : phones.find((p) => p.id === source.id)?.name ?? 'Phone';
   useWindowTitle(editor ? (editor.was ? displayName(editor.was) || 'Edit Contact' : 'New Contact') : current ? displayName(current.contact) || 'No Name' : sourceTitle);
 
-  useEffect(() => din.app.saveState({ source, selected: current?.key ?? null } satisfies Saved), [din, source, current]);
+  useEffect(() => saveState({ source, selected: current?.key ?? null } satisfies Saved), [source, current]);
 
   const showSource = useCallback((s: Source) => {
     setSource(s);
@@ -402,17 +402,13 @@ export function Contacts() {
   };
 
   // Launched again (a link to someone, the shortcut).
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        if (typeof launch.params.contact === 'string') {
-          setEditor(null);
-          showContact(launch.params.contact);
-        }
-        if (launch.shortcut === 'new-contact') setEditor({ draft: blankContact(), was: null });
-      }),
-    [din, showContact],
-  );
+  useOnLaunch((launch) => {
+    if (typeof launch.params.contact === 'string') {
+      setEditor(null);
+      showContact(launch.params.contact);
+    }
+    if ('new' in launch.params) setEditor({ draft: blankContact(), was: null });
+  });
 
   useMenuBar(
     [

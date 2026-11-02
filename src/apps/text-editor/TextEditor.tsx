@@ -36,6 +36,7 @@ import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOpti
 import { invalidateListings } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TabStrip } from '@/shared/TabStrip';
@@ -214,7 +215,7 @@ type Asking = { kind: 'tab'; id: string } | { kind: 'window' } | null;
  */
 export function TextEditor() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const launchFiles = windowLaunchFiles();
   const initialPaths = launchFiles.flatMap((f) => (f.kind === 'file' ? [din.files.path(f)] : []));
   const launchFolder = launchFiles.find((f) => f.kind === 'directory');

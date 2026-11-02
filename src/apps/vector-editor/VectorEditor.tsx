@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { Button, Dialog, NumberField, Select } from '@/shared/photo/chrome';
 import { Panel } from '@/shared/photo/panels';
 import { FOCUS, INPUT } from '@/shared/photo/styles';
@@ -182,7 +183,7 @@ interface TextEditing {
  */
 export function VectorEditor() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);

@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import type { PhoneConversation, PhoneDevice, PhoneMessage } from '@/lib/phone';
 import { cn } from '@/lib/utils';
-import type { LaunchContext } from '@/sdk/din';
+import { useOnLaunch, windowLaunch, type Launch } from '@/shared/launch';
 import { useDin, useDocumentVisible, useMediaQuery, useMenuBar, useWindowFocused, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { cleanPhoneError, formatAddress, phoneDigits } from '@/shared/phone';
@@ -31,15 +31,15 @@ type Selection =
   | { kind: 'new' }
   | null;
 
-function fromLaunch(launch: Pick<LaunchContext, 'params' | 'shortcut'>): Selection {
+function fromLaunch(launch: Pick<Launch, 'params'>): Selection {
   const { phoneId, threadId } = launch.params;
   if (typeof phoneId === 'string' && typeof threadId === 'string') return { kind: 'thread', phoneId, threadId, addresses: [] };
-  if (launch.shortcut === 'new' || recipientsOf(launch).length) return { kind: 'new' };
+  if ('new' in launch.params || recipientsOf(launch).length) return { kind: 'new' };
   return null;
 }
 
 /** A launch's `{ to: [{ name, address }] }` (Contacts' Send Message): who a new message is for. */
-function recipientsOf(launch: Pick<LaunchContext, 'params'>): Recipient[] {
+function recipientsOf(launch: Pick<Launch, 'params'>): Recipient[] {
   const { to } = launch.params;
   if (!Array.isArray(to)) return [];
   return to.flatMap((r: unknown) => {
@@ -70,26 +70,22 @@ export function Messages() {
   const visible = useDocumentVisible();
   const narrow = !useMediaQuery('(min-width: 680px)');
 
-  const [selection, setSelection] = useState<Selection>(() => fromLaunch(din.app.launch));
+  const [selection, setSelection] = useState<Selection>(() => fromLaunch(windowLaunch()));
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<PhoneConversation | null>(null);
   const [newFrom, setNewFrom] = useState<string | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[]>(() => recipientsOf(din.app.launch));
+  const [recipients, setRecipients] = useState<Recipient[]>(() => recipientsOf(windowLaunch()));
 
   const phones = useMemo(() => state.data?.phones ?? [], [state.data]);
   const phoneById = useMemo(() => new Map(phones.map((p) => [p.id, p])), [phones]);
   const list = useMemo(() => conversations.data ?? [], [conversations.data]);
 
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        const next = fromLaunch(launch);
-        if (next) setSelection(next);
-        const to = recipientsOf(launch);
-        if (to.length || next?.kind === 'new') setRecipients(to);
-      }),
-    [din],
-  );
+  useOnLaunch((launch) => {
+    const next = fromLaunch(launch);
+    if (next) setSelection(next);
+    const to = recipientsOf(launch);
+    if (to.length || next?.kind === 'new') setRecipients(to);
+  });
 
   // The conversation on screen: the one picked; one started here, under the
   // phone's own id once the phone has it; or, in a wide window, the newest.

@@ -3,6 +3,7 @@ import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, Sea
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
@@ -153,8 +154,8 @@ export function Viewer() {
   // A window Din reopened comes back as it was left; one opened for a
   // message (a new mail notification's click) opens on it.
   const [restored] = useState(() => {
-    const target = din.app.launch.reason === 'restore' ? null : messageTarget(din.app.launch.params);
-    if (!target) return savedViewer(din.app.launch.state);
+    const target = wasReopened() ? null : messageTarget(windowLaunch().params);
+    if (!target) return savedViewer(restoredState());
     const selection: Selection = { kind: 'mailbox', accountId: target.accountId, path: target.path };
     return { selection, filter: null, search: '', message: target.key, scroll: 0 };
   });
@@ -276,9 +277,9 @@ export function Viewer() {
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
       const state: SavedWindow = { kind: 'viewer', selection: chosenMailbox, filter, search, message: savedMessage, scroll: Math.round(scrollTop.current) };
-      din.app.saveState(state);
+      saveState(state);
     }, 300);
-  }, [din, chosenMailbox, filter, search, savedMessage]);
+  }, [chosenMailbox, filter, search, savedMessage]);
   useEffect(() => {
     saveWindow();
   }, [saveWindow]);
@@ -309,16 +310,12 @@ export function Viewer() {
 
   // A message to open (a new mail notification's click, see MailHost):
   // its mailbox, and the message once the list has it.
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        const target = messageTarget(launch.params);
-        if (!target) return;
-        setSelection({ kind: 'mailbox', accountId: target.accountId, path: target.path });
-        setRestoring(target.key);
-      }),
-    [din, setSelection],
-  );
+  useOnLaunch((launch) => {
+    const target = messageTarget(launch.params);
+    if (!target) return;
+    setSelection({ kind: 'mailbox', accountId: target.accountId, path: target.path });
+    setRestoring(target.key);
+  });
 
   // Messages that left the list: a conversation they were all of closes,
   // back to the list on the one after it.

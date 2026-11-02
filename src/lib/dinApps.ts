@@ -6,6 +6,7 @@
 import type { DinManifest, Permission, Size } from '@/sdk/din';
 import { guestsAvailable } from '@/platform/guest';
 import type { Push } from '@/sdk/protocol';
+import { encodeLaunchParams } from '@/shared/launch';
 
 /** The session partition apps run in (DIN_APPS_PARTITION in electron/din-apps.mts). */
 export const DIN_APPS_PARTITION = 'persist:din-apps';
@@ -117,6 +118,26 @@ export function manifestSize(manifest: DinManifest): Size | undefined {
 /** Whether an id is an app's from a folder, at din+file://<host>/ (`file-<host>`; src/lib/fileApps.ts). */
 export function isFileAppId(id: string): boolean {
   return /^file-[a-z2-7]{52}$/.test(id);
+}
+
+/**
+ * A launch's `targetURL`: the app's own URL (`din://<id>/`, wherever the
+ * page is served from), at the shortcut's `url` when a shortcut launched it
+ * (else the start URL), with the launch parameters in its query.
+ */
+export function launchUrl(id: string, manifest: DinManifest, shortcut: string | null, params: Record<string, unknown>): string {
+  const base = isFileAppId(id) ? `din+file://${id.slice('file-'.length)}/` : `din://${id}/`;
+  const path = (shortcut ? manifest.shortcuts?.find((s) => s.din?.id === shortcut)?.url : undefined) ?? manifest.start_url ?? '/';
+  const own = new URL(base);
+  let url: URL;
+  try {
+    url = new URL(path, own);
+    if (url.protocol !== own.protocol || url.host !== own.host) url = own;
+  } catch {
+    url = own;
+  }
+  encodeLaunchParams(url, params);
+  return url.href;
 }
 
 /** The URL an app's window loads. */

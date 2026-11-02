@@ -5,7 +5,7 @@
   "start_url": "/",
   "launch_handler": { "client_mode": "focus-existing" },
   "shortcuts": [
-    { "name": "New Event", "url": "/", "din": { "id": "new-event" } }
+    { "name": "New Event", "url": "/?new", "din": { "id": "new-event" } }
   ],
   "din": {
     "permissions": ["nostr"],

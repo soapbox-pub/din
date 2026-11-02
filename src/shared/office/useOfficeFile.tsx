@@ -243,7 +243,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   const openFile = useCallback(
     (target: FileSystemFileHandle) => {
       if (handle && din.files.path(target) === din.files.path(handle) && !error) return;
-      if (dirtyRef.current || handle) void din.app.open(din.app.id, {}, [target]);
+      if (dirtyRef.current || handle) void din.app.openWindow({}, [target]);
       else {
         setLoading(true);
         setError(null);
@@ -383,6 +383,6 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     recent,
     requestClose,
     prompt,
-    newWindow: () => void din.app.open(din.app.id),
+    newWindow: () => void din.app.openWindow(),
   };
 }

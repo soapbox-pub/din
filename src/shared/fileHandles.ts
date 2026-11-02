@@ -7,6 +7,7 @@
  */
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { OpenFilePickerOptions, PickerOptions, SaveFilePickerOptions, DirectoryPickerOptions } from '@/sdk';
+import { launched, onLaunch, windowLaunch } from '@/shared/launch';
 
 /** "Pictures": `.png`, `.jpg`: a picker's type by its extensions, whatever their MIME types. */
 export interface FileTypeFilter {
@@ -78,37 +79,9 @@ export async function folderEntries(folder: FileSystemDirectoryHandle): Promise<
 
 // ---- launchQueue ----
 
-interface Launches {
-  first: Promise<readonly FileSystemHandle[]>;
-  files: readonly FileSystemHandle[] | null;
-  listeners: Set<(files: readonly FileSystemHandle[]) => void>;
-}
-let launches: Launches | null = null;
-
-/** The page's one `launchQueue` consumer: the first launch is the window's own, the rest come after. */
-function listen(): Launches {
-  if (launches) return launches;
-  let resolve!: (files: readonly FileSystemHandle[]) => void;
-  const l: Launches = { first: new Promise((r) => (resolve = r)), files: null, listeners: new Set() };
-  launches = l;
-  const first = (files: readonly FileSystemHandle[]) => {
-    l.files = files;
-    resolve(files);
-  };
-  if (typeof launchQueue === 'undefined') {
-    first([]);
-    return l;
-  }
-  launchQueue.setConsumer(({ files }) => {
-    if (!l.files) first(files);
-    else if (files.length > 0) for (const cb of l.listeners) cb(files);
-  });
-  return l;
-}
-
 /** The files this window was launched with (from Files, a drop on the Dock tile, Open With). */
-export function launchedFiles(): Promise<readonly FileSystemHandle[]> {
-  return listen().first;
+export async function launchedFiles(): Promise<readonly FileSystemHandle[]> {
+  return (await launched()).files;
 }
 
 /**
@@ -116,7 +89,7 @@ export function launchedFiles(): Promise<readonly FileSystemHandle[]> {
  * an app's first render can start with its document.
  */
 export function windowLaunchFiles(): readonly FileSystemHandle[] {
-  return listen().files ?? [];
+  return windowLaunch().files;
 }
 
 /** The first file (not folder) the window was launched with, or null. */
@@ -126,9 +99,9 @@ export function windowLaunchFile(): FileSystemFileHandle | null {
 
 /** Files from each launch after the window's own (a single-instance app launched again). */
 export function onLaunchFiles(cb: (files: readonly FileSystemHandle[]) => void): () => void {
-  const l = listen();
-  l.listeners.add(cb);
-  return () => l.listeners.delete(cb);
+  return onLaunch(({ files }) => {
+    if (files.length > 0) cb(files);
+  });
 }
 
 /** The window's launch files once mounted (if any), then each later launch's, while mounted. */

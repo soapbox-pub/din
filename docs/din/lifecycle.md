@@ -2,65 +2,65 @@
 
 > **Status: in place.** On the desktop's side the window manager still
 > opens a window with launch params; `DinAppFrame` turns them into the
-> app's launch context and answers its close requests through the
+> launch's `targetURL` and files, and answers its close requests through the
 > desktop's close guards (`src/lib/closeGuards.ts`).
 
 ## Launching
 
 A window opens, the desktop creates its webview at the manifest's
 `start_url`, the port handshake runs ([../security-model.md](../security-model.md)),
-and the app's code starts with everything in place:
+and the app's code starts with everything in place. Launches are the
+web's Launch Handling: `launchQueue`'s consumer hears this window's launch,
+then each launch after it.
 
 ```ts
 await din.ready;  // window.din is Din's; ready resolves after the desktop's hello
-const { reason, params, shortcut, state, opener } = din.app.launch;
-launchQueue.setConsumer(({ files }) => {   // the web's: the files it was opened with
-  for (const handle of files) open(handle);
+launchQueue.setConsumer(({ targetURL, files }) => {
+  const params = new URL(targetURL).searchParams;   // the launch parameters
+  for (const handle of files) open(handle);          // the files it was opened with
 });
 ```
 
-| Field | |
+| | |
 |---|---|
-| `params` | What `din.app.open(id, params)` or a shortcut passed: `{ width, height }` for Paint's File > New |
-| `shortcut` | The manifest shortcut's `din.id`, for Dock and launcher jump lists |
-| `reason` | `new`, `relaunch` for `onLaunch` below, or `restore` when Din reopened the window on starting again |
-| `state` | What the window last gave `din.app.saveState`, on `restore` (and on **Reopen** after a crash); else null |
-| `opener` | The app that opened it with `din.app.open`, by id, as the desktop saw it; null when the user or the desktop did. An app can't claim to be another, so it's what an app trusts a request by (the Assistant's intents) |
+| `targetURL` | The app's own URL (`din://<id>/`, wherever the page is served from), at the shortcut's `url` when a manifest shortcut launched it, with the launch parameters in its query |
+| `files` | The launch's files, already granted ([files.md](files.md)) |
+| `din.app.opener` | The app that opened it with `din.app.open`, by id, as the desktop saw it; null when the user or the desktop did. An app can't claim to be another, so it's what an app trusts a request by (the Assistant's intents). It's the launch the consumer is hearing's |
 
-Launch params are structured-cloneable data. Paths an app puts in
+The launch parameters are what `din.app.open(id, params)` passed, or the
+desktop (`{ width, height }` for Paint's File > New): a string as itself,
+anything else as JSON, and a string that would read as JSON (`"2024"`,
+`"true"`) quoted. `decodeLaunchParams(targetURL)` in `src/shared/launch.ts`
+reads them back as they were. A manifest shortcut's `url` carries its own
+(`"/?new"`), and its `din.params` are added to them. Paths an app puts in
 `din.app.open` params are dropped: files travel as handles. On the
 desktop's side, though, Files and the rest still open apps with
 `{ path }` or `{ paths }` params, which `DinAppFrame` turns into granted
-handles for the launch's files (and leaves out of `params`).
+handles for the launch's files (and leaves out of the query).
 
-### The files: `launchQueue`
-
-The files a window is opened with (from Files, a drop on the Dock tile,
-Open With, `din.app.open(id, params, handles)`), already granted, come as
-the web's Launch Handling has them: `launchQueue`'s consumer hears this
-window's launch, then each launch after it, with `targetURL` the page's
-own and `files` the launch's handles ([files.md](files.md)). Launches
-that come before there's a consumer wait for it. Every launch is heard,
-with no files too.
-
-`startApp` waits for the window's own launch before the app first
-renders, so `windowLaunchFile()` and `windowLaunchFiles()` from
-`src/shared/fileHandles.ts` have its files at once, to start with the
-document; `useLaunchFiles(cb)` and `onLaunchFiles(cb)` hear the launches
-after it. They're the page's one consumer: an app uses them or
-`launchQueue` itself, not both.
+Launches that come before there's a consumer wait for it. Every launch is
+heard, with no files too. `startApp` waits for the window's own launch
+before the app first renders, so `windowLaunch()` from
+`src/shared/launch.ts` has it at once (its `params` decoded), as
+`windowLaunchFile()` and `windowLaunchFiles()` from
+`src/shared/fileHandles.ts` have its files, to start with the document;
+`onLaunch(cb)` and `useOnLaunch(cb)` (and `useLaunchFiles(cb)`,
+`onLaunchFiles(cb)` for those with files) hear the launches after it.
+They're the page's one consumer: an app uses them or `launchQueue`
+itself, not both.
 
 ### Single-instance apps
 
 With `"launch_handler": { "client_mode": "focus-existing" }` in the
-manifest, launching a running app focuses its window and calls
-`onLaunch` there instead of opening a new one:
+manifest, launching a running app focuses its window and gives
+`launchQueue`'s consumer the new launch there, instead of opening a new
+window:
 
 ```ts
-din.app.onLaunch(({ params, shortcut }) => {
-  if (shortcut === 'mini') showMini();
+useOnLaunch(({ params }) => {
+  if (params.show === 'mini') showMini();   // the Mini Player shortcut's url is "/?show=mini"
 });
-onLaunchFiles((files) => files.forEach(enqueue));   // or launchQueue's consumer
+onLaunchFiles((files) => files.forEach(enqueue));
 ```
 
 This replaces today's `actionAt` timestamps on dock action params.
@@ -72,18 +72,26 @@ it starts again (Settings → Windows, `din settings set windows.reopen`):
 after Restart Din, an update, a crash, logging out or a reboot. Each
 window comes back on its monitor and workspace, at its size, maximized,
 tiled or minimized as it was, with the launch params it was opened with
-(less a shortcut, which would run again) and `reason: 'restore'`. Native
-Linux apps are started again, and their windows go back where they were
-as they map.
+(less a shortcut, which would run again). Native Linux apps are started
+again, and their windows go back where they were as they map.
 
 Din is stopped without warning, so there's no moment to save at quit.
 An app that wants to come back as it was saves what it shows as that
-changes, and reads it back from `launch.state`:
+changes, as the window's Navigation API state, and reads it back from
+there; the runtime passes it on to the desktop, and puts it back before
+the window's launch reaches `launchQueue`:
 
 ```ts
-din.app.saveState({ folder: current.path, view });   // JSON, up to 512 KB; null forgets it
-if (din.app.launch.reason === 'restore') openFolder(din.app.launch.state);
+navigation.updateCurrentEntry({ state: { folder: current.path, view } });   // JSON, up to 512 KB; null forgets it
+const saved = navigation.currentEntry.getState();                           // undefined in a new window
 ```
+
+A reopened window's entry always has state, null if it saved none, so
+`getState() !== undefined` tells it from a new window; one-shot launch
+parameters (an intent, a recording action) were carried out the first
+time. `saveState`, `restoredState()` and `wasReopened()` in
+`src/shared/launch.ts` do the same, as of the window's launch. **Reopen**
+after a crash brings the saved state back too.
 
 The Terminal saves its tabs and panes with each one's folder (its shells
 start fresh there), and the Web Browser its tabs.
@@ -109,6 +117,7 @@ so a simple app needn't think about it.
 
 ```ts
 await din.app.open('paint', { width: 800, height: 600 });   // a new window, or the running one
+await din.app.openWindow({}, [handle]);                      // a new window of this app
 await din.app.openFiles([handle]);                           // whichever app the desktop has for it
 window.open('https://example.com');                          // as links open anywhere on the desktop
 await din.app.canOpen('assistant');                          // installed (and, the Assistant, switched on)?
@@ -161,4 +170,4 @@ Its window then says "Paint isn't responding" over the app and offers
 (`dinos.apps.kill`), and `render-process-gone` follows within about
 100 ms. A window whose renderer is gone, killed or crashed, shows "Paint
 stopped" with **Reopen**, which reloads the webview: a new process, the
-same webContents, a fresh port, and the same launch context.
+same webContents, a fresh port, and the same launch.

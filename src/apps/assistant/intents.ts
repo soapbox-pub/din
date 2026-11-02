@@ -1,4 +1,4 @@
-import type { LaunchContext } from '@/sdk';
+import type { Launch } from '@/shared/launch';
 
 /**
  * What other apps can open the Assistant for, as a launch param:
@@ -8,7 +8,7 @@ import type { LaunchContext } from '@/sdk';
  * An app sends data, never instructions: what the agent is told about an
  * intent is written here, and an app fills in only its fields. A
  * conversation starts on its own only for the apps an intent trusts (by
- * `launch.opener`, which the desktop sets); for any other, the message waits
+ * `din.app.opener`, which the desktop sets); for any other, the message waits
  * in the composer for the user to send. `intentNonce` must equal `nonce`,
  * since launch params are merged into the last launch's.
  */
@@ -43,10 +43,13 @@ const INTENTS: Record<string, IntentKind> = {
   },
 };
 
-/** The intent a launch carries, if it's one of this launch's own and well formed. */
-export function intentOf({ params, opener, reason }: LaunchContext): LaunchIntent | null {
-  // A window Din reopens keeps its last params: that intent was carried out then.
-  if (reason === 'restore') return null;
+/**
+ * The intent a launch carries, if it's one of this launch's own and well
+ * formed. `opener` is `din.app.opener`; a window Din reopened keeps its last
+ * params, whose intent was carried out then.
+ */
+export function intentOf({ params }: Pick<Launch, 'params'>, opener: string | null, reopened = false): LaunchIntent | null {
+  if (reopened) return null;
   const kind = typeof params.intent === 'string' ? INTENTS[params.intent] : undefined;
   if (!kind || params.nonce === undefined || params.intentNonce !== params.nonce) return null;
   const { directory, prompt, title } = params;

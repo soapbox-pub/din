@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { ADJUSTMENT_NAMES, defaultAdjustment, FILTER_NAMES, type FilterSpec } from '@/shared/photo/adjust';
 import { OptionsBar, Toolbar } from '@/shared/photo/bars';
 import { Button, Dialog } from '@/shared/photo/chrome';
@@ -232,7 +233,7 @@ function placeFloat(f: Float, layer: Layer): Layer {
  */
 export function PhotoEditor() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);

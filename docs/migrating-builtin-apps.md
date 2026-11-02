@@ -15,7 +15,7 @@ replaced as below. `src/apps/calculator/` is the model.
 
 | Today (in the desktop) | In an app |
 |---|---|
-| `AppComponentProps.params` | `din.app.launch.params` |
+| `AppComponentProps.params` | `launchQueue`'s `targetURL` query (`windowLaunch().params`) |
 | `AppComponentProps.windowId` | `din.window.id` (rarely needed) |
 | `useWindowActions().open(id, params)` | `din.app.open(id, params)` |
 | `open(appForFile(name), { path })` | `din.app.openFiles([handle])` |

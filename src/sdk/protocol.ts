@@ -6,7 +6,6 @@
 import type {
   DragInfo,
   FrameStyle,
-  LaunchContext,
   Menu,
   MenuItem,
   Permission,
@@ -121,12 +120,24 @@ export interface ThemeData extends ThemeSnapshot {
   scheme: 'light' | 'dark';
 }
 
+/** A launch, as the runtime gives it to `launchQueue`'s consumer and the Navigation API. */
+export interface LaunchData {
+  /** The `targetURL`: the app's URL (a shortcut's), with the launch parameters in its query. */
+  url: string;
+  files: HandleData[];
+  /** What the window saved, to restore; null for a new window and a relaunch. */
+  state: unknown;
+  /** Din reopened the window on starting again, as it was before (saved state or none). */
+  restored: boolean;
+  opener: string | null;
+}
+
 /** The desktop's first message: everything the app reads synchronously. */
 export interface Hello {
   type: 'hello';
   version: 1;
   appId: string;
-  launch: Omit<LaunchContext, 'files'> & { files: HandleData[] };
+  launch: LaunchData;
   state: WindowState;
   frameStyle: FrameStyle;
   theme: ThemeData;
@@ -161,7 +172,8 @@ export interface Hello {
 /** What an app can ask, by method: the params, and what the reply carries. */
 export interface Requests {
   'app.ready': [void, void];
-  'app.open': [{ appId: string; params?: Record<string, unknown>; handles?: string[] }, void];
+  /** `appId` null: a new window of this app. */
+  'app.open': [{ appId: string | null; params?: Record<string, unknown>; handles?: string[] }, void];
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
   'app.canOpen': [{ appId: string }, boolean];
@@ -283,7 +295,7 @@ export type Push =
   | { type: 'state'; state: WindowState }
   | { type: 'frameStyle'; style: FrameStyle }
   | { type: 'theme'; theme: ThemeData }
-  | { type: 'launch'; launch: Omit<LaunchContext, 'files'> & { files: HandleData[] } }
+  | { type: 'launch'; launch: LaunchData }
   | { type: 'menuAction'; id: string }
   | { type: 'closeRequest'; request: number }
   | { type: 'moveEnd' }

@@ -34,7 +34,6 @@ import type {
   DragInfo,
   DropResult,
   FrameStyle,
-  LaunchContext,
   MenuItem,
   Nip07,
   NostrEventTemplate,
@@ -55,7 +54,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
-import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState } from '@/sdk/protocol';
+import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import {
@@ -64,6 +63,7 @@ import {
   installFilePickers,
   installFileSystemObserver,
   installLaunchQueue,
+  installSavedState,
   installWindowState,
   toWebHandle,
   watchDocumentHead,
@@ -426,38 +426,33 @@ export function installDin(transport: Transport): void {
     };
   }
   const wrap = (data: HandleData): FileSystemHandle => toWebHandle(grant(data)) as unknown as FileSystemHandle;
-  const launchFiles = installLaunchQueue();
-  /** A launch: the context first, so `launchQueue`'s consumer reads this one's params. */
-  const launched = (l: Hello['launch']) => {
-    const { files, ...rest } = l;
-    launch = rest;
-    launchFiles(files.map(grant));
+  const launchTo = installLaunchQueue();
+  const restoreState = installSavedState((state) => tell('app.saveState', { state }));
+  let opener: string | null = null;
+  /** A launch: its opener and the state to restore first, for `launchQueue`'s consumer to read. */
+  const launched = (l: LaunchData) => {
+    opener = l.opener;
+    // A reopened window's entry has state, null if it saved none: getState() tells it from a new one's undefined.
+    if (l.state !== null || l.restored) restoreState(l.state);
+    launchTo(l.url, l.files.map(grant));
   };
 
   // ---- app ----
-  const launches = new Emitter<LaunchContext>();
-  let launch: LaunchContext = { reason: 'new', params: {}, shortcut: null, state: null, opener: null };
   pushes.on((p) => {
-    if (p.type === 'launch') {
-      launched(p.launch);
-      launches.emit(launch);
-    }
+    if (p.type === 'launch') launched(p.launch);
   });
   let readied = false;
   const app: DinApp = {
-    get id() {
-      return h?.appId ?? location.hostname;
+    get opener() {
+      return opener;
     },
-    get launch() {
-      return launch;
-    },
-    onLaunch: (cb) => launches.on(cb),
     ready() {
       if (readied) return;
       readied = true;
       tell('app.ready');
     },
     open: (appId, params, files) => request('app.open', { appId, params, handles: files?.map(idOf) }),
+    openWindow: (params, files) => request('app.open', { appId: null, params, handles: files?.map(idOf) }),
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
@@ -465,7 +460,6 @@ export function installDin(transport: Transport): void {
       get: (key) => request('app.sessionGet', { key }),
       set: (key, value) => tell('app.sessionSet', { key, value }),
     },
-    saveState: (state) => tell('app.saveState', { state }),
   };
 
   // ---- window ----

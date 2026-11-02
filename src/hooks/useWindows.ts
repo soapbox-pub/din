@@ -587,7 +587,7 @@ export function useWindows(
 
   /**
    * Launch an app again in one of its windows: focus it, merging in the new
-   * params, which a Din app hears as `onLaunch`. What `open` does for a
+   * params, which a Din app hears in `launchQueue`. What `open` does for a
    * single-instance app, and the desktop for any app when it knows the
    * window (a notification's).
    */

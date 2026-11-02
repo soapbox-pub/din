@@ -767,11 +767,12 @@ export function installFileSystemObserver(watch: WatchHost): void {
 
 /**
  * Launch Handling's `window.launchQueue`: the consumer hears this window's
- * launch, with the files it was opened with, and each launch after it (a
- * single-instance app opened again, a Dock shortcut). Launches that come
- * before there's a consumer wait for it.
+ * launch, with its URL (the launch parameters in the query) and the files
+ * it was opened with, and each launch after it (a single-instance app
+ * opened again, a Dock shortcut). Launches that come before there's a
+ * consumer wait for it.
  */
-export function installLaunchQueue(): (files: Grant[]) => void {
+export function installLaunchQueue(): (url: string, files: Grant[]) => void {
   const queued: LaunchParams[] = [];
   let consumer: ((params: LaunchParams) => void) | null = null;
   Object.defineProperty(window, 'launchQueue', {
@@ -783,9 +784,35 @@ export function installLaunchQueue(): (files: Grant[]) => void {
       },
     },
   });
-  return (files) => {
-    const params: LaunchParams = { targetURL: location.href, files: files.map(toWebHandle) };
+  return (url, files) => {
+    const params: LaunchParams = { targetURL: url, files: files.map(toWebHandle) };
     if (consumer) consumer(params);
     else queued.push(params);
   };
+}
+
+interface Navigation {
+  updateCurrentEntry(options: { state: unknown }): void;
+}
+
+/**
+ * What a window keeps for Din to reopen it with is its Navigation API
+ * state: each `navigation.updateCurrentEntry({ state })` is passed on to
+ * the desktop as well. Returns how the runtime puts back a window's saved
+ * state, before its launch reaches `launchQueue`.
+ */
+export function installSavedState(save: (state: unknown) => void): (state: unknown) => void {
+  const navigation = (globalThis as { navigation?: Navigation }).navigation;
+  if (!navigation) return () => {};
+  const proto = Object.getPrototypeOf(navigation) as Navigation;
+  const update = proto.updateCurrentEntry;
+  Object.defineProperty(proto, 'updateCurrentEntry', {
+    configurable: true,
+    writable: true,
+    value: function (this: Navigation, options: { state: unknown }) {
+      update.call(this, options);
+      save(options?.state ?? null);
+    },
+  });
+  return (state) => update.call(navigation, { state });
 }

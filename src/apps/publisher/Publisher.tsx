@@ -3,6 +3,7 @@ import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, FilePlus, FolderO
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { looksLikePub, readPub } from './publisher/pub';
 import { rasterizeMetafile } from './publisher/pub/raster';
 import { pubToIdml } from './publisher/pub/toIdml';
@@ -134,7 +135,7 @@ const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z
  */
 export function Publisher() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState<Settings>(readSettings);

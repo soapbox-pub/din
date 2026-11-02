@@ -117,8 +117,9 @@ export function Stopwatch() {
 ```
 
 Din reopens windows when it starts again. To come back as it was, an app
-saves what it shows as that changes, with `din.app.saveState(value)`, and
-reads it from `din.app.launch.state` when `launch.reason` is `restore`
+saves what it shows as that changes, as its Navigation API state
+(`navigation.updateCurrentEntry({ state })`), and reads it back from
+`navigation.currentEntry.getState()`
 ([din/lifecycle.md](din/lifecycle.md#restoring-after-a-restart)).
 
 ## 6. Run it

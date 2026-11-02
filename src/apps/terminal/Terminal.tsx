@@ -9,6 +9,7 @@ import { getPtyBridge, type PtyBridge } from '@/lib/pty';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { useDin, useDinTheme, useMediaQuery, useWindowAccent, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { restoredState, saveState, windowLaunch } from '@/shared/launch';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { adoptedTab, hasAdoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
@@ -261,7 +262,7 @@ function tabFromPayload(payload: TabPayload): TermTab {
   return { id: newTabId(), layout, activePaneId: activePaneId || firstPaneId(layout) };
 }
 
-/** What a window keeps for Din to reopen it with (din.app.saveState). */
+/** What a window keeps for Din to reopen it with (its navigation state). */
 interface SavedTerminal {
   tabs: TabPayload[];
   /** Index of the selected tab. */
@@ -469,7 +470,7 @@ function firstTab(params: Record<string, unknown>): TermTab {
 
 export function Terminal() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const bridge = getPtyBridge();
   const theme = useDinTheme();
   const dark = useMediaQuery(DARK_QUERY);
@@ -490,12 +491,12 @@ export function Terminal() {
 
   // A window opened for a tab torn off another one starts empty, and gets
   // the tab.
-  const adopting = hasAdoptedTab(din);
+  const adopting = hasAdoptedTab();
   // Reopened by Din on starting again, it has the tabs it had, in the
   // folders they were in (with fresh shells: the old ones died with Din).
   const [initial] = useState(() => {
     if (adopting) return { tabs: [], active: 0 };
-    return (din.app.launch.state !== null && restoredTabs(din.app.launch.state)) || { tabs: [firstTab(params)], active: 0 };
+    return (restoredState() !== null && restoredTabs(restoredState())) || { tabs: [firstTab(params)], active: 0 };
   });
   const [tabs, setTabs] = useState<TermTab[]>(initial.tabs);
   const [activeId, setActiveId] = useState<string>(() => tabs[initial.active]?.id ?? tabs[0]?.id ?? '');
@@ -547,7 +548,7 @@ export function Terminal() {
       tabs: tabs.map((t) => ({ layout: keep(t.layout), activePaneId: t.activePaneId })),
       active: Math.max(0, tabs.findIndex((t) => t.id === activeId)),
     };
-    din.app.saveState(saved);
+    saveState(saved);
   }, [din, tabs, activeId, labels]);
 
   const openTab = useCallback(() => {

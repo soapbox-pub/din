@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { DragPoint, TearOff } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import type { TabTransfer } from '@/shared/TabContextMenu';
+import { windowLaunch } from '@/shared/launch';
 
 /**
  * Tabs moving between an app's windows, for a tab strip in an app (the
@@ -71,8 +72,8 @@ function slotAt(list: HTMLElement, x: number): { index: number; x: number } {
 }
 
 /** Whether this window was opened to adopt a tab (so it shouldn't start with one of its own). */
-export function hasAdoptedTab(din: Din): boolean {
-  return typeof din.app.launch.params[ADOPT_PARAM] === 'string';
+export function hasAdoptedTab(): boolean {
+  return typeof windowLaunch().params[ADOPT_PARAM] === 'string';
 }
 
 /**
@@ -80,11 +81,12 @@ export function hasAdoptedTab(din: Din): boolean {
  * window), if any. Read it when the window starts; it's removed once read.
  */
 export async function adoptedTab(din: Din): Promise<unknown> {
-  const token = din.app.launch.params[ADOPT_PARAM];
+  const { params } = windowLaunch();
+  const token = params[ADOPT_PARAM];
   if (typeof token !== 'string') return undefined;
   const payload = await din.app.session.get(token);
   din.app.session.set(token, undefined);
-  const place = din.app.launch.params.place as { x?: unknown; y?: unknown } | undefined;
+  const place = params.place as { x?: unknown; y?: unknown } | undefined;
   if (typeof place?.x === 'number' && typeof place.y === 'number') window.moveTo(place.x, place.y);
   return payload;
 }
@@ -175,7 +177,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     const place = point
       ? { x: Math.round(bounds.x + point.x - GRAB.x), y: Math.max(0, Math.round(bounds.y + point.y - GRAB.y)) }
       : undefined;
-    await din.app.open(din.app.id, { ...o.params, width: bounds.width, height: bounds.height, [ADOPT_PARAM]: token, ...(place ? { place } : {}) });
+    await din.app.openWindow({ ...o.params, width: bounds.width, height: bounds.height, [ADOPT_PARAM]: token, ...(place ? { place } : {}) });
   }, [din]);
 
   const tearOff = useMemo<TearOff>(() => ({

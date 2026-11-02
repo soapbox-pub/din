@@ -63,7 +63,7 @@ Din apps' workers get, from `electron/din-app-workers.mts` through
   raises `notificationclick` in the worker and a dismissal
   `notificationclose`.
 - `clients.openWindow(url)`, for a minute after a click: a new window of the
-  app, with `url` in its launch params (`din.app.launch.params.url`), and
+  app, with `url` in its launch params (`decodeLaunchParams(targetURL).url`), and
   `WindowClient.focus()`, which brings the app's frontmost window forward.
 - The web's own worker APIs: `fetch`, IndexedDB, the Cache API,
   `clients.matchAll()` and `postMessage` to open windows.

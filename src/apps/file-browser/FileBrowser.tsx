@@ -49,6 +49,7 @@ import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { windowLaunchFiles } from '@/shared/fileHandles';
 import { useDin, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { TabStrip } from '@/shared/TabStrip';
 import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import { dinWindowMove } from '@/shared/dinWindowMove';
@@ -143,7 +144,8 @@ interface TabSpec {
 /** The first tab, from what the window was opened with: a folder, or a file to select in its folder. */
 function launchTab(din: Din): TabSpec {
   const [file] = windowLaunchFiles();
-  const select = typeof din.app.launch.params.select === 'string' ? din.app.launch.params.select : undefined;
+  const { select: selected } = windowLaunch().params;
+  const select = typeof selected === 'string' ? selected : undefined;
   const path = file && din.files.path(file);
   if (path && file.kind === 'file') return { id: newTabId(), path: parentPath(path), select: file.name };
   return { id: newTabId(), path: path || undefined, select };

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
 import { typesFromFilters, type Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowAccent, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
 import '@fontsource/arimo/700.css';
@@ -229,7 +230,7 @@ export function CAD() {
 
 function CADWindow() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const launchFile = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);

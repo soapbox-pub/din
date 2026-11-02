@@ -12,7 +12,7 @@ import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
  * every change instead (WindowSessionHost). Each window keeps its app, its
  * launch params, where it was (monitor, workspace, geometry, maximized,
  * tiled, minimized, stacking) and, if its app saved one, a state of its own
- * (din.app.saveState, the browser's tabs) that it gets back on restore.
+ * (a Din app's navigation state, the browser's tabs) that it gets back on restore.
  */
 
 /** The snapshot of the windows open. */
@@ -121,7 +121,7 @@ const restoredWindows = new Set<string>();
 const stateListeners = new Set<() => void>();
 
 /**
- * Keep a window's own state for the next start (din.app.saveState, the
+ * Keep a window's own state for the next start (a Din app's navigation state, the
  * browser's tabs). JSON only, up to MAX_WINDOW_STATE_BYTES; null forgets it.
  * Returns false when it's too big or can't be stored as JSON.
  */

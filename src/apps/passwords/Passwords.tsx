@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, Search, StickyNote } from 'lucide-react';
 import {
   AlertDialog,
@@ -18,8 +18,8 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { cleanPasswordsError, type CopyField, type PasswordItem, type PasswordList, type PasswordsState, type PasswordSummary } from '@/lib/passwords';
-import type { LaunchContext } from '@/sdk';
-import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useOnLaunch, windowLaunch, type Launch } from '@/shared/launch';
+import { useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { ImportDialog } from './passwords/ImportDialog';
 import { ItemDetail } from './passwords/ItemDetail';
@@ -46,7 +46,7 @@ import {
 } from './passwords/vault';
 
 /** What a launch asks for: an item to show (the browser's "Open in Passwords"). */
-function launchedItem({ params }: LaunchContext): string | null {
+function launchedItem({ params }: Launch): string | null {
   return typeof params.item === 'string' ? params.item : null;
 }
 
@@ -128,11 +128,10 @@ type Editing = { initial: PasswordItem | BlankItem } | null;
 type FolderPrompt = { mode: 'new' } | { mode: 'rename'; id: string; name: string } | null;
 
 function Vault({ state }: { state: PasswordsState }) {
-  const din = useDin();
   const bridge = useBridge()!;
   const { data: list } = useVaultList(true);
   const [section, setSection] = useState<Section>({ type: 'all' });
-  const [chosen, setSelected] = useState<string | null>(() => launchedItem(din.app.launch));
+  const [chosen, setSelected] = useState<string | null>(() => launchedItem(windowLaunch()));
   const [editing, setEditing] = useState<Editing>(null);
   const [search, setSearch] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -145,18 +144,14 @@ function Vault({ state }: { state: PasswordsState }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  useEffect(
-    () =>
-      din.app.onLaunch((launch) => {
-        const item = launchedItem(launch);
-        if (!item) return;
-        setSection({ type: 'all' });
-        setSearch('');
-        setEditing(null);
-        setSelected(item);
-      }),
-    [din],
-  );
+  useOnLaunch((launch) => {
+    const item = launchedItem(launch);
+    if (!item) return;
+    setSection({ type: 'all' });
+    setSearch('');
+    setEditing(null);
+    setSelected(item);
+  });
 
   const items = useMemo(() => {
     if (!list) return [];

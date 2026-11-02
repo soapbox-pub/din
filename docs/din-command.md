@@ -202,7 +202,7 @@ Folder…** under From Your Folders. The folder is served the same way
 profile), at `din+file://<hash>/`, where the hash is the sha256 of its
 path in base32: the same folder always gets the same origin, and its
 storage. Its id on the desktop is `file-<hash>` (no `din://` app may
-have one), which is `din.app.id`.
+have one).
 
 The App Store shows the app as its manifest describes it, and what it
 asks for; **Add** allows that and opens it. A manifest that later asks for

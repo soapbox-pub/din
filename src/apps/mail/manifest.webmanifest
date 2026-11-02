@@ -5,7 +5,7 @@
   "start_url": "/",
   "launch_handler": { "client_mode": "navigate-new" },
   "shortcuts": [
-    { "name": "New Message", "url": "/", "din": { "id": "compose" } }
+    { "name": "New Message", "url": "/?new", "din": { "id": "compose" } }
   ],
   "din": {
     "permissions": ["mail"],

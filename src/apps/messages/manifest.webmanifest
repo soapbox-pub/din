@@ -5,7 +5,7 @@
   "start_url": "/",
   "launch_handler": { "client_mode": "focus-existing" },
   "shortcuts": [
-    { "name": "New Message", "url": "/", "din": { "id": "new" } }
+    { "name": "New Message", "url": "/?new", "din": { "id": "new" } }
   ],
   "din": {
     "permissions": ["phone"],

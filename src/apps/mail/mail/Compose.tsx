@@ -3,6 +3,7 @@ import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Bold, ChevronDown, Italic, List, ListOrdered, Loader2, Paperclip, Quote, Send, Strikethrough, Underline, X } from 'lucide-react';
 import { useDin, useCloseGuard, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { saveState, useOnLaunch } from '@/shared/launch';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { pickFiles } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
@@ -229,13 +230,9 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
 
   // A message to open, sent here (a restored window can't be told from a
   // viewer): it opens in a viewer of its own.
-  useEffect(
-    () =>
-      din.app.onLaunch(({ params }) => {
-        if (messageTarget(params)) void din.app.open('mail', params);
-      }),
-    [din],
-  );
+  useOnLaunch(({ params }) => {
+    if (messageTarget(params)) void din.app.open('mail', params);
+  });
 
   const editor = useEditor({
     extensions: [StarterKit.configure({ link: { openOnClick: false, autolink: true }, heading: false, codeBlock: false })],
@@ -278,10 +275,10 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
           forwardFrom: seed.forwardFrom && forwarded.length ? { ...seed.forwardFrom, indexes: forwarded } : null,
         },
       };
-      din.app.saveState(state);
+      saveState(state);
     }, 500);
     return () => clearTimeout(t);
-  }, [din, editor, seed, accountId, to, cc, bcc, subject, attached, draftUid, dirty, revision]);
+  }, [editor, seed, accountId, to, cc, bcc, subject, attached, draftUid, dirty, revision]);
 
   const format = useEditorState({
     editor,

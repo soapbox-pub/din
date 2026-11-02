@@ -8,7 +8,7 @@
     { "action": "/", "accept": { "text/vcard": [".vcf", ".vcard"] } }
   ],
   "shortcuts": [
-    { "name": "New Contact", "url": "/", "din": { "id": "new-contact" } }
+    { "name": "New Contact", "url": "/?new", "din": { "id": "new-contact" } }
   ],
   "din": {
     "permissions": ["phone"],

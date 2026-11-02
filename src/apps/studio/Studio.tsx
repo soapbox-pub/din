@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
-import type { LaunchContext } from '@/sdk';
+import { onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
 import { Compositor } from './engine/compositor';
@@ -51,9 +51,9 @@ interface Action {
   destination?: string;
 }
 
-function actionOf({ params, reason }: LaunchContext): Action | null {
+function actionOf({ params }: Pick<Launch, 'params'>, reopened = false): Action | null {
   // A window Din reopens keeps its last params: what they asked for was done then.
-  if (reason === 'restore') return null;
+  if (reopened) return null;
   const { action, nonce } = params;
   if (action !== 'record' && action !== 'stop' && action !== 'mark' && action !== 'live') return null;
   const scene = params.scene === 'screen-camera' || params.scene === 'camera' || params.scene === 'screen' ? params.scene : undefined;
@@ -454,8 +454,8 @@ export function Studio() {
       setGoLiveOpen(true);
     }
   }, []);
-  useEffect(() => perform(actionOf(din.app.launch)), [din, perform]);
-  useEffect(() => din.app.onLaunch((launch) => perform(actionOf(launch))), [din, perform]);
+  useEffect(() => perform(actionOf(windowLaunch(), wasReopened())), [perform]);
+  useEffect(() => onLaunch((launch) => perform(actionOf(launch))), [perform]);
 
   // ---- takes ----
   const openTake = (t: TakeInfo, focus = false) => {

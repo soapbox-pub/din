@@ -61,6 +61,7 @@ import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import {
   appUrl,
+  launchUrl,
   DIN_APPS_PARTITION,
   SYSTEM_PERMISSIONS,
   forgetMigratedStorage,
@@ -89,7 +90,7 @@ import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
 import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome } from '@/sdk/din';
-import type { FromApp, HandleData, Hello, MediaReport, Method, Push, Requests, WindowState } from '@/sdk/protocol';
+import type { FromApp, HandleData, Hello, LaunchData, MediaReport, Method, Push, Requests, WindowState } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */
@@ -384,20 +385,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return out;
   }, [grantFile]);
 
-  const launchOf = useCallback(async (p: Record<string, unknown> | undefined, reason: Hello['launch']['reason']): Promise<Hello['launch']> => {
+  const launchOf = useCallback(async (p: Record<string, unknown> | undefined, relaunch: boolean): Promise<LaunchData> => {
     const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, opener, readOnlyPaths, ...rest } = (p ?? {}) as Record<string, unknown>;
     // Files an app opened this one with that it could only read itself stay read-only.
     const readOnly = new Set(Array.isArray(readOnlyPaths) ? readOnlyPaths.filter((x): x is string => typeof x === 'string') : []);
     const paths = launchPaths(p);
     return {
-      reason,
-      params: rest,
+      url: launchUrl(appId, manifest, typeof shortcut === 'string' ? shortcut : null, rest),
       files: (await Promise.all(paths.map((x) => grantPaths([x], !readOnly.has(x))))).flat(),
-      shortcut: typeof shortcut === 'string' ? shortcut : null,
-      state: reason === 'relaunch' ? null : windowStateOf(windowId),
+      state: relaunch ? null : windowStateOf(windowId),
+      restored: !relaunch && wasRestored(windowId),
       opener: typeof opener === 'string' ? opener : null,
     };
-  }, [grantPaths, windowId]);
+  }, [appId, manifest, grantPaths, windowId]);
 
   // ---- requests ----
   const handlers = useRef<{ [M in Method]?: (params: Requests[M][0]) => Promise<Requests[M][1]> | Requests[M][1] }>({});
@@ -479,7 +479,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useLayoutEffect(() => {
     handlers.current = {
       'app.ready': () => setReady(true),
-      'app.open': async ({ appId: target, params: p, handles }) => {
+      'app.open': async ({ appId: requested, params: p, handles }) => {
+        const target = requested === null ? appId : requested;
         // The Installer is the desktop's alone to open.
         if (typeof target !== 'string' || target === 'installer') return;
         // Paths in params grant nothing; files travel as handles, which the
@@ -491,7 +492,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
         // What this app could only read, the opened one can only read too.
         const readOnlyPaths = grants.filter((g) => !g.writable).map((g) => g.path);
-        // Who asked, which the opened app reads as `launch.opener`.
+        // Who asked, which the opened app reads as `din.app.opener`.
         live.current.actions.open(target, { ...clean, ...files, ...(readOnlyPaths.length > 0 ? { readOnlyPaths } : {}), opener: appId });
       },
       'app.openFiles': async ({ handles }) => {
@@ -1083,7 +1084,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     };
 
     // Launch files first: with file-folders, their folders are what fs reaches.
-    const launch = await launchOf(params, wasRestored(windowId) ? 'restore' : 'new');
+    const launch = await launchOf(params, false);
 
     // The bridges it's granted get their own ports to main, before hello.
     const apps = getAppsBridge();
@@ -1351,7 +1352,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useEffect(() => {
     if (paramsJson === firstParams.current) return;
     firstParams.current = paramsJson;
-    void launchOf(JSON.parse(paramsJson) as Record<string, unknown>, 'relaunch').then((launch) => push({ type: 'launch', launch }));
+    void launchOf(JSON.parse(paramsJson) as Record<string, unknown>, true).then((launch) => push({ type: 'launch', launch }));
   }, [paramsJson, launchOf, push]);
 
   // Main's word that the app stopped answering (it can take a while to notice).

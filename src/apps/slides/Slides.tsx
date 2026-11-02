@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core';
 import { FilePlus, FileText, FolderOpen } from 'lucide-react';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { useDin } from '@/sdk/react';
+import { windowLaunch } from '@/shared/launch';
 import '@/shared/office/fonts';
 import { fontStack, stepFontSize } from '@/shared/office/fonts';
 import {
@@ -160,7 +161,7 @@ const caseFns: Record<CaseKind, (s: string) => string> = {
  */
 export function Slides() {
   const din = useDin();
-  const params = din.app.launch.params;
+  const params = windowLaunch().params;
   const initialDesign = typeof params?.design === 'string' ? DESIGNS.find((d) => d.id === params.design) : undefined;
   const [initial] = useState(() => newPresentation(initialDesign));
   const [pkg, setPkg] = useState<OpcPackage>(initial.pkg);
