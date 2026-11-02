@@ -183,7 +183,7 @@ export function BluetoothSettingsSection() {
 function rowDetail(device: BluetoothDevice): string {
   if (device.busy) return describeDevice(device);
   if (device.battery !== null) return `${device.battery}% battery`;
-  return device.connected ? '' : deviceKind(device.icon);
+  return device.connected ? '' : deviceKind(device);
 }
 
 function BluetoothDeviceRow({
@@ -210,7 +210,7 @@ function BluetoothDeviceRow({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
-            icon={<BluetoothDeviceIcon icon={device.icon} />}
+            icon={<BluetoothDeviceIcon device={device} />}
             name={device.name}
             detail={rowDetail(device)}
             connected={device.connected}
@@ -289,7 +289,7 @@ function BluetoothDeviceDetails({ device, onBack }: { device: BluetoothDevice | 
       ) : (
         <>
           <DetailsHero
-            icon={<BluetoothDeviceIcon icon={device.icon} />}
+            icon={<BluetoothDeviceIcon device={device} />}
             name={device.name}
             status={
               <>
@@ -339,7 +339,7 @@ function BluetoothDeviceDetails({ device, onBack }: { device: BluetoothDevice | 
           {error !== null && <DetailsError>{error}</DetailsError>}
 
           <InfoList>
-            <InfoRow label="Type" value={deviceKind(device.icon)} />
+            <InfoRow label="Type" value={deviceKind(device)} />
             {device.battery !== null && <InfoRow label="Battery" value={`${device.battery}%`} />}
             <InfoRow label="Bluetooth address" value={device.address} />
           </InfoList>

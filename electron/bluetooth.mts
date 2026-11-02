@@ -44,6 +44,11 @@ const AGENT_PATH = '/pub/din/bluetooth/agent';
 
 /** Message Access Server: a phone that shares its texts (phone-map.mts). */
 const MAS_UUID = '00001132-0000-1000-8000-00805f9b34fb';
+/** The service a Trezor offers over Bluetooth LE (trezorlib's transport/ble.py). */
+const TREZOR_UUID = '8c000001-a59b-4d58-a9ad-073df69fa1b1';
+/** Apple's Bluetooth company ID, and its USB vendor ID, as Modalias gives them. */
+const APPLE_COMPANY = 0x004c;
+const APPLE_USB_VENDOR = 0x05ac;
 
 const SYSTEM_BUS = process.env.DBUS_SYSTEM_BUS_ADDRESS || 'unix:path=/run/dbus/system_bus_socket';
 
@@ -70,6 +75,9 @@ export interface BluetoothAdapter {
 
 export type BluetoothBusy = 'pairing' | 'connecting' | 'disconnecting';
 
+/** What a device is, where Din can tell more than BlueZ's icon says. */
+export type BluetoothDeviceKind = 'iphone' | 'android' | 'trezor';
+
 export interface BluetoothDevice {
   /** BlueZ's object path, which the actions take. */
   path: string;
@@ -77,6 +85,7 @@ export interface BluetoothDevice {
   name: string;
   /** BlueZ's freedesktop icon name, e.g. "audio-headset", "input-keyboard". */
   icon: string | null;
+  kind: BluetoothDeviceKind | null;
   paired: boolean;
   connected: boolean;
   /** Battery level, 0-100, for devices that report one. */
@@ -163,6 +172,31 @@ function deviceName(props: Map<string, unknown>): string {
   return String(props.get('Alias') ?? props.get('Name') ?? props.get('Address') ?? 'Unknown device');
 }
 
+/**
+ * Who made a device: the vendor in its Modalias, which BlueZ learns on
+ * connecting, else the company in what it advertises. Null when it doesn't say.
+ */
+function deviceVendor(props: Map<string, unknown>): { apple: boolean } | null {
+  const modalias = /^(bluetooth|usb):v([0-9a-f]{4})/i.exec(String(props.get('Modalias') ?? ''));
+  if (modalias) {
+    const id = parseInt(modalias[2], 16);
+    return { apple: id === (modalias[1].toLowerCase() === 'usb' ? APPLE_USB_VENDOR : APPLE_COMPANY) };
+  }
+  const data = props.get('ManufacturerData');
+  if (data instanceof Map && data.size > 0) return { apple: data.has(APPLE_COMPANY) };
+  return null;
+}
+
+/** An iPhone, an Android phone or a Trezor, as far as the device tells. */
+function deviceKind(props: Map<string, unknown>): BluetoothDeviceKind | null {
+  const uuids = props.get('UUIDs');
+  if (Array.isArray(uuids) && uuids.includes(TREZOR_UUID)) return 'trezor';
+  if (props.get('Icon') !== 'phone') return null;
+  const vendor = deviceVendor(props);
+  // Nearly every phone that isn't Apple's runs Android.
+  return vendor ? (vendor.apple ? 'iphone' : 'android') : null;
+}
+
 function state(): BluetoothState {
   const path = adapterPath();
   const adapterProps = path ? objects.get(path)?.get(ADAPTER) : undefined;
@@ -190,6 +224,7 @@ function state(): BluetoothState {
         address: String(props.get('Address') ?? ''),
         name: deviceName(props),
         icon: typeof props.get('Icon') === 'string' ? (props.get('Icon') as string) : null,
+        kind: deviceKind(props),
         paired,
         connected,
         battery: typeof battery === 'number' ? battery : null,

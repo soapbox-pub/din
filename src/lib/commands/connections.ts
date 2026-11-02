@@ -1,5 +1,5 @@
 import { getWifiBridge, signalLabel, bandLabel } from '@/lib/wifi';
-import { getBluetoothBridge, describeDevice, sortDevices, type BluetoothDevice } from '@/lib/bluetooth';
+import { getBluetoothBridge, describeDevice, deviceKind, sortDevices, type BluetoothDevice } from '@/lib/bluetooth';
 import { getVpnBridge } from '@/lib/vpn';
 import { getTorBridge, torState } from '@/lib/tor';
 import type { Area, Param } from './types';
@@ -96,7 +96,7 @@ export const bluetoothArea: Area = {
       const state = await call(bluetooth().state());
       if (!state.available) return { data: null, text: 'Bluetooth isn’t available' };
       const devices = sortDevices(state.devices).map((d) => ({
-        name: d.name, address: d.address, paired: d.paired, connected: d.connected, battery: d.battery, status: describeDevice(d),
+        name: d.name, address: d.address, paired: d.paired, connected: d.connected, battery: d.battery, type: deviceKind(d), status: describeDevice(d),
       }));
       return { data: { adapter: state.adapter, devices }, text: [`powered: ${state.adapter?.powered ? 'on' : 'off'}${state.adapter?.discovering ? ', looking for devices' : ''}`, '', ...devices.map((d) => `${d.connected ? '*' : ' '} ${d.name}  ${d.address}  ${d.status}`)].join('\n') };
     }),

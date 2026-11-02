@@ -18,6 +18,9 @@ export interface BluetoothAdapter {
 
 export type BluetoothBusy = 'pairing' | 'connecting' | 'disconnecting';
 
+/** What a device is, where Din can tell more than BlueZ's icon says. */
+export type BluetoothDeviceKind = 'iphone' | 'android' | 'trezor';
+
 export interface BluetoothDevice {
   /** BlueZ's object path, which the actions take. */
   path: string;
@@ -25,6 +28,7 @@ export interface BluetoothDevice {
   name: string;
   /** BlueZ's freedesktop icon name, e.g. "audio-headset", "input-keyboard". */
   icon: string | null;
+  kind: BluetoothDeviceKind | null;
   paired: boolean;
   connected: boolean;
   /** Battery level, 0-100, for devices that report one. */
@@ -114,11 +118,14 @@ export function describeDevice(device: BluetoothDevice): string {
   const battery = device.battery !== null ? ` · ${device.battery}% battery` : '';
   if (device.connected) return `Connected${battery}`;
   if (device.paired) return `Not connected${battery}`;
-  return deviceKind(device.icon);
+  return deviceKind(device);
 }
 
-/** A plain name for BlueZ's icon name. */
-export function deviceKind(icon: string | null): string {
+/** A plain name for what a device is. */
+export function deviceKind({ icon, kind }: Pick<BluetoothDevice, 'icon' | 'kind'>): string {
+  if (kind === 'iphone') return 'iPhone';
+  if (kind === 'android') return 'Android phone';
+  if (kind === 'trezor') return 'Trezor';
   switch (icon) {
     case 'audio-headset':
       return 'Headset';
@@ -145,6 +152,14 @@ export function deviceKind(icon: string | null): string {
     case 'camera-photo':
     case 'camera-video':
       return 'Camera';
+    case 'multimedia-player':
+      return 'Media player';
+    case 'scanner':
+      return 'Scanner';
+    case 'modem':
+      return 'Modem';
+    case 'network-wireless':
+      return 'Network access point';
     default:
       return 'Device';
   }

@@ -10,8 +10,11 @@ import {
   Loader2,
   Monitor,
   Mouse,
+  Music,
   Plug,
   Printer,
+  Router,
+  ScanLine,
   Settings2,
   Smartphone,
   Speaker,
@@ -45,6 +48,7 @@ import {
   getBluetoothBridge,
   sortDevices,
   type BluetoothDevice,
+  type BluetoothDeviceKind,
   type BluetoothRequest,
 } from '@/lib/bluetooth';
 import { cn } from '@/lib/utils';
@@ -63,11 +67,89 @@ const ICONS: Record<string, LucideIcon> = {
   printer: Printer,
   'camera-photo': Camera,
   'camera-video': Camera,
+  'multimedia-player': Music,
+  scanner: ScanLine,
+  modem: Router,
+  'network-wireless': Router,
+};
+
+/** Drawn like Lucide's icons, so they sit among them. */
+function Glyph({ className, children }: { className?: string; children: React.ReactNode }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** A phone, with Apple's logo on its screen. */
+function IPhoneIcon({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+      <path
+        stroke="none"
+        fill="currentColor"
+        transform="translate(7.9 7.7) scale(0.34)"
+        d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+      />
+    </Glyph>
+  );
+}
+
+/** A phone, with the Android robot's head on its screen. */
+function AndroidPhoneIcon({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+      <path strokeWidth="1.25" d="m9.7 11.3-1-1.5M14.3 11.3l1-1.5" />
+      <path
+        stroke="none"
+        fill="currentColor"
+        fillRule="evenodd"
+        d="M7.75 15.5a4.25 4.25 0 0 1 8.5 0zM9.75 13.4a.65.65 0 1 0 1.3 0a.65.65 0 1 0-1.3 0zM12.95 13.4a.65.65 0 1 0 1.3 0a.65.65 0 1 0-1.3 0z"
+      />
+    </Glyph>
+  );
+}
+
+/** Trezor's padlock, which is what a Trezor looks like. */
+function TrezorIcon({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      <path d="M5.5 10h13v8.5L12 21.5l-6.5-3z" />
+    </Glyph>
+  );
+}
+
+const KIND_ICONS: Record<BluetoothDeviceKind, (props: { className?: string }) => React.ReactNode> = {
+  iphone: IPhoneIcon,
+  android: AndroidPhoneIcon,
+  trezor: TrezorIcon,
 };
 
 /** A glyph for what kind of device this is. */
-export function BluetoothDeviceIcon({ icon, className }: { icon: string | null; className?: string }) {
-  const Icon = (icon && ICONS[icon]) || Bluetooth;
+export function BluetoothDeviceIcon({
+  device,
+  className,
+}: {
+  device: Pick<BluetoothDevice, 'icon' | 'kind'>;
+  className?: string;
+}) {
+  const Icon = (device.kind && KIND_ICONS[device.kind]) || (device.icon && ICONS[device.icon]) || Bluetooth;
   return <Icon className={className} aria-hidden />;
 }
 
@@ -138,7 +220,7 @@ export function BluetoothPopoverBody() {
                           device.connected ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
                         )}
                       >
-                        <BluetoothDeviceIcon icon={device.icon} className="size-3.5" />
+                        <BluetoothDeviceIcon device={device} className="size-3.5" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-foreground">{device.name}</span>
