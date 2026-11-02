@@ -52,7 +52,8 @@ import { createTransport } from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
-import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, webLink } from './mail-lists.mts';
+import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
+import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
 import type {
   ConversationMessage,
   MailAccount,
@@ -853,7 +854,7 @@ function storedPage(store: MailStore, mailbox: string, before: number | undefine
     const page = older.slice(0, limit);
     const kept = store.summaries(mailbox, page);
     // Kept from before Mail read their References: fetched again, for conversations.
-    if (kept.size < page.length || [...kept.values()].some((k) => !k.summary.references)) return null;
+    if (kept.size < page.length || [...kept.values()].some((k) => stale(k.summary))) return null;
     return { messages: byDate([...kept.values()].map((k) => k.summary)), total: box.uids.length, more: older.length > page.length };
   }
   const all = store.allSummaries(mailbox, before).filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true));
@@ -968,7 +969,7 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
 
     // Summaries kept from before Mail read References are fetched again, once.
     const have = store.summaries(mailbox, uids.slice(0, PAGE));
-    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => !have.get(u)?.summary.references))) dirty = true;
+    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => stale(have.get(u)?.summary)))) dirty = true;
   }, false);
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
   if (arrived.length) announce(a, store, arrived);
@@ -1010,7 +1011,7 @@ function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
 }
 
 /** What's fetched for a message's summary. */
-const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references'] };
+const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references', 'authentication-results', 'received'] };
 
 /** How many of a long References list are kept, from each end: the root and the latest. */
 const REFERENCES_KEPT = 10;
@@ -1020,13 +1021,23 @@ function messageIds(value: string | undefined): string[] {
   return value?.match(/<[^<>\s]{1,500}>/g) ?? [];
 }
 
+/** Kept from before Mail read what conversations and senders' pictures need: fetched again. */
+function stale(s: MessageSummary | undefined): boolean {
+  return !s || !s.references || s.senderVerified === undefined;
+}
+
 function keptReferences(ids: string[]): string[] {
   return ids.length > REFERENCES_KEPT * 2 ? [...ids.slice(0, REFERENCES_KEPT), ...ids.slice(-REFERENCES_KEPT)] : ids;
 }
 
+function from0Domain(m: FetchMessageObject): string {
+  return m.envelope?.from?.[0]?.address?.split('@').pop()?.toLowerCase() ?? '';
+}
+
 function summary(m: FetchMessageObject): MessageSummary {
   const date = m.envelope?.date ?? m.internalDate;
-  const headers = m.headers ? headerFields(m.headers.toString('latin1')) : null;
+  const raw = m.headers?.toString('latin1') ?? '';
+  const headers = m.headers ? headerFields(raw) : null;
   return {
     uid: m.uid,
     messageId: m.envelope?.messageId ?? null,
@@ -1043,6 +1054,7 @@ function summary(m: FetchMessageObject): MessageSummary {
     threadId: m.threadId ?? null,
     inReplyTo: messageIds(m.envelope?.inReplyTo)[0] ?? null,
     references: keptReferences(messageIds(headers?.get('references')?.join(' '))),
+    senderVerified: senderVouched(raw, from0Domain(m)),
   };
 }
 
@@ -1276,7 +1288,7 @@ async function conversation(a: StoredAccount, ids: string[], threadId: string | 
         const uids = ((await c.search(criteria, { uid: true })) || []).sort((x, y) => y - x).slice(0, CONVERSATION_MAX);
         if (!uids.length) return [];
         const kept = store.summaries(mailbox, uids);
-        await fetchSummaries(c, store, mailbox, uids.filter((u) => !kept.get(u)?.summary.references));
+        await fetchSummaries(c, store, mailbox, uids.filter((u) => stale(kept.get(u)?.summary)));
         const now = store.summaries(mailbox, uids);
         return uids.flatMap((u) => {
           const summary = now.get(u)?.summary;
@@ -1858,6 +1870,12 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:setFlags', (id, mailbox, uids, flags) =>
     setFlags(account(id), mailboxArg(mailbox), uidList(uids), (flags ?? {}) as { seen?: unknown; flagged?: unknown }),
   );
+  handle('mail:avatar', (address) => {
+    if (typeof address !== 'string') throw new Error('No address');
+    return avatar(address);
+  });
+  handle('mail:avatarLookups', () => avatarLookups());
+  handle('mail:setAvatarLookups', (on) => setAvatarLookups(on === true));
   handle('mail:markAllRead', (id, mailbox) => markAllRead(account(id), mailboxArg(mailbox)));
   handle('mail:move', (id, mailbox, uids, to) => move(account(id), mailboxArg(mailbox), uidList(uids), to));
   handle('mail:remove', (id, mailbox, uids) => remove(account(id), mailboxArg(mailbox), uidList(uids)));

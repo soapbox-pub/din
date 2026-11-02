@@ -105,6 +105,8 @@ export interface MessageSummary {
    * Mail looked.
    */
   references?: string[];
+  /** The account's server says DKIM passed for the From domain; undefined for summaries kept from before Mail looked. */
+  senderVerified?: boolean;
 }
 
 /** A message of a conversation, with the mailbox it's in. */
@@ -240,6 +242,15 @@ export interface MailBridge {
   conversation(accountId: string, options: { messageIds: string[]; threadId?: string | null; since?: number }): Promise<ConversationMessage[]>;
   attachment(accountId: string, path: string, uid: number, index: number): Promise<MailAttachment>;
   setFlags(accountId: string, path: string, uids: number[], flags: { seen?: boolean; flagged?: boolean }): Promise<void>;
+  /**
+   * A sender's picture (a data: URL) from their domain's NIP-05 profile or
+   * BIMI logo, or null; ask only for senders with `senderVerified`.
+   * Looked up in main and kept for weeks (electron/mail-avatars.mts).
+   */
+  avatar(address: string): Promise<string | null>;
+  /** Whether senders' pictures are looked up (on unless turned off). */
+  avatarLookups(): Promise<boolean>;
+  setAvatarLookups(on: boolean): Promise<void>;
   /** Mark every message in a mailbox read; resolves with how many were unread. */
   markAllRead(accountId: string, path: string): Promise<number>;
   /** Move to a mailbox by path, or to the account's archive, trash or junk. */
@@ -286,7 +297,7 @@ export interface MailRead {
  * mail and each inbox's unread count, watched from the moment Din starts,
  * for notifications and Mail's Dock badge.
  */
-export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'subscriptions' | 'unsubscribe'> & {
+export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe'> & {
   /** Each account's unread mail in its inbox, as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;

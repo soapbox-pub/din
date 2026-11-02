@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Plus } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -138,6 +138,9 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
   const [selected, setSelected] = useState<string | 'general'>(initial ?? accounts[0]?.id ?? 'general');
   const [remote, setRemote] = useState(() => localStorage.getItem(REMOTE_KEY) === 'always');
   const account = accounts.find((a) => a.id === selected);
+  const mail = useMail();
+  const qc = useQueryClient();
+  const lookups = useQuery({ queryKey: ['mail', 'avatar-lookups'], queryFn: () => mail!.avatarLookups(), enabled: !!mail });
 
   return (
     <Overlay label="Mail settings" onClose={onClose} className="h-[560px] max-w-[720px]">
@@ -179,6 +182,23 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
                   if (on) localStorage.setItem(REMOTE_KEY, 'always');
                   else localStorage.removeItem(REMOTE_KEY);
                   window.dispatchEvent(new Event('din-mail-remote'));
+                }}
+              />
+            </label>
+            <label className="flex items-start justify-between gap-4">
+              <span>
+                <span className="block text-[13px] font-medium">Look up senders’ pictures</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  From the sender’s own domain (its Nostr profile or brand logo), only for senders your server checked, and never when you open a message. Their domain can see that it was asked.
+                </span>
+              </span>
+              <Switch
+                checked={lookups.data ?? true}
+                disabled={!lookups.isSuccess}
+                onCheckedChange={async (on) => {
+                  qc.setQueryData(['mail', 'avatar-lookups'], on);
+                  await mail?.setAvatarLookups(on);
+                  void qc.invalidateQueries({ queryKey: ['mail', 'avatar'] });
                 }}
               />
             </label>

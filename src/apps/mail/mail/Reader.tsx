@@ -7,24 +7,14 @@ import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import type { MailAddress, MailAttachmentInfo, MailMessage } from '@/lib/mail';
 import { useConversation, useMail, useMessage, type Item } from './api';
-import { displayName, fileSize, formatAddress, fullDate, initials, listDate } from './format';
+import { displayName, fileSize, formatAddress, fullDate, listDate } from './format';
 import { HtmlBody, TextBody } from './MessageBody';
 import { useOpenLink } from './links';
+import { Avatar } from './Avatar';
 import type { MenuEntry, MenuPick } from './menu';
 import { DropdownEntries } from './MenuEntries';
 
 export const REMOTE_KEY = 'din:mail:remote-content';
-
-export function Avatar({ who, className }: { who: MailAddress | undefined; className?: string }) {
-  return (
-    <div
-      aria-hidden
-      className={cn('grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-b from-zinc-400 to-zinc-500 text-sm font-semibold text-white select-none dark:from-zinc-500 dark:to-zinc-600', className)}
-    >
-      {initials(who)}
-    </div>
-  );
-}
 
 function People({ label, list }: { label: string; list: MailAddress[] }) {
   if (!list.length) return null;
@@ -184,7 +174,7 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item
   const sender = m.from[0];
   return (
     <header className="flex gap-3">
-      <Avatar who={sender} />
+      <Avatar who={sender} verified={item.senderVerified} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <button
@@ -276,7 +266,7 @@ function Folded({ item, onOpen }: { item: Item; onOpen: () => void }) {
       onClick={onOpen}
       className="flex w-full items-center gap-3 rounded-xl py-2 pr-2 text-left text-sm outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring/60"
     >
-      <Avatar who={item.from[0]} />
+      <Avatar who={item.from[0]} verified={item.senderVerified} />
       <span className={cn('w-40 shrink-0 truncate', !item.seen && 'font-semibold')}>{displayName(item.from[0]) || 'Unknown Sender'}</span>
       <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.draft ? 'Draft' : item.preview ?? ''}</span>
       <span className="shrink-0 text-xs text-muted-foreground">{listDate(item.date)}</span>

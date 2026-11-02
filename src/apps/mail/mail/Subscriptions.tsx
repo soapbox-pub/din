@@ -8,7 +8,7 @@ import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { UNSUBSCRIBE_METHODS, type MailAccount, type MailSubscription, type UnsubscribeMethod, type UnsubscribeResult } from '@/lib/mail';
 import { useMail, useMessage, useSubscriptions, type Item } from './api';
-import { Avatar } from './Reader';
+import { Avatar } from './Avatar';
 import { displayName } from './format';
 
 /** How far back each "Look Further Back" goes, in months. */
@@ -121,7 +121,7 @@ const Row = ({
       className={cn('mx-2 flex items-center gap-3 rounded-lg px-3 py-2.5', checked ? 'bg-primary/[0.07]' : 'hover:bg-foreground/5', className)}
     >
       <Checkbox checked={checked} onCheckedChange={(v) => onCheck(v === true)} aria-label={`Select ${name}`} />
-      <Avatar who={{ name: s.name, address: s.address }} className="size-9 text-xs" />
+      <Avatar who={{ name: s.name, address: s.address }} verified={s.verified} className="size-9 text-xs" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="min-w-0 truncate text-[13px] font-semibold">{name}</span>

@@ -57,6 +57,43 @@ export function dkimPassed(results: string | undefined, domain: string): boolean
     });
 }
 
+/**
+ * Whether the account's server vouched for the From domain: in the
+ * Authentication-Results its server put on top (the first of them, and any
+ * more from the same server before the next Received line, as some servers
+ * write one per check), DKIM passed aligned with the domain, or DMARC
+ * passed for it. `raw` is the message's Authentication-Results and
+ * Received headers, in their order; ones further down could be anyone's.
+ */
+export function senderVouched(raw: string, domain: string): boolean {
+  if (!domain) return false;
+  let server: string | null = null;
+  const results: string[] = [];
+  for (const line of raw.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/)) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    const key = line.slice(0, colon).trim().toLowerCase();
+    const value = line.slice(colon + 1).trim();
+    if (key === 'received') {
+      if (server !== null) break;
+      continue;
+    }
+    if (key !== 'authentication-results') continue;
+    const id = value.split(';')[0].trim().split(/\s+/)[0].toLowerCase();
+    if (server === null) server = id;
+    else if (id !== server) break;
+    results.push(value);
+  }
+  return results.some(
+    (r) =>
+      dkimPassed(r, domain) ||
+      r
+        .split(';')
+        .slice(1)
+        .some((part) => /^\s*dmarc\s*=\s*pass\b/i.test(part) && aligned(/\bheader\.from\s*=\s*"?([^\s;"]+)/i.exec(part)?.[1] ?? '', domain)),
+  );
+}
+
 /** What a message's list headers say, or null when it doesn't say how to leave. */
 export function listHeader(fields: Map<string, string[]>, from: MailAddress | undefined, date: number): ListHeader | null {
   const value = fields.get('list-unsubscribe')?.[0];
@@ -131,7 +168,7 @@ export function isPublicAddress(ip: string): boolean {
   return !PRIVATE.check(ip, family === 4 ? 'ipv4' : 'ipv6');
 }
 
-const LOCAL_NAMES = /(^|\.)(localhost|local|lan|home|internal|intranet|corp|home\.arpa|localdomain)$/i;
+export const LOCAL_NAMES = /(^|\.)(localhost|local|lan|home|internal|intranet|corp|home\.arpa|localdomain)$/i;
 
 /** An https link Din may POST to, or why not. */
 export function checkLink(raw: string): URL {
@@ -156,7 +193,7 @@ export function checkLink(raw: string): URL {
 type LookupCallback = (error: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void;
 
 /** dns.lookup that only answers with public addresses, and fails if any isn't. */
-function publicLookup(hostname: string, options: dns.LookupOptions, callback: LookupCallback): void {
+export function publicLookup(hostname: string, options: dns.LookupOptions, callback: LookupCallback): void {
   dns.lookup(hostname, { all: true }, (error, addresses) => {
     if (error) return callback(error, '');
     if (!addresses.length || !addresses.every((a) => isPublicAddress(a.address))) {

@@ -6,6 +6,7 @@ import type { MailboxInfo } from '@/lib/mail';
 import type { Conversation } from './conversations';
 import { addressLine, displayName, listDate } from './format';
 import { MAIL_DRAG } from './mailboxes';
+import { Avatar } from './Avatar';
 import { messageMenu, type MenuPick } from './menu';
 import { ContextEntries } from './MenuEntries';
 
@@ -70,6 +71,7 @@ const MessageRow = ({
       <RowButton label={c.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(c.flagged ? 'unflag' : 'flag')}>
         <Star className={cn('size-4', c.flagged ? 'fill-amber-400 text-amber-500' : 'opacity-60 group-hover:opacity-100')} strokeWidth={1.75} />
       </RowButton>
+      {recipients ? <Avatar who={item.to[0]} className="mr-1 size-8 text-xs" /> : <Avatar who={item.from[0]} verified={item.senderVerified} className="mr-1 size-8 text-xs" />}
       <div className="min-w-0 flex-1 pl-1 @2xl:flex @2xl:items-center @2xl:gap-4">
         <div className="flex items-baseline gap-2 @2xl:w-52 @2xl:shrink-0">
           <span className={cn('flex min-w-0 flex-1 items-baseline gap-1', unread ? 'font-semibold' : 'text-foreground/85')}>
@@ -102,7 +104,8 @@ export function ListSkeleton() {
   return (
     <div className="pt-1" aria-busy="true" aria-label="Loading messages">
       {Array.from({ length: 10 }, (_, i) => (
-        <div key={i} className="flex items-center gap-4 border-b border-border/50 py-3 pr-3 pl-10">
+        <div key={i} className="flex items-center gap-4 border-b border-border/50 py-2 pr-3 pl-10">
+          <div className="size-8 shrink-0 animate-pulse rounded-full bg-foreground/10 motion-reduce:animate-none" />
           <div className="h-3.5 w-40 shrink-0 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
           <div className="h-3.5 flex-1 animate-pulse rounded bg-foreground/[0.07] motion-reduce:animate-none" />
           <div className="h-3 w-12 shrink-0 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />

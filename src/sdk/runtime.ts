@@ -1047,7 +1047,7 @@ export function installDin(transport: Transport): void {
       if (permissions.has('mail')) {
         await sys.ready('mail');
         const m: Record<string, unknown> = {};
-        for (const c of ['accounts', 'discover', 'addAccount', 'updateAccount', 'removeAccount', 'mailboxes', 'messages', 'message', 'conversation', 'attachment', 'setFlags', 'markAllRead', 'move', 'remove', 'send', 'saveDraft', 'subscriptions', 'unsubscribe', 'unsubscribeMessage']) {
+        for (const c of ['accounts', 'discover', 'addAccount', 'updateAccount', 'removeAccount', 'mailboxes', 'messages', 'message', 'conversation', 'attachment', 'setFlags', 'markAllRead', 'avatar', 'avatarLookups', 'setAvatarLookups', 'move', 'remove', 'send', 'saveDraft', 'subscriptions', 'unsubscribe', 'unsubscribeMessage']) {
           m[c] = (...args: unknown[]) => sys.call('mail', `mail:${c}`, args);
         }
         m.onChanged = (cb: (change: unknown) => void) => sys.on('mail', 'mail:changed', (c) => cb(c));

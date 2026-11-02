@@ -34,7 +34,7 @@ function day(ms: number): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, marking a mailbox read, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -88,6 +88,17 @@ export const mailArea: Area = {
       let marked = 0;
       for (const t of targets) marked += await call(mail().markAllRead(t.account.id, t.box.path));
       return { data: { marked }, text: `Marked ${marked.toLocaleString()} ${marked === 1 ? 'message' : 'messages'} read` };
+    }),
+    command('mail', 'pictures', 'Whether Mail looks up senders’ pictures from their domain (NIP-05 profile or BIMI logo), as its Settings switch does; with on or off, turn it on or off', [
+      { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off' },
+    ], async (args) => {
+      const state = args.optString('state');
+      if (state !== undefined) {
+        if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
+        await call(mail().setAvatarLookups(state === 'on'));
+      }
+      const on = await call(mail().avatarLookups());
+      return { data: { lookups: on }, text: on ? 'Mail looks up senders’ pictures' : 'Mail doesn’t look up senders’ pictures' };
     }),
     command('mail', 'unsubscribe', 'Unsubscribe from mailing lists, as Subscriptions does (asks on screen first)', [
       { name: 'lists', type: 'string', positional: true, rest: true, help: 'Senders, by name, address or list id (as din mail subscriptions lists them)' },
