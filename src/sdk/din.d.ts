@@ -780,7 +780,10 @@ export type Permission =
   | 'wallpaper'
   /** Install cursor themes and change the pointer (`din.desktop.setCursor`). */
   | 'cursor'
-  /** The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD. */
+  /**
+   * The Assistant's OpenCode service (`din.system.assistant`). Assistant, CAD:
+   * any app but the Assistant reaches only conversations it started.
+   */
   | 'assistant'
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'

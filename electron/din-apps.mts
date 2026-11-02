@@ -432,6 +432,10 @@ interface Grant {
   roots: Map<string, boolean> | null;
   /** Where the port's pushes go, as the handlers' sender does. */
   send: (channel: string, ...args: unknown[]) => void;
+  /** The app it was granted to. */
+  appId: string;
+  /** For assistant, the conversations this app started (the Assistant app reaches all of them). */
+  sessions: Set<string>;
 }
 
 const grants = new Map<number, Map<SystemPermission, Grant>>();
@@ -439,7 +443,7 @@ const grants = new Map<number, Map<SystemPermission, Grant>>();
 function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Map<string, boolean> | null = null): void {
   revoke(contents.id, permission);
   const { port1, port2 } = new MessageChannelMain();
-  const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {} };
+  const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {}, appId: appIdOf(contents.getURL()) ?? '', sessions: new Set() };
   let byPermission = grants.get(contents.id);
   if (!byPermission) grants.set(contents.id, (byPermission = new Map()));
   byPermission.set(permission, entry);
@@ -488,6 +492,7 @@ function grant(contents: Electron.WebContents, permission: SystemPermission, roo
         .then(() => invoke(event as unknown as Electron.IpcMainInvokeEvent, ...args))
         .then((result) => {
           if (channel === 'pty:spawn' && typeof result === 'number') entry.ptys.add(result);
+          if (channel === 'assistant:request') noteSession(entry, args, result);
           reply({ result: permission === 'fs' ? withoutProtected(channel, args, result) : result });
         })
         .catch((error: unknown) => {
@@ -514,6 +519,7 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
   if (permission === 'pty' && channel !== 'pty:spawn' && channel !== 'pty:adopt' && !entry.ptys.has(args[0] as number)) {
     return 'Not one of this app\'s terminals';
   }
+  if (permission === 'assistant' && entry.appId !== 'assistant') return assistantRefusal(channel, args, entry);
   if (permission === 'fs') {
     if (entry.roots && !SCOPED_FS.has(channel)) return `${channel} reaches beyond this app's folders`;
     if (entry.roots && channel === 'fs:compress' && Array.isArray(args[1]) && args[1].some((n) => typeof n !== 'string' || n.includes('/'))) {
@@ -541,6 +547,38 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
     }
   }
   return null;
+}
+
+/**
+ * Why an app other than the Assistant can't make an assistant call, or null.
+ * One embedding a conversation (CAD) talks to conversations it started, in
+ * a folder of its own under ~/.cache/din, and reads the models and agents:
+ * not the user's other conversations, their credentials, or sudo's
+ * approvals and passwords, which only the Assistant app answers.
+ */
+function assistantRefusal(channel: string, args: unknown[], entry: Grant): string | null {
+  if (/^assistant:(status|recentModels|install|checkUpdate)$/.test(channel)) return null;
+  if (channel !== 'assistant:request') return `Only the Assistant app can call ${channel}`;
+  const [method, apiPath, body] = args;
+  if (typeof method !== 'string' || typeof apiPath !== 'string' || apiPath.includes('..')) return 'Not an OpenCode API path';
+  const at = apiPath.split('?')[0];
+  if (method === 'GET' && /^\/api\/(session\/active|model|model\/default|agent|command|integration)$/.test(at)) return null;
+  if (method === 'POST' && at === '/api/session') {
+    const directory = (body as { location?: { directory?: unknown } } | null)?.location?.directory;
+    const own = path.join(os.homedir(), '.cache', 'din', `${entry.appId}-assistant`);
+    if (typeof directory === 'string' && path.isAbsolute(directory) && path.resolve(directory).startsWith(own + path.sep)) return null;
+    return `A conversation of ${entry.appId}'s works in ${own}`;
+  }
+  const session = /^\/api\/(?:experimental\/)?session\/([^/]+)(\/[^/]+)?/.exec(at);
+  if (session && entry.sessions.has(decodeURIComponent(session[1])) && session[2] !== '/move' && session[2] !== '/fork') return null;
+  return `${method} ${at} reaches beyond ${entry.appId}'s own conversations`;
+}
+
+/** Remember a conversation an app started, so it can go on talking to it. */
+function noteSession(entry: Grant, args: unknown[], result: unknown): void {
+  if (entry.appId === 'assistant' || args[0] !== 'POST' || args[1] !== '/api/session') return;
+  const id = (result as { ok?: unknown; data?: { data?: { id?: unknown } } } | null)?.data?.data?.id;
+  if ((result as { ok?: unknown } | null)?.ok === true && typeof id === 'string') entry.sessions.add(id);
 }
 
 /** For the fs calls that change files, which of their arguments name what they change. */
@@ -746,6 +784,11 @@ export function forwardPushToGrants(channel: string, args: unknown[]): void {
   for (const byPermission of grants.values()) {
     for (const [permission, entry] of byPermission) {
       if (!SYSTEM_PUSHES[permission]?.test(channel)) continue;
+      // An app other than the Assistant hears only of its own conversations.
+      if (permission === 'assistant' && entry.appId !== 'assistant' && channel === 'assistant:event') {
+        const event = (args[0] ?? {}) as { type?: unknown; sessionID?: unknown };
+        if (event.type === 'din.passwords' || (typeof event.sessionID === 'string' && !entry.sessions.has(event.sessionID))) continue;
+      }
       // A scoped grant hears only of its own folders.
       if (entry.roots && !(typeof args[0] === 'string' && withinRoots(entry.roots, args[0]))) continue;
       entry.port.postMessage({ push: channel, args });

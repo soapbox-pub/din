@@ -33,7 +33,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `media-session` | `din.media`: report what's playing; hear the media keys and Din's media controls | Media Player |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
-| `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
+| `assistant` | `din.system.assistant`: the Assistant's OpenCode service. Only the Assistant reaches all of it; any other app talks only to conversations it started, in `~/.cache/din/<id>-assistant/`, hears only their events, and can't answer sudo | Assistant, CAD |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks and phones plugged in by USB, mounting, unlocking and ejecting | Files |
 | `mail` | `din.system.mail`: the user's IMAP and SMTP accounts (`src/lib/mail.ts`), run in main by `electron/mail.mts`. Passwords stay in main, sealed with the keyring; the app never sees them. Mail already seen is kept in `userData/mail/<account>.db`, so it reads offline. Subscriptions reads the inbox's List-Unsubscribe headers and leaves lists: a one-click POST from main only to public https hosts, or an email from the account | Mail |
