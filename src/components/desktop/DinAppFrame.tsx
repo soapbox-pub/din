@@ -634,11 +634,12 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
       'window.restore': () => {
         const w = live.current.win;
-        if (w && (w.maximized || w.snapped)) {
+        // Out of the Dock, as a minimized window's tile does.
+        if (w?.minimized) live.current.actions.focus(windowId);
+        else if (w && (w.maximized || w.snapped)) {
           live.current.actions.unmaximize(windowId, w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height });
         }
       },
-      'window.toggleMaximize': () => live.current.frame?.toggleMaximize(),
       'window.focus': () => live.current.actions.focus(windowId),
       'window.close': () => {
         setCloseGuard(windowId, null);

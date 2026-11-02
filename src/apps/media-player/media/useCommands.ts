@@ -81,7 +81,7 @@ export function useCommands() {
       loadSkin,
       addLibraryFolder,
       close: () => din.window.requestClose(),
-      minimize: () => din.window.minimize(),
+      minimize: () => void window.minimize(),
       message,
       clearMessage: () => setMessage(null),
       setMessage,

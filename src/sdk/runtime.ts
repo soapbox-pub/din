@@ -525,10 +525,6 @@ export function installDin(transport: Transport): void {
     beginMove: (e) => gesture(e, request('window.beginMove', { at: point(e) })),
     beginResize: (edge, e) => gesture(e, request('window.beginResize', { edge, at: point(e) })),
     setBounds: (bounds) => tell('window.setBounds', bounds),
-    minimize: () => tell('window.minimize'),
-    maximize: () => tell('window.maximize'),
-    restore: () => tell('window.restore'),
-    toggleMaximize: () => tell('window.toggleMaximize'),
     focus: () => tell('window.focus'),
     close: () => tell('window.close'),
     requestClose: () => tell('window.requestClose'),
@@ -548,9 +544,9 @@ export function installDin(transport: Transport): void {
     icon: (url) => tell('window.setIcon', { url }),
     accent: (color) => tell('window.setAccent', { color }),
   });
-  // The Additional Windowing Controls draft's, for pages written for it.
+  // The Additional Windowing Controls draft's.
   for (const name of ['minimize', 'maximize', 'restore'] as const) {
-    Object.defineProperty(window, name, { value: async () => win[name](), writable: true, configurable: true });
+    Object.defineProperty(window, name, { value: () => request(`window.${name}`), writable: true, configurable: true });
   }
 
   // ---- menus ----

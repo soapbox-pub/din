@@ -151,7 +151,6 @@ export interface Requests {
   'window.minimize': [void, void];
   'window.maximize': [void, void];
   'window.restore': [void, void];
-  'window.toggleMaximize': [void, void];
   'window.focus': [void, void];
   'window.close': [void, void];
   'window.requestClose': [void, void];

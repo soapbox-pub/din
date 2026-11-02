@@ -20,7 +20,8 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useWindowActions().open(id, params)` | `din.app.open(id, params)` |
 | `open(appForFile(name), { path })` | `din.app.openFiles([handle])` |
 | `useWindowActions().close(windowId)` / `window.close()` | `din.window.close()` |
-| `focus`, `minimize`, `maximize`, `toggleMaximize` | the same on `din.window` |
+| `focus` | `din.window.focus` |
+| `minimize`, `maximize`, `toggleMaximize` | `window.minimize()`, `window.maximize()`, `window.restore()` |
 | `resize(windowId, w, h)` | `din.window.setBounds({ width, height })` |
 | `setFrameless(windowId, true, geometry)` | `din.window.setChrome({ frame: 'none', … })` + `setBounds` |
 | `useWindowTitle(title)` | `useWindowTitle(title)` from `@/sdk/react`, or `document.title` |

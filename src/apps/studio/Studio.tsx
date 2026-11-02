@@ -302,12 +302,12 @@ export function Studio() {
       setMarkers(0);
       setNow(Date.now());
       setPhase('recording');
-      if (settings.hideWhileRecording && scr.stream && !takeWithLive.current) din.window.minimize();
+      if (settings.hideWhileRecording && scr.stream && !takeWithLive.current) void window.minimize();
     } catch (error) {
       setPhase('idle');
       setNotice(`Couldn’t start recording: ${cleanCaptureError(error)}`);
     }
-  }, [capture, cam.stream, compositor, din, mixer, program, scr.stream, settings]);
+  }, [capture, cam.stream, compositor, mixer, program, scr.stream, settings]);
 
   const record = useCallback(() => {
     if (phase !== 'idle' || !capture) return;
@@ -356,7 +356,6 @@ export function Studio() {
       setNotice(`The take couldn’t be saved: ${cleanCaptureError(error)}`);
     } finally {
       setPhase('idle');
-      if (din.window.state.minimized) din.window.restore();
       din.window.focus();
     }
   }, [din, phase]);

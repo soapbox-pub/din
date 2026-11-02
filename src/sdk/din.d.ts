@@ -82,6 +82,14 @@ declare global {
   interface Window {
     /** Defined by Din, before any of the page's scripts run, in every app it hosts (din:// apps, later nsites). */
     din?: Din;
+    /**
+     * From the web's Additional Windowing Controls draft, on the app's own
+     * window: as the title bar's buttons. `restore` brings a minimized
+     * window back, and un-maximizes or un-tiles one that isn't.
+     */
+    minimize(): Promise<void>;
+    maximize(): Promise<void>;
+    restore(): Promise<void>;
   }
 }
 
@@ -270,11 +278,6 @@ export interface DinWindow {
   /** Move or resize; clamped to the work area and the min/max size. */
   setBounds(bounds: Partial<Rect>): void;
 
-  minimize(): void;
-  maximize(): void;
-  /** Un-maximize or un-tile. */
-  restore(): void;
-  toggleMaximize(): void;
   focus(): void;
   /** Close this window. Doesn't consult its own `onCloseRequest`. */
   close(): void;

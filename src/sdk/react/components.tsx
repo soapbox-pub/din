@@ -55,7 +55,7 @@ export function WindowDragRegion({ className, children, onPointerDown, onDoubleC
         onDoubleClick?.(e);
         if (e.defaultPrevented || !e.currentTarget.contains(e.target as Node)) return;
         if ((e.target as HTMLElement).closest(`${INTERACTIVE}, ${FIELD}`)) return;
-        din.window.toggleMaximize();
+        void (din.window.state.maximized ? window.restore() : window.maximize());
       }}
       onContextMenu={(e) => {
         onContextMenu?.(e);
@@ -79,13 +79,13 @@ export function WindowControls({ className }: { className?: string }) {
   const button = 'grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   return (
     <div className={cn('flex shrink-0 items-center gap-2', className)} data-window-no-drag>
-      <button type="button" aria-label="Minimize window" onClick={() => din.window.minimize()} className={cn(button, muted, hover)}>
+      <button type="button" aria-label="Minimize window" onClick={() => void window.minimize()} className={cn(button, muted, hover)}>
         <Minus className="size-4" />
       </button>
       <button
         type="button"
         aria-label={state.maximized ? 'Restore window' : 'Maximize window'}
-        onClick={() => din.window.toggleMaximize()}
+        onClick={() => void (state.maximized ? window.restore() : window.maximize())}
         className={cn(button, muted, hover)}
       >
         {state.maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}

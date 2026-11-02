@@ -201,10 +201,11 @@ din.window.setBounds({ width: 1160, height: 720 });  // Calculator switching to 
   frame.
 - `setBounds` is clamped to the monitor's work area and the min/max
   size. A tiled or maximized window ignores it until restored.
-- `minimize()`, `maximize()`, `restore()`, `toggleMaximize()`, `focus()`
-  do what the title bar's buttons and a click do. The page's own
-  `window.minimize()`, `window.maximize()` and `window.restore()`, from
-  the web's Additional Windowing Controls draft, are the same.
+- The page's own `window.minimize()`, `window.maximize()` and
+  `window.restore()`, from the web's Additional Windowing Controls draft,
+  do what the title bar's buttons do: `restore` brings a minimized window
+  back, and un-maximizes or un-tiles one that isn't. `din.window.focus()`
+  does what a click does. To toggle, look at `din.window.state.maximized`.
 
 ## Closing
 
