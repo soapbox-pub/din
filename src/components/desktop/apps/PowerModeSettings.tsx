@@ -13,7 +13,7 @@ export function PowerModeSettings() {
       <PowerModeRow
         kind="power-mode"
         title="Power mode"
-        description="Type for a while without stopping, and every keystroke throws sparks from the caret. A pause of ten seconds ends it."
+        description="Type for a while without stopping, and every keystroke throws sparks from the caret. A pause of a second ends it."
         checked={config.powerMode}
         onCheckedChange={(powerMode) => updateConfig((current) => ({ ...current, powerMode }))}
       />
