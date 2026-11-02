@@ -3644,11 +3644,30 @@ function forwardShellShortcuts(contents: Electron.WebContents): void {
   });
 }
 
-/** Cut, copy and paste for a text field in a guest that draws its own menus. */
-function popupEditMenu(params: Electron.ContextMenuParams): void {
+/**
+ * Spelling suggestions, cut, copy and paste for a text field in contents
+ * that draw their own menus (the desktop, built-in apps, widgets).
+ */
+function popupEditMenu(contents: Electron.WebContents, params: Electron.ContextMenuParams): void {
   if (!params.isEditable) return;
   const { editFlags } = params;
   const menu = new Menu();
+  if (params.misspelledWord) {
+    for (const suggestion of params.dictionarySuggestions) {
+      menu.append(new MenuItem({ label: suggestion.replace(/&/g, '&&'), click: () => contents.replaceMisspelling(suggestion) }));
+    }
+    if (params.dictionarySuggestions.length === 0) {
+      menu.append(new MenuItem({ label: 'No Guesses Found', enabled: false }));
+    }
+    menu.append(new MenuItem({ type: 'separator' }));
+    menu.append(
+      new MenuItem({
+        label: 'Add to Dictionary',
+        click: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      }),
+    );
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
   if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
   if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
   if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
@@ -6388,25 +6407,8 @@ app.on('web-contents-created', (_event, contents) => {
 
   if (contents.getType() !== 'webview') {
     // The shell renderer (address bar, inputs, etc.) gets no context menu by
-    // default. Add Cut/Copy/Paste/Select All for editable fields.
-    contents.on('context-menu', (_e, params) => {
-      if (!params.isEditable) return;
-      const { editFlags } = params;
-      const menu = new Menu();
-      if (editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }));
-      if (editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }));
-      if (editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }));
-      if (menu.items.length > 0) {
-        menu.append(new MenuItem({ type: 'separator' }));
-        menu.append(new MenuItem({ role: 'selectAll' }));
-      }
-      if (menu.items.length === 0) return;
-      setImmediate(() => {
-        if (shellWindow && !shellWindow.isDestroyed()) {
-          menu.popup({ window: shellWindow });
-        }
-      });
-    });
+    // default: editable fields get spelling and Cut/Copy/Paste/Select All.
+    contents.on('context-menu', (_e, params) => popupEditMenu(contents, params));
     return;
   }
 
@@ -6420,7 +6422,7 @@ app.on('web-contents-created', (_event, contents) => {
     attachingGuestSrc = '';
     forwardShellShortcuts(contents);
     // Apps draw their own menus; text fields keep cut, copy and paste.
-    contents.on('context-menu', (_e, params) => popupEditMenu(params));
+    contents.on('context-menu', (_e, params) => popupEditMenu(contents, params));
     return;
   }
 
@@ -6429,7 +6431,7 @@ app.on('web-contents-created', (_event, contents) => {
     attachWidgetGuest(contents, attachingGuestSrc, sendToShell);
     attachingGuestSrc = '';
     forwardShellShortcuts(contents);
-    contents.on('context-menu', (_e, params) => popupEditMenu(params));
+    contents.on('context-menu', (_e, params) => popupEditMenu(contents, params));
     return;
   }
 
