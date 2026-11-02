@@ -1,4 +1,5 @@
 import type { Din } from '@/sdk';
+import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
 
 /**
  * Publisher reaches the folders of files the user hands it: a document's
@@ -36,7 +37,7 @@ export function reachLink(din: Din, path: string): Promise<void> {
   let p = reached.get(path);
   if (!p) {
     const kept = read()[path];
-    p = kept ? din.files.restore(kept.token).then(() => {}, () => {}) : Promise.resolve();
+    p = kept ? loadHandle(kept.token).then(() => {}, () => {}) : Promise.resolve();
     reached.set(path, p);
   }
   return p;
@@ -52,7 +53,7 @@ export async function keepLinks(din: Din, doc: string, docDir: string, paths: st
   for (const path of want) {
     if (read()[path]) continue;
     try {
-      fresh.set(path, await din.files.persist(await din.files.fromPath(path)));
+      fresh.set(path, await storeHandle(await din.files.fromPath(path)));
     } catch {
       // Gone, or out of reach: nothing to keep.
     }
@@ -60,7 +61,7 @@ export async function keepLinks(din: Din, doc: string, docDir: string, paths: st
   // Read again: another window may have saved meanwhile.
   const all = read();
   for (const [path, token] of fresh) {
-    if (all[path]) din.files.release(token);
+    if (all[path]) forgetHandle(token);
     else all[path] = { token, docs: [] };
   }
   for (const [path, kept] of Object.entries(all)) {
@@ -68,7 +69,7 @@ export async function keepLinks(din: Din, doc: string, docDir: string, paths: st
     if (want.has(path) && !has) kept.docs.push(doc);
     else if (!want.has(path) && has) kept.docs = kept.docs.filter((d) => d !== doc);
     if (!kept.docs.length) {
-      din.files.release(kept.token);
+      forgetHandle(kept.token);
       delete all[path];
       reached.delete(path);
     }

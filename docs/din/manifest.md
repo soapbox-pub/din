@@ -130,7 +130,7 @@ Nostr & Storage, or with `din apps links` and `din apps open-links`.
 | `hidden` | `hidden` | Openable by id, not listed (Preview, Developer Tools) |
 | `dockAs` | `dockAs` | Windows go under another app's Dock tile |
 | `migrateStorage` | | See below |
-| `migrateRecentFiles` | | Recent lists of `{ path, time }` turned into persisted handles once ([files.md](files.md#recent-files)) |
+| `migrateRecentFiles` | | Recent lists of `{ path, time }` turned into handles kept in IndexedDB once ([files.md](files.md#recent-files)) |
 | `migrateFiles` | | Files kept elsewhere before the move, copied once into the app's folders ([files.md](files.md#paths-nothing-granted)) |
 | `folders` | | Fixed folders `din.system.fs` reaches by path, without `fs` ([files.md](files.md#some-folders-by-path)) |
 

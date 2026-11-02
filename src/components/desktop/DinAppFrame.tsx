@@ -74,6 +74,8 @@ import {
   appWindows,
   persistedGrant,
   persistGrant,
+  markGrantsStored,
+  unstoredGrants,
   recentFilesToMigrate,
   releaseGrant,
   windowIdAt,
@@ -758,11 +760,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         session.current!.watches.delete(handle);
         if (w.id !== null) void getFsBridge()?.unwatch(w.id);
       },
-      'files.persist': ({ handle }) => {
+      'files.persist': ({ handle, token }) => {
         const { path, kind, writable } = grantOf(handle);
-        return persistGrant({ appId, path, kind, writable });
+        if (typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(token)) throw new Error('That isn’t a token');
+        if (!persistGrant(token, { appId, path, kind, writable, stored: true })) throw new Error('That token is taken');
       },
-      'files.release': ({ token }) => releaseGrant(appId, String(token)),
       'files.requestAccess': async ({ paths, reason }) => {
         const s = session.current;
         const wanted = [...new Set((Array.isArray(paths) ? paths : []).map(normalizePath).filter((p): p is string => p !== null))].slice(0, 5000);
@@ -804,10 +806,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         try {
           await getFsBridge()?.stat(entry.path);
         } catch {
+          // Gone: nothing will bring the grant back.
+          releaseGrant(appId, String(token));
           return null;
         }
         return grantFile(entry.path, entry.kind, entry.writable);
       },
+      'files.stored': ({ tokens }) => markGrantsStored(appId, Array.isArray(tokens) ? tokens.map(String) : []),
       'files.url': async ({ handle }) => {
         const g = await usableGrant(handle);
         const apps = getAppsBridge();
@@ -1176,6 +1181,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       permissions,
       storage: storageToMigrate(manifest),
       recentFiles: recent,
+      unstoredHandles: unstoredGrants(appId).map(({ token, kind, path, writable }) => ({
+        __dinFileHandle: 1 as const,
+        token,
+        kind,
+        name: basename(path),
+        key: appKeyOf(appId, path),
+        path,
+        writable,
+      })),
       drag: dragInfo(currentDrag()),
       dictation: { available: hasDictationBridge() },
       powerMode: powerModeOn(),

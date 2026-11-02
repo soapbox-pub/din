@@ -16,7 +16,7 @@ folder) that the user handed it:
 - launched with: opened from Files, Open With, dropped on its Dock tile
   (`launchQueue`, [lifecycle.md](lifecycle.md));
 - pasted from Din's clipboard (`din.clipboard.readFiles`);
-- restored from an earlier `din.files.persist`.
+- read back from IndexedDB, where the app kept it ([Recent files](#recent-files)).
 
 ```ts
 const [file] = await showOpenFilePicker({
@@ -45,8 +45,8 @@ The handles pass `instanceof FileSystemFileHandle` (or
 (`denied` for `readwrite` on a file picked to read). A folder's `entries`,
 `keys`, `values`, `getFileHandle`, `getDirectoryHandle` and `resolve`
 reach what's in it, granted with it. They can't create or remove a
-folder's entries (`NotAllowedError`), and can't be kept in IndexedDB,
-since they aren't the browser's own: `din.files.persist` keeps them.
+folder's entries (`NotAllowedError`). They can be kept in IndexedDB, as
+the web's can, to open again after a restart.
 
 `src/shared/fileHandles.ts` has the few helpers Din's apps share over
 these: the pickers resolving with nothing when cancelled (`pickFiles`,
@@ -72,7 +72,6 @@ await observer.observe(handle);
 | `path(handle)` | The full path, to show (a Recent list's folder, Copy Path), and stable for the same file, to compare handles by. Knowing it grants nothing |
 | `parent(handle)` | With `file-folders`, a file's folder as a handle (null for a folder) |
 | `url(handle)` | A `din-file://<token>/<name>` URL to load it from instead of `getFile()` (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
-| `persist(handle)` | A token that `restore(token)` turns back into the handle after a restart, for Recent Files and reopening last session's documents |
 
 ## Saving
 
@@ -91,17 +90,30 @@ with `mode: 'read'`, or the file isn't writable:
 
 ## Recent files
 
-An app keeps its own recent list: `din.files.persist(handle)` gives a token, kept
-in the app's storage, that `din.files.restore(token)` turns back into a
-handle after a restart (or null if the file is gone), and
-`din.files.release(token)` forgets one the app drops. The office apps do
-this. Din's own Recent (Files', the Dock's) doesn't take entries from apps
-yet.
+An app keeps its own recent list, and the handles in it go in IndexedDB,
+as on the web:
+
+```ts
+store.put(handle, 'last-document');            // in any object store, in any value
+const kept = await get('last-document');       // a handle again, after a restart too
+if ((await kept.queryPermission()) === 'granted') open(kept);   // 'denied' once the file is gone
+```
+
+The runtime puts a handle in as its grant's token, which the desktop keeps
+for the app (`installStoredHandles` in `src/sdk/standards.ts`), and reading
+it back gives a handle that gets its grant back from the desktop when it's
+first used: `queryPermission()` asks, and its other calls reject with
+`NotFoundError` once the file is gone. `storeHandle`, `loadHandle` and
+`forgetHandle` in `src/shared/handleStore.ts` keep handles under string
+keys that the app keeps where it likes (the office apps', CAD's and Media
+Player's lists keep them in localStorage, as `token`). Din's own Recent
+(Files', the Dock's) doesn't take entries from apps yet.
 
 An app that kept a recent list on the desktop's origin before it moved,
 as `{ path, time }` entries, lists the keys in its manifest's
 `migrateRecentFiles`: on its first launch the desktop turns each entry it
-can still find into `{ token, key, name, path, time }` and merges them into
+can still find into `{ token, key, name, path, time }`, the token a key in
+`src/shared/handleStore.ts`' database, and merges them into
 the app's own list under the same key.
 
 ## The file clipboard

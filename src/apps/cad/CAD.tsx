@@ -66,6 +66,7 @@ import { AssistantPalette } from './cad/ui/assistant';
 import { useCadAssistant } from './cad/useCadAssistant';
 import { unitsName } from './cad/assistant';
 import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
+import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
 
 const SETTINGS_KEY = 'din:cad:settings';
 const RECENT_KEY = 'din:cad:recent';
@@ -155,7 +156,7 @@ function readRecent(): Recent[] {
 function writeRecent(din: Din, list: Recent[], keep: Recent[]): Recent[] {
   // Tokens of entries that left the list are let go.
   const kept = new Set(keep.map((r) => r.token));
-  for (const r of list) if (!kept.has(r.token)) din.files.release(r.token);
+  for (const r of list) if (!kept.has(r.token)) forgetHandle(r.token);
   localStorage.setItem(RECENT_KEY, JSON.stringify(keep));
   return keep;
 }
@@ -164,7 +165,7 @@ async function addRecent(din: Din, file: FileSystemFileHandle): Promise<Recent[]
   const list = readRecent();
   const path = din.files.path(file);
   const same = list.find((r) => r.path === path);
-  const token = same?.token ?? (await din.files.persist(file));
+  const token = same?.token ?? (await storeHandle(file));
   const entry = { token, key: path, path, time: Date.now() };
   return writeRecent(din, list, [entry, ...list.filter((r) => r.path !== path)].slice(0, RECENT_MAX));
 }
@@ -741,7 +742,7 @@ function CADWindow() {
   /** A recent drawing, by the grant it was kept with; one that's gone leaves the list. */
   const openRecent = useCallback(
     (r: Recent) =>
-      void din.files.restore(r.token).then(
+      void loadHandle(r.token).then(
         (handle) => {
           if (handle?.kind === 'file') {
             openHandle(handle as FileSystemFileHandle);

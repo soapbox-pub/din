@@ -447,7 +447,14 @@ export function installWindowState(host: WindowStateHost): void {
  * the port, and the calls on it. Apps see it only as the web handle over it.
  */
 export interface Grant {
-  readonly id: string;
+  /**
+   * The desktop's id for it on the window's port. A handle read back from
+   * IndexedDB gets its grant back from the desktop first, and rejects with
+   * `NotFoundError` when the file is gone or the grant revoked.
+   */
+  id(): Promise<string>;
+  /** The token the desktop keeps the grant under, once it's been stored. */
+  token?: string;
   readonly kind: 'file' | 'directory';
   readonly name: string;
   /** Stable for the same file within the app. */
@@ -533,9 +540,16 @@ function writableStream(grant: Grant, initial: Uint8Array): WritableStream & {
   });
 }
 
-/** A handle's permission: what it was granted is all it has. */
-function permission(grant: Grant, descriptor?: { mode?: 'read' | 'readwrite' }): PermissionState {
-  return descriptor?.mode === 'readwrite' && !grant.writable ? 'denied' : 'granted';
+/**
+ * A handle's permission: what it was granted is all it has. One read back
+ * from IndexedDB has it while the desktop still keeps it (the file is there).
+ */
+async function permission(grant: Grant, descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState> {
+  if (descriptor?.mode === 'readwrite' && !grant.writable) return 'denied';
+  return grant.id().then(
+    () => 'granted',
+    () => 'denied',
+  );
 }
 
 
@@ -1025,4 +1039,124 @@ export function installSpeechRecognition(host: SpeechHost): void {
   for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
     Object.defineProperty(window, name, { value: DinSpeechRecognition, writable: true, configurable: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Handles kept in IndexedDB
+// ---------------------------------------------------------------------------
+
+/** What a handle is stored as: the grant's token with the desktop, and what's known of it without asking. */
+export interface StoredHandle {
+  __dinFileHandle: 1;
+  token: string;
+  kind: 'file' | 'directory';
+  name: string;
+  key: string;
+  path: string;
+  writable: boolean;
+}
+
+function isStoredHandle(value: unknown): value is StoredHandle {
+  return !!value && typeof value === 'object' && (value as { __dinFileHandle?: unknown }).__dinFileHandle === 1 && typeof (value as { token?: unknown }).token === 'string';
+}
+
+/**
+ * A copy of `value` with `swap` applied to everything in it (arrays, plain
+ * objects, Maps and Sets, as structured clone goes through them), sharing
+ * whatever doesn't change; the value itself when nothing does.
+ */
+function swapDeep(value: unknown, swap: (v: unknown) => unknown, seen = new Map<object, unknown>()): unknown {
+  const swapped = swap(value);
+  if (swapped !== value || !value || typeof value !== 'object') return swapped;
+  if (seen.has(value)) return seen.get(value);
+  seen.set(value, value);
+  let out: unknown = value;
+  if (Array.isArray(value)) {
+    const items = value.map((v) => swapDeep(v, swap, seen));
+    if (items.some((v, i) => v !== value[i])) out = items;
+  } else if (value instanceof Map) {
+    const entries = [...value].map(([k, v]) => [swapDeep(k, swap, seen), swapDeep(v, swap, seen)] as const);
+    if (entries.some(([k, v], i) => k !== [...value.keys()][i] || v !== [...value.values()][i])) out = new Map(entries);
+  } else if (value instanceof Set) {
+    const items = [...value].map((v) => swapDeep(v, swap, seen));
+    if (items.some((v, i) => v !== [...value][i])) out = new Set(items);
+  } else {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+    const entries = Object.entries(value).map(([k, v]) => [k, swapDeep(v, swap, seen)] as const);
+    if (entries.some(([k, v]) => v !== (value as Record<string, unknown>)[k])) out = Object.fromEntries(entries);
+  }
+  seen.set(value, out);
+  return out;
+}
+
+export interface StoredHandlesHost {
+  /** The token a grant is kept under, asking the desktop to keep it the first time. */
+  store(grant: Grant): string;
+  /** The grant a stored handle stands for, got back from the desktop when it's first used. */
+  restore(stored: StoredHandle): Grant;
+}
+
+/**
+ * File System Access handles can be kept in IndexedDB, as the web's can, to
+ * open again after a restart (a Recent list): a handle put in a store goes in
+ * as its grant's token, which the desktop keeps, and comes out as a handle
+ * again, which gets its grant back from the desktop when it's first used
+ * (`queryPermission()` says whether it can: `denied` once the file is gone).
+ */
+export function installStoredHandles(host: StoredHandlesHost): void {
+  const toStored = (v: unknown): unknown => {
+    const grant = grantOf(v);
+    if (!grant) return v;
+    const stored: StoredHandle = { __dinFileHandle: 1, token: host.store(grant), kind: grant.kind, name: grant.name, key: grant.key, path: grant.path, writable: grant.writable };
+    return stored;
+  };
+  const handles = new Map<string, WebFileHandle | WebDirectoryHandle>();
+  const fromStored = (v: unknown): unknown => {
+    if (!isStoredHandle(v)) return v;
+    let handle = handles.get(v.token);
+    if (!handle) handles.set(v.token, (handle = toWebHandle(host.restore(v))));
+    return handle;
+  };
+
+  for (const name of ['put', 'add'] as const) {
+    const original = IDBObjectStore.prototype[name];
+    Object.defineProperty(IDBObjectStore.prototype, name, {
+      configurable: true,
+      writable: true,
+      value: function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+        return original.call(this, swapDeep(value, toStored), key);
+      },
+    });
+  }
+  const update = IDBCursor.prototype.update;
+  Object.defineProperty(IDBCursor.prototype, 'update', {
+    configurable: true,
+    writable: true,
+    value: function (this: IDBCursor, value: unknown) {
+      return update.call(this, swapDeep(value, toStored));
+    },
+  });
+
+  // Reads: each result swapped once, so reading it again gives the same objects.
+  const read = (proto: object, name: string) => {
+    const getter = Object.getOwnPropertyDescriptor(proto, name)?.get;
+    if (!getter) return;
+    const memo = new WeakMap<object, { raw: unknown; out: unknown }>();
+    Object.defineProperty(proto, name, {
+      configurable: true,
+      enumerable: true,
+      get(this: object) {
+        const raw: unknown = getter.call(this);
+        if (!raw || typeof raw !== 'object' || raw instanceof IDBDatabase || raw instanceof IDBCursor) return raw;
+        const known = memo.get(this);
+        if (known && known.raw === raw) return known.out;
+        const out = swapDeep(raw, fromStored);
+        memo.set(this, { raw, out });
+        return out;
+      },
+    });
+  };
+  read(IDBRequest.prototype, 'result');
+  read(IDBCursorWithValue.prototype, 'value');
 }

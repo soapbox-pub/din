@@ -5,6 +5,7 @@ import type { FileFilter } from '@/lib/fileFilters';
 import { ACCENTS, type OfficeApp } from './accent';
 import { OfficeButton, OfficeDialog, type RecentFile } from './chrome';
 import { fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
+import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 512 * 1024 * 1024;
@@ -45,14 +46,14 @@ export function readRecent(app: OfficeApp): RecentFile[] {
 
 async function addRecent(din: Din, app: OfficeApp, handle: FileSystemFileHandle): Promise<RecentFile[]> {
   const path = din.files.path(handle);
-  const token = readRecent(app).find((r) => r.path === path)?.token ?? (await din.files.persist(handle));
+  const token = readRecent(app).find((r) => r.path === path)?.token ?? (await storeHandle(handle));
   // Read again after the await: another window may have changed the list meanwhile.
   const list = readRecent(app);
   const entry = { token, key: path, name: handle.name, path, time: Date.now() };
   const all = [entry, ...list.filter((r) => r.path !== path)];
   const next = all.slice(0, RECENT_MAX);
   localStorage.setItem(recentKey(app), JSON.stringify(next));
-  for (const r of all.slice(RECENT_MAX)) din.files.release(r.token);
+  for (const r of all.slice(RECENT_MAX)) forgetHandle(r.token);
   return next;
 }
 
@@ -61,7 +62,7 @@ const RECENT_CHANGED = 'din:office:recent';
 export function removeRecent(din: Din, app: OfficeApp, key: string) {
   const list = readRecent(app);
   localStorage.setItem(recentKey(app), JSON.stringify(list.filter((r) => r.key !== key)));
-  for (const r of list) if (r.key === key) din.files.release(r.token);
+  for (const r of list) if (r.key === key) forgetHandle(r.token);
   window.dispatchEvent(new CustomEvent(RECENT_CHANGED, { detail: app }));
 }
 
@@ -256,7 +257,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   /** A Recent entry's file, or null (and the entry gone from the list) if it can't be found. */
   const restoreRecent = useCallback(
     async (entry: RecentFile): Promise<FileSystemFileHandle | null> => {
-      const restored = await din.files.restore(entry.token).catch(() => null);
+      const restored = await loadHandle(entry.token).catch(() => null);
       const target = restored?.kind === 'file' ? (restored as FileSystemFileHandle) : null;
       if (!target) {
         removeRecent(din, app, entry.key);

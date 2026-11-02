@@ -1,6 +1,7 @@
 import { connect, type Din } from '@/sdk';
 import { fileUrl, getFsBridge, joinPath } from '@/lib/fs';
 import { isPlaylistFile } from './playlists';
+import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
 
 /**
  * What the player can reach. Its own folders (the manifest's `din.folders`:
@@ -81,11 +82,11 @@ export function grantsReady(): Promise<Din> {
     // back): not one to ask for again.
     const lost: string[] = [];
     await Promise.all(Object.values(tokens).flatMap((kept) => Object.entries(kept).map(async ([path, token]) => {
-      const handle = await din.files.restore(token).catch(() => null);
+      const handle = await loadHandle(token).catch(() => null);
       if (handle) {
         if (!handles.has(path)) handles.set(path, handle);
       } else {
-        din.files.release(token);
+        forgetHandle(token);
         delete kept[path];
         lost.push(path);
       }
@@ -210,7 +211,7 @@ let keeping: Promise<void> = Promise.resolve();
 export function keepFor(user: GrantUser, locations: Iterable<string>): Promise<void> {
   const wanted = [...locations];
   keeping = keeping.then(async () => {
-    const din = await grantsReady();
+    await grantsReady();
     const kept = (tokens[user] ??= {});
     const needed = new Set<string>();
     for (const location of wanted) {
@@ -222,14 +223,14 @@ export function keepFor(user: GrantUser, locations: Iterable<string>): Promise<v
     for (const path of needed) {
       if (kept[path]) continue;
       const handle = handles.get(path);
-      const token = handle && (await din.files.persist(handle).catch(() => null));
+      const token = handle && (await storeHandle(handle).catch(() => null));
       if (!token) continue;
       kept[path] = token;
       changed = true;
     }
     for (const [path, token] of Object.entries(kept)) {
       if (needed.has(path)) continue;
-      din.files.release(token);
+      forgetHandle(token);
       delete kept[path];
       changed = true;
     }

@@ -17,6 +17,7 @@ import type {
   AssistantSettings,
   Edge,
 } from '@/sdk/din';
+import type { StoredHandle } from '@/sdk/standards';
 
 /**
  * What an app's page is playing, for Din's media controls and the media
@@ -153,6 +154,12 @@ export interface Hello {
    * merged into the app's own under the same keys.
    */
   recentFiles: Record<string, string> | null;
+  /**
+   * Handles the desktop keeps for the app that its IndexedDB doesn't have
+   * yet (kept before handles went there), to put in its `din-handles`
+   * database under their tokens.
+   */
+  unstoredHandles: StoredHandle[];
   /** The drag going on, if one is. */
   drag: DragInfo | null;
   /** Whether this computer can take dictation (the runtime's SpeechRecognition). */
@@ -182,7 +189,6 @@ export interface Requests {
   'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];
   'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];
   'files.parent': [{ handle: string }, HandleData | null];
-  'files.release': [{ token: string }, void];
   'files.requestAccess': [{ paths: string[]; reason?: string }, HandleData[]];
   'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
   'assistant.follow': [{ sessionID: string }, void];
@@ -230,8 +236,11 @@ export interface Requests {
   'files.entries': [{ handle: string }, HandleData[]];
   'files.watch': [{ handle: string }, void];
   'files.unwatch': [{ handle: string }, void];
-  'files.persist': [{ handle: string }, string];
+  /** A handle put in IndexedDB: keep its grant under the app's own (random) token; one in use by another app is refused. */
+  'files.persist': [{ handle: string; token: string }, void];
   'files.restore': [{ token: string }, HandleData | null];
+  /** These `unstoredHandles` are in the app's IndexedDB now. */
+  'files.stored': [{ tokens: string[] }, void];
   'files.url': [{ handle: string }, string];
   'files.fromPath': [{ path: string }, HandleData];
 

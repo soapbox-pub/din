@@ -224,7 +224,8 @@ export function forgetMigratedStorage(entries: Record<string, string>): void {
 }
 
 // ---------------------------------------------------------------------------
-// Handles apps keep across restarts (handle.persist(), din.files.restore()).
+// Handles apps keep across restarts, in their IndexedDB (src/sdk/standards.ts'
+// installStoredHandles), as tokens for grants kept here.
 // ---------------------------------------------------------------------------
 
 const PERSIST_KEY = 'din:app-file-tokens';
@@ -234,6 +235,12 @@ export interface PersistedGrant {
   path: string;
   kind: 'file' | 'directory';
   writable: boolean;
+  /**
+   * The app's IndexedDB has it. Tokens from before handles went there (the
+   * old `din.files.persist`, recent lists moved out of the desktop) are put
+   * in its `din-handles` database under their own name on its next launch.
+   */
+  stored?: boolean;
 }
 
 function persistedGrants(): Record<string, PersistedGrant> {
@@ -245,13 +252,28 @@ function persistedGrants(): Record<string, PersistedGrant> {
   }
 }
 
-/** Keep a grant for an app; resolves to the token it gets back with. */
-export function persistGrant(grant: PersistedGrant): string {
-  const token = crypto.randomUUID();
+/** Keep a grant for an app under a token (a new one when none is given); null if the token is another app's. */
+export function persistGrant(token: string | null, grant: PersistedGrant): string | null {
   const all = persistedGrants();
-  all[token] = grant;
+  const t = token ?? crypto.randomUUID();
+  if (all[t] && all[t].appId !== grant.appId) return null;
+  all[t] = grant;
   localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
-  return token;
+  return t;
+}
+
+/** An app's tokens its IndexedDB doesn't have yet, to put there. */
+export function unstoredGrants(appId: string): (PersistedGrant & { token: string })[] {
+  return Object.entries(persistedGrants())
+    .filter(([, g]) => g.appId === appId && !g.stored)
+    .map(([token, g]) => ({ ...g, token }));
+}
+
+/** The app's IndexedDB has these now. */
+export function markGrantsStored(appId: string, tokens: string[]): void {
+  const all = persistedGrants();
+  for (const t of tokens) if (all[t]?.appId === appId) all[t].stored = true;
+  localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
 }
 
 /** The grant a token stands for, if it's this app's. */
@@ -260,7 +282,7 @@ export function persistedGrant(appId: string, token: string): PersistedGrant | n
   return grant && grant.appId === appId ? grant : null;
 }
 
-/** An app let go of a token. */
+/** A token whose file is gone. */
 export function releaseGrant(appId: string, token: string): void {
   const all = persistedGrants();
   if (all[token]?.appId !== appId) return;
@@ -295,7 +317,7 @@ export async function recentFilesToMigrate(
       if (typeof item?.path !== 'string' || typeof item.time !== 'number') continue;
       const kind = await exists(item.path);
       if (!kind) continue;
-      const token = persistGrant({ appId, path: item.path, kind, writable: true });
+      const token = persistGrant(null, { appId, path: item.path, kind, writable: true });
       const name = item.path.replace(/\/+$/, '').split('/').pop() || item.path;
       entries.push({ token, key: appKeyOf(appId, item.path), name, path: item.path, time: item.time });
     }

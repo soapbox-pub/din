@@ -54,6 +54,7 @@ import type { CaptureBridge } from '@/lib/capture';
 import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
+import { seedHandles } from '@/shared/handleStore';
 import {
   bridgeMediaSession,
   grantOf,
@@ -62,6 +63,7 @@ import {
   installLaunchQueue,
   installDroppedFiles,
   installSpeechRecognition,
+  installStoredHandles,
   installSavedState,
   installWindowState,
   toWebHandle,
@@ -378,32 +380,47 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'fileChange') for (const cb of [...(fileListeners.get(p.handle) ?? [])]) cb(p.change);
   });
-  installFileSystemObserver(({ id }, cb) => {
-    let listeners = fileListeners.get(id);
-    if (!listeners) {
-      fileListeners.set(id, (listeners = new Set()));
-      tell('files.watch', { handle: id });
-    }
-    listeners.add(cb);
-    return () => {
-      listeners.delete(cb);
-      if (listeners.size || fileListeners.get(id) !== listeners) return;
-      fileListeners.delete(id);
-      tell('files.unwatch', { handle: id });
+  installFileSystemObserver((grant, cb) => {
+    let stopped = false;
+    let stop = () => {
+      stopped = true;
     };
+    void grant.id().then((id) => {
+      if (stopped) return;
+      let listeners = fileListeners.get(id);
+      if (!listeners) {
+        fileListeners.set(id, (listeners = new Set()));
+        tell('files.watch', { handle: id });
+      }
+      const set = listeners;
+      set.add(cb);
+      stop = () => {
+        set.delete(cb);
+        if (set.size || fileListeners.get(id) !== set) return;
+        fileListeners.delete(id);
+        tell('files.unwatch', { handle: id });
+      };
+    }, () => {});
+    return () => stop();
   });
-  const idOf = (file: FileSystemHandle): string => {
+  const grantFor = (file: FileSystemHandle): Grant => {
     const grant = grantOf(file);
     if (!grant) throw new TypeError('Not a file handle Din granted');
-    return grant.id;
+    return grant;
   };
-  const grantFor = (file: FileSystemHandle): Grant => {
-    idOf(file);
-    return grantOf(file)!;
+  /** The desktop's id for a handle, getting a stored one's grant back first. */
+  const idOf = (file: FileSystemHandle): Promise<string> => {
+    try {
+      return grantFor(file).id();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   };
-  function grant(data: HandleData): Grant {
+  const idsOf = (files: FileSystemHandle[] | undefined) => (files ? Promise.all(files.map(idOf)) : Promise.resolve(undefined));
+  function grant(data: HandleData, token?: string): Grant {
     return {
-      id: data.id,
+      id: () => Promise.resolve(data.id),
+      token,
       kind: data.kind,
       name: data.name,
       key: data.key,
@@ -421,9 +438,41 @@ export function installDin(transport: Transport): void {
         else payload = new Uint8Array(content.buffer, content.byteOffset, content.byteLength).slice().buffer;
         await request('files.write', { handle: data.id, data: payload });
       },
-      entries: async () => (data.kind === 'directory' ? (await request('files.entries', { handle: data.id })).map(grant) : []),
+      entries: async () => (data.kind === 'directory' ? (await request('files.entries', { handle: data.id })).map((d) => grant(d)) : []),
     };
   }
+  // Handles kept in IndexedDB: as their grants' tokens, which the desktop keeps.
+  const tokens = new Map<string, string>();
+  installStoredHandles({
+    store: (g) => {
+      const known = g.token ?? tokens.get(g.key);
+      if (known) return known;
+      const token = crypto.randomUUID();
+      tokens.set(g.key, token);
+      void g.id().then((handle) => tell('files.persist', { handle, token }), () => {});
+      return token;
+    },
+    restore: (stored) => {
+      let live: Promise<Grant> | null = null;
+      const real = () =>
+        (live ??= request('files.restore', { token: stored.token }).then((data) => {
+          if (!data) throw new DOMException(`${stored.name} can’t be found`, 'NotFoundError');
+          return grant(data, stored.token);
+        }));
+      return {
+        id: async () => (await real()).id(),
+        token: stored.token,
+        kind: stored.kind,
+        name: stored.name,
+        key: stored.key,
+        path: stored.path,
+        writable: stored.writable,
+        getFile: async () => (await real()).getFile(),
+        write: async (content) => (await real()).write(content),
+        entries: async () => (await real()).entries(),
+      };
+    },
+  });
   const wrap = (data: HandleData): FileSystemHandle => toWebHandle(grant(data)) as unknown as FileSystemHandle;
   const launchTo = installLaunchQueue();
   const restoreState = installSavedState((state) => tell('app.saveState', { state }));
@@ -433,7 +482,7 @@ export function installDin(transport: Transport): void {
     opener = l.opener;
     // A reopened window's entry has state, null if it saved none: getState() tells it from a new one's undefined.
     if (l.state !== null || l.restored) restoreState(l.state);
-    launchTo(l.url, l.files.map(grant));
+    launchTo(l.url, l.files.map((d) => grant(d)));
   };
 
   // ---- app ----
@@ -450,9 +499,9 @@ export function installDin(transport: Transport): void {
       readied = true;
       tell('app.ready');
     },
-    open: (appId, params, files) => request('app.open', { appId, params, handles: files?.map(idOf) }),
-    openWindow: (params, files) => request('app.open', { appId: null, params, handles: files?.map(idOf) }),
-    openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
+    open: async (appId, params, files) => request('app.open', { appId, params, handles: await idsOf(files) }),
+    openWindow: async (params, files) => request('app.open', { appId: null, params, handles: await idsOf(files) }),
+    openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
   };
@@ -642,35 +691,29 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- files ----
-  const withHandle = <T extends { startInHandle?: Grant }>(options: T) => {
+  const withHandle = async <T extends { startInHandle?: Grant }>(options: T) => {
     const { startInHandle, ...rest } = options;
-    return { ...rest, startInHandle: startInHandle?.id };
+    return { ...rest, startInHandle: startInHandle ? await startInHandle.id().catch(() => undefined) : undefined };
   };
   installFilePickers({
-    open: async (options) => (await request('files.open', withHandle(options))).map(grant),
+    open: async (options) => (await request('files.open', await withHandle(options))).map((d) => grant(d)),
     save: async (options) => {
-      const result = await request('files.save', withHandle(options));
+      const result = await request('files.save', await withHandle(options));
       return result ? grant(result) : null;
     },
   });
   const files: DinFiles = {
     path: (handle) => grantFor(handle).path,
-    url: (handle) => request('files.url', { handle: idOf(handle) }),
+    url: async (handle) => request('files.url', { handle: await idOf(handle) }),
     parent: async (handle) => {
-      const p = await request('files.parent', { handle: idOf(handle) });
+      const p = await request('files.parent', { handle: await idOf(handle) });
       return p ? (wrap(p) as FileSystemDirectoryHandle) : null;
-    },
-    persist: (handle) => request('files.persist', { handle: idOf(handle) }),
-    restore: async (token) => {
-      const result = await request('files.restore', { token });
-      return result ? wrap(result) : null;
     },
     fromPath: async (path) => {
       await ready;
       needFs();
       return wrap(await request('files.fromPath', { path }));
     },
-    release: (token) => tell('files.release', { token }),
     requestAccess: async (paths, reason) => (await request('files.requestAccess', { paths, reason })).map(wrap),
     pathUrl: (path) => {
       needFs();
@@ -747,8 +790,8 @@ export function installDin(transport: Transport): void {
   });
   const drag: DinDrag = {
     startFiles(e, list, label) {
-      const handles = list.map(idOf);
-      beginDrag(e, (token) => request('drag.startFiles', { token, handles, label }), list.map((f) => f.name).join('\n'));
+      const handles = idsOf(list);
+      beginDrag(e, async (token) => request('drag.startFiles', { token, handles: (await handles) ?? [], label }), list.map((f) => f.name).join('\n'));
     },
     startPaths(e, paths, label) {
       needFs();
@@ -783,7 +826,9 @@ export function installDin(transport: Transport): void {
       const r = await request('clipboard.readFiles');
       return r ? { files: r.files.map(wrap), cut: r.cut } : null;
     },
-    writeFiles: (list, cut) => tell('clipboard.writeFiles', { handles: list.map(idOf), cut }),
+    writeFiles: (list, cut) => {
+      void idsOf(list).then((handles) => tell('clipboard.writeFiles', { handles: handles ?? [], cut }), (e: unknown) => console.warn('din: clipboard.writeFiles:', e));
+    },
   };
 
   // ---- theme ----
@@ -847,12 +892,12 @@ export function installDin(transport: Transport): void {
     setWallpaper: async (file) => {
       await ready;
       need('wallpaper');
-      await request('desktop.setWallpaper', { handle: idOf(file) });
+      await request('desktop.setWallpaper', { handle: await idOf(file) });
     },
     setCursor: async (file) => {
       await ready;
       need('cursor');
-      await request('desktop.setCursor', { handle: idOf(file) });
+      await request('desktop.setCursor', { handle: await idOf(file) });
     },
   };
   installSpeechRecognition({
@@ -968,6 +1013,13 @@ export function installDin(transport: Transport): void {
         localStorage.setItem(key, JSON.stringify([...mine, ...parse(value).filter((e) => !known.has(e?.key))]));
       }
       tell('storage.migrated');
+    }
+
+    // Handles kept from before they went in IndexedDB, put there now.
+    if (hello.unstoredHandles.length > 0) {
+      void seedHandles(hello.unstoredHandles.map((s) => [s.token, s]))
+        .then((tokens) => tell('files.stored', { tokens }))
+        .catch((e: unknown) => console.warn('din: keeping file handles:', e));
     }
 
     for (const p of hello.permissions) permissions.add(p);

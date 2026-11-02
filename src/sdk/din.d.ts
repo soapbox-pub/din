@@ -336,9 +336,10 @@ export interface DinMenus {
  * (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`, which
  * open Din's pickers), launched with (`launchQueue`), dropped
  * (a drop's `getAsFileSystemHandle()`), pasted (`din.clipboard.readFiles`) or restored
- * (`din.files.restore`). A handle is a capability: having one is what lets
+ * (read back from IndexedDB). A handle is a capability: having one is what lets
  * the app read or write that file and nothing else. Handles last as long as
- * the page; `persist` keeps one for Recent Files. These take them.
+ * the page, and can be kept in IndexedDB like the web's, to open again
+ * after a restart. These take them.
  */
 export interface DinFiles {
   /**
@@ -359,12 +360,6 @@ export interface DinFiles {
    * for a folder (whose parent the user didn't hand over).
    */
   parent(handle: FileSystemHandle): Promise<FileSystemDirectoryHandle | null>;
-  /** Keep the grant across restarts; resolves with a token for `restore`. */
-  persist(handle: FileSystemHandle): Promise<string>;
-  /** A handle kept by `persist`; null if the file is gone or the grant was revoked. */
-  restore(token: string): Promise<FileSystemHandle | null>;
-  /** Forget a `persist` token the app no longer keeps (a Recent entry removed). */
-  release(token: string): void;
   /**
    * Files and folders by path that nothing granted the app: songs a playlist
    * names elsewhere, folders its saved state lists. Resolves with handles for
@@ -841,8 +836,8 @@ export interface DinManifest {
     /**
      * Recent-file lists the app kept on the desktop's origin, as JSON arrays
      * of `{ path, time }` under these keys. The desktop turns each entry it
-     * can still find into `{ token, key, name, path, time }` (a `persist()`
-     * token) in the app's storage, once.
+     * can still find into `{ token, key, name, path, time }` in the app's
+     * storage, once, the token its key in `src/shared/handleStore.ts`.
      */
     migrateRecentFiles?: string[];
     /**
