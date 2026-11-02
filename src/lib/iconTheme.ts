@@ -22,6 +22,8 @@ export interface IconThemeInfo {
   limited: boolean;
   /** Whether Din installed it, and so can remove it. */
   imported: boolean;
+  /** Whether its icons are glyphs Din draws on a tile in its colours (`X-Monochrome=true`). */
+  monochrome: boolean;
 }
 
 /** A theme as it's published (src/lib/themePackages.ts). */
@@ -63,11 +65,18 @@ export interface IconRequest {
   kind: 'apps' | 'files';
 }
 
+/** What a lookup found. */
+export interface IconLookup {
+  /** The theme's icons as data URLs, keyed by each request's first name; missing ones are left out. */
+  icons: Record<string, string>;
+  /** Which of them are app icons from a monochrome theme (`X-Monochrome=true`): glyphs for Din to draw on a tile in its colours. */
+  glyphs: string[];
+}
+
 export interface IconThemeBridge {
   status(): Promise<IconThemeStatus>;
   themes(): Promise<IconThemeInfo[]>;
-  /** The theme's icons as data URLs, keyed by each request's first name; missing ones are left out. */
-  lookup(requests: IconRequest[]): Promise<Record<string, string>>;
+  lookup(requests: IconRequest[]): Promise<IconLookup>;
   set(theme: string): Promise<void>;
   /** A theme's archive and preview icons, for publishing it. */
   exportTheme(id: string): Promise<IconThemeExport>;

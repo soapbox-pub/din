@@ -153,6 +153,21 @@ to a file it wrote, so none can lead out of the theme, and installs the
 parents an icon theme names but the computer lacks when the same author
 published them.
 
+### Monochrome themes
+
+A theme whose `index.theme` says `X-Monochrome=true` in its `[Icon Theme]`
+group is glyphs: one-colour shapes on nothing, best as SVGs. Din draws each of
+its app icons on a tile in the colour scheme's colours (the glyph in the
+primary colour, on the card colour), as Android does themed icons, so they
+follow light and dark mode and the user's theme. Other programs show the
+glyphs as drawn. The key isn't one of Din's own `X-Din-` keys, so it travels
+with the theme.
+
+Din's apps take a theme's icon by their freedesktop counterparts' names, or
+`din-<name>` for apps with none (`din-assistant`, `din-mail`); an installed
+nsite by `nsite-<npub>` for a root site or `nsite-<npub>-<d>` for a named one;
+an installed website by `web-<host>`.
+
 ## Media Player skins (kind 34675)
 
 A skin for Din's Media Player: a classic Winamp skin (`.wsz`) or a Windows

@@ -1070,7 +1070,8 @@ expose('iconTheme', {
   themes: () => ipcRenderer.invoke('icon-theme:themes'),
 
   /**
-   * The theme's icons as data URLs, keyed by each request's first name.
+   * The theme's icons as data URLs, keyed by each request's first name, and
+   * which are glyphs to tint: { icons, glyphs }.
    * @param {{ names: string[], kind: 'apps' | 'files' }[]} requests
    */
   lookup: (requests) => ipcRenderer.invoke('icon-theme:lookup', requests),

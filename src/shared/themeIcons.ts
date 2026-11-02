@@ -31,6 +31,8 @@ export const FILE_ICON_NAMES: Record<FileCategory, string[]> = {
 const NO_ICONS: Record<string, string> = {};
 
 let desktopIcons: Record<string, string> = NO_ICONS;
+/** The desktop's theme icons that are glyphs to tint (a monochrome theme's), by URL. */
+let desktopGlyphs = new Set<string>();
 const listeners = new Set<() => void>();
 
 function subscribeDesktop(listener: () => void): () => void {
@@ -42,9 +44,10 @@ function getDesktop(): Record<string, string> {
   return desktopIcons;
 }
 
-/** Replace the desktop's theme icons. */
-export function setDesktopThemeIcons(icons: Record<string, string>): void {
+/** Replace the desktop's theme icons, and say which of them are glyphs, by name. */
+export function setDesktopThemeIcons(icons: Record<string, string>, glyphs: string[]): void {
   desktopIcons = Object.keys(icons).length > 0 ? icons : NO_ICONS;
+  desktopGlyphs = new Set(glyphs.flatMap((name) => (icons[name] ? [icons[name]] : [])));
   for (const listener of listeners) listener();
 }
 
@@ -67,6 +70,14 @@ export function useThemeIcons(): Record<string, string> {
   );
   const get = useCallback(() => (din ? din.theme.current.icons : getDesktop()), [din]);
   return useSyncExternalStore(subscribe, get);
+}
+
+/**
+ * Whether an icon the desktop shows is one of a monochrome theme's glyphs,
+ * which AppIcon draws on a tile in the colour scheme's colours. Desktop only.
+ */
+export function isGlyphIcon(url: string): boolean {
+  return desktopGlyphs.has(url);
 }
 
 /** A theme icon, if the theme has one and it's an inline image. */

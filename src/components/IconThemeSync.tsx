@@ -32,7 +32,10 @@ export function IconThemeSync() {
         for (let i = 0; i < requests.length; i += LOOKUP_BATCH) batches.push(requests.slice(i, i + LOOKUP_BATCH));
         const [status, ...found] = await Promise.all([bridge.status(), ...batches.map((batch) => bridge.lookup(batch))]);
         if (!alive || mine !== run) return;
-        setDesktopThemeIcons(Object.assign({}, ...found));
+        setDesktopThemeIcons(
+          Object.assign({}, ...found.map((batch) => batch.icons)),
+          found.flatMap((batch) => batch.glyphs),
+        );
         document.documentElement.dataset.iconTheme = status.din ? '' : status.theme;
       } catch (error) {
         console.warn('din: could not read the icon theme:', error);

@@ -72,6 +72,13 @@ Type=Scalable
 Context=Applications
 `;
 
+/**
+ * index.theme's key for a theme of glyphs: one-colour shapes on nothing,
+ * which Din draws on a tile in the colour scheme's colours, as Android does
+ * themed icons. Not an X-Din- key, so it travels with a published theme.
+ */
+const MONOCHROME_KEY = 'X-Monochrome';
+
 /** A theme's directory name; it ends up as a gsettings argument and a path segment. */
 const THEME_NAME = /^(?![-.])[A-Za-z0-9_ .+-]+$/;
 
@@ -112,6 +119,8 @@ interface IconTheme {
   limited: boolean;
   /** Whether Din installed it (from Nostr), and so can remove it. */
   imported: boolean;
+  /** Whether it's glyphs for Din to tint (MONOCHROME_KEY). */
+  monochrome: boolean;
 }
 
 interface IconThemeStatus {
@@ -224,6 +233,7 @@ interface ThemeDir {
 interface ParsedTheme {
   name: string | null;
   hidden: boolean;
+  monochrome: boolean;
   dirs: ThemeDir[];
   inherits: string[];
 }
@@ -273,6 +283,7 @@ function parseIndexTheme(file: string): ParsedTheme | null {
   return {
     name: head.get('Name') ?? null,
     hidden: head.get('Hidden') === 'true',
+    monochrome: head.get(MONOCHROME_KEY) === 'true',
     dirs,
     inherits: (head.get('Inherits') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   };
@@ -513,8 +524,8 @@ function lookupChain(theme: string): string[] {
   return themeChain(theme).filter((name) => name !== 'hicolor');
 }
 
-/** Find the first of `names` a theme (or a parent) has, as a file path. */
-function findIcon(chain: string[], names: string[], kind: IconKind): string | null {
+/** Find the first of `names` a theme (or a parent) has: its file, and the theme it's in. */
+function findIcon(chain: string[], names: string[], kind: IconKind): { file: string; theme: string } | null {
   const contexts = CONTEXTS[kind];
   for (const theme of chain) {
     const dirs = themeDirs(theme)
@@ -525,7 +536,7 @@ function findIcon(chain: string[], names: string[], kind: IconKind): string | nu
         for (const root of roots) {
           for (const ext of ICON_EXTENSIONS) {
             const file = path.join(root, theme, dir.name, name + ext);
-            if (fs.existsSync(file)) return file;
+            if (fs.existsSync(file)) return { file, theme };
           }
         }
       }
@@ -534,20 +545,31 @@ function findIcon(chain: string[], names: string[], kind: IconKind): string | nu
   return null;
 }
 
+interface IconLookup {
+  /** Data URLs, keyed by each request's first name. */
+  icons: Record<string, string>;
+  /** Which of them are app icons from a monochrome theme, for Din to tint. */
+  glyphs: string[];
+}
+
 /**
  * Look icons up in the session's theme: each request's first name the theme
  * has, as a data URL, keyed by the request's first name. Nothing under the
  * Din theme.
  */
-async function lookup(requests: { names: string[]; kind: IconKind }[]): Promise<Record<string, string>> {
+async function lookup(requests: { names: string[]; kind: IconKind }[]): Promise<IconLookup> {
   const theme = await currentIconTheme();
-  const found: Record<string, string> = {};
+  const found: IconLookup = { icons: {}, glyphs: [] };
   if (theme === DIN_THEME) return found;
   const chain = lookupChain(theme);
+  const monochrome = new Set(chain.filter((name) => themeIndex(name)?.monochrome));
   for (const { names, kind } of requests) {
-    const file = findIcon(chain, names, kind);
-    const url = file && iconDataUrl(file);
-    if (url) found[names[0]] = url;
+    const hit = findIcon(chain, names, kind);
+    const url = hit && iconDataUrl(hit.file);
+    if (url) {
+      found.icons[names[0]] = url;
+      if (kind === 'apps' && monochrome.has(hit.theme)) found.glyphs.push(names[0]);
+    }
     await breathe();
   }
   return found;
@@ -571,8 +593,8 @@ function preview(theme: string): string[] {
   const chain = lookupChain(theme);
   const urls: string[] = [];
   for (const { names, kind } of PREVIEW) {
-    const file = findIcon(chain, names, kind);
-    const url = file && iconDataUrl(file);
+    const hit = findIcon(chain, names, kind);
+    const url = hit && iconDataUrl(hit.file);
     if (url) urls.push(url);
     if (urls.length === PREVIEW_COUNT) break;
   }
@@ -613,11 +635,17 @@ async function themes(): Promise<IconTheme[]> {
   // Din's own icons are always a choice, installed or not (see installDinTheme).
   const list: IconTheme[] = installed.some((t) => t.id === DIN_THEME)
     ? []
-    : [{ id: DIN_THEME, name: DIN_THEME, preview: [], limited: false, imported: false }];
+    : [{ id: DIN_THEME, name: DIN_THEME, preview: [], limited: false, imported: false, monochrome: false }];
   for (const theme of installed) {
     const offered = theme.id === DIN_THEME || restylesApps(theme.id);
     if (offered || theme.id === current) {
-      list.push({ ...theme, preview: preview(theme.id), limited: !offered, imported: isImported(theme.id) });
+      list.push({
+        ...theme,
+        preview: preview(theme.id),
+        limited: !offered,
+        imported: isImported(theme.id),
+        monochrome: themeIndex(theme.id)?.monochrome ?? false,
+      });
     }
     await breathe();
   }
@@ -733,9 +761,9 @@ async function exportTheme(id: string): Promise<IconThemeExport> {
   const chain = lookupChain(id);
   const previews: IconThemeExport['previews'] = [];
   for (const { names, kind } of PUBLISH_PREVIEW) {
-    const file = findIcon(chain, names, kind);
-    if (!file) continue;
-    previews.push({ name: names[0], mime: PREVIEW_MIME[path.extname(file).toLowerCase()], data: await fsp.readFile(file) });
+    const hit = findIcon(chain, names, kind);
+    if (!hit) continue;
+    previews.push({ name: names[0], mime: PREVIEW_MIME[path.extname(hit.file).toLowerCase()], data: await fsp.readFile(hit.file) });
     if (previews.length === PUBLISH_PREVIEW_COUNT) break;
   }
 

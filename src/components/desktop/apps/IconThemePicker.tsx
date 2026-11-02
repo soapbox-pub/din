@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, MoreHorizontal, Share, Store, Trash2 } from 'lucide-react';
+import { GlyphTile } from '@/components/desktop/AppIcon';
 import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { Button } from '@/components/ui/button';
 import {
@@ -181,9 +182,13 @@ function IconThemeOption({
           >
             <span className="flex h-10 items-center gap-2" aria-hidden>
               {preview.length > 0 ? (
-                preview.map((src) => (
-                  <img key={src} src={src} alt="" draggable={false} className="size-8 object-contain" />
-                ))
+                preview.map((src) =>
+                  option.monochrome ? (
+                    <GlyphTile key={src} src={src} className="size-8" />
+                  ) : (
+                    <img key={src} src={src} alt="" draggable={false} className="size-8 object-contain" />
+                  ),
+                )
               ) : (
                 <span className="text-xs text-muted-foreground">No preview</span>
               )}

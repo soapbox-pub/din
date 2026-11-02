@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { THEMED_APP_ICONS, WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
-import { themeIcon, useThemeIcons } from '@/shared/themeIcons';
+import { isGlyphIcon, themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 /**
  * Renders a desktop app icon: a root-relative image path for built-in apps
@@ -12,6 +12,9 @@ import { themeIcon, useThemeIcons } from '@/shared/themeIcons';
  * Lucide component. Remote URLs are sanitized (https or inline
  * data:image URIs); local paths must be root-relative (`/...` but not `//...`).
  * Anything that fails validation or loading falls back to the globe icon.
+ * A monochrome icon theme's glyphs are drawn on a tile in the colour
+ * scheme's card and primary colours, so they follow light and dark mode and
+ * the user's theme, as Android's themed icons do.
  */
 /**
  * Cancel a still-loading image when its icon unmounts. An <img> with a fetch
@@ -24,6 +27,22 @@ function cancelLoadOnUnmount(img: HTMLImageElement | null) {
   return () => {
     if (img && !img.complete) img.removeAttribute('src');
   };
+}
+
+/**
+ * A monochrome icon theme's glyph (an inline image) on a tile: the glyph in
+ * the colour scheme's primary colour on its card colour.
+ */
+export function GlyphTile({ src, className }: { src: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      style={{ '--glyph': `url("${src}")` } as CSSProperties}
+      className={cn('relative inline-block rounded-[22%] bg-card shadow-sm ring-1 ring-foreground/10', className)}
+    >
+      <span className="absolute inset-[18%] bg-primary [mask:var(--glyph)_center/contain_no-repeat]" />
+    </span>
+  );
 }
 
 export function AppIcon({
@@ -55,7 +74,9 @@ export function AppIcon({
   const src = themed ?? (isLocal ? icon : sanitizeImageUrl(icon));
   const shown = !src || failed ? WEB_APP_ICON : src;
 
-  const img = (
+  const img = isGlyphIcon(shown) ? (
+    <GlyphTile src={shown} className={web ? 'size-full' : className} />
+  ) : (
     <img
       ref={cancelLoadOnUnmount}
       src={shown}
