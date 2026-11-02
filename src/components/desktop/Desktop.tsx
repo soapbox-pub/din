@@ -4,6 +4,7 @@ import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MouseHost } from './MouseHost';
+import { DeviceBatteryHost } from './DeviceBatteryHost';
 import { AssistantHost } from './AssistantHost';
 import { DesktopAssistantHost } from './assistant/DesktopAssistantHost';
 import { SecurityOptions } from './SecurityOptions';
@@ -245,6 +246,7 @@ function DesktopSession() {
                     <ScreenSharePicker />
                     <DesktopHotkeys />
                     <MouseHost />
+                    <DeviceBatteryHost />
                     <AssistantHost />
                     <SecurityOptions />
                     <ScreenshotHost />
