@@ -1356,7 +1356,10 @@ async function setFlags(a: StoredAccount, mailbox: string, uids: number[], flags
 async function markAllRead(a: StoredAccount, mailbox: string): Promise<number> {
   const count = await inMailbox(a, mailbox, async (client) => {
     const uids = (await client.search({ seen: false }, { uid: true })) || [];
-    if (uids.length) await client.messageFlagsAdd({ seen: false }, ['\\Seen'], { uid: true });
+    // All of it by range, not the unread by uid: a big inbox's list of them
+    // is longer than servers take a command (Dovecot's is 64 KB), and
+    // imapflow answers a refused STORE with false, not an error.
+    if (uids.length && !(await client.messageFlagsAdd('1:*', ['\\Seen'], { uid: true, silent: true }))) throw new Error('The server didn’t mark them read');
     return uids.length;
   });
   const store = storeOf(a);
