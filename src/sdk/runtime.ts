@@ -29,7 +29,6 @@ import type {
   DinFiles,
   DinMenus,
   DinPermissions,
-  DinPrint,
   DinSystem,
   DinTheme,
   DinWindow,
@@ -841,7 +840,7 @@ export function installDin(transport: Transport): void {
     onChange: (cb) => accounts.on(cb),
   };
 
-  // ---- notifications (the web's own API), printing, permissions ----
+  // ---- notifications (the web's own API), permissions ----
   installNotifications({
     permission: () => (h ? (permissions.has('notifications') ? 'granted' : 'denied') : 'default'),
     ready,
@@ -856,21 +855,6 @@ export function installDin(transport: Transport): void {
       if (p.type === 'notification') cb(p.id, p.event, p.action);
     }),
   });
-  const print: DinPrint = {
-    get available() {
-      return h?.printAvailable ?? false;
-    },
-    html: async (title, html) => {
-      await ready;
-      need('printing');
-      await request('print.html', { title, html });
-    },
-    file: async (file) => {
-      await ready;
-      need('printing');
-      await request('print.file', { handle: idOf(file) });
-    },
-  };
   const permissionsApi: DinPermissions = { has: (p) => permissions.has(p) };
 
   // ---- media session, wallpaper, dictation ----
@@ -969,7 +953,6 @@ export function installDin(transport: Transport): void {
     clipboard,
     theme,
     account,
-    print,
     desktop,
     dictation,
     assistant,

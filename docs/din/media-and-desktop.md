@@ -34,6 +34,27 @@ any other source. The runtime reads the session (`src/sdk/standards.ts`):
   play (Media Player with a queue). It isn't listed, but a play key
   pressed with nothing else playing calls the handler.
 
+## Printing: `window.print()`
+
+An app prints as a web page does, with no permission: `window.print()`
+opens Din's print dialog (in a plain browser, the browser's). Called on the
+app's own window it prints the page as it's drawn. Called on a frame's
+window it prints just that frame, which is how an app prints something
+other than what it shows, as sites print receipts:
+
+- a document the app drew, as a whole HTML page in a `srcdoc` frame, its
+  styles and pictures inline: Din draws it again, with scripts off and
+  nothing from the web;
+- a file (a PDF, a picture, text), in a `blob:` frame: Din prints the file
+  itself, so a PDF prints as the PDF. The frame's `title` names it in the
+  dialog.
+
+`src/shared/print.ts` does both for Din's apps: `printDocument(html,
+title)` and `printFile(file)`. The frame needs the app's CSP to allow it
+(`frame-src about:` for a document; `frame-src blob:` and `object-src blob:`
+for a file). `print()` returns at once; anything that goes wrong is shown in
+the dialog.
+
 ## `din.desktop` (permissions `wallpaper` and `cursor`)
 
 ```ts

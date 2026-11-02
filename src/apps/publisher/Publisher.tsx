@@ -45,6 +45,7 @@ import { Toolbar } from './publisher/toolbar';
 import { TOOL_GROUPS, toolByCode, type ToolId } from './publisher/tools';
 import { fmtLength, nudgeStep, rulerSteps, unitLabel } from './publisher/units';
 import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
+import { printDocument } from '@/shared/print';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 1024 * 1024 * 1024;
@@ -1017,8 +1018,8 @@ export function Publisher() {
           if (c) parts.push(`<img src="${c.toDataURL('image/jpeg', 0.92)}" alt="">`);
         }
       }
-      const html = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${w}pt ${h}pt;margin:0}html,body{margin:0}img{display:block;width:${w}pt;height:${h}pt;page-break-after:always}</style></head><body>${parts.join('')}</body></html>`;
-      await din.print.html(docName, html);
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${docName.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)}</title><style>@page{size:${w}pt ${h}pt;margin:0}html,body{margin:0}img{display:block;width:${w}pt;height:${h}pt;page-break-after:always}</style></head><body>${parts.join('')}</body></html>`;
+      await printDocument(html, docName);
       setStatus('Choose “Save as PDF” in the print dialog to export a PDF.');
     } catch (err) {
       setStatus(`Couldn’t print: ${err instanceof Error ? err.message : String(err)}`);

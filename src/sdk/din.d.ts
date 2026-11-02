@@ -68,7 +68,6 @@ export interface Din {
   clipboard: DinClipboard;
   theme: DinTheme;
   account: DinAccount;
-  print: DinPrint;
   desktop: DinDesktop;
   dictation: DinDictation;
   assistant: DinAssistant;
@@ -703,19 +702,6 @@ export interface DinAssistant {
 }
 
 // ---------------------------------------------------------------------------
-// din.print (permission `printing`)
-// ---------------------------------------------------------------------------
-
-export interface DinPrint {
-  /** Whether this computer can print (has a print service). */
-  readonly available: boolean;
-  /** Din's print dialog for a document, as HTML (with its own styles inline). */
-  html(title: string, html: string): Promise<void>;
-  /** Din's print dialog for a file the app holds (a PDF, a picture, text). */
-  file(file: FileSystemHandle): Promise<void>;
-}
-
-// ---------------------------------------------------------------------------
 // din.permissions and din.system
 // ---------------------------------------------------------------------------
 
@@ -733,8 +719,6 @@ export type Permission =
   | 'fs'
   /** Terminals (`din.system.pty`). Terminal. */
   | 'pty'
-  /** Print documents (`din.print`). */
-  | 'printing'
   /** Notifications kept in the notification center, and a Dock badge. Toasts need nothing. */
   | 'notifications'
   /** Set the desktop wallpaper (`din.desktop`). */

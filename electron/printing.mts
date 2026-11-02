@@ -22,11 +22,14 @@
 // on its own (the hidden iframe sites print receipts through), a picture, a
 // text file, and the test page are drawn as HTML in a hidden offscreen
 // window with JavaScript off and laid out the same way; a PDF is printed as
-// it is. The dialog shows the PDF's pages, drawn by poppler's pdftoppm, so
+// it is. A frame showing a file (an app printing a PDF, a picture or text
+// through a blob: frame) sends the file, which is printed as one. The
+// dialog shows the PDF's pages, drawn by poppler's pdftoppm, so
 // what it previews is what's sent. Chromium's own print path is never used:
 // it would open a GTK dialog, which under din-shell replaces the whole screen.
 //
-// Pages that call window.print() reach here through print-preload.cjs; the
+// Pages (and Din's apps) that call window.print() reach here through
+// print-preload.cjs; the
 // shell is told (`printing:open`) and shows the dialog. Jobs Din sends are
 // followed until they leave the queue, and a printer that stops with one
 // waiting (out of paper, offline) is reported once (`printing:event`).
@@ -57,6 +60,7 @@ const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 /** Documents apps draw to print (pictures and fonts inlined) can't be bigger than this. */
 const MAX_HTML_CHARS = 256 * 1024 * 1024;
 const MAX_FRAME_HTML = 16 * 1024 * 1024;
+const MAX_FRAME_FILE_BYTES = 512 * 1024 * 1024;
 
 export const PAPER_SIZES = ['Letter', 'Legal', 'Tabloid', 'A3', 'A4', 'A5'] as const;
 export type PaperSize = (typeof PAPER_SIZES)[number];
@@ -139,7 +143,8 @@ type Source =
   | { kind: 'page'; contents: WebContents }
   /** `network`: its pictures and styles may come from the web (a page's frame, outside Tor). */
   | { kind: 'html'; html: string; baseUrl?: string; network?: boolean }
-  | { kind: 'file'; path: string; type: 'pdf' | 'image' | 'text' };
+  /** `temporary`: a copy made to print (a frame's file), removed with the document. */
+  | { kind: 'file'; path: string; type: 'pdf' | 'image' | 'text'; temporary?: boolean };
 
 interface Document {
   title: string;
@@ -159,6 +164,7 @@ const TEXT_EXTENSIONS = new Set([
   '.conf', '.cfg', '.sh', '.py', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.css', '.html', '.htm',
   '.c', '.h', '.cpp', '.hpp', '.rs', '.go', '.java', '.rb', '.php', '.lua', '.nix', '.sql', '.diff',
 ]);
+
 
 let sendToShell: (channel: string, payload?: unknown) => void = () => {};
 let tempDir: string | null = null;
@@ -659,6 +665,16 @@ function discard(id: string): void {
   documents.delete(id);
   document.unwatch?.();
   if (document.pdf) fs.rmSync(document.pdf, { force: true });
+  if (document.source.kind === 'file' && document.source.temporary) fs.rmSync(document.source.path, { force: true });
+}
+
+/** Files a frame can print as themselves, by type, and what they're saved as to print. */
+function frameFileKind(type: string): { type: 'pdf' | 'image' | 'text'; ext: string } | null {
+  if (type === 'application/pdf') return { type: 'pdf', ext: '.pdf' };
+  const image = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml|avif)$/.exec(type);
+  if (image) return { type: 'image', ext: image[1] === 'jpeg' ? '.jpg' : image[1] === 'svg+xml' ? '.svg' : `.${image[1]}` };
+  if (type === 'text/plain') return { type: 'text', ext: '.txt' };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,24 +931,37 @@ export function registerPrintingHandlers(options: {
   guestFromId: (wcId: unknown) => WebContents | null;
   /** Whether a session is Tor's, whose pages' printouts mustn't reach the web directly. */
   isTorSession: (s: Electron.Session) => boolean;
+  /** One of Din's apps: what it prints is its own document, which may be big, and draws nothing from the web. */
+  isAppGuest: (contents: WebContents) => boolean;
 }): void {
-  const { assertShellSender, guestFromId, isTorSession } = options;
+  const { assertShellSender, guestFromId, isTorSession, isAppGuest } = options;
   sendToShell = options.sendToShell;
 
   // print() from a page, through print-preload.cjs. A frame inside the page
-  // prints just itself: what it shows, drawn again without its scripts.
+  // prints just itself: what it shows, drawn again without its scripts, or
+  // the file it shows (a PDF, a picture, text) as that file.
   ipcMain.on('printing:request', (event, frame: unknown) => {
     const contents = event.sender;
     if (!guestFromId(contents.id)) return;
     if (hasDialog(contents)) return;
-    const f = (frame ?? null) as { html?: unknown; baseUrl?: unknown; title?: unknown } | null;
-    if (!f || typeof f.html !== 'string' || f.html.length > MAX_FRAME_HTML) {
+    const app = isAppGuest(contents);
+    const f = (frame ?? null) as { html?: unknown; baseUrl?: unknown; title?: unknown; file?: unknown; type?: unknown } | null;
+    const title = (typeof f?.title === 'string' && f.title.trim().slice(0, 200)) || contents.getTitle() || 'Untitled';
+    if (f && f.file instanceof Uint8Array && typeof f.type === 'string') {
+      const kind = frameFileKind(f.type);
+      if (!kind || f.file.byteLength > MAX_FRAME_FILE_BYTES) return;
+      const file = path.join(temp(), `frame${nextDocument}-${Date.now()}${kind.ext}`);
+      fs.writeFileSync(file, f.file);
+      const document = addDocument(title, { kind: 'file', path: file, type: kind.type, temporary: true }, contents.id, contents);
+      sendToShell('printing:open', document);
+      return;
+    }
+    if (!f || typeof f.html !== 'string' || f.html.length > (app ? MAX_HTML_CHARS : MAX_FRAME_HTML)) {
       requestPagePrint(contents);
       return;
     }
     const baseUrl = typeof f.baseUrl === 'string' && /^https?:/.test(f.baseUrl) ? f.baseUrl : contents.getURL();
-    const title = (typeof f.title === 'string' && f.title.trim()) || contents.getTitle() || 'Untitled';
-    const network = !isTorSession(contents.session);
+    const network = !app && !isTorSession(contents.session);
     const document = addDocument(title, { kind: 'html', html: f.html, baseUrl, network }, contents.id, contents);
     sendToShell('printing:open', document);
   });
@@ -962,12 +991,6 @@ export function registerPrintingHandlers(options: {
     const guest = guestFromId(wcId);
     if (!guest) throw new Error('That page was closed.');
     return addDocument(guest.getTitle() || 'Untitled', { kind: 'page', contents: guest }, null, guest);
-  });
-
-  ipcMain.handle('printing:openHtml', (event, title: unknown, html: unknown) => {
-    assertShellSender(event);
-    if (typeof html !== 'string' || html.length > MAX_HTML_CHARS) throw new Error('This document is too big to print.');
-    return addDocument(typeof title === 'string' && title ? title.slice(0, 200) : 'Untitled', { kind: 'html', html });
   });
 
   ipcMain.handle('printing:openFile', (event, file: unknown) => {

@@ -41,7 +41,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `pickFile({ mode: 'save' })` → `window.fs.writeFile` | `showSaveFilePicker()` → `createWritable()` |
 | `window.fs.*` (general) | `din.system.fs` with the `fs` permission; most apps need handles instead |
 | `window.pty` | `din.system.pty` with `pty` |
-| `printHtml(title, html)`, `printFile(path)` | `din.print.html(title, html)`, `din.print.file(handle)` with `printing` |
+| `printHtml(title, html)`, `printFile(path)` | `printDocument(html, title)`, `printFile(file)` from `@/shared/print`: the web's `print()` on a frame |
 | `fileClipboard` | `din.clipboard` |
 | `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, `din.drag.accept` |
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |

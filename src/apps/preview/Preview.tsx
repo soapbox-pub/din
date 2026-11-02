@@ -5,6 +5,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
+import { printFile } from '@/shared/print';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
@@ -79,12 +80,13 @@ export function Preview() {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
   // What's printed is what's saved: edits in progress aren't.
-  const printable = din.permissions.has('printing') && isPrintableFile(name);
+  const printable = isPrintableFile(name);
   const print = useCallback(() => {
     if (!path || !printable) return;
     setPrintError(null);
     din.files.fromPath(path)
-      .then((handle) => din.print.file(handle))
+      .then((handle) => (handle as FileSystemFileHandle).getFile())
+      .then(printFile)
       .catch((error) => setPrintError(cleanPrintingError(error)));
   }, [din, path, printable]);
   const extract = useCallback(async () => {

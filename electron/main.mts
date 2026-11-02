@@ -21,6 +21,7 @@ import {
   DIN_APPS_PARTITION,
   DIN_FILE_SCHEME,
   DIN_SCHEME,
+  appsSession,
   forwardPushToGrants,
   isAppGuest as isDinAppGuest,
   isBridgeEvent,
@@ -5794,6 +5795,8 @@ app.whenReady().then(() => {
     },
     DIN_APP_PRELOAD,
   );
+  // An app prints as a page does, with the web's print().
+  appsSession().registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
   registerWidgets(
     {
       // In development dist/ may hold nothing but them (npm run dev builds them).
@@ -5924,6 +5927,7 @@ app.whenReady().then(() => {
     sendToShell,
     guestFromId: shellGuestFromId,
     isTorSession: (s) => s === torBrowserSession(),
+    isAppGuest: isDinAppGuest,
   });
   app.on('will-quit', cleanUpPrinting);
   registerSystemMonitorHandlers({

@@ -43,6 +43,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
+import { printFile } from '@/shared/print';
 import { isWindowsProgram } from '@/lib/nativeApps';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
@@ -1066,12 +1067,12 @@ function FileBrowserTab({
   }, [din, run, fs, refresh]);
 
   const openInTerminal = useCallback((path: string) => void din.app.open('terminal', { cwd: path }), [din]);
-  const canPrint = din.print.available;
   const print = useCallback((path: string | undefined) => {
     if (!path) return;
     din.files
       .fromPath(path)
-      .then((handle) => din.print.file(handle))
+      .then((handle) => (handle as FileSystemFileHandle).getFile())
+      .then(printFile)
       .catch((error: unknown) => setStatus({ kind: 'error', text: cleanPrintingError(error) }));
   }, [din]);
   const setBackground = useCallback((path: string | undefined) => {
@@ -1884,7 +1885,7 @@ function FileBrowserTab({
                         Edit in Vector Editor
                       </ContextMenuItem>
                     )}
-                    {single?.kind === 'file' && !isTrash && canPrint && isPrintableFile(single.name) && (
+                    {single?.kind === 'file' && !isTrash && isPrintableFile(single.name) && (
                       <ContextMenuItem onSelect={() => print(pathsOf([single.name])[0])}>Print…</ContextMenuItem>
                     )}
                     {single?.kind === 'file' && !isTrash && isViewableImage(single.name) && (

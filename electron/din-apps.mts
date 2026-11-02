@@ -6,7 +6,8 @@
 // files on that session, makes the ports that connect each app to the
 // desktop (and, for apps granted fs or pty, straight to main), and
 // keeps app guests pinned to their own origin.
-// (Printing is a desktop service, din.print, since its dialog is the desktop's.)
+// Apps print with the web's print(), as pages do (print-preload.cjs, on this
+// session too).
 //
 // Trust: an app's preload may ask for its desktop port, and gets one only
 // from a main frame in a webview the shell hosts, in this session; the app id

@@ -5,7 +5,6 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import { ContextMenu as CM } from 'radix-ui';
 import { BookOpenText, ClipboardPaste, Copy, FileText, Globe, Link as LinkIcon, Scissors, Type } from 'lucide-react';
-import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { ACCENTS } from '@/shared/office/accent';
 import {
@@ -62,6 +61,7 @@ import { WordRibbon, type RibbonState, type WordCommands } from './word/ribbon';
 import { wordExtensions, type ParaAttrs, type WordHooks } from './word/schema';
 import { defaultStylesXml, effectivePara, ensureBuiltin, galleryStyles, parseStyles, styleCss } from './word/styles';
 import { printHtml } from './word/print';
+import { printDocument } from '@/shared/print';
 import { newWordDoc, TEMPLATES } from './word/templates';
 import { writeDocx, writeText } from './word/write';
 import { readOdt, writeOdt } from './word/odt';
@@ -160,7 +160,6 @@ function hfFor(doc: WordDoc, kind: 'header' | 'footer', page: number): { type: H
  * Opens the file it was launched with; without one it starts a blank document.
  */
 export function WordProcessor() {
-  const din = useDin();
   const scopeId = useId().replace(/[^a-zA-Z0-9]/g, '');
   const scope = `wp-s-${scopeId}`;
 
@@ -586,7 +585,6 @@ export function WordProcessor() {
     [active, file],
   );
 
-  const canPrint = din.permissions.has('printing') && din.print.available;
   const print = useCallback(async () => {
     const view = mounted && viewOf(mounted);
     if (!view) return;
@@ -602,12 +600,12 @@ export function WordProcessor() {
         header: d.headers.default,
         footer: d.footers.default,
       });
-      await din.print.html(file.docName, html);
+      await printDocument(html, file.docName);
       file.setStatus(null);
     } catch (err) {
       file.setStatus(`Couldn’t print: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [din, mounted, file, scope, docCss]);
+  }, [mounted, file, scope, docCss]);
 
   const cmd: WordCommands = {
     paste: (t) => void paste(t),
@@ -885,7 +883,7 @@ export function WordProcessor() {
     else if (ctrl && !shift && key === 'o') setBackstage('open');
     else if (ctrl && !shift && key === 'n') file.newWindow();
     else if (ctrl && !shift && key === 'w') file.requestClose();
-    else if (ctrl && !shift && key === 'p' && canPrint) void print();
+    else if (ctrl && !shift && key === 'p' ) void print();
     else if (ctrl && !shift && key === 'f') openNav();
     else if (ctrl && !shift && key === 'h') setDialog({ kind: 'replace', find: findQuery });
     else if (ctrl && !shift && key === 'k') openLinkDialog();
@@ -1430,14 +1428,10 @@ export function WordProcessor() {
           }}
           onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
           path={file.path ?? null}
-          onPrint={
-            canPrint
-              ? () => {
-                  setBackstage(null);
-                  void print();
-                }
-              : undefined
-          }
+          onPrint={() => {
+            setBackstage(null);
+            void print();
+          }}
           info={
             <div className="max-w-lg space-y-2 text-[13px]">
               <p>

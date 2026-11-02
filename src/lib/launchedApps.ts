@@ -78,7 +78,6 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   nostr: 'Sign, encrypt and decrypt as you (Din asks each time)',
   fs: 'Read, change and delete any of your files',
   pty: 'Run commands in terminals',
-  printing: 'Print',
   notifications: 'Keep notifications and a Dock badge',
   wallpaper: 'Change the desktop wallpaper',
   cursor: 'Install cursors and change the pointer',

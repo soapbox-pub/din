@@ -13,6 +13,7 @@ No permission needed:
   way);
 - the theme;
 - opening other apps, files it holds, and URLs;
+- printing (`window.print()`);
 - its own origin's storage and the network.
 
 ## What an app asks for
@@ -27,7 +28,6 @@ When nsites get `window.din`, the user approves the list at install.
 | `nostr` | `window.nostr`, signing as the signed-in user. Implies `account` | App Store |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
-| `printing` | `din.print`: Din's print dialog for HTML or a file the app holds | Word Processor, Publisher, Preview |
 | `notifications` | `new Notification()` and `navigator.setAppBadge()` | Assistant, Terminal |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
@@ -91,8 +91,8 @@ another Unix user anyway. A pty port can touch only the terminals it
 spawned, and they end with the grant. The desktop can revoke a grant,
 which closes the port.
 
-Printing isn't a bridge: the print dialog is the desktop's, so
-`din.print` goes to the desktop.
+Printing needs neither: an app's `window.print()` goes to Din's print
+dialog as a web page's does ([media-and-desktop.md](media-and-desktop.md)).
 
 New system pieces are added as the apps that need them move over
 (Settings needs most of `window.dinos`, and moves last). Each one gets a

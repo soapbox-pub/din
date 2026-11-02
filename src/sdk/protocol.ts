@@ -138,7 +138,6 @@ export interface Hello {
   powerMode: boolean;
   /** For apps with fs: the URL base to load files from by path (din-file://<token>). */
   fsUrlBase: string | null;
-  printAvailable: boolean;
   /** `din.system.fs` reaches only some folders (`file-folders`, the manifest's `folders`). */
   scopedFs: boolean;
 }
@@ -236,8 +235,6 @@ export interface Requests {
   /** navigator.setAppBadge(): a count, a plain mark, or none. */
   'notifications.setBadge': [{ badge: number | 'flag' | null }, void];
 
-  'print.html': [{ title: string; html: string }, void];
-  'print.file': [{ handle: string }, void];
 
   'nostr.getPublicKey': [void, string];
   'nostr.signEvent': [{ event: unknown }, unknown];

@@ -97,8 +97,6 @@ export interface PrintingBridge {
   capabilities(printer: string): Promise<PrinterCapabilities>;
   openPage(wcId: number): Promise<PrintDocument>;
   openFile(path: string): Promise<PrintDocument>;
-  /** A document an app drew as HTML; it's rendered with scripts off. */
-  openHtml(title: string, html: string): Promise<PrintDocument>;
   preview(id: string, layout: PrintLayout): Promise<PrintPreview>;
   /** Resolves to the job id. */
   print(id: string, layout: PrintLayout, job: JobOptions): Promise<string>;
@@ -188,14 +186,7 @@ export async function printPage(wcId: number): Promise<void> {
   showPrintDialog(await bridge.openPage(wcId));
 }
 
-/** Open the print dialog for a document an app drew as HTML. */
-export async function printHtml(title: string, html: string): Promise<void> {
-  const bridge = getPrintingBridge();
-  if (!bridge) return;
-  showPrintDialog(await bridge.openHtml(title, html));
-}
-
-/** Open the print dialog for a file. */
+/** Open the print dialog for a file (`din printers print`). */
 export async function printFile(path: string): Promise<void> {
   const bridge = getPrintingBridge();
   if (!bridge) return;

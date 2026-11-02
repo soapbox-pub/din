@@ -15,7 +15,6 @@
   "din": {
     "permissions": [
       "file-folders",
-      "printing",
       "indd"
     ],
     "window": {

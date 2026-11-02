@@ -16,7 +16,6 @@
     "permissions": [
       "cursor",
       "file-folders",
-      "printing",
       "wallpaper"
     ],
     "window": {

@@ -41,7 +41,6 @@ import { getFsBridge } from '@/lib/fs';
 import { unreadAssistantSessions } from '@/lib/assistantNotifications';
 import { closeNotification, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
 import { setWindowBadge } from '@/lib/appBadges';
-import { printFile, printHtml } from '@/lib/printing';
 import { powerModeOn, subscribePowerMode, typed } from '@/lib/powerMode';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
@@ -60,7 +59,6 @@ import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { getAssistantBridge } from '@/lib/assistant';
-import { getPrintingBridge } from '@/lib/printing';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import {
   appUrl,
@@ -1003,15 +1001,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         setWindowBadge(windowId, appId, badge === 'flag' ? 'flag' : typeof badge === 'number' && badge > 0 ? Math.floor(badge) : null);
       },
 
-      'print.html': async ({ title, html }) => {
-        need('printing');
-        await printHtml(String(title), String(html));
-      },
-      'print.file': async ({ handle }) => {
-        need('printing');
-        await printFile((await usableGrant(handle)).path);
-      },
-
       'assistant.setSettings': (patch) => {
         need('assistant');
         if (typeof patch.enabled === 'boolean') live.current.updateConfig((c) => ({ ...c, assistantEnabled: patch.enabled }));
@@ -1175,7 +1164,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       dictation: { available: hasDictationBridge(), status: getDictationState().status, here: dictationHere() },
       powerMode: powerModeOn(),
       fsUrlBase,
-      printAvailable: getPrintingBridge() !== undefined,
       scopedFs,
       assistant: permissions.includes('assistant') ? assistantSettings() : null,
       assistantUnread: permissions.includes('assistant') ? unreadAssistantSessions(getNotificationState().notifications) : [],

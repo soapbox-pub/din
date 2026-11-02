@@ -13,9 +13,7 @@
     "client_mode": "navigate-new"
   },
   "din": {
-    "permissions": [
-      "printing"
-    ],
+    "permissions": [],
     "window": {
       "size": {
         "width": 1200,

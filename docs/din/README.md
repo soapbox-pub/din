@@ -42,7 +42,7 @@ din.app.ready();
 | `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, `din.clipboard` | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
 | `din.theme`, `din.account`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
-| `navigator.mediaSession`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
+| `navigator.mediaSession`, `window.print()`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.permissions`, `din.system` | [permissions.md](permissions.md) |
 | The manifest | [manifest.md](manifest.md) |
 
