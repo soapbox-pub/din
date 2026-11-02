@@ -3,11 +3,11 @@
 //! shaking stops. Din turns it on and off (cursor.rs); the big pointer is the
 //! theme's arrow, drawn in place of whatever pointer there is (render.rs).
 //!
-//! A shake is strokes back and forth in quick succession. Each stroke of
-//! some length that the pointer turns back from adds one to the shake's
-//! energy, which drains away steadily, so a stroke or two in passing never
-//! adds up, while shaking keeps it topped up the higher the quicker the
-//! strokes come. Past a couple of strokes' worth, how far past sets how big
+//! A shake is strokes back and forth in quick succession, and as on a Mac it
+//! takes a good hard one. Each long, quick stroke the pointer turns back
+//! from adds one to the shake's energy, which drains away steadily, so a few
+//! strokes in passing never add up, while shaking keeps it topped up the
+//! higher the quicker the strokes come. Past a few strokes' worth, how far past sets how big
 //! the pointer is to be. That's held while the strokes keep coming, sagging
 //! only slowly if the shaking eases, so the pointer doesn't throb with each
 //! stroke, and let go of once they stop, so it shrinks back in one go. The
@@ -20,14 +20,16 @@ use smithay::utils::{Logical, Point};
 use tracing::debug;
 
 /// How quickly the energy drains (a time constant, in seconds).
-const DRAIN: f64 = 0.5;
+const DRAIN: f64 = 0.45;
 /// How much energy it takes before the pointer starts to grow.
-const THRESHOLD: f64 = 1.4;
+const THRESHOLD: f64 = 2.4;
 /// How much bigger the pointer gets for each stroke's energy past that, and at most.
-const GAIN: f64 = 1.4;
+const GAIN: f64 = 1.6;
 pub const MAX_SCALE: f64 = 4.5;
-/// How long a stroke must be, in logical pixels, to count: not a hand's tremor.
-const MIN_STROKE: f64 = 40.0;
+/// How long a stroke must be, in logical pixels, and how quickly made, to count:
+/// not a hand's tremor, nor going back and forth over something.
+const MIN_STROKE: f64 = 80.0;
+const MAX_STROKE_TIME: Duration = Duration::from_millis(300);
 /// How far the pointer must come back before it has turned, not just wavered.
 const TURN: f64 = 12.0;
 /// The spring's stiffness, as an angular frequency: growing, and shrinking back.
@@ -46,6 +48,8 @@ pub struct Shake {
     stroke: (f64, f64),
     /// How far it's come back against the stroke since.
     back: (f64, f64),
+    /// When the stroke began.
+    stroke_from: Duration,
     energy: f64,
     energy_at: Option<Duration>,
     /// When the last stroke counted, and how big it's held to be meanwhile, past 1.
@@ -79,7 +83,7 @@ impl Shake {
         if (sx != 0.0 || sy != 0.0) && dx * sx + dy * sy < 0.0 {
             self.back = (self.back.0 + dx, self.back.1 + dy);
             if self.back.0.hypot(self.back.1) >= TURN {
-                if sx.hypot(sy) >= MIN_STROKE {
+                if sx.hypot(sy) >= MIN_STROKE && now.saturating_sub(self.stroke_from) <= MAX_STROKE_TIME {
                     let before = self.wanted();
                     self.energy += 1.0;
                     self.stroked_at = Some(now);
@@ -89,6 +93,7 @@ impl Shake {
                 }
                 self.stroke = self.back;
                 self.back = (0.0, 0.0);
+                self.stroke_from = now;
             }
         } else {
             self.stroke = (sx + self.back.0 + dx, sy + self.back.1 + dy);
