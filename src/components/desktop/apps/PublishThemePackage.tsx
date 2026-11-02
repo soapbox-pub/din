@@ -1,15 +1,31 @@
-import { useState, type FormEvent } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, Share, Store } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { AlertTriangle, Check, Copy, ImagePlus, Loader2, Share, Store, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { usePublishDeps, useThemePackageActions } from '@/hooks/useThemePackages';
+import { EXTENSION_CATEGORIES, extensionCatalog } from '@/lib/extensionCatalog';
+import { getFsBridge } from '@/lib/fs';
 import { packageNaddr, publishThemePackage, type PackageType } from '@/lib/themePackages';
+
+/** A screenshot in the form: one already published (a URL) or a picked image to upload. */
+interface Shot {
+  key: string;
+  src: string;
+  value: string | File;
+}
+
+const SHOT_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+const MAX_SHOTS = 5;
+const MAX_SHOT_BYTES = 10 * 1024 * 1024;
+const NO_CATEGORY = 'none';
 
 /** A theme to publish: which kind, its directory name, and what it's called. */
 export interface PublishTarget {
@@ -50,7 +66,7 @@ export function PublishThemePackage({
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={target?.type === 'extension' ? 'sm:max-w-lg' : 'sm:max-w-md'}>
         {target && <PublishForm key={`${target.type}:${target.id}`} target={target} onClose={onClose} onView={onView} />}
       </DialogContent>
     </Dialog>
@@ -70,8 +86,37 @@ function PublishForm({
   const deps = usePublishDeps();
   const { refreshPublished } = useThemePackageActions();
   const { open } = useWindowActions();
-  const [title, setTitle] = useState(target.name);
-  const [summary, setSummary] = useState(target.summary ?? '');
+  const { pickFiles } = useFilePicker();
+  // What the user published this extension with last time, to start from.
+  const [previous] = useState(() =>
+    target.type === 'extension' && user
+      ? extensionCatalog([user.pubkey]).find((p) => p.identifier === target.id || p.title === target.name) ?? null
+      : null,
+  );
+  const [title, setTitle] = useState(previous?.title ?? target.name);
+  const [summary, setSummary] = useState(previous?.description || target.summary || '');
+  const [category, setCategory] = useState(previous?.categories.find((c) => EXTENSION_CATEGORIES.some((k) => k.slug === c)) ?? NO_CATEGORY);
+  const [shots, setShots] = useState<Shot[]>(() => (previous?.screenshots ?? []).map((url) => ({ key: url, src: url, value: url })));
+  const objectUrls = useRef<string[]>([]);
+  useEffect(() => () => objectUrls.current.forEach((url) => URL.revokeObjectURL(url)), []);
+
+  const addShots = async () => {
+    const fs = getFsBridge();
+    const picked = await pickFiles({ title: 'Add screenshots', confirmLabel: 'Add', multiple: true, extensions: Object.keys(SHOT_MIME) }).catch(() => null);
+    if (!fs || !picked) return;
+    const added: Shot[] = [];
+    for (const path of picked.paths.slice(0, MAX_SHOTS - shots.length)) {
+      const { data, truncated } = await fs.readFile(path, MAX_SHOT_BYTES).catch(() => ({ data: null, truncated: true }));
+      const name = path.split('/').pop() ?? 'screenshot.png';
+      const mime = SHOT_MIME[name.split('.').pop()?.toLowerCase() ?? ''];
+      if (!data || truncated || !mime) continue;
+      const file = new File([data.slice().buffer as ArrayBuffer], name, { type: mime });
+      const src = URL.createObjectURL(file);
+      objectUrls.current.push(src);
+      added.push({ key: src, src, value: file });
+    }
+    setShots((prev) => [...prev, ...added].slice(0, MAX_SHOTS));
+  };
   const [state, setState] = useState<State>({ state: 'idle' });
   const [copied, setCopied] = useState(false);
 
@@ -83,7 +128,13 @@ function PublishForm({
       const identifier = await publishThemePackage(
         target.type,
         target.id,
-        { title: title.trim(), summary: summary.trim() || undefined },
+        {
+          title: title.trim(),
+          summary: summary.trim() || undefined,
+          ...(target.type === 'extension'
+            ? { category: category === NO_CATEGORY ? undefined : category, screenshots: shots.map((s) => s.value) }
+            : {}),
+        },
         { ...deps, progress: (step, percent) => setState({ state: 'publishing', step, percent }) },
       );
       refreshPublished(target.type);
@@ -164,6 +215,57 @@ function PublishForm({
           placeholder="Optional"
         />
       </div>
+      {target.type === 'extension' && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="package-category">Category</Label>
+            <Select value={category} onValueChange={setCategory} disabled={busy}>
+              <SelectTrigger id="package-category" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CATEGORY}>None</SelectItem>
+                {EXTENSION_CATEGORIES.map((c) => (
+                  <SelectItem key={c.slug} value={c.slug}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Screenshots</Label>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {shots.map((shot) => (
+                <div key={shot.key} className="relative aspect-[16/10] w-32 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+                  <img src={shot.src} alt="" referrerPolicy="no-referrer" className="size-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setShots((prev) => prev.filter((s) => s.key !== shot.key))}
+                    disabled={busy}
+                    aria-label="Remove screenshot"
+                    className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-background/90 text-foreground shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </button>
+                </div>
+              ))}
+              {shots.length < MAX_SHOTS && (
+                <button
+                  type="button"
+                  onClick={() => void addShots()}
+                  disabled={busy}
+                  className="grid aspect-[16/10] w-32 shrink-0 place-items-center rounded-lg border border-dashed border-border text-muted-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="flex flex-col items-center gap-1 text-xs">
+                    <ImagePlus className="size-5" aria-hidden />
+                    Add
+                  </span>
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">Up to {MAX_SHOTS}, shown on its page. 1280×800 looks best.</p>
+          </div>
+        </>
+      )}
       {busy && (
         <div className="space-y-2" aria-live="polite">
           <Progress value={state.percent ?? 0} />

@@ -1,6 +1,6 @@
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { getCrxBridge, type CrxExtension } from '@/lib/crx';
-import { extensionCatalog, syncExtensionCatalog } from '@/lib/extensionCatalog';
+import { EXTENSION_CATEGORIES, extensionCatalog, syncExtensionCatalog } from '@/lib/extensionCatalog';
 import {
   fetchThemePackage,
   installThemePackage,
@@ -101,6 +101,7 @@ export const extensionsArea: Area = {
       EXTENSION,
       { name: 'title', type: 'string', optional: true, help: 'What to call it (default: its name)' },
       { name: 'summary', type: 'string', optional: true, help: 'A description (default: its own)' },
+      { name: 'category', type: 'string', optional: true, choices: EXTENSION_CATEGORIES.map((c) => c.slug), help: 'Its category on about:extensions' },
     ], async (args, ctx) => {
       if (!ctx.pubkey) throw new CommandError('No one is signed in');
       const found = await pickExtension(args.string('extension'));
@@ -112,7 +113,7 @@ export const extensionsArea: Area = {
       });
       if (!ok) throw new CommandError('You didn’t allow it');
       const servers = getEffectiveBlossomServers(ctx.config.blossomServerMetadata, ctx.config.useAppBlossomServers);
-      const identifier = await call(publishThemePackage('extension', found.id, { title, summary: args.optString('summary') ?? (found.description || undefined) }, {
+      const identifier = await call(publishThemePackage('extension', found.id, { title, summary: args.optString('summary') ?? (found.description || undefined), category: args.optString('category') }, {
         upload: (file) => ctx.upload(file),
         publish: (template) => ctx.publish(template),
         servers,

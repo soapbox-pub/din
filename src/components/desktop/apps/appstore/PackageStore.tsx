@@ -4,6 +4,12 @@ import { ArrowDownToLine, Check, Copy, Info, Loader2, Puzzle, RefreshCw, Trash2 
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import {
+  useCopyAddress,
+  usePackageAuthor,
+  usePackageHandlers,
+  type PackageHandlers,
+} from '@/components/desktop/apps/appstore/usePackageHandlers';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -23,28 +29,16 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
-import { useIconThemeStatus } from '@/hooks/useIconTheme';
-import { canKeepPackages } from '@/hooks/useThemePackages';
-import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
-import {
-  useInstalledPackages,
-  type PackageCatalogState,
-  useThemePackage,
-  useThemePackageActions,
-} from '@/hooks/useThemePackages';
-import { useToast } from '@/hooks/useToast';
+import { type PackageCatalogState, useThemePackage } from '@/hooks/useThemePackages';
 import { Budget } from '@/lib/cursorImport/bytes';
 import { decodeXcursor } from '@/lib/cursorImport/xcursor';
 import { formatBytes } from '@/lib/fs';
-import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import {
   blobUrl,
   iconPreviewUrls,
   packageCoordinate,
-  packageNaddr,
   parsePackageNaddr,
   type CursorPackage,
   type ExtensionPackage,
@@ -84,40 +78,6 @@ const COPY: Record<PackageType, { title: string; subtitle: string; noun: string;
   },
 };
 
-/** What a theme becomes once it's got, for the toast. */
-const BECOMES: Record<PackageType, string> = {
-  cursor: 'It’s now your pointer.',
-  icon: 'They’re now your icons.',
-  skin: 'The Media Player is wearing it.',
-  extension: 'It runs on the sites you browse.',
-};
-
-/** Where a published theme stands on this computer, and what its button does. */
-interface PackageState {
-  /** Its directory name, when installed. */
-  id: string | null;
-  /** Installed, but an older version than this. */
-  outdated: boolean;
-  /** The pointer's or the icons' now. */
-  inUse: boolean;
-  busy: boolean;
-}
-
-interface PackageHandlers {
-  stateOf: (pkg: ThemePackage) => PackageState;
-  /** Get, Update or Use, whichever it needs. */
-  act: (pkg: ThemePackage) => void;
-  remove: (pkg: ThemePackage) => void;
-  /** Ask to delete one of the user's own from Nostr; `deleting` is the one asked about. */
-  deleteOwn: (pkg: ThemePackage) => void;
-  deleting: ThemePackage | null;
-  cancelDelete: () => void;
-  confirmDelete: (pkg: ThemePackage) => void;
-  select: (pkg: ThemePackage) => void;
-  canInstall: boolean;
-  isOwn: (pkg: ThemePackage) => boolean;
-}
-
 /**
  * The App Store's Cursors, Icons and Skins, and the Web Browser's
  * about:extensions: cursor themes (kind 34628), icon themes (kind 34642),
@@ -132,15 +92,12 @@ export function PackageStore({
   search,
   selected,
   onSelect,
-  top,
 }: {
   type: PackageType;
   catalog: PackageCatalog;
   search: string;
   selected: PackageAddress | null;
   onSelect: (address: PackageAddress | null) => void;
-  /** Shown above the list when not searching (about:extensions' installed ones). */
-  top?: ReactNode;
 }) {
   const handlers = usePackageHandlers(type, onSelect);
   const { user } = useCurrentUser();
@@ -193,7 +150,6 @@ export function PackageStore({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
-            {!query && top}
             {query ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader title={address ? `${capitalize(copy.noun)} at this address` : `Results for “${query}”`} />
@@ -253,108 +209,6 @@ export function PackageStore({
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function cleanError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-}
-
-/** What every card, page and menu of a tab does, sharing one installed list and one set of busy flags. */
-function usePackageHandlers(type: PackageType, onSelect: (address: PackageAddress | null) => void): PackageHandlers {
-  const installed = useInstalledPackages(type);
-  const cursorStatus = useSystemCursorStatus();
-  const iconStatus = useIconThemeStatus();
-  const actions = useThemePackageActions();
-  const { user } = useCurrentUser();
-  const { toast } = useToast();
-  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
-  const [deleting, setDeleting] = useState<ThemePackage | null>(null);
-
-  // Which skin the Media Player wears is its own, so a skin is never In Use here.
-  const current = type === 'cursor' ? cursorStatus.data?.theme : type === 'icon' ? iconStatus.data?.theme : undefined;
-  const canInstall = canKeepPackages(type) && (
-    type === 'cursor' ? cursorStatus.data?.canChange !== false
-      : type === 'icon' ? iconStatus.data?.canChange !== false
-        : true);
-
-  const stateOf = (pkg: ThemePackage): PackageState => {
-    const entry = installed.data?.get(packageCoordinate(pkg));
-    return {
-      id: entry?.id ?? null,
-      // An extension's newest release is only known once fetched; it's out of date when its package is another.
-      outdated: !!entry && (pkg.type === 'extension'
-        ? !!pkg.asset && !!entry.sha256 && entry.sha256 !== pkg.asset.sha256
-        : entry.publishedAt < pkg.createdAt),
-      // An extension is at work as soon as it's installed.
-      inUse: !!entry && (pkg.type === 'extension' || entry.id === current),
-      busy: busy.has(packageCoordinate(pkg)),
-    };
-  };
-
-  const track = async (pkg: ThemePackage, run: () => Promise<unknown>, failure: string) => {
-    const key = packageCoordinate(pkg);
-    setBusy((prev) => new Set(prev).add(key));
-    try {
-      await run();
-    } catch (error) {
-      toast({ title: failure, description: cleanError(error), variant: 'destructive' });
-    } finally {
-      setBusy((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
-
-  const act = (pkg: ThemePackage) => {
-    const state = stateOf(pkg);
-    if (state.busy || (state.inUse && !state.outdated)) return;
-    if (state.id && !state.outdated) {
-      void track(pkg, () => actions.use(pkg.type, state.id as string), `Couldn’t use ${pkg.title}`);
-      return;
-    }
-    void track(
-      pkg,
-      async () => {
-        await actions.install(pkg);
-        toast({ title: `${pkg.title} ${state.id ? 'updated' : 'installed'}`, description: BECOMES[pkg.type] });
-      },
-      `Couldn’t get ${pkg.title}`,
-    );
-  };
-
-  const remove = (pkg: ThemePackage) => {
-    const { id } = stateOf(pkg);
-    if (id) void track(pkg, () => actions.remove(pkg.type, id), `Couldn’t remove ${pkg.title}`);
-  };
-
-  return {
-    stateOf,
-    act,
-    remove,
-    deleteOwn: setDeleting,
-    select: (pkg) => onSelect({ type: pkg.type, pubkey: pkg.pubkey, identifier: pkg.identifier }),
-    canInstall,
-    isOwn: (pkg) => pkg.pubkey === user?.pubkey,
-    deleting,
-    cancelDelete: () => setDeleting(null),
-    confirmDelete: (pkg) => {
-      setDeleting(null);
-      void track(pkg, () => actions.deleteOwn(pkg), `Couldn’t delete ${pkg.title}`);
-    },
-  };
-}
-
-/** The author's name and picture. */
-function usePackageAuthor(pubkey: string | undefined) {
-  const author = useAuthor(pubkey);
-  const metadata = author.data?.metadata;
-  return {
-    name: (metadata?.display_name || metadata?.name)?.trim() || null,
-    picture: metadata?.picture ? sanitizeImageUrl(metadata.picture) : null,
-  };
 }
 
 function PackageGrid({ packages, handlers }: { packages: ThemePackage[]; handlers: PackageHandlers }) {
@@ -500,7 +354,7 @@ function PackagePill({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
 }
 
 /** A theme's right-click menu, mirroring its card's and page's buttons. */
-function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePackage; handlers: PackageHandlers; children: ReactNode }) {
+export function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePackage; handlers: PackageHandlers; children: ReactNode }) {
   const state = handlers.stateOf(pkg);
   const copy = useCopyAddress();
   const done = state.inUse && !state.outdated;
@@ -542,15 +396,8 @@ function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePackage; ha
   );
 }
 
-function useCopyAddress() {
-  const { toast } = useToast();
-  return (pkg: ThemePackage) => {
-    void navigator.clipboard.writeText(packageNaddr(pkg)).then(() => toast({ title: 'Address copied' }));
-  };
-}
-
 /** Asks before one of the user's own published themes is deleted from their relays. */
-function DeleteDialog({ handlers }: { handlers: PackageHandlers }) {
+export function DeleteDialog({ handlers }: { handlers: PackageHandlers }) {
   const pkg = handlers.deleting;
   return (
     <AlertDialog open={!!pkg} onOpenChange={(open) => !open && handlers.cancelDelete()}>
@@ -768,7 +615,7 @@ function TryCursors({ pkg }: { pkg: CursorPackage }) {
 }
 
 /** What an extension says it can do, from its manifest; Get shows the same before installing. */
-function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
+export function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
   const sites = pkg.hosts.includes('<all_urls>') || pkg.hosts.some((h) => /^\*:\/\/\*\/\*$/.test(h) || /^https?:\/\/\*\/\*$/.test(h))
     ? ['Every site']
     : pkg.hosts;
@@ -804,7 +651,7 @@ function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
   );
 }
 
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+export function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <dt className="shrink-0 text-muted-foreground">{label}</dt>

@@ -209,7 +209,7 @@ follows the draft, and adds:
 
 | Event | Din's tags |
 |---|---|
-| 32267 | `d` (the `d` it was installed under, its Web Store id, or its name made a slug), `name`, `["f", "chromium"]`, `summary`, `icon` (the biggest icon its manifest names), `alt`; content is its description |
+| 32267 | `d` (the `d` it was installed under, its Web Store id, or its name made a slug), `name`, `["f", "chromium"]`, `summary`, `icon` (the biggest icon its manifest names), `image` (screenshots, up to five), `t` (its category, one of the Chrome Web Store's as a slug: `productivity`, `developer-tools`, `privacy-and-security`…), `alt`; content is its description |
 | 30063 | `i`, `version` (the manifest's), `d` (`<i>@<version>`), `["c", "main"]`, the same `f`, `e` (the asset) |
 | 3063 | `i`, `x`, `version`, `m`, the same `f`, `url`, `size`, `filename`, `min_platform_version` (the manifest's `minimum_chrome_version`), `permission`, `host`, `alt` |
 

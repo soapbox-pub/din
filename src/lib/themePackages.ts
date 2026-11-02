@@ -321,6 +321,10 @@ export interface ExtensionKeyStore {
 export interface PublishDetails {
   title: string;
   summary?: string;
+  /** An extension's category (its app's `t`; EXTENSION_CATEGORIES). */
+  category?: string;
+  /** An extension's screenshots, in order: URLs already published, or images to upload. */
+  screenshots?: (string | File)[];
 }
 
 function bytesOf(data: Uint8Array): ArrayBuffer {
@@ -516,6 +520,17 @@ export async function publishBrowserExtension(id: string, details: PublishDetail
     tags: [['i', d], ['version', version], ['d', `${d}@${version}`], ['c', 'main'], ...platforms, ['e', asset.id]],
   }));
 
+  const screenshots: string[] = [];
+  for (const [i, shot] of (details.screenshots ?? []).entries()) {
+    if (typeof shot === 'string') {
+      screenshots.push(shot);
+      continue;
+    }
+    deps.progress?.(`Uploading screenshot ${i + 1}`, 85);
+    const uploaded = await uploadBlob(deps, shot, shot.name, shot.type || 'image/png').catch(() => null);
+    if (uploaded) screenshots.push(uploaded.url);
+  }
+
   const summary = details.summary?.split('\n')[0].trim();
   const appTags = [
     ['d', d],
@@ -523,6 +538,8 @@ export async function publishBrowserExtension(id: string, details: PublishDetail
     ...platforms,
     ...(summary ? [['summary', summary]] : []),
     ...(image ? [['icon', image]] : []),
+    ...screenshots.map((url) => ['image', url]),
+    ...(details.category ? [['t', details.category]] : []),
     ['alt', `Browser extension: ${details.title}`],
   ];
   const content = details.summary ?? '';

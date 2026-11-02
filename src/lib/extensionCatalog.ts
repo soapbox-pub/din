@@ -31,6 +31,33 @@ export const RELEASE_KIND = 30063;
 export const ASSET_KIND = 3063;
 export const CRX_MIME = 'application/x-chrome-extension';
 
+/**
+ * The categories an extension can be published under, as its app's `t`
+ * tag, with what about:extensions calls them: the Chrome Web Store's.
+ */
+export const EXTENSION_CATEGORIES: { slug: string; label: string }[] = [
+  { slug: 'accessibility', label: 'Accessibility' },
+  { slug: 'art-and-design', label: 'Art & Design' },
+  { slug: 'communication', label: 'Communication' },
+  { slug: 'developer-tools', label: 'Developer Tools' },
+  { slug: 'education', label: 'Education' },
+  { slug: 'entertainment', label: 'Entertainment' },
+  { slug: 'functionality-and-ui', label: 'Functionality & UI' },
+  { slug: 'games', label: 'Games' },
+  { slug: 'news-and-weather', label: 'News & Weather' },
+  { slug: 'privacy-and-security', label: 'Privacy & Security' },
+  { slug: 'productivity', label: 'Productivity' },
+  { slug: 'shopping', label: 'Shopping' },
+  { slug: 'social', label: 'Social' },
+  { slug: 'tools', label: 'Tools' },
+];
+
+/** What a category (`t` value) is called. */
+export function categoryLabel(slug: string): string {
+  return EXTENSION_CATEGORIES.find((c) => c.slug === slug)?.label
+    ?? slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** The NIP-82 platform (`f`) of what a Chromium-based browser runs: Chrome extensions. */
 export const CHROMIUM_PLATFORM = 'chromium';
 
@@ -63,6 +90,10 @@ export interface ExtensionPackage {
   /** When its latest release came out, else when the app was published. */
   createdAt: number;
   image: string | null;
+  /** Screenshots, from the app's `image` tags. */
+  screenshots: string[];
+  /** Its categories, from the app's `t` tags. */
+  categories: string[];
   license: string;
   repository: string | null;
   website: string | null;
@@ -575,6 +606,8 @@ function build(app: NostrEvent): ExtensionPackage | null {
     size: asset?.size ?? 0,
     createdAt: release?.createdAt ?? app.created_at,
     image: icon ? sanitizeImageUrl(icon) ?? null : null,
+    screenshots: tagValues(app, 'image').flatMap((url) => sanitizeImageUrl(url) ?? []).slice(0, 8),
+    categories: [...new Set(tagValues(app, 't').map((t) => t.trim().toLowerCase()).filter(Boolean))],
     license: tagValue(app, 'license') ?? '',
     repository: httpsUrls(tagValues(app, 'repository'))[0] ?? null,
     website: httpsUrls(tagValues(app, 'url'))[0] ?? null,
