@@ -549,6 +549,10 @@ export function installDin(transport: Transport): void {
   };
 
   watchDocumentHead({ title: win.setTitle, icon: win.setIcon, accent: win.setAccent });
+  // The Additional Windowing Controls draft's, for pages written for it.
+  for (const name of ['minimize', 'maximize', 'restore'] as const) {
+    Object.defineProperty(window, name, { value: async () => win[name](), writable: true, configurable: true });
+  }
 
   // ---- menus ----
   const menuActions = new Emitter<string>();
