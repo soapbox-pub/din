@@ -414,7 +414,7 @@ function StatCard({
         {warning !== 'ok' && <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
         <span className="truncate">{detail}</span>
       </p>
-      <Sparkline values={history} max={max} className={cn('mt-2 min-h-10 w-full flex-1', tone)} />
+      <Sparkline values={history} max={max} className={cn('mt-2 h-10 w-full flex-auto', tone)} />
       {children}
     </section>
   );
