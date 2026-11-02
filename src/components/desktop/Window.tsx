@@ -16,7 +16,6 @@ import { WindowAccentContext } from '@/contexts/WindowAccentContext';
 import { WindowTitleContext } from '@/contexts/WindowTitleContext';
 import { WindowIconContext } from '@/contexts/WindowIconContext';
 import { WindowFocusContext } from '@/contexts/WindowFocusContext';
-import { WindowMenuSlotContext } from '@/contexts/WindowMenuSlotContext';
 import { WindowAppContext } from '@/contexts/WindowAppContext';
 import { WindowVisibleContext } from '@/contexts/WindowVisibleContext';
 import {
@@ -449,8 +448,6 @@ export const Window = memo(function Window({
   const [titlebar, setTitlebar] = useState<ReactNode>(null);
   // The app draws the whole title bar itself, from WindowHeader's pieces.
   const [ownHeader, setOwnHeader] = useState(false);
-  // Where the app's menus go with no menu bar to hold them (MenuBarMenus).
-  const [menuSlot, setMenuSlot] = useState<HTMLElement | null>(null);
 
   // Chrome accent color published by the hosted app (e.g. the loaded page's
   // theme-color), tinting the title bar Safari-style. The raw value comes
@@ -1705,28 +1702,12 @@ export const Window = memo(function Window({
         </WindowDragRegion>
       )}
 
-      {/* The app's menus under the title bar, Windows style, with no menu
-          bar to put them in; hidden while it has none. Above an app's own
-          title bar it's the top of the window, so it drags it too. */}
-      {!frameless && config.desktopLayout === 'taskbar' && (
-        <WindowDragRegion
-          style={titlebarTint}
-          className={cn(
-            'flex shrink-0 items-center gap-0.5 px-1.5 pb-1 [&:not(:has([data-menu-slot]>*))]:hidden',
-            ownsHeader && 'rounded-t-[inherit] pt-1',
-          )}
-        >
-          <div ref={setMenuSlot} data-menu-slot="" className="contents" />
-        </WindowDragRegion>
-      )}
-
       <div
         className={cn(
           'relative flex-1 overflow-hidden',
           ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
         )}
       >
-        <WindowMenuSlotContext.Provider value={menuSlot}>
         <WindowOwnHeaderContext.Provider value={setOwnHeader}>
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
@@ -1752,7 +1733,6 @@ export const Window = memo(function Window({
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>
         </WindowOwnHeaderContext.Provider>
-        </WindowMenuSlotContext.Provider>
       </div>
       </WindowFrameContext.Provider>
 
