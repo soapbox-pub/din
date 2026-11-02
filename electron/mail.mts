@@ -1538,7 +1538,13 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   const smtp = p.smtp === undefined ? a.smtp : p.smtp;
   if (!isServer(imap) || !isServer(smtp)) throw new Error('Check the server settings.');
   const servers = p.imap !== undefined || p.smtp !== undefined || typeof p.password === 'string';
-  const password = typeof p.password === 'string' && p.password ? p.password : unseal(a.password);
+  // The stored password goes only to the servers it was given for: another
+  // host, port or user (or any SMTP change) needs it typed again, or whoever
+  // could change the settings could send it anywhere.
+  const sameServer = (x: typeof imap, y: typeof imap) => x.host === y.host && x.port === y.port && x.user === y.user;
+  const typed = typeof p.password === 'string' && p.password ? p.password : null;
+  if (!typed && (!sameServer(imap, a.imap) || !sameServer(smtp, a.smtp))) throw new Error('Enter the password for the new server settings.');
+  const password = typed ?? unseal(a.password);
   if (servers) await verify(imap, smtp, password);
   if (typeof p.name === 'string') a.name = p.name.trim().slice(0, 100) || a.name;
   if (typeof p.fullName === 'string') a.fullName = p.fullName.trim().slice(0, 200).replace(/[\r\n]/g, ' ');
