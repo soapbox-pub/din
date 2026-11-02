@@ -148,10 +148,13 @@ impl State {
         let pointer_gestures_state = PointerGesturesState::new::<State>(&dh);
         let relative_pointer_state = RelativePointerManagerState::new::<State>(&dh);
         let pointer_constraints_state = PointerConstraintsState::new::<State>(&dh);
-        // For wtype and wlrctl (os/debug.nix). Only Din and what it starts
-        // know the socket.
-        VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
-        virtual_pointer::create_global(&dh);
+        // For wtype and wlrctl, in the debug image alone (os/debug.nix). Every
+        // process of the user's can open the socket, and a keyboard and pointer
+        // it drives could type into a Terminal or press Allow on a sudo prompt.
+        if std::env::var_os("DIN_COMPOSITOR_VIRTUAL_INPUT").is_some_and(|value| value == "1") {
+            VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true);
+            virtual_pointer::create_global(&dh);
+        }
         virtual_output::create_global(&dh);
 
         let mut seat = seat_state.new_wl_seat(&dh, backend.seat_name());

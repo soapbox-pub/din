@@ -27,4 +27,8 @@
   };
 
   environment.systemPackages = with pkgs; [ grim wtype wlrctl ];
+
+  # The compositor offers wtype and wlrctl a virtual keyboard and pointer only
+  # here: anywhere else, any process of din's could drive Din with them.
+  systemd.services.din-shell.environment.DIN_COMPOSITOR_VIRTUAL_INPUT = "1";
 }
