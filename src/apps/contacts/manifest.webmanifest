@@ -1,0 +1,19 @@
+{
+  "name": "Contacts",
+  "description": "Your address book, kept on this computer as vCards, with your phone's contacts beside it.",
+  "icons": [{ "src": "/icons/apps/contacts.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "file_handlers": [
+    { "action": "/", "accept": { "text/vcard": [".vcf", ".vcard"] } }
+  ],
+  "shortcuts": [
+    { "name": "New Contact", "url": "/", "din": { "id": "new-contact" } }
+  ],
+  "din": {
+    "permissions": ["phone"],
+    "folders": ["~/.local/share/din/contacts"],
+    "window": { "size": { "width": 980, "height": 660 }, "frame": "custom" },
+    "keywords": ["address book", "people", "vcard", "vcf", "phone numbers", "emails", "addresses", "birthdays", "rolodex"]
+  }
+}

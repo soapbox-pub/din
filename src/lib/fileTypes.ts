@@ -129,9 +129,16 @@ export function isMediaPlayerFile(name: string): boolean {
   return AUDIO.has(ext) || PLAYLIST.has(ext) || MEDIA_SKIN.has(ext);
 }
 
+/** Address book cards, which Contacts imports. */
+export function isVCard(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'vcf' || ext === 'vcard';
+}
+
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
   if (isMediaPlayerFile(name)) return 'media-player';
+  if (isVCard(name)) return 'contacts';
   if (isTextFile(name)) return 'text-editor';
   if (isLayeredImage(name)) return 'photo-editor';
   if (isCadFile(name)) return 'cad';

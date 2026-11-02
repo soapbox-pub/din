@@ -629,6 +629,16 @@ files — `git add` new source files before `npm run os:build`.
   the account's calendars (kind 31924) as the sidebar's colored lists.
   Nostr calendar events are public. The menu bar's clock opens it, and
   `din calendar` lists, adds, answers and deletes events.
+- Contacts is the address book, kept only on this computer: one vCard per
+  person in `~/.local/share/din/contacts` (`src/shared/contacts.ts`,
+  `src/shared/vcard.ts`), the vdir layout vdirsyncer and khard use, with
+  groups (the cards' CATEGORIES), pictures, birthdays and Apple's and
+  Google's custom labels. It imports and exports .vcf files (Files opens
+  them there; someone already in the book gets what the file adds rather
+  than a second card), shows each phone's synced contacts beside it,
+  read-only, to add from, and starts a text in Messages or an email in Mail.
+  `din contacts` lists, shows, adds, edits and deletes people, and groups,
+  imports and exports them.
 - Messages reads and answers the texts on the user's phones, added in
   Settings → Phone (`electron/phone.mts`): iPhones and Android phones alike
   over Bluetooth's Message Access Profile, through BlueZ's obexd

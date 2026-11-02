@@ -182,8 +182,12 @@ export const APPS: readonly AppDefinition[] = [
   dinApp('mail'),
   // Texts from the user's phones (Settings → Phone), iMessage style. Launch
   // params `{ phoneId, threadId }` open a conversation (a notification's
-  // click).
+  // click); `{ to: [{ name, address }] }` starts one.
   dinApp('messages'),
+  // The address book: vCards in ~/.local/share/din/contacts, groups, the
+  // phones' contacts beside it. Files opens .vcf here (to import); launch
+  // params `{ contact: uid }` show someone.
+  dinApp('contacts'),
   // NIP-52 events and invitations by day, week or month. Launch params
   // `{ date: 'YYYY-MM-DD', view }` show a day; the menu bar's clock opens it.
   dinApp('calendar'),
