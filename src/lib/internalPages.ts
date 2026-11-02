@@ -17,7 +17,8 @@
  */
 
 import { parseNostrUri } from '@/lib/nostrUri';
-import { BROWSER_EXTENSION_KIND, type PackageAddress } from '@/lib/themePackages';
+import { APP_KIND, isKnownExtension } from '@/lib/extensionCatalog';
+import type { PackageAddress } from '@/lib/themePackages';
 
 /** The settings page. */
 export const PREFERENCES_URL = 'about:preferences';
@@ -65,10 +66,13 @@ export function internalPageTitle(url: string): string | null {
 
 /**
  * The published extension a `nostr:` URI names, or null. Such a link opens
- * on about:extensions' page for it rather than the generic preview.
+ * on about:extensions' page for it rather than the generic preview. Any
+ * NIP-82 app has the same kind, so only one about:extensions knows to be an
+ * extension does.
  */
 export function extensionAddressOf(url: string): PackageAddress | null {
   const target = parseNostrUri(url)?.target;
-  if (target?.type !== 'address' || target.kind !== BROWSER_EXTENSION_KIND) return null;
+  if (target?.type !== 'address' || target.kind !== APP_KIND) return null;
+  if (!isKnownExtension(target.pubkey, target.identifier)) return null;
   return { type: 'extension', pubkey: target.pubkey, identifier: target.identifier };
 }

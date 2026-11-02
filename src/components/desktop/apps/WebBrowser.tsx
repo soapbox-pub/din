@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -168,6 +168,7 @@ import {
 } from '@/components/desktop/apps/InspectorToolbar';
 import { NostrPage } from '@/components/desktop/apps/NostrPage';
 import { ExtensionsPage } from '@/components/desktop/apps/ExtensionsPage';
+import { isExtensionCatalogLoaded, loadExtensionCatalog, subscribeExtensionCatalog } from '@/lib/extensionCatalog';
 import { isNostrUri, type NostrHandler } from '@/lib/nostrUri';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 import { cleanPrintingError, printPage } from '@/lib/printing';
@@ -499,6 +500,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // Collapsed subtrees in the tree sidebar (by tab id).
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const crx = getCrxBridge();
+  // A nostr: link to an extension opens on about:extensions once the catalog
+  // on disk says it is one (extensionAddressOf), so read it, and draw again
+  // when it's in.
+  useSyncExternalStore(subscribeExtensionCatalog, isExtensionCatalogLoaded);
+  useEffect(() => {
+    if (crx) void loadExtensionCatalog();
+  }, [crx]);
   const devtools = getDevtoolsBridge();
   const userscriptsBridge = getUserscriptsBridge();
   // The userscript library: persisted per-device, synced to the injector in

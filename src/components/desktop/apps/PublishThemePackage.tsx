@@ -33,8 +33,8 @@ const WHERE: Record<PackageType, string> = { cursor: 'the App Store', icon: 'the
 
 /**
  * Publish to Nostr…: an installed cursor theme (kind 34628), icon theme
- * (kind 34642), Media Player skin (kind 34675) or browser extension (kind
- * 34639), its files on the user's Blossom servers, signed by the user, for
+ * (kind 34642), Media Player skin (kind 34675) or browser extension (a
+ * NIP-82 app with a .crx), its files on the user's Blossom servers, signed by the user, for
  * others to find in the App Store, or for an extension the Web Browser's
  * about:extensions (src/lib/themePackages.ts). `onView` shows it once it's
  * published, which is the App Store's page for it unless said otherwise.

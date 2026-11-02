@@ -2672,12 +2672,14 @@ expose('crx', {
   reloadExtension: (id) => ipcRenderer.invoke('crx:reloadExtension', id),
 
   /**
-   * An installed extension's files (a .tar.gz) and icon, for publishing it.
+   * An installed extension as a .crx, and its icon, for publishing it; a
+   * folder's is signed with its key in `keys` (PEM, by `d`), or a new one.
    * @param {string} id
+   * @param {Record<string, string>} keys
    */
-  exportExtension: (id) => ipcRenderer.invoke('crx:exportExtension', id),
+  exportExtension: (id, keys) => ipcRenderer.invoke('crx:exportExtension', id, keys),
 
-  /** The extensions installed from Nostr ({ id, source: { coordinate, publishedAt } }[]). */
+  /** The extensions installed from Nostr ({ id, source: { coordinate, publishedAt, sha256? } }[]). */
   published: () => ipcRenderer.invoke('crx:published'),
 
   /**

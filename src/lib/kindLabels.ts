@@ -385,7 +385,6 @@ export const KIND_LABELS: Record<number, string> = {
   34550: 'Community definition',
   // Din
   34628: 'Cursor theme',
-  34639: 'Browser extension',
   34642: 'Icon theme',
   34675: 'Media Player skin',
   // NIP-5A

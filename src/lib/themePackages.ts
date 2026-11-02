@@ -2,6 +2,18 @@ import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { APP_BLOSSOM_SERVERS, parseBlossomServerList } from '@/lib/appBlossom';
 import { getCrxBridge } from '@/lib/crx';
+import {
+  APP_KIND,
+  ASSET_KIND,
+  CHROME_PLATFORMS,
+  CRX_MIME,
+  RELEASE_KIND,
+  extensionReleases,
+  fetchExtension,
+  ingestPublished,
+  storedExtension,
+  type ExtensionPackage,
+} from '@/lib/extensionCatalog';
 import { formatBytes } from '@/lib/fs';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
@@ -18,7 +30,8 @@ import {
 import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPreview } from '@/lib/systemCursor';
 
 /**
- * Cursor themes, icon themes, Media Player skins and browser extensions on Nostr (NIP.md): Din's own kinds, in a range of
+ * Cursor themes, icon themes, Media Player skins and browser extensions on
+ * Nostr (NIP.md). The themes and skins are Din's own kinds, in a range of
  * its own, 346xx, DIN on a dialpad, the last two digits spelling the type
  * the same way.
  *
@@ -30,9 +43,9 @@ import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPre
  *   thousands of files, plus a few of its icons for showing it (`icon`).
  * - **34675 (SK), a Media Player skin:** a Winamp .wsz or Windows Media
  *   Player .wmz, already one file, as one blob (`skin`).
- * - **34639 (EX), a browser extension:** a Chrome extension's directory as
- *   one gzipped tarball blob (`archive`), with what it asks for copied from
- *   its manifest so the browser's Extensions page can show it beforehand.
+
+ * Browser extensions are NIP-82 software instead: an app (kind 32267) whose
+ * releases carry a .crx asset (src/lib/extensionCatalog.ts, which keeps them).
  *
  * All are addressable, `d` being the theme's directory name (a skin's file
  * name without its extension), so publishing one again updates it.
@@ -46,7 +59,6 @@ import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPre
 export const CURSOR_THEME_KIND = 34628;
 export const ICON_THEME_KIND = 34642;
 export const MEDIA_SKIN_KIND = 34675;
-export const BROWSER_EXTENSION_KIND = 34639;
 
 export type PackageType = 'cursor' | 'icon' | 'skin' | 'extension';
 
@@ -54,7 +66,7 @@ export const PACKAGE_KIND: Record<PackageType, number> = {
   cursor: CURSOR_THEME_KIND,
   icon: ICON_THEME_KIND,
   skin: MEDIA_SKIN_KIND,
-  extension: BROWSER_EXTENSION_KIND,
+  extension: APP_KIND,
 };
 
 /** What each is called in a sentence, and what its `alt` and `t` tags say. */
@@ -104,19 +116,7 @@ export interface SkinPackage extends PackageCommon {
   image: string | null;
 }
 
-export interface ExtensionPackage extends PackageCommon {
-  type: 'extension';
-  archive: { sha256: string; mime: string; size: number };
-  /** Its manifest's version. */
-  version: string;
-  manifestVersion: number | null;
-  /** The API permissions it asks for. */
-  permissions: string[];
-  /** The sites it can read and change. */
-  hosts: string[];
-  /** Its icon. */
-  image: string | null;
-}
+export type { ExtensionPackage } from '@/lib/extensionCatalog';
 
 export type ThemePackage = CursorPackage | IconPackage | SkinPackage | ExtensionPackage;
 
@@ -149,7 +149,7 @@ function size(value: string | undefined): number {
   return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-/** Parse a kind 34628, 34642, 34675 or 34639 event, or null when it lacks what installing needs. */
+/** Parse a kind 34628, 34642 or 34675 event, or null when it lacks what installing needs. */
 export function parseThemePackage(event: NostrEvent): ThemePackage | null {
   const identifier = tagValue(event, 'd');
   if (!identifier) return null;
@@ -208,24 +208,6 @@ export function parseThemePackage(event: NostrEvent): ThemePackage | null {
       skin: { sha256: skin[1], format: skin[2] as SkinFormat, size: size(skin[3]) },
       image: image ? sanitizeImageUrl(image) ?? null : null,
       size: size(skin[3]),
-    };
-  }
-
-  if (event.kind === BROWSER_EXTENSION_KIND) {
-    const archive = event.tags.find(([n, sha]) => n === 'archive' && SHA256.test(sha ?? ''));
-    if (!archive) return null;
-    const image = tagValue(event, 'image');
-    const manifestVersion = Number(tagValue(event, 'manifest'));
-    return {
-      ...common,
-      type: 'extension',
-      archive: { sha256: archive[1], mime: archive[2] || 'application/gzip', size: size(archive[3]) },
-      version: tagValue(event, 'version')?.trim() ?? '',
-      manifestVersion: Number.isInteger(manifestVersion) && manifestVersion > 0 ? manifestVersion : null,
-      permissions: tagValues(event, 'permission'),
-      hosts: tagValues(event, 'host'),
-      image: image ? sanitizeImageUrl(image) ?? null : null,
-      size: size(archive[3]),
     };
   }
 
@@ -324,6 +306,16 @@ export interface PublishDeps {
   /** The servers uploads go to. */
   servers: string[];
   progress?(text: string, percent?: number): void;
+  /** Who's publishing, to tell what of theirs is already published. */
+  pubkey?: string;
+  /** The keys the user's own extensions are signed with, by `d` (useExtensionKeys). */
+  extensionKeys?: ExtensionKeyStore;
+}
+
+/** Signing keys (PKCS#8 PEM) for the extensions the user publishes from folders, by `d`. */
+export interface ExtensionKeyStore {
+  all(): Record<string, string>;
+  set(identifier: string, pem: string): void;
 }
 
 export interface PublishDetails {
@@ -459,43 +451,108 @@ export async function publishMediaSkin(id: string, details: PublishDetails, deps
   return d;
 }
 
+/** The id of an event `publish` resolved with. */
+function publishedEvent(result: unknown): NostrEvent {
+  const event = result as NostrEvent | null;
+  if (!event || typeof event.id !== 'string') throw new Error('Publishing didn’t give back the event');
+  return event;
+}
+
+/** Whether an app event already says what publishing it again would. */
+function sameApp(app: NostrEvent, tags: string[][], content: string): boolean {
+  if (app.content !== content) return false;
+  const key = (t: string[][]) => t.filter(([n]) => n !== 'alt').map((tag) => tag.join('\u0000')).sort().join('\u0001');
+  return key(app.tags) === key(tags);
+}
+
 /**
- * Publish an installed browser extension as kind 34639, by its extension id;
- * resolves with its `d` tag.
+ * Publish an installed browser extension as NIP-82 software, by its
+ * extension id: its .crx as an asset (kind 3063), a release of that version
+ * (kind 30063), and the app (kind 32267), which is only published again when
+ * what it says changes. Resolves with the app's `d`.
  */
 export async function publishBrowserExtension(id: string, details: PublishDetails, deps: PublishDeps): Promise<string> {
   const bridge = getCrxBridge();
   if (!bridge) throw new Error('Extensions can only be published in the Din desktop app');
   deps.progress?.('Packing the extension');
-  const extension = await bridge.exportExtension(id);
+  const extension = await bridge.exportExtension(id, deps.extensionKeys?.all() ?? {});
   const d = extension.identifier;
+  // Kept before anything's uploaded: the key is the extension's id from now on.
+  if (extension.newKey) deps.extensionKeys?.set(d, extension.newKey);
+  const version = extension.version || '0';
+  const platforms = CHROME_PLATFORMS.map((platform) => ['f', platform]);
 
   deps.progress?.('Uploading its icon', 10);
   const image = extension.icon
     ? ((await uploadBlob(deps, extension.icon.data, extension.icon.name, extension.icon.mime).catch(() => null))?.url ?? null)
     : null;
 
-  deps.progress?.(`Uploading the extension (${formatBytes(extension.archive.length)})`, 30);
-  const { sha256 } = await uploadBlob(deps, extension.archive, `${d}.tar.gz`, 'application/gzip');
+  deps.progress?.(`Uploading the extension (${formatBytes(extension.crx.length)})`, 30);
+  const filename = `${d}-${version}.crx`;
+  const { sha256, url } = await uploadBlob(deps, extension.crx, filename, CRX_MIME);
 
-  deps.progress?.('Publishing', 90);
-  const tags = commonTags('extension', d, details, [], deps.servers);
-  tags.splice(
-    tags.length - 1,
-    0,
-    ['archive', sha256, 'application/gzip', String(extension.archive.length)],
-    ...(extension.version ? [['version', extension.version]] : []),
-    ...(extension.manifestVersion ? [['manifest', String(extension.manifestVersion)]] : []),
-    ...extension.permissions.map((p) => ['permission', p]),
-    ...extension.hosts.map((h) => ['host', h]),
-  );
-  if (image) tags.push(['image', image]);
-  await deps.publish({ kind: BROWSER_EXTENSION_KIND, content: '', tags });
+  deps.progress?.('Publishing', 80);
+  const asset = publishedEvent(await deps.publish({
+    kind: ASSET_KIND,
+    content: '',
+    tags: [
+      ['i', d],
+      ['x', sha256],
+      ['version', version],
+      ['m', CRX_MIME],
+      ...platforms,
+      ['url', url],
+      ['size', String(extension.crx.length)],
+      ['filename', filename],
+      ...(extension.minimumChrome ? [['min_platform_version', extension.minimumChrome]] : []),
+      ...extension.permissions.map((p) => ['permission', p]),
+      ...extension.hosts.map((h) => ['host', h]),
+      ['alt', `Browser extension: ${details.title} ${version}`],
+    ],
+  }));
+  const release = publishedEvent(await deps.publish({
+    kind: RELEASE_KIND,
+    content: '',
+    tags: [['i', d], ['version', version], ['d', `${d}@${version}`], ['c', 'main'], ...platforms, ['e', asset.id]],
+  }));
+
+  const summary = details.summary?.split('\n')[0].trim();
+  const appTags = [
+    ['d', d],
+    ['name', details.title],
+    ...platforms,
+    ['m', CRX_MIME],
+    ...(summary ? [['summary', summary]] : []),
+    ...(image ? [['icon', image]] : []),
+    ['alt', `Browser extension: ${details.title}`],
+  ];
+  const content = details.summary ?? '';
+  const existing = deps.pubkey ? storedExtension(deps.pubkey, d)?.event : undefined;
+  const published = [asset, release];
+  if (!existing || !sameApp(existing, appTags, content)) {
+    published.push(publishedEvent(await deps.publish({ kind: APP_KIND, content, tags: appTags })));
+  }
+  ingestPublished(published);
   return d;
 }
 
 /** The kind 5 deletion of one of the user's own published themes (NIP-09). */
 export function packageDeletion(pkg: ThemePackage): { kind: number; content: string; tags: string[][] } {
+  if (pkg.type === 'extension') {
+    // The app, and its releases and assets, which would show it again under the same address.
+    const own = extensionReleases(pkg.pubkey, pkg.identifier);
+    return {
+      kind: 5,
+      content: '',
+      tags: [
+        ['e', pkg.event.id],
+        ['a', packageCoordinate(pkg)],
+        ...own.flatMap((r) => [['e', r.id], ['a', `${RELEASE_KIND}:${pkg.pubkey}:${r.identifier}`], ...r.assets.map((id) => ['e', id])]),
+        ['k', String(APP_KIND)],
+        ...(own.length ? [['k', String(RELEASE_KIND)], ['k', String(ASSET_KIND)]] : []),
+      ],
+    };
+  }
   return {
     kind: 5,
     content: '',
@@ -590,8 +647,17 @@ export async function installThemePackage(pkg: ThemePackage, deps: InstallDeps, 
   if (pkg.type === 'extension') {
     const bridge = getCrxBridge();
     if (!bridge) throw new Error('Extensions install in the Din desktop app');
+    // Its newest release, when only the app was known.
+    const latest = pkg.asset ? pkg : await fetchExtension(pkg, deps.query);
+    if (!latest?.asset) throw new Error(`${pkg.title} has no release with a Chrome extension in it.`);
     deps.progress?.(`Downloading ${pkg.title}`);
-    return (await bridge.installPublished({ ...base, archive: { sha256: pkg.archive.sha256 } })).id;
+    const found = httpsUrls(latest.servers);
+    return (await bridge.installPublished({
+      ...base,
+      publishedAt: latest.createdAt,
+      servers: [...new Set([...found, ...servers])],
+      asset: { sha256: latest.asset.sha256 },
+    })).id;
   }
 
   const bridge = getIconThemeBridge();
@@ -613,6 +679,7 @@ export async function installThemePackage(pkg: ThemePackage, deps: InstallDeps, 
 
 /** One published theme by its address, the newest version not deleted, or null. */
 export async function fetchThemePackage(address: PackageAddress, query: InstallDeps['query']): Promise<ThemePackage | null> {
+  if (address.type === 'extension') return fetchExtension(address, query);
   const coordinate = packageCoordinate(address);
   const events = await query([
     { kinds: [PACKAGE_KIND[address.type]], authors: [address.pubkey], '#d': [address.identifier] },

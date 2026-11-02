@@ -1,7 +1,7 @@
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { getCrxBridge, type CrxExtension } from '@/lib/crx';
+import { extensionCatalog, syncExtensionCatalog } from '@/lib/extensionCatalog';
 import {
-  fetchPackageCatalog,
   fetchThemePackage,
   installThemePackage,
   packageCoordinate,
@@ -17,7 +17,7 @@ import { call, command, need, pick } from './util';
 /**
  * `din extensions`: the Web Browser's extensions, as its Settings page and
  * about:extensions have them: installed from the Chrome Web Store, loaded
- * from a folder, or got from Nostr (kind 34639, src/lib/themePackages.ts).
+ * from a folder, or got from Nostr (NIP-82 apps with a .crx, src/lib/extensionCatalog.ts).
  */
 
 const crx = () => need(getCrxBridge(), 'Browser extensions');
@@ -73,9 +73,11 @@ export const extensionsArea: Area = {
       { name: 'search', type: 'string', positional: true, optional: true, help: 'Words in its name or description' },
     ], async (args, ctx) => {
       const q = args.optString('search')?.toLowerCase();
-      const found = (await fetchPackageCatalog('extension', await catalogAuthors(ctx), ctx.query))
+      const authors = await catalogAuthors(ctx);
+      await call(syncExtensionCatalog((filters) => ctx.query(filters), authors));
+      const found = extensionCatalog(authors)
         .filter((pkg) => !q || `${pkg.title}\u0000${pkg.summary}\u0000${pkg.identifier}`.toLowerCase().includes(q));
-      return { data: found.map((pkg) => ({ ...packageRow(pkg), version: pkg.type === 'extension' ? pkg.version : '' })) };
+      return { data: found.map((pkg) => ({ ...packageRow(pkg), version: pkg.version })) };
     }),
     command('extensions', 'install', 'Download a published extension and add it, as Get does on about:extensions (asks on screen first)', [
       { name: 'address', type: 'string', positional: true, help: 'Its naddr1… address' },
@@ -108,6 +110,8 @@ export const extensionsArea: Area = {
         publish: (template) => ctx.publish(template),
         servers,
         progress: (text, percent) => ctx.progress?.({ text, percent }),
+        pubkey: ctx.pubkey,
+        extensionKeys: ctx.extensionKeys,
       }));
       const address = packageNaddr({ type: 'extension', pubkey: ctx.pubkey, identifier });
       return { data: { address }, text: address };

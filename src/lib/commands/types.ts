@@ -4,6 +4,7 @@ import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import type { WidgetsContextValue } from '@/contexts/WidgetsContext';
 import type { DesktopIconsContextValue } from '@/contexts/DesktopIconsContext';
 import type { WindowActions, WindowState } from '@/hooks/useWindows';
+import type { ExtensionKeyStore } from '@/lib/themePackages';
 
 /**
  * The `din` command's commands (docs/din-command.md): everything a user can
@@ -108,6 +109,8 @@ export interface CommandContext {
   readonly monitors: readonly string[];
   /** The signed-in account's pubkey (hex). */
   readonly pubkey: string | undefined;
+  /** The keys the user's own extensions are signed with, for publishing them (useExtensionKeys). */
+  readonly extensionKeys?: ExtensionKeyStore;
   /** Sign and publish an event as the signed-in account. */
   publish(template: { kind: number; content: string; tags: string[][] }): Promise<unknown>;
   /** Upload a file to the account's Blossom servers; resolves with its NIP-94 tags. */

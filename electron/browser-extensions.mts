@@ -1,41 +1,39 @@
 // Browser extensions beyond the Chrome Web Store's: ones loaded from a folder
-// on this computer, and ones published to Nostr (NIP.md, kind 34639) and
-// installed from there.
+// on this computer, and ones published to Nostr as NIP-82 software (an app,
+// kind 32267, whose releases carry a .crx asset; NIP.md) and installed from
+// there.
 //
 // The Web Store's own installs live in Extensions/ (electron-chrome-web-store
 // loads them, see setupChromeExtensions in main.mts). Folders the user loads
 // are remembered by path in local-extensions.json and loaded where they are,
 // so editing one and pressing Reload is the whole development loop. Ones from
 // Nostr are unpacked into NostrExtensions/<dir>, with NostrExtensions/
-// .nostr.json recording, by directory, the coordinate and created_at each
-// came from, for Update and Remove. An unpacked extension's id comes from its
-// manifest's `key` when it has one (as the Web Store's do), else from its
-// path, so updating one in place keeps its id, and with it its storage.
+// .nostr.json recording, by directory, the app's coordinate, the release's
+// created_at and the asset's hash each came from, for Update and Remove, and
+// the .crx itself kept in NostrExtensions/.crx/, to publish again as it is.
+// An unpacked extension's id comes from its manifest's `key`, which Din sets
+// to the key the .crx was signed with, as Chrome does when it installs one,
+// so an extension from Nostr has the id it was published with, and keeps it,
+// and its storage, through updates.
 //
-// Any installed extension can be exported for publishing: its directory as a
-// gzipped tarball, and its icon.
+// Any installed extension can be exported for publishing as a .crx: the Web
+// Store's own copy for one from there (which keeps Google's signature and its
+// id), the one it came in for one from Nostr, and for a folder its files
+// signed with a key of its own, which the desktop keeps (roaming it with the
+// user's encrypted app data) so it always gets the same id.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, net } from 'electron';
 import { uninstallExtension } from 'electron-chrome-web-store';
-import {
-  checkPackageBase,
-  fetchBlobs,
-  isSha256,
-  PackageError,
-  packTarGz,
-  safeRelative,
-  unpackTarGz,
-  type TarEntry,
-} from './themePackages.mts';
+import { CrxError, extensionIdOfKey, newSigningKey, readCrx, writeCrx } from './crx.mts';
+import { checkPackageBase, fetchBlobs, isSha256, PackageError, safeRelative } from './themePackages.mts';
 
-/** A published browser extension's kind (NIP.md). */
-const EXTENSION_KIND = 34639;
+/** A NIP-82 software application's kind, which a published extension is. */
+const APP_KIND = 32267;
 
 const EXTENSION_ID = /^[a-p]{32}$/;
 
@@ -49,7 +47,7 @@ export interface ExtensionInfo {
   source: 'webstore' | 'local' | 'nostr';
   /** The folder it was loaded from, for one loaded from a folder. */
   path?: string;
-  /** The `<kind>:<pubkey>:<d>` it was installed from, for one from Nostr. */
+  /** The app's `32267:<pubkey>:<d>` it was installed from, for one from Nostr. */
   coordinate?: string;
 }
 
@@ -57,19 +55,28 @@ export interface ExtensionInfo {
 export interface ExtensionExport {
   /** What its `d` tag should be: the one it was installed under, its Web Store id, or its name made a slug. */
   identifier: string;
+  /** The id it has once installed from the package. */
+  extensionId: string;
   name: string;
   version: string;
   description: string;
   manifestVersion: number | null;
+  /** Its manifest's `minimum_chrome_version`. */
+  minimumChrome: string | null;
   permissions: string[];
   hosts: string[];
-  archive: Uint8Array;
+  /** The .crx. */
+  crx: Uint8Array;
   icon: { name: string; mime: string; data: Uint8Array } | null;
+  /** The signing key made for it, when it had none yet, for the desktop to keep. */
+  newKey: string | null;
 }
 
 interface PublishedSource {
   coordinate: string;
   publishedAt: number;
+  /** The asset's hash. */
+  sha256?: string;
 }
 
 type Manifest = Record<string, unknown>;
@@ -119,10 +126,17 @@ async function nostrSources(): Promise<Record<string, PublishedSource>> {
   if (!sources || typeof sources !== 'object' || Array.isArray(sources)) return {};
   const out: Record<string, PublishedSource> = {};
   for (const [dir, value] of Object.entries(sources as Record<string, unknown>)) {
-    const { coordinate, publishedAt } = (value ?? {}) as Record<string, unknown>;
-    if (typeof coordinate === 'string' && typeof publishedAt === 'number') out[dir] = { coordinate, publishedAt };
+    const { coordinate, publishedAt, sha256 } = (value ?? {}) as Record<string, unknown>;
+    if (typeof coordinate === 'string' && typeof publishedAt === 'number') {
+      out[dir] = { coordinate, publishedAt, ...(isSha256(sha256) ? { sha256 } : {}) };
+    }
   }
   return out;
+}
+
+/** Where the .crx an extension from Nostr came in is kept. */
+function crxFile(dir: string): string {
+  return path.join(nostrBase(), '.crx', `${dir}.crx`);
 }
 
 /** The NostrExtensions directory an extension at `dir` is in, or null when it isn't one of them. */
@@ -179,11 +193,6 @@ async function localize(read: (relative: string) => Promise<string | null>, mani
   return typeof found === 'string' ? found : value;
 }
 
-/** Reads a file of the extension in `dir`, for localize. */
-function readFrom(dir: string): (relative: string) => Promise<string | null> {
-  return (relative) => fsp.readFile(path.join(dir, relative), 'utf8').catch(() => null);
-}
-
 async function readManifest(dir: string): Promise<Manifest> {
   let text: string;
   try {
@@ -198,12 +207,6 @@ async function readManifest(dir: string): Promise<Manifest> {
   } catch {
     throw new Error('The extension’s manifest.json isn’t valid JSON.');
   }
-}
-
-/** The id Chromium gives an extension whose manifest has this `key`. */
-function idFromKey(key: string): string {
-  const hash = crypto.createHash('sha256').update(Buffer.from(key, 'base64')).digest('hex').slice(0, 32);
-  return [...hash].map((c) => String.fromCharCode(97 + Number.parseInt(c, 16))).join('');
 }
 
 /** A directory name made from a display name. */
@@ -240,6 +243,56 @@ function largestIcon(manifest: Manifest): string | null {
     if (best) return best[1];
   }
   return null;
+}
+
+/** Google's own .crx of a Web Store extension, at its current version. */
+async function webStoreCrx(id: string): Promise<Buffer> {
+  const url = new URL('https://clients2.google.com/service/update2/crx');
+  url.searchParams.set('response', 'redirect');
+  url.searchParams.set('acceptformat', 'crx3');
+  url.searchParams.set('prodversion', process.versions.chrome);
+  url.searchParams.set('x', new URLSearchParams({ id, installsource: 'ondemand', uc: '' }).toString());
+  const response = await net.fetch(url.toString(), { signal: AbortSignal.timeout(5 * 60_000) });
+  // 204 for one the store no longer has.
+  if (response.status !== 200) throw new Error('The Chrome Web Store doesn’t have this extension.');
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/** An extension's files as they go in a package: everything but version control and the Web Store's signatures. */
+async function packageFiles(root: string): Promise<Map<string, Uint8Array>> {
+  const files = new Map<string, Uint8Array>();
+  const walk = async (dir: string, inside: string, seen: Set<string>) => {
+    const real = await fsp.realpath(dir);
+    if (seen.has(real)) return;
+    const inner = new Set(seen).add(real);
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      if (!inside && entry.name === '_metadata') continue;
+      if (entry.name === '.git') continue;
+      const full = path.join(dir, entry.name);
+      const relative = inside ? `${inside}/${entry.name}` : entry.name;
+      let stat;
+      try {
+        stat = await fsp.stat(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) await walk(full, relative, inner);
+      else if (stat.isFile()) files.set(relative, await fsp.readFile(full));
+    }
+  };
+  await walk(root, '', new Set());
+  return files;
+}
+
+function parseManifest(bytes: Uint8Array | undefined): Manifest {
+  if (!bytes) throw new PackageError('The extension has no manifest.json.');
+  try {
+    const manifest = JSON.parse(Buffer.from(bytes).toString('utf8').replace(/^\uFEFF/, '')) as unknown;
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error();
+    return manifest as Manifest;
+  } catch {
+    throw new PackageError('The extension’s manifest.json isn’t valid JSON.');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +350,7 @@ export function registerBrowserExtensionHandlers(options: {
     if (extension && dir) {
       extensions().removeExtension(id);
       await fsp.rm(path.join(nostrBase(), dir), { recursive: true, force: true });
+      await fsp.rm(crxFile(dir), { force: true });
       const sources = await nostrSources();
       delete sources[dir];
       await writeJson(sourcesFile(), sources);
@@ -311,83 +365,96 @@ export function registerBrowserExtensionHandlers(options: {
     await uninstallExtension(id, { session: options.session(), extensionsPath: options.webStorePath() });
   };
 
-  const exportExtension = async (extension: Electron.Extension): Promise<ExtensionExport> => {
+  const exportExtension = async (extension: Electron.Extension, keys: Record<string, string>): Promise<ExtensionExport> => {
     const root = extension.path;
-    const manifest = await readManifest(root);
-    const entries: TarEntry[] = [];
-    const walk = async (dir: string, inside: string, seen: Set<string>) => {
-      const real = await fsp.realpath(dir);
-      if (seen.has(real)) return;
-      const inner = new Set(seen).add(real);
-      for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
-        // The Web Store's signatures over its files, and version control, aren't the extension.
-        if (!inside && entry.name === '_metadata') continue;
-        if (entry.name === '.git') continue;
-        const full = path.join(dir, entry.name);
-        const relative = inside ? `${inside}/${entry.name}` : entry.name;
-        let stat;
-        try {
-          stat = await fsp.stat(full);
-        } catch {
-          continue;
-        }
-        if (stat.isDirectory()) await walk(full, relative, inner);
-        else if (stat.isFile()) entries.push({ path: relative, type: 'file', data: await fsp.readFile(full) });
-      }
-    };
-    await walk(root, '', new Set());
-
     const sources = await nostrSources();
     const dir = nostrDirOf(root);
-    const installedAs = dir ? sources[dir]?.coordinate.split(':').slice(2).join(':') : undefined;
-    const name = extension.name || (await localize(readFrom(root), manifest, manifest.name));
     const isLocal = (await localFolders()).includes(root);
-    const identifier = installedAs || (!dir && !isLocal ? extension.id : slug(name));
+
+    let crx: Buffer | null;
+    let newKey: string | null = null;
+    let identifier: string;
+    let files: Map<string, Uint8Array>;
+    const name = extension.name;
+    if (dir) {
+      // As it came, so it keeps its signature and its id.
+      crx = await fsp.readFile(crxFile(dir));
+      files = readCrx(crx).files;
+      identifier = sources[dir]?.coordinate.split(':').slice(2).join(':') || slug(name);
+    } else if (!isLocal && (crx = await webStoreCrx(extension.id).then((data) => {
+      const store = readCrx(data);
+      return store.id === extension.id ? data : null;
+    }, () => null))) {
+      files = readCrx(crx).files;
+      identifier = extension.id;
+    } else {
+      // A folder's, or one the Web Store no longer has, signed by a key of
+      // its own (which gives the latter a new id).
+      files = await packageFiles(root);
+      identifier = isLocal ? slug(name) : extension.id;
+      let pem: string | null = typeof keys[identifier] === 'string' ? keys[identifier] : null;
+      try {
+        if (pem) extensionIdOfKey(pem);
+      } catch {
+        pem = null;
+      }
+      if (!pem) pem = newKey = newSigningKey();
+      crx = writeCrx(files, pem);
+    }
+    const parsed = readCrx(crx);
+    const manifest = parseManifest(files.get('manifest.json'));
+    const read = async (relative: string) => {
+      const bytes = files.get(relative);
+      return bytes ? Buffer.from(bytes).toString('utf8') : null;
+    };
 
     const iconPath = largestIcon(manifest);
     const iconRelative = iconPath ? safeRelative(iconPath.replace(/^\/+/, '')) : null;
     let icon: ExtensionExport['icon'] = null;
     if (iconRelative) {
       const mime = ICON_MIME[path.extname(iconRelative).toLowerCase()];
-      const data = mime ? await fsp.readFile(path.join(root, iconRelative)).catch(() => null) : null;
+      const data = files.get(iconRelative);
       if (mime && data) icon = { name: path.basename(iconRelative), mime, data };
     }
 
     const access = extensionAccess(manifest);
     return {
       identifier,
-      name,
-      version: extension.version,
-      description: extension.manifest?.description ?? (await localize(readFrom(root), manifest, manifest.description)),
+      extensionId: parsed.id,
+      name: name || (await localize(read, manifest, manifest.name)),
+      version: typeof manifest.version === 'string' ? manifest.version : extension.version,
+      description: extension.manifest?.description ?? (await localize(read, manifest, manifest.description)),
       manifestVersion: typeof manifest.manifest_version === 'number' ? manifest.manifest_version : null,
+      minimumChrome: typeof manifest.minimum_chrome_version === 'string' ? manifest.minimum_chrome_version : null,
       permissions: access.permissions,
       hosts: access.hosts,
-      archive: await packTarGz(entries),
+      crx,
       icon,
+      newKey,
     };
   };
 
   const installPublished = async (value: unknown): Promise<{ id: string; name: string }> => {
-    const pkg = checkPackageBase(value, EXTENSION_KIND, /^$/);
-    const archive = (pkg.archive ?? {}) as { sha256?: unknown };
-    if (!isSha256(archive.sha256)) throw new PackageError('Not an extension');
-    const data = (await fetchBlobs([archive.sha256], pkg.servers)).get(archive.sha256);
+    const pkg = checkPackageBase(value, APP_KIND, /^$/);
+    const asset = (pkg.asset ?? {}) as { sha256?: unknown };
+    if (!isSha256(asset.sha256)) throw new PackageError('Not an extension');
+    const data = (await fetchBlobs([asset.sha256], pkg.servers)).get(asset.sha256);
     if (!data) throw new PackageError('The extension couldn’t be downloaded.');
 
-    const files = new Map<string, Buffer>();
-    for (const entry of await unpackTarGz(data)) {
-      const relative = safeRelative(entry.path);
-      if (relative && entry.type === 'file') files.set(relative, Buffer.from(entry.data));
-    }
-    const manifestBytes = files.get('manifest.json');
-    if (!manifestBytes) throw new PackageError('The extension’s archive has no manifest.json.');
-    let manifest: Manifest;
+    let parsed;
     try {
-      manifest = JSON.parse(manifestBytes.toString('utf8').replace(/^\uFEFF/, '')) as Manifest;
-      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error();
-    } catch {
-      throw new PackageError('The extension’s manifest.json isn’t valid JSON.');
+      parsed = readCrx(data);
+    } catch (error) {
+      throw new PackageError(error instanceof CrxError ? error.message : 'The extension’s package is damaged.');
     }
+    const files = new Map<string, Uint8Array>();
+    for (const [name, bytes] of parsed.files) {
+      const relative = safeRelative(name);
+      if (relative) files.set(relative, bytes);
+    }
+    const manifest = parseManifest(files.get('manifest.json'));
+    // Its id is the key it was signed with, as when Chrome installs a .crx.
+    files.set('manifest.json', Buffer.from(JSON.stringify({ ...manifest, key: parsed.key }, null, 2)));
 
     const base = nostrBase();
     const sources = await nostrSources();
@@ -409,15 +476,18 @@ export function registerBrowserExtensionHandlers(options: {
       || access.hosts.some((h) => !before.hosts.includes(h));
     if (more) {
       // The prompt names it as the extension does, which may be in its locale files.
-      const localized = await localize(async (relative) => files.get(relative)?.toString('utf8') ?? null, manifest, manifest.name);
+      const read = async (relative: string) => {
+        const bytes = files.get(relative);
+        return bytes ? Buffer.from(bytes).toString('utf8') : null;
+      };
+      const localized = await localize(read, manifest, manifest.name);
       const name = localized && !localized.startsWith('__MSG_') ? localized : pkg.name;
       const allow = await options.askToAdd(name, access);
       if (allow !== true) throw new PackageError('You didn’t add it.');
     }
 
     // Whatever has its id now (another copy of the same extension) makes way.
-    const id = typeof manifest.key === 'string' ? idFromKey(manifest.key) : null;
-    const clash = id ? extensions().getExtension(id) : undefined;
+    const clash = extensions().getExtension(parsed.id);
     if (clash && clash.path !== dest) await remove(clash.id);
     const current = extensions().getAllExtensions().find((e) => e.path === dest);
     if (current) extensions().removeExtension(current.id);
@@ -429,7 +499,7 @@ export function registerBrowserExtensionHandlers(options: {
         const file = path.join(staging, relative);
         await fsp.mkdir(path.dirname(file), { recursive: true });
         await fsp.writeFile(file, bytes, { flag: 'wx' }).catch(() => {
-          throw new PackageError('The extension’s archive is damaged.');
+          throw new PackageError('The extension’s package is damaged.');
         });
       }
       await fsp.rm(dest, { recursive: true, force: true });
@@ -438,7 +508,12 @@ export function registerBrowserExtensionHandlers(options: {
       await fsp.rm(staging, { recursive: true, force: true });
       throw error;
     }
-    await writeJson(sourcesFile(), { ...(await nostrSources()), [dir]: { coordinate: pkg.coordinate, publishedAt: pkg.publishedAt } });
+    await fsp.mkdir(path.dirname(crxFile(dir)), { recursive: true });
+    await fsp.writeFile(crxFile(dir), data);
+    await writeJson(sourcesFile(), {
+      ...(await nostrSources()),
+      [dir]: { coordinate: pkg.coordinate, publishedAt: pkg.publishedAt, sha256: asset.sha256 },
+    });
 
     const extension = await load(dest);
     return { id: extension.id, name: extension.name };
@@ -479,12 +554,15 @@ export function registerBrowserExtensionHandlers(options: {
     return info(await load(extension.path));
   });
 
-  // An installed extension's files and icon, for publishing it.
-  ipcMain.handle('crx:exportExtension', async (event, id: unknown) => {
+  // An installed extension as a .crx, and its icon, for publishing it. A
+  // folder's is signed with its key in `keys` (PKCS#8 PEM, by `d`), or a new
+  // key when that has none.
+  ipcMain.handle('crx:exportExtension', async (event, id: unknown, keys: unknown) => {
     assertShellSender(event);
     const extension = find(id);
     if (options.hidden(extension.id)) throw new Error('That extension is Din’s own');
-    return exportExtension(extension);
+    const valid = keys && typeof keys === 'object' && !Array.isArray(keys) ? (keys as Record<string, string>) : {};
+    return exportExtension(extension, valid);
   });
 
   // The extensions installed from Nostr, with where each was published.

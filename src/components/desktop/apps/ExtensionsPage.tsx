@@ -3,7 +3,7 @@ import { ArrowLeft, Puzzle, RefreshCw, Search, Settings } from 'lucide-react';
 import { PackageStore } from '@/components/desktop/apps/appstore/PackageStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { usePackageCatalog } from '@/hooks/useThemePackages';
+import { useExtensionCatalog } from '@/hooks/useThemePackages';
 import type { PackageAddress } from '@/lib/themePackages';
 import { cn } from '@/lib/utils';
 
@@ -15,14 +15,14 @@ export interface ExtensionsPageProps {
 }
 
 /**
- * about:extensions: browser extensions published to Nostr (kind 34639) by
+ * about:extensions: browser extensions published to Nostr (NIP-82 apps with a .crx) by
  * Din's publishers, the people the user follows, and the user, to find and
  * get, laid out like the App Store's Cursors, Icons and Skins (PackageStore),
  * which these aren't listed among. An internal page, painted over the tab's
  * parked surface like about:preferences (src/lib/internalPages.ts).
  */
 export function ExtensionsPage({ initial, onOpenPreferences }: ExtensionsPageProps) {
-  const catalog = usePackageCatalog('extension');
+  const catalog = useExtensionCatalog();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<PackageAddress | null>(initial);
 

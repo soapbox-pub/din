@@ -1,18 +1,19 @@
 # Din Nostr Schemas
 
 This document describes how Din uses Nostr to store desktop state and share
-what a desktop looks like. Din builds on existing NIPs, and defines four
-kinds of its own, for cursor themes, icon themes, Media Player skins and
-browser extensions, in a range it keeps for itself:
+what a desktop looks like. Din builds on existing NIPs, and defines three
+kinds of its own, for cursor themes, icon themes and Media Player skins, in a
+range it keeps for itself:
 **346xx**, "DIN" on a phone keypad. The last two digits spell the type the
 same way.
 
 | Kind | Keypad | What |
 |---|---|---|
 | 34628 | DIN-**CU** | [Cursor theme](#cursor-themes-kind-34628) |
-| 34639 | DIN-**EX** | [Browser extension](#browser-extensions-kind-34639) |
 | 34642 | DIN-**IC** | [Icon theme](#icon-themes-kind-34642) |
 | 34675 | DIN-**SK** | [Media Player skin](#media-player-skins-kind-34675) |
+
+Browser extensions are [NIP-82](#browser-extensions-nip-82) software instead.
 
 ## Encrypted App Data (NIP-78, kind 30078)
 
@@ -57,6 +58,7 @@ and never publishes plaintext.
 | `computer.din.nostr-link-defaults` | `{ [kind: string]: string }` | The app (by desktop app id) each kind's `nostr:` links open in without asking, chosen with "Always" in the Open with dialog |
 | `computer.din.nsite-apps` | `{ "host": string, "installedAt": number, "name"?: string }[]` | [NIP-5A](https://github.com/nostr-protocol/nips/blob/master/5A.md) nsites installed as desktop apps. `host` is the site's canonical host (`npub1…` for a root site, `<pubkeyB36><d>` for a named one), never a NIP-05 name; `installedAt` is Unix seconds; `name` is set only when the user renamed the app. Only addresses roam: each device keeps the signed manifests and files itself, and installs whatever the list names that it doesn't have |
 | `computer.din.themes` | `{ "a": string, "addedAt": number }[]` | Other people's named themes the user added from the App Store, listed under Your Themes in Settings → Themes. `a` is the theme's `36767:<pubkey>:<d>` coordinate; `addedAt` is Unix seconds. Only addresses roam: each device reads the newest version of each theme from relays |
+| `computer.din.extension-keys` | `{ [d: string]: string }` | The keys (PKCS#8 PEM) the user's browser extensions are signed with when Din packages them, by the `d` of their NIP-82 app; each is its extension's id, so publishing it again from another computer keeps it ([Browser extensions](#browser-extensions-nip-82)) |
 | `computer.din.signer-permissions` | `{ [origin: string]: { "status": "connected" \| "blocked", "name"?: string, "methods": { [method: string]: "allow" \| "deny" }, "kinds": { [kind: string]: "allow" \| "deny" }, "createdAt": number, "lastUsed": number } }` | Sites and installed apps connected to the account through Din's NIP-07 signer, and what each may do without asking: `methods` holds `nip04.encrypt` / `nip04.decrypt` / `nip44.encrypt` / `nip44.decrypt`, `kinds` holds `signEvent` per event kind; times are Unix ms |
 
 ### Retired keys
@@ -183,47 +185,66 @@ records, by file name, the `coordinate` (`<kind>:<pubkey>:<d>`) and
 `publishedAt` (`created_at`) each came from, for Update and Remove. Use opens
 the Media Player wearing it.
 
-## Browser extensions (kind 34639)
+## Browser extensions (NIP-82)
 
-A Chrome extension for Din's Web Browser, as one gzipped tarball of its
-directory, the folder holding its `manifest.json`. Addressable like the
-others.
+Extensions for Din's Web Browser are published as NIP-82 software
+([draft](https://github.com/nostr-protocol/nips/pull/2526)): an
+application (kind 32267), a release per version (kind 30063), and the
+release's asset (kind 3063), a Chrome extension package (`.crx`, version 3,
+`application/x-chrome-extension`) on the publisher's Blossom servers. Din
+follows the draft, and adds:
 
-| Tag | Required | Meaning |
-|---|---|---|
-| `["d", <id>]` | yes | What it's published as: the `d` it was installed under, its Chrome Web Store id, or its name made a slug |
-| `["title", <name>]` | yes | Its name, as people see it |
-| `["summary", <text>]` | no | A description |
-| `["alt", "Browser extension: <name>"]` | yes | NIP-31 |
-| `["archive", <sha256>, "application/gzip", <bytes>]` | yes | The extension as a `.tar.gz` blob, and its size |
-| `["version", <version>]` | no | Its manifest's `version` |
-| `["manifest", "2" \| "3"]` | no | Its manifest's `manifest_version` |
-| `["permission", <name>]` | no, many | An API permission its manifest asks for, e.g. `storage` |
-| `["host", <pattern>]` | no, many | A site it can read and change, from its `host_permissions`, the match patterns in its `permissions`, and its content scripts' `matches` |
-| `["image", <url>]` | no | Its icon, the biggest its manifest names |
-| `["server", <url>]` | yes, one or more | Blossom servers holding its files |
-| `["t", "browser-extension"]` | yes | |
+- **`m` tags on the application**, one per MIME type of the assets it
+  ships, so `{"kinds": [32267], "#m": ["application/x-chrome-extension"]}`
+  finds extensions without fetching assets. Din has proposed this for
+  NIP-82. Only a change in those types updates the application; a new
+  version is a new release and asset.
+- **`permission` and `host` tags on the asset**: the API permissions its
+  manifest asks for, and the sites it can read and change (from
+  `host_permissions`, the match patterns in `permissions`, and content
+  scripts' `matches`), for showing before downloading it. Installing reads
+  them again from the package.
 
-The archive's paths are relative to the extension's directory and it must
-hold `manifest.json`; it has files only, no links. Din leaves out `.git` and
-the Web Store's `_metadata` when publishing, and keeps everything else as it
-is, `manifest.json`'s `key` included, so an extension keeps its id.
-`permission` and `host` are only for showing it: installing reads them again
-from the manifest in the archive. `content` is empty.
+| Event | Din's tags |
+|---|---|
+| 32267 | `d` (the `d` it was installed under, its Web Store id, or its name made a slug), `name`, `f` for every desktop Chrome runs on (`linux-x86_64`, `linux-aarch64`, `darwin-arm64`, `darwin-x86_64`, `windows-x86_64`, `windows-aarch64`), `["m", "application/x-chrome-extension"]`, `summary`, `icon` (the biggest icon its manifest names), `alt`; content is its description |
+| 30063 | `i`, `version` (the manifest's), `d` (`<i>@<version>`), `["c", "main"]`, the same `f`, `e` (the asset) |
+| 3063 | `i`, `x`, `version`, `m`, the same `f`, `url`, `size`, `filename`, `min_platform_version` (the manifest's `minimum_chrome_version`), `permission`, `host`, `alt` |
 
-The browser's Settings page lists installed extensions, from the Chrome Web
-Store, a folder (Load from folder…, which Din keeps loading from where it
-is), or Nostr, and publishes any of them from its ⋯ and right-click menus;
-`din extensions publish` does the same. `about:extensions`, an internal page
-of the browser reached from its menu, lists them as the App Store lists
-cursor themes, honoring deletions with `["k", "34639"]`, and a `nostr:` link
-to one opens its page there. Installing downloads the blob as for themes and
-checks its hash, then asks the user with what the manifest asks for, as the
-Web Store's installs do (an update asks again only when it wants more),
-unpacks it into the browser's `NostrExtensions/<d>` (numbered if taken), and
-loads it. `NostrExtensions/.nostr.json` records, by directory, the
-`coordinate` and `publishedAt` each came from, for Update and Remove. A copy
-of the same extension, by id, already installed another way is replaced.
+The package's signing key is the extension's id. A Web Store extension is
+published as Google's own package of it, which keeps its id; one installed
+from Nostr as the package it came in; and one loaded from a folder (or no
+longer in the Web Store) is signed by Din with an ECDSA P-256 key of its own,
+which Din keeps in the user's encrypted app data (`computer.din.extension-keys`,
+`{ [d: string]: string }` of PKCS#8 PEM) so the same extension has the same id
+from any of the user's computers.
+
+**Finding them.** `about:extensions`, an internal page of the browser, lists
+the extensions Din's publishers, the people the user follows, and the user
+publish. NIP-82 marks an app as an extension only on its assets, regular
+events with one per file per version, so Din keeps all of those authors'
+apps and releases, their `.crx` assets (asked for with `#m`), and deletions
+(kind 5 with `["k", "32267"]`, `"30063"` or `"3063"`) in IndexedDB. The page
+draws from that at once, then syncs: an author new to it is asked for
+everything, the rest for what's newer than their last sync, and what comes
+back is merged in. An app is listed when its newest `main` release (by
+`created_at`, which NIP-82 makes the release date) with a `.crx` asset is
+known, or when it carries the `m` tag, in which case its newest releases are
+fetched when it's opened or got. A `nostr:` link to an app the page knows to
+be an extension opens its page there.
+
+**Installing.** Get downloads the package from the asset's servers, the
+author's BUD-03 list (kind 10063) and Din's, checks its hash, checks every
+signature in it and that one is by the key its id comes from, then asks the
+user with what its manifest asks for, as Web Store installs do (an update
+asks again only when it wants more). Din unpacks it into the browser's
+`NostrExtensions/<d>` (numbered if taken) with its key set as the manifest's
+`key`, as Chrome does, so it has the id it was published with, keeps the
+package in `NostrExtensions/.crx/`, and records the app's coordinate, the
+release's `created_at` and the asset's hash in `NostrExtensions/.nostr.json`,
+for Update and Remove. A copy of the same extension already installed
+another way is replaced. Deleting one of the user's own from Nostr deletes
+its app, releases and assets.
 
 ## Other kinds Din reads/writes (standard usage, no extensions)
 
@@ -232,9 +253,10 @@ of the same extension, by id, already installed another way is replaced.
 | 0 | NIP-01 | Profile metadata (published on signup) |
 | 10002 | NIP-65 | Relay list; read on login, published from Settings → Nostr & Storage |
 | 10063 | BUD-03 | Blossom server list; read on login, published from Settings → Nostr & Storage |
+| 32267, 30063, 3063 | NIP-82 (draft) | Browser extensions: published from the browser's Settings, listed on `about:extensions` from a synced copy kept on the device ([Browser extensions](#browser-extensions-nip-82)) |
 | 15128, 35128 | NIP-5A | nsite manifests; read to serve `nsite://` sites, and kept (signature-checked) in the device's nsite store for sites that were opened or installed |
 | 16767 | Profile Themes | Active profile theme; applied as the OS theme, and published when a synced custom theme changes. A theme worn from a named one carries Ditto's credit tags: `["a", "36767:<pubkey>:<d>"]`, plus `["p", <pubkey>]` when someone else made it. Editing someone else's theme drops both |
 | 36767 | Profile Themes | Named themes, in the same `c`/`f`/`bg` tags as 16767 plus `d`, `title`, optional `description`, `alt` and `["t", "theme"]`, as Ditto writes them. The App Store's Themes lists those by its catalog publishers, the people the user follows, and the user; Settings → Themes saves the custom theme as one, updates one under its `d`, and deletes one with a NIP-09 kind 5 carrying `e`, `a` and `["k", "36767"]` |
 | 3 | NIP-02 | Follow list; read to list what the people the user follows publish in the App Store |
-| 5 | NIP-09 | Deletions of the user's own named themes, cursor and icon themes, Media Player skins, and browser extensions |
+| 5 | NIP-09 | Deletions of the user's own named themes, cursor and icon themes, Media Player skins, and browser extensions (their NIP-82 app, releases and assets) |
 | 22242 | NIP-42 | Relay authentication |

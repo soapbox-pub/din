@@ -18,6 +18,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useExtensionKeys } from '@/hooks/useThemePackages';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { runCommandLine, runStructured, type CommandContext } from '@/lib/commands';
@@ -48,11 +49,12 @@ export function CommandHost() {
   const { mutateAsync: publish } = useNostrPublish();
   const { mutateAsync: upload } = useUploadFile();
   const relays = useManifestRelays();
+  const extensionKeys = useExtensionKeys();
   const [asking, setAsking] = useState<Asking[]>([]);
 
-  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays });
+  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys });
   useLayoutEffect(() => {
-    live.current = { config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays };
+    live.current = { config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys };
   });
 
   useEffect(() => {
@@ -73,6 +75,7 @@ export function CommandHost() {
         get workspaces() { return live.current.active; },
         get monitors() { return live.current.areas.map((area) => area.id); },
         get pubkey() { return live.current.user?.pubkey; },
+        get extensionKeys() { return live.current.extensionKeys; },
         publish: (template) => live.current.publish(template),
         upload: (file) => live.current.upload(file),
         query: (filters) => live.current.relays.query(filters, { signal: AbortSignal.timeout(8000) }),

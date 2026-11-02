@@ -32,26 +32,41 @@ export interface CrxExtension {
 export interface CrxExtensionExport {
   /** What its `d` tag should be. */
   identifier: string;
+  /** The id it has once installed from the package. */
+  extensionId: string;
   name: string;
   version: string;
   description: string;
   manifestVersion: number | null;
+  /** Its manifest's `minimum_chrome_version`. */
+  minimumChrome: string | null;
   permissions: string[];
   hosts: string[];
-  /** Its directory as a .tar.gz. */
-  archive: Uint8Array;
+  /** The .crx. */
+  crx: Uint8Array;
   icon: { name: string; mime: string; data: Uint8Array } | null;
+  /** The signing key made for it, when it had none yet (PKCS#8 PEM), to keep under its `d`. */
+  newKey: string | null;
+}
+
+/** Where an extension installed from Nostr came from: its app, its release's date, its asset's hash. */
+export interface CrxPublishedSource {
+  coordinate: string;
+  publishedAt: number;
+  sha256?: string;
 }
 
 /** What installing a published extension sends the main process. */
 export interface CrxPublishedInstall {
   identifier: string;
   name: string;
+  /** The app's `32267:<pubkey>:<d>`. */
   coordinate: string;
+  /** The release's `created_at`. */
   publishedAt: number;
   inherits: string[];
   servers: string[];
-  archive: { sha256: string };
+  asset: { sha256: string };
 }
 
 /** The pop-up window a page's window.open asked for. */
@@ -145,10 +160,10 @@ export interface CrxBridge {
   loadUnpacked(path: string): Promise<CrxExtension>;
   /** Load an installed extension again from its files. */
   reloadExtension(id: string): Promise<CrxExtension>;
-  /** An installed extension's files and icon, for publishing it. */
-  exportExtension(id: string): Promise<CrxExtensionExport>;
+  /** An installed extension as a .crx and its icon, for publishing it; a folder's is signed with its key in `keys`, by `d`. */
+  exportExtension(id: string, keys: Record<string, string>): Promise<CrxExtensionExport>;
   /** The extensions installed from Nostr, and where each was published. */
-  published(): Promise<{ id: string; source: { coordinate: string; publishedAt: number } }[]>;
+  published(): Promise<{ id: string; source: CrxPublishedSource }[]>;
   /** Install (or update) a published extension, asking the user first. */
   installPublished(manifest: CrxPublishedInstall): Promise<{ id: string; name: string }>;
   /**

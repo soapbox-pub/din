@@ -578,7 +578,8 @@ files — `git add` new source files before `npm run os:build`.
   [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell);
   install them by browsing the Chrome Web Store inside the browser, load one
   from a folder (Settings → Extensions → Load from folder…), or get one
-  published to Nostr on `about:extensions` (kind 34639, see `NIP.md`); any of
+  published to Nostr on `about:extensions` (NIP-82 apps with a `.crx`, see
+  `NIP.md`); any of
   them can be published from its menu there. Extensions
   run only in the browser's session partition — never against the shell.
   Installed web apps share that partition, like installed apps in Chrome: a

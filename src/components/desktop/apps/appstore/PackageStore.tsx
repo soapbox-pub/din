@@ -31,7 +31,7 @@ import { canKeepPackages } from '@/hooks/useThemePackages';
 import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
 import {
   useInstalledPackages,
-  usePackageCatalog,
+  type PackageCatalogState,
   useThemePackage,
   useThemePackageActions,
 } from '@/hooks/useThemePackages';
@@ -55,7 +55,7 @@ import {
 import { cn } from '@/lib/utils';
 import { frameUrl, framesNear } from '@/shared/cursorFrames';
 
-type PackageCatalog = ReturnType<typeof usePackageCatalog>;
+type PackageCatalog = PackageCatalogState;
 
 const COPY: Record<PackageType, { title: string; subtitle: string; noun: string; empty: string }> = {
   cursor: {
@@ -121,7 +121,7 @@ interface PackageHandlers {
 /**
  * The App Store's Cursors, Icons and Skins, and the Web Browser's
  * about:extensions: cursor themes (kind 34628), icon themes (kind 34642),
- * skins (kind 34675) and browser extensions (kind 34639) published by the catalog's publishers, the people the
+ * skins (kind 34675) and browser extensions (NIP-82 apps with a .crx) published by the catalog's publishers, the people the
  * user follows, and the user (usePackageCatalog), the people they follow
  * first. Get downloads one and puts it on; it shows its download size, which
  * for an icon set can be tens of megabytes.
@@ -645,8 +645,10 @@ function PackageDetailPage({
           </div>
         </div>
 
-        {pkg.summary ? (
-          <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">{pkg.summary}</p>
+        {(pkg.type === 'extension' ? pkg.description || pkg.summary : pkg.summary) ? (
+          <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">
+            {pkg.type === 'extension' ? pkg.description || pkg.summary : pkg.summary}
+          </p>
         ) : (
           <p className="text-muted-foreground">This {COPY[pkg.type].noun} doesn’t describe itself.</p>
         )}
@@ -666,7 +668,9 @@ function PackageDetailPage({
               <InfoRow label="Kind">{pkg.skin.format === 'winamp' ? 'Winamp classic skin (.wsz)' : 'Windows Media Player skin (.wmz)'}</InfoRow>
             ) : null}
             {pkg.type === 'extension' && pkg.version ? <InfoRow label="Version">{pkg.version}</InfoRow> : null}
-            {pkg.type === 'extension' && pkg.manifestVersion ? <InfoRow label="Manifest">{`Version ${pkg.manifestVersion}`}</InfoRow> : null}
+            {pkg.type === 'extension' && pkg.minimumChrome ? <InfoRow label="Needs">{`Chrome ${pkg.minimumChrome} or later`}</InfoRow> : null}
+            {pkg.type === 'extension' && pkg.license ? <InfoRow label="License">{pkg.license}</InfoRow> : null}
+            {pkg.type === 'extension' && pkg.repository ? <InfoRow label="Source code">{pkg.repository}</InfoRow> : null}
             {pkg.inherits.length > 0 && <InfoRow label="Builds on">{pkg.inherits.join(', ')}</InfoRow>}
             <InfoRow label="Creator">{author.name ?? 'Unknown'}</InfoRow>
             <InfoRow label="Updated">{updated}</InfoRow>
