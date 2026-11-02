@@ -98,6 +98,11 @@ export interface FileData {
   bytes: ArrayBuffer;
 }
 
+/** The theme as the desktop sends it: the snapshot, and its scheme for the runtime's `dark` class. */
+export interface ThemeData extends ThemeSnapshot {
+  scheme: 'light' | 'dark';
+}
+
 /** The desktop's first message: everything the app reads synchronously. */
 export interface Hello {
   type: 'hello';
@@ -106,7 +111,7 @@ export interface Hello {
   launch: Omit<LaunchContext, 'files'> & { files: HandleData[] };
   state: WindowState;
   frameStyle: FrameStyle;
-  theme: ThemeSnapshot;
+  theme: ThemeData;
   permissions: Permission[];
   /**
    * localStorage entries the app kept on the desktop's origin before it
@@ -259,7 +264,7 @@ export interface ReplyMessage {
 export type Push =
   | { type: 'state'; state: WindowState }
   | { type: 'frameStyle'; style: FrameStyle }
-  | { type: 'theme'; theme: ThemeSnapshot }
+  | { type: 'theme'; theme: ThemeData }
   | { type: 'launch'; launch: Omit<LaunchContext, 'files'> & { files: HandleData[] } }
   | { type: 'menuAction'; id: string }
   | { type: 'closeRequest'; request: number }

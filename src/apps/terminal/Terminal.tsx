@@ -8,7 +8,7 @@ import { SquareTerminal } from 'lucide-react';
 import { getPtyBridge, type PtyBridge } from '@/lib/pty';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
-import { useDin, useDinTheme, useWindowAccent, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDinTheme, useMediaQuery, useWindowAccent, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { adoptedTab, hasAdoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
@@ -87,12 +87,15 @@ const terminalTheme = (dark: boolean, selection = currentSelection) => {
   return selection ? { ...palette, selectionBackground: selection } : palette;
 };
 
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
 /**
- * Whether Din is dark right now (din.theme, which follows the Light/Dark/System
- * setting and a custom theme's own background alike). Sessions live outside
- * React, so the window sets it here and they repaint when it changes.
+ * Whether Din is dark right now (prefers-color-scheme, which follows the
+ * Light/Dark/System setting and a custom theme's own background alike).
+ * Sessions live outside React, so the window sets it here and they repaint
+ * when it changes.
  */
-let currentDark = window.din?.theme.current.scheme === 'dark';
+let currentDark = matchMedia(DARK_QUERY).matches;
 /** Selected text's color on the desktop, which the terminal's selection takes too. */
 let currentSelection = selectionOf(window.din?.theme.current.tokens);
 const darkListeners = new Set<(dark: boolean, schemeChanged: boolean) => void>();
@@ -469,7 +472,7 @@ export function Terminal() {
   const params = din.app.launch.params;
   const bridge = getPtyBridge();
   const theme = useDinTheme();
-  const dark = theme.scheme === 'dark';
+  const dark = useMediaQuery(DARK_QUERY);
   const selection = selectionOf(theme.tokens);
   useLayoutEffect(() => setDinLook(dark, selection), [dark, selection]);
   // The whole window is the terminal's color: the header's tokens follow its

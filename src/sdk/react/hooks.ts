@@ -51,6 +51,18 @@ export function useDinTheme(): ThemeSnapshot {
   );
 }
 
+/** Whether a media query matches (`(prefers-color-scheme: dark)`), re-rendering when that changes. */
+export function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const list = matchMedia(query);
+      list.addEventListener('change', cb);
+      return () => list.removeEventListener('change', cb);
+    },
+    () => matchMedia(query).matches,
+  );
+}
+
 /** The drag going on anywhere on the desktop, or null. */
 export function useCurrentDrag(): DragInfo | null {
   const din = useDin();

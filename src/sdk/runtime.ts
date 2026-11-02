@@ -55,7 +55,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
-import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
+import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import {
@@ -243,7 +243,7 @@ function markAccessibility(): void {
 }
 
 /** Apply the desktop's theme to this document. */
-function applyTheme(theme: ThemeSnapshot, loadedFaces: Set<string>): void {
+function applyTheme(theme: ThemeData, loadedFaces: Set<string>): void {
   const root = document.documentElement;
   root.classList.remove('light', 'dark');
   root.classList.add(theme.scheme);
@@ -785,18 +785,13 @@ export function installDin(transport: Transport): void {
 
   // ---- theme ----
   const loadedFaces = new Set<string>();
-  let themeSnapshot: ThemeSnapshot = {
-    scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-    tokens: {},
-    fontFaces: [],
-    icons: {},
-  };
+  let themeSnapshot: ThemeSnapshot = { tokens: {}, fontFaces: [], icons: {} };
   const themes = new Emitter<ThemeSnapshot>();
+  const takeTheme = ({ scheme: _, ...snapshot }: ThemeData) => (themeSnapshot = snapshot);
   pushes.on((p) => {
     if (p.type !== 'theme') return;
-    themeSnapshot = p.theme;
-    applyTheme(themeSnapshot, loadedFaces);
-    themes.emit(themeSnapshot);
+    applyTheme(p.theme, loadedFaces);
+    themes.emit(takeTheme(p.theme));
   });
   const theme: DinTheme = {
     get current() {
@@ -989,8 +984,8 @@ export function installDin(transport: Transport): void {
     launched(hello.launch);
     state = hello.state;
     frameStyle = hello.frameStyle;
-    themeSnapshot = hello.theme;
-    applyTheme(themeSnapshot, loadedFaces);
+    takeTheme(hello.theme);
+    applyTheme(hello.theme, loadedFaces);
     markAccessibility();
     currentDrag = hello.drag;
     reportDragOver(hello.drag !== null);

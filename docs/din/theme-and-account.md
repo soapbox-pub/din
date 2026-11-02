@@ -14,18 +14,21 @@ the app's `:root` as the same CSS custom properties Din uses
 `color-scheme` and the `dark` class, and loads the fonts. Tailwind classes
 and shadcn/ui components then match without any code.
 
-For anything drawn by hand (canvases, terminals, charts):
+Light or dark is the web's `prefers-color-scheme`, which follows Din's
+setting and a profile theme's background alike (Din sets Chromium's own
+mode, `electron/main.mts`), in stylesheets and `matchMedia` as on any page;
+`useMediaQuery('(prefers-color-scheme: dark)')` re-renders on a change.
+For anything else drawn by hand (canvases, terminals, charts):
 
 ```ts
-const { scheme, tokens, fonts } = din.theme.current;
+const { tokens, fontFaces } = din.theme.current;
 din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 ```
 
 | Field | |
 |---|---|
-| `scheme` | `light` or `dark` |
 | `tokens` | Every design token, without the `--` |
-| `fonts` | `{ sans, mono }` font stacks |
+| `fontFaces` | A profile theme's web fonts, which the runtime loads |
 | `icons` | The icon theme's file-type icons by name, or `{}` |
 
 The interface zoom is the page's own `devicePixelRatio`: the desktop

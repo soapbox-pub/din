@@ -1,4 +1,4 @@
-import type { ThemeSnapshot } from '@/sdk/din';
+import type { ThemeData } from '@/sdk/protocol';
 import { themeFontFaces } from '@/lib/themeFontFaces';
 import { fileThemeIcons } from '@/shared/themeIcons';
 import { INCREASE_CONTRAST_ATTRIBUTE } from '@/lib/accessibility';
@@ -10,7 +10,7 @@ import { INCREASE_CONTRAST_ATTRIBUTE } from '@/lib/accessibility';
  * (`--tw-*`) stay out. Settings → Accessibility reach apps as media
  * features instead (electron/accessibility.mts).
  */
-export function themeSnapshot(): ThemeSnapshot {
+export function themeSnapshot(): ThemeData {
   const root = document.documentElement;
   const computed = getComputedStyle(root);
   const tokens: Record<string, string> = {};

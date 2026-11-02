@@ -565,8 +565,12 @@ export interface DinClipboard {
 // din.theme: the desktop's look, applied to the app
 // ---------------------------------------------------------------------------
 
+/**
+ * Light or dark is the web's `prefers-color-scheme`, which follows Din's
+ * (a profile theme's too); the runtime also sets `color-scheme` and the
+ * `dark` class on `:root`.
+ */
 export interface ThemeSnapshot {
-  scheme: 'light' | 'dark';
   /**
    * Din's design tokens as CSS custom properties without the `--`
    * (`background`, `foreground`, `primary`, `radius`, …), as the desktop

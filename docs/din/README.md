@@ -93,6 +93,7 @@ For React apps, `src/sdk/react` adds:
 | `useCloseGuard(fn)` | `setCloseGuard` | `din.window.onCloseRequest` for as long as it's mounted |
 | `useMenuBar(menus, onAction)` | `<MenuBarMenus>` | A declarative menu bar ([menus.md](menus.md)) |
 | `useDinTheme()` | reading the desktop's CSS | The theme snapshot |
+| `useMediaQuery(query)` | `useTheme()` | Whether a media query matches (`prefers-color-scheme: dark`), re-rendering on change |
 | `useCurrentDrag()` | `files/dnd.ts`' `activeFileDrag` | The drag going on, for drop zones ([drag-and-drop.md](drag-and-drop.md)) |
 
 The pieces look and behave like the desktop's, and an app that lays out
