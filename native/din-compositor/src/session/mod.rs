@@ -31,6 +31,7 @@ mod input;
 mod output_management;
 mod render;
 mod screencopy;
+mod shake;
 mod shell;
 mod state;
 mod virtual_output;
@@ -91,6 +92,8 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    cursor::watch_settings(&event_loop.handle(), &mut state);
 
     event_loop
         .handle()

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
-import { FIND_MAX_SCALE, cursorEffects } from '@/lib/cursorEffects';
+import { cursorEffects } from '@/lib/cursorEffects';
 import type { CursorImage } from '@/lib/cursorEffects/scene';
 import { portalContainer } from '@/lib/portalContainer';
 import { setPowerMode } from '@/lib/powerMode';
@@ -13,21 +13,17 @@ import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
 import { useReducedMotion } from '@/shared/reducedMotion';
 
-/**
- * The pointer's own arrow, as big as it's drawn, from the theme's image
- * nearest `magnify` times its size (so it stays sharp drawn that much
- * bigger); null until it's known, or outside the shell.
- */
-function useCursorImage(wanted: boolean, zoom: number, magnify = 1): CursorImage | null {
+/** The pointer's own arrow, for Mouse Trails to copy; null until it's known, or outside the shell. */
+function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
   const status = useSystemCursorStatus();
   const theme = status.data?.theme;
   const size = status.data?.size;
   const { data } = useQuery({
-    queryKey: ['cursor', 'effect-image', theme, size, magnify],
+    queryKey: ['cursor', 'effect-image', theme, size],
     queryFn: async () => {
       const bridge = getSystemCursorBridge();
       if (!bridge || !theme || !size) return null;
-      const arrow = (await bridge.preview(theme, Math.min(256, Math.round(size * magnify)))).find((p) => p.role === 'default');
+      const arrow = (await bridge.preview(theme, size)).find((p) => p.role === 'default');
       if (!arrow) return null;
       const pixels = new Uint8ClampedArray(arrow.rgba.length);
       pixels.set(arrow.rgba);
@@ -52,7 +48,8 @@ function useCursorImage(wanted: boolean, zoom: number, magnify = 1): CursorImage
  * The layer cursor effects draw on (src/lib/cursorEffects): over the whole
  * screen, above everything, taking no input. Feeds the engine the user's
  * choices, the screen's size, and whether the system asks for less motion,
- * and switches power mode (src/lib/powerMode.ts), whose sparks it draws.
+ * and switches power mode (src/lib/powerMode.ts), whose sparks it draws,
+ * and din-shell's Shake to find the pointer.
  * It's in the desktop's layer, not <body>, so it stays on top while that
  * layer is a modal dialog for something fullscreen on another monitor.
  */
@@ -62,7 +59,6 @@ export function CursorEffectsLayer() {
   const host = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
   const cursor = useCursorImage(config.cursorTrail === 'mouse-trails', config.zoomLevel / 100);
-  const bigCursor = useCursorImage(config.cursorShakeToFind, config.zoomLevel / 100, FIND_MAX_SCALE);
 
   useEffect(() => {
     const el = host.current;
@@ -78,11 +74,10 @@ export function CursorEffectsLayer() {
       trail: config.cursorTrail,
       click: config.cursorClick,
       showMouse: config.cursorShowMouse,
-      shakeToFind: config.cursorShakeToFind,
       firePaint: config.cursorFirePaint,
       water: config.cursorWater,
     });
-  }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorShakeToFind, config.cursorFirePaint, config.cursorWater]);
+  }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorFirePaint, config.cursorWater]);
 
   useEffect(() => {
     setPowerMode(config.powerMode && !reduced, config.powerModeShake);
@@ -92,9 +87,11 @@ export function CursorEffectsLayer() {
     cursorEffects.setCursorImage(cursor);
   }, [cursor]);
 
+  // din-shell draws the pointer, so it's the one to make it big.
+  const shakeToFind = config.cursorShakeToFind && !reduced;
   useEffect(() => {
-    cursorEffects.setFindCursorImage(bigCursor);
-  }, [bigCursor]);
+    void getSystemCursorBridge()?.setShakeToFind(shakeToFind).catch(() => {});
+  }, [shakeToFind]);
 
   const tint = useCursorEffectTint(config.cursorThemeColor);
   useEffect(() => {

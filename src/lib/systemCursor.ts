@@ -32,6 +32,8 @@ export interface SystemCursorStatus {
   canChange: boolean;
   /** Whether a change is the desktop's too (GNOME and the like), Din not being the desktop. */
   shared: boolean;
+  /** Whether din-shell draws the pointer, and so can make it big when the mouse is shaken. */
+  shellPointer: boolean;
 }
 
 export interface SystemCursorPreview {
@@ -115,6 +117,8 @@ export interface SystemCursorBridge {
   themes(): Promise<SystemCursorTheme[]>;
   preview(id: string, size: number): Promise<SystemCursorPreview[]>;
   set(choice: { theme: string; size: number }): Promise<void>;
+  /** Whether shaking the mouse makes the pointer big (din-shell's; only where `shellPointer`). */
+  setShakeToFind(on: boolean): Promise<void>;
   /**
    * Import the themes and effect packages in a file or folder (absolute
    * path) and use the first theme; resolves with their ids.

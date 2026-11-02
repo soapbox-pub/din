@@ -1026,6 +1026,13 @@ expose('cursor', {
   set: (choice) => ipcRenderer.invoke('cursor:set', choice),
 
   /**
+   * Whether shaking the mouse makes the pointer big; din-shell's to do, so
+   * only where status().shellPointer.
+   * @param {boolean} on
+   */
+  setShakeToFind: (on) => ipcRenderer.invoke('cursor:shake-to-find', on),
+
+  /**
    * Import the cursor themes and effect packages in a file or folder and
    * make the first theme the pointer's; resolves with { themes, effects },
    * their ids.

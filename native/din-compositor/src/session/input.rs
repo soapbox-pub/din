@@ -247,6 +247,7 @@ impl State {
         let under = self.surface_under(location);
         pointer.motion(self, under.clone(), &MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time });
         pointer.frame(self);
+        self.shake.moved(location, self.clock.now().into());
         self.queue_redraw_pointer();
 
         // A constraint takes effect once the pointer is inside it.

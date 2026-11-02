@@ -53,7 +53,7 @@ use smithay::{
     },
 };
 
-use super::{cursor, drm, gamma, output_management, screencopy, shell, virtual_output, virtual_pointer};
+use super::{cursor, drm, gamma, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
 
 /// CLOCK_MONOTONIC, the clock presentation times are in.
 const CLOCK_MONOTONIC: u32 = 1;
@@ -111,6 +111,7 @@ pub struct State {
     pub pending: shell::Pending,
     pub cursor_status: CursorImageStatus,
     pub cursor: cursor::Cursors,
+    pub shake: shake::Shake,
     pub dnd_icon: Option<DndIcon>,
     /// Keys the compositor took (a VT switch), whose release it takes too.
     pub suppressed_keys: Vec<Keysym>,
@@ -208,6 +209,7 @@ impl State {
             pending: shell::Pending::default(),
             cursor_status: CursorImageStatus::default_named(),
             cursor: cursor::Cursors::load(),
+            shake: shake::Shake::default(),
             dnd_icon: None,
             suppressed_keys: Vec::new(),
             pointer_devices: 0,

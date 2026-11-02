@@ -793,11 +793,14 @@ impl State {
         let output = head.output.clone();
         let Some(area) = self.space.output_geometry(&output) else { return };
         let scale = output.current_scale().fractional_scale();
+        // A pointer growing or shrinking on this display wants the next frame too.
+        let growing = self.shake.step(self.clock.now().into()) && pointer.is_some_and(|p| area.to_f64().contains(p));
         let mut scene = Scene {
             space: &self.space,
             pointer,
             cursor_status: &self.cursor_status,
             cursors: &mut self.cursor,
+            magnify: self.shake.scale(),
             dnd_icon: self.dnd_icon.as_ref(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, true);
@@ -815,7 +818,7 @@ impl State {
                 if damaged {
                     let feedback = presentation_feedback(&output, &self.space, &states);
                     match surface.queue_frame(Some(feedback)) {
-                        Ok(()) => screen.redraw = Redraw::Flipping { again: false },
+                        Ok(()) => screen.redraw = Redraw::Flipping { again: growing },
                         Err(err) => warn!("{}: queueing a frame: {err}", head.name),
                     }
                 } else {
@@ -831,7 +834,7 @@ impl State {
                         })
                         .expect("frame timer");
                     screen.estimated_vblank = Some(token);
-                    screen.redraw = Redraw::Flipping { again: false };
+                    screen.redraw = Redraw::Flipping { again: growing };
                 }
                 (damaged, states)
             }

@@ -309,6 +309,7 @@ impl State {
             pointer,
             cursor_status: &self.cursor_status,
             cursors: &mut self.cursor,
+            magnify: self.shake.scale(),
             dnd_icon: self.dnd_icon.as_ref(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, info.cursor);

@@ -37,6 +37,9 @@ pub struct Scene<'a> {
     pub pointer: Option<Point<f64, Logical>>,
     pub cursor_status: &'a CursorImageStatus,
     pub cursors: &'a mut Cursors,
+    /// How many times its size the pointer's drawn: past 1, Shake to find
+    /// the pointer draws the theme's arrow that big in place of any other.
+    pub magnify: f64,
     pub dnd_icon: Option<&'a DndIcon>,
 }
 
@@ -66,7 +69,29 @@ pub fn elements(
                 Kind::Unspecified,
             ));
         }
+        let big = scene.magnify > 1.001 && !matches!(scene.cursor_status, CursorImageStatus::Hidden);
         match scene.cursor_status {
+            _ if big => {
+                let px = scene.cursors.size as f64 * scale * scene.magnify;
+                if let Some(image) = scene.cursors.arrow(px) {
+                    // Physical pixels to each of the image's.
+                    let k = px / image.nominal.max(1) as f64;
+                    let location = at.to_physical(scale_xy) - image.hotspot.to_f64().upscale(k);
+                    let size =
+                        ((image.width as f64 * k / scale).round() as i32, (image.height as f64 * k / scale).round() as i32);
+                    if let Ok(element) = MemoryRenderBufferRenderElement::from_buffer(
+                        renderer,
+                        location,
+                        &image.buffer,
+                        None,
+                        None,
+                        Some(size.into()),
+                        Kind::Cursor,
+                    ) {
+                        elements.push(OutputElement::Memory(element));
+                    }
+                }
+            }
             CursorImageStatus::Hidden => {}
             CursorImageStatus::Surface(surface) => {
                 let hotspot = with_states(surface, |states| {

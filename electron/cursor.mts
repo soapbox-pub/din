@@ -14,6 +14,11 @@
 // GNOME and its kin, where that changes the desktop's pointer too
 // (desktop-settings.mts). Elsewhere (KDE) it only shows them.
 //
+// Under din-shell, which draws the pointer on the screen, Din tells it the
+// theme, size and whether Shake to find the pointer is on, in
+// $XDG_RUNTIME_DIR/din-shell-pointer, which it watches
+// (native/din-compositor/src/session/cursor.rs).
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -74,6 +79,8 @@ interface CursorStatus {
   canChange: boolean;
   /** Whether a change is the desktop's too, Din not being the desktop. */
   shared: boolean;
+  /** Whether din-shell draws the pointer, and so can make it big when the mouse is shaken. */
+  shellPointer: boolean;
 }
 
 /** One cursor of a theme, as straight (not premultiplied) RGBA. */
@@ -227,6 +234,31 @@ async function apply(theme: string, size: number): Promise<void> {
   await gsettings('set', SCHEMA, 'cursor-theme', theme);
   await gsettings('set', SCHEMA, 'cursor-size', String(size));
   exportEnvironment(theme, size);
+  void tellShell();
+}
+
+// ---------------------------------------------------------------------------
+// din-shell
+// ---------------------------------------------------------------------------
+
+/** Whether Din is on din-shell, which names its Wayland socket so (session/mod.rs). */
+const onShell = process.env.WAYLAND_DISPLAY === 'din-shell' && !!process.env.XDG_RUNTIME_DIR;
+
+let shakeToFind = false;
+
+/** Tell din-shell the pointer's theme and size and whether a shake makes it big. */
+async function tellShell(): Promise<void> {
+  if (!onShell) return;
+  const { theme, size } = await current();
+  const file = path.join(process.env.XDG_RUNTIME_DIR!, 'din-shell-pointer');
+  const temp = `${file}.${process.pid}`;
+  try {
+    // Renamed into place, so din-shell never reads half of it.
+    await fs.writeFile(temp, `theme=${theme}\nsize=${size}\nshake-to-find=${shakeToFind ? 1 : 0}\n`);
+    await fs.rename(temp, file);
+  } catch (error) {
+    console.warn('Could not tell din-shell about the pointer:', error);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +420,23 @@ export function registerCursorHandlers(options: {
   ipcMain.handle('cursor:status', async (event): Promise<CursorStatus> => {
     assertShellSender(event);
     const { theme, size } = await current();
-    return { theme, size, sizes: SIZES, fixedSize: await hasFixedSize(theme), canChange: canChange(), shared: settingsOwner() === 'shared' };
+    return {
+      theme,
+      size,
+      sizes: SIZES,
+      fixedSize: await hasFixedSize(theme),
+      canChange: canChange(),
+      shared: settingsOwner() === 'shared',
+      shellPointer: onShell,
+    };
+  });
+
+  ipcMain.handle('cursor:shake-to-find', async (event, on: unknown) => {
+    assertShellSender(event);
+    if (typeof on !== 'boolean') throw new Error('Not a boolean');
+    if (on === shakeToFind) return;
+    shakeToFind = on;
+    await tellShell();
   });
 
   ipcMain.handle('cursor:themes', async (event) => {
