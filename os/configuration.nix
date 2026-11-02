@@ -269,6 +269,16 @@ let
     '';
   };
 
+  # Pairs an Apple accessory over Bluetooth when it's plugged in by USB, as a
+  # Mac does (see the script, and din-apple-pair@ below).
+  din-apple-pair = pkgs.writeShellApplication {
+    name = "din-apple-pair";
+    runtimeInputs = [ pkgs.python3 config.systemd.package ];
+    text = ''
+      exec python3 -I ${./din-apple-pair.py} "$@"
+    '';
+  };
+
   # The `din` command: everything a user can do on Din, from a shell
   # (docs/din-command.md). Its client, din-cli.mjs (compiled with the rest
   # of electron/ and installed with it), runs on Din's own Electron as
@@ -1049,15 +1059,36 @@ in
   # The next remaps keys the way hwdb does, from the file din-keyboard
   # writes when the layout needs it (os/din-keyboard.sh).
   #
-  # The last gives `din` the Android phones libmtp's rules (69-libmtp.rules)
+  # The next gives `din` the Android phones libmtp's rules (69-libmtp.rules)
   # found speaking MTP, for jmtpfs (electron/phone-usb.mts).
+  #
+  # The last pairs a Magic Mouse, Keyboard or Trackpad plugged in by USB
+  # (din-apple-pair@, below), for each of an Apple USB device's HID
+  # interfaces: the helper finds the one that answers.
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
     SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/dinos-esp"
     ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TEST=="/var/lib/din/keyboard-remap", IMPORT{file}="/var/lib/din/keyboard-remap", IMPORT{builtin}="keyboard"
     ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", OWNER="din", MODE="0660"
+    ACTION=="add", SUBSYSTEM=="hidraw", SUBSYSTEMS=="usb", ATTRS{idVendor}=="05ac", TAG+="systemd", ENV{SYSTEMD_WANTS}+="din-apple-pair@%k.service"
   '';
+
+  # Pairs the Apple accessory on /dev/%I over Bluetooth (os/din-apple-pair.py)
+  # while it's plugged in, and connects it when it's unplugged: the unit is
+  # bound to the device, so it stops then. Not ordered after bluetooth.service,
+  # which the helper restarts; it waits for the adapter itself.
+  systemd.services."din-apple-pair@" = {
+    description = "Pair the Apple accessory on %I over Bluetooth";
+    bindsTo = [ "dev-%i.device" ];
+    after = [ "dev-%i.device" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${din-apple-pair}/bin/din-apple-pair pair %I";
+      ExecStop = "${din-apple-pair}/bin/din-apple-pair connect %I";
+    };
+  };
 
   # din-shell: Din on the screen. This is the entire graphical stack - no
   # X11, no display manager, no desktop: Din's own compositor (see
