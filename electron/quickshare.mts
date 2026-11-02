@@ -35,7 +35,9 @@
 //   share sheet is open). It joins it, connects to PORT there and says it's
 //   the same phone (ClientIntroduction), then both sides finish with
 //   Bluetooth and carry on over Wi-Fi, with the same keys. Without a hotspot
-//   the share stays on Bluetooth.
+//   the share stays on Bluetooth. While a share that came over Bluetooth
+//   goes on, this computer stops advertising and listening for beacons: the
+//   card's Bluetooth shares its 2.4 GHz radio with Wi-Fi, and slows it.
 // - Sharing: the phone offers files or a piece of text (Introduction).
 //   Anyone could be sending, since only Google's own devices can prove
 //   they're "yours" or a contact's, so the user is asked, with the PIN: in
@@ -100,6 +102,8 @@ const PROGRESS_MS = 250;
 const SPARE_BYTES = 64 * 1024 * 1024;
 /** How long the share-sheet beacon of one of the user's phones keeps this computer visible. */
 const NEARBY_MS = 90_000;
+/** How long after the share-sheet beacon stops the hotspot waiting for the share stays up. */
+const BEACON_GONE_MS = 20_000;
 /** Quick Share's share-sheet beacon (fast initiation), as BlueZ names its service data. */
 const FAST_INIT_UUID = '0000fe2c-0000-1000-8000-00805f9b34fb';
 /** The weakest signal (dBm) the share-sheet scan hears: a phone in the room. */
@@ -143,8 +147,9 @@ const leases = new Map<number, () => void>();
 /** Until when a phone's share sheet keeps this computer visible (ms), and its timer. */
 let nearbyUntil = 0;
 let nearbyTimer: NodeJS.Timeout | null = null;
-/** Keeps the hotspot up while a phone's share sheet keeps this computer visible. */
+/** Keeps the hotspot up while a phone's share sheet is open, and its timer. */
 let nearbyHotspot: (() => void) | null = null;
+let beaconTimer: NodeJS.Timeout | null = null;
 /** The adapter scanning for share sheets, or null when not scanning. */
 let scanning: string | null = null;
 let unwatchScan: (() => void) | null = null;
@@ -983,7 +988,10 @@ class Connection {
     setTimeout(() => this.socket.destroy(), 1000).unref();
     this.releaseHotspot?.();
     this.releaseHotspot = null;
-    if (this.bluetooth) void apply();
+    if (this.bluetooth) {
+      void apply();
+      checkPhones();
+    }
   }
 }
 
@@ -1162,7 +1170,8 @@ async function withdraw(): Promise<void> {
  */
 function apply(again = false): Promise<void> {
   applying = applying.then(async () => {
-    advertiseOverBluetooth(listening() ? bleAdvertisement : null);
+    // Not while a share over Bluetooth goes on, which it would slow.
+    advertiseOverBluetooth(listening() && !bluetoothBusy() ? bleAdvertisement : null);
     if (!receiving()) {
       clearTimeout(retry ?? undefined);
       retry = null;
@@ -1256,15 +1265,27 @@ function hasFastInit(serviceData: unknown): boolean {
 function shareSheetOpened(): void {
   const wasVisible = listening();
   nearbyUntil = Date.now() + NEARBY_MS;
-  nearbyHotspot ??= holdHotspot();
   clearTimeout(nearbyTimer ?? undefined);
   nearbyTimer = setTimeout(() => {
     nearbyTimer = null;
-    nearbyHotspot?.();
-    nearbyHotspot = null;
     void apply();
   }, NEARBY_MS + 100);
+  // The phone sends the beacon for as long as its share sheet is open, so
+  // the hotspot follows the beacon rather than the visibility: a share that
+  // starts later starts it again (Connection), only a little slower.
+  nearbyHotspot ??= holdHotspot();
+  clearTimeout(beaconTimer ?? undefined);
+  beaconTimer = setTimeout(() => {
+    beaconTimer = null;
+    nearbyHotspot?.();
+    nearbyHotspot = null;
+  }, BEACON_GONE_MS);
   if (!wasVisible) void apply();
+}
+
+/** Whether a share over Bluetooth is going on, which Din's own Bluetooth would slow (it shares the radio with Wi-Fi). */
+function bluetoothBusy(): boolean {
+  return [...connections.values()].some((c) => c.bluetooth);
 }
 
 /** A phone connected over Bluetooth (quickshare-bluetooth.mts). */
@@ -1274,8 +1295,9 @@ function bluetoothConnected(socket: net.Socket, peer: BluetoothPeer): void {
     return;
   }
   track(new Connection(socket, { bluetooth: peer }));
-  // The server, for the hotspot it'll be offered.
+  // The server, for the hotspot it'll be offered; and quiet Bluetooth while it's busy.
   void apply();
+  checkPhones();
 }
 
 async function startScan(): Promise<void> {
@@ -1324,13 +1346,17 @@ async function stopScan(): Promise<void> {
 
 let checkTimer: NodeJS.Timeout | null = null;
 
-/** Listen for share sheets while one of the user's phones may send and is connected; not otherwise. */
+/**
+ * Listen for share sheets while one of the user's phones may send and is
+ * connected, and isn't sharing over Bluetooth already (the scan would slow
+ * it: the radio's shared with Wi-Fi); not otherwise.
+ */
 function checkPhones(): void {
   if (checkTimer) return;
   checkTimer = setTimeout(() => {
     checkTimer = null;
     checkingPhones = checkingPhones.then(async () => {
-      const phones = await connectedFilePhones().catch(() => []);
+      const phones = bluetoothBusy() ? [] : await connectedFilePhones().catch(() => []);
       try {
         if (phones.length && !scanning) await startScan();
         else if (!phones.length && scanning) await stopScan();

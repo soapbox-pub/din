@@ -31,7 +31,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { app, ipcMain, session } from 'electron';
 import { setOnionProxyTorPort, startOnionProxy } from './onion-proxy.mts';
-import { HOTSPOT_IFACE } from './quickshare-hotspot.mts';
+import { HOTSPOT_IFACE, dropHotspot } from './quickshare-hotspot.mts';
 import { CommandError, runCommand } from './system.mts';
 
 type AssertSender = (event: Electron.IpcMainInvokeEvent) => void;
@@ -873,7 +873,8 @@ function passwordArgs(security: WifiSecurity, password: string): string[] {
 }
 
 /** Bring a saved profile up, rejecting with NetworkManager's reason. */
-function activate(uuid: string): Promise<string> {
+async function activate(uuid: string): Promise<string> {
+  await dropHotspot();
   return nmcli(['connection', 'up', 'uuid', uuid], NMCLI_CONNECT_TIMEOUT_MS);
 }
 
@@ -1125,6 +1126,7 @@ export function registerWifiHandlers(options: {
 
     const args = ['device', 'wifi', 'connect', ssid];
     if (password !== undefined) args.push('password', password);
+    await dropHotspot();
     try {
       await nmcli(args, NMCLI_CONNECT_TIMEOUT_MS);
     } catch (error) {

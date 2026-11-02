@@ -13,7 +13,9 @@
 // Bluetooth.
 //
 // It's up while something holds it (holdHotspot: a phone's share sheet open
-// nearby, a share over Bluetooth), and for LINGER_MS after.
+// nearby, a share over Bluetooth), and for LINGER_MS after. Joining another
+// network takes it down first (dropHotspot, network.mts): the card can't
+// move its own connection to another channel while it hosts one on this.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -29,7 +31,7 @@ const CONNECTION = 'Din Quick Share';
 /** This computer's address on it; NetworkManager hands phones the rest of the /24. */
 const GATEWAY = '10.42.0.1';
 /** How long it stays up once nothing holds it. */
-const LINGER_MS = 30_000;
+const LINGER_MS = 5_000;
 /** How long after failing to start it isn't tried again. */
 const FAILED_MS = 5 * 60_000;
 const COMMAND_MS = 30_000;
@@ -161,6 +163,20 @@ export function holdHotspot(): () => void {
 /** The hotspot once it's up, or null when there's none (nothing holds it, or it couldn't start). */
 export function hotspot(): Promise<Hotspot | null> {
   return current ?? Promise.resolve(null);
+}
+
+/**
+ * The computer is joining another network: take the hotspot down now, even
+ * if something holds it (a share waiting for it stays on Bluetooth). The
+ * next hold starts it again, on the new network's channel.
+ */
+export function dropHotspot(): Promise<void> {
+  clearTimeout(downTimer ?? undefined);
+  downTimer = null;
+  const was = current;
+  if (!was) return Promise.resolve();
+  current = null;
+  return serial(async () => ((await was) ? down() : undefined));
 }
 
 /** Din is quitting: take the hotspot down without waiting. */
