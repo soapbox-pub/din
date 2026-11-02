@@ -84,7 +84,9 @@ pub fn elements(
                         location,
                         &image.buffer,
                         None,
-                        None,
+                        // All of the image, however big it's drawn: without it,
+                        // smithay takes as much of the image as it's drawn big.
+                        Some(Rectangle::from_size((image.width as f64, image.height as f64).into())),
                         Some(size.into()),
                         Kind::Cursor,
                     ) {
@@ -125,7 +127,9 @@ pub fn elements(
                         location,
                         &image.buffer,
                         None,
-                        None,
+                        // All of the image, however big it's drawn: without it,
+                        // smithay takes as much of the image as it's drawn big.
+                        Some(Rectangle::from_size((image.width as f64, image.height as f64).into())),
                         Some(size.into()),
                         Kind::Cursor,
                     ) {

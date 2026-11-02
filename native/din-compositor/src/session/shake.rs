@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use smithay::utils::{Logical, Point};
-use tracing::info;
+use tracing::debug;
 
 /// How quickly the energy drains (a time constant, in seconds).
 const DRAIN: f64 = 0.5;
@@ -73,7 +73,7 @@ impl Shake {
                     let before = self.wanted();
                     self.energy += 1.0;
                     if before == 0.0 && self.wanted() > 0.0 {
-                        info!("shake: the pointer grows");
+                        debug!("shake: the pointer grows");
                     }
                 }
                 self.stroke = self.back;
@@ -117,7 +117,7 @@ impl Shake {
         let active = target > 0.0 || self.scale > 0.005 || self.velocity.abs() > 0.01;
         if !active {
             if self.peak > 0.0 {
-                info!("shake: the pointer grew to {:.1}×", 1.0 + self.peak);
+                debug!("shake: the pointer grew to {:.1}×", 1.0 + self.peak);
             }
             self.peak = 0.0;
             self.scale = 0.0;
