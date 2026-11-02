@@ -96,7 +96,7 @@ function askpassHelper(): string | null {
   const dir = process.env.XDG_RUNTIME_DIR || os.tmpdir();
   const file = path.join(dir, 'din-askpass-helper.sh');
   try {
-    fs.writeFileSync(file, `#!/bin/sh\nexec python3 '${ASKPASS_SCRIPT.replace(/'/g, `'\\''`)}' "$@"\n`, { mode: 0o700 });
+    fs.writeFileSync(file, `#!/bin/sh\nexec python3 -I '${ASKPASS_SCRIPT.replace(/'/g, `'\\''`)}' "$@"\n`, { mode: 0o700 });
     return file;
   } catch {
     return null;

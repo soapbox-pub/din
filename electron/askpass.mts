@@ -10,10 +10,12 @@
 //
 // - Approval. On DinOS sudo's PAM stack asks Din to approve the command
 //   before it asks for the password (os/din-password.py's `sudo check`, as
-//   root), wherever sudo runs, terminal or not, except at the prompt in Din's
-//   Terminal app, which root lets through itself. The user clicks Allow or Deny;
-//   nothing is typed. Root checks that this socket is Din's main process
-//   before it asks, so only Din can approve. "Allow for this conversation"
+//   root), wherever sudo runs, terminal or not. One with a terminal (typed
+//   in the Terminal, say) opens the dialog at once, since someone's waiting
+//   at it. The user clicks Allow or Deny; nothing is typed. Root checks that
+//   this socket is Din's main process before it asks, so only Din can
+//   approve, and Din answers only root asking for the sudo above it, so
+//   nothing else puts up an approval. "Allow for this conversation"
 //   has root grant the conversation as well. A request nobody answers, or
 //   Din not running, falls through to the password.
 // - The password, when sudo needs it and has no terminal to read it from:
@@ -22,6 +24,13 @@
 //   stays where it was typed and only the right one goes back to the helper.
 //   A command just denied isn't asked for it here at all, so Deny means
 //   deny; one reading the password from a terminal goes on to ask there.
+//   The password goes only to Din's helper that a real sudo started: the
+//   kernel names the process at the socket's other end (SO_PEERCRED), whose
+//   parent has to be setuid sudo, and which has to be din-askpass.py itself,
+//   run with python3 -I, writing to a pipe nothing of the user's holds but
+//   it. A program of the user's can still start sudo itself and trace its
+//   own helper (ptrace allows a parent that), but the dialog shows it and
+//   its command, and gets no further than asking.
 //
 // This module reads what sudo was asked to run, and who asked, from /proc
 // for the user to see, in words for a command of Din's own (describe). Cancel, the asker going away (its command was
@@ -29,9 +38,7 @@
 // fails as though nothing was typed.
 //
 // The session id is the asker's word, so a program could put its request in
-// a conversation; it gets no more than it would from the dialog. So is the
-// rest: a program that asks for approval itself only gets the answer, which
-// lets nothing run.
+// a conversation; it gets no more than it would from the dialog.
 //
 // "Allow for this conversation" with the password has din-password
 // (DIN_PASSWORD, as root) grant the conversation: its next sudos pass sudo's
@@ -105,6 +112,18 @@ const CHECK_TIMEOUT_MS = 15_000;
 const DENIED_MS = 60_000;
 const SESSION_ID = /^ses_[A-Za-z0-9]{1,64}$/;
 const PASSWORD_HELPER = process.env.DIN_PASSWORD;
+/**
+ * din-askpass.py, which sudo's askpass helper runs: DinOS's (the launcher's
+ * DIN_ASKPASS_SCRIPT) and the source tree's (electron/system-packages.mts).
+ */
+const ASKPASS_SCRIPTS = [process.env.DIN_ASKPASS_SCRIPT, path.join(import.meta.dirname, '../os/din-askpass.py')];
+/** Reads SO_PEERCRED off the socket handed to it as fd 3: "pid uid gid". */
+const PEERCRED = [
+  'import socket, struct',
+  's = socket.socket(fileno=3)',
+  'print(*struct.unpack("3i", s.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)))',
+  's.detach()',
+].join('\n');
 const UPDATER = process.env.DIN_UPDATER;
 /** Programs that only pass a command on: the one that asked is above them. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', 'nohup']);
@@ -141,6 +160,104 @@ function parentOf(pid: number): number {
 /** When a process started, to tell it from a later one with its pid. */
 function startOf(pid: number): string {
   return statOf(pid)[19] ?? '';
+}
+
+/** A process's real and effective uid, from /proc/<pid>/status. */
+function uidsOf(pid: number): [number, number] | null {
+  try {
+    const line = fs.readFileSync(`/proc/${pid}/status`, 'utf8').match(/^Uid:\s+(\d+)\s+(\d+)/m);
+    return line ? [Number(line[1]), Number(line[2])] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The process at the socket's other end, as the kernel has it (SO_PEERCRED). */
+function peerOf(socket: net.Socket): Promise<{ pid: number; uid: number } | null> {
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn('python3', ['-I', '-c', PEERCRED], { stdio: ['ignore', 'pipe', 'ignore', socket] });
+    const timer = setTimeout(() => child.kill(), CHECK_TIMEOUT_MS);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => (out += chunk));
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const [pid, uid] = out.trim().split(' ').map(Number);
+      resolve(code === 0 && Number.isInteger(pid) && pid > 1 && Number.isInteger(uid) ? { pid, uid } : null);
+    });
+  });
+}
+
+/** A real sudo of the user's: setuid root, so the user's processes can't pass for it. */
+function isSudo(pid: number): boolean {
+  const uids = uidsOf(pid);
+  return path.basename(argv(pid)[0] ?? '') === 'sudo' && uids !== null && uids[0] === process.getuid?.() && uids[1] === 0;
+}
+
+function sameContents(a: string, b: string | undefined): boolean {
+  if (!b) return false;
+  try {
+    return fs.readFileSync(a).equals(fs.readFileSync(b));
+  } catch {
+    return false;
+  }
+}
+
+/** The pipe a process writes its stdout to ("pipe:[123]"), or null for anything else. */
+function stdoutPipe(pid: number): string | null {
+  try {
+    const target = fs.readlinkSync(`/proc/${pid}/fd/1`);
+    return target.startsWith('pipe:') ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a process of the user's other than `pid` has `pipe` open: sudo's own fds can't be read. */
+function pipeHeldElsewhere(pipe: string, pid: number): boolean {
+  for (const entry of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry) || Number(entry) === pid) continue;
+    let fds: string[];
+    try {
+      fds = fs.readdirSync(`/proc/${entry}/fd`);
+    } catch {
+      continue;
+    }
+    for (const fd of fds) {
+      try {
+        if (fs.readlinkSync(`/proc/${entry}/fd/${fd}`) === pipe) return true;
+      } catch {
+        // Gone, or closed meanwhile.
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether `peer` is Din's askpass helper that the real sudo `sudo` started,
+ * so the password it's answered goes to sudo: din-askpass.py run with
+ * python3 -I (no PYTHONPATH or the like to load other code), sudo's child,
+ * writing to a pipe that only sudo reads.
+ */
+function isHelperOf(peer: { pid: number; uid: number }, sudo: number): boolean {
+  if (peer.uid !== process.getuid?.() || parentOf(peer.pid) !== sudo || !isSudo(sudo)) return false;
+  const args = argv(peer.pid);
+  let exe: string;
+  try {
+    exe = fs.readlinkSync(`/proc/${peer.pid}/exe`);
+  } catch {
+    return false;
+  }
+  // sudo passes its prompt, after the script.
+  if (args.length < 3 || args.length > 4 || args[1] !== '-I' || !/^python3/.test(path.basename(args[0])) || !/^python3/.test(path.basename(exe))) {
+    return false;
+  }
+  const script = args[2];
+  if (!ASKPASS_SCRIPTS.some((trusted) => sameContents(script, trusted))) return false;
+  const pipe = stdoutPipe(peer.pid);
+  return pipe !== null && !pipeHeldElsewhere(pipe, peer.pid);
 }
 
 function nameOf(pid: number): string {
@@ -206,13 +323,17 @@ function settle(requestId: number, message: Record<string, string> = {}): void {
   else options?.sendToShell('askpass:cancel', { requestId });
 }
 
-function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean): void {
-  const args = typeof pid === 'number' && Number.isInteger(pid) && pid > 1 ? argv(pid) : [];
-  if (path.basename(args[0] ?? '') !== 'sudo' || !options?.hasShell()) {
+async function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean, tty: boolean): Promise<void> {
+  const sudo = typeof pid === 'number' && Number.isInteger(pid) && pid > 1 ? pid : 0;
+  const peer = sudo ? await peerOf(socket) : null;
+  // An approval only from root's din-password under that sudo (its PAM
+  // stack), the password only to the helper that sudo started.
+  const trusted = peer !== null && (approve ? peer.uid === 0 && parentOf(peer.pid) === sudo && isSudo(sudo) : isHelperOf(peer, sudo));
+  if (!trusted || socket.destroyed || !options?.hasShell()) {
     reply(socket, {});
     return;
   }
-  const sudo = pid as number;
+  const args = argv(sudo);
   if (!approve && denied.get(sudo) === startOf(sudo)) {
     reply(socket, {});
     return;
@@ -225,7 +346,7 @@ function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolea
     requester: direct ? 'Din' : requesterOf(sudo),
     command: ['sudo', ...args.slice(1).filter((arg) => !direct || arg !== '-A')].map(quote).join(' '),
     approve,
-    direct,
+    direct: direct || (approve && tty),
     action: described?.action ?? null,
     detail: described?.detail ?? null,
   };
@@ -324,14 +445,14 @@ function accept(socket: net.Socket): void {
       return;
     }
     started = true;
-    let request: { pid?: unknown; session?: unknown; approve?: unknown } = {};
+    let request: { pid?: unknown; session?: unknown; approve?: unknown; tty?: unknown } = {};
     try {
       const parsed: unknown = JSON.parse(buffer.slice(0, newline));
       if (typeof parsed === 'object' && parsed !== null) request = parsed;
     } catch {
       // Answered as nothing, below.
     }
-    ask(socket, request.pid, request.session, request.approve === true);
+    void ask(socket, request.pid, request.session, request.approve === true, request.tty === true);
   });
 }
 

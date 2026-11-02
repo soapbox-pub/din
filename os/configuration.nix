@@ -315,7 +315,7 @@ let
     name = "din-askpass";
     runtimeInputs = [ pkgs.python3 ];
     text = ''
-      exec python3 ${./din-askpass.py} "$@"
+      exec python3 -I ${./din-askpass.py} "$@"
     '';
   };
 
@@ -440,6 +440,9 @@ let
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
+    # sudo's askpass helper's script: Din answers the password only to it
+    # (electron/askpass.mts).
+    export DIN_ASKPASS_SCRIPT=${./din-askpass.py}
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
     # Screen recording (electron/screen-recorder.mts), through din-shell's
     # screencopy, encoded with VA-API.
@@ -732,9 +735,9 @@ in
   # own helpers run without asking; each takes only the commands it means to.
   #
   # It asks to approve the command in Din, with a click: in the Assistant's
-  # conversation for the agent's commands, else from a notification - in a
-  # terminal too (din-password's `sudo check`, in sudo's PAM stack below),
-  # except one typed at the prompt in Din's Terminal app, which it lets by.
+  # conversation for the agent's commands, else from a notification, or in
+  # Din's dialog at once for one with a terminal, typed in Din's Terminal
+  # too (din-password's `sudo check`, in sudo's PAM stack below).
   # Unanswered, denied in a terminal, or with no Din to ask (the text
   # console, SSH), it asks for the computer's password: `din`'s, which the
   # Installer sets to the disk's when it encrypts (os/din-install.sh).

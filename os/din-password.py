@@ -21,8 +21,7 @@ so Din can run it through sudo without a password.
     din-password sudo check
                            sudo's PAM stack (pam_exec, as root): succeeds when
                            the sudo above it runs in a granted conversation,
-                           was typed at a Din Terminal prompt, or Din
-                           approves it
+                           or Din approves it
 
 Passwords never go on a command line, where other users could read them:
 cryptsetup gets them through pipes, nostrd over its socket, din-keyring,
@@ -47,12 +46,10 @@ process din-shell's compositor starts, which nothing else `din` runs can
 become, and whose Electron takes no debugger (os/configuration.nix). Its
 `allow-session` answer grants the conversation, as `grant` does.
 
-A sudo typed at the prompt of a Din Terminal tab isn't asked to be approved:
-the user just asked for it. Root tells one from /proc: sudo is the tab's
-shell's foreground job, and that shell runs under the pty-host.py that Din's
-main process started. Scripts, subshells, the Assistant and terminal apps
-still ask. Anything already able to change what that shell runs (its rc
-files, say) gets the same pass, as it could get the user's password anyway.
+A sudo typed at the prompt of a Din Terminal tab is asked about too, and Din
+opens its dialog at once for one with a terminal. Nothing in /proc tells one
+the user typed from one a program they ran went on to exec, and anything
+writing to the tab could fake any mark the shell left.
 """
 
 import ctypes
@@ -365,35 +362,6 @@ def din_shell():
     return int(shown.stdout.strip() or 0)
 
 
-def typed_in_terminal(sudo, session):
-    """Whether sudo is a job the user started at a Din Terminal tab's prompt.
-
-    Its parent is the tab's shell, the shell's is pty-host.py running it as
-    a shell (not a terminal app), and pty-host's is Din's main process. sudo
-    holds the terminal, in a job of its own: not the shell's group, as
-    something its startup files ran would be.
-    """
-    if session:
-        return False
-    try:
-        compositor = din_shell()
-        chain = [sudo]
-        while len(chain) < 5 and chain[-1] > 1:
-            chain.append(stat(chain[-1])[0])
-        if compositor <= 1 or len(chain) < 5 or chain[4] != compositor:
-            return False
-        _, shell, host, _, _ = chain
-        args = proc(host, "cmdline").split(b"\0")
-        helper = next((i for i, arg in enumerate(args) if os.path.basename(arg) == b"pty-host.py"), None)
-        if helper is None or args[helper + 3 : helper + 4] != [b"shell"]:
-            return False
-        fields = proc(sudo, "stat").decode().rsplit(")", 1)[1].split()
-        group, leader, tty, foreground = int(fields[2]), int(fields[3]), int(fields[4]), int(fields[5])
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        return False
-    return tty != 0 and leader == shell and group == foreground and group != shell
-
-
 def ask_din(sudo, session):
     """Din's answer to approving sudo: allow, allow-session, deny, or None for none."""
     compositor = din_shell()
@@ -447,8 +415,6 @@ def sudo_check():
             return
         if sudo_status() != "approve":
             sys.exit(1)
-        if typed_in_terminal(sudo, session):
-            return
         answer = ask_din(sudo, session)
         if answer == "allow-session" and session:
             server = opencode_server(sudo)
