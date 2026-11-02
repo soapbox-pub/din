@@ -120,7 +120,6 @@ export function Viewer() {
   const [query, setQuery] = useState('');
   const [chosen, setSelected] = useState<Set<string>>(() => new Set());
   const anchor = useRef<string | null>(null);
-  const [listActive, setListActive] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const [widths, setWidths] = useState(loadWidths);
   const [dialog, setDialog] = useState<{ kind: 'setup' } | { kind: 'settings'; accountId: string | null } | null>(null);
@@ -521,7 +520,11 @@ export function Viewer() {
       {showSidebar && !noAccounts && (
         <>
           <aside className="flex shrink-0 flex-col border-r border-border/60 bg-background/30" style={{ width: widths.sidebar }}>
-            <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end gap-0.5 px-2">
+            <WindowDragRegion className="flex h-13 shrink-0 items-center gap-0.5 pr-2 pl-3">
+              <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="mr-1.5 size-4 shrink-0 object-contain" />
+              <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
+                Mail
+              </span>
               <ToolButton label={refreshing ? 'Getting new mail' : 'Get new mail'} onClick={refresh}>
                 <RefreshCw className={cn('size-4', refreshing && 'animate-spin motion-reduce:animate-none')} strokeWidth={1.75} />
               </ToolButton>
@@ -616,8 +619,6 @@ export function Viewer() {
                   onAction={(action, item) => void run(action, targetsFor(item))}
                   onMove={(item, path) => void moveTo(targetsFor(item), item.accountId, path)}
                   targetsFor={targetsFor}
-                  active={listActive}
-                  onActiveChange={setListActive}
                 />
               )}
             </section>

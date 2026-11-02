@@ -20,13 +20,11 @@ import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS } from './mailboxes';
 const MessageRow = ({
   item,
   selected,
-  active,
   recipients,
   className,
   ...props
-}: ComponentProps<'div'> & { item: Item; selected: boolean; active: boolean; recipients: boolean }) => {
+}: ComponentProps<'div'> & { item: Item; selected: boolean; recipients: boolean }) => {
   const who = recipients ? addressLine(item.to) || 'No Recipients' : displayName(item.from[0]) || 'Unknown Sender';
-  const highlight = selected && active;
   return (
     <div
       role="option"
@@ -35,29 +33,29 @@ const MessageRow = ({
       {...props}
       className={cn(
         'relative mx-2 flex cursor-default gap-1 rounded-lg py-2.5 pr-3 select-none [content-visibility:auto] [contain-intrinsic-size:auto_84px]',
-        highlight ? 'bg-primary text-primary-foreground' : selected ? 'bg-foreground/10' : 'hover:bg-foreground/[0.03]',
+        selected ? 'bg-foreground/10' : 'hover:bg-foreground/5',
         className,
       )}
     >
       <div className="flex w-5 shrink-0 justify-center pt-1.5">
-        {!item.seen && <span aria-label="Unread" className={cn('size-2.5 rounded-full', highlight ? 'bg-primary-foreground' : 'bg-primary')} />}
-        {item.seen && item.answered && <Reply aria-label="Replied" className={cn('size-3.5', highlight ? 'opacity-80' : 'text-muted-foreground')} />}
+        {!item.seen && <span aria-label="Unread" className={'size-2.5 rounded-full bg-primary'} />}
+        {item.seen && item.answered && <Reply aria-label="Replied" className={'size-3.5 text-muted-foreground'} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className={cn('min-w-0 flex-1 truncate text-[13px]', item.seen ? 'font-medium' : 'font-semibold')}>{item.draft && !recipients ? 'Draft' : who}</span>
-          <span className={cn('shrink-0 text-xs tabular-nums', highlight ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{listDate(item.date)}</span>
+          <span className={'shrink-0 text-xs text-muted-foreground tabular-nums'}>{listDate(item.date)}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[13px]">{item.subject || 'No Subject'}</span>
-          {item.hasAttachments && <Paperclip aria-label="Has attachments" className={cn('size-3.5 shrink-0', highlight ? 'opacity-80' : 'text-muted-foreground')} />}
-          {item.flagged && <Flag aria-label="Flagged" className={cn('size-3.5 shrink-0', highlight ? 'fill-current' : 'fill-orange-500 text-orange-500')} />}
+          {item.hasAttachments && <Paperclip aria-label="Has attachments" className={'size-3.5 shrink-0 text-muted-foreground'} />}
+          {item.flagged && <Flag aria-label="Flagged" className={'size-3.5 shrink-0 fill-orange-500 text-orange-500'} />}
         </div>
-        <p className={cn('mt-0.5 line-clamp-2 text-[13px] leading-snug', highlight ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+        <p className={'mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted-foreground'}>
           {item.preview ?? '\u00a0'}
         </p>
       </div>
-      {!highlight && <div aria-hidden className="absolute right-0 bottom-0 left-7 h-px bg-border/70" />}
+      {!selected && <div aria-hidden className="absolute right-0 bottom-0 left-7 h-px bg-border/70" />}
     </div>
   );
 };
@@ -96,8 +94,6 @@ export function MessageList({
   onAction,
   onMove,
   targetsFor,
-  active,
-  onActiveChange,
 }: {
   items: Item[];
   selected: Set<string>;
@@ -114,8 +110,6 @@ export function MessageList({
   onMove: (item: Item, path: string) => void;
   /** The messages a menu on this row acts on: the selection if the row is in it. */
   targetsFor: (item: Item) => Item[];
-  active: boolean;
-  onActiveChange: (active: boolean) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -150,10 +144,6 @@ export function MessageList({
       aria-activedescendant={lastSelected ? `msg-${lastSelected}` : undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      onFocus={() => onActiveChange(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onActiveChange(false);
-      }}
       className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2 outline-none"
     >
       {items.map((item) => {
@@ -170,7 +160,6 @@ export function MessageList({
                 item={item}
                 recipients={recipients}
                 selected={selected.has(item.key)}
-                active={active}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData(MAIL_DRAG, JSON.stringify(targets.map((t) => t.key)));
