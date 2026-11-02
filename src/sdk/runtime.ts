@@ -223,6 +223,9 @@ function applyTheme(theme: ThemeSnapshot, loadedFaces: Set<string>): void {
   root.classList.remove('light', 'dark');
   root.classList.add(theme.scheme);
   root.style.colorScheme = theme.scheme;
+  root.toggleAttribute('data-reduce-motion', theme.reducedMotion);
+  root.toggleAttribute('data-reduce-transparency', theme.reducedTransparency);
+  root.toggleAttribute('data-increase-contrast', theme.increasedContrast);
   for (const [name, value] of Object.entries(theme.tokens)) root.style.setProperty(`--${name}`, value);
   for (const face of theme.fontFaces) {
     const key = `${face.family}\u0000${face.url}`;
@@ -727,6 +730,8 @@ export function installDin(transport: Transport): void {
     fontFaces: [],
     zoom: 1,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    reducedTransparency: false,
+    increasedContrast: false,
     icons: {},
   };
   const themes = new Emitter<ThemeSnapshot>();

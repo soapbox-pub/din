@@ -40,6 +40,7 @@ import { categoryLabel, type ExtensionPackage } from '@/lib/extensionCatalog';
 import { formatBytes } from '@/lib/fs';
 import { packageCoordinate, parsePackageNaddr, type PackageAddress, type ThemePackage } from '@/lib/themePackages';
 import { cn } from '@/lib/utils';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 export interface ExtensionsPageProps {
   /** The extension whose page to open on, from a `nostr:` link to one. */
@@ -348,7 +349,7 @@ function Featured({ packages, handlers, onSelect }: { packages: ExtensionPackage
   const count = packages.length;
 
   useEffect(() => {
-    if (paused || count < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (paused || count < 2 || prefersReducedMotion()) return;
     const timer = setInterval(() => setIndex((i) => (i + 1) % count), FEATURE_MS);
     return () => clearInterval(timer);
   }, [paused, count]);

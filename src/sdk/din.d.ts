@@ -562,8 +562,19 @@ export interface ThemeSnapshot {
   fontFaces: { family: string; url: string }[];
   /** The desktop's interface zoom. The desktop already scales the window; for canvas apps. */
   zoom: number;
-  /** The user prefers reduced motion. */
+  /**
+   * The user prefers reduced motion: the system says so, or Settings →
+   * Accessibility. The SDK marks the app's root `data-reduce-motion`, which
+   * Tailwind's `motion-safe:` and `motion-reduce:` follow.
+   */
   reducedMotion: boolean;
+  /** Settings → Accessibility → Reduce transparency (or Increase contrast); the root is marked `data-reduce-transparency`. */
+  reducedTransparency: boolean;
+  /**
+   * Settings → Accessibility → Increase contrast; the root is marked
+   * `data-increase-contrast`, and the tokens are already the stronger ones.
+   */
+  increasedContrast: boolean;
   /**
    * File-type icons from the system's icon theme, as data URLs keyed by
    * freedesktop icon name (`folder`, `image-x-generic`, …). Empty while Din

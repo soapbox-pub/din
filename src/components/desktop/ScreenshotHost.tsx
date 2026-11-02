@@ -33,6 +33,7 @@ import {
   type ScreenshotRequest,
   type ViewportRect,
 } from '@/lib/screenshot';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /** How long the thumbnail stays up after a capture, unless hovered. */
 const THUMBNAIL_MS = 5000;
@@ -234,7 +235,7 @@ export function ScreenshotHost() {
  * it showed up whitened in the next capture.
  */
 function flashScreen(): void {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (prefersReducedMotion()) return;
   const layer = document.createElement('div');
   layer.setAttribute('aria-hidden', 'true');
   layer.style.cssText =

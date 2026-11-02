@@ -83,6 +83,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   nostr: 'nostr',
   connected: { not: 'giving apps the signer is only done by hand' },
   datetime: 'datetime',
+  accessibility: 'settings',
   about: 'update',
   developers: { not: 'debugging the desktop itself' },
 };

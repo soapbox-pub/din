@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /** Pointer travel before a press turns into a drag, in CSS pixels. */
 const DRAG_THRESHOLD = 5;
@@ -48,7 +49,7 @@ function settle(el: HTMLElement, delta: number, axis: ReorderAxis): void {
   const release = () => {
     if (el.dataset.reorderDragging === undefined) el.style.transition = '';
   };
-  if (!delta || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (!delta || prefersReducedMotion()) {
     el.style.transform = '';
     release();
     return;

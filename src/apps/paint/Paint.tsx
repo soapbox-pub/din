@@ -47,6 +47,7 @@ import {
   type Rect,
 } from './paint/raster';
 import { setSoundEnabled, sfx, startScribble, scribbleSpeed, stopScribble, type ScribbleKind } from './paint/sounds';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 const MAX_UNDO = 40;
 const MAX_BYTES = 256 * 1024 * 1024;
@@ -779,7 +780,7 @@ export function Paint() {
     };
     const c = fxRef.current;
     const ctx = c?.getContext('2d');
-    if (!c || !ctx || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!c || !ctx || prefersReducedMotion()) {
       boom();
       return;
     }

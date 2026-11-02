@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
@@ -11,14 +11,7 @@ import { setPowerMode } from '@/lib/powerMode';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
-
-const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
-
-function subscribeReducedMotion(onChange: () => void): () => void {
-  const query = window.matchMedia(REDUCED_MOTION);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-}
+import { useReducedMotion } from '@/shared/reducedMotion';
 
 /**
  * The pointer's own arrow, as big as it's drawn, from the theme's image
@@ -67,7 +60,7 @@ export function CursorEffectsLayer() {
   const { config } = useAppContext();
   const layout = useContext(MonitorsContext);
   const host = useRef<HTMLDivElement>(null);
-  const reduced = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(REDUCED_MOTION).matches, () => false);
+  const reduced = useReducedMotion();
   const cursor = useCursorImage(config.cursorTrail === 'mouse-trails', config.zoomLevel / 100);
   const bigCursor = useCursorImage(config.cursorShakeToFind, config.zoomLevel / 100, FIND_MAX_SCALE);
 

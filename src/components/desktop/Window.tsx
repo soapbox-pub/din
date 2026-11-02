@@ -59,6 +59,7 @@ import {
   type WorkArea,
 } from '@/lib/monitors';
 import { guestElements, isGuestFullscreen } from '@/platform/guest';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /**
  * Dragging with the pointer within this many pixels of a monitor's top edge
@@ -728,7 +729,7 @@ export const Window = memo(function Window({
     };
     settleZ();
 
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (prefersReducedMotion()) return;
 
     const minimizing = win.minimized;
     // Random draws an effect at minimize; restore plays that one back.
@@ -910,7 +911,7 @@ export const Window = memo(function Window({
     const from = paintedRect.current;
     if (!el || !from || win.minimized || win.away) return;
     if (dragState.current || resizeState.current) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (prefersReducedMotion()) return;
 
     animCancel.current?.();
     animCancel.current = null;
@@ -988,7 +989,7 @@ export const Window = memo(function Window({
       !el ||
       win.minimized ||
       effect === 'none' ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      prefersReducedMotion()
     ) {
       destroy(win.id);
       return;
@@ -1041,7 +1042,7 @@ export const Window = memo(function Window({
         const effect = resolveEffect(choice, event);
         if (effect === 'none') return;
         if (effect === 'pop') {
-          if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+          if (prefersReducedMotion()) return;
           const gone = { opacity: 0, scale: '0.95' };
           const pop = el.animate(
             [{ opacity: 1, scale: '1' }, { ...gone, offset: 0.25 }, { ...gone, offset: 0.7 }, { opacity: 1, scale: '1' }],
@@ -1167,7 +1168,7 @@ export const Window = memo(function Window({
 
       const wobblyEnabled =
         config.wobblyWindows &&
-        !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        !prefersReducedMotion();
       if (!wobblyEnabled) {
         // A rigid drag interrupts any leftover jiggle from a settings change.
         stopWobble(false);
@@ -1309,7 +1310,7 @@ export const Window = memo(function Window({
         // staying rigid until the next grab.
         if (
           config.wobblyWindows &&
-          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          !prefersReducedMotion()
         ) {
           const st: WobblyDrag = {
             model: createModel(x, y, width, height),

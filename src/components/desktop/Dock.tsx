@@ -36,6 +36,7 @@ import { DOCK_STYLES } from '@/lib/dockStyles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { TileMenuContent } from '@/components/desktop/TileMenuContent';
 import { useMenuAbove, type MenuAboveContentProps } from '@/hooks/useMenuAbove';
+import { useReducedMotion } from '@/shared/reducedMotion';
 
 /**
  * Width and height of one dock slot at rest in the previews, in px (icon plus
@@ -195,12 +196,7 @@ export function Dock({
 
   // Magnification is pointer-driven eye candy; skip it entirely for users
   // who prefer reduced motion (tiles then behave like plain buttons).
-  const reduceMotion = useMemo(
-    () =>
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    [],
-  );
+  const reduceMotion = useReducedMotion();
   const { config } = useAppContext();
   const magnifies = config.dockMagnification && !reduceMotion;
   const size = config.dockSize;

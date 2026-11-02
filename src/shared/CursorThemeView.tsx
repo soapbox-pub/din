@@ -7,6 +7,7 @@ import { ImportError, convertCursors } from '@/lib/cursorImport/convert';
 import { chromiumDecoder } from '@/lib/cursorImport/decoder';
 import { frameUrl, framesNear } from '@/shared/cursorFrames';
 import { Skeleton } from '@/components/ui/skeleton';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /** The nominal sizes the cursors are shown at, and tried at, for themes with several. */
 const SHOW_SIZE = 48;
@@ -227,7 +228,7 @@ function CursorImage({ frames }: { frames: PreviewImage[] }) {
   const animated = frames.length > 1;
 
   useEffect(() => {
-    if (!animated || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!animated || prefersReducedMotion()) return;
     const timer = window.setTimeout(
       () => setIndex((i) => (i + 1) % frames.length),
       Math.max(frames[index % frames.length].delay, 16),

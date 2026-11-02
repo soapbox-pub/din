@@ -20,6 +20,7 @@
 //   - window.dinos.keyboard: the system's keyboard layout, for Settings
 //   - window.dinos.datetime: the system's time zone and clock, for Settings
 //   - window.dinos.cursor: the pointer's theme and size, for Settings
+//   - window.dinos.accessibility: Settings → Accessibility, passed on to Linux apps
 //   - window.dinos.iconTheme: the icon theme, for Settings and Din's icons
 //   - window.dinos.tray: apps' status icons and their menus, for the menu bar
 //   - window.dinos.systemNotifications: Linux apps' and web pages' notifications,
@@ -987,6 +988,16 @@ expose('datetime', {
    * @param {string} time
    */
   setTime: (time) => ipcRenderer.invoke('datetime:set-time', time),
+});
+
+// Accessibility bridge (window.dinos.accessibility), backed by
+// electron/accessibility.mts: Reduce motion and Increase contrast, for the
+// Linux apps Din runs (GSettings, on DinOS).
+expose('accessibility', {
+  /**
+   * @param {{ reduceMotion: boolean, highContrast: boolean }} preferences
+   */
+  set: (preferences) => ipcRenderer.invoke('accessibility:set', preferences),
 });
 
 // Cursor bridge (window.dinos.cursor), backed by the cursor:* handlers in

@@ -175,6 +175,18 @@ export interface AppConfig {
    * applies. Device-specific, so it is kept local and never synced.
    */
   zoomLevel: number;
+  /**
+   * Accessibility (src/lib/accessibility.ts): Din's own motion is cut down
+   * to what's needed, as if the system preferred reduced motion, in the
+   * desktop and its apps.
+   */
+  reduceMotion: boolean;
+  /** Panels, menus and windows are solid instead of frosted glass. */
+  reduceTransparency: boolean;
+  /** Stronger borders, secondary text and focus rings; implies reduceTransparency. */
+  increaseContrast: boolean;
+  /** Text size, as a percentage (100 = normal), without scaling the rest of the layout as zoom does. */
+  textSize: number;
   /** Whether clocks (menu bar, boot and lock screens) show 12- or 24-hour time. */
   clockFormat: ClockFormat;
   /** Whether the menu-bar clock shows the weekday and date beside the time. */

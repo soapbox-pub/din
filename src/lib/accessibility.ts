@@ -1,0 +1,58 @@
+import { REDUCE_MOTION_ATTRIBUTE } from '@/shared/reducedMotion';
+
+/**
+ * Settings → Accessibility, applied. Each preference marks the desktop's
+ * root, where src/index.css acts on it; the theme Din sends its apps carries
+ * them (src/components/desktop/dinHost/theme.ts), so each app's root gets the
+ * same marks. On DinOS, Linux apps hear of them too, through GSettings
+ * (electron/accessibility.mts).
+ */
+
+export interface AccessibilityPreferences {
+  reduceMotion: boolean;
+  reduceTransparency: boolean;
+  increaseContrast: boolean;
+  /** A percentage; 100 is normal. */
+  textSize: number;
+}
+
+export const REDUCE_TRANSPARENCY_ATTRIBUTE = 'data-reduce-transparency';
+export const INCREASE_CONTRAST_ATTRIBUTE = 'data-increase-contrast';
+/** The root custom property every Tailwind text size is multiplied by. */
+export const TEXT_SCALE_PROPERTY = '--din-text-scale';
+
+export const MIN_TEXT_SIZE = 100;
+export const MAX_TEXT_SIZE = 200;
+export const TEXT_SIZE_STEP = 10;
+
+export function clampTextSize(percent: number): number {
+  return Math.min(MAX_TEXT_SIZE, Math.max(MIN_TEXT_SIZE, Math.round(percent)));
+}
+
+export interface AccessibilityBridge {
+  /** Pass the preferences on to Linux apps (GSettings); a no-op where Din isn't the desktop. */
+  set(preferences: { reduceMotion: boolean; highContrast: boolean }): Promise<void>;
+}
+
+declare global {
+  interface Dinos {
+    /** Present only inside the Electron shell. */
+    accessibility?: AccessibilityBridge;
+  }
+}
+
+export function getAccessibilityBridge(): AccessibilityBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.dinos?.accessibility;
+}
+
+/** Mark the document's root with the preferences. */
+export function applyAccessibility(preferences: AccessibilityPreferences): void {
+  const root = document.documentElement;
+  root.toggleAttribute(REDUCE_MOTION_ATTRIBUTE, preferences.reduceMotion);
+  root.toggleAttribute(REDUCE_TRANSPARENCY_ATTRIBUTE, preferences.reduceTransparency || preferences.increaseContrast);
+  root.toggleAttribute(INCREASE_CONTRAST_ATTRIBUTE, preferences.increaseContrast);
+  // Always set, so apps that took a larger size from the theme's tokens take
+  // the normal one back.
+  root.style.setProperty(TEXT_SCALE_PROPERTY, String(clampTextSize(preferences.textSize) / 100));
+}

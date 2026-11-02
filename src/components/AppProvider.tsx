@@ -3,6 +3,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme } from '@/contexts/AppContext';
 import { AppConfigSchema } from '@/lib/appConfigSchema';
 import { getZoomBridge } from '@/lib/zoom';
+import { applyAccessibility, getAccessibilityBridge } from '@/lib/accessibility';
 import { setConfiguredTheme } from '@/lib/rootScheme';
 
 interface AppProviderProps {
@@ -60,6 +61,8 @@ export function AppProvider(props: AppProviderProps) {
   // Apply the interface zoom level to the document root
   useApplyZoom(config.zoomLevel);
 
+  useApplyAccessibility(config);
+
   return (
     <AppContext.Provider value={appContextValue}>
       {children}
@@ -80,6 +83,16 @@ function useApplyZoom(zoomLevel: number) {
   useEffect(() => {
     getZoomBridge()?.set(zoomLevel / 100);
   }, [zoomLevel]);
+}
+
+/** Apply Settings → Accessibility to the document root, and pass it on to Linux apps. */
+function useApplyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize }: AppConfig) {
+  useEffect(() => {
+    applyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize });
+  }, [reduceMotion, reduceTransparency, increaseContrast, textSize]);
+  useEffect(() => {
+    void getAccessibilityBridge()?.set({ reduceMotion, highContrast: increaseContrast }).catch(() => {});
+  }, [reduceMotion, increaseContrast]);
 }
 
 /** Apply the Light/Dark/System setting to the document root (src/lib/rootScheme.ts). */

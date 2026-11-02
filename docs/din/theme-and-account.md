@@ -27,8 +27,16 @@ din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 | `tokens` | Every design token, without the `--` |
 | `fonts` | `{ sans, mono }` font stacks |
 | `zoom` | The interface zoom. The desktop already scales the webview; canvas apps use it for crisp pixels |
-| `reducedMotion` | Also reflected in `prefers-reduced-motion` |
+| `reducedMotion` | The system prefers reduced motion, or Settings → Accessibility asks for it. `prefers-reduced-motion` only knows the first; check `prefersReducedMotion()` (`src/shared/reducedMotion.ts`) or `motion-safe:` / `motion-reduce:`, which follow both |
+| `reducedTransparency` | Settings → Accessibility → Reduce transparency: draw solid surfaces instead of frosted glass |
+| `increasedContrast` | Settings → Accessibility → Increase contrast. The tokens already carry the stronger borders and text |
 | `icons` | The icon theme's file-type icons by name, or `{}` |
+
+Settings → Accessibility's preferences also mark the app's `:root`
+(`data-reduce-motion`, `data-reduce-transparency`, `data-increase-contrast`),
+and its Text size reaches the app as `--din-text-scale`, which Tailwind's
+`text-xs` to `text-2xl` are multiplied by. Size text with those classes and
+it grows with the setting.
 
 A profile theme (the signed-in user's colors) arrives as tokens like any
 other; apps don't need to know.

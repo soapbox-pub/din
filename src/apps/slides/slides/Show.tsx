@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { Deck, Slide, SlideCtx, Transition } from './model';
 import { SlideImage } from './render';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /**
  * Slide Show: the slides full screen on black, one at a time, with
@@ -36,7 +37,7 @@ export function SlideShow({ deck, start, ctxFor, onExit }: { deck: Deck; start: 
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [idle, setIdle] = useState(false);
   const idleTimer = useRef<number | null>(null);
-  const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const reduce = prefersReducedMotion();
 
   useEffect(() => {
     const el = rootRef.current;

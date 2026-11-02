@@ -1,4 +1,5 @@
 import {
+  Accessibility,
   BatteryFull,
   Bell,
   Bluetooth,
@@ -39,6 +40,7 @@ export type SectionId =
   | 'keyboard'
   | 'printers'
   | 'datetime'
+  | 'accessibility'
   | 'password'
   | 'notifications'
   | 'nostr'
@@ -218,6 +220,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Connected apps',
     icon: Link2,
     search: ['Connect an app', 'Sites and installed apps', 'Apps connected with a link', 'signer', 'bunker', 'Nostr Connect', 'remote signer', 'permissions', 'NIP-46'],
+  },
+  {
+    id: 'accessibility',
+    group: 'System',
+    name: 'Accessibility',
+    icon: Accessibility,
+    search: ['Reduce motion', 'Reduce transparency', 'Increase contrast', 'Text size', 'Makes text larger without zooming everything else.', 'Zoom', 'a11y', 'animation', 'blur', 'glass', 'high contrast', 'larger text', 'font size', 'vision', 'low vision', 'motion sickness', 'vestibular'],
   },
   {
     id: 'datetime',

@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from '@/shared/reducedMotion';
+
 /**
  * Shared logic for OverdriveSlider (src/components/ui/overdrive-slider.tsx)
  * and its read-only meter: ranges that can be pushed past their ends, the
@@ -67,10 +69,6 @@ export function position(value: number, { min, max, overMax, underMin }: Overdri
   if (overMax !== undefined && value > max) return 1 + ((value - max) / (overMax - max)) * REACH;
   if (underMin !== undefined && value < min) return -((min - value) / (min - underMin)) * REACH;
   return (Math.max(min, Math.min(max, value)) - min) / (max - min);
-}
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
 
 /** A small bump toward `direction` (1 = right), for a knock at the edge. */

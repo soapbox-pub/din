@@ -1,6 +1,8 @@
 import type { ThemeSnapshot } from '@/sdk/din';
 import { themeFontFaces } from '@/lib/themeFontFaces';
 import { fileThemeIcons } from '@/shared/themeIcons';
+import { onReducedMotionChange, prefersReducedMotion } from '@/shared/reducedMotion';
+import { INCREASE_CONTRAST_ATTRIBUTE, REDUCE_TRANSPARENCY_ATTRIBUTE } from '@/lib/accessibility';
 
 /**
  * The desktop's look as apps get it: every design token as the desktop
@@ -21,7 +23,9 @@ export function themeSnapshot(zoom: number): ThemeSnapshot {
     tokens,
     fontFaces: themeFontFaces(),
     zoom,
-    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    reducedMotion: prefersReducedMotion(),
+    reducedTransparency: root.hasAttribute(REDUCE_TRANSPARENCY_ATTRIBUTE),
+    increasedContrast: root.hasAttribute(INCREASE_CONTRAST_ATTRIBUTE),
     icons: fileThemeIcons(),
   };
 }
@@ -34,12 +38,14 @@ export function onThemeChange(listener: () => void): () => void {
     frame = requestAnimationFrame(listener);
   };
   const observer = new MutationObserver(schedule);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-icon-theme'] });
-  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  motion.addEventListener('change', schedule);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'data-icon-theme', REDUCE_TRANSPARENCY_ATTRIBUTE, INCREASE_CONTRAST_ATTRIBUTE],
+  });
+  const stopMotion = onReducedMotionChange(schedule);
   return () => {
     cancelAnimationFrame(frame);
     observer.disconnect();
-    motion.removeEventListener('change', schedule);
+    stopMotion();
   };
 }

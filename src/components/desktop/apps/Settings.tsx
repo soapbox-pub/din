@@ -1,6 +1,10 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
+  Blend,
+  Contrast,
+  Type,
+  Zap,
   BatteryFull,
   BellOff,
   Bomb,
@@ -65,6 +69,7 @@ import {
 } from '@/lib/display';
 import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
+import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, TEXT_SIZE_STEP, clampTextSize } from '@/lib/accessibility';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
 import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
@@ -113,7 +118,7 @@ import {
   useTimeZones,
 } from '@/hooks/useDateTime';
 import { useClock } from '@/hooks/useClock';
-import type { ClockFormat, DesktopLayout, TaskbarButtons, TaskbarPosition, TaskbarStyle } from '@/contexts/AppContext';
+import type { AppConfig, ClockFormat, DesktopLayout, TaskbarButtons, TaskbarPosition, TaskbarStyle } from '@/contexts/AppContext';
 import { useDesktopIcons } from '@/contexts/DesktopIconsContext';
 import { DESKTOP_ICON_SORTS, type DesktopIconSize } from '@/lib/desktopIcons';
 import {
@@ -373,6 +378,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <PrintersSettingsSection />
     ) : id === 'datetime' ? (
       <DateTimeSection />
+    ) : id === 'accessibility' ? (
+      <AccessibilitySection />
     ) : id === 'password' ? (
       <PasswordSection />
     ) : id === 'notifications' ? (
@@ -3216,7 +3223,7 @@ function EffectsSection({ windowId }: { windowId: string }) {
           </Label>
           <p className="text-xs text-muted-foreground">
             Windows wriggle like jelly while you drag them, Compiz style.
-            Automatically disabled when your system prefers reduced motion.
+            Off while Reduce motion is on, in Accessibility or the system.
           </p>
         </div>
         <Switch
@@ -3248,6 +3255,85 @@ function EffectsSection({ windowId }: { windowId: string }) {
 
       <p className="mb-3 mt-4 text-sm text-muted-foreground">Typing</p>
       <PowerModeSettings />
+    </SectionShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Din's own accessibility preferences (src/lib/accessibility.ts), which
+ * reach its apps with the theme and, on DinOS, Linux apps through GSettings.
+ */
+function AccessibilitySection() {
+  const { config, updateConfig } = useAppContext();
+  const set = (patch: Partial<AppConfig>) => updateConfig((current) => ({ ...current, ...patch }));
+  const textSize = clampTextSize(config.textSize);
+
+  return (
+    <SectionShell title="Accessibility">
+      <SubHeading>Display</SubHeading>
+      <SettingSwitchRow
+        id="reduce-motion"
+        icon={Zap}
+        label="Reduce motion"
+        description="Windows, the Dock and menus appear and move without animating, and effects like wobbly windows and cursor trails stay still. Apps are asked to do the same."
+        checked={config.reduceMotion}
+        onCheckedChange={(reduceMotion) => set({ reduceMotion })}
+      />
+      <SettingSwitchRow
+        id="reduce-transparency"
+        icon={Blend}
+        label="Reduce transparency"
+        description="The menu bar, Dock, windows and panels are solid instead of frosted glass."
+        checked={config.reduceTransparency || config.increaseContrast}
+        disabled={config.increaseContrast}
+        onCheckedChange={(reduceTransparency) => set({ reduceTransparency })}
+      />
+      <SettingSwitchRow
+        id="increase-contrast"
+        icon={Contrast}
+        label="Increase contrast"
+        description="Borders, fields and secondary text are darker in a light theme and lighter in a dark one, and the focused control gets a thick outline. Also reduces transparency."
+        checked={config.increaseContrast}
+        onCheckedChange={(increaseContrast) => set({ increaseContrast })}
+      />
+
+      <SubHeading>Size</SubHeading>
+      <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-start gap-3">
+          <Type className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="text-size" className="text-sm">Text size</Label>
+              <span className="text-xs tabular-nums text-muted-foreground">{textSize}%</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Makes text larger without zooming everything else.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground" aria-hidden>A</span>
+          <Slider
+            id="text-size"
+            aria-label="Text size"
+            value={[textSize]}
+            min={MIN_TEXT_SIZE}
+            max={MAX_TEXT_SIZE}
+            step={TEXT_SIZE_STEP}
+            onValueChange={([value]) => set({ textSize: clampTextSize(value) })}
+          />
+          <span className="text-lg text-muted-foreground" aria-hidden>A</span>
+        </div>
+      </div>
+      <DisplayZoomControl
+        available={getZoomBridge() !== undefined}
+        value={config.zoomLevel}
+        onChange={(percent) => set({ zoomLevel: clampZoom(percent) })}
+      />
     </SectionShell>
   );
 }

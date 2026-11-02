@@ -69,6 +69,10 @@ const SETTINGS: Setting[] = [
   { key: 'taskbar.position', field: 'taskbarPosition', help: 'The screen edge the taskbar runs along', param: { type: 'string', choices: ['bottom', 'top', 'left', 'right'] } },
   { key: 'taskbar.buttons', field: 'taskbarButtons', help: 'A taskbar button per app, its windows combined, or one per window', param: { type: 'string', choices: ['combine', 'separate'] } },
   { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent', param: { type: 'integer', min: 50, max: 200 } },
+  { key: 'accessibility.reduce-motion', field: 'reduceMotion', help: 'Keep animation to what’s needed, in Din and its apps', param: bool },
+  { key: 'accessibility.reduce-transparency', field: 'reduceTransparency', help: 'Solid panels, menus and windows instead of frosted glass', param: bool },
+  { key: 'accessibility.increase-contrast', field: 'increaseContrast', help: 'Stronger borders, secondary text and focus rings; also reduces transparency', param: bool },
+  { key: 'accessibility.text-size', field: 'textSize', help: 'Text size in percent, without zooming the rest', param: { type: 'integer', min: 100, max: 200 } },
   { key: 'datetime.clock-format', field: 'clockFormat', help: '12- or 24-hour time, or the locale’s', param: { type: 'string', choices: ['auto', '12', '24'] } },
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },
   { key: 'datetime.show-seconds', field: 'clockShowSeconds', help: 'The menu bar shows seconds', param: bool },
@@ -117,7 +121,7 @@ const KEY: Param = { name: 'key', type: 'string', positional: true, help: 'The s
 
 export const settingsArea: Area = {
   name: 'settings',
-  summary: 'Din’s preferences: theme, effects, Dock or taskbar, tiling, clock, sync…',
+  summary: 'Din’s preferences: theme, effects, Dock or taskbar, tiling, accessibility, clock, sync…',
   commands: [
     command('settings', 'list', 'Every setting, with its value', [
       { name: 'prefix', type: 'string', positional: true, optional: true, help: 'Only those under it, e.g. dock' },

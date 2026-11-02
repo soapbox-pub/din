@@ -100,6 +100,7 @@ import {
 } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { intentOf, type LaunchIntent } from './intents';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 const SUGGESTIONS = [
   'What’s taking up the most space in my home folder?',
@@ -829,7 +830,7 @@ function Conversation({
     stick.current = true;
     setStuck(true);
     jumping.current = true;
-    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const smooth = !prefersReducedMotion();
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
     el.focus({ preventScroll: true });
   };

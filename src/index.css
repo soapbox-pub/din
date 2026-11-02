@@ -3,7 +3,34 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Motion follows Settings → Accessibility → Reduce motion as well as the
+   system's preference (src/shared/reducedMotion.ts). */
+@custom-variant motion-safe {
+  @media (prefers-reduced-motion: no-preference) {
+    &:where(:root:not([data-reduce-motion]) *) {
+      @slot;
+    }
+  }
+}
+@custom-variant motion-reduce {
+  &:where([data-reduce-motion] *) {
+    @slot;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    @slot;
+  }
+}
+
 @theme {
+  /* Body and interface text grows with Settings → Accessibility → Text size
+     (src/lib/accessibility.ts); display sizes stay as they are. */
+  --text-xs: calc(0.75rem * var(--din-text-scale, 1));
+  --text-sm: calc(0.875rem * var(--din-text-scale, 1));
+  --text-base: calc(1rem * var(--din-text-scale, 1));
+  --text-lg: calc(1.125rem * var(--din-text-scale, 1));
+  --text-xl: calc(1.25rem * var(--din-text-scale, 1));
+  --text-2xl: calc(1.5rem * var(--din-text-scale, 1));
+
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif,
     'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 }
@@ -283,6 +310,7 @@
 
   body {
     @apply bg-background text-foreground;
+    font-size: var(--text-base);
     /* Inter's SF-Pro-like alternates: cv05 = lowercase l with tail,
        ss03 = round quotes/commas. Fonts without these features (e.g.
        profile-theme overrides) simply ignore them. */
@@ -292,6 +320,55 @@
   ::selection {
     background-color: var(--selection);
   }
+}
+
+/* Settings → Accessibility (src/lib/accessibility.ts). */
+
+/* Reduce motion: what CSS animates finishes at once, still firing its end
+   events; spinners and skeletons keep going, as they say something is
+   happening. */
+:root[data-reduce-motion] *:not(.animate-spin, .animate-pulse),
+:root[data-reduce-motion] *::before,
+:root[data-reduce-motion] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Reduce transparency: frosted glass is solid, in the surface's own color. */
+:root[data-reduce-transparency] [class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"]:is([class*="bg-card/"], [class*="bg-white/"]) {
+  background-color: var(--card) !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-background/"] {
+  background-color: var(--background) !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-black/"] {
+  background-color: rgb(0 0 0 / 0.85) !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-popover/"] {
+  background-color: var(--popover) !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-muted/"] {
+  background-color: var(--muted) !important;
+}
+
+/* Increase contrast: borders, fields and secondary text move toward the
+   text color, whatever the theme, and focus is a thick ring. The desktop's
+   computed tokens go to its apps with the theme. */
+:root[data-increase-contrast] {
+  --border: color-mix(in oklab, var(--foreground) 55%, var(--background)) !important;
+  --input: color-mix(in oklab, var(--foreground) 65%, var(--background)) !important;
+  --sidebar-border: color-mix(in oklab, var(--foreground) 55%, var(--background)) !important;
+  --muted-foreground: color-mix(in oklab, var(--foreground) 85%, var(--background)) !important;
+  --ring: var(--foreground) !important;
+}
+:root[data-increase-contrast] :focus-visible {
+  outline: 3px solid var(--ring) !important;
+  outline-offset: 2px;
 }
 
 /* The desktop's layer (index.html). Closed, it's as if it weren't there.

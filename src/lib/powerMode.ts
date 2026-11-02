@@ -17,6 +17,7 @@ import { cursorEffects } from '@/lib/cursorEffects';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
 import { findGuest } from '@/platform/guest';
 import { caretSpot, typesText, type CaretSpot } from '@/shared/caret';
+import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /** What the Electron preload exposes as `window.dinos.powerMode`. */
 export interface PowerModeBridge {
@@ -103,7 +104,7 @@ export function previewPowerMode(rect: { x: number; y: number; width: number; he
   for (let i = 0; i < steps; i++) {
     window.setTimeout(() => {
       cursorEffects.sparks(rect.x + rect.width * (0.15 + (0.7 * i) / (steps - 1)), rect.y + rect.height / 2, rgbOf(color) ?? [255, 255, 255]);
-      if (win && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) shakeWindow(win);
+      if (win && !prefersReducedMotion()) shakeWindow(win);
     }, i * 70);
   }
 }

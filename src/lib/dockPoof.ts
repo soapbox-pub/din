@@ -1,11 +1,9 @@
+import { prefersReducedMotion } from '@/shared/reducedMotion';
+
 /** How long the cloud takes to billow out and fade, in ms. */
 const DURATION = 480;
 /** Puffs around the cloud's edge, besides the one in the middle. */
 const PUFFS = 7;
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-}
 
 /**
  * Make a dragged-off Dock tile vanish in a puff of smoke, as on macOS: the
