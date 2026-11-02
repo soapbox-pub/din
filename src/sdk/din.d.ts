@@ -9,7 +9,7 @@
  * for each area.
  *
  * Conventions:
- * - Reads of state (`din.window.state`, `din.theme.current`) are synchronous:
+ * - Reads of state (`din.window.snapped`, `din.theme.current`) are synchronous:
  *   the desktop pushes changes and the SDK keeps a copy. Each has an
  *   `onChange` that returns an unsubscribe function.
  * - Requests that the desktop answers return promises. Fire-and-forget
