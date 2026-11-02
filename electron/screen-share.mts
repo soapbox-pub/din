@@ -245,7 +245,11 @@ async function handleRequest(
 ): Promise<void> {
   const frame = request.frame;
   const origin = request.securityOrigin || frame?.origin || '';
-  if (!frame || !request.videoRequested || !/^(https?|nsite|file):/.test(origin)) {
+  // The frame's own URL too: screen-share-preload.cjs, which tells the menu
+  // bar a share is on, runs in http(s), nsite and file frames only, and an
+  // about:blank or srcdoc frame borrows its parent's origin, so one could
+  // share the screen without the menu bar ever saying so.
+  if (!frame || !request.videoRequested || !/^(https?|nsite|file):/.test(origin) || !/^(https?|nsite|file):/.test(frame.url)) {
     callback({});
     return;
   }
