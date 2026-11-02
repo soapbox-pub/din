@@ -4,6 +4,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
+import type { MenuAboveContentProps } from '@/hooks/useMenuAbove';
 import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
 import { cn } from '@/lib/utils';
@@ -25,6 +26,7 @@ export function TileMenuContent({
   onTogglePin,
   onUninstall,
   taskWindow,
+  above,
 }: {
   app: AppDefinition;
   appWindows: DockWindow[];
@@ -42,10 +44,12 @@ export function TileMenuContent({
     toggleMaximize: (id: string) => void;
     close: (id: string) => void;
   };
+  /** Opens the menu above its tile (`useMenuAbove`). */
+  above?: MenuAboveContentProps;
 }) {
   const { open, focus, minimize, closeAll } = controls;
   return (
-    <ContextMenuContent className="z-[10000] w-52">
+    <ContextMenuContent className="z-[10000] w-52" {...above}>
       {taskWindow && (
         <>
           {taskWindow.minimized ? (

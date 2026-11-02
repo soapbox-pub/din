@@ -35,6 +35,7 @@ import type { DockStyle } from '@/contexts/AppContext';
 import { DOCK_STYLES } from '@/lib/dockStyles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { TileMenuContent } from '@/components/desktop/TileMenuContent';
+import { useMenuAbove, type MenuAboveContentProps } from '@/hooks/useMenuAbove';
 
 /**
  * Width and height of one dock slot at rest in the previews, in px (icon plus
@@ -232,6 +233,8 @@ export function Dock({
   // footprint for window-intersection checks (offsets ignore the slide
   // transform, unlike getBoundingClientRect).
   const stripRef = useRef<HTMLDivElement>(null);
+  // Above the whole strip: the classic shelf is shorter than the tiles.
+  const surfaceMenu = useMenuAbove(() => stripRef.current);
 
   // Where the cursor sat within the tile under it, in slots from that tile's
   // center, as of the last paint before a drag. A drag keeps it, so the
@@ -692,10 +695,10 @@ export function Dock({
             style={{ height: magnifiedHeight(size, maxScale) + layout.lift }}
           />
           <ContextMenu>
-            <ContextMenuTrigger asChild>
+            <ContextMenuTrigger asChild {...surfaceMenu.trigger}>
               <DockSurface variant={dockStyle} size={size} />
             </ContextMenuTrigger>
-            <DockMenuContent />
+            <DockMenuContent above={surfaceMenu.content} />
           </ContextMenu>
           {entryIds.map((appId, i) => {
             const app = getApp(appId);
@@ -817,6 +820,7 @@ const DockItem = memo(function DockItem({
   const tileIcon = frontmost?.icon ?? app.icon;
   // Bounces until the app's window turns up.
   const launching = useLaunching(app.id);
+  const menuAbove = useMenuAbove();
 
   const button = (
     <button
@@ -888,6 +892,7 @@ const DockItem = memo(function DockItem({
       bar="dock"
       onTogglePin={onTogglePin}
       onUninstall={onUninstall}
+      above={menuAbove.content}
     />
   );
 
@@ -954,7 +959,7 @@ const DockItem = memo(function DockItem({
   return (
     <div {...wrapperProps}>
       <ContextMenu>
-        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        <ContextMenuTrigger asChild {...menuAbove.trigger}>{button}</ContextMenuTrigger>
         {menu}
       </ContextMenu>
       {runningDots}
@@ -1042,9 +1047,10 @@ function DockSurface({
  * right-clicking it offers the Dock's settings.
  */
 function DockDivider({ variant, size }: { variant: DockStyle; size: number }) {
+  const menuAbove = useMenuAbove();
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
+      <ContextMenuTrigger asChild {...menuAbove.trigger}>
         <div role="separator" aria-orientation="vertical" className="relative w-4 shrink-0" style={{ height: size }}>
           <span
             aria-hidden
@@ -1060,17 +1066,17 @@ function DockDivider({ variant, size }: { variant: DockStyle; size: number }) {
           />
         </div>
       </ContextMenuTrigger>
-      <DockMenuContent />
+      <DockMenuContent above={menuAbove.content} />
     </ContextMenu>
   );
 }
 
 /** The Dock's own menu: magnification, its backdrop, and the rest in Settings. */
-function DockMenuContent() {
+function DockMenuContent({ above }: { above: MenuAboveContentProps }) {
   const { config, updateConfig } = useAppContext();
   const { open } = useWindowActions();
   return (
-    <ContextMenuContent className="z-[10000] w-52">
+    <ContextMenuContent className="z-[10000] w-52" {...above}>
       <ContextMenuCheckboxItem
         checked={config.dockMagnification}
         onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockMagnification: checked }))}

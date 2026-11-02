@@ -33,6 +33,7 @@ import {
 } from '@/components/desktop/MenuBar';
 import { PowerDialog, type PowerAction } from '@/components/desktop/PowerDialog';
 import { TileMenuContent } from '@/components/desktop/TileMenuContent';
+import { useMenuAbove, type MenuAboveContentProps } from '@/hooks/useMenuAbove';
 import { TrayItems } from '@/components/desktop/TrayMenu';
 import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
 import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
@@ -352,10 +353,11 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
     register(appId, el);
     registerDockTile(appId, el);
   }, [register]);
+  const menuAbove = useMenuAbove();
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
+      <ContextMenuTrigger asChild {...menuAbove.trigger}>
         <div role="toolbar" aria-label="Apps" className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-hidden py-0.5">
           {entryIds.map((appId) => {
             const app = getApp(appId);
@@ -401,7 +403,7 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
           })}
         </div>
       </ContextMenuTrigger>
-      <TaskbarMenuContent />
+      <TaskbarMenuContent above={menuAbove.content} />
     </ContextMenu>
   );
 }
@@ -442,6 +444,7 @@ const TaskButton = memo(function TaskButton({
   const launching = useLaunching(app.id);
   const frontmost = appWindows.reduce<DockWindow | null>((top, w) => (!top || w.z > top.z ? w : top), null);
   const ref = useCallback((el: HTMLDivElement | null) => registerRef(app.id, el), [registerRef, app.id]);
+  const menuAbove = useMenuAbove();
 
   const wheel = useRef({ delta: 0, at: 0 });
   const onWheel = (e: React.WheelEvent) => {
@@ -464,7 +467,7 @@ const TaskButton = memo(function TaskButton({
         <span aria-hidden className="absolute inset-y-0.5 right-0 left-1 rounded-md border border-foreground/15 bg-foreground/5" />
       )}
       <ContextMenu>
-        <ContextMenuTrigger asChild>
+        <ContextMenuTrigger asChild {...menuAbove.trigger}>
           <button
             type="button"
             aria-label={label}
@@ -506,6 +509,7 @@ const TaskButton = memo(function TaskButton({
           bar="taskbar"
           onTogglePin={onTogglePin}
           onUninstall={onUninstall}
+          above={menuAbove.content}
         />
       </ContextMenu>
     </div>
@@ -584,6 +588,8 @@ const WindowButtons = memo(function WindowButtons({
   onUninstall?: (appId: string) => void;
 }) {
   const ref = useCallback((el: HTMLDivElement | null) => registerRef(app.id, el), [registerRef, app.id]);
+  // Shared by its buttons: only one menu is open at a time.
+  const menuAbove = useMenuAbove();
 
   return (
     <div
@@ -602,7 +608,7 @@ const WindowButtons = memo(function WindowButtons({
           (shownBadge === 'flag' ? ', has news' : shownBadge ? `, ${shownBadge} new` : '');
         return (
           <ContextMenu key={w.id}>
-            <ContextMenuTrigger asChild>
+            <ContextMenuTrigger asChild {...menuAbove.trigger}>
               <button
                 type="button"
                 aria-label={label}
@@ -642,6 +648,7 @@ const WindowButtons = memo(function WindowButtons({
               onTogglePin={onTogglePin}
               onUninstall={onUninstall}
               taskWindow={{ ...w, ...windowControls }}
+              above={menuAbove.content}
             />
           </ContextMenu>
         );
@@ -666,11 +673,11 @@ const WindowButtons = memo(function WindowButtons({
  * The menu between the taskbar's buttons: its size, whether windows combine,
  * back to the menu bar and Dock, or its settings.
  */
-function TaskbarMenuContent() {
+function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
   const { config, updateConfig } = useAppContext();
   const { open } = useWindowActions();
   return (
-    <ContextMenuContent className="z-[10000] w-56">
+    <ContextMenuContent className="z-[10000] w-56" {...above}>
       <ContextMenuSub>
         <ContextMenuSubTrigger>Size</ContextMenuSubTrigger>
         <ContextMenuSubContent className="w-40">
