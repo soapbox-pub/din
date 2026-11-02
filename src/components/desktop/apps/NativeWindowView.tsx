@@ -410,6 +410,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     <div
       ref={hostRef}
       data-native-window=""
+      // A Linux app's window: its keys are its own, not a screen reader's.
+      role="application"
       tabIndex={0}
       aria-label={title || app?.name}
       className="size-full overflow-hidden bg-background outline-none"

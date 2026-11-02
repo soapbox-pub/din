@@ -127,7 +127,7 @@ function Bubble({
           {message.images.length > 0 && (
             <div className={cn('flex max-w-[70%] flex-wrap gap-1', mine && 'justify-end')}>
               {message.images.map((src, i) => (
-                <img key={i} src={src} alt="Picture" draggable={false} className="max-h-60 max-w-full rounded-2xl object-cover" />
+                <img key={i} src={src} alt={`Attachment ${i + 1}`} draggable={false} className="max-h-60 max-w-full rounded-2xl object-cover" />
               ))}
             </div>
           )}

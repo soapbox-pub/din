@@ -86,6 +86,8 @@ function TakeRow({
             'group relative flex cursor-default items-center gap-3 rounded-lg p-2 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring',
             selected && 'bg-accent',
           )}
+          // A row Enter opens, which keeps its right-click menu as a list item.
+          // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
           tabIndex={0}
           aria-current={selected || undefined}
           onClick={onOpen}

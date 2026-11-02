@@ -518,12 +518,11 @@ export function HistoryPanel({ labels, index, onJump }: { labels: string[]; inde
     listRef.current?.querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest' });
   }, [index, labels.length]);
   return (
-    <div ref={listRef} className="max-h-40 min-h-16 overflow-y-auto py-0.5" role="list" aria-label="History states">
+    <div ref={listRef} className="max-h-40 min-h-16 overflow-y-auto py-0.5" role="group" aria-label="History states">
       {labels.map((label, i) => (
         <button
           key={i}
           type="button"
-          role="listitem"
           aria-current={i === index ? 'step' : undefined}
           onClick={() => onJump(i)}
           className={cn(
@@ -584,12 +583,11 @@ export function ColorPanel({
 
 export function SwatchesPanel({ onPick }: { onPick: (hex: string, bg: boolean) => void }) {
   return (
-    <div className="grid grid-cols-16 gap-px p-2" role="list" aria-label="Swatches">
+    <div className="grid grid-cols-16 gap-px p-2" role="group" aria-label="Swatches">
       {SWATCHES.map((s) => (
         <button
           key={s}
           type="button"
-          role="listitem"
           aria-label={`Swatch ${s} (Ctrl+click for background)`}
           title={`${s} — click: foreground, Ctrl+click: background`}
           onClick={(e) => onPick(s, e.ctrlKey || e.metaKey)}

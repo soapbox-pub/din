@@ -1023,6 +1023,9 @@ export function SystemMonitor() {
             <div
               ref={containerRef}
               onScroll={onScroll}
+              // The treegrid's rows hold the keyboard here, beside its header,
+              // so the right-click menu's trigger has it.
+              // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
               tabIndex={0}
               aria-activedescendant={selected ? rowDomId(selected.key) : undefined}
               onKeyDown={onGridKeyDown}

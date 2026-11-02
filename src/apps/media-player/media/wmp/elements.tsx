@@ -345,6 +345,8 @@ function ButtonGroup({ node }: { node: VmNode }) {
       ref={canvasRef}
       width={map?.w ?? 1}
       height={map?.h ?? 1}
+      // The skin's buttons are painted on it, so it's a group of them.
+      // eslint-disable-next-line jsx-a11y-x/no-interactive-element-to-noninteractive-role
       role="group"
       aria-label={str(a.accname) || node.attrs.id || 'Buttons'}
       title={hover >= 0 ? tipOf(hover) : undefined}

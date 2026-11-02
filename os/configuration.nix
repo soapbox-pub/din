@@ -58,7 +58,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-WT9H9XK1QG4jIbTeI0i8vmr6sSaeBiQDmnodNMntwrY=";
+    npmDepsHash = "sha256-ISh0FK7PNU4fFei8cHqWLLTu45nMxUwgqUCionO0ZIs=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs

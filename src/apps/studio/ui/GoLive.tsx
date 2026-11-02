@@ -182,7 +182,7 @@ function DestinationRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li
+        <div
           role="radio"
           aria-checked={selected}
           tabIndex={0}
@@ -227,7 +227,7 @@ function DestinationRow({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </li>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onEdit}>
@@ -335,7 +335,7 @@ export function GoLiveDialog({
           />
         ) : (
           <>
-            <ul role="radiogroup" aria-label="Destination" className="flex flex-col gap-2">
+            <div role="radiogroup" aria-label="Destination" className="flex flex-col gap-2">
               {list.map((d) => (
                 <DestinationRow
                   key={d.id}
@@ -346,7 +346,7 @@ export function GoLiveDialog({
                   onRemove={() => void remove(d)}
                 />
               ))}
-            </ul>
+            </div>
             <Button variant="ghost" className="self-start" onClick={() => setForm({ editing: null })}>
               <Plus className="size-4" aria-hidden />
               Add a place to stream

@@ -4,6 +4,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import jsxA11y from "eslint-plugin-jsx-a11y-x";
 import tseslint from "typescript-eslint";
 import htmlEslint from "@html-eslint/eslint-plugin";
 import customRules from "./eslint-rules/index.js";
@@ -45,6 +46,31 @@ export default defineConfig(
       // window.dinos and apps window.din (AGENTS.md, docs/README.md).
       "no-restricted-imports": ["error", {
         paths: [{ name: "electron", message: "Electron IPC belongs to the preloads: use window.dinos (desktop) or window.din (apps)." }],
+      }],
+    },
+  },
+  {
+    // Accessibility: roles, names, ARIA and labels. The rules about mouse
+    // handlers on plain elements are off: a desktop hands keyboard handling
+    // to the container (a toolbar's arrow keys, a list's selection), and
+    // clicking a backdrop away has Escape beside it. Fields focus themselves
+    // as native apps' do, and the user's own videos have no captions.
+    name: "app/a11y",
+    files: ["src/**/*.tsx"],
+    extends: [jsxA11y.configs.recommended],
+    rules: {
+      "jsx-a11y-x/no-autofocus": "off",
+      "jsx-a11y-x/media-has-caption": "off",
+      "jsx-a11y-x/click-events-have-key-events": "off",
+      "jsx-a11y-x/no-static-element-interactions": "off",
+      "jsx-a11y-x/no-noninteractive-element-interactions": "off",
+      "jsx-a11y-x/interactive-supports-focus": "off",
+      // A splitter (a focusable separator) takes the arrow keys, and a Linux
+      // app's window (role application) all of them.
+      "jsx-a11y-x/no-noninteractive-tabindex": ["error", { tags: [], roles: ["tabpanel", "separator", "application"] }],
+      "jsx-a11y-x/label-has-associated-control": ["error", {
+        controlComponents: ["Input", "Switch", "Checkbox", "Slider", "Textarea", "SelectTrigger", "RadioGroupItem"],
+        depth: 3,
       }],
     },
   },

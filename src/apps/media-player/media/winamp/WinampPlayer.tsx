@@ -443,10 +443,10 @@ function EqWindow({ y, commands }: { y: number; commands: Commands }) {
     return (
       <div style={{ position: 'absolute', left: 0, top: y, width: W, height: SHADE_H, clipPath: clip }}>
         <Sprite name={focused ? 'eqShadeActive' : 'eqShade'} x={0} y={0} {...drag} />
-        <div {...volDrag.handlers} aria-label="Volume" role="slider" style={{ position: 'absolute', left: 61, top: 4, width: 97, height: 7 }}>
+        <div {...volDrag.handlers} aria-label="Volume" role="slider" aria-valuenow={Math.round(volume * 100)} aria-valuemin={0} aria-valuemax={100} style={{ position: 'absolute', left: 61, top: 4, width: 97, height: 7 }}>
           <Sprite name={vx < 31 ? 'eqShadeVolLeft' : vx > 62 ? 'eqShadeVolRight' : 'eqShadeVolCenter'} x={vx} y={0} />
         </div>
-        <div {...balDrag.handlers} aria-label="Balance" role="slider" style={{ position: 'absolute', left: 164, top: 4, width: 43, height: 7 }}>
+        <div {...balDrag.handlers} aria-label="Balance" role="slider" aria-valuenow={Math.round(balance * 100)} aria-valuemin={-100} aria-valuemax={100} style={{ position: 'absolute', left: 164, top: 4, width: 43, height: 7 }}>
           <Sprite name={bx < 13 ? 'eqShadeBalLeft' : bx > 26 ? 'eqShadeBalRight' : 'eqShadeBalCenter'} x={bx} y={0} />
         </div>
         <SpriteButton up={null} down="eqMaxDown" x={254} y={3} width={9} height={9} label="Full size" onClick={() => setWinampPrefs({ eqShade: false })} />
