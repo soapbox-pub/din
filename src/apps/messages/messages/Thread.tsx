@@ -137,7 +137,7 @@ function Bubble({
               className={cn(
                 'max-w-[70%] px-3.5 py-2 text-[15px] leading-snug break-words whitespace-pre-wrap select-text',
                 'rounded-[20px]',
-                mine ? 'bg-primary text-primary-foreground' : 'bg-foreground/[0.08] text-foreground',
+                mine ? 'bg-muted text-foreground' : 'bg-foreground/[0.08] text-foreground',
                 mine && endsRun && 'rounded-br-md',
                 !mine && endsRun && 'rounded-bl-md',
                 message.status === 'sending' && 'opacity-70',

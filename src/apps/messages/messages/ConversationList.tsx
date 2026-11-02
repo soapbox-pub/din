@@ -94,7 +94,7 @@ export function ConversationList({
                 className={cn(
                   'flex cursor-default items-center gap-3 rounded-xl px-2 py-2.5 outline-none',
                   'focus-visible:ring-2 focus-visible:ring-ring',
-                  current ? 'bg-primary text-primary-foreground' : 'hover:bg-foreground/[0.06]',
+                  current ? 'bg-foreground/10' : 'hover:bg-foreground/5',
                 )}
               >
                 <div className="relative">
@@ -106,15 +106,15 @@ export function ConversationList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
                     <span className={cn('min-w-0 flex-1 truncate text-[15px]', c.unread > 0 ? 'font-semibold' : 'font-medium')}>{name}</span>
-                    <time className={cn('shrink-0 text-xs', current ? 'text-primary-foreground/80' : 'text-muted-foreground')} dateTime={new Date(c.last.time).toISOString()}>
+                    <time className={cn('shrink-0 text-xs', 'text-muted-foreground')} dateTime={new Date(c.last.time).toISOString()}>
                       {listTime(c.last.time)}
                     </time>
                   </div>
-                  <p className={cn('line-clamp-2 text-[13px] leading-snug', current ? 'text-primary-foreground/85' : c.unread > 0 ? 'text-foreground' : 'text-muted-foreground')}>
+                  <p className={cn('line-clamp-2 text-[13px] leading-snug', c.unread > 0 ? 'text-foreground' : 'text-muted-foreground')}>
                     {preview(c)}
                   </p>
                   {phoneNames && (
-                    <p className={cn('mt-0.5 truncate text-[11px]', current ? 'text-primary-foreground/70' : 'text-muted-foreground/80')}>
+                    <p className={cn('mt-0.5 truncate text-[11px]', 'text-muted-foreground/80')}>
                       {phoneNames.get(c.phoneId)}
                     </p>
                   )}
