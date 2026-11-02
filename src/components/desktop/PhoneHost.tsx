@@ -3,7 +3,7 @@ import { MessageCircle, Smartphone } from 'lucide-react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { appForFile } from '@/lib/fileTypes';
 import { parentPath } from '@/lib/fs';
-import { closeNotificationByKey, notify, updateNotificationByKey, type NotifyInput } from '@/lib/notificationCenter';
+import { closeNotificationByKey, getNotificationState, notify, updateNotificationByKey, type NotifyInput } from '@/lib/notificationCenter';
 import { getPhoneDesktopBridge, type PhoneReceive } from '@/lib/phone';
 import { cleanPhoneError, formatAddress } from '@/shared/phone';
 
@@ -11,7 +11,8 @@ import { cleanPhoneError, formatAddress } from '@/shared/phone';
  * New texts from the user's phones (electron/phone.mts), as notifications
  * with a reply field, the way a Mac shows iMessages. One per conversation:
  * a newer text replaces the one before. A click opens the conversation in
- * Messages; none shows while Messages is the window in front.
+ * Messages; none shows while Messages is the window in front, and one goes
+ * once its conversation is read, in Messages or on the phone.
  *
  * Files a phone shares over Bluetooth (electron/phone-receive.mts) get one
  * notification per share: progress with Cancel while a file takes more than
@@ -30,13 +31,24 @@ export function PhoneHost() {
   useEffect(() => {
     const phone = getPhoneDesktopBridge();
     if (!phone) return;
-    return phone.onIncoming(({ message, name: rawName, from, update }) => {
+    const key = (phoneId: string, threadId: string) => `phone:${phoneId}:${threadId}`;
+    const offMessages = phone.onMessages(({ phoneId, threadIds }) => {
+      const notified = new Set(getNotificationState().notifications.map((n) => n.replaceKey));
+      const pending = threadIds.filter((t) => notified.has(key(phoneId, t)));
+      if (pending.length === 0) return;
+      void phone.conversations(phoneId).then((list) => {
+        for (const threadId of pending) {
+          if (!list.some((c) => c.threadId === threadId && c.unread > 0)) closeNotificationByKey(key(phoneId, threadId));
+        }
+      }, () => {});
+    });
+    const offIncoming = phone.onIncoming(({ message, name: rawName, from, update }) => {
       // A number that isn't a contact, written as people write it.
       const name = rawName.split(', ').map(formatAddress).join(', ');
       const group = message.addresses.length > 1;
       const pictures = message.images.length;
       const body = message.body || (pictures ? (pictures === 1 ? 'Sent a picture' : `Sent ${pictures} pictures`) : '');
-      const replaceKey = `phone:${message.phoneId}:${message.threadId}`;
+      const replaceKey = key(message.phoneId, message.threadId);
       const reply = {
         placeholder: `Reply to ${name}`,
         send: (text: string) =>
@@ -65,6 +77,10 @@ export function PhoneHost() {
         onActivate: () => openRef.current('messages', { phoneId: message.phoneId, threadId: message.threadId, nonce: Date.now() }),
       });
     });
+    return () => {
+      offMessages();
+      offIncoming();
+    };
   }, []);
 
   useEffect(() => {
