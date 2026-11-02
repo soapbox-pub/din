@@ -1017,9 +1017,24 @@ async function screenRect(): Promise<Rect> {
 
 let primary: Electron.Rectangle | null = null;
 
+/**
+ * Where the desktop last saw the pointer, in screen DIPs. On Wayland
+ * Electron can't tell where the pointer is (getCursorScreenPoint stays at
+ * 0,0), but the desktop sees it move everywhere Din draws, so while
+ * something asks, main asks the desktop to say (src/lib/capturePointer.ts).
+ */
+let reported: { x: number; y: number } | null = null;
+/** Until when the desktop has been asked to report it. */
+let reportingUntil = 0;
+/** How long one ask lasts; the desktop reports a while longer, so asks in a row overlap. */
+const REPORT_MS = 2_000;
+
 /** Where the pointer is on the primary display, as fractions of it (outside it: off 0..1). */
 function pointer(): { x: number; y: number } {
-  const point = screen.getCursorScreenPoint();
+  const now = Date.now();
+  if (now >= reportingUntil) options?.sendToShell('capture:reportPointer');
+  reportingUntil = now + REPORT_MS;
+  const point = reported ?? screen.getCursorScreenPoint();
   const area = primary ?? screen.getPrimaryDisplay().bounds;
   return { x: (point.x - area.x) / area.width, y: (point.y - area.y) / area.height };
 }
@@ -1052,6 +1067,17 @@ export function registerCaptureHandlers(opts: Options): void {
   ipcMain.handle('capture:pointer', (event) => {
     assertShellSender(event);
     return pointer();
+  });
+
+  // The desktop's report of the pointer, in CSS pixels of its window.
+  ipcMain.on('capture:pointerAt', (event, x: unknown, y: unknown) => {
+    assertShellSender(event);
+    const shell = opts.shellWindow();
+    if (!shell || shell.isDestroyed() || typeof x !== 'number' || typeof y !== 'number') return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const zoom = shell.webContents.getZoomFactor();
+    const bounds = shell.getContentBounds();
+    reported = { x: bounds.x + x * zoom, y: bounds.y + y * zoom };
   });
 
   ipcMain.handle('capture:takes', async (event) => {

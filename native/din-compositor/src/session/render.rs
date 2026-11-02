@@ -90,6 +90,8 @@ pub fn elements(
                     ) {
                         elements.push(OutputElement::Memory(element));
                     }
+                } else {
+                    tracing::warn!("shake: the cursor theme has no arrow to draw big");
                 }
             }
             CursorImageStatus::Hidden => {}

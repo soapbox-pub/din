@@ -171,6 +171,10 @@ export interface CaptureBridge {
   streamStart(id: string): Promise<LiveStatus>;
   streamWrite(data: Uint8Array): void;
   streamStop(): Promise<void>;
+  /** Tell main where the pointer is, in CSS pixels of the desktop (src/lib/capturePointer.ts). */
+  pointerAt(x: number, y: number): void;
+  /** Main wants to know where the pointer is for a while (Studio's drawing it). */
+  onReportPointer(callback: () => void): () => void;
   onState(callback: (state: CaptureState) => void): () => void;
   /** A take changed (or `removed`). */
   onChanged(callback: (take: TakeInfo | { path: string; removed: true }) => void): () => void;

@@ -3558,6 +3558,15 @@ expose('capture', {
   ...capture,
   /** @param {Uint8Array} data */
   streamWrite: (data) => ipcRenderer.send('capture:streamWrite', data),
+  /**
+   * Where the pointer is, in CSS pixels of the desktop, for main to tell
+   * Studio (Electron can't see it on Wayland); only while onReportPointer asks.
+   * @param {number} x
+   * @param {number} y
+   */
+  pointerAt: (x, y) => ipcRenderer.send('capture:pointerAt', x, y),
+  /** @param {() => void} callback */
+  onReportPointer: (callback) => listen('capture:reportPointer', callback),
   /** @param {(state: unknown) => void} callback */
   onState: (callback) => listen('capture:state', callback),
   /** @param {(take: unknown) => void} callback */

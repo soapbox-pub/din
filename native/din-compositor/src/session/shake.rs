@@ -45,6 +45,8 @@ pub struct Shake {
     scale: f64,
     velocity: f64,
     last_step: Option<Duration>,
+    /// The biggest it's been drawn this shake, for the log.
+    peak: f64,
 }
 
 impl Shake {
@@ -111,8 +113,13 @@ impl Shake {
             self.velocity += accel * h;
             self.scale = (self.scale + self.velocity * h).max(0.0);
         }
+        self.peak = self.peak.max(self.scale);
         let active = target > 0.0 || self.scale > 0.005 || self.velocity.abs() > 0.01;
         if !active {
+            if self.peak > 0.0 {
+                info!("shake: the pointer grew to {:.1}×", 1.0 + self.peak);
+            }
+            self.peak = 0.0;
             self.scale = 0.0;
             self.velocity = 0.0;
             self.last_step = None;
@@ -125,3 +132,4 @@ impl Shake {
         1.0 + self.scale
     }
 }
+
