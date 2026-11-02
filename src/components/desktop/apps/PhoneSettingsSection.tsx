@@ -59,7 +59,7 @@ import { PhoneSetupWizard } from './PhoneSetupWizard';
  * opens the page. Add a phone walks through pairing one in this same pane
  * (PhoneSetupWizard). Launched with `{ add: true, nonce }` (Messages' Set Up
  * a Phone), it starts there. Quick Share, for any Android device on the same
- * network, is its own app; the bottom of the page opens it (QuickShareGroup).
+ * network, is its own app; a button at the bottom of the page opens it.
  */
 export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
   const bridge = getPhoneDesktopBridge();
@@ -213,33 +213,19 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
         </div>
       )}
 
-      <QuickShareGroup onOpen={() => open('quick-share')} />
+      {/* Quick Share has its own window, visible to nearby devices only while it's open (electron/quickshare.mts). */}
+      <Button
+        variant="outline"
+        className="self-start"
+        title="Android phones and tablets on the same Wi-Fi can share files and links here while Quick Share is open"
+        onClick={() => open('quick-share')}
+      >
+        <Share2 className="size-4" aria-hidden />
+        Receive with Quick Share
+      </Button>
 
       {forgetDialog}
     </section>
-  );
-}
-
-/** Quick Share has its own window, visible to nearby devices only while it's open (electron/quickshare.mts). */
-function QuickShareGroup({ onOpen }: { onOpen: () => void }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <SubHeading>Quick Share</SubHeading>
-      <DetailsGroup>
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-          <span className="min-w-0">
-            <span className="block text-sm text-foreground">Receive from Android</span>
-            <span className="block text-xs text-muted-foreground">
-              Phones and tablets on the same Wi-Fi can share files and links here while Quick Share is open.
-            </span>
-          </span>
-          <Button variant="outline" size="sm" onClick={onOpen}>
-            <Share2 className="size-4" aria-hidden />
-            Open Quick Share
-          </Button>
-        </div>
-      </DetailsGroup>
-    </div>
   );
 }
 
