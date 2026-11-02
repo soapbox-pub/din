@@ -17,13 +17,18 @@
  */
 
 import { parseNostrUri } from '@/lib/nostrUri';
+import { BROWSER_EXTENSION_KIND, type PackageAddress } from '@/lib/themePackages';
 
 /** The settings page. */
 export const PREFERENCES_URL = 'about:preferences';
 
+/** Extensions published to Nostr, to find and get (src/components/desktop/apps/ExtensionsPage.tsx). */
+export const EXTENSIONS_URL = 'about:extensions';
+
 /** Every fixed internal page, by URL. */
 const INTERNAL_PAGES: Record<string, { title: string }> = {
   [PREFERENCES_URL]: { title: 'Settings' },
+  [EXTENSIONS_URL]: { title: 'Extensions' },
 };
 
 /** Tab labels for a `nostr:` page, by what it names. */
@@ -52,7 +57,18 @@ export function isInternalUrl(url: string): boolean {
  * fall through to the generic "New tab".
  */
 export function internalPageTitle(url: string): string | null {
+  if (extensionAddressOf(url)) return INTERNAL_PAGES[EXTENSIONS_URL].title;
   const nostr = parseNostrUri(url);
   if (nostr) return NOSTR_TITLES[nostr.target.type];
   return INTERNAL_PAGES[url]?.title ?? null;
+}
+
+/**
+ * The published extension a `nostr:` URI names, or null. Such a link opens
+ * on about:extensions' page for it rather than the generic preview.
+ */
+export function extensionAddressOf(url: string): PackageAddress | null {
+  const target = parseNostrUri(url)?.target;
+  if (target?.type !== 'address' || target.kind !== BROWSER_EXTENSION_KIND) return null;
+  return { type: 'extension', pubkey: target.pubkey, identifier: target.identifier };
 }

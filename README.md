@@ -576,8 +576,10 @@ files — `git add` new source files before `npm run os:build`.
 - The Web Browser app supports Chrome extensions (tabs, toolbar actions,
   content scripts) via
   [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell);
-  install them by browsing the Chrome Web Store inside the browser, or drop
-  unpacked extensions into the app's `Extensions/` data directory. Extensions
+  install them by browsing the Chrome Web Store inside the browser, load one
+  from a folder (Settings → Extensions → Load from folder…), or get one
+  published to Nostr on `about:extensions` (kind 34639, see `NIP.md`); any of
+  them can be published from its menu there. Extensions
   run only in the browser's session partition — never against the shell.
   Installed web apps share that partition, like installed apps in Chrome: a
   site signed in in a tab is signed in in its app window, and the reverse.

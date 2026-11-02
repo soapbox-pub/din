@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Puzzle, Settings, Trash2, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { FolderOpen, MoreHorizontal, Puzzle, RotateCw, Settings, Share, Store, Trash2, X } from 'lucide-react';
 import { crxIconUrl, getCrxBridge, type CrxExtension } from '@/lib/crx';
+import { EXTENSIONS_URL } from '@/lib/internalPages';
+import { useFilePicker } from '@/contexts/FilePickerContext';
+import { CRX_EXTENSIONS_KEY, useCrxExtensions } from '@/hooks/useThemePackages';
+import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { Userscript } from '@/lib/userscripts';
 import { getAdblockBridge } from '@/lib/adblock';
 import { useAdblockSettings } from '@/hooks/useAdblock';
@@ -13,6 +25,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Label } from '@/components/ui/label';
@@ -34,7 +47,7 @@ export interface PreferencesProps {
   /** Vertical (tree) tabs, shared with the window's own tab strip. */
   treeTabs: boolean;
   onTreeTabsChange: (value: boolean) => void;
-  /** Open a URL in a new tab (the Chrome Web Store link). */
+  /** Open a URL in a new tab (the Chrome Web Store link, about:extensions). */
   onOpenUrl: (url: string) => void;
   /** Whether extensions/userscripts apply here (never in a private window). */
   showExtensions: boolean;
@@ -296,10 +309,14 @@ function SettingRow({
   );
 }
 
+/** What each source of an extension is called on its row. */
+const SOURCE_LABEL: Partial<Record<CrxExtension['source'], string>> = { local: 'Folder', nostr: 'Nostr' };
+
 /**
- * Installed Chrome extensions (with per-item uninstall and a Web Store link)
- * plus the userscript library. Refreshes its extension list on mount — the
- * page is a tab, so that's on open and on every reload.
+ * Installed Chrome extensions, from the Web Store, a folder, or Nostr: each
+ * can be reloaded, published to Nostr or removed, from its ⋯ menu or by
+ * right-clicking it. Below them, ways to get more, and the userscript
+ * library.
  */
 function ExtensionsSection({
   onOpenUrl,
@@ -310,37 +327,62 @@ function ExtensionsSection({
 }: PreferencesProps) {
   const crx = getCrxBridge();
   const { toast } = useToast();
-  const [extensions, setExtensions] = useState<CrxExtension[] | null>(null);
+  const { pickFile } = useFilePicker();
+  const queryClient = useQueryClient();
+  const { data: extensions } = useCrxExtensions();
+  const [publishing, setPublishing] = useState<PublishTarget | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!crx) return;
-    try {
-      setExtensions(await crx.listExtensions());
-    } catch {
-      setExtensions([]);
-    }
-  }, [crx]);
-
-  useEffect(() => {
-    // refresh() only setState()s after an await (an async IPC round-trip), so
-    // this can't cascade synchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refresh();
-  }, [refresh]);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: CRX_EXTENSIONS_KEY });
 
   const uninstall = async (extension: CrxExtension) => {
     if (!crx) return;
     try {
       await crx.uninstallExtension(extension.id);
       toast({ title: `${extension.name} removed` });
-      refresh();
     } catch {
       toast({
         title: `Couldn't remove ${extension.name}`,
         variant: 'destructive',
       });
     }
+    refresh();
   };
+
+  const reload = async (extension: CrxExtension) => {
+    if (!crx) return;
+    try {
+      await crx.reloadExtension(extension.id);
+      toast({ title: `${extension.name} reloaded` });
+    } catch (error) {
+      toast({ title: `Couldn't reload ${extension.name}`, description: cleanError(error), variant: 'destructive' });
+    }
+    refresh();
+  };
+
+  const loadFolder = async () => {
+    if (!crx) return;
+    const folder = await pickFile({ title: 'Load an extension from a folder', confirmLabel: 'Load', directory: true }).catch(() => null);
+    if (!folder) return;
+    try {
+      const extension = await crx.loadUnpacked(folder);
+      toast({ title: `${extension.name} loaded` });
+    } catch (error) {
+      toast({ title: 'Couldn’t load that extension', description: cleanError(error), variant: 'destructive' });
+    }
+    refresh();
+  };
+
+  const actions = (extension: CrxExtension): ExtensionAction[] => [
+    ...(extension.source === 'local'
+      ? [{ label: 'Reload', icon: <RotateCw />, run: () => void reload(extension) }]
+      : []),
+    {
+      label: 'Publish to Nostr…',
+      icon: <Share />,
+      run: () => setPublishing({ type: 'extension', id: extension.id, name: extension.name, summary: extension.description }),
+    },
+    { label: 'Remove', icon: <Trash2 />, run: () => void uninstall(extension), destructive: true },
+  ];
 
   return (
     <PreferencesSection
@@ -348,7 +390,7 @@ function ExtensionsSection({
       description="Extensions run on the sites you browse in this app."
     >
       {crx &&
-        (extensions === null ? null : extensions.length === 0 ? (
+        (extensions == null ? null : extensions.length === 0 ? (
           <p className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
             No extensions installed yet.
           </p>
@@ -362,31 +404,40 @@ function ExtensionsSection({
                   >
                     <ExtensionIcon id={extension.id} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{extension.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {extension.version}
+                      <p className="flex items-center gap-2 text-sm">
+                        <span className="truncate">{extension.name}</span>
+                        {SOURCE_LABEL[extension.source] && (
+                          <Badge variant="secondary" className="shrink-0">{SOURCE_LABEL[extension.source]}</Badge>
+                        )}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground" title={extension.path}>
+                        {extension.path ? `${extension.version} · ${extension.path}` : extension.version}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${extension.name}`}
-                      title={`Remove ${extension.name}`}
-                      onClick={() => uninstall(extension)}
-                      className={cn(
-                        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/60',
-                        'hover:bg-destructive/10 hover:text-destructive',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      )}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0"
+                          aria-label={`More for ${extension.name}`}
+                          title="More"
+                        >
+                          <MoreHorizontal className="size-4" aria-hidden />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        {actions(extension).map((action) => (
+                          <ExtensionMenuItem key={action.label} action={action} kind="dropdown" />
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </li>
                 </ContextMenuTrigger>
-                <ContextMenuContent className="w-48">
-                  <ContextMenuItem variant="destructive" onSelect={() => uninstall(extension)}>
-                    <Trash2 />
-                    Remove
-                  </ContextMenuItem>
+                <ContextMenuContent className="w-52">
+                  {actions(extension).map((action) => (
+                    <ExtensionMenuItem key={action.label} action={action} kind="context" />
+                  ))}
                 </ContextMenuContent>
               </ContextMenu>
             ))}
@@ -394,13 +445,20 @@ function ExtensionsSection({
         ))}
 
       {crx && (
-        <Button
-          variant="secondary"
-          className="w-full"
-          onClick={() => onOpenUrl(WEB_STORE_URL)}
-        >
-          Browse the Chrome Web Store
-        </Button>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Button variant="secondary" onClick={() => void loadFolder()}>
+            <FolderOpen aria-hidden />
+            Load from folder…
+          </Button>
+          <Button variant="secondary" onClick={() => onOpenUrl(EXTENSIONS_URL)}>
+            <Puzzle aria-hidden />
+            Browse on Nostr
+          </Button>
+          <Button variant="secondary" onClick={() => onOpenUrl(WEB_STORE_URL)}>
+            <Store aria-hidden />
+            Chrome Web Store
+          </Button>
+        </div>
       )}
 
       {userscripts !== null && (
@@ -411,8 +469,41 @@ function ExtensionsSection({
           onAdd={onAddUserscript}
         />
       )}
+
+      <PublishThemePackage
+        target={publishing}
+        onClose={() => setPublishing(null)}
+        onView={{ label: 'View in Extensions', open: (naddr) => onOpenUrl(`nostr:${naddr}`) }}
+      />
     </PreferencesSection>
   );
+}
+
+interface ExtensionAction {
+  label: string;
+  icon: ReactNode;
+  run: () => void;
+  destructive?: boolean;
+}
+
+/** One of an extension's actions, in its ⋯ menu or its right-click menu, with a line above Remove. */
+function ExtensionMenuItem({ action, kind }: { action: ExtensionAction; kind: 'dropdown' | 'context' }) {
+  const Item = kind === 'dropdown' ? DropdownMenuItem : ContextMenuItem;
+  const Separator = kind === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator;
+  return (
+    <>
+      {action.destructive && <Separator />}
+      <Item variant={action.destructive ? 'destructive' : 'default'} onSelect={action.run}>
+        {action.icon}
+        {action.label}
+      </Item>
+    </>
+  );
+}
+
+function cleanError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
 }
 
 /** Extension icon via the crx:// protocol, with a glyph fallback. */

@@ -16,6 +16,8 @@ export interface PublishTarget {
   type: PackageType;
   id: string;
   name: string;
+  /** A description to start from (an extension's own). */
+  summary?: string;
 }
 
 type State =
@@ -24,30 +26,52 @@ type State =
   | { state: 'done'; naddr: string }
   | { state: 'error'; message: string };
 
-const WHAT: Record<PackageType, string> = { cursor: 'this cursor', icon: 'these icons', skin: 'this skin' };
+const WHAT: Record<PackageType, string> = { cursor: 'this cursor', icon: 'these icons', skin: 'this skin', extension: 'this extension' };
+
+/** Where people find each once it's published. */
+const WHERE: Record<PackageType, string> = { cursor: 'the App Store', icon: 'the App Store', skin: 'the App Store', extension: 'the Web Browser’s Extensions page' };
 
 /**
  * Publish to Nostr…: an installed cursor theme (kind 34628), icon theme
- * (kind 34642) or Media Player skin (kind 34675), its files on the user's Blossom servers, signed by the
- * user, for others to find in the App Store (src/lib/themePackages.ts).
+ * (kind 34642), Media Player skin (kind 34675) or browser extension (kind
+ * 34639), its files on the user's Blossom servers, signed by the user, for
+ * others to find in the App Store, or for an extension the Web Browser's
+ * about:extensions (src/lib/themePackages.ts). `onView` shows it once it's
+ * published, which is the App Store's page for it unless said otherwise.
  */
-export function PublishThemePackage({ target, onClose }: { target: PublishTarget | null; onClose: () => void }) {
+export function PublishThemePackage({
+  target,
+  onClose,
+  onView,
+}: {
+  target: PublishTarget | null;
+  onClose: () => void;
+  onView?: { label: string; open: (naddr: string) => void };
+}) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
-        {target && <PublishForm key={`${target.type}:${target.id}`} target={target} onClose={onClose} />}
+        {target && <PublishForm key={`${target.type}:${target.id}`} target={target} onClose={onClose} onView={onView} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function PublishForm({ target, onClose }: { target: PublishTarget; onClose: () => void }) {
+function PublishForm({
+  target,
+  onClose,
+  onView,
+}: {
+  target: PublishTarget;
+  onClose: () => void;
+  onView?: { label: string; open: (naddr: string) => void };
+}) {
   const { user } = useCurrentUser();
   const deps = usePublishDeps();
   const { refreshPublished } = useThemePackageActions();
   const { open } = useWindowActions();
   const [title, setTitle] = useState(target.name);
-  const [summary, setSummary] = useState('');
+  const [summary, setSummary] = useState(target.summary ?? '');
   const [state, setState] = useState<State>({ state: 'idle' });
   const [copied, setCopied] = useState(false);
 
@@ -85,8 +109,8 @@ function PublishForm({ target, onClose }: { target: PublishTarget; onClose: () =
           </span>
           <DialogTitle className="text-xl">{title.trim()} is on Nostr</DialogTitle>
           <DialogDescription>
-            People who follow you find it in the App Store, and anyone can get it with this address. Publishing it
-            again updates it.
+            People who follow you find it in {WHERE[target.type]}, and anyone can get it with this address. Publishing
+            it again updates it.
           </DialogDescription>
         </DialogHeader>
         <div className="flex gap-2">
@@ -101,12 +125,13 @@ function PublishForm({ target, onClose }: { target: PublishTarget; onClose: () =
             variant="secondary"
             className="flex-1"
             onClick={() => {
-              open('app-store', { package: state.naddr });
+              if (onView) onView.open(state.naddr);
+              else open('app-store', { package: state.naddr });
               onClose();
             }}
           >
             <Store aria-hidden />
-            View in App Store
+            {onView?.label ?? 'View in App Store'}
           </Button>
           <Button className="flex-1" onClick={onClose}>Done</Button>
         </div>
@@ -120,7 +145,7 @@ function PublishForm({ target, onClose }: { target: PublishTarget; onClose: () =
       <DialogHeader>
         <DialogTitle className="text-xl">Publish {target.name} to Nostr</DialogTitle>
         <DialogDescription>
-          Shares {WHAT[target.type]} with people who follow you, in the App Store.
+          Shares {WHAT[target.type]} with people who follow you, in {WHERE[target.type]}.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-2">

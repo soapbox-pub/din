@@ -9,6 +9,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { getEffectiveBlossomServers } from '@/lib/appBlossom';
+import { getCrxBridge } from '@/lib/crx';
 import { getFsBridge } from '@/lib/fs';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { NSITE_CATALOG_PUBKEYS } from '@/lib/nsiteCatalog';
@@ -30,6 +31,17 @@ import {
   type ThemePackage,
 } from '@/lib/themePackages';
 
+/** The query that lists the browser's installed extensions (useCrxExtensions). */
+export const CRX_EXTENSIONS_KEY = ['crx', 'extensions'] as const;
+
+/** The browser's installed extensions, or null outside the Din desktop app. */
+export function useCrxExtensions() {
+  return useQuery({
+    queryKey: CRX_EXTENSIONS_KEY,
+    queryFn: async () => (await getCrxBridge()?.listExtensions()) ?? null,
+  });
+}
+
 /** How many published themes the store asks for at a time. */
 const PAGE = 40;
 
@@ -48,6 +60,7 @@ export function useCatalogAuthors(): string[] {
 /** Whether this computer can keep themes of a type: the Din desktop app, not a browser. */
 export function canKeepPackages(type: PackageType): boolean {
   if (type === 'skin') return getFsBridge() !== undefined;
+  if (type === 'extension') return getCrxBridge() !== undefined;
   return (type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge()) !== undefined;
 }
 
@@ -142,7 +155,8 @@ export function useThemePackageActions() {
   const refresh = useCallback(
     (type: PackageType) => {
       void queryClient.invalidateQueries({ queryKey: ['theme-packages', 'installed', type] });
-      if (type !== 'skin') void queryClient.invalidateQueries({ queryKey: type === 'cursor' ? ['cursor'] : ['icon-theme'] });
+      if (type === 'extension') void queryClient.invalidateQueries({ queryKey: CRX_EXTENSIONS_KEY });
+      else if (type !== 'skin') void queryClient.invalidateQueries({ queryKey: type === 'cursor' ? ['cursor'] : ['icon-theme'] });
     },
     [queryClient],
   );

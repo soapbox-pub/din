@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, Check, Copy, Info, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, Check, Copy, Info, Loader2, Puzzle, RefreshCw, Trash2 } from 'lucide-react';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import {
@@ -47,6 +47,7 @@ import {
   packageNaddr,
   parsePackageNaddr,
   type CursorPackage,
+  type ExtensionPackage,
   type PackageAddress,
   type PackageType,
   type ThemePackage,
@@ -75,6 +76,12 @@ const COPY: Record<PackageType, { title: string; subtitle: string; noun: string;
     noun: 'skin',
     empty: 'No skins found on your relays yet. Publish one from the Media Player’s Skins tab, or follow people who share theirs.',
   },
+  extension: {
+    title: 'Extensions',
+    subtitle: 'Extensions for the Web Browser, from Din’s publishers and the people you follow.',
+    noun: 'extension',
+    empty: 'No extensions found on your relays yet. Publish one from the browser’s Settings, or follow people who share theirs.',
+  },
 };
 
 /** What a theme becomes once it's got, for the toast. */
@@ -82,6 +89,7 @@ const BECOMES: Record<PackageType, string> = {
   cursor: 'It’s now your pointer.',
   icon: 'They’re now your icons.',
   skin: 'The Media Player is wearing it.',
+  extension: 'It runs on the sites you browse.',
 };
 
 /** Where a published theme stands on this computer, and what its button does. */
@@ -111,8 +119,9 @@ interface PackageHandlers {
 }
 
 /**
- * The App Store's Cursors and Icons: cursor themes (kind 34628) and icon
- * themes (kind 34642) published by the catalog's publishers, the people the
+ * The App Store's Cursors, Icons and Skins, and the Web Browser's
+ * about:extensions: cursor themes (kind 34628), icon themes (kind 34642),
+ * skins (kind 34675) and browser extensions (kind 34639) published by the catalog's publishers, the people the
  * user follows, and the user (usePackageCatalog), the people they follow
  * first. Get downloads one and puts it on; it shows its download size, which
  * for an icon set can be tens of megabytes.
@@ -270,7 +279,8 @@ function usePackageHandlers(type: PackageType, onSelect: (address: PackageAddres
     return {
       id: entry?.id ?? null,
       outdated: !!entry && entry.publishedAt < pkg.createdAt,
-      inUse: !!entry && entry.id === current,
+      // An extension is at work as soon as it's installed.
+      inUse: !!entry && (pkg.type === 'extension' || entry.id === current),
       busy: busy.has(packageCoordinate(pkg)),
     };
   };
@@ -389,6 +399,25 @@ function PackagePreview({ pkg, visible, className, large = false }: { pkg: Theme
   if (!visible) return <Skeleton className={cn('rounded-none', className)} />;
   const backdrop = 'bg-gradient-to-br from-muted/60 to-muted';
 
+  if (pkg.type === 'extension') {
+    return (
+      <div className={cn('grid place-items-center p-4', backdrop, className)} aria-hidden>
+        {pkg.image && !failed.has(pkg.image) ? (
+          <img
+            src={pkg.image}
+            alt=""
+            referrerPolicy="no-referrer"
+            draggable={false}
+            onError={() => setFailed(new Set([pkg.image as string]))}
+            className={cn('object-contain', large ? 'size-32' : 'size-16')}
+          />
+        ) : (
+          <Puzzle className={cn('text-muted-foreground', large ? 'size-24' : 'size-12')} />
+        )}
+      </div>
+    );
+  }
+
   if (pkg.type === 'cursor' || pkg.type === 'skin') {
     const skin = pkg.type === 'skin';
     return (
@@ -441,7 +470,7 @@ function PackagePreview({ pkg, visible, className, large = false }: { pkg: Theme
 function PackagePill({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHandlers }) {
   const state = handlers.stateOf(pkg);
   const done = state.inUse && !state.outdated;
-  const label = state.busy ? (state.id && !state.outdated ? 'Switching…' : 'Getting…') : done ? 'In Use' : state.outdated ? 'Update' : state.id ? 'Use' : 'Get';
+  const label = state.busy ? (state.id && !state.outdated ? 'Switching…' : 'Getting…') : done ? (pkg.type === 'extension' ? 'Installed' : 'In Use') : state.outdated ? 'Update' : state.id ? 'Use' : 'Get';
   return (
     <Button
       size="sm"
@@ -475,7 +504,7 @@ function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePackage; ha
       <ContextMenuContent className="w-52">
         <ContextMenuItem onSelect={() => handlers.act(pkg)} disabled={done || state.busy || !handlers.canInstall}>
           {state.outdated ? <RefreshCw aria-hidden /> : state.id ? <Check aria-hidden /> : <ArrowDownToLine aria-hidden />}
-          {state.outdated ? 'Update' : state.id ? 'Use' : 'Get'}
+          {state.outdated ? 'Update' : state.id ? (pkg.type === 'extension' ? 'Installed' : 'Use') : 'Get'}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => handlers.select(pkg)}>
           <Info aria-hidden />
@@ -624,6 +653,8 @@ function PackageDetailPage({
 
         {pkg.type === 'cursor' && <TryCursors pkg={pkg} />}
 
+        {pkg.type === 'extension' && <ExtensionAccess pkg={pkg} />}
+
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
           <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
@@ -634,6 +665,8 @@ function PackageDetailPage({
             {pkg.type === 'skin' ? (
               <InfoRow label="Kind">{pkg.skin.format === 'winamp' ? 'Winamp classic skin (.wsz)' : 'Windows Media Player skin (.wmz)'}</InfoRow>
             ) : null}
+            {pkg.type === 'extension' && pkg.version ? <InfoRow label="Version">{pkg.version}</InfoRow> : null}
+            {pkg.type === 'extension' && pkg.manifestVersion ? <InfoRow label="Manifest">{`Version ${pkg.manifestVersion}`}</InfoRow> : null}
             {pkg.inherits.length > 0 && <InfoRow label="Builds on">{pkg.inherits.join(', ')}</InfoRow>}
             <InfoRow label="Creator">{author.name ?? 'Unknown'}</InfoRow>
             <InfoRow label="Updated">{updated}</InfoRow>
@@ -717,6 +750,43 @@ function TryCursors({ pkg }: { pkg: CursorPackage }) {
                 <span className="text-xs text-muted-foreground">{label}</span>
               </div>
             ))}
+      </div>
+    </section>
+  );
+}
+
+/** What an extension says it can do, from its manifest; Get shows the same before installing. */
+function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
+  const sites = pkg.hosts.includes('<all_urls>') || pkg.hosts.some((h) => /^\*:\/\/\*\/\*$/.test(h) || /^https?:\/\/\*\/\*$/.test(h))
+    ? ['Every site']
+    : pkg.hosts;
+  if (!sites.length && !pkg.permissions.length) return null;
+  return (
+    <section className="flex flex-col gap-4" aria-label="What it can do">
+      <SectionHeader title="What It Can Do" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {sites.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="mb-2 text-sm font-medium">Read and change data on</p>
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {sites.map((site) => (
+                <li key={site} className="truncate font-mono text-xs" title={site}>{site}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {pkg.permissions.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <p className="mb-2 text-sm font-medium">Permissions</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {pkg.permissions.map((permission) => (
+                <li key={permission} className="rounded-full bg-muted px-2.5 py-0.5 font-mono text-xs text-muted-foreground">
+                  {permission}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </section>
   );

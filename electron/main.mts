@@ -45,10 +45,8 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
-import {
-  installChromeWebStore,
-  uninstallExtension,
-} from 'electron-chrome-web-store';
+import { installChromeWebStore } from 'electron-chrome-web-store';
+import { extensionAccess, registerBrowserExtensionHandlers } from './browser-extensions.mts';
 import { DevtoolsBridge } from './devtools-bridge.mts';
 import {
   registerUserscriptHandlers,
@@ -3535,6 +3533,9 @@ let shellWindow: BrowserWindow | null = null;
 /** The extension system for the browser session (set at startup). */
 let chromeExtensions: ElectronChromeExtensions | null = null;
 
+/** Extensions from folders and from Nostr (set at startup). */
+let browserExtensions: ReturnType<typeof registerBrowserExtensionHandlers> | null = null;
+
 /**
  * The `src` of the <webview> guest currently being attached. Electron emits
  * `will-attach-webview` immediately before it constructs the guest's
@@ -4236,31 +4237,19 @@ function setupChromeExtensions(): void {
         return { action: 'deny' };
       }
       const raw = manifest as unknown as Record<string, unknown>;
-      const strings = (value: unknown): string[] =>
-        Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
-      // Site access comes from MV3 host_permissions, MV2 match patterns mixed
-      // into permissions, and content-script matches; show all of them.
-      const isPattern = (p: string) => p === '<all_urls>' || p.includes('://');
-      const contentScripts = Array.isArray(raw.content_scripts) ? raw.content_scripts : [];
-      const sites = new Set([
-        ...strings(raw.host_permissions),
-        ...strings(raw.permissions).filter(isPattern),
-        ...contentScripts.flatMap((cs: unknown) =>
-          cs && typeof cs === 'object' ? strings((cs as { matches?: unknown }).matches) : [],
-        ),
-      ]);
-      const allow = await askShell({
-        kind: 'extension-install',
-        name: localizedName || (typeof raw.name === 'string' ? raw.name : 'This extension'),
-        permissions: strings(raw.permissions).filter((p) => !isPattern(p)),
-        hostPermissions: [...sites],
-      });
+      const allow = await askToAddExtension(
+        localizedName || (typeof raw.name === 'string' ? raw.name : 'This extension'),
+        extensionAccess(raw),
+      );
       return { action: allow ? 'allow' : 'deny' };
     },
   }).catch((error) => {
     console.error('chrome-web-store setup failed:', error);
   });
   hardenWebStorePreload();
+
+  // Extensions loaded from folders and installed from Nostr.
+  void browserExtensions?.loadSaved();
 
   // Serve crx://extension-icon/... in the shell session so the toolbar's
   // <browser-action-list> and the extensions manager can render icons.
@@ -4272,6 +4261,11 @@ function setupChromeExtensions(): void {
     type: 'frame',
     filePath: ensureBrowserActionPreload(),
   });
+}
+
+/** Ask the user to add an extension, Chrome-style, showing what it can reach. */
+function askToAddExtension(name: string, access: { permissions: string[]; hosts: string[] }): Promise<boolean | null> {
+  return askShell({ kind: 'extension-install', name, permissions: access.permissions, hostPermissions: access.hosts });
 }
 
 /** The one origin allowed to drive extension installs. */
@@ -5318,29 +5312,14 @@ function registerCrxHandlers(): void {
     openActionPopup = null;
   });
 
-  // Installed-extension listing for the browser's extensions menu.
-  ipcMain.handle('crx:listExtensions', (event) => {
-    assertShellSender(event);
-    return browserSession()
-      .extensions.getAllExtensions()
-      .filter((extension) => !isAdblockExtension(extension.id))
-      .map((extension) => ({
-        id: extension.id,
-        name: extension.manifest?.name ?? extension.name,
-        version: extension.version,
-        description: extension.manifest?.description ?? '',
-      }));
-  });
-
-  ipcMain.handle('crx:uninstallExtension', async (event, extensionId) => {
-    assertShellSender(event);
-    if (typeof extensionId !== 'string' || !/^[a-p]{32}$/.test(extensionId)) {
-      throw new Error('Invalid extension id');
-    }
-    await uninstallExtension(extensionId, {
-      session: browserSession(),
-      extensionsPath: extensionsPath(),
-    });
+  // Listing, removing, loading from folders, publishing and installing from
+  // Nostr (electron/browser-extensions.mts).
+  browserExtensions = registerBrowserExtensionHandlers({
+    assertShellSender,
+    session: browserSession,
+    webStorePath: extensionsPath,
+    hidden: isAdblockExtension,
+    askToAdd: askToAddExtension,
   });
 }
 

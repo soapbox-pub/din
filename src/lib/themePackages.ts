@@ -1,6 +1,7 @@
 import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { APP_BLOSSOM_SERVERS, parseBlossomServerList } from '@/lib/appBlossom';
+import { getCrxBridge } from '@/lib/crx';
 import { formatBytes } from '@/lib/fs';
 import { getIconThemeBridge } from '@/lib/iconTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
@@ -17,7 +18,7 @@ import {
 import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPreview } from '@/lib/systemCursor';
 
 /**
- * Cursor themes, icon themes and Media Player skins on Nostr (NIP.md): Din's own kinds, in a range of
+ * Cursor themes, icon themes, Media Player skins and browser extensions on Nostr (NIP.md): Din's own kinds, in a range of
  * its own, 346xx, DIN on a dialpad, the last two digits spelling the type
  * the same way.
  *
@@ -29,25 +30,31 @@ import { getSystemCursorBridge, type PublishedThemeInstall, type SystemCursorPre
  *   thousands of files, plus a few of its icons for showing it (`icon`).
  * - **34675 (SK), a Media Player skin:** a Winamp .wsz or Windows Media
  *   Player .wmz, already one file, as one blob (`skin`).
+ * - **34639 (EX), a browser extension:** a Chrome extension's directory as
+ *   one gzipped tarball blob (`archive`), with what it asks for copied from
+ *   its manifest so the browser's Extensions page can show it beforehand.
  *
  * All are addressable, `d` being the theme's directory name (a skin's file
  * name without its extension), so publishing one again updates it.
  * Publishing and installing are here, shared by Settings, the Media Player,
- * the App Store and the `din` command; themes' files are read and written by
- * the main process (electron/themePackages.mts), skins' through the fs
- * bridge (src/lib/skinPackages.ts).
+ * the App Store, the Web Browser's about:extensions and the `din` command;
+ * themes' and extensions' files are read and written by the main process
+ * (electron/themePackages.mts, electron/browser-extensions.mts), skins'
+ * through the fs bridge (src/lib/skinPackages.ts).
  */
 
 export const CURSOR_THEME_KIND = 34628;
 export const ICON_THEME_KIND = 34642;
 export const MEDIA_SKIN_KIND = 34675;
+export const BROWSER_EXTENSION_KIND = 34639;
 
-export type PackageType = 'cursor' | 'icon' | 'skin';
+export type PackageType = 'cursor' | 'icon' | 'skin' | 'extension';
 
 export const PACKAGE_KIND: Record<PackageType, number> = {
   cursor: CURSOR_THEME_KIND,
   icon: ICON_THEME_KIND,
   skin: MEDIA_SKIN_KIND,
+  extension: BROWSER_EXTENSION_KIND,
 };
 
 /** What each is called in a sentence, and what its `alt` and `t` tags say. */
@@ -55,6 +62,7 @@ const PACKAGE_WORDS: Record<PackageType, { alt: string; t: string }> = {
   cursor: { alt: 'Cursor theme', t: 'cursor-theme' },
   icon: { alt: 'Icon theme', t: 'icon-theme' },
   skin: { alt: 'Media Player skin', t: 'media-player-skin' },
+  extension: { alt: 'Browser extension', t: 'browser-extension' },
 };
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -96,7 +104,21 @@ export interface SkinPackage extends PackageCommon {
   image: string | null;
 }
 
-export type ThemePackage = CursorPackage | IconPackage | SkinPackage;
+export interface ExtensionPackage extends PackageCommon {
+  type: 'extension';
+  archive: { sha256: string; mime: string; size: number };
+  /** Its manifest's version. */
+  version: string;
+  manifestVersion: number | null;
+  /** The API permissions it asks for. */
+  permissions: string[];
+  /** The sites it can read and change. */
+  hosts: string[];
+  /** Its icon. */
+  image: string | null;
+}
+
+export type ThemePackage = CursorPackage | IconPackage | SkinPackage | ExtensionPackage;
 
 export interface PackageAddress {
   type: PackageType;
@@ -127,7 +149,7 @@ function size(value: string | undefined): number {
   return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-/** Parse a kind 34628, 34642 or 34675 event, or null when it lacks what installing needs. */
+/** Parse a kind 34628, 34642, 34675 or 34639 event, or null when it lacks what installing needs. */
 export function parseThemePackage(event: NostrEvent): ThemePackage | null {
   const identifier = tagValue(event, 'd');
   if (!identifier) return null;
@@ -186,6 +208,24 @@ export function parseThemePackage(event: NostrEvent): ThemePackage | null {
       skin: { sha256: skin[1], format: skin[2] as SkinFormat, size: size(skin[3]) },
       image: image ? sanitizeImageUrl(image) ?? null : null,
       size: size(skin[3]),
+    };
+  }
+
+  if (event.kind === BROWSER_EXTENSION_KIND) {
+    const archive = event.tags.find(([n, sha]) => n === 'archive' && SHA256.test(sha ?? ''));
+    if (!archive) return null;
+    const image = tagValue(event, 'image');
+    const manifestVersion = Number(tagValue(event, 'manifest'));
+    return {
+      ...common,
+      type: 'extension',
+      archive: { sha256: archive[1], mime: archive[2] || 'application/gzip', size: size(archive[3]) },
+      version: tagValue(event, 'version')?.trim() ?? '',
+      manifestVersion: Number.isInteger(manifestVersion) && manifestVersion > 0 ? manifestVersion : null,
+      permissions: tagValues(event, 'permission'),
+      hosts: tagValues(event, 'host'),
+      image: image ? sanitizeImageUrl(image) ?? null : null,
+      size: size(archive[3]),
     };
   }
 
@@ -419,6 +459,41 @@ export async function publishMediaSkin(id: string, details: PublishDetails, deps
   return d;
 }
 
+/**
+ * Publish an installed browser extension as kind 34639, by its extension id;
+ * resolves with its `d` tag.
+ */
+export async function publishBrowserExtension(id: string, details: PublishDetails, deps: PublishDeps): Promise<string> {
+  const bridge = getCrxBridge();
+  if (!bridge) throw new Error('Extensions can only be published in the Din desktop app');
+  deps.progress?.('Packing the extension');
+  const extension = await bridge.exportExtension(id);
+  const d = extension.identifier;
+
+  deps.progress?.('Uploading its icon', 10);
+  const image = extension.icon
+    ? ((await uploadBlob(deps, extension.icon.data, extension.icon.name, extension.icon.mime).catch(() => null))?.url ?? null)
+    : null;
+
+  deps.progress?.(`Uploading the extension (${formatBytes(extension.archive.length)})`, 30);
+  const { sha256 } = await uploadBlob(deps, extension.archive, `${d}.tar.gz`, 'application/gzip');
+
+  deps.progress?.('Publishing', 90);
+  const tags = commonTags('extension', d, details, [], deps.servers);
+  tags.splice(
+    tags.length - 1,
+    0,
+    ['archive', sha256, 'application/gzip', String(extension.archive.length)],
+    ...(extension.version ? [['version', extension.version]] : []),
+    ...(extension.manifestVersion ? [['manifest', String(extension.manifestVersion)]] : []),
+    ...extension.permissions.map((p) => ['permission', p]),
+    ...extension.hosts.map((h) => ['host', h]),
+  );
+  if (image) tags.push(['image', image]);
+  await deps.publish({ kind: BROWSER_EXTENSION_KIND, content: '', tags });
+  return d;
+}
+
 /** The kind 5 deletion of one of the user's own published themes (NIP-09). */
 export function packageDeletion(pkg: ThemePackage): { kind: number; content: string; tags: string[][] } {
   return {
@@ -512,6 +587,13 @@ export async function installThemePackage(pkg: ThemePackage, deps: InstallDeps, 
     return saveSkin(data, pkg.skin.format, base);
   }
 
+  if (pkg.type === 'extension') {
+    const bridge = getCrxBridge();
+    if (!bridge) throw new Error('Extensions install in the Din desktop app');
+    deps.progress?.(`Downloading ${pkg.title}`);
+    return (await bridge.installPublished({ ...base, archive: { sha256: pkg.archive.sha256 } })).id;
+  }
+
   const bridge = getIconThemeBridge();
   if (!bridge) throw new Error('Icon themes install in the Din desktop app');
   deps.progress?.(`Downloading ${pkg.title}`);
@@ -547,6 +629,7 @@ export async function fetchThemePackage(address: PackageAddress, query: InstallD
 export function publishThemePackage(type: PackageType, id: string, details: PublishDetails, deps: PublishDeps): Promise<string> {
   if (type === 'cursor') return publishCursorTheme(id, details, deps);
   if (type === 'icon') return publishIconTheme(id, details, deps);
+  if (type === 'extension') return publishBrowserExtension(id, details, deps);
   return publishMediaSkin(id, details, deps);
 }
 
@@ -555,6 +638,7 @@ export async function installedPackages(type: PackageType): Promise<PublishedThe
   if (type === 'skin') {
     return (await installedSkins()).flatMap((skin) => (skin.source ? [{ id: skin.id, source: skin.source }] : []));
   }
+  if (type === 'extension') return (await getCrxBridge()?.published()) ?? [];
   const bridge = type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge();
   return (await bridge?.published()) ?? [];
 }
@@ -564,10 +648,12 @@ export type OpenApp = (appId: string, params?: Record<string, unknown>) => unkno
 
 /**
  * Make an installed theme the pointer's (at `size`, else the current size)
- * or the icons', or open the Media Player wearing a skin.
+ * or the icons', or open the Media Player wearing a skin. An extension is
+ * at work once it's installed, so there's nothing more to do for one.
  */
 export async function applyTheme(type: PackageType, id: string, options: { size?: number; open?: OpenApp } = {}): Promise<void> {
   const { size } = options;
+  if (type === 'extension') return;
   if (type === 'skin') {
     if (!options.open) throw new Error('Skins are worn in the Media Player');
     const { path } = await readSkin(id);
@@ -586,9 +672,14 @@ export async function applyTheme(type: PackageType, id: string, options: { size?
   await bridge.set(id);
 }
 
-/** Delete a theme Din installed. */
+/** Delete a theme Din installed, or remove an extension. */
 export async function removeTheme(type: PackageType, id: string): Promise<void> {
   if (type === 'skin') return trashSkin(id);
+  if (type === 'extension') {
+    const crx = getCrxBridge();
+    if (!crx) throw new Error('Extensions can’t be removed here');
+    return crx.uninstallExtension(id);
+  }
   const bridge = type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge();
   if (!bridge) throw new Error('Themes can’t be removed here');
   await bridge.removeTheme(id);

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   AtSign,
+  Puzzle,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -47,6 +48,8 @@ import { pickBestIcon, type IconCandidate } from '@/lib/appIcon';
 import {
   internalPageTitle,
   isInternalUrl,
+  EXTENSIONS_URL,
+  extensionAddressOf,
   PREFERENCES_URL,
 } from '@/lib/internalPages';
 import { getCrxBridge, isAllowedTabUrl } from '@/lib/crx';
@@ -164,6 +167,7 @@ import {
   type DockMode,
 } from '@/components/desktop/apps/InspectorToolbar';
 import { NostrPage } from '@/components/desktop/apps/NostrPage';
+import { ExtensionsPage } from '@/components/desktop/apps/ExtensionsPage';
 import { isNostrUri, type NostrHandler } from '@/lib/nostrUri';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 import { cleanPrintingError, printPage } from '@/lib/printing';
@@ -1570,19 +1574,22 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
    * it has one — the way every browser treats its settings tab. An empty tab
    * is navigated in place rather than stranded behind a new one.
    */
-  const openPreferences = useCallback(() => {
-    const existing = tabsRef.current.find((t) => t.url === PREFERENCES_URL);
+  const openInternalPage = useCallback((url: string) => {
+    const existing = tabsRef.current.find((t) => t.url === url);
     if (existing) {
       setActiveId(existing.id);
       return;
     }
     const active = tabsRef.current.find((t) => t.id === activeIdRef.current);
     if (active && active.url === '') {
-      navigateTab(active.id, PREFERENCES_URL);
+      navigateTab(active.id, url);
       return;
     }
-    openTab(PREFERENCES_URL);
+    openTab(url);
   }, [navigateTab, openTab]);
+  const openPreferences = useCallback(() => openInternalPage(PREFERENCES_URL), [openInternalPage]);
+  /** about:extensions, the same way. */
+  const openExtensions = useCallback(() => openInternalPage(EXTENSIONS_URL), [openInternalPage]);
 
   /** Move a tab through its history by `delta` (-1 back, +1 forward). */
   const goTab = useCallback(
@@ -2079,6 +2086,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           showClearData={!isPrivate}
           onClearBrowsingData={() => setClearDataOpen(true)}
           onOpenPreferences={openPreferences}
+          showExtensions={!isPrivate && !!crx}
+          onOpenExtensions={openExtensions}
         />
 
         {activeTab.loading && (
@@ -2132,7 +2141,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // Non-null only for the settings tab, where it both selects the
             // about:preferences overlay and supplies what it renders.
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
-            nostrUri={isNostrUri(tab.url) ? tab.url : null}
+            nostrUri={isNostrUri(tab.url) && !extensionAddressOf(tab.url) ? tab.url : null}
+            // about:extensions, or a nostr: link to one extension on it.
+            extensionsPage={tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? tab.url : null}
+            onOpenPreferences={openPreferences}
             onNavigate={navigateTab}
             onPredict={predictNavigation}
             onOpenTab={openTabInBackground}
@@ -3665,6 +3677,8 @@ const TabSurface = memo(function TabSurface({
   topSites: sites,
   preferences,
   nostrUri,
+  extensionsPage,
+  onOpenPreferences,
   onNavigate: onNavigateToUrl,
   onPredict,
   onOpenTab,
@@ -3705,6 +3719,9 @@ const TabSurface = memo(function TabSurface({
   preferences: PreferencesProps | null;
   /** The nostr: link this tab previews, or null. */
   nostrUri: string | null;
+  /** The URL of the about:extensions page (or a nostr: link to an extension) this tab shows, or null. */
+  extensionsPage: string | null;
+  onOpenPreferences: () => void;
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string, typed?: boolean) => void;
   /** Where the new-tab page would go changed (see predictNavigation). */
@@ -3866,6 +3883,9 @@ const TabSurface = memo(function TabSurface({
       {preferences && <PreferencesPage {...preferences} />}
       {/* A nostr: link's preview, the same way. */}
       {nostrUri && <NostrPage uri={nostrUri} />}
+      {extensionsPage && (
+        <ExtensionsPage key={extensionsPage} initial={extensionAddressOf(extensionsPage)} onOpenPreferences={onOpenPreferences} />
+      )}
       {/* Untrusted-TLS warning, over the failed page until the user decides. */}
       {certError && (
         <CertificateWarning
@@ -4229,7 +4249,9 @@ function tabLabel(tab: Tab): string {
  * one (nothing loads), so they wear the icon of the thing they are.
  */
 function TabGlyph({ tab, className }: { tab: Tab; className?: string }) {
-  const Icon = tab.url === PREFERENCES_URL ? Settings : isNostrUri(tab.url) ? AtSign : Globe;
+  const Icon = tab.url === PREFERENCES_URL
+    ? Settings
+    : tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? Puzzle : isNostrUri(tab.url) ? AtSign : Globe;
   return <Icon className={className} aria-hidden />;
 }
 
@@ -4285,6 +4307,8 @@ function BrowserMenu({
   showClearData,
   onClearBrowsingData,
   onOpenPreferences,
+  showExtensions,
+  onOpenExtensions,
 }: {
   /** Show the find-in-page item (webview mode). */
   showFind: boolean;
@@ -4308,6 +4332,10 @@ function BrowserMenu({
   onClearBrowsingData: () => void;
   /** Open the about:preferences tab. */
   onOpenPreferences: () => void;
+  /** Show the Extensions item (extensions never run in private windows). */
+  showExtensions: boolean;
+  /** Open the about:extensions tab. */
+  onOpenExtensions: () => void;
 }) {
   const [open, setOpen] = useState(false);
   /** Run an action and dismiss the menu. */
@@ -4390,6 +4418,13 @@ function BrowserMenu({
               label="Clear browsing data…"
               shortcut="Ctrl+Shift+Del"
               onClick={() => run(onClearBrowsingData)}
+            />
+          )}
+          {showExtensions && (
+            <BrowserMenuItem
+              icon={Puzzle}
+              label="Extensions"
+              onClick={() => run(onOpenExtensions)}
             />
           )}
           <BrowserMenuItem

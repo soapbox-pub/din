@@ -2649,14 +2649,42 @@ expose('crx', {
     };
   },
 
-  /** Installed extensions ({ id, name, version, description }[]). */
+  /** Installed extensions ({ id, name, version, description, source, path?, coordinate? }[]). */
   listExtensions: () => ipcRenderer.invoke('crx:listExtensions'),
 
   /**
-   * Uninstall an installed extension by id.
+   * Uninstall an installed extension by id (one loaded from a folder is
+   * only forgotten; its folder stays).
    * @param {string} id
    */
   uninstallExtension: (id) => ipcRenderer.invoke('crx:uninstallExtension', id),
+
+  /**
+   * Load an extension from a folder, and keep loading it from there.
+   * @param {string} path
+   */
+  loadUnpacked: (path) => ipcRenderer.invoke('crx:loadUnpacked', path),
+
+  /**
+   * Load an installed extension again from its files.
+   * @param {string} id
+   */
+  reloadExtension: (id) => ipcRenderer.invoke('crx:reloadExtension', id),
+
+  /**
+   * An installed extension's files (a .tar.gz) and icon, for publishing it.
+   * @param {string} id
+   */
+  exportExtension: (id) => ipcRenderer.invoke('crx:exportExtension', id),
+
+  /** The extensions installed from Nostr ({ id, source: { coordinate, publishedAt } }[]). */
+  published: () => ipcRenderer.invoke('crx:published'),
+
+  /**
+   * Install (or update) a published extension; resolves with { id, name }.
+   * @param {unknown} manifest
+   */
+  installPublished: (manifest) => ipcRenderer.invoke('crx:installPublished', manifest),
 
   /**
    * Subscribe to extension action-popup open/close requests (chrome.action

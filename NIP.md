@@ -1,15 +1,16 @@
 # Din Nostr Schemas
 
 This document describes how Din uses Nostr to store desktop state and share
-what a desktop looks like. Din builds on existing NIPs, and defines three
-kinds of its own, for cursor themes, icon themes and Media Player skins, in a
-range it keeps for itself:
+what a desktop looks like. Din builds on existing NIPs, and defines four
+kinds of its own, for cursor themes, icon themes, Media Player skins and
+browser extensions, in a range it keeps for itself:
 **346xx**, "DIN" on a phone keypad. The last two digits spell the type the
 same way.
 
 | Kind | Keypad | What |
 |---|---|---|
 | 34628 | DIN-**CU** | [Cursor theme](#cursor-themes-kind-34628) |
+| 34639 | DIN-**EX** | [Browser extension](#browser-extensions-kind-34639) |
 | 34642 | DIN-**IC** | [Icon theme](#icon-themes-kind-34642) |
 | 34675 | DIN-**SK** | [Media Player skin](#media-player-skins-kind-34675) |
 
@@ -182,6 +183,48 @@ records, by file name, the `coordinate` (`<kind>:<pubkey>:<d>`) and
 `publishedAt` (`created_at`) each came from, for Update and Remove. Use opens
 the Media Player wearing it.
 
+## Browser extensions (kind 34639)
+
+A Chrome extension for Din's Web Browser, as one gzipped tarball of its
+directory, the folder holding its `manifest.json`. Addressable like the
+others.
+
+| Tag | Required | Meaning |
+|---|---|---|
+| `["d", <id>]` | yes | What it's published as: the `d` it was installed under, its Chrome Web Store id, or its name made a slug |
+| `["title", <name>]` | yes | Its name, as people see it |
+| `["summary", <text>]` | no | A description |
+| `["alt", "Browser extension: <name>"]` | yes | NIP-31 |
+| `["archive", <sha256>, "application/gzip", <bytes>]` | yes | The extension as a `.tar.gz` blob, and its size |
+| `["version", <version>]` | no | Its manifest's `version` |
+| `["manifest", "2" \| "3"]` | no | Its manifest's `manifest_version` |
+| `["permission", <name>]` | no, many | An API permission its manifest asks for, e.g. `storage` |
+| `["host", <pattern>]` | no, many | A site it can read and change, from its `host_permissions`, the match patterns in its `permissions`, and its content scripts' `matches` |
+| `["image", <url>]` | no | Its icon, the biggest its manifest names |
+| `["server", <url>]` | yes, one or more | Blossom servers holding its files |
+| `["t", "browser-extension"]` | yes | |
+
+The archive's paths are relative to the extension's directory and it must
+hold `manifest.json`; it has files only, no links. Din leaves out `.git` and
+the Web Store's `_metadata` when publishing, and keeps everything else as it
+is, `manifest.json`'s `key` included, so an extension keeps its id.
+`permission` and `host` are only for showing it: installing reads them again
+from the manifest in the archive. `content` is empty.
+
+The browser's Settings page lists installed extensions, from the Chrome Web
+Store, a folder (Load from folder…, which Din keeps loading from where it
+is), or Nostr, and publishes any of them from its ⋯ and right-click menus;
+`din extensions publish` does the same. `about:extensions`, an internal page
+of the browser reached from its menu, lists them as the App Store lists
+cursor themes, honoring deletions with `["k", "34639"]`, and a `nostr:` link
+to one opens its page there. Installing downloads the blob as for themes and
+checks its hash, then asks the user with what the manifest asks for, as the
+Web Store's installs do (an update asks again only when it wants more),
+unpacks it into the browser's `NostrExtensions/<d>` (numbered if taken), and
+loads it. `NostrExtensions/.nostr.json` records, by directory, the
+`coordinate` and `publishedAt` each came from, for Update and Remove. A copy
+of the same extension, by id, already installed another way is replaced.
+
 ## Other kinds Din reads/writes (standard usage, no extensions)
 
 | Kind | NIP | Usage |
@@ -193,5 +236,5 @@ the Media Player wearing it.
 | 16767 | Profile Themes | Active profile theme; applied as the OS theme, and published when a synced custom theme changes. A theme worn from a named one carries Ditto's credit tags: `["a", "36767:<pubkey>:<d>"]`, plus `["p", <pubkey>]` when someone else made it. Editing someone else's theme drops both |
 | 36767 | Profile Themes | Named themes, in the same `c`/`f`/`bg` tags as 16767 plus `d`, `title`, optional `description`, `alt` and `["t", "theme"]`, as Ditto writes them. The App Store's Themes lists those by its catalog publishers, the people the user follows, and the user; Settings → Themes saves the custom theme as one, updates one under its `d`, and deletes one with a NIP-09 kind 5 carrying `e`, `a` and `["k", "36767"]` |
 | 3 | NIP-02 | Follow list; read to list what the people the user follows publish in the App Store |
-| 5 | NIP-09 | Deletions of the user's own named themes, cursor and icon themes, and Media Player skins |
+| 5 | NIP-09 | Deletions of the user's own named themes, cursor and icon themes, Media Player skins, and browser extensions |
 | 22242 | NIP-42 | Relay authentication |

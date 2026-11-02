@@ -63,9 +63,14 @@ const TABS: { id: StoreTab; name: string; search: string }[] = [
   { id: 'skins', name: 'Skins', search: 'Search skins, or paste an address' },
 ];
 
-/** The tab each kind of published theme is in, and back. */
-const PACKAGE_TABS: Record<PackageType, StoreTab> = { cursor: 'cursors', icon: 'icons', skin: 'skins' };
+/** The tab each kind of published theme is in, and back. Extensions are the Web Browser's (about:extensions). */
+const PACKAGE_TABS: Record<Exclude<PackageType, 'extension'>, StoreTab> = { cursor: 'cursors', icon: 'icons', skin: 'skins' };
 const TAB_PACKAGES: Partial<Record<StoreTab, PackageType>> = { cursors: 'cursor', icons: 'icon', skins: 'skin' };
+
+/** A published theme the App Store lists, leaving out extensions. */
+function storePackage(address: PackageAddress | null): PackageAddress | null {
+  return address && address.type !== 'extension' ? address : null;
+}
 
 /** The skin file a launch asks to publish: a name in the Media Player's skins folder, never a path. */
 function skinToPublish(params: AppComponentProps['params']): PublishTarget | null {
@@ -76,7 +81,7 @@ function skinToPublish(params: AppComponentProps['params']): PublishTarget | nul
 
 /** The tab a launch opens on: the one asked for, or the one an address it names is in. */
 function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | null): StoreTab {
-  if (pkg) return PACKAGE_TABS[pkg.type];
+  if (pkg && pkg.type !== 'extension') return PACKAGE_TABS[pkg.type];
   if (skinToPublish(params)) return 'skins';
   if (typeof params?.theme === 'string') return 'themes';
   return TABS.some((t) => t.id === params?.tab) ? (params?.tab as StoreTab) : 'apps';
@@ -119,7 +124,7 @@ export function AppStore({ params }: AppComponentProps) {
   const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
   const [selectedPackage, setSelectedPackage] = useState<PackageAddress | null>(() =>
-    typeof params?.package === 'string' ? parsePackageNaddr(params.package) : null,
+    typeof params?.package === 'string' ? storePackage(parsePackageNaddr(params.package)) : null,
   );
   const [tab, setTab] = useState<StoreTab>(() => initialTab(params, selectedPackage));
   const themes = useThemeCatalog(tab === 'themes');

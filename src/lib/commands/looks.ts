@@ -43,7 +43,10 @@ interface InstalledRow {
   format?: string;
 }
 
-async function installed(type: PackageType): Promise<InstalledRow[]> {
+/** The kinds looked after here; extensions are `din extensions` (./extensions.ts). */
+type LooksType = Exclude<PackageType, 'extension'>;
+
+async function installed(type: LooksType): Promise<InstalledRow[]> {
   if (type === 'skin') {
     // Which skin the Media Player wears is its own; Din's built-in skins aren't files.
     return (await call(installedSkins())).map((skin) => ({
@@ -80,10 +83,10 @@ function naddrOf(type: PackageType, coordinate: string): string {
   return packageNaddr({ type, pubkey, identifier: d.join(':') });
 }
 
-const NOUN: Record<PackageType, string> = { cursor: 'cursor theme', icon: 'icon theme', skin: 'Media Player skin' };
+const NOUN: Record<LooksType, string> = { cursor: 'cursor theme', icon: 'icon theme', skin: 'Media Player skin' };
 
 /** Who the App Store lists themes by: Din's publishers, the user, and the people they follow. */
-async function catalogAuthors(ctx: CommandContext): Promise<string[]> {
+export async function catalogAuthors(ctx: CommandContext): Promise<string[]> {
   const authors = new Set(NSITE_CATALOG_PUBKEYS);
   if (ctx.pubkey) {
     authors.add(ctx.pubkey);
@@ -93,11 +96,11 @@ async function catalogAuthors(ctx: CommandContext): Promise<string[]> {
   return [...authors];
 }
 
-function packageRow(pkg: ThemePackage) {
+export function packageRow(pkg: ThemePackage) {
   return { address: packageNaddr(pkg), title: pkg.title, summary: pkg.summary, author: nip19.npubEncode(pkg.pubkey), size: pkg.size, updated: pkg.createdAt };
 }
 
-function looksArea(type: PackageType, name: 'cursors' | 'icons' | 'skins'): Area {
+function looksArea(type: LooksType, name: 'cursors' | 'icons' | 'skins'): Area {
   const noun = NOUN[type];
   const theme: Param = { ...THEME, help: THEME.help.replace('{area}', name) };
   const pickTheme = async (query: string) => pick(await installed(type), query, (t) => [t.id, t.name], noun);

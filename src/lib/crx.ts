@@ -20,6 +20,38 @@ export interface CrxExtension {
   name: string;
   version: string;
   description: string;
+  /** Where it came from: the Chrome Web Store, a folder here, or Nostr. */
+  source: 'webstore' | 'local' | 'nostr';
+  /** The folder it's loaded from, for one loaded from a folder. */
+  path?: string;
+  /** The `<kind>:<pubkey>:<d>` it was installed from, for one from Nostr. */
+  coordinate?: string;
+}
+
+/** An installed extension made ready to publish (electron/browser-extensions.mts). */
+export interface CrxExtensionExport {
+  /** What its `d` tag should be. */
+  identifier: string;
+  name: string;
+  version: string;
+  description: string;
+  manifestVersion: number | null;
+  permissions: string[];
+  hosts: string[];
+  /** Its directory as a .tar.gz. */
+  archive: Uint8Array;
+  icon: { name: string; mime: string; data: Uint8Array } | null;
+}
+
+/** What installing a published extension sends the main process. */
+export interface CrxPublishedInstall {
+  identifier: string;
+  name: string;
+  coordinate: string;
+  publishedAt: number;
+  inherits: string[];
+  servers: string[];
+  archive: { sha256: string };
 }
 
 /** The pop-up window a page's window.open asked for. */
@@ -107,8 +139,18 @@ export interface CrxBridge {
   onTabCommand(callback: (command: CrxTabCommand) => void): () => void;
   /** Installed extensions. */
   listExtensions(): Promise<CrxExtension[]>;
-  /** Uninstall an installed extension by id. */
+  /** Uninstall an installed extension by id; one loaded from a folder is only forgotten. */
   uninstallExtension(id: string): Promise<void>;
+  /** Load an extension from a folder, and keep loading it from there. */
+  loadUnpacked(path: string): Promise<CrxExtension>;
+  /** Load an installed extension again from its files. */
+  reloadExtension(id: string): Promise<CrxExtension>;
+  /** An installed extension's files and icon, for publishing it. */
+  exportExtension(id: string): Promise<CrxExtensionExport>;
+  /** The extensions installed from Nostr, and where each was published. */
+  published(): Promise<{ id: string; source: { coordinate: string; publishedAt: number } }[]>;
+  /** Install (or update) a published extension, asking the user first. */
+  installPublished(manifest: CrxPublishedInstall): Promise<{ id: string; name: string }>;
   /**
    * Subscribe to action-popup open/close requests (chrome.action popups
    * hosted in-shell). Returns an unsubscribe fn.
