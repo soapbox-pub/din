@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { Din } from '@/sdk';
 import { pickFiles, pickFolder } from '@/shared/fileHandles';
 import { useDin } from '@/sdk/react';
@@ -12,41 +12,56 @@ async function startIn(din: Din, path: string | undefined): Promise<FileSystemHa
   return path ? din.files.fromPath(path).catch(() => undefined) : undefined;
 }
 
+/** A space before the text unless it starts a line or follows one. */
+function spaced(before: string, text: string): string {
+  return before && !/\s$/.test(before) && !/^[.,!?;:]/.test(text) ? ` ${text}` : text;
+}
+
 /**
- * Dictation into the composer's field, through din.dictation (it types
- * into what's focused). Lit while what's dictated goes into this window's
- * composer, from its mic or Din's dictation key alike.
+ * Dictation into the composer's field: the web's SpeechRecognition (Din's
+ * dictation, in the window the user is in), what's said typed at the
+ * cursor as if from the keyboard. Lit while its own session listens.
  */
-function useAppDictation(din: Din, ref: RefObject<HTMLTextAreaElement | null>) {
-  const [status, setStatus] = useState(din.dictation.status);
-  useEffect(() => din.dictation.onStatus(setStatus), [din]);
-  // Whether the composer has focus: dictation types into the focused field.
-  const [focused, setFocused] = useState(false);
+function useAppDictation(ref: RefObject<HTMLTextAreaElement | null>) {
+  const [available, setAvailable] = useState(false);
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const on = () => setFocused(true);
-    const off = () => setFocused(false);
-    el.addEventListener('focus', on);
-    el.addEventListener('blur', off);
+    let live = true;
+    void globalThis.SpeechRecognition?.available({ langs: [], processLocally: true })
+      .then((answer) => live && setAvailable(answer === 'available'))
+      .catch(() => {});
     return () => {
-      el.removeEventListener('focus', on);
-      el.removeEventListener('blur', off);
+      live = false;
     };
-  }, [ref]);
-  const active = din.dictation.here && focused && (status === 'listening' || status === 'transcribing');
+  }, []);
+  const recognition = useRef<SpeechRecognition | null>(null);
+  const [active, setActive] = useState(false);
+  useEffect(() => () => recognition.current?.abort(), []);
   return {
-    available: din.dictation.available,
+    available,
     active,
     toggle: () => {
-      if (active) {
-        void din.dictation.finish();
+      if (recognition.current) {
+        recognition.current.stop();
         return;
       }
       const textarea = ref.current;
       if (!textarea) return;
       textarea.focus();
-      din.dictation.start().catch(() => {});
+      const r = new SpeechRecognition();
+      r.onresult = (e) => {
+        const text = e.results[0]?.[0]?.transcript ?? '';
+        const field = ref.current;
+        if (!text || !field?.isConnected) return;
+        field.focus();
+        document.execCommand('insertText', false, spaced(field.value.slice(0, field.selectionStart ?? field.value.length), text));
+      };
+      r.onend = () => {
+        if (recognition.current === r) recognition.current = null;
+        setActive(false);
+      };
+      recognition.current = r;
+      setActive(true);
+      r.start();
     },
   };
 }
@@ -88,7 +103,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
         return picked ? din.files.path(picked) : null;
       },
       notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
-      useDictation: (ref) => useAppDictation(din, ref),
+      useDictation: (ref) => useAppDictation(ref),
     }),
     [din, settings.directory, settings.colorfulReplies],
   );

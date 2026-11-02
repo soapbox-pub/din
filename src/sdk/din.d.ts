@@ -68,7 +68,6 @@ export interface Din {
   clipboard: DinClipboard;
   theme: DinTheme;
   desktop: DinDesktop;
-  dictation: DinDictation;
   assistant: DinAssistant;
   permissions: DinPermissions;
   /** Privileged system bridges, present only when the manifest asks for them. */
@@ -608,26 +607,37 @@ export interface DinDesktop {
 }
 
 // ---------------------------------------------------------------------------
-// din.dictation: speech to text, into the app's focused field
+// Speech to text: the web's SpeechRecognition
 // ---------------------------------------------------------------------------
 
-export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'error';
+// `SpeechRecognition` (and `webkitSpeechRecognition`), from the Web Speech
+// API, is Din's dictation (whisper.cpp, on this computer), in the window
+// the user is in: `start()` listens until a pause (until `stop()` with
+// `continuous`), then one final `result` brings what was said and `end`
+// follows. `SpeechRecognition.available()` says whether this computer can
+// take dictation. No interim results; `lang` is whisper's to guess.
 
-export interface DinDictation {
-  /** Whether this computer can take dictation. */
-  readonly available: boolean;
-  readonly status: DictationStatus;
-  /** Whether what's being dictated goes into this window (from its mic button, or Din's dictation key). */
-  readonly here: boolean;
-  onStatus(cb: (status: DictationStatus) => void): Unsubscribe;
-  /**
-   * Listen, and type what's said into the field focused in the app when it
-   * finishes (as Din's dictation key does). `held`: stops when `finish()`
-   * is called rather than at a pause.
-   */
-  start(options?: { held?: boolean }): Promise<void>;
-  finish(): Promise<void>;
-  cancel(): void;
+declare global {
+  // The Web Speech API's recognizer, which TypeScript's DOM types don't have.
+  interface SpeechRecognition extends EventTarget {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    maxAlternatives: number;
+    processLocally: boolean;
+    start(): void;
+    stop(): void;
+    abort(): void;
+    onstart: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+    onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => unknown) | null;
+    onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => unknown) | null;
+    onend: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+  }
+  var SpeechRecognition: {
+    prototype: SpeechRecognition;
+    new (): SpeechRecognition;
+    available(options?: { langs?: string[]; processLocally?: boolean }): Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>;
+  };
 }
 
 // ---------------------------------------------------------------------------

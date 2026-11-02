@@ -22,9 +22,7 @@ import type {
   AssistantSettings,
   DinClipboard,
   DinDesktop,
-  DinDictation,
   DinDrag,
-  DictationStatus,
   DinFiles,
   DinMenus,
   DinPermissions,
@@ -63,6 +61,7 @@ import {
   installFileSystemObserver,
   installLaunchQueue,
   installDroppedFiles,
+  installSpeechRecognition,
   installSavedState,
   installWindowState,
   toWebHandle,
@@ -856,30 +855,18 @@ export function installDin(transport: Transport): void {
       await request('desktop.setCursor', { handle: idOf(file) });
     },
   };
-  let dictationStatus: DictationStatus = 'idle';
-  let dictationHere = false;
-  const dictationChanges = new Emitter<DictationStatus>();
-  pushes.on((p) => {
-    if (p.type !== 'dictation') return;
-    dictationStatus = p.status;
-    dictationHere = p.here;
-    dictationChanges.emit(p.status);
-  });
-  const dictation: DinDictation = {
-    get available() {
+  installSpeechRecognition({
+    available: async () => {
+      await ready;
       return h?.dictation.available ?? false;
     },
-    get status() {
-      return dictationStatus;
-    },
-    get here() {
-      return dictationHere;
-    },
-    onStatus: (cb) => dictationChanges.on(cb),
-    start: (options) => request('dictation.start', { held: options?.held === true }),
-    finish: () => request('dictation.finish'),
-    cancel: () => tell('dictation.cancel'),
-  };
+    start: (id, continuous) => request('speech.start', { id, continuous }),
+    stop: () => tell('speech.stop'),
+    abort: () => tell('speech.abort'),
+    onEvent: (cb) => pushes.on((p) => {
+      if (p.type === 'speech') cb(p);
+    }),
+  });
 
   // ---- the assistant's settings ----
   let assistantSettings = NO_ASSISTANT;
@@ -931,7 +918,6 @@ export function installDin(transport: Transport): void {
     clipboard,
     theme,
     desktop,
-    dictation,
     assistant,
     permissions: permissionsApi,
     system,
@@ -995,8 +981,6 @@ export function installDin(transport: Transport): void {
     markAccessibility();
     currentDrag = hello.drag;
     reportDragOver(hello.drag !== null);
-    dictationStatus = hello.dictation.status;
-    dictationHere = hello.dictation.here;
     assistantSettings = hello.assistant ?? NO_ASSISTANT;
     assistantUnread = hello.assistantUnread;
     powerMode = hello.powerMode;

@@ -15,7 +15,6 @@ import type {
   Snap,
   WindowChrome,
   AssistantSettings,
-  DictationStatus,
   Edge,
 } from '@/sdk/din';
 
@@ -156,7 +155,8 @@ export interface Hello {
   recentFiles: Record<string, string> | null;
   /** The drag going on, if one is. */
   drag: DragInfo | null;
-  dictation: { available: boolean; status: DictationStatus; here: boolean };
+  /** Whether this computer can take dictation (the runtime's SpeechRecognition). */
+  dictation: { available: boolean };
   /** Din's assistant settings, for apps with the assistant permission. */
   assistant: AssistantSettings | null;
   /** The conversations with unread notifications, for apps with the assistant permission. */
@@ -238,9 +238,10 @@ export interface Requests {
   'media.setSession': [{ session: MediaReport | null }, void];
   'desktop.setWallpaper': [{ handle: string }, void];
   'desktop.setCursor': [{ handle: string }, void];
-  'dictation.start': [{ held: boolean }, void];
-  'dictation.finish': [void, void];
-  'dictation.cancel': [void, void];
+  /** SpeechRecognition's start(): listen until a pause, or with `continuous` until stop(). */
+  'speech.start': [{ id: number; continuous: boolean }, void];
+  'speech.stop': [void, void];
+  'speech.abort': [void, void];
 
   /** The token is the app's own (random); the desktop refuses one already in use. */
   'drag.startFiles': [{ token: string; handles: string[]; label: string }, void];
@@ -303,11 +304,17 @@ export type Push =
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
   | { type: 'notification'; id: number; event: 'click' | 'close'; action: string | null }
   | { type: 'mediaAction'; action: MediaAction }
-  | { type: 'dictation'; status: DictationStatus; here: boolean }
+  /** This window's SpeechRecognition: what was said, how it ended. */
+  | { type: 'speech'; id: number; event: 'result'; text: string }
+  | { type: 'speech'; id: number; event: 'error'; error: SpeechErrorCode; message: string }
+  | { type: 'speech'; id: number; event: 'end' }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
   | { type: 'assistantUnread'; sessionIDs: string[] }
   | { type: 'powerMode'; on: boolean };
+
+/** SpeechRecognitionErrorEvent's `error`, as Din's dictation can fail. */
+export type SpeechErrorCode = 'no-speech' | 'audio-capture' | 'service-not-allowed' | 'network';
 
 /** What a page's Notification tells the desktop to show. */
 export interface NotificationData {

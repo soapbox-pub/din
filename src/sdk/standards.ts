@@ -883,3 +883,146 @@ export function installDroppedFiles(host: DroppedFilesHost): void {
     true,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Speech to text
+// ---------------------------------------------------------------------------
+
+export type SpeechEvent = { id: number } & (
+  | { event: 'result'; text: string }
+  | { event: 'error'; error: string; message: string }
+  | { event: 'end' }
+);
+
+export interface SpeechHost {
+  /** Whether this computer can take dictation. */
+  available(): Promise<boolean>;
+  /** Start session `id`, whose events name it. */
+  start(id: number, continuous: boolean): Promise<void>;
+  stop(): void;
+  abort(): void;
+  onEvent(cb: (event: SpeechEvent) => void): Unsubscribe;
+}
+
+type SpeechHandler = ((this: unknown, event: Event) => unknown) | null;
+
+/**
+ * The Web Speech API's `SpeechRecognition` (and `webkitSpeechRecognition`)
+ * over Din's dictation, which listens through the desktop and transcribes on
+ * this computer. One final result per session, then `end`; `start()` while
+ * one is going throws `InvalidStateError`, as the web's does. The draft's
+ * `SpeechRecognition.available()` answers `available` or `unavailable`.
+ */
+export function installSpeechRecognition(host: SpeechHost): void {
+  let active: DinSpeechRecognition | null = null;
+  let nextId = 1;
+  host.onEvent((e) => {
+    if (active?.session === e.id) active.hear(e);
+  });
+
+  const list = <T>(items: T[], extra: object = {}) =>
+    Object.assign(items, { item: (i: number) => items[i] ?? null }, extra);
+
+  class DinSpeechRecognition extends EventTarget {
+    static available(): Promise<'available' | 'unavailable'> {
+      return host.available().then((ok) => (ok ? 'available' : 'unavailable'));
+    }
+    static install(): Promise<boolean> {
+      return host.available();
+    }
+    lang = '';
+    continuous = false;
+    interimResults = false;
+    maxAlternatives = 1;
+    processLocally = true;
+    grammars: unknown = null;
+    onstart: SpeechHandler = null;
+    onend: SpeechHandler = null;
+    onresult: SpeechHandler = null;
+    onerror: SpeechHandler = null;
+    onnomatch: SpeechHandler = null;
+    onaudiostart: SpeechHandler = null;
+    onaudioend: SpeechHandler = null;
+    onsoundstart: SpeechHandler = null;
+    onsoundend: SpeechHandler = null;
+    onspeechstart: SpeechHandler = null;
+    onspeechend: SpeechHandler = null;
+    private running = false;
+    /** @internal The session the desktop is running for it. */
+    session = 0;
+
+    start(): void {
+      if (this.running) throw new DOMException('Recognition has already started.', 'InvalidStateError');
+      this.running = true;
+      if (active && active !== this) active.abort();
+      // The one session Din runs at a time, which the desktop's events are for.
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      active = this;
+      const id = (this.session = nextId++);
+      host.start(id, this.continuous).then(
+        () => {
+          if (active !== this || this.session !== id) return;
+          this.fire(new Event('start'));
+          this.fire(new Event('audiostart'));
+        },
+        (error: unknown) => {
+          if (active !== this || this.session !== id) return;
+          const name = error instanceof Error ? error.name : '';
+          const message = error instanceof Error ? error.message : String(error);
+          this.hear({ id, event: 'error', error: name === 'NotAllowedError' ? 'not-allowed' : 'service-not-allowed', message });
+          this.hear({ id, event: 'end' });
+        },
+      );
+    }
+    stop(): void {
+      if (active === this) host.stop();
+    }
+    abort(): void {
+      if (active !== this) return;
+      host.abort();
+      this.hear({ id: this.session, event: 'error', error: 'aborted', message: '' });
+      this.hear({ id: this.session, event: 'end' });
+    }
+
+    /** @internal */
+    hear(e: SpeechEvent): void {
+      if (!this.running) return;
+      if (e.event === 'result') {
+        const alternative = { transcript: e.text, confidence: 1 };
+        const result = list([alternative], { isFinal: true });
+        const event = new Event('result');
+        Object.defineProperties(event, {
+          resultIndex: { value: 0, enumerable: true },
+          results: { value: list([result]), enumerable: true },
+        });
+        this.fire(event);
+      } else if (e.event === 'error') {
+        const event = new Event('error');
+        Object.defineProperties(event, {
+          error: { value: e.error, enumerable: true },
+          message: { value: e.message, enumerable: true },
+        });
+        this.fire(event);
+      } else {
+        this.running = false;
+        if (active === this) active = null;
+        this.fire(new Event('audioend'));
+        this.fire(new Event('end'));
+      }
+    }
+
+    private fire(event: Event): void {
+      this.dispatchEvent(event);
+      const handler = (this as unknown as Record<string, SpeechHandler>)[`on${event.type}`];
+      try {
+        handler?.call(this, event);
+      } catch (error) {
+        console.error('din: SpeechRecognition handler threw:', error);
+      }
+    }
+  }
+
+  for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
+    Object.defineProperty(window, name, { value: DinSpeechRecognition, writable: true, configurable: true });
+  }
+}

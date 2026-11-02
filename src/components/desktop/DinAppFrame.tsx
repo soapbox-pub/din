@@ -48,7 +48,6 @@ import { registerMediaSource, type MediaSource } from '@/lib/nowPlaying';
 import {
   cancelDictation,
   finishDictation,
-  focusedDictationTarget,
   getDictationState,
   hasDictationBridge,
   startDictation,
@@ -89,7 +88,7 @@ import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
 import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome } from '@/sdk/din';
-import type { FromApp, HandleData, Hello, LaunchData, MediaReport, Method, Push, Requests, WindowState } from '@/sdk/protocol';
+import type { FromApp, HandleData, Hello, LaunchData, MediaReport, SpeechErrorCode, Method, Push, Requests, WindowState } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */
@@ -197,6 +196,14 @@ const NAMED_FOLDERS: Record<string, string> = {
   videos: 'Videos',
   downloads: 'Downloads',
 };
+
+/** SpeechRecognitionErrorEvent's code for why Din's dictation stopped. */
+function speechError(message: string | null): SpeechErrorCode {
+  if (message === 'Didn’t hear anything') return 'no-speech';
+  if (message === 'Couldn’t use the microphone') return 'audio-capture';
+  if (message === 'Dictation isn’t available here') return 'service-not-allowed';
+  return 'network';
+}
 
 /**
  * The window body of a built-in app: its din:// page in a guest of its own
@@ -325,12 +332,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     push({ type: 'moveEnd' });
     for (const resolve of moveEnded.current.splice(0)) resolve();
   }, [push]);
-  /** Whether what's being dictated goes into this window. */
-  const dictationHere = () => {
-    const owner = getDictationState().owner;
-    const el = surface.current?.element() ?? iframe.current;
-    return getDictationState().status !== 'idle' && !!el && owner === el;
-  };
+  /** The app's SpeechRecognition session, which owns Din's dictation while it listens. */
+  const speech = useRef<{ id: number; owner: object; ended: boolean } | null>(null);
+  const endSpeech = useCallback((s: { id: number; owner: object; ended: boolean }) => {
+    if (s.ended) return;
+    s.ended = true;
+    if (speech.current === s) speech.current = null;
+    push({ type: 'speech', id: s.id, event: 'end' });
+  }, [push]);
   const assistantSettings = (): AssistantSettings => ({
     enabled: live.current.config.assistantEnabled !== false,
     directory: live.current.config.assistantDirectory ?? '',
@@ -842,15 +851,34 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           void queryClient.invalidateQueries({ queryKey: ['cursor'] });
         }
       },
-      'dictation.start': async ({ held }) => {
-        // Into the field focused in the app: the guest is what's focused here.
-        const target = focusedDictationTarget();
-        const el = surface.current?.element();
-        if (!target || !el || target.owner !== el) throw new Error('Nothing in the app is focused');
-        await startDictation(target, { held });
+      // What's said goes back to the app, not typed anywhere.
+      'speech.start': async ({ id, continuous }) => {
+        // Only the window the user is in may open the microphone.
+        if (!live.current.isTop) {
+          const error = new Error('Only the focused window can listen');
+          error.name = 'NotAllowedError';
+          throw error;
+        }
+        const s = { id: Number(id), owner: {}, ended: false };
+        const started = startDictation(
+          {
+            owner: s.owner,
+            insert: (text) => {
+              if (!s.ended) push({ type: 'speech', id: s.id, event: 'result', text });
+              endSpeech(s);
+            },
+          },
+          { held: continuous === true },
+        );
+        speech.current = s;
+        await started;
       },
-      'dictation.finish': () => finishDictation(),
-      'dictation.cancel': () => cancelDictation(),
+      'speech.stop': () => {
+        if (speech.current && getDictationState().owner === speech.current.owner) return finishDictation();
+      },
+      'speech.abort': () => {
+        if (speech.current && getDictationState().owner === speech.current.owner) cancelDictation();
+      },
 
       'drag.startFiles': async ({ token, handles, label }) => {
         const grants = await Promise.all(handles.map(usableGrant));
@@ -1149,7 +1177,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       storage: storageToMigrate(manifest),
       recentFiles: recent,
       drag: dragInfo(currentDrag()),
-      dictation: { available: hasDictationBridge(), status: getDictationState().status, here: dictationHere() },
+      dictation: { available: hasDictationBridge() },
       powerMode: powerModeOn(),
       fsUrlBase,
       scopedFs,
@@ -1231,17 +1259,20 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     });
   }, [windowId, push]);
 
-  // Dictation's status, for the app's mic buttons.
-  useEffect(() => {
-    let last = '';
-    return subscribeDictation(() => {
-      const status = getDictationState().status;
-      const here = dictationHere();
-      if (`${status}:${here}` === last) return;
-      last = `${status}:${here}`;
-      push({ type: 'dictation', status, here });
-    });
-  }, [push]);
+  // The app's recognition ending without words: cancelled, nothing heard,
+  // failed, or another session took the microphone. After a result, the
+  // session's own insert has ended it already, in the same task.
+  useEffect(
+    () =>
+      subscribeDictation(() => {
+        const s = speech.current;
+        const { owner, status, error } = getDictationState();
+        if (!s || s.ended || owner === s.owner) return;
+        if (status === 'error') push({ type: 'speech', id: s.id, event: 'error', error: speechError(error), message: error ?? '' });
+        queueMicrotask(() => endSpeech(s));
+      }),
+    [push, endSpeech],
+  );
 
   // Din's assistant settings, for apps that show the assistant.
   const assistantJson = permissions.includes('assistant')

@@ -72,23 +72,35 @@ converter's sandbox and checked before anything is written. It rejects
 with a message to show when the file isn't a theme Din can read, or when
 Din can't change the cursor on this system.
 
-## `din.dictation`
+## Dictation: `SpeechRecognition`
 
-Din's speech to text, typed into the field focused in the app. Text
-fields need nothing: the dictation key already types into whatever has
-focus in an app. This is for an app's own mic button:
+Text fields need nothing: Din's dictation key already types into whatever
+has focus in an app. An app's own mic button uses the Web Speech API's
+`SpeechRecognition` (or `webkitSpeechRecognition`), which is Din's speech
+to text (whisper.cpp, on this computer; `installSpeechRecognition` in
+`src/sdk/standards.ts`):
 
 ```ts
-if (din.dictation.available) {
-  micButton.onclick = () => (din.dictation.status === 'listening' ? din.dictation.finish() : din.dictation.start());
-  din.dictation.onStatus((s) => micButton.classList.toggle('on', s === 'listening'));
+if ((await SpeechRecognition.available({ langs: [], processLocally: true })) === 'available') {
+  micButton.onclick = () => {
+    const r = new SpeechRecognition();
+    r.onresult = (e) => insertAtCursor(e.results[0][0].transcript);
+    r.onend = () => micButton.classList.remove('on');
+    micButton.classList.add('on');
+    r.start();
+  };
 }
 ```
 
-`start({ held: true })` listens until `finish()` (push to talk);
-otherwise it stops at a pause. `din.dictation.here` says whether what's
-being dictated goes into this window, from its button or Din's dictation
-key, so a mic button can light up either way.
+`start()` listens until a pause, or with `continuous` until `stop()`
+(push to talk); `abort()` throws the recording away. What was said comes
+as one final `result`, then `end`; nothing is typed for the app, which
+puts the text where it wants it. Only the window the user is in can
+start listening (an `error` of `not-allowed` otherwise), and one session
+runs at a time on the desktop: a new one, or the dictation key, ends the
+last. No interim results; `lang` is whisper's to guess. The Assistant's
+composer (`src/shared/assistant/appHost.tsx`) types the text at its
+cursor as the keyboard would.
 
 ## `din.assistant` (permission `assistant`)
 
