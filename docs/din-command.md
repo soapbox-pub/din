@@ -44,7 +44,7 @@ a missing or bad argument).
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
 | `notifications` | List, send, click, dismiss, clear |
 | `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
-| `extensions` | The Web Browser's extensions: list, load one from a folder (asks on screen first), reload, publish to Nostr (asks on screen first), find on `about:extensions` (`store`), install one by its address (shows what it can do and asks first, as Get does), remove |
+| `extensions` | The Web Browser's extensions: list, load one from a folder (asks on screen first), install one from a `.crx` file (shows what it can do and asks first), reload, publish to Nostr (asks on screen first), find on `about:extensions` (`store`), install one by its address (shows what it can do and asks first, as Get does), remove |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, connect or disconnect a phone, whether it can send files here, add one paired in Bluetooth or forget one |

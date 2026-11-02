@@ -2666,6 +2666,12 @@ expose('crx', {
   loadUnpacked: (path) => ipcRenderer.invoke('crx:loadUnpacked', path),
 
   /**
+   * Install an extension from a .crx file, asking the user first.
+   * @param {string} path
+   */
+  installFile: (path) => ipcRenderer.invoke('crx:installFile', path),
+
+  /**
    * Load an installed extension again from its files.
    * @param {string} id
    */

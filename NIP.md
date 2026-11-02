@@ -215,7 +215,7 @@ follows the draft, and adds:
 
 The package's signing key is the extension's id. A Web Store extension is
 published as Google's own package of it, which keeps its id; one installed
-from Nostr as the package it came in; and one loaded from a folder (or no
+from Nostr or a `.crx` file as the package it came in; and one loaded from a folder (or no
 longer in the Web Store) is signed by Din with an ECDSA P-256 key of its own,
 which Din keeps in the user's encrypted app data (`computer.din.extension-keys`,
 `{ [d: string]: string }` of PKCS#8 PEM) so the same extension has the same id
@@ -256,7 +256,7 @@ its app, releases and assets.
 | 0 | NIP-01 | Profile metadata (published on signup) |
 | 10002 | NIP-65 | Relay list; read on login, published from Settings → Nostr & Storage |
 | 10063 | BUD-03 | Blossom server list; read on login, published from Settings → Nostr & Storage |
-| 32267, 30063, 3063 | NIP-82 (draft) | Browser extensions: published from the browser's Settings, listed on `about:extensions` from a synced copy kept on the device ([Browser extensions](#browser-extensions-nip-82)) |
+| 32267, 30063, 3063 | NIP-82 (draft) | Browser extensions: published and listed on `about:extensions` from a synced copy kept on the device ([Browser extensions](#browser-extensions-nip-82)) |
 | 15128, 35128 | NIP-5A | nsite manifests; read to serve `nsite://` sites, and kept (signature-checked) in the device's nsite store for sites that were opened or installed |
 | 16767 | Profile Themes | Active profile theme; applied as the OS theme, and published when a synced custom theme changes. A theme worn from a named one carries Ditto's credit tags: `["a", "36767:<pubkey>:<d>"]`, plus `["p", <pubkey>]` when someone else made it. Editing someone else's theme drops both |
 | 36767 | Profile Themes | Named themes, in the same `c`/`f`/`bg` tags as 16767 plus `d`, `title`, optional `description`, `alt` and `["t", "theme"]`, as Ditto writes them. The App Store's Themes lists those by its catalog publishers, the people the user follows, and the user; Settings → Themes saves the custom theme as one, updates one under its `d`, and deletes one with a NIP-09 kind 5 carrying `e`, `a` and `["k", "36767"]` |

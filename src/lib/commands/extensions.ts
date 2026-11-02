@@ -39,7 +39,7 @@ async function pickExtension(query: string): Promise<CrxExtension> {
 
 export const extensionsArea: Area = {
   name: 'extensions',
-  summary: 'Web Browser extensions: list, load from a folder, reload, publish to Nostr, find and install from about:extensions, remove',
+  summary: 'Web Browser extensions: list, load from a folder or .crx file, reload, publish to Nostr, find and install from about:extensions, remove',
   commands: [
     command('extensions', 'list', 'The installed extensions, and where each came from', [], async () => ({
       data: (await installed()).map((e) => ({
@@ -63,6 +63,13 @@ export const extensionsArea: Area = {
       if (!ok) throw new CommandError('You didn’t allow it');
       const extension = await call(crx().loadUnpacked(folder));
       return { data: extension, text: `Loaded ${extension.name} (${extension.id})` };
+    }),
+    command('extensions', 'install-file', 'Install an extension from a .crx file (shows what it can do and asks on screen first)', [
+      { name: 'file', type: 'path', positional: true, help: 'The .crx file' },
+    ], async (args) => {
+      // Installing shows what it can do on screen and waits for the user's yes.
+      const extension = await call(crx().installFile(args.string('file')));
+      return { data: extension, text: `Installed ${extension.name} (${extension.id})` };
     }),
     command('extensions', 'reload', 'Load an installed extension again from its files, as after editing them', [EXTENSION], async (args) => {
       const found = await pickExtension(args.string('extension'));

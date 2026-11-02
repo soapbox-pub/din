@@ -167,7 +167,7 @@ import {
   type DockMode,
 } from '@/components/desktop/apps/InspectorToolbar';
 import { NostrPage } from '@/components/desktop/apps/NostrPage';
-import { ExtensionsPage } from '@/components/desktop/apps/ExtensionsPage';
+import { ExtensionsPage, type ExtensionsPageProps } from '@/components/desktop/apps/ExtensionsPage';
 import { isExtensionCatalogLoaded, loadExtensionCatalog, subscribeExtensionCatalog } from '@/lib/extensionCatalog';
 import { isNostrUri, type NostrHandler } from '@/lib/nostrUri';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
@@ -1735,8 +1735,17 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     () => ({
       treeTabs,
       onTreeTabsChange: setTreeTabs,
+      showClearData: !isPrivate,
+      onClearBrowsingData: () => setClearDataOpen(true),
+    }),
+    [treeTabs, setTreeTabs, isPrivate],
+  );
+
+  // What about:extensions needs to manage the installed ones, memoized for
+  // the same reason.
+  const installedExtensions = useMemo<ExtensionsPageProps['installed']>(
+    () => ({
       onOpenUrl: (url) => openTab(url),
-      showExtensions: !isPrivate && (!!crx || !!userscriptsBridge),
       userscripts: userscriptsBridge ? userscriptList : null,
       onSetUserscriptEnabled: setUserscriptEnabled,
       onRemoveUserscript: (script) => {
@@ -1744,21 +1753,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         toast({ title: `${script.name} removed` });
       },
       onAddUserscript: () => setScriptInstall({ code: '' }),
-      showClearData: !isPrivate,
-      onClearBrowsingData: () => setClearDataOpen(true),
     }),
-    [
-      treeTabs,
-      setTreeTabs,
-      openTab,
-      isPrivate,
-      crx,
-      userscriptsBridge,
-      userscriptList,
-      setUserscriptEnabled,
-      removeUserscript,
-      toast,
-    ],
+    [openTab, userscriptsBridge, userscriptList, setUserscriptEnabled, removeUserscript, toast],
   );
 
   // Tint the toolbar with the active tab's theme color, matching the title
@@ -2094,7 +2090,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           showClearData={!isPrivate}
           onClearBrowsingData={() => setClearDataOpen(true)}
           onOpenPreferences={openPreferences}
-          showExtensions={!isPrivate && !!crx}
+          showExtensions={!isPrivate && (!!crx || !!userscriptsBridge)}
           onOpenExtensions={openExtensions}
         />
 
@@ -2152,7 +2148,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             nostrUri={isNostrUri(tab.url) && !extensionAddressOf(tab.url) ? tab.url : null}
             // about:extensions, or a nostr: link to one extension on it.
             extensionsPage={tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? tab.url : null}
-            onOpenPreferences={openPreferences}
+            installedExtensions={installedExtensions}
             onNavigate={navigateTab}
             onPredict={predictNavigation}
             onOpenTab={openTabInBackground}
@@ -3686,7 +3682,7 @@ const TabSurface = memo(function TabSurface({
   preferences,
   nostrUri,
   extensionsPage,
-  onOpenPreferences,
+  installedExtensions,
   onNavigate: onNavigateToUrl,
   onPredict,
   onOpenTab,
@@ -3729,7 +3725,8 @@ const TabSurface = memo(function TabSurface({
   nostrUri: string | null;
   /** The URL of the about:extensions page (or a nostr: link to an extension) this tab shows, or null. */
   extensionsPage: string | null;
-  onOpenPreferences: () => void;
+  /** What about:extensions needs to manage the installed ones. */
+  installedExtensions: ExtensionsPageProps['installed'];
   /** Navigate this tab to a URL/search (from the new-tab page). */
   onNavigate: (id: string, raw: string, typed?: boolean) => void;
   /** Where the new-tab page would go changed (see predictNavigation). */
@@ -3892,7 +3889,7 @@ const TabSurface = memo(function TabSurface({
       {/* A nostr: link's preview, the same way. */}
       {nostrUri && <NostrPage uri={nostrUri} />}
       {extensionsPage && (
-        <ExtensionsPage key={extensionsPage} initial={extensionAddressOf(extensionsPage)} onOpenPreferences={onOpenPreferences} />
+        <ExtensionsPage key={extensionsPage} initial={extensionAddressOf(extensionsPage)} installed={installedExtensions} />
       )}
       {/* Untrusted-TLS warning, over the failed page until the user decides. */}
       {certError && (

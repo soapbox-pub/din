@@ -1,27 +1,32 @@
 import { useState } from 'react';
-import { ArrowLeft, Puzzle, RefreshCw, Search, Settings } from 'lucide-react';
+import { ArrowLeft, Puzzle, RefreshCw, Search } from 'lucide-react';
 import { PackageStore } from '@/components/desktop/apps/appstore/PackageStore';
+import { InstalledExtensions, type InstalledExtensionsProps } from '@/components/desktop/apps/InstalledExtensions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useExtensionCatalog } from '@/hooks/useThemePackages';
-import type { PackageAddress } from '@/lib/themePackages';
+import { parsePackageNaddr, type PackageAddress } from '@/lib/themePackages';
 import { cn } from '@/lib/utils';
 
 export interface ExtensionsPageProps {
   /** The extension whose page to open on, from a `nostr:` link to one. */
   initial: PackageAddress | null;
-  /** Open the browser's settings, where installed extensions are managed. */
-  onOpenPreferences: () => void;
+  /** What managing the installed ones needs from the browser window. */
+  installed: Omit<InstalledExtensionsProps, 'onViewPublished'>;
 }
 
 /**
- * about:extensions: browser extensions published to Nostr (NIP-82 apps with a .crx) by
- * Din's publishers, the people the user follows, and the user, to find and
- * get, laid out like the App Store's Cursors, Icons and Skins (PackageStore),
- * which these aren't listed among. An internal page, painted over the tab's
- * parked surface like about:preferences (src/lib/internalPages.ts).
+ * about:extensions: the browser's extensions in one place. At the top, the
+ * installed ones, to reload, publish or remove, with ways to add one from a
+ * folder, a .crx file or the Chrome Web Store, and the userscripts
+ * (InstalledExtensions); below, browser extensions published to Nostr
+ * (NIP-82 apps with a .crx) by Din's publishers, the people the user
+ * follows, and the user, to find and get, laid out like the App Store's
+ * Cursors, Icons and Skins (PackageStore), which these aren't listed among.
+ * An internal page, painted over the tab's parked surface like
+ * about:preferences (src/lib/internalPages.ts).
  */
-export function ExtensionsPage({ initial, onOpenPreferences }: ExtensionsPageProps) {
+export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
   const catalog = useExtensionCatalog();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<PackageAddress | null>(initial);
@@ -42,7 +47,7 @@ export function ExtensionsPage({ initial, onOpenPreferences }: ExtensionsPagePro
         )}
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">Extensions</h1>
-          <p className="truncate text-sm text-muted-foreground">Published on Nostr by people you follow</p>
+          <p className="truncate text-sm text-muted-foreground">Yours, and ones people you follow published on Nostr</p>
         </div>
         {!selected && (
           <div className="relative w-full sm:w-72">
@@ -67,12 +72,20 @@ export function ExtensionsPage({ initial, onOpenPreferences }: ExtensionsPagePro
         >
           <RefreshCw className={cn(catalog.refreshing && 'motion-safe:animate-spin')} aria-hidden />
         </Button>
-        <Button variant="secondary" onClick={onOpenPreferences}>
-          <Settings aria-hidden />
-          Manage
-        </Button>
       </header>
-      <PackageStore type="extension" catalog={catalog} search={search} selected={selected} onSelect={setSelected} />
+      <PackageStore
+        type="extension"
+        catalog={catalog}
+        search={search}
+        selected={selected}
+        onSelect={setSelected}
+        top={
+          <InstalledExtensions
+            {...installed}
+            onViewPublished={(naddr) => setSelected(parsePackageNaddr(naddr, 'extension'))}
+          />
+        }
+      />
     </div>
   );
 }

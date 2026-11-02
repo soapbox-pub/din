@@ -1,12 +1,14 @@
 // Browser extensions beyond the Chrome Web Store's: ones loaded from a folder
-// on this computer, and ones published to Nostr as NIP-82 software (an app,
+// on this computer, ones installed from a .crx file, and ones published to Nostr as NIP-82 software (an app,
 // kind 32267, whose releases carry a .crx asset; NIP.md) and installed from
 // there.
 //
 // The Web Store's own installs live in Extensions/ (electron-chrome-web-store
 // loads them, see setupChromeExtensions in main.mts). Folders the user loads
 // are remembered by path in local-extensions.json and loaded where they are,
-// so editing one and pressing Reload is the whole development loop. Ones from
+// so editing one and pressing Reload is the whole development loop. A .crx
+// file is checked and unpacked into PackedExtensions/<id>, the file kept in
+// PackedExtensions/.crx/ to publish as it is. Ones from
 // Nostr are unpacked into NostrExtensions/<dir>, with NostrExtensions/
 // .nostr.json recording, by directory, the app's coordinate, the release's
 // created_at and the asset's hash each came from, for Update and Remove, and
@@ -18,7 +20,7 @@
 //
 // Any installed extension can be exported for publishing as a .crx: the Web
 // Store's own copy for one from there (which keeps Google's signature and its
-// id), the one it came in for one from Nostr, and for a folder its files
+// id), the one it came in for one from Nostr or a file, and for a folder its files
 // signed with a key of its own, which the desktop keeps (roaming it with the
 // user's encrypted app data) so it always gets the same id.
 //
@@ -44,7 +46,7 @@ export interface ExtensionInfo {
   version: string;
   description: string;
   /** Where it came from: the Chrome Web Store, a folder here, or Nostr. */
-  source: 'webstore' | 'local' | 'nostr';
+  source: 'webstore' | 'local' | 'file' | 'nostr';
   /** The folder it was loaded from, for one loaded from a folder. */
   path?: string;
   /** The app's `32267:<pubkey>:<d>` it was installed from, for one from Nostr. */
@@ -132,6 +134,22 @@ async function nostrSources(): Promise<Record<string, PublishedSource>> {
     }
   }
   return out;
+}
+
+/** Where extensions installed from a .crx file are unpacked, each under its id. */
+function packedBase(): string {
+  return path.join(app.getPath('userData'), 'PackedExtensions');
+}
+
+/** Where the .crx an extension was installed from a file is kept. */
+function packedCrxFile(id: string): string {
+  return path.join(packedBase(), '.crx', `${id}.crx`);
+}
+
+/** The PackedExtensions directory (its id) an extension at `dir` is in, or null. */
+function packedIdOf(dir: string): string | null {
+  const relative = path.relative(packedBase(), dir);
+  return EXTENSION_ID.test(relative) ? relative : null;
 }
 
 /** Where the .crx an extension from Nostr came in is kept. */
@@ -333,6 +351,7 @@ export function registerBrowserExtensionHandlers(options: {
     const dir = nostrDirOf(extension.path);
     if (dir) return { ...base, source: 'nostr', coordinate: (await nostrSources())[dir]?.coordinate };
     if ((await localFolders()).includes(extension.path)) return { ...base, source: 'local', path: extension.path };
+    if (packedIdOf(extension.path)) return { ...base, source: 'file' };
     return { ...base, source: 'webstore' };
   };
 
@@ -356,6 +375,13 @@ export function registerBrowserExtensionHandlers(options: {
       await writeJson(sourcesFile(), sources);
       return;
     }
+    const packed = extension && packedIdOf(extension.path);
+    if (extension && packed) {
+      extensions().removeExtension(id);
+      await fsp.rm(path.join(packedBase(), packed), { recursive: true, force: true });
+      await fsp.rm(packedCrxFile(packed), { force: true });
+      return;
+    }
     const folders = await localFolders();
     if (extension && folders.includes(extension.path)) {
       extensions().removeExtension(id);
@@ -369,6 +395,7 @@ export function registerBrowserExtensionHandlers(options: {
     const root = extension.path;
     const sources = await nostrSources();
     const dir = nostrDirOf(root);
+    const packed = packedIdOf(root);
     const isLocal = (await localFolders()).includes(root);
 
     let crx: Buffer | null;
@@ -381,6 +408,10 @@ export function registerBrowserExtensionHandlers(options: {
       crx = await fsp.readFile(crxFile(dir));
       files = readCrx(crx).files;
       identifier = sources[dir]?.coordinate.split(':').slice(2).join(':') || slug(name);
+    } else if (packed) {
+      crx = await fsp.readFile(packedCrxFile(packed));
+      files = readCrx(crx).files;
+      identifier = slug(name);
     } else if (!isLocal && (crx = await webStoreCrx(extension.id).then((data) => {
       const store = readCrx(data);
       return store.id === extension.id ? data : null;
@@ -434,13 +465,12 @@ export function registerBrowserExtensionHandlers(options: {
     };
   };
 
-  const installPublished = async (value: unknown): Promise<{ id: string; name: string }> => {
-    const pkg = checkPackageBase(value, APP_KIND, /^$/);
-    const asset = (pkg.asset ?? {}) as { sha256?: unknown };
-    if (!isSha256(asset.sha256)) throw new PackageError('Not an extension');
-    const data = (await fetchBlobs([asset.sha256], pkg.servers)).get(asset.sha256);
-    if (!data) throw new PackageError('The extension couldn’t be downloaded.');
-
+  /**
+   * Check a .crx, ask the user to add it (an update only when it wants more
+   * than what's at `dest` now), and unpack it there with its key as the
+   * manifest's `key`, as Chrome does, so it has the id it was signed with.
+   */
+  const unpackCrx = async (data: Buffer, dest: string, fallbackName: string): Promise<string> => {
     let parsed;
     try {
       parsed = readCrx(data);
@@ -453,24 +483,11 @@ export function registerBrowserExtensionHandlers(options: {
       if (relative) files.set(relative, bytes);
     }
     const manifest = parseManifest(files.get('manifest.json'));
-    // Its id is the key it was signed with, as when Chrome installs a .crx.
     files.set('manifest.json', Buffer.from(JSON.stringify({ ...manifest, key: parsed.key }, null, 2)));
 
-    const base = nostrBase();
-    const sources = await nostrSources();
-    const existing = Object.entries(sources).find(([, s]) => s.coordinate === pkg.coordinate)?.[0];
-    const dir = existing ?? (await (async () => {
-      const stem = slug(pkg.identifier);
-      let name = stem;
-      for (let n = 2; await fsp.access(path.join(base, name)).then(() => true, () => false); n++) name = `${stem}-${n}`;
-      return name;
-    })());
-    const dest = path.join(base, dir);
-
-    // The user says yes to what it can do, as for the Web Store; an update
-    // asks again only when it wants more than the version installed.
     const access = extensionAccess(manifest);
-    const before = existing ? extensionAccess(await readManifest(dest).catch(() => ({}))) : null;
+    const installed = await fsp.access(dest).then(() => true, () => false);
+    const before = installed ? extensionAccess(await readManifest(dest).catch(() => ({}))) : null;
     const more = !before
       || access.permissions.some((p) => !before.permissions.includes(p))
       || access.hosts.some((h) => !before.hosts.includes(h));
@@ -481,7 +498,7 @@ export function registerBrowserExtensionHandlers(options: {
         return bytes ? Buffer.from(bytes).toString('utf8') : null;
       };
       const localized = await localize(read, manifest, manifest.name);
-      const name = localized && !localized.startsWith('__MSG_') ? localized : pkg.name;
+      const name = localized && !localized.startsWith('__MSG_') ? localized : fallbackName;
       const allow = await options.askToAdd(name, access);
       if (allow !== true) throw new PackageError('You didn’t add it.');
     }
@@ -492,6 +509,7 @@ export function registerBrowserExtensionHandlers(options: {
     const current = extensions().getAllExtensions().find((e) => e.path === dest);
     if (current) extensions().removeExtension(current.id);
 
+    const base = path.dirname(dest);
     await fsp.mkdir(base, { recursive: true });
     const staging = await fsp.mkdtemp(path.join(base, '.din-extension-'));
     try {
@@ -508,6 +526,27 @@ export function registerBrowserExtensionHandlers(options: {
       await fsp.rm(staging, { recursive: true, force: true });
       throw error;
     }
+    return parsed.id;
+  };
+
+  const installPublished = async (value: unknown): Promise<{ id: string; name: string }> => {
+    const pkg = checkPackageBase(value, APP_KIND, /^$/);
+    const asset = (pkg.asset ?? {}) as { sha256?: unknown };
+    if (!isSha256(asset.sha256)) throw new PackageError('Not an extension');
+    const data = (await fetchBlobs([asset.sha256], pkg.servers)).get(asset.sha256);
+    if (!data) throw new PackageError('The extension couldn’t be downloaded.');
+
+    const base = nostrBase();
+    const sources = await nostrSources();
+    const existing = Object.entries(sources).find(([, s]) => s.coordinate === pkg.coordinate)?.[0];
+    const dir = existing ?? (await (async () => {
+      const stem = slug(pkg.identifier);
+      let name = stem;
+      for (let n = 2; await fsp.access(path.join(base, name)).then(() => true, () => false); n++) name = `${stem}-${n}`;
+      return name;
+    })());
+    const dest = path.join(base, dir);
+    await unpackCrx(data, dest, pkg.name);
     await fsp.mkdir(path.dirname(crxFile(dir)), { recursive: true });
     await fsp.writeFile(crxFile(dir), data);
     await writeJson(sourcesFile(), {
@@ -517,6 +556,27 @@ export function registerBrowserExtensionHandlers(options: {
 
     const extension = await load(dest);
     return { id: extension.id, name: extension.name };
+  };
+
+  /** Install an extension from a .crx file, into PackedExtensions/<id>. */
+  const installFile = async (file: string): Promise<ExtensionInfo> => {
+    let data: Buffer;
+    try {
+      data = await fsp.readFile(file);
+    } catch {
+      throw new PackageError('That file couldn’t be read.');
+    }
+    let id: string;
+    try {
+      id = readCrx(data).id;
+    } catch (error) {
+      throw new PackageError(error instanceof CrxError ? error.message : 'That isn’t a Chrome extension package.');
+    }
+    const dest = path.join(packedBase(), id);
+    await unpackCrx(data, dest, path.basename(file, path.extname(file)));
+    await fsp.mkdir(path.dirname(packedCrxFile(id)), { recursive: true });
+    await fsp.writeFile(packedCrxFile(id), data);
+    return info(await load(dest));
   };
 
   ipcMain.handle('crx:listExtensions', async (event) => {
@@ -543,6 +603,13 @@ export function registerBrowserExtensionHandlers(options: {
     const extension = await load(folder);
     await setLocalFolders([...(await localFolders()), folder]);
     return info(extension);
+  });
+
+  // Install an extension from a .crx file.
+  ipcMain.handle('crx:installFile', async (event, file: unknown) => {
+    assertShellSender(event);
+    if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('Not a file');
+    return installFile(file);
   });
 
   // Load an extension again from its files, as after editing them.
@@ -584,11 +651,14 @@ export function registerBrowserExtensionHandlers(options: {
     return installPublished(manifest);
   });
 
-  /** Load the folders and Nostr installs from last time. */
+  /** Load the folders, .crx files and Nostr installs from last time. */
   const loadSaved = async () => {
     const dirs = [
       ...(await localFolders()),
       ...Object.keys(await nostrSources()).map((dir) => path.join(nostrBase(), dir)),
+      ...(await fsp.readdir(packedBase()).catch(() => [] as string[]))
+        .filter((id) => EXTENSION_ID.test(id))
+        .map((id) => path.join(packedBase(), id)),
     ];
     for (const dir of dirs) {
       try {

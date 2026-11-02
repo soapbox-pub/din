@@ -132,12 +132,15 @@ export function PackageStore({
   search,
   selected,
   onSelect,
+  top,
 }: {
   type: PackageType;
   catalog: PackageCatalog;
   search: string;
   selected: PackageAddress | null;
   onSelect: (address: PackageAddress | null) => void;
+  /** Shown above the list when not searching (about:extensions' installed ones). */
+  top?: ReactNode;
 }) {
   const handlers = usePackageHandlers(type, onSelect);
   const { user } = useCurrentUser();
@@ -190,6 +193,7 @@ export function PackageStore({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+            {!query && top}
             {query ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader title={address ? `${capitalize(copy.noun)} at this address` : `Results for “${query}”`} />

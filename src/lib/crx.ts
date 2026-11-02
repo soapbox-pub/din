@@ -20,8 +20,8 @@ export interface CrxExtension {
   name: string;
   version: string;
   description: string;
-  /** Where it came from: the Chrome Web Store, a folder here, or Nostr. */
-  source: 'webstore' | 'local' | 'nostr';
+  /** Where it came from: the Chrome Web Store, a folder here, a .crx file, or Nostr. */
+  source: 'webstore' | 'local' | 'file' | 'nostr';
   /** The folder it's loaded from, for one loaded from a folder. */
   path?: string;
   /** The `<kind>:<pubkey>:<d>` it was installed from, for one from Nostr. */
@@ -158,6 +158,8 @@ export interface CrxBridge {
   uninstallExtension(id: string): Promise<void>;
   /** Load an extension from a folder, and keep loading it from there. */
   loadUnpacked(path: string): Promise<CrxExtension>;
+  /** Install an extension from a .crx file, asking the user first. */
+  installFile(path: string): Promise<CrxExtension>;
   /** Load an installed extension again from its files. */
   reloadExtension(id: string): Promise<CrxExtension>;
   /** An installed extension as a .crx and its icon, for publishing it; a folder's is signed with its key in `keys`, by `d`. */
