@@ -9,6 +9,8 @@
  * at animation time.
  */
 
+import type { DockEdge } from '@/lib/genie';
+
 const tiles = new Map<string, HTMLElement>();
 
 export function registerDockTile(appId: string, el: HTMLElement | null): void {
@@ -18,18 +20,21 @@ export function registerDockTile(appId: string, el: HTMLElement | null): void {
 
 /**
  * The app tile's resting rect in viewport coordinates, or null if the app
- * has no tile. Horizontal position comes from the live rect (the dock's
- * auto-hide slide is vertical-only, so left/width are always valid); the
- * vertical position is derived from layout offsets so a dock caught
- * mid-slide still yields the resting spot it settles at (the footer is
- * pinned to the viewport's bottom edge).
+ * has no tile. Along the bottom edge, horizontal position comes from the
+ * live rect (the dock's auto-hide slide is vertical-only, so left/width are
+ * always valid); the vertical position is derived from layout offsets so a
+ * dock caught mid-slide still yields the resting spot it settles at (the
+ * footer is pinned to the viewport's bottom edge). A taskbar along any
+ * other edge doesn't slide, so its live rect is the resting one.
  */
 export function getDockTileRect(
   appId: string,
+  edge: DockEdge,
 ): { x: number; y: number; width: number; height: number } | null {
   const el = tiles.get(appId);
   if (!el) return null;
   const rect = el.getBoundingClientRect();
+  if (edge !== 'bottom') return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
   return {
     x: rect.left,
     y: window.innerHeight - el.offsetHeight,
