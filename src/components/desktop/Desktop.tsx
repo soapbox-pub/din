@@ -124,9 +124,9 @@ function DesktopSession() {
 
   // Each monitor's work area in workspace coordinates. The workspace's
   // origin is where the primary monitor's menu bar or taskbar ends, and its
-  // bottom where a taskbar along the bottom starts (the Dock overlays it
-  // instead), measured once laid out
-  // and again whenever the monitors or the workspace's size change. Measured
+  // bottom and right edges where a taskbar along the bottom or down the
+  // right starts (the Dock overlays it instead), measured once laid out and
+  // again whenever the monitors or the workspace's size change. Measured
   // against the Wallpaper's full-screen root rather than the viewport: <body>
   // may not have moved to the primary monitor yet (MonitorsProvider's effect
   // runs after this one), but the offset between the two is already final.
@@ -140,10 +140,13 @@ function DesktopSession() {
       const bottom = rect && screen && primary
         ? Math.round(primary.y + primary.height - (rect.bottom - screen.top))
         : 0;
+      const right = rect && screen && primary
+        ? Math.round(primary.x + primary.width - (rect.right - screen.left))
+        : 0;
       const next = workAreas(monitors, {
         x: (rect?.left ?? 0) - (screen?.left ?? 0),
         y: (rect?.top ?? 0) - (screen?.top ?? 0),
-      }, bottom);
+      }, { bottom, right });
       setAreas((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     };
     measure();

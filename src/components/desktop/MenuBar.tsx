@@ -83,6 +83,7 @@ import { primaryArea } from '@/lib/monitors';
 import type { AppDefinition } from '@/lib/apps';
 import { focusedWindow, isShown } from '@/hooks/useWindows';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
+import { isTaskbarVertical } from '@/lib/taskbarStyles';
 
 /**
  * Menu bar along the top of the desktop.
@@ -906,13 +907,14 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
  * Menu-bar clock: weekday, date, and time. Clicking opens a calendar beside
  * the notification center; a dot beside the time marks unread notifications.
  * In the taskbar it's the time over the date, Windows style, at the corner
- * of the screen; down a taskbar on the left, the time over the day and month.
+ * of the screen; down a taskbar at the side, the time over the day and month.
  */
 export const ClockMenuItem = memo(function ClockMenuItem() {
   const { hasUnread, doNotDisturb } = useNotificationsBadge();
   const [open, setOpen] = useState(false);
   const edge = useTaskbarEdge();
   const taskbar = edge !== null;
+  const vertical = edge !== null && isTaskbarVertical(edge);
   // The viewport can span several monitors (stacked ones make it taller than
   // any of them), so size the panel to the primary monitor's work area.
   const maxHeight = Math.round(primaryArea(useWorkAreas()).height * 0.85);
@@ -927,10 +929,10 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
           title={doNotDisturb ? 'Calendar and notifications (Do Not Disturb)' : undefined}
           className={cn(
             'gap-1.5 rounded-md px-2.5 font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground',
-            edge === 'left' ? 'h-auto w-full flex-col gap-0.5 px-0 py-1.5 text-xs' : taskbar ? 'h-full text-xs' : 'h-7 text-sm',
+            vertical ? 'h-auto w-full flex-col gap-0.5 px-0 py-1.5 text-xs' : taskbar ? 'h-full text-xs' : 'h-7 text-sm',
           )}
         >
-          <ClockText stacked={taskbar} narrow={edge === 'left'} />
+          <ClockText stacked={taskbar} narrow={vertical} />
           {doNotDisturb ? (
             <BellOff className="size-3.5 text-muted-foreground" aria-hidden />
           ) : (

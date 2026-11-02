@@ -57,7 +57,7 @@ import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { registerDockTile } from '@/lib/dockTiles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { getFsBridge } from '@/lib/fs';
-import { TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
+import { isTaskbarVertical, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { USER_DIRS } from '@/shared/userDirs';
 
@@ -68,7 +68,7 @@ const WHEEL_COOLDOWN = 120;
 
 /**
  * How each build of the taskbar (AppConfig's taskbarStyle) sizes its parts,
- * across the bottom or top of the screen or down its left side.
+ * across the bottom or top of the screen or down one of its sides.
  */
 interface TaskbarSizes {
   /** Whether the bar runs down the side of the screen, its buttons in a column. */
@@ -87,7 +87,7 @@ interface TaskbarSizes {
   logo: string;
 }
 
-// Down the left, `bar` matches taskbarWorkspaceClass's margin.
+// Down a side, `bar` matches taskbarWorkspaceClass's margin.
 const TASKBAR_SIZES: Record<TaskbarStyle, Record<'row' | 'column', TaskbarSizes>> = {
   slim: {
     row: { vertical: false, bar: 'h-10', glass: 'bg-background/70', tile: 'w-14', icon: 'size-7', windowIcon: 'size-5', logo: 'h-6' },
@@ -111,7 +111,7 @@ interface WindowControls {
 /**
  * The taskbar, Windows style: one bar along the bottom of the primary
  * monitor in place of the menu bar and the Dock (AppConfig's desktopLayout),
- * or along its top, or down its left side as Ubuntu's is (taskbarPosition),
+ * or along its top, or down its left side as Ubuntu's is, or its right (taskbarPosition),
  * slim like Vista's or tall like 7's (taskbarStyle). The Start button opens
  * the apps launcher beside the user's folders and the power buttons; then
  * come the pinned apps and the running ones, either a button per app that
@@ -123,7 +123,7 @@ interface WindowControls {
 export function Taskbar() {
   const { config } = useAppContext();
   const position = config.taskbarPosition;
-  const sizes = TASKBAR_SIZES[config.taskbarStyle][position === 'left' ? 'column' : 'row'];
+  const sizes = TASKBAR_SIZES[config.taskbarStyle][isTaskbarVertical(position) ? 'column' : 'row'];
   const vertical = sizes.vertical;
   return (
     <BarSideContext.Provider value={position}>
@@ -135,12 +135,14 @@ export function Taskbar() {
           sizes.bar,
           sizes.glass,
           'border-border/60 backdrop-blur-2xl backdrop-saturate-150',
-          // Glass catching the light along its top or left edge.
+          // Glass catching the light along its top or outer edge.
           'before:pointer-events-none before:absolute before:from-foreground/[0.06] before:to-transparent',
           vertical
-            ? 'absolute inset-y-0 left-0 flex-col border-r py-1 before:inset-y-0 before:left-0 before:w-1/2 before:bg-linear-to-r'
+            ? 'absolute inset-y-0 flex-col py-1 before:inset-y-0 before:w-1/2'
             : 'relative px-1 before:inset-x-0 before:top-0 before:h-1/2 before:bg-linear-to-b',
           position === 'bottom' && 'border-t',
+          position === 'left' && 'left-0 border-r before:left-0 before:bg-linear-to-r',
+          position === 'right' && 'right-0 border-l before:right-0 before:bg-linear-to-l',
           // Laid out after the workspace, but shown above it.
           position === 'top' && 'order-first border-b',
         )}
@@ -599,7 +601,7 @@ function TileBadge({ badge }: { badge: AppBadge }) {
  * as the bar fills. A click raises its window or, if it's the active one,
  * minimizes it; middle-click opens a new one; its menu acts on that window
  * first, then on its app. The group drags as one, where the app's button
- * would be. Down a taskbar on the left there's no room for titles, so each
+ * would be. Down a taskbar at the side there's no room for titles, so each
  * window's button is its icon alone.
  */
 const WindowButtons = memo(function WindowButtons({

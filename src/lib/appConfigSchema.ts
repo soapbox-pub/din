@@ -49,7 +49,7 @@ export const AppConfigSchema = z.object({
   dockSize: z.number().min(32).max(160),
   dockStyle: z.enum(['none', 'modern', 'classic']),
   taskbarStyle: z.enum(['tall', 'slim']),
-  taskbarPosition: z.enum(['bottom', 'top', 'left']),
+  taskbarPosition: z.enum(['bottom', 'top', 'left', 'right']),
   taskbarButtons: z.enum(['combine', 'separate']),
   zoomLevel: z.number(),
   clockFormat: z.enum(['auto', '12', '24']),

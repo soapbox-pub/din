@@ -151,23 +151,29 @@ export interface WorkArea extends Rect {
  * Work areas for the given monitors, with the workspace's top-left at
  * `origin` in the viewport. The primary monitor's work area starts at the
  * workspace's top-left corner, below the menu bar or a taskbar along the top
- * and right of one down the left, and stops `bottom` px above the monitor's
- * bottom edge, above a taskbar along the bottom.
+ * and right of one down the left, and stops `inset.bottom` px above the
+ * monitor's bottom edge, above a taskbar along the bottom, and `inset.right`
+ * px short of its right edge, beside one down the right.
  */
-export function workAreas(monitors: Monitor[], origin: { x: number; y: number }, bottom = 0): WorkArea[] {
+export function workAreas(
+  monitors: Monitor[],
+  origin: { x: number; y: number },
+  inset: { bottom?: number; right?: number } = {},
+): WorkArea[] {
   return monitors.map((m) => {
     const bounds = { x: m.x - origin.x, y: m.y - origin.y, width: m.width, height: m.height };
     const left = m.primary ? Math.max(bounds.x, 0) : bounds.x;
     const top = m.primary ? Math.max(bounds.y, 0) : bounds.y;
-    const inset = m.primary ? Math.max(bottom, 0) : 0;
+    const bottom = m.primary ? Math.max(inset.bottom ?? 0, 0) : 0;
+    const right = m.primary ? Math.max(inset.right ?? 0, 0) : 0;
     return {
       id: m.id,
       primary: m.primary,
       bounds,
       x: left,
       y: top,
-      width: Math.max(0, bounds.x + bounds.width - left),
-      height: Math.max(0, bounds.y + bounds.height - top - inset),
+      width: Math.max(0, bounds.x + bounds.width - left - right),
+      height: Math.max(0, bounds.y + bounds.height - top - bottom),
     };
   });
 }

@@ -215,7 +215,7 @@ import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSecti
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
-import { TASKBAR_BUTTONS, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
+import { isTaskbarVertical, TASKBAR_BUTTONS, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { WM_BINDING_HELP } from '@/lib/wmBindings';
 import { SECTIONS, matchingSections } from '@/lib/settingsSections';
 import type { SectionId } from '@/lib/settingsSections';
@@ -3510,7 +3510,7 @@ function PicturedChoices<T extends string>({
   preview: (value: T) => React.ReactNode;
 }) {
   return (
-    <div className={cn('grid gap-2', options.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} role="radiogroup" aria-label={label}>
+    <div className={cn('grid gap-2', options.length === 4 ? 'grid-cols-4' : options.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} role="radiogroup" aria-label={label}>
       {options.map((option) => {
         const active = value === option.value;
         return (
@@ -3544,12 +3544,14 @@ const TASKBAR_PREVIEW_APPS = ['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'];
 
 /** A small taskbar along the bottom, top or left of a desktop, Din's logo as its Start button. */
 function TaskbarPositionPreview({ position }: { position: TaskbarPosition }) {
-  const vertical = position === 'left';
+  const vertical = isTaskbarVertical(position);
   return (
     <span
       className={cn(
         'absolute flex items-center gap-1 bg-black/45',
-        vertical ? 'inset-y-0 left-0 w-4 flex-col py-1' : 'inset-x-0 h-4 px-1',
+        vertical ? 'inset-y-0 w-4 flex-col py-1' : 'inset-x-0 h-4 px-1',
+        position === 'left' && 'left-0',
+        position === 'right' && 'right-0',
         position === 'bottom' && 'bottom-0',
         position === 'top' && 'top-0',
       )}
@@ -3613,7 +3615,7 @@ function TaskbarOptions() {
         preview={(value) => <TaskbarPositionPreview position={value} />}
       />
       <p className="text-xs text-muted-foreground">
-        Along the bottom of the screen as on Windows, along the top, or down the left side as on Ubuntu. Down the side, each window’s button is its icon alone.
+        Along the bottom of the screen as on Windows, along the top, down the left side as on Ubuntu, or down the right. Down a side, each window’s button is its icon alone.
       </p>
       <SubHeading>Taskbar size</SubHeading>
       <PicturedChoices

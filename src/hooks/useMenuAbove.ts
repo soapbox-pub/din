@@ -11,19 +11,21 @@ const RADIX_SIDE_OFFSET = 2;
  * pointer, where it would run into the bottom of the screen and rest on it.
  * For the Dock's and taskbar's menus. Spread `trigger` onto the
  * `ContextMenuTrigger` and `content` onto its `ContextMenuContent`. In a
- * taskbar along the top or down the left (BarSideContext), it opens below
- * what was clicked, or right of it, instead.
+ * taskbar along the top or down a side (BarSideContext), it opens below
+ * what was clicked, or beside it, instead.
  *
  * Radix pins a context menu's top to the pointer, so the menu is kept out of
  * the strip below the trigger's top edge (or above its bottom edge) by
  * padding that edge's collisions, and `sticky="always"` lets it shift past
  * the pointer to get there. Radix opens it right of the pointer and won't
  * shift it sideways, so off a bar on the left it's nudged over by `translate`
- * instead. `anchor`, if given, picks the element it opens clear of instead.
+ * instead; off one on the right, padding the right edge flips it left of the
+ * pointer, and it's nudged the rest of the way. `anchor`, if given, picks the
+ * element it opens clear of instead.
  */
 export function useMenuAbove(anchor?: () => Element | null) {
   const edge = useTaskbarEdge();
-  const [padding, setPadding] = useState<{ top?: number; bottom?: number }>({});
+  const [padding, setPadding] = useState<{ top?: number; bottom?: number; right?: number }>({});
   const [nudge, setNudge] = useState(0);
   return {
     trigger: {
@@ -32,6 +34,9 @@ export function useMenuAbove(anchor?: () => Element | null) {
         if (edge === 'left') {
           setPadding({});
           setNudge(Math.max(0, rect.right + GAP - e.clientX - RADIX_SIDE_OFFSET));
+        } else if (edge === 'right') {
+          setPadding({ right: window.innerWidth - rect.left + GAP });
+          setNudge(Math.min(0, rect.left - GAP - (e.clientX - RADIX_SIDE_OFFSET)));
         } else {
           setPadding(edge === 'top' ? { top: rect.bottom + GAP } : { bottom: window.innerHeight - rect.top + GAP });
           setNudge(0);

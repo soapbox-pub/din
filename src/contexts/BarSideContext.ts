@@ -16,9 +16,9 @@ export function useTaskbarEdge(): TaskbarPosition | null {
 /**
  * The side a bar item's popover opens on: down from the menu bar or a
  * taskbar along the top, up from one along the bottom, right of one down the
- * left.
+ * left, left of one down the right.
  */
-export function useBarSide(): 'top' | 'bottom' | 'right' {
+export function useBarSide(): 'top' | 'bottom' | 'left' | 'right' {
   const edge = useContext(BarSideContext);
-  return edge === 'bottom' ? 'top' : edge === 'left' ? 'right' : 'bottom';
+  return edge === 'bottom' ? 'top' : edge === 'left' ? 'right' : edge === 'right' ? 'left' : 'bottom';
 }

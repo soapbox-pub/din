@@ -23,9 +23,9 @@ export type TaskbarStyle = "tall" | "slim";
 
 /**
  * The screen edge the taskbar runs along: the bottom, Windows style, the
- * top, or the left, Ubuntu style.
+ * top, the left, Ubuntu style, or the right.
  */
-export type TaskbarPosition = "bottom" | "top" | "left";
+export type TaskbarPosition = "bottom" | "top" | "left" | "right";
 
 /**
  * What the taskbar's buttons stand for: an app each, its windows combined
@@ -157,7 +157,7 @@ export interface AppConfig {
   dockStyle: DockStyle;
   /** The taskbar's build: tall (Windows 7) or slim (Windows Vista). */
   taskbarStyle: TaskbarStyle;
-  /** The screen edge the taskbar runs along: bottom, top, or left. */
+  /** The screen edge the taskbar runs along: bottom, top, left, or right. */
   taskbarPosition: TaskbarPosition;
   /** Whether the taskbar has a button per app, its windows combined, or one per window. */
   taskbarButtons: TaskbarButtons;
