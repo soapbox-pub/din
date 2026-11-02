@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils';
 /**
  * The tablist, 40px tall: the padding gives the tabs air in a title bar, and
  * room for the raised tab's shadow, which the scrolling strip would clip.
+ * A scroller starts its own touch-action, so it's `touch-none` here too: a
+ * finger drags the tabs and the window, not the strip.
  */
-export const tabListClass = 'flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5 py-1.5 [scrollbar-width:none]';
+export const tabListClass = 'flex min-w-0 flex-1 touch-none items-center gap-1 overflow-x-auto px-0.5 py-1.5 [scrollbar-width:none]';
 
 /** The raised look of the active tab (and of one being dragged). */
 export const tabRaisedClass =
