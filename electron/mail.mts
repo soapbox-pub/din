@@ -54,6 +54,7 @@ import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, webLink } from './mail-lists.mts';
 import type {
+  ConversationMessage,
   MailAccount,
   MailAccountPatch,
   MailAddress,
@@ -851,7 +852,8 @@ function storedPage(store: MailStore, mailbox: string, before: number | undefine
     const older = before ? box.uids.filter((u) => u < before) : box.uids;
     const page = older.slice(0, limit);
     const kept = store.summaries(mailbox, page);
-    if (kept.size < page.length) return null;
+    // Kept from before Mail read their References: fetched again, for conversations.
+    if (kept.size < page.length || [...kept.values()].some((k) => !k.summary.references)) return null;
     return { messages: byDate([...kept.values()].map((k) => k.summary)), total: box.uids.length, more: older.length > page.length };
   }
   const all = store.allSummaries(mailbox, before).filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true));
@@ -964,8 +966,9 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     }
     store.setBox(mailbox, { validity, modseq: modseq?.toString() ?? null, uids, synced: Date.now() });
 
+    // Summaries kept from before Mail read References are fetched again, once.
     const have = store.summaries(mailbox, uids.slice(0, PAGE));
-    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => !have.has(u)))) dirty = true;
+    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => !have.get(u)?.summary.references))) dirty = true;
   }, false);
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
   if (arrived.length) announce(a, store, arrived);
@@ -1007,10 +1010,23 @@ function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
 }
 
 /** What's fetched for a message's summary. */
-const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, headers: ['list-unsubscribe'] };
+const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references'] };
+
+/** How many of a long References list are kept, from each end: the root and the latest. */
+const REFERENCES_KEPT = 10;
+
+/** The Message-IDs in a header, `<a@b> <c@d>`, as `<a@b>`. */
+function messageIds(value: string | undefined): string[] {
+  return value?.match(/<[^<>\s]{1,500}>/g) ?? [];
+}
+
+function keptReferences(ids: string[]): string[] {
+  return ids.length > REFERENCES_KEPT * 2 ? [...ids.slice(0, REFERENCES_KEPT), ...ids.slice(-REFERENCES_KEPT)] : ids;
+}
 
 function summary(m: FetchMessageObject): MessageSummary {
   const date = m.envelope?.date ?? m.internalDate;
+  const headers = m.headers ? headerFields(m.headers.toString('latin1')) : null;
   return {
     uid: m.uid,
     messageId: m.envelope?.messageId ?? null,
@@ -1023,7 +1039,10 @@ function summary(m: FetchMessageObject): MessageSummary {
     hasAttachments: hasAttachments(m.bodyStructure),
     preview: null,
     size: m.size ?? 0,
-    listUnsubscribe: m.headers ? /\S/.test(m.headers.toString('latin1')) : undefined,
+    listUnsubscribe: headers ? !!headers.get('list-unsubscribe')?.some((v) => /\S/.test(v)) : undefined,
+    threadId: m.threadId ?? null,
+    inReplyTo: messageIds(m.envelope?.inReplyTo)[0] ?? null,
+    references: keptReferences(messageIds(headers?.get('references')?.join(' '))),
   };
 }
 
@@ -1225,6 +1244,61 @@ async function message(a: StoredAccount, mailbox: string, uid: number): Promise<
     })),
     unsubscribe: list ? unsubscribeInfo(a, list) : null,
   };
+}
+
+/** The most of a conversation read from each mailbox, newest first. */
+const CONVERSATION_MAX = 100;
+
+/**
+ * A conversation's messages: from All Mail by the server's thread id on
+ * Gmail; elsewhere from the inbox, Sent and Archive, by the thread id
+ * where the server has OBJECTID, else by Message-ID and References.
+ */
+async function conversation(a: StoredAccount, ids: string[], threadId: string | null, since: number | undefined): Promise<ConversationMessage[]> {
+  const s = sessionOf(a.id);
+  if (!s.specials.size) await mailboxes(a);
+  const client = await connection(a);
+  const gmail = client.capabilities.has('X-GM-EXT-1');
+  const byThread = !!threadId && (gmail || client.capabilities.has('OBJECTID'));
+  const all = s.specials.get('all');
+  const where = gmail && byThread && all ? [all] : [...new Set(['INBOX', s.specials.get('sent'), s.specials.get('archive')].filter((p): p is string => !!p))];
+  if (!byThread && !ids.length) return [];
+  const store = storeOf(a);
+  const out: ConversationMessage[] = [];
+  for (const mailbox of where) {
+    try {
+      const found = await inMailbox(a, mailbox, async (c) => {
+        if (c.mailbox) checkValidity(a, store, mailbox, String(c.mailbox.uidValidity));
+        const criteria: SearchObject = byThread
+          ? { threadId: threadId! }
+          : { or: ids.flatMap((id): SearchObject[] => ['message-id', 'references', 'in-reply-to'].map((h) => ({ header: { [h]: id } }))) };
+        if (since && !byThread) criteria.since = new Date(since);
+        const uids = ((await c.search(criteria, { uid: true })) || []).sort((x, y) => y - x).slice(0, CONVERSATION_MAX);
+        if (!uids.length) return [];
+        const kept = store.summaries(mailbox, uids);
+        await fetchSummaries(c, store, mailbox, uids.filter((u) => !kept.get(u)?.summary.references));
+        const now = store.summaries(mailbox, uids);
+        return uids.flatMap((u) => {
+          const summary = now.get(u)?.summary;
+          return summary ? [{ path: mailbox, summary }] : [];
+        });
+      });
+      out.push(...found);
+    } catch {
+      // A mailbox that can't be searched leaves its part of the conversation out.
+    }
+  }
+  // The same message in two mailboxes (a copy filed away) shows once.
+  const seen = new Set<string>();
+  return out
+    .filter((m) => {
+      const id = m.summary.messageId;
+      if (!id) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .sort((x, y) => x.summary.date - y.summary.date);
 }
 
 async function attachment(a: StoredAccount, mailbox: string, uid: number, index: number): Promise<MailAttachment> {
@@ -1756,6 +1830,13 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:message', (id, mailbox, uid) => {
     if (!Number.isInteger(uid)) throw new Error('Bad uid');
     return message(account(id), mailboxArg(mailbox), uid as number);
+  });
+  handle('mail:conversation', (id, opts) => {
+    const o = (opts ?? {}) as { messageIds?: unknown; threadId?: unknown; since?: unknown };
+    const ids = Array.isArray(o.messageIds) ? o.messageIds.filter((x): x is string => typeof x === 'string' && /^<[^<>\s]{1,500}>$/.test(x)).slice(0, 30) : [];
+    const threadId = typeof o.threadId === 'string' && /^[\w.-]{1,200}$/.test(o.threadId) ? o.threadId : null;
+    const since = typeof o.since === 'number' && o.since > 0 ? o.since : undefined;
+    return conversation(account(id), [...new Set(ids)], threadId, since);
   });
   handle('mail:attachment', (id, mailbox, uid, index) => {
     if (!Number.isInteger(uid) || !Number.isInteger(index)) throw new Error('Bad attachment');

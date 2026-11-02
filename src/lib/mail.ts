@@ -95,6 +95,22 @@ export interface MessageSummary {
   size: number;
   /** It has a List-Unsubscribe header; unknown (undefined) for summaries kept from before Mail looked. */
   listUnsubscribe?: boolean;
+  /** The server's conversation id (Gmail's X-GM-THRID, or OBJECTID's THREADID), where it has one. */
+  threadId?: string | null;
+  /** The message it answers. */
+  inReplyTo?: string | null;
+  /**
+   * The conversation it's part of, by Message-ID, oldest first (at most
+   * the first and last few); undefined for summaries kept from before
+   * Mail looked.
+   */
+  references?: string[];
+}
+
+/** A message of a conversation, with the mailbox it's in. */
+export interface ConversationMessage {
+  path: string;
+  summary: MessageSummary;
 }
 
 export type MessageFilter = 'unread' | 'flagged' | null;
@@ -215,6 +231,13 @@ export interface MailBridge {
   mailboxes(accountId: string): Promise<MailboxInfo[]>;
   messages(accountId: string, path: string, options?: { before?: number; limit?: number; query?: string; filter?: MessageFilter }): Promise<MessagePage>;
   message(accountId: string, path: string, uid: number): Promise<MailMessage>;
+  /**
+   * The rest of a conversation, from the inbox, Sent and Archive (All Mail
+   * on Gmail): every message with one of `messageIds` as its Message-ID or
+   * among its References, or with the server's `threadId`; `since`
+   * (milliseconds) bounds how far back to look. Oldest first.
+   */
+  conversation(accountId: string, options: { messageIds: string[]; threadId?: string | null; since?: number }): Promise<ConversationMessage[]>;
   attachment(accountId: string, path: string, uid: number, index: number): Promise<MailAttachment>;
   setFlags(accountId: string, path: string, uids: number[], flags: { seen?: boolean; flagged?: boolean }): Promise<void>;
   /** Move to a mailbox by path, or to the account's archive, trash or junk. */

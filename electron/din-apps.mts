@@ -61,7 +61,7 @@ const SYSTEM_PERMISSIONS = {
   assistant: /^assistant:(status|setEnabled|install|restart|checkUpdate|upgrade|recentModels|request|passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|unlock|eject)$/,
-  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|attachment|setFlags|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
+  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
   passwords: /^passwords:(state|create|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
