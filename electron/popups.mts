@@ -64,6 +64,8 @@ export interface PopupFeatures {
   height: number;
   /** Opened from a private window: the pop-up is private too. */
   private: boolean;
+  /** Opened from a Tor tab: the pop-up stays in Tor, whatever its address. */
+  tor: boolean;
 }
 
 /** The values of Cross-Origin-Opener-Policy that matter here. */
@@ -206,6 +208,7 @@ export function popupFeatures(
   disposition: string,
   features: string,
   isPrivate: boolean,
+  tor = false,
 ): PopupFeatures | null {
   if (disposition !== 'new-window' || features.trim() === '') return null;
   const size = (key: string, fallback: number): number => {
@@ -213,7 +216,7 @@ export function popupFeatures(
     const value = match ? Number(match[1]) : fallback;
     return Math.min(Math.max(value, 100), 4096);
   };
-  return { width: size('width', 500), height: size('height', 600), private: isPrivate };
+  return { width: size('width', 500), height: size('height', 600), private: isPrivate, tor };
 }
 
 /**

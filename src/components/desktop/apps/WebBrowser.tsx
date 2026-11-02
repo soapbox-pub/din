@@ -278,6 +278,7 @@ function createTab(
   url: string,
   pendingRequestId: number | null = null,
   parentId: string | null = null,
+  tor = isOnionUrl(url),
 ): Tab {
   // A blank new tab shows an empty address bar (ready to type), even though
   // its surface loads about:blank.
@@ -289,7 +290,7 @@ function createTab(
     id: newTabId(),
     parentId,
     initialSrc: blank || internal ? NEW_TAB_URL : url,
-    tor: isOnionUrl(url),
+    tor,
     address: blank ? '' : url,
     url: blank ? '' : url,
     title: null,
@@ -584,8 +585,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       activate = true,
       pendingRequestId: number | null = null,
       parentId: string | null = null,
+      tor?: boolean,
     ) => {
-      const tab = createTab(url, pendingRequestId, parentId);
+      const tab = createTab(url, pendingRequestId, parentId, tor);
       setTabs((ts) => [...ts, tab]);
       if (activate) {
         focusOnActivate.current = true;
@@ -1092,14 +1094,17 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'title': {
           updateTab(id, { title: event.value || null });
           // Join the title onto the history entry for the tab's current URL.
-          // Private windows never touch browsing history.
+          // Private windows and Tor tabs never touch browsing history.
           const tab = tabsRef.current.find((t) => t.id === id);
-          if (!isPrivate && tab?.url && event.value) recordTitle(tab.url, event.value);
+          if (!isPrivate && !tab?.tor && tab?.url && event.value) recordTitle(tab.url, event.value);
           break;
         }
         case 'favicon': {
-          updateTab(id, { favicon: event.value });
           const tab = tabsRef.current.find((t) => t.id === id);
+          // A Tor tab's icon would be fetched by the shell, outside Tor: it
+          // keeps its glyph.
+          if (tab?.tor) break;
+          updateTab(id, { favicon: event.value });
           if (!isPrivate && tab?.url) recordFavicon(tab.url, event.value);
           break;
         }
@@ -1136,8 +1141,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // redirects, back/forward); recordVisit ignores non-https URLs
           // (about:blank, chrome-extension://). The iframe fallback never
           // fires this event - it records in navigateTab / go instead.
-          // Private windows keep no history.
-          if (!isPrivate) {
+          // Private windows and Tor tabs keep no history.
+          if (!isPrivate && !tabsRef.current.find((t) => t.id === id)?.tor) {
             const sent = typedUrls.current.get(id);
             typedUrls.current.delete(id);
             if (sent && sent.url !== event.url) recordVisit(sent.url, sent.typed);
@@ -1273,10 +1278,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // relationship (ignored by the horizontal strip). Desktop-initiated
           // opens (terminal/desktop link clicks) carry no opener and stay
           // top-level.
-          const parentId =
-            command.openerWcId != null
-              ? existing.find((t) => t.wcId === command.openerWcId)?.id ?? null
-              : null;
+          const opener = command.openerWcId != null ? existing.find((t) => t.wcId === command.openerWcId) : undefined;
+          const parentId = opener?.id ?? null;
+          // What a Tor tab opens stays in Tor, clearnet or not: a page that
+          // could open a tab outside it could learn its visitor's address.
+          const tor = opener?.tor || isOnionUrl(command.url);
           // Middle-click / Ctrl+Cmd-click and "Open link in new tab" open in
           // the background: spawn the tab but leave the current one focused and
           // don't raise the window. Plain target=_blank / window.open stay in
@@ -1292,12 +1298,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             existing[0].initialSrc === NEW_TAB_URL &&
             existing[0].url === '';
           if (soloBlank) {
-            const tab = createTab(command.url);
+            const tab = createTab(command.url, null, null, tor);
             setTabs([tab]);
             focusOnActivate.current = true;
             setActiveId(tab.id);
           } else {
-            openTab(command.url, !background, null, parentId);
+            openTab(command.url, !background, null, parentId, tor);
           }
           // A foreground link opened in this window (target=_blank, a desktop
           // link click) must bring it forward - the user clicked expecting to
@@ -1554,7 +1560,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       else views.current.get(id)?.loadURL(surfaceUrl(resolved));
       // The iframe fallback emits no navigate events, so record here (never
       // in a private window).
-      if (!webviewMode && !isPrivate) recordVisit(resolved, typed);
+      if (!webviewMode && !isPrivate && !tor) recordVisit(resolved, typed);
       if (webviewMode && resolved.startsWith('https://')) {
         typedUrls.current.set(id, { url: resolved, typed });
       }
@@ -1617,7 +1623,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       const url = tab.history[target];
       view.loadURL(surfaceUrl(url));
       updateTab(id, { cursor: target, address: url, url, title: null, favicon: null, themeColor: null });
-      if (!isPrivate) recordVisit(url);
+      if (!isPrivate && !tab.tor) recordVisit(url);
     },
     [updateTab, webviewMode, recordVisit, isPrivate],
   );
@@ -2054,7 +2060,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           </span>
         )}
 
-        <InstallSiteButton
+        {!activeTab.tor && <InstallSiteButton
           url={activeTab.url}
           pageTitle={activeTab.title}
           favicon={activeTab.favicon}
@@ -2065,7 +2071,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           collectNostrHandler={() =>
             views.current.get(activeTab.id)?.collectNostrHandler() ?? Promise.resolve(null)
           }
-        />
+        />}
 
         {/* One overflow menu gathers the browser's less-frequent *actions*:
             new/private windows, find-in-page, page source, developer tools,

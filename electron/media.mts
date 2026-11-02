@@ -218,7 +218,9 @@ function guestSource(guest: Guest): ExternalMediaSource | null {
     kind: 'web',
     title,
     subtitle: (lead?.title && lead.artist) || host,
-    artwork: lead?.artwork ?? null,
+    // The shell loads an https picture itself, outside the page's session:
+    // from a private or Tor tab, only a picture the page handed over whole.
+    artwork: lead?.artwork && (contents.session.isPersistent() || lead.artwork.startsWith('data:')) ? lead.artwork : null,
     playing,
     canPlay: actions.has('play') || resumable || guest.pausedByDin,
     canPrevious: actions.has('previoustrack'),

@@ -281,7 +281,7 @@ export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): 
   if (url.protocol === 'ws:') return onion ? null : { cancel: true };
   if (url.protocol !== 'http:') return null;
   if (onion && url.port) return null;
-  // A clearnet page leaves the session (keepTorSession).
+  // A clearnet page goes as it is, as Tor Browser lets it (keepTorSession).
   if (!onion && details.resourceType === 'mainFrame') return null;
   url.protocol = 'https:';
   return { redirectURL: url.href };
@@ -341,16 +341,25 @@ export function secureOnionSites(s: Electron.Session): void {
 }
 
 /**
- * Keep a browser tab's pages in the session that fits them: onion sites in
- * Tor's, everything else out of it. A link, script or redirect that crosses
- * over is stopped, and the shell loads it again in a surface in the other
- * session (the Web Browser's tor:move-tab listener).
+ * Keep a browser tab's onion sites in Tor's session. A link, script or
+ * redirect from a clearnet page to one is stopped, and the shell loads it
+ * again in a surface in Tor's session (the Web Browser's tor:move-tab
+ * listener). A Tor tab never leaves on its own: a clearnet page it goes to
+ * loads in Tor's session too, through Tor, as in Tor Browser, since a page
+ * that could send its tab out could learn the visitor's address (a script
+ * setting location, a redirect). Only the user typing an address takes a tab
+ * out. nsite:// stays out of Tor: its relays and Blossom servers are reached
+ * directly.
  */
 export function keepTorSession(contents: Electron.WebContents, inTor: boolean): void {
   // WebRTC would otherwise go around the proxy, and give away the address.
   if (inTor) contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
   const guard = (event: Electron.Event, url: string) => {
-    if (!/^(https?|nsite):/i.test(url) || isOnionUrl(url) === inTor) return;
+    if (inTor) {
+      if (/^nsite:/i.test(url)) event.preventDefault();
+      return;
+    }
+    if (!/^https?:/i.test(url) || !isOnionUrl(url)) return;
     event.preventDefault();
     sendToShell('tor:move-tab', { wcId: contents.id, url });
   };

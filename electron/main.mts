@@ -4594,10 +4594,12 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     }
     // A nostr: link (NIP-21) opens in the app the user chose for its kind,
     // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts);
-    // a mailto: link opens a new message in Mail.
+    // a mailto: link opens a new message in Mail. Not from Tor's session: the
+    // preview reaches relays directly.
     if (
       permission === 'openExternal' &&
       prompts &&
+      s !== torBrowserSession() &&
       'externalURL' in details &&
       typeof details.externalURL === 'string' &&
       details.externalURL.length <= 8192 &&
@@ -5926,12 +5928,13 @@ app.whenReady().then(() => {
   // nsite:// in every browser session, installed apps' windows included. This
   // process has no Nostr client, so manifest lookups are relayed to the shell
   // renderer (NsiteBridgeHost), which owns Nostrify, the relay list, and the
-  // query cache. Private windows never write the nsite store.
+  // query cache. Private windows never write the nsite store. Not Tor's
+  // session: those lookups and blob fetches go out directly, so an onion page
+  // that loaded nsite:// would learn its visitor's address.
   registerNsiteProtocol({
     sessions: [
       { session: browserSession(), persist: true },
       { session: privateBrowserSession(), persist: false },
-      { session: torBrowserSession(), persist: false },
     ],
     sendToShell,
     isShellSender,
@@ -6544,7 +6547,7 @@ app.on('web-contents-created', (_event, contents) => {
     // A window.open that asked for a pop-up gets a small window of its own.
     // A web page's only: extension pages open theirs as tabs, as before.
     const popup = isWebPage
-      ? popupFeatures(disposition, features, isEphemeralBrowserSession(contents.session))
+      ? popupFeatures(disposition, features, isEphemeralBrowserSession(contents.session), contents.session === torBrowserSession())
       : null;
     if (isBrowserTab && isUserscriptInstallUrl(url)) {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });

@@ -46,6 +46,8 @@ export function WebPopup({ windowId, params }: AppComponentProps) {
   const initialUrl = typeof params?.url === 'string' && isAllowedTabUrl(params.url) ? params.url : null;
   const openerWcId = typeof params?.openerWcId === 'number' ? params.openerWcId : undefined;
   const isPrivate = params?.private === true;
+  // From a Tor tab: in Tor, clearnet address or not (as the tab's links are).
+  const inTor = params?.tor === true;
 
   const viewRef = useRef<BrowserViewHandle>(null);
   const [url, setUrl] = useState(initialUrl ?? '');
@@ -142,7 +144,7 @@ export function WebPopup({ windowId, params }: AppComponentProps) {
           ref={viewRef}
           src={initialUrl}
           partition={
-            isOnionUrl(initialUrl)
+            inTor || isOnionUrl(initialUrl)
               ? WEBBROWSER_TOR_PARTITION
               : isPrivate
                 ? WEBBROWSER_PRIVATE_PARTITION

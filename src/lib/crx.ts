@@ -76,6 +76,8 @@ export interface CrxPopupFeatures {
   height: number;
   /** Opened from a private window, so private too. */
   private: boolean;
+  /** Opened from a Tor tab, so in Tor too. */
+  tor?: boolean;
 }
 
 /** A tab command initiated by the extension system (or a page's window.open). */

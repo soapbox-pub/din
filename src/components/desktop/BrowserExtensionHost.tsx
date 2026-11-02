@@ -42,6 +42,7 @@ export function BrowserExtensionHost() {
           url: command.url,
           openerWcId: command.openerWcId,
           private: command.popup.private,
+          tor: command.popup.tor === true,
           ...popupWindowSize(command.popup),
         });
         return;
