@@ -26,13 +26,13 @@ use tracing::debug;
 /// How quickly the energy drains (a time constant, in seconds).
 const DRAIN: f64 = 0.45;
 /// How much energy it takes before the pointer starts to grow.
-const THRESHOLD: f64 = 2.4;
+const THRESHOLD: f64 = 2.9;
 /// How much bigger the pointer gets for each stroke's energy past that, and at most.
 const GAIN: f64 = 1.6;
 pub const MAX_SCALE: f64 = 4.5;
 /// How long a stroke must be, in logical pixels, and how quickly made, to count:
 /// not a hand's tremor, nor going back and forth over something.
-const MIN_STROKE: f64 = 80.0;
+const MIN_STROKE: f64 = 100.0;
 const MAX_STROKE_TIME: Duration = Duration::from_millis(300);
 /// How far the pointer must come back before it has turned, not just wavered.
 const TURN: f64 = 12.0;
