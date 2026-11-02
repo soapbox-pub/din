@@ -526,6 +526,13 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
     return 'Not one of this app\'s terminals';
   }
   if (permission === 'assistant' && entry.appId !== 'assistant') return assistantRefusal(channel, args, entry);
+  // A disc image a virtual machine reads (setCdrom's, or a config's cdrom):
+  // never one of Din's own files.
+  if (permission === 'vms') {
+    const values = args.flatMap((a) => (a && typeof a === 'object' ? Object.values(a) : [a]));
+    const named = values.find((v) => typeof v === 'string' && path.isAbsolute(v) && isProtectedPath(v));
+    if (named) return `${path.resolve(named as string)} belongs to Din`;
+  }
   if (permission === 'fs') {
     if (entry.roots && !SCOPED_FS.has(channel)) return `${channel} reaches beyond this app's folders`;
     if (entry.roots && channel === 'fs:compress' && Array.isArray(args[1]) && args[1].some((n) => typeof n !== 'string' || n.includes('/'))) {
