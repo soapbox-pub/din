@@ -11,6 +11,7 @@
  */
 
 import { DRAG_MIME } from '@/sdk';
+import { droppedHandles } from '@/shared/fileHandles';
 import { broadcastDrag, otherWindowDrag } from './windows';
 
 interface LocalDrag {
@@ -93,13 +94,13 @@ export async function takeDrop(e: React.DragEvent, copy: boolean): Promise<Dropp
     return { paths, folders: paths.filter((p) => folders.has(p)), copy };
   }
   const din = window.din;
-  if (!din) return null;
-  const result = await din.drag.accept(e.nativeEvent, copy ? 'copy' : 'move');
-  if (result?.kind !== 'files') return null;
+  if (!din || !e.dataTransfer.types.includes(DRAG_MIME)) return null;
+  const files = await droppedHandles(e.nativeEvent);
+  if (files.length === 0) return null;
   return {
-    paths: result.files.map((f) => din.files.path(f)),
-    folders: result.files.filter((f) => f.kind === 'directory').map((f) => din.files.path(f)),
-    copy: result.operation !== 'move',
+    paths: files.map((f) => din.files.path(f)),
+    folders: files.filter((f) => f.kind === 'directory').map((f) => din.files.path(f)),
+    copy,
   };
 }
 

@@ -298,7 +298,6 @@ export type Push =
   | { type: 'closeRequest'; request: number }
   | { type: 'moveEnd' }
   | { type: 'drag'; drag: DragInfo | null }
-  | { type: 'dragEnd'; token: string; dropped: boolean; operation: 'copy' | 'move' | 'link' | null }
   | { type: 'tabDetached'; tabType: string; state: unknown; at: Point }
   | { type: 'fileChange'; handle: string; change: 'modified' | 'removed' }
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }

@@ -336,7 +336,7 @@ export interface DinMenus {
  * `FileSystemDirectoryHandle`, backed by the desktop: picked
  * (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`, which
  * open Din's pickers), launched with (`launchQueue`), dropped
- * (`din.drag.accept`), pasted (`din.clipboard.readFiles`) or restored
+ * (a drop's `getAsFileSystemHandle()`), pasted (`din.clipboard.readFiles`) or restored
  * (`din.files.restore`). A handle is a capability: having one is what lets
  * the app read or write that file and nothing else. Handles last as long as
  * the page; `persist` keeps one for Recent Files. These take them.
@@ -453,6 +453,10 @@ declare global {
     /** Din reports `modified`, and `disappeared` when it's removed. */
     readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
   }
+  interface DataTransferItem {
+    /** File System Access: a handle to a dropped file, or null for anything else. */
+    getAsFileSystemHandle(): Promise<FileSystemHandle | null>;
+  }
   class FileSystemObserver {
     constructor(callback: (records: FileSystemChangeRecord[], observer: FileSystemObserver) => void);
     observe(handle: FileSystemHandle, options?: { recursive?: boolean }): Promise<void>;
@@ -477,10 +481,6 @@ export interface DragInfo {
   tabType?: string;
 }
 
-/** What a drop hands the target. */
-export type DropResult =
-  | { kind: 'files'; files: FileSystemHandle[]; operation: 'copy' | 'move' | 'link' }
-  | { kind: 'tab'; tabType: string; state: unknown };
 
 export interface DinDrag {
   /**
@@ -503,13 +503,13 @@ export interface DinDrag {
   readonly current: DragInfo | null;
   onChange(cb: (drag: DragInfo | null) => void): Unsubscribe;
   /**
-   * Take a drop. Call from `drop` with the event; resolves with what was
-   * dropped, or null if the event isn't a Din drag (then read the
-   * DataTransfer as usual, for files and text from web pages).
+   * Take a tab dropped from another window of the app. Call from `drop`
+   * with the event; null if it isn't one. Files dropped from other apps
+   * are the web's: the drop's `file` items, each with
+   * `getAsFileSystemHandle()`. Where a drag of files went, the source's
+   * `dragend` says, in its `dropEffect`.
    */
-  accept(e: DragEvent, operation?: 'copy' | 'move' | 'link'): Promise<DropResult | null>;
-  /** The drag this app started finished: where it went, so a move can drop the original. */
-  onEnd(cb: (result: { token: string; dropped: boolean; operation: 'copy' | 'move' | 'link' | null }) => void): Unsubscribe;
+  acceptTab(e: DragEvent): Promise<{ tabType: string; state: unknown } | null>;
   /** A tab this app was dragging was dropped outside every window. */
   onTabDetached(cb: (e: { tabType: string; state: unknown; at: Point }) => void): Unsubscribe;
 }

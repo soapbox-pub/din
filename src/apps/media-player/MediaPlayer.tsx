@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLaunchFiles } from '@/shared/fileHandles';
+import { droppedHandles, useLaunchFiles } from '@/shared/fileHandles';
 import { cleanFsError } from '@/lib/fs';
 import { DRAG_MIME, type FrameMode, type Rect } from '@/sdk';
 import { onLaunch, windowLaunch, type Launch } from '@/shared/launch';
@@ -324,9 +324,9 @@ export function MediaPlayer() {
         setDragOver(false);
         if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
         e.preventDefault();
-        void din.drag.accept(e.nativeEvent, 'copy').then((result) => {
-          if (result?.kind !== 'files') return;
-          return openHandles(result.files, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
+        void droppedHandles(e.nativeEvent).then((files) => {
+          if (files.length === 0) return;
+          return openHandles(files, player.getState().queue.length === 0 ? 'play' : 'enqueue').then((m) => m && commands.setMessage(m));
         });
       }}
       className="relative size-full outline-none"

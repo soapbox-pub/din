@@ -32,7 +32,6 @@ import type {
   DinTheme,
   DinWindow,
   DragInfo,
-  DropResult,
   FrameStyle,
   MenuItem,
   Nip07,
@@ -63,6 +62,7 @@ import {
   installFilePickers,
   installFileSystemObserver,
   installLaunchQueue,
+  installDroppedFiles,
   installSavedState,
   installWindowState,
   toWebHandle,
@@ -683,15 +683,12 @@ export function installDin(transport: Transport): void {
   // ---- drag and drop ----
   let currentDrag: DragInfo | null = null;
   const drags = new Emitter<DragInfo | null>();
-  const dragEnds = new Emitter<{ token: string; dropped: boolean; operation: 'copy' | 'move' | 'link' | null }>();
   const detached = new Emitter<{ tabType: string; state: unknown; at: { x: number; y: number } }>();
   pushes.on((p) => {
     if (p.type === 'drag') {
       currentDrag = p.drag;
       drags.emit(currentDrag);
       reportDragOver(currentDrag !== null);
-    } else if (p.type === 'dragEnd') {
-      dragEnds.emit({ token: p.token, dropped: p.dropped, operation: p.operation });
     } else if (p.type === 'tabDetached') {
       detached.emit({ tabType: p.tabType, state: p.state, at: p.at });
     }
@@ -740,6 +737,15 @@ export function installDin(transport: Transport): void {
       { once: true },
     );
   }
+  // A drop of files from another app: the web's file items, whose
+  // getAsFileSystemHandle() trades the drag's token for grants to them.
+  installDroppedFiles({
+    drag: () => currentDrag,
+    accept: async (token, operation) => {
+      const result = await request('drag.accept', { token, operation });
+      return result?.kind === 'files' ? result.files.map(wrap) : [];
+    },
+  });
   const drag: DinDrag = {
     startFiles(e, list, label) {
       const handles = list.map(idOf);
@@ -756,15 +762,12 @@ export function installDin(transport: Transport): void {
       return currentDrag;
     },
     onChange: (cb) => drags.on(cb),
-    async accept(e, operation = 'copy') {
+    async acceptTab(e) {
       const token = e.dataTransfer?.getData(DRAG_MIME);
-      if (!token) return null;
-      const result = await request('drag.accept', { token, operation });
-      if (!result) return null;
-      if (result.kind === 'files') return { kind: 'files', files: result.files.map(wrap), operation: result.operation } satisfies DropResult;
-      return result;
+      if (!token || currentDrag?.kind !== 'tab') return null;
+      const result = await request('drag.accept', { token, operation: 'move' });
+      return result?.kind === 'tab' ? { tabType: result.tabType, state: result.state } : null;
     },
-    onEnd: (cb) => dragEnds.on(cb),
     onTabDetached: (cb) => detached.on(cb),
   };
 

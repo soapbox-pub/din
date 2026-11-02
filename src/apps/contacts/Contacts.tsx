@@ -24,7 +24,8 @@ import {
   type StoredContact,
 } from '@/shared/contacts';
 import { DialogButton, Overlay } from '@/shared/dialogs';
-import { fileTypes, pickFiles, pickSaveFile, useLaunchFiles, writeFile } from '@/shared/fileHandles';
+import { droppedHandles, fileTypes, pickFiles, pickSaveFile, useLaunchFiles, writeFile } from '@/shared/fileHandles';
+import { DRAG_MIME } from '@/sdk';
 import { toast } from '@/shared/toast';
 import {
   blankContact,
@@ -475,13 +476,14 @@ export function Contacts() {
     if (e.dataTransfer.types.includes(CONTACT_DRAG)) return;
     e.preventDefault();
     const blobs = [...e.dataTransfer.files];
-    void din.drag.accept(e.nativeEvent, 'copy').then(async (result) => {
-      if (result?.kind === 'files') return offerImport(result.files);
+    const fromApp = e.dataTransfer.types.includes(DRAG_MIME) ? droppedHandles(e.nativeEvent) : null;
+    void (async () => {
+      if (fromApp) return offerImport(await fromApp);
       const vcards = blobs.filter((f) => /\.(vcf|vcard)$/i.test(f.name));
       if (!vcards.length) return;
       const cards = (await Promise.all(vcards.map((f) => f.text()))).flatMap(parseVCards);
       if (cards.length) setImporting({ name: vcards.length === 1 ? vcards[0].name : `${vcards.length} files`, cards });
-    });
+    })();
   };
 
   const header = (children: React.ReactNode, className?: string) => (

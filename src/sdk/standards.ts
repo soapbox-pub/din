@@ -816,3 +816,70 @@ export function installSavedState(save: (state: unknown) => void): (state: unkno
   });
   return (state) => update.call(navigation, { state });
 }
+
+// ---------------------------------------------------------------------------
+// Drops of files from other apps
+// ---------------------------------------------------------------------------
+
+/** The MIME type a Din drag carries its token under (DRAG_MIME in src/sdk/index.ts). */
+const DRAG_TYPE = 'application/x-din-drag';
+
+export interface DroppedFilesHost {
+  /** The drag going on, as the desktop said. */
+  drag(): { kind: 'files' | 'tab'; count: number } | null;
+  /** Trade a drag's token for handles to its files. */
+  accept(token: string, operation: 'copy' | 'move' | 'link'): Promise<FileSystemHandle[]>;
+}
+
+/**
+ * A drop of files dragged from another app, as the web has a drop of files:
+ * its DataTransfer's `items` hold one `file` item for each, whose
+ * `getAsFileSystemHandle()` (from File System Access) resolves with a handle
+ * to it. Nothing is taken until one is asked for; the first trades the
+ * drag's token with the desktop for grants to them all, as the drop's
+ * `dropEffect` (`copy`, `move` or `link`) says. `getAsFile()` gives null:
+ * the bytes come through the handle. Runs in the capture phase on the
+ * window, before the page's own listeners, React's included.
+ */
+export function installDroppedFiles(host: DroppedFilesHost): void {
+  window.addEventListener(
+    'drop',
+    (e) => {
+      const dt = e.dataTransfer;
+      const token = dt?.getData(DRAG_TYPE);
+      const drag = host.drag();
+      if (!dt || !token || drag?.kind !== 'files') return;
+      const effect = dt.dropEffect;
+      const operation = effect === 'move' || effect === 'link' ? effect : 'copy';
+      let taken: Promise<FileSystemHandle[]> | null = null;
+      const take = () => (taken ??= host.accept(token, operation));
+      const fileItem = (index: number) =>
+        Object.create(DataTransferItem.prototype, {
+          kind: { value: 'file', enumerable: true },
+          type: { value: '', enumerable: true },
+          getAsFile: { value: () => null },
+          getAsString: { value: () => {} },
+          getAsFileSystemHandle: { value: () => take().then((list) => list[index] ?? null) },
+          webkitGetAsEntry: { value: () => null },
+        }) as DataTransferItem;
+      const own = dt.items;
+      const items = [...Array.from(own), ...Array.from({ length: drag.count }, (_, i) => fileItem(i))];
+      const list = Object.setPrototypeOf(items, DataTransferItemList.prototype) as DataTransferItemList;
+      Object.defineProperties(list, {
+        add: { value: own.add.bind(own) },
+        remove: { value: own.remove.bind(own) },
+        clear: { value: own.clear.bind(own) },
+      });
+      const transfer = new Proxy(dt, {
+        get(target, key) {
+          if (key === 'items') return list;
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+        set: (target, key, value) => Reflect.set(target, key, value, target),
+      });
+      Object.defineProperty(e, 'dataTransfer', { value: transfer, configurable: true });
+    },
+    true,
+  );
+}

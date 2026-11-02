@@ -863,7 +863,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           folders: grants.length > 0 && grants.every((g) => g.kind === 'directory'),
           // What it could only read, a target only copies.
           copyOnly: grants.some((g) => !g.writable),
-          onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
       },
@@ -885,7 +884,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           paths: clean,
           folders: clean.length > 0 && kinds.every((k) => k === 'directory'),
           copyOnly,
-          onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
       },
@@ -899,7 +897,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           folders: false,
           tabType,
           tabState: state,
-          onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
       },

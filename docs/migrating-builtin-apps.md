@@ -43,7 +43,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `window.pty` | `din.system.pty` with `pty` |
 | `printHtml(title, html)`, `printFile(path)` | `printDocument(html, title)`, `printFile(file)` from `@/shared/print`: the web's `print()` on a frame |
 | `fileClipboard` | `din.clipboard` |
-| `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, `din.drag.accept` |
+| `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, the drop's `getAsFileSystemHandle()` |
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |
 | `useToast()` / `notify()` | `toast(…)` from `@/shared/toast`, drawn in the app's window, or `new Notification()` for one kept in the notification center |
 | `useDesktopBackground().setBackground` | `din.desktop.setWallpaper(handle)` with `wallpaper` |

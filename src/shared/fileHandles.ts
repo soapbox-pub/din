@@ -77,6 +77,21 @@ export async function folderEntries(folder: FileSystemDirectoryHandle): Promise<
   return entries;
 }
 
+// ---- drops ----
+
+/**
+ * The handles a drop of files brought, from its `file` items'
+ * `getAsFileSystemHandle()`. Call from `drop` itself: the items are only
+ * readable there. A drag from another app on Din gives handles Din granted;
+ * check for one (its DataTransfer types include `DRAG_MIME`) before giving
+ * them to `din.files`, which takes no other.
+ */
+export async function droppedHandles(e: DragEvent): Promise<FileSystemHandle[]> {
+  const items = [...(e.dataTransfer?.items ?? [])].filter((item) => item.kind === 'file');
+  const handles = await Promise.all(items.map((item) => item.getAsFileSystemHandle().catch(() => null)));
+  return handles.filter((h): h is FileSystemHandle => h !== null);
+}
+
 // ---- launchQueue ----
 
 /** The files this window was launched with (from Files, a drop on the Dock tile, Open With). */

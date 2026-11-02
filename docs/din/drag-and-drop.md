@@ -18,10 +18,10 @@ and only then gets a grant to exactly those files.
                                        pushes DragInfo{files, 2} to all apps (no token)
                                ◀────── (every app sees din.drag.current)
                                                               dragover: current.kind === 'files' → show drop zone
-                                                              drop ─ accept(e) ─▶
+                                                              drop ─ item.getAsFileSystemHandle() ─▶
                                        checks t, grants files to Paint
-                                       ─────────────────────────────────▶ { kind: 'files', files: [h1, h2] }
- onEnd({ dropped: true, operation: 'copy' }) ◀─
+                                       ─────────────────────────────────▶ h1, h2
+ dragend (dropEffect 'copy') ◀─
 ```
 
 ## Dragging files out
@@ -30,8 +30,8 @@ and only then gets a grant to exactly those files.
 row.addEventListener('dragstart', (e) => {
   din.drag.startFiles(e, selectedHandles, selected.length === 1 ? selected[0].name : `${selected.length} items`);
 });
-din.drag.onEnd(({ dropped, operation }) => {
-  if (dropped && operation === 'move') refresh();
+row.addEventListener('dragend', (e) => {
+  if (e.dataTransfer?.dropEffect === 'move') refresh();   // the web's: where the drag went
 });
 ```
 
@@ -55,12 +55,31 @@ a `dragstart` can't wait for `din.files.fromPath`. Files does.
 zone.addEventListener('dragover', (e) => {
   if (din.drag.current?.kind === 'files' || e.dataTransfer?.types.includes('Files')) e.preventDefault();
 });
+zone.addEventListener('dragover', (e) => {
+  if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
+});
 zone.addEventListener('drop', async (e) => {
   e.preventDefault();
-  const result = await din.drag.accept(e, e.ctrlKey ? 'copy' : 'move');
-  if (result?.kind === 'files') open(result.files);
-  else if (e.dataTransfer?.files.length) openBlobs(e.dataTransfer.files);   // from a web page or native app
+  if (e.dataTransfer?.types.includes('application/x-din-drag')) {
+    // File System Access: read the items now, during the drop.
+    const items = [...e.dataTransfer.items].filter((item) => item.kind === 'file');
+    open(await Promise.all(items.map((item) => item.getAsFileSystemHandle())));
+  } else if (e.dataTransfer?.files.length) openBlobs(e.dataTransfer.files);   // from a web page or native app
 });
+```
+
+A drop of files from another app is the web's drop of files: its
+DataTransfer's `items` hold a `file` item for each, and
+`getAsFileSystemHandle()` resolves with a handle Din granted
+(`installDroppedFiles` in `src/sdk/standards.ts` puts them there, in the
+capture phase before the page's own listeners). Nothing is granted until a
+handle is asked for; the first trades the drag's token for them all, as
+the drop's `dropEffect` says. `getAsFile()` gives null: read the file
+through its handle. `droppedHandles(e)` in `src/shared/fileHandles.ts`
+does the reading. A tab dropped from another window of the app is
+`din.drag.acceptTab(e)`'s.
+
+```ts
 ```
 
 - During the drag, `din.drag.current` says what's coming (kind, count,
@@ -70,12 +89,14 @@ zone.addEventListener('drop', async (e) => {
 - The token isn't in `din.drag.current`: a target reads it from the
   drop's DataTransfer, which the engine shows only to where the drop
   lands, so no other app can take the drag.
-- `accept` resolves to null when the drop isn't a Din drag; the
-  DataTransfer then holds whatever the web gave (files from a page, text,
-  URLs), read as usual.
-- Operations: `copy`, `move`, `link`. A target without `fs` can only
-  receive (`copy`); `move` is honored only when the target can write where
-  the files go (Files). The source learns what happened through `onEnd`.
+- A drop that isn't a Din drag (no `application/x-din-drag` type) holds
+  whatever the web gave (files from a page, text, URLs), read as usual;
+  its file items' handles are the browser's, which `din.files` doesn't
+  take.
+- Operations: `copy`, `move`, `link`, the drop's `dropEffect`. A target
+  without `fs` can only receive (`copy`); `move` is honored only when the
+  target can write where the files go (Files). The source learns what
+  happened from its `dragend`'s `dropEffect`.
 
 ## Dragging tabs
 
@@ -96,7 +117,7 @@ drop; the desktop helps instead:
 
 `useDinTabTransfer` (`src/shared/dinTabTransfer.ts`) does all of it and
 returns the `TabTransfer` that `TabStrip` takes, as `useTabTransfer` does
-on the desktop; the new window calls `adoptedTab(din)` when it starts. A
+on the desktop; the new window calls `adoptedTab()` when it starts. A
 Terminal tab's payload carries its ptys as hand-over tokens
 (`din.system.pty.release` / `adopt`), so its shells keep running.
 
@@ -111,7 +132,7 @@ use HTML drag and drop.
 | App → web page or nsite | The desktop replays the drop into the page as real files through the DevTools protocol, as it does today for Files (`guestFileDrop` in `electron/main.mts`) |
 | App → native window | The desktop hands the paths to the embedded display, as today |
 | App → Dock tile | The desktop takes the drop and opens the files in the tile's app, if it opens them (`src/lib/dockDrop.ts`) |
-| Web page → app | An ordinary web drag: `accept` returns null, read `e.dataTransfer` |
+| Web page → app | An ordinary web drag: read `e.dataTransfer` |
 | Desktop (Screenshot's thumbnail) → app | The desktop starts a Din drag itself; targets can't tell the difference |
 
 ## How the drag crosses processes
@@ -124,6 +145,5 @@ and the desktop page as ordinary drag events. The custom type
 (so targets can decide early), and the token and the `text/plain`
 fallback were readable on `drop`. No covering or relaying is needed.
 
-The source's own `dragend` fires with a `dropEffect`, but that doesn't
-say which app took the drop, so the desktop still reports the outcome
-through `onEnd`.
+The source's own `dragend` fires with the `dropEffect` the target chose,
+which is how the source learns where its drag went.
