@@ -119,7 +119,7 @@ export function SkinText({ text, x = 0, y = 0, style }: { text: string; x?: numb
 export function WinampVis({ x, y, width, height, mode, onClick }: { x: number; y: number; width: number; height: number; mode: number; onClick: () => void }) {
   const skin = useSkin();
   const ref = useRef<HTMLCanvasElement>(null);
-  const visible = useWindowState().visible;
+  const visible = useWindowState((s) => s.visible);
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');

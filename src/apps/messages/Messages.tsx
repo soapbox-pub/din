@@ -55,8 +55,9 @@ export function Messages() {
   usePhoneSync();
   const state = usePhoneState();
   const conversations = useConversations();
-  const { bounds, focused, visible } = useWindowState();
-  const narrow = (bounds.width || window.innerWidth) < 680;
+  const focused = useWindowState((s) => s.focused);
+  const visible = useWindowState((s) => s.visible);
+  const narrow = useWindowState((s) => (s.bounds.width || window.innerWidth) < 680);
 
   const [selection, setSelection] = useState<Selection>(() => fromLaunch(din.app.launch));
   const [search, setSearch] = useState('');

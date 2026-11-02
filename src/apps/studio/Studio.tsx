@@ -77,7 +77,7 @@ function actionOf({ params, reason }: LaunchContext): Action | null {
 export function Studio() {
   const din = useDin();
   const capture = din.system.capture;
-  const { visible } = useWindowState();
+  const visible = useWindowState((s) => s.visible);
   const [settings, update] = useStudioSettings();
   const [status, setStatus] = useState<CaptureStatus | null>(null);
   const devices = useDevices();

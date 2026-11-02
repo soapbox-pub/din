@@ -183,7 +183,7 @@ function Position({ setOverride }: { setOverride: (t: string | null) => void }) 
 
 function MainWindow({ y, commands, onMenu }: { y: number; commands: Commands; onMenu: (e: React.MouseEvent) => void }) {
   const skin = useSkin();
-  const focused = useWindowState().focused;
+  const focused = useWindowState((s) => s.focused);
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const status = usePlayer((s) => s.status);
@@ -423,7 +423,7 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
 
 function EqWindow({ y, commands }: { y: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowState().focused;
+  const focused = useWindowState((s) => s.focused);
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const eqOn = usePlayer((s) => s.eqOn);
@@ -542,7 +542,7 @@ function PlMenu({ which, x, y, actions }: { which: keyof typeof PL_MENUS; x: num
 
 function PlaylistWindow({ y, width, height, commands }: { y: number; width: number; height: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowState().focused;
+  const focused = useWindowState((s) => s.focused);
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const queue = usePlayer((s) => s.queue);

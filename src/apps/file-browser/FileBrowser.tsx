@@ -179,7 +179,7 @@ export function FileBrowser() {
   const din = useDin();
   const bridge = getFsBridge();
   const queryClient = useQueryClient();
-  const windowState = useWindowState();
+  const windowFocused = useWindowState((s) => s.focused);
   const home = useHomeDir();
   const trash = useTrashDir();
   const [prefs, setPrefs] = useLocalStorage<FilesPrefs>('din:files:prefs', DEFAULT_PREFS);
@@ -371,7 +371,7 @@ export function FileBrowser() {
             <FileBrowserTab
               tabId={tab.id}
               active={tab.id === activeId}
-              windowFocused={windowState.focused}
+              windowFocused={windowFocused}
               initialPath={tab.path}
               initialSelect={tab.select}
               prefs={mergedPrefs}

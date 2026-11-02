@@ -181,9 +181,7 @@ export function Viewer() {
   const listRef = useRef<HTMLDivElement>(null);
   const readerRef = useRef<HTMLDivElement>(null);
 
-  const { bounds } = useWindowState();
-  const width = bounds.width || window.innerWidth;
-  const sidebarFits = width >= SIDEBAR_MIN_WIDTH;
+  const sidebarFits = useWindowState((s) => (s.bounds.width || window.innerWidth) >= SIDEBAR_MIN_WIDTH);
   const showSidebar = sidebarOpen && sidebarFits;
 
   const setSelection = useCallback((s: Selection) => {

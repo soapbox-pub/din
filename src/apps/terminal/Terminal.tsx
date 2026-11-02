@@ -1497,7 +1497,7 @@ const TerminalSession = memo(function TerminalSession({
   const initialCwdRef = useRef(initialCwd);
   const appRef = useRef(app);
   const handoverRef = useRef(handover);
-  const isTop = useWindowState().focused;
+  const isTop = useWindowState((s) => s.focused);
   const isTopRef = useRef(isTop);
   // Always-fresh callbacks for the (long-lived) session.
   const host = useRef<PaneHost>({

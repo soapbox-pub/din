@@ -89,7 +89,7 @@ from `@/sdk` and render itself.
 import { WindowControls, WindowDragRegion, useMenuBar, useWindowState, useWindowTitle } from '@/sdk/react';
 
 export function Stopwatch() {
-  const { visible } = useWindowState();
+  const visible = useWindowState((s) => s.visible);
   const [ms, running, toggle, reset] = useStopwatch({ paused: !visible });
 
   useMenuBar(

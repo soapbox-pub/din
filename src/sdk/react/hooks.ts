@@ -17,12 +17,19 @@ export function useDinOptional(): Din | null {
   return useContext(DinContext);
 }
 
-/** The window's state, re-rendering when it changes. */
-export function useWindowState(): WindowState {
+/**
+ * The window's state, re-rendering when it changes. With `select`, just the
+ * part it picks (a primitive), re-rendering only when that changes: the
+ * bounds change on every step of a move, so a component that only needs a
+ * width breakpoint or `focused` shouldn't take the whole state.
+ */
+export function useWindowState(): WindowState;
+export function useWindowState<T>(select: (state: WindowState) => T): T;
+export function useWindowState<T>(select?: (state: WindowState) => T): WindowState | T {
   const din = useDin();
   return useSyncExternalStore(
     (cb) => din.window.onChange(cb),
-    () => din.window.state,
+    () => (select ? select(din.window.state) : din.window.state),
   );
 }
 

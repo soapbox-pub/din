@@ -86,7 +86,7 @@ For React apps, `src/sdk/react` adds:
 | `<DinProvider din>` / `useDin()` | `useWindowActions`, the window contexts | The connected `din`, anywhere in the tree |
 | `<WindowDragRegion>` | the same, from `WindowHeader.tsx` | A stretch of header that moves the window, maximizes on double-click, opens the window menu on right-click |
 | `<WindowControls>` | the same | Minimize, maximize, close, in the title bar's colors |
-| `useWindowState()` | `useWindowIsTop`, `useWindowVisible` | The window's state, re-rendering on change |
+| `useWindowState()`, `useWindowState(select)` | `useWindowIsTop`, `useWindowVisible` | The window's state, re-rendering on change; with `select`, only the part it picks (a primitive), re-rendering only when that changes. The bounds change on every step of a move, so pick what you need |
 | `useFrameStyle()` | `useWindowFrame().muted/hover` | The title bar's accent and darkness (`frameControlClasses` turns it into classes) |
 | `useWindowTitle(title)`, `useWindowIcon(url)`, `useWindowAccent(color)` | the same | The page's `document.title`, icon link and theme-color, which the window follows, for as long as it's mounted |
 | `useCloseGuard(fn)` | `setCloseGuard` | `din.window.onCloseRequest` for as long as it's mounted |

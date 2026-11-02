@@ -74,7 +74,7 @@ export function WindowDragRegion({ className, children, onPointerDown, onDoubleC
 /** Minimize, maximize and close, in the title bar's colors. */
 export function WindowControls({ className }: { className?: string }) {
   const din = useDin();
-  const state = useWindowState();
+  const maximized = useWindowState((s) => s.maximized);
   const { muted, hover } = frameControlClasses(useFrameStyle());
   const button = 'grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   return (
@@ -84,11 +84,11 @@ export function WindowControls({ className }: { className?: string }) {
       </button>
       <button
         type="button"
-        aria-label={state.maximized ? 'Restore window' : 'Maximize window'}
-        onClick={() => void (state.maximized ? window.restore() : window.maximize())}
+        aria-label={maximized ? 'Restore window' : 'Maximize window'}
+        onClick={() => void (maximized ? window.restore() : window.maximize())}
         className={cn(button, muted, hover)}
       >
-        {state.maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        {maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
       </button>
       <button
         type="button"

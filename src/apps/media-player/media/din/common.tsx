@@ -90,7 +90,7 @@ export function Cover({ location, className, iconClassName }: { location: string
  */
 export function VisCanvas({ vis, className, pixelScale = 1 }: { vis: string; className?: string; pixelScale?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const visible = useWindowState().visible;
+  const visible = useWindowState((s) => s.visible);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || !visible) return;
