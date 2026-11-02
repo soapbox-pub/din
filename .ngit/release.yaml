@@ -20,7 +20,7 @@ description: |
   Installed systems update themselves, building Din from source.
 tags: [nostr, desktop, os, nixos]
 license: AGPL-3.0
-repository: nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din
+repository: nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din
 publication:
   blossom_servers:
     - https://blossom.ditto.pub

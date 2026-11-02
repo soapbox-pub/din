@@ -115,7 +115,7 @@ export const UPDATE_STEP_LABELS: Record<UpdateStep, string> = {
 
 /** The default source (os/din-update.sh's DEFAULT_URL and DEFAULT_BRANCH). */
 export const DEFAULT_UPDATE_URL =
-  'nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din';
+  'nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din';
 export const DEFAULT_UPDATE_BRANCH = 'main';
 
 /** A commit as people read them: its first seven characters. */

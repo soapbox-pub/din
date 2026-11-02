@@ -24,7 +24,7 @@ developer's own checkout of Din; work in it all the same.
 1. Get `~/DinOS` ready.
    - If it doesn't exist, clone the repository the system updates from.
      `sudo -n "$U" status` prints it (`url`, `branch`); by default
-     that's `git clone nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din ~/DinOS`
+     that's `git clone nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din ~/DinOS`
      (git-remote-nostr is installed). Its `origin` is that repository.
    - If it does, catch it up with the running system first. Updates merge
      into the user's changes as root and record the result on the

@@ -93,7 +93,10 @@
 # beyond the boot menu's (configuration.nix) leave the profile, so their
 # store paths can go at the next collection.
 
-DEFAULT_URL=nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din
+DEFAULT_URL=nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din
+# Din's repository before Team Soapbox led it; checkouts following it move to
+# DEFAULT_URL.
+FORMER_URL=nostr://npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/git.shakespeare.diy/din
 DEFAULT_BRANCH=main
 # The configuration in os/flake.nix that's built.
 SYSTEM_NAME=dinos
@@ -190,7 +193,11 @@ import_from_fork() {
 
 # The checkout, made empty (to be fetched into) the first time.
 ensure_checkout() {
-  [[ -d $SRC/.git ]] && return
+  if [[ -d $SRC/.git ]]; then
+    [[ $(src_git remote get-url origin 2>/dev/null) == "$FORMER_URL" ]] &&
+      src_git remote set-url origin "$DEFAULT_URL"
+    return 0
+  fi
   rm -rf "$SRC.partial"
   mkdir -p "$(dirname "$SRC")"
   git init -q "$SRC.partial"

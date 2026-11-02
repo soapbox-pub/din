@@ -190,7 +190,7 @@ locks, and the lid just suspends. `nix build ./os#checks.x86_64-linux.lock`.
 Installed systems update themselves, by building Din from source. Each keeps
 a checkout of Din in `/var/lib/dinos/src`, which only root can write to, and
 follows one branch of one repository: by default `main` of Din's own,
-`nostr://npub1q3sle…/git.shakespeare.diy/din`, which git fetches through
+`nostr://npub10qdp2…/git.shakespeare.diy/din`, which git fetches through
 `git-remote-nostr` (from ngit, which DinOS ships), taking the branch's tip
 from the maintainers' signed repository state. `din-update.service` runs
 `os/din-update.sh` five minutes after boot and every six hours after: it
