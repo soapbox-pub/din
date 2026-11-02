@@ -35,6 +35,7 @@ export const AppConfigSchema = z.object({
   cursorTrail: z.string(),
   cursorClick: z.string(),
   cursorShowMouse: z.boolean(),
+  cursorShakeToFind: z.boolean(),
   cursorFirePaint: z.boolean(),
   cursorWater: z.boolean(),
   cursorThemeColor: z.boolean(),

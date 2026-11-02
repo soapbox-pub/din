@@ -17,6 +17,10 @@
  *    Super+Shift+C puts it out;
  *  - Water: hold Super+Ctrl and move to stir the screen like a pond.
  *
+ * And one of macOS's: Shake to find the pointer, where a shake of the mouse
+ * makes the pointer big for a moment, the bigger the harder it's shaken.
+ * The big one is drawn here, while the real one is hidden (hidePointer.ts).
+ *
  * Particles draw on a 2D canvas, cleared only where they were last frame;
  * water on a WebGL canvas under it. Both are hidden, and the frame loop
  * stopped, whenever there's nothing to draw.
@@ -35,10 +39,11 @@ import {
   sparks,
 } from '@/lib/cursorEffects/effects';
 import { PACKAGE_PREFIX, loadPackage } from '@/lib/cursorEffects/packages';
-import { type CursorImage, Scene } from '@/lib/cursorEffects/scene';
+import { type CursorImage, Scene, arrowImage } from '@/lib/cursorEffects/scene';
 import type { Rgb } from '@/lib/cursorEffects/sprites';
 import { Water } from '@/lib/cursorEffects/water';
 import { getGuestInput } from '@/lib/guestInput';
+import { setPointerHidden } from '@/lib/hidePointer';
 import { getScreenshotBridge } from '@/lib/screenshot';
 
 export interface CursorEffectSettings {
@@ -47,6 +52,7 @@ export interface CursorEffectSettings {
   /** A click effect's id, `cursorfx:…`, or `none`. */
   click: string;
   showMouse: boolean;
+  shakeToFind: boolean;
   firePaint: boolean;
   water: boolean;
 }
@@ -54,13 +60,31 @@ export interface CursorEffectSettings {
 /** Something Settings can show off: a trail, a click effect, or one of the plugins. */
 export type PreviewKind = 'trail' | 'click' | 'show-mouse' | 'fire-paint' | 'water';
 
-const OFF: CursorEffectSettings = { trail: 'none', click: 'none', showMouse: false, firePaint: false, water: false };
+const OFF: CursorEffectSettings = { trail: 'none', click: 'none', showMouse: false, shakeToFind: false, firePaint: false, water: false };
 
 /** Moves further apart than this in time aren't joined into one stroke. */
 const STROKE_GAP_MS = 250;
 /** How long a shake shows the pointer for, and Show Mouse takes to fade in and out. */
 const SHAKE_SHOW_MS = 1600;
 const SHOW_FADE_MS = 250;
+/** How much bigger than itself Shake to find the pointer draws the pointer, at most. */
+export const FIND_MAX_SCALE = 5;
+/** The stretch of movement a shake is looked for in. */
+const FIND_WINDOW_MS = 450;
+/** How far the pointer goes one way, along either axis, before turning back counts as a turn. */
+const FIND_TURN_PX = 40;
+/** Moves shorter than this along an axis don't change which way it's going. */
+const FIND_JITTER_PX = 3;
+/** How many turns in the stretch make a shake, and how fast it must go (CSS pixels a millisecond). */
+const FIND_TURNS = 3;
+const FIND_MIN_SPEED = 1.5;
+/** How much bigger the pointer gets for each pixel a millisecond faster than that. */
+const FIND_GAIN = 0.9;
+/** How long the pointer stays big after the shake stops. */
+const FIND_HOLD_MS = 300;
+/** How quickly it grows and shrinks back: the time constants of its easing. */
+const FIND_GROW_MS = 60;
+const FIND_SHRINK_MS = 110;
 /** How long a painted point burns. */
 const PAINT_LIFE_MS = 2600;
 /**
@@ -148,6 +172,18 @@ class CursorEffectsEngine {
   private shownAt: { x: number; y: number } | null = null;
   private shake: { x: number; t: number; dir: number }[] = [];
 
+  /** Shake to find the pointer: the big pointer's canvas, and the picture drawn on it. */
+  private findCanvas: HTMLCanvasElement | null = null;
+  private findDrawn: { image: CursorImage; scale: number } | null = null;
+  private findImage: CursorImage | null = null;
+  private findMoves: { t: number; d: number }[] = [];
+  private findTurns: number[] = [];
+  private findRuns = { x: { dir: 0, travel: 0 }, y: { dir: 0, travel: 0 } };
+  /** How big the pointer is drawn now, how big it's heading for, and until when. */
+  private findScale = 1;
+  private findTarget = 1;
+  private findUntil = 0;
+
   private painting = false;
   private paint: PaintPoint[] = [];
   private paintState = blankState();
@@ -162,6 +198,7 @@ class CursorEffectsEngine {
     this.update();
     return () => {
       this.stop();
+      this.resetFind();
       this.releaseCanvases();
       this.host = null;
       this.update();
@@ -195,6 +232,7 @@ class CursorEffectsEngine {
       });
     }
     if (!settings.showMouse) this.showing = false;
+    if (!settings.shakeToFind) this.resetFind();
     if (!settings.firePaint) {
       this.paint = [];
       this.scene.clear('paint');
@@ -210,6 +248,7 @@ class CursorEffectsEngine {
       this.paint = [];
       this.previews = [];
       this.water?.calm();
+      this.resetFind();
     }
     this.update();
   }
@@ -217,6 +256,11 @@ class CursorEffectsEngine {
   /** The pointer's picture, for Mouse Trails' copies of it. */
   setCursorImage(image: CursorImage | null): void {
     this.scene.cursor = image;
+  }
+
+  /** The pointer's picture, big enough for Shake to find the pointer to draw sharp; null for Din's own arrow. */
+  setFindCursorImage(image: CursorImage | null): void {
+    this.findImage = image;
   }
 
   /** The theme's color for effects to take on, or null for their own colors. */
@@ -259,7 +303,7 @@ class CursorEffectsEngine {
 
   private get wanted(): boolean {
     const s = this.settings;
-    return this.enabled && !!this.host && (s.trail !== 'none' || s.click !== 'none' || s.showMouse || s.firePaint || s.water);
+    return this.enabled && !!this.host && (s.trail !== 'none' || s.click !== 'none' || s.showMouse || s.shakeToFind || s.firePaint || s.water);
   }
 
   /** Listen to the pointer while any effect is on. */
@@ -308,6 +352,7 @@ class CursorEffectsEngine {
     const onBlur = () => {
       onUp();
       this.pointer = null;
+      this.findUntil = 0;
     };
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerdown', onDown, true);
@@ -351,6 +396,13 @@ class CursorEffectsEngine {
       this.detectShake(x, t);
       if (this.showing || this.shownUntil > t) active = true;
     }
+    if (this.settings.shakeToFind) {
+      this.detectFind(from, x, y, t);
+      if (this.findScale > 1 || this.findUntil > t) {
+        this.placeFind();
+        active = true;
+      }
+    }
     if (active) this.wake();
   }
 
@@ -376,6 +428,97 @@ class CursorEffectsEngine {
       this.shownUntil = t + SHAKE_SHOW_MS;
       this.wake();
     }
+  }
+
+  /**
+   * A few quick turns back and forth, along either axis, at speed: the
+   * faster, the bigger the pointer grows, and it stays big while it goes on.
+   */
+  private detectFind(from: { x: number; y: number }, x: number, y: number, t: number): void {
+    const dx = x - from.x;
+    const dy = y - from.y;
+    for (const [run, d] of [[this.findRuns.x, dx], [this.findRuns.y, dy]] as const) {
+      if (Math.abs(d) < FIND_JITTER_PX) continue;
+      const dir = Math.sign(d);
+      if (dir === run.dir) {
+        run.travel += Math.abs(d);
+        continue;
+      }
+      if (run.dir && run.travel >= FIND_TURN_PX) this.findTurns.push(t);
+      run.dir = dir;
+      run.travel = Math.abs(d);
+    }
+    this.findMoves.push({ t, d: Math.hypot(dx, dy) });
+    this.findMoves = this.findMoves.filter((m) => t - m.t < FIND_WINDOW_MS);
+    this.findTurns = this.findTurns.filter((turn) => t - turn < FIND_WINDOW_MS);
+    if (this.findTurns.length < FIND_TURNS) return;
+    const speed = this.findMoves.reduce((sum, m) => sum + m.d, 0) / FIND_WINDOW_MS;
+    if (speed < FIND_MIN_SPEED) return;
+    const target = Math.min(FIND_MAX_SCALE, 2 + (speed - FIND_MIN_SPEED) * FIND_GAIN);
+    this.findTarget = this.findUntil > t ? Math.max(this.findTarget, target) : target;
+    this.findUntil = t + FIND_HOLD_MS;
+  }
+
+  /** The big pointer's canvas, with the pointer drawn on it at its biggest. */
+  private ensureFindCanvas(): HTMLCanvasElement | null {
+    if (!this.host) return null;
+    const image = this.findImage ?? arrowImage();
+    const scale = window.devicePixelRatio || 1;
+    let canvas = this.findCanvas;
+    if (canvas && this.findDrawn?.image === image && this.findDrawn.scale === scale) return canvas;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.style.cssText = 'position:absolute;left:0;top:0;z-index:1;transform-origin:0 0;visibility:hidden';
+      this.host.appendChild(canvas);
+      this.findCanvas = canvas;
+    }
+    const width = image.width * FIND_MAX_SCALE;
+    const height = image.height * FIND_MAX_SCALE;
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(image.source, 0, 0, canvas.width, canvas.height);
+    }
+    this.findDrawn = { image, scale };
+    return canvas;
+  }
+
+  /** Put the big pointer where the pointer is, at its size now. */
+  private placeFind(): void {
+    const canvas = this.findScale > 1 && this.pointer ? this.ensureFindCanvas() : null;
+    if (!canvas || !this.pointer || !this.findDrawn) return;
+    const { image } = this.findDrawn;
+    const s = this.findScale;
+    const x = this.pointer.x - image.hotX * s;
+    const y = this.pointer.y - image.hotY * s;
+    canvas.style.transform = `translate(${x}px, ${y}px) scale(${s / FIND_MAX_SCALE})`;
+  }
+
+  /** Grow or shrink the big pointer toward its size, hiding the real one while it shows. */
+  private stepFind(dt: number, now: number): void {
+    if (this.findUntil <= now) this.findTarget = 1;
+    const target = this.findTarget;
+    const tau = target > this.findScale ? FIND_GROW_MS : FIND_SHRINK_MS;
+    this.findScale += (target - this.findScale) * (1 - Math.exp(-dt / tau));
+    if (target === 1 && this.findScale < 1.02) this.findScale = 1;
+    const showing = this.findScale > 1 && !!this.pointer;
+    if (showing) this.placeFind();
+    if (this.findCanvas) this.findCanvas.style.visibility = showing ? 'visible' : 'hidden';
+    setPointerHidden(showing);
+  }
+
+  private resetFind(): void {
+    this.findScale = 1;
+    this.findTarget = 1;
+    this.findUntil = 0;
+    this.findMoves = [];
+    this.findTurns = [];
+    if (this.findCanvas) this.findCanvas.style.visibility = 'hidden';
+    setPointerHidden(false);
   }
 
   private addPaint(x: number, y: number): void {
@@ -460,6 +603,9 @@ class CursorEffectsEngine {
     this.backdrop = 'none';
     this.area = null;
     this.canvasSize = { width: 0, height: 0, scale: 0 };
+    this.findCanvas?.remove();
+    this.findCanvas = null;
+    this.findDrawn = null;
   }
 
   private wake(): void {
@@ -502,6 +648,8 @@ class CursorEffectsEngine {
       this.shownAt = null;
     }
 
+    this.stepFind(dt, now);
+
     const rate = Math.min(1, PAINT_FLAME_POINTS / Math.max(1, this.paint.length));
     for (const p of this.paint) {
       p.age += dt;
@@ -515,7 +663,7 @@ class CursorEffectsEngine {
     this.drawWater(dt, now);
 
     const busy =
-      this.scene.busy || this.paint.length > 0 || this.showStrength > 0 || this.previews.length > 0 || !!this.water?.moving;
+      this.scene.busy || this.paint.length > 0 || this.showStrength > 0 || this.findScale > 1 || this.previews.length > 0 || !!this.water?.moving;
     if (busy) this.frame = requestAnimationFrame(this.tick);
     else this.idleTimer = window.setTimeout(() => this.releaseCanvases(), RELEASE_MS);
   }

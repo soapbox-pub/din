@@ -41,6 +41,7 @@ interface WebviewElement extends HTMLElement {
   getWebContentsId(): number;
   executeJavaScript(code: string): Promise<unknown>;
   insertCSS(css: string): Promise<string>;
+  removeInsertedCSS(key: string): Promise<void>;
 }
 
 const TAG = 'webview';
@@ -162,6 +163,8 @@ export const guest = {
   executeJavaScript: (el: GuestElement, code: string) => engine(el).executeJavaScript(code),
   /** Add a style sheet to the page's current document. Only Din's own styles, never page-supplied ones. */
   insertCSS: (el: GuestElement, css: string) => engine(el).insertCSS(css),
+  /** Take away a style sheet insertCSS added, by the key it gave. */
+  removeCSS: (el: GuestElement, key: string) => engine(el).removeInsertedCSS(key),
 };
 
 /** The engine's events on the host element, by Din's names for them. */

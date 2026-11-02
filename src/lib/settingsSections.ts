@@ -105,7 +105,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Appearance',
     name: 'Cursors',
     icon: MousePointer2,
-    search: ['Appearance', 'Cursor', 'Cursor style', 'Cursor size', 'Cursor effects', 'Trail', 'Click effect', 'Match theme color', 'Show Mouse', 'Fire Paint', 'Water', 'CursorFX', 'Compiz', 'mouse pointer'],
+    search: ['Appearance', 'Cursor', 'Cursor style', 'Cursor size', 'Cursor effects', 'Trail', 'Click effect', 'Match theme color', 'Shake to find the pointer', 'shake', 'big pointer', 'Show Mouse', 'Fire Paint', 'Water', 'CursorFX', 'Compiz', 'mouse pointer'],
   },
   {
     id: 'icons',

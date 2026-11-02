@@ -532,3 +532,9 @@
   }
 }
 
+
+/* Shake to find the pointer draws a big arrow in its place (src/lib/hidePointer.ts). */
+html.din-hide-pointer,
+html.din-hide-pointer * {
+  cursor: none !important;
+}

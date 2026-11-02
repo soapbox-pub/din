@@ -6,7 +6,7 @@
 
 export { CLICK_EFFECTS, TRAIL_EFFECTS } from '@/lib/cursorEffects/effects';
 export type { ClickEffect, CursorEffectGroup, TrailEffect } from '@/lib/cursorEffects/effects';
-export { cursorEffects } from '@/lib/cursorEffects/engine';
+export { FIND_MAX_SCALE, cursorEffects } from '@/lib/cursorEffects/engine';
 export type { CursorEffectSettings, PreviewKind } from '@/lib/cursorEffects/engine';
 export { PACKAGE_PREFIX, forgetPackage } from '@/lib/cursorEffects/packages';
 export { cursorEffectThumbnail, forgetThumbnails } from '@/lib/cursorEffects/thumbnail';

@@ -50,6 +50,7 @@ const SETTINGS: Setting[] = [
   },
   { key: 'appearance.cursor-theme-color', field: 'cursorThemeColor', help: 'Cursor effects take on the theme\'s color', param: bool },
   { key: 'appearance.show-mouse', field: 'cursorShowMouse', help: 'Super+Shift+K, or shaking the mouse, rings the pointer with light', param: bool },
+  { key: 'appearance.shake-to-find', field: 'cursorShakeToFind', help: 'Shaking the mouse makes the pointer big for a moment', param: bool },
   { key: 'appearance.fire-paint', field: 'cursorFirePaint', help: 'Super+Shift and drag to draw in fire', param: bool },
   { key: 'appearance.water', field: 'cursorWater', help: 'Hold Super+Ctrl and move the mouse to stir the screen', param: bool },
   { key: 'appearance.power-mode', field: 'powerMode', help: 'Type a while without stopping and keystrokes throw sparks from the caret', param: bool },

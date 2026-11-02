@@ -137,6 +137,21 @@ export function CursorEffectsSettings() {
           onCheckedChange={(cursorThemeColor) => updateConfig((current) => ({ ...current, cursorThemeColor }))}
         />
       </div>
+      <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="min-w-0 flex-1">
+          <Label htmlFor="cursor-shake-to-find" className="cursor-pointer text-sm">
+            Shake to find the pointer
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Shake the mouse and the pointer grows for a moment, the bigger the harder you shake, so you can spot it.
+          </p>
+        </div>
+        <Switch
+          id="cursor-shake-to-find"
+          checked={config.cursorShakeToFind}
+          onCheckedChange={(cursorShakeToFind) => updateConfig((current) => ({ ...current, cursorShakeToFind }))}
+        />
+      </div>
       <PluginRow
         kind="show-mouse"
         title="Show Mouse"

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useSystemCursorStatus } from '@/hooks/useSystemCursor';
-import { cursorEffects } from '@/lib/cursorEffects';
+import { FIND_MAX_SCALE, cursorEffects } from '@/lib/cursorEffects';
 import type { CursorImage } from '@/lib/cursorEffects/scene';
 import { portalContainer } from '@/lib/portalContainer';
 import { setPowerMode } from '@/lib/powerMode';
@@ -20,17 +20,21 @@ function subscribeReducedMotion(onChange: () => void): () => void {
   return () => query.removeEventListener('change', onChange);
 }
 
-/** The pointer's own arrow, for Mouse Trails to copy; null until it's known, or outside the shell. */
-function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
+/**
+ * The pointer's own arrow, as big as it's drawn, from the theme's image
+ * nearest `magnify` times its size (so it stays sharp drawn that much
+ * bigger); null until it's known, or outside the shell.
+ */
+function useCursorImage(wanted: boolean, zoom: number, magnify = 1): CursorImage | null {
   const status = useSystemCursorStatus();
   const theme = status.data?.theme;
   const size = status.data?.size;
   const { data } = useQuery({
-    queryKey: ['cursor', 'effect-image', theme, size],
+    queryKey: ['cursor', 'effect-image', theme, size, magnify],
     queryFn: async () => {
       const bridge = getSystemCursorBridge();
       if (!bridge || !theme || !size) return null;
-      const arrow = (await bridge.preview(theme, size)).find((p) => p.role === 'default');
+      const arrow = (await bridge.preview(theme, Math.min(256, Math.round(size * magnify)))).find((p) => p.role === 'default');
       if (!arrow) return null;
       const pixels = new Uint8ClampedArray(arrow.rgba.length);
       pixels.set(arrow.rgba);
@@ -65,6 +69,7 @@ export function CursorEffectsLayer() {
   const host = useRef<HTMLDivElement>(null);
   const reduced = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(REDUCED_MOTION).matches, () => false);
   const cursor = useCursorImage(config.cursorTrail === 'mouse-trails', config.zoomLevel / 100);
+  const bigCursor = useCursorImage(config.cursorShakeToFind, config.zoomLevel / 100, FIND_MAX_SCALE);
 
   useEffect(() => {
     const el = host.current;
@@ -80,10 +85,11 @@ export function CursorEffectsLayer() {
       trail: config.cursorTrail,
       click: config.cursorClick,
       showMouse: config.cursorShowMouse,
+      shakeToFind: config.cursorShakeToFind,
       firePaint: config.cursorFirePaint,
       water: config.cursorWater,
     });
-  }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorFirePaint, config.cursorWater]);
+  }, [config.cursorTrail, config.cursorClick, config.cursorShowMouse, config.cursorShakeToFind, config.cursorFirePaint, config.cursorWater]);
 
   useEffect(() => {
     setPowerMode(config.powerMode && !reduced, config.powerModeShake);
@@ -92,6 +98,10 @@ export function CursorEffectsLayer() {
   useEffect(() => {
     cursorEffects.setCursorImage(cursor);
   }, [cursor]);
+
+  useEffect(() => {
+    cursorEffects.setFindCursorImage(bigCursor);
+  }, [bigCursor]);
 
   const tint = useCursorEffectTint(config.cursorThemeColor);
   useEffect(() => {

@@ -114,6 +114,8 @@ export interface AppConfig {
   cursorClick: string;
   /** Compiz's Show Mouse: Super+Shift+K, or shaking the mouse, rings the pointer with light. */
   cursorShowMouse: boolean;
+  /** As on a Mac: shaking the mouse makes the pointer big for a moment, so it's easy to find. */
+  cursorShakeToFind: boolean;
   /** Compiz's Fire Paint: Super+Shift and drag to draw in fire; Super+Shift+C puts it out. */
   cursorFirePaint: boolean;
   /** Compiz's Water: hold Super+Ctrl and move the mouse to stir the screen like a pond. */

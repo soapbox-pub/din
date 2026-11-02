@@ -65,6 +65,7 @@ const defaultConfig: AppConfig = {
   cursorTrail: 'none',
   cursorClick: 'fireworks',
   cursorShowMouse: false,
+  cursorShakeToFind: true,
   cursorFirePaint: false,
   cursorWater: false,
   cursorThemeColor: false,

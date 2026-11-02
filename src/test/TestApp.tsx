@@ -48,6 +48,7 @@ export function TestApp({ children }: TestAppProps) {
     cursorTrail: 'none',
     cursorClick: 'none',
     cursorShowMouse: false,
+    cursorShakeToFind: false,
     cursorFirePaint: false,
     cursorWater: false,
     cursorThemeColor: false,
