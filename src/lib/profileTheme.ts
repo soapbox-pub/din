@@ -138,6 +138,17 @@ export const PRESET_THEME_COLORS: Record<'light' | 'dark', ProfileTheme['colors'
   dark: { background: '#020817', text: '#f8fafc', primary: '#f8fafc' },
 };
 
+/**
+ * Selected text's background in the built-in themes (index.css's
+ * `--selection`): translucent, so the text keeps its own color.
+ */
+export const DEFAULT_SELECTION_COLOR = '#3b82f666';
+
+/** Selected text's background in a custom theme: its primary color, translucent. */
+export function selectionColor(primaryHex: string): string {
+  return `${primaryHex}66`;
+}
+
 /** A theme's look as `c`, `f` and `bg` tags, shared by kinds 16767 and 36767. */
 export function buildThemeLookTags(theme: ProfileTheme): string[][] {
   const tags: string[][] = [
@@ -403,6 +414,7 @@ function onColorForeground(hexColor: string): string {
  * - border/input: primary hue at reduced saturation, L 30 (dark) / 82 (light)
  * - mutedForeground: dimmed text color
  * - ring: the primary color itself
+ * - selection: the primary color, translucent ({@link selectionColor})
  *
  * Unlike Ditto, accent is a subtle primary-tinted surface carrying the text
  * color, as in index.css: it's the hover/selected fill for every menu item,
@@ -466,5 +478,6 @@ export function deriveThemeTokens(colors: ProfileTheme['colors']): Record<string
     '--sidebar-accent-foreground': textHex,
     '--sidebar-border': border,
     '--sidebar-ring': primaryHex,
+    '--selection': selectionColor(primaryHex),
   };
 }

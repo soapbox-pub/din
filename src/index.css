@@ -181,6 +181,11 @@
   --sidebar-border: hsl(220 13% 91%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 
+  /* Selected text's background, translucent so the text keeps its color.
+     A custom theme makes it its primary color (deriveThemeTokens), and web
+     pages get the same unless they choose their own (electron/main.mts). */
+  --selection: #3b82f666;
+
   /* Markdown in the assistant's replies, after GitHub Light like the
      Terminal and Code apps. */
   --md-heading: #8250df;
@@ -282,6 +287,10 @@
        ss03 = round quotes/commas. Fonts without these features (e.g.
        profile-theme overrides) simply ignore them. */
     font-feature-settings: 'cv05', 'ss03';
+  }
+
+  ::selection {
+    background-color: var(--selection);
   }
 }
 

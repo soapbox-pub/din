@@ -6,7 +6,7 @@ import type { Extension } from '@codemirror/state';
 export const MONO_FONT = "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace";
 
 const mix = (color: string, percent: number) => `color-mix(in oklab, ${color} ${percent}%, transparent)`;
-const SELECTION = mix('var(--sidebar-ring)', 28);
+const SELECTION = 'var(--selection)';
 
 /** The editor's chrome, in Din's colors so it follows light and dark on its own. */
 export const editorChrome = EditorView.theme({

@@ -141,6 +141,7 @@ import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
+import { attachSelectionColor, setSelectionColor } from './selection-color.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
@@ -5240,6 +5241,10 @@ function registerThemeHandler(): void {
     nativeTheme.themeSource = source;
     if (source !== 'system') void setNativeColorScheme(source);
   });
+  ipcMain.on('theme:selection', (event, color: unknown) => {
+    if (!isShellSender(event)) return;
+    setSelectionColor(color);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -6505,6 +6510,7 @@ app.on('web-contents-created', (_event, contents) => {
     });
     contents.once('destroyed', () => cancelNostrRequestsFor(contents.id, 'The page was closed'));
     attachFileChooserInterception(contents);
+    attachSelectionColor(contents);
     // Pop-ups need a click (electron/popups.mts); a tab one opened is linked
     // to its opener.
     attachPopups(contents);

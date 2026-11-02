@@ -78,7 +78,14 @@ const LIGHT_THEME = {
   brightWhite: '#8c959f',
 };
 
-const terminalTheme = (dark: boolean) => (dark ? DARK_THEME : LIGHT_THEME);
+/** The desktop's selection color, when it's one xterm reads (`#rrggbb` or `#rrggbbaa`). */
+const selectionOf = (tokens: Record<string, string> | undefined) =>
+  tokens?.selection && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(tokens.selection) ? tokens.selection : undefined;
+
+const terminalTheme = (dark: boolean, selection = currentSelection) => {
+  const palette = dark ? DARK_THEME : LIGHT_THEME;
+  return selection ? { ...palette, selectionBackground: selection } : palette;
+};
 
 /**
  * Whether Din is dark right now (din.theme, which follows the Light/Dark/System
@@ -86,12 +93,16 @@ const terminalTheme = (dark: boolean) => (dark ? DARK_THEME : LIGHT_THEME);
  * React, so the window sets it here and they repaint when it changes.
  */
 let currentDark = window.din?.theme.current.scheme === 'dark';
-const darkListeners = new Set<(dark: boolean) => void>();
+/** Selected text's color on the desktop, which the terminal's selection takes too. */
+let currentSelection = selectionOf(window.din?.theme.current.tokens);
+const darkListeners = new Set<(dark: boolean, schemeChanged: boolean) => void>();
 
-function setDinDark(dark: boolean) {
-  if (dark === currentDark) return;
+function setDinLook(dark: boolean, selection: string | undefined) {
+  if (dark === currentDark && selection === currentSelection) return;
+  const schemeChanged = dark !== currentDark;
   currentDark = dark;
-  for (const listener of darkListeners) listener(dark);
+  currentSelection = selection;
+  for (const listener of darkListeners) listener(dark, schemeChanged);
 }
 
 let nextSessionId = 0;
@@ -457,8 +468,10 @@ export function Terminal() {
   const din = useDin();
   const params = din.app.launch.params;
   const bridge = getPtyBridge();
-  const dark = useDinTheme().scheme === 'dark';
-  useLayoutEffect(() => setDinDark(dark), [dark]);
+  const theme = useDinTheme();
+  const dark = theme.scheme === 'dark';
+  const selection = selectionOf(theme.tokens);
+  useLayoutEffect(() => setDinLook(dark, selection), [dark, selection]);
   // The whole window is the terminal's color: the header's tokens follow its
   // palette, and the accent carries it to the window controls and to the
   // menu bar over a fullscreen window.
@@ -1195,10 +1208,10 @@ function paneSession(
       return true;
     }),
   ];
-  const applyDark = (dark: boolean) => {
+  const applyDark = (dark: boolean, schemeChanged: boolean) => {
     if (disposed) return;
     term.options.theme = terminalTheme(dark);
-    if (reportScheme) term.input(schemeReport(), false);
+    if (reportScheme && schemeChanged) term.input(schemeReport(), false);
   };
   darkListeners.add(applyDark);
 

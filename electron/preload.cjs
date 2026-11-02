@@ -1300,6 +1300,11 @@ expose('theme', {
    */
   set: (source) => ipcRenderer.send('theme:set', source),
   /**
+   * Set selected text's background in pages, and native apps' accent.
+   * @param {string} color `#rrggbbaa`
+   */
+  setSelection: (color) => ipcRenderer.send('theme:selection', color),
+  /**
    * Subscribe to "Set Image as Desktop Background" in a page's right-click
    * menu. Returns an unsubscribe fn.
    * @param {(url: string) => void} callback

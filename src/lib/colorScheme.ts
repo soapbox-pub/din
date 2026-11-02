@@ -11,6 +11,11 @@
 export interface ColorSchemeBridge {
   set(source: 'light' | 'dark' | 'system'): void;
   /**
+   * Set selected text's background (`#rrggbbaa`) in web pages that don't
+   * choose their own, and the accent native apps take from it.
+   */
+  setSelection(color: string): void;
+  /**
    * Subscribe to "Set Image as Desktop Background" in a page's right-click
    * menu, with the image's https URL. Returns an unsubscribe fn.
    */

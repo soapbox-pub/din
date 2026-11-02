@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
-import { deriveThemeTokens, isDarkTheme } from '@/lib/profileTheme';
+import { DEFAULT_SELECTION_COLOR, deriveThemeTokens, isDarkTheme, selectionColor } from '@/lib/profileTheme';
 import { setThemeFontFaces } from '@/lib/themeFontFaces';
 import { setPaintedScheme } from '@/lib/rootScheme';
 
@@ -36,6 +36,12 @@ export function ProfileThemeApplier() {
   useEffect(() => {
     getColorSchemeBridge()?.set(scheme);
   }, [scheme]);
+
+  // And selected text the desktop's color, where pages don't pick their own.
+  const selection = theme ? selectionColor(theme.colors.primary) : DEFAULT_SELECTION_COLOR;
+  useEffect(() => {
+    getColorSchemeBridge()?.setSelection(selection);
+  }, [selection]);
 
   // Apply color tokens.
   useEffect(() => {
