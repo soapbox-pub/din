@@ -20,6 +20,13 @@
 // processes (a child inherits its parent's fds) counts for the oldest.
 // Other users' fds are unreadable, so their GPU use is unknown (null).
 //
+// Disk: traffic is bytes read and written per second, every physical disk
+// together (/proc/diskstats), not a percentage: an NVMe drive serves many
+// requests at once, so the share of time it has one in flight (Windows'
+// "active time", sent along as activeTime) can read 100% at a fraction of
+// what it can do. Space is statfs on / and /home, whose levels the
+// low-space notification (disk-space.mts) shares.
+//
 // Processes are labelled with what the user sees. Electron's own processes
 // come from app.getAppMetrics(), and each page renderer from the
 // WebContents it hosts (a browser tab, an installed web app). Native apps
@@ -45,8 +52,10 @@ import {
   displayName,
   readCmdline,
   readCpuTimes,
+  readDiskIo,
   readDrmClients,
   readDrmFds,
+  readFilesystems,
   readGpu,
   readMemory,
   readOwner,
@@ -55,7 +64,9 @@ import {
   readUsers,
   startedAt,
   type CpuTimes,
+  type DiskIo,
   type DrmClient,
+  type FilesystemSpace,
   type GpuTotals,
   type MemoryTotals,
   type ProcEntry,
@@ -126,6 +137,18 @@ export interface ProcessInfo {
   blocked: string | null;
 }
 
+export interface DiskTotals {
+  /** Traffic since the last sample, or null without a physical disk to read. */
+  io: {
+    /** Bytes read and written per second. */
+    readRate: number;
+    writeRate: number;
+    /** Percent of the time the busiest disk had a request in flight. */
+    activeTime: number;
+  } | null;
+  filesystems: FilesystemSpace[];
+}
+
 export interface SystemSnapshot {
   /** When it was taken, in ms since the epoch. */
   at: number;
@@ -135,6 +158,7 @@ export interface SystemSnapshot {
   memory: MemoryTotals;
   /** Null without a GPU whose driver says how busy it is. */
   gpu: GpuTotals | null;
+  disk: DiskTotals;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */
@@ -152,8 +176,13 @@ let running = false;
 let generation = 0;
 let timer: NodeJS.Timeout | null = null;
 /** The last sample's counters, which the next one's CPU use is measured from. */
-let previous: { cpu: CpuTimes; ticks: Map<string, number>; at: bigint; gpuNs: Map<string, number> } | null =
-  null;
+let previous: {
+  cpu: CpuTimes;
+  ticks: Map<string, number>;
+  at: bigint;
+  gpuNs: Map<string, number>;
+  diskIo: DiskIo | null;
+} | null = null;
 /** Each process's fds on the GPU, as last looked for. */
 let drmFds = new Map<string, number[]>();
 let samples = 0;
@@ -302,10 +331,12 @@ async function gpuTimes(entries: ProcEntry[], me: number): Promise<Map<string, n
 }
 
 async function sample(): Promise<SystemSnapshot | null> {
-  const [cpu, memory, gpu, entries, { uptime, load }] = await Promise.all([
+  const [cpu, memory, gpu, diskIo, filesystems, entries, { uptime, load }] = await Promise.all([
     readCpuTimes(),
     readMemory(),
     readGpu(),
+    readDiskIo(),
+    readFilesystems(),
     readProcesses(),
     readUptimeAndLoad(),
   ]);
@@ -404,13 +435,26 @@ async function sample(): Promise<SystemSnapshot | null> {
   });
 
   const busy = previous && elapsed > 0 ? 1 - (cpu.idle - previous.cpu.idle) / elapsed : 0;
-  previous = { cpu, ticks, at, gpuNs };
+  const before = previous?.diskIo;
+  const seconds = wallNs / 1e9;
+  const rate = (now: number, then: number) => Math.max(0, (now - then) / seconds);
+  const measured = before && seconds > 0;
+  const disk: DiskTotals = {
+    io: diskIo && {
+      readRate: measured ? rate(diskIo.read, before.read) : 0,
+      writeRate: measured ? rate(diskIo.written, before.written) : 0,
+      activeTime: measured ? Math.min(100, (rate(diskIo.activeMs, before.activeMs) / 1000) * 100) : 0,
+    },
+    filesystems,
+  };
+  previous = { cpu, ticks, at, gpuNs, diskIo };
   return {
     at: Date.now(),
     cpu: Math.min(100, Math.max(0, busy * 100)),
     cpuCount: cpu.cpuCount,
     memory,
     gpu,
+    disk,
     uptime,
     load,
     processes,
@@ -552,6 +596,11 @@ export function registerSystemMonitorHandlers(options: {
     assertShellSender(event);
     subscribers = Math.max(0, subscribers - 1);
     if (subscribers === 0) stop();
+  });
+
+  ipcMain.handle('system-monitor:filesystems', (event) => {
+    assertShellSender(event);
+    return readFilesystems();
   });
 
   ipcMain.handle('system-monitor:end', async (event, pid: unknown) => {

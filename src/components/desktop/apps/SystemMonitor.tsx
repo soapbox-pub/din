@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import type { KeyboardEvent, MouseEvent } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
@@ -9,6 +9,7 @@ import {
   Cog,
   OctagonX,
   Search,
+  TriangleAlert,
   X,
 } from 'lucide-react';
 import {
@@ -47,8 +48,11 @@ import { formatBytes } from '@/lib/fs';
 import {
   cleanSystemMonitorError,
   getSystemMonitorBridge,
+  type DiskTotals,
+  type FilesystemSpace,
   type PageInfo,
   type ProcessInfo,
+  type SpaceLevel,
   type SystemSnapshot,
 } from '@/lib/systemMonitor';
 import { cn } from '@/lib/utils';
@@ -321,11 +325,13 @@ function formatUptime(seconds: number): string {
   return `${minutes} min`;
 }
 
-/** A small line graph of the last minute, 0-100. */
-function Sparkline({ values, className }: { values: number[]; className?: string }) {
+/** A small line graph of the last minute, from 0 to `max`. */
+function Sparkline({ values, max = 100, className }: { values: number[]; max?: number; className?: string }) {
   const width = SYSTEM_HISTORY_LENGTH - 1;
   const start = width - (values.length - 1);
-  const points = values.map((v, i) => `${start + i},${(100 - Math.min(100, Math.max(0, v))).toFixed(2)}`);
+  const points = values.map(
+    (v, i) => `${start + i},${(100 - Math.min(100, Math.max(0, (v / max) * 100))).toFixed(2)}`,
+  );
   const line = points.length > 1 ? `M${points.join('L')}` : '';
   return (
     <svg
@@ -354,19 +360,39 @@ function StatCard({
   label,
   value,
   detail,
+  detailTitle,
   history,
+  max,
   tone,
+  warning = 'ok',
+  className,
+  children,
 }: {
   label: string;
   value: string;
   detail: string;
+  /** Tooltip on the detail line. */
+  detailTitle?: string;
   history: number[];
+  /** The graph's top; 100 for percentages. */
+  max?: number;
   tone: string;
+  warning?: SpaceLevel;
+  className?: string;
+  children?: ReactNode;
 }) {
   return (
     <section
       aria-label={label}
-      className="relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-gradient-to-b from-foreground/[0.03] to-transparent p-3 shadow-xs"
+      className={cn(
+        'relative flex min-w-0 flex-col overflow-hidden rounded-xl border bg-gradient-to-b to-transparent p-3 shadow-xs',
+        warning === 'critical'
+          ? 'border-destructive/60 from-destructive/[0.08]'
+          : warning === 'low'
+            ? 'border-amber-500/60 from-amber-500/[0.08]'
+            : 'border-border/60 from-foreground/[0.03]',
+        className,
+      )}
     >
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-xs font-medium text-muted-foreground">{label}</h2>
@@ -374,9 +400,120 @@ function StatCard({
           {value}
         </p>
       </div>
-      <p className="truncate text-xs text-muted-foreground">{detail}</p>
-      <Sparkline values={history} className={cn('mt-2 h-10 w-full', tone)} />
+      <p
+        title={detailTitle}
+        className={cn(
+          'flex items-center gap-1 truncate text-xs',
+          warning === 'critical'
+            ? 'font-medium text-destructive'
+            : warning === 'low'
+              ? 'font-medium text-amber-700 dark:text-amber-300'
+              : 'text-muted-foreground',
+        )}
+      >
+        {warning !== 'ok' && <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
+        <span className="truncate">{detail}</span>
+      </p>
+      <Sparkline values={history} max={max} className={cn('mt-2 min-h-10 w-full flex-1', tone)} />
+      {children}
     </section>
+  );
+}
+
+const SPACE_RANK: Record<SpaceLevel, number> = { ok: 0, low: 1, critical: 2 };
+
+/** Disk traffic, like "24 MB/s". */
+function formatRate(bytesPerSecond: number): string {
+  return `${formatBytes(Math.round(bytesPerSecond))}/s`;
+}
+
+/** The smallest top the disk graph scales to, so an idle disk's trickle stays near the floor. */
+const DISK_GRAPH_FLOOR = 1024 * 1024;
+
+/** One filesystem's space, as a bar of what's used. */
+function SpaceBar({ fs }: { fs: FilesystemSpace }) {
+  const used = fs.total > 0 ? ((fs.total - fs.free) / fs.total) * 100 : 0;
+  const text = `${formatBytes(fs.free)} free of ${formatBytes(fs.total)}`;
+  return (
+    <div className="space-y-1" title={fs.mountPoint}>
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-medium">{fs.label}</span>
+        <span
+          className={cn(
+            'truncate tabular-nums',
+            fs.level === 'critical'
+              ? 'text-destructive'
+              : fs.level === 'low'
+                ? 'text-amber-700 dark:text-amber-300'
+                : 'text-muted-foreground',
+          )}
+        >
+          {text}
+        </span>
+      </div>
+      <div
+        role="meter"
+        aria-label={`${fs.label} disk space used`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(used)}
+        aria-valuetext={`${Math.round(used)}% used, ${text}`}
+        className="h-1.5 overflow-hidden rounded-full bg-foreground/10"
+      >
+        <div
+          className={cn(
+            'h-full rounded-full motion-safe:transition-[width]',
+            fs.level === 'critical' ? 'bg-destructive' : fs.level === 'low' ? 'bg-amber-500' : 'bg-chart-4',
+          )}
+          style={{ width: `${Math.min(100, used)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DiskCard({ disk, history, className }: { disk: DiskTotals; history: number[]; className?: string }) {
+  const { io, filesystems } = disk;
+  const worst = filesystems.reduce<FilesystemSpace | null>(
+    (w, fs) => (fs.level !== 'ok' && (!w || SPACE_RANK[fs.level] > SPACE_RANK[w.level]) ? fs : w),
+    null,
+  );
+  const max = Math.max(DISK_GRAPH_FLOOR, ...history);
+  let detail = io ? `read ${formatRate(io.readRate)} · write ${formatRate(io.writeRate)}` : 'Traffic unavailable';
+  if (worst) {
+    detail = `${worst.label} disk ${worst.level === 'critical' ? 'is running out of space' : 'almost full'}: ${formatBytes(worst.free)} left`;
+  }
+  const first = filesystems[0];
+  return (
+    <StatCard
+      label="Disk"
+      value={
+        io
+          ? formatRate(io.readRate + io.writeRate)
+          : first
+            ? formatPercent(first.total > 0 ? ((first.total - first.free) / first.total) * 100 : 0)
+            : '–'
+      }
+      detail={detail}
+      detailTitle={
+        io
+          ? `Read ${formatRate(io.readRate)}, write ${formatRate(io.writeRate)}. Busy ${formatPercent(io.activeTime)} of the time.`
+          : undefined
+      }
+      history={history}
+      max={max}
+      tone="text-chart-4"
+      warning={worst?.level ?? 'ok'}
+      className={className}
+    >
+      {filesystems.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {filesystems.map((fs) => (
+            <SpaceBar key={fs.mountPoint} fs={fs} />
+          ))}
+        </div>
+      )}
+    </StatCard>
   );
 }
 
@@ -385,17 +522,22 @@ function SystemHeader({
   cpuHistory,
   memoryHistory,
   gpuHistory,
+  diskHistory,
 }: {
   snapshot: SystemSnapshot | null;
   cpuHistory: number[];
   memoryHistory: number[];
   gpuHistory: number[];
+  diskHistory: number[];
 }) {
   if (!snapshot) {
     return (
-      <div className="grid grid-cols-2 gap-3 p-3 pb-2" aria-hidden>
-        {[0, 1].map((i) => (
-          <div key={i} className="space-y-2 rounded-xl border border-border/60 p-3">
+      <div className="grid grid-cols-2 gap-3 p-3 pb-2 @2xl:grid-cols-3" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className={cn('space-y-2 rounded-xl border border-border/60 p-3', i === 2 && 'col-span-2 @2xl:col-span-1')}
+          >
             <div className="flex justify-between">
               <Skeleton className="h-3 w-16" />
               <Skeleton className="h-5 w-12" />
@@ -407,11 +549,11 @@ function SystemHeader({
       </div>
     );
   }
-  const { memory, gpu } = snapshot;
+  const { memory, gpu, disk } = snapshot;
   const swap =
     memory.swapTotal > 0 ? ` · swap ${formatBytes(memory.swapUsed)} of ${formatBytes(memory.swapTotal)}` : '';
   return (
-    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu && '@2xl:grid-cols-3')}>
+    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu ? '@2xl:grid-cols-4' : '@2xl:grid-cols-3')}>
       <StatCard
         label="CPU"
         value={formatPercent(snapshot.cpu)}
@@ -427,18 +569,17 @@ function SystemHeader({
         tone="text-chart-2"
       />
       {gpu && (
-        <div className="col-span-2 grid @2xl:col-span-1">
-          <StatCard
-            label="GPU"
-            value={formatPercent(gpu.busy)}
-            detail={`${formatBytes(gpu.memoryUsed)} of ${formatBytes(gpu.memoryTotal)}${
-              gpu.sharedUsed > 0 ? ` · ${formatBytes(gpu.sharedUsed)} shared` : ''
-            }`}
-            history={gpuHistory}
-            tone="text-chart-3"
-          />
-        </div>
+        <StatCard
+          label="GPU"
+          value={formatPercent(gpu.busy)}
+          detail={`${formatBytes(gpu.memoryUsed)} of ${formatBytes(gpu.memoryTotal)}${
+            gpu.sharedUsed > 0 ? ` · ${formatBytes(gpu.sharedUsed)} shared` : ''
+          }`}
+          history={gpuHistory}
+          tone="text-chart-3"
+        />
       )}
+      <DiskCard disk={disk} history={diskHistory} className={cn(!gpu && 'col-span-2 @2xl:col-span-1')} />
     </div>
   );
 }
@@ -623,9 +764,10 @@ function TableSkeleton() {
  * won't stop. Apps are listed with everything they started folded under
  * them; CPU is a share of the whole machine, so the column adds up to the
  * total in the header. GPU shows where the driver says how busy it is.
+ * Disk shows traffic, not a percentage, and how full / and /home are.
  */
 export function SystemMonitor() {
-  const { available, snapshot, cpuHistory, memoryHistory, gpuHistory } = useSystemMonitor();
+  const { available, snapshot, cpuHistory, memoryHistory, gpuHistory, diskHistory } = useSystemMonitor();
   const { getApp, findAppIdForUrl } = useInstalledApps();
   const { toast } = useToast();
 
@@ -786,6 +928,7 @@ export function SystemMonitor() {
         cpuHistory={cpuHistory}
         memoryHistory={memoryHistory}
         gpuHistory={gpuHistory}
+        diskHistory={diskHistory}
       />
 
       <div className="flex flex-wrap items-center gap-2 px-3 pb-3">

@@ -118,6 +118,7 @@ import { registerNotificationHandlers } from './notifications.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
 import { forgetWebPushSubscriptions, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
+import { watchDiskSpace } from './disk-space.mts';
 import { watchLiveStick } from './live-stick.mts';
 import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from './file-chooser.mts';
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
@@ -6239,6 +6240,7 @@ app.whenReady().then(() => {
     }
     win.show();
     watchLiveStick();
+    watchDiskSpace();
   };
   // `touch ~/.config/din/skip-restore` (from a text console, Ctrl+Alt+F2)
   // has the next start leave the saved windows closed. Taken once.

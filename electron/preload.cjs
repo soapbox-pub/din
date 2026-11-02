@@ -43,8 +43,8 @@
 //   - window.dinos.indd: InDesign documents read into IDML, for Publisher
 //   - window.dinos.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
-//   - window.dinos.systemMonitor: running processes, CPU and memory, and ending
-//     them, for the System Monitor app
+//   - window.dinos.systemMonitor: running processes, CPU, memory and disks, and
+//     ending them, for the System Monitor app
 //   - window.dinos.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.dinos.nostrd: the signer daemon that holds the account keys, for the
@@ -1761,6 +1761,9 @@ expose('systemMonitor', {
    * @param {number} pid
    */
   forceQuit: (pid) => ipcRenderer.invoke('system-monitor:force-quit', pid),
+
+  /** The space on / and /home, measured now. */
+  filesystems: () => ipcRenderer.invoke('system-monitor:filesystems'),
 });
 
 // Bluetooth login bridge (window.dinos.bluetoothLogin), backed by

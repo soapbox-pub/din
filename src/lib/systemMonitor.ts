@@ -5,7 +5,8 @@
  *
  * The main process reads /proc every couple of seconds while someone is
  * subscribed and pushes the whole snapshot. CPU figures are shares of the
- * whole machine (all cores together make 100%). Absent in a plain browser;
+ * whole machine (all cores together make 100%); disk traffic is bytes per
+ * second, not a percentage (see electron/system-monitor.mts). Absent in a plain browser;
  * callers feature-detect via `getSystemMonitorBridge()`.
  */
 
@@ -76,6 +77,33 @@ export interface GpuTotals {
   sharedTotal: number;
 }
 
+/** How worried to be about a filesystem's free space (electron/proc-stats.mts's spaceLevel). */
+export type SpaceLevel = 'ok' | 'low' | 'critical';
+
+export interface FilesystemSpace {
+  /** What it is to the user: "System" for /, "Home" for /home. */
+  label: string;
+  mountPoint: string;
+  /** Bytes in all. */
+  total: number;
+  /** Bytes the user can still write. */
+  free: number;
+  level: SpaceLevel;
+}
+
+export interface DiskTotals {
+  /** Traffic since the last snapshot, or null without a physical disk to read. */
+  io: {
+    /** Bytes read and written per second. */
+    readRate: number;
+    writeRate: number;
+    /** Percent of the time the busiest disk had a request in flight. */
+    activeTime: number;
+  } | null;
+  /** / and, when it's a filesystem of its own, /home. */
+  filesystems: FilesystemSpace[];
+}
+
 export interface SystemSnapshot {
   /** When it was taken, in ms since the epoch. */
   at: number;
@@ -85,6 +113,7 @@ export interface SystemSnapshot {
   memory: MemoryTotals;
   /** Null without a GPU whose driver says how busy it is (only amdgpu does). */
   gpu: GpuTotals | null;
+  disk: DiskTotals;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */
@@ -99,6 +128,8 @@ export interface SystemMonitorBridge {
   end(pid: number): Promise<void>;
   /** Make a process quit now (SIGKILL). */
   forceQuit(pid: number): Promise<void>;
+  /** The space on / and /home, measured now. */
+  filesystems(): Promise<FilesystemSpace[]>;
 }
 
 declare global {

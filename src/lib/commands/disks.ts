@@ -1,10 +1,13 @@
+import { formatBytes } from '@/lib/fs';
+import { getSystemMonitorBridge } from '@/lib/systemMonitor';
 import { getVolumesBridge, type Volume } from '@/lib/volumes';
 import { type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
  * `din disks`: the USB sticks, SD cards and other removable disks in Files'
- * sidebar (electron/volumes.mts): opening, unlocking and ejecting them.
+ * sidebar (electron/volumes.mts): opening, unlocking and ejecting them; and
+ * how full the computer's own disks are, as System Monitor's Disk tile shows.
  */
 
 const volumes = () => need(getVolumesBridge(), 'Removable disks');
@@ -23,8 +26,21 @@ function describe(v: Volume): string {
 
 export const disksArea: Area = {
   name: 'disks',
-  summary: 'Removable disks: list, open, unlock and eject',
+  summary: 'Disks: free space, and removable ones to list, open, unlock and eject',
   commands: [
+    command('disks', 'space', 'How full the system and home disks are, and whether either is low', [], async () => {
+      const list = await call(need(getSystemMonitorBridge(), 'Disk space').filesystems());
+      return {
+        data: list,
+        text: list
+          .map((fs) => {
+            const used = fs.total > 0 ? Math.round(((fs.total - fs.free) / fs.total) * 100) : 0;
+            const level = fs.level === 'ok' ? '' : fs.level === 'low' ? '\talmost full' : '\trunning out of space';
+            return `${fs.label}\t${fs.mountPoint}\t${formatBytes(fs.free)} free of ${formatBytes(fs.total)} (${used}% used)${level}`;
+          })
+          .join('\n'),
+      };
+    }),
     command('disks', 'list', 'The removable disks plugged in, and where each is mounted', [], async () => {
       const { volumes: list } = await call(volumes().state());
       return {

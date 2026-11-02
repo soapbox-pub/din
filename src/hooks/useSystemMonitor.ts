@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getSystemMonitorBridge, type SystemSnapshot } from '@/lib/systemMonitor';
 
-/** Snapshots kept for the CPU, memory and GPU graphs: a minute's worth. */
+/** Snapshots kept for the CPU, memory, GPU and disk graphs: a minute's worth. */
 export const SYSTEM_HISTORY_LENGTH = 30;
 
 interface SystemMonitorState {
@@ -12,9 +12,17 @@ interface SystemMonitorState {
   memoryHistory: number[];
   /** Recent GPU use, in percent, oldest first. */
   gpuHistory: number[];
+  /** Recent disk traffic, read and write together, in bytes per second, oldest first. */
+  diskHistory: number[];
 }
 
-const EMPTY: SystemMonitorState = { snapshot: null, cpuHistory: [], memoryHistory: [], gpuHistory: [] };
+const EMPTY: SystemMonitorState = {
+  snapshot: null,
+  cpuHistory: [],
+  memoryHistory: [],
+  gpuHistory: [],
+  diskHistory: [],
+};
 
 /**
  * What's running, refreshed every couple of seconds. The main process only
@@ -36,6 +44,10 @@ export function useSystemMonitor() {
           snapshot.memory.total > 0 ? (snapshot.memory.used / snapshot.memory.total) * 100 : 0,
         ].slice(-SYSTEM_HISTORY_LENGTH),
         gpuHistory: [...prev.gpuHistory, snapshot.gpu?.busy ?? 0].slice(-SYSTEM_HISTORY_LENGTH),
+        diskHistory: [
+          ...prev.diskHistory,
+          snapshot.disk.io ? snapshot.disk.io.readRate + snapshot.disk.io.writeRate : 0,
+        ].slice(-SYSTEM_HISTORY_LENGTH),
       })),
     );
   }, [bridge]);

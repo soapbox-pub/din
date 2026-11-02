@@ -1,6 +1,7 @@
 // What's running and what it costs, read straight from /proc for the System
 // Monitor (system-monitor.mts): each process's CPU time, memory, owner and
-// command line and GPU time, and the machine's CPU, memory and GPU totals.
+// command line and GPU time, the machine's CPU, memory and GPU totals, and
+// its disks' traffic and free space.
 //
 // Nothing is spawned. `ps` would fork Electron's main process on every
 // sample (see system-worker.mts for what that costs), and everything it
@@ -293,6 +294,115 @@ export async function readDrmClients(pid: number, fds: number[]): Promise<DrmCli
     if (client) clients.set(client.id, client);
   }
   return [...clients.values()];
+}
+
+/** The disks' I/O counters from /proc/diskstats, every physical disk together. */
+export interface DiskIo {
+  /** Bytes read and written so far. */
+  read: number;
+  written: number;
+  /** Time some disk had a request in flight, in ms (io_ticks), the busiest disk's. */
+  activeMs: number;
+}
+
+/** One filesystem's space, from statfs. */
+export interface FilesystemSpace {
+  /** What it is to the user: "System" for /, "Home" for /home. */
+  label: string;
+  mountPoint: string;
+  /** Bytes in all. */
+  total: number;
+  /** Bytes the user can still write (bavail: not the blocks kept for root). */
+  free: number;
+  level: SpaceLevel;
+}
+
+/** How worried to be about a filesystem's free space. */
+export type SpaceLevel = 'ok' | 'low' | 'critical';
+
+const GIB = 1024 ** 3;
+
+/**
+ * Low under 10% free, critical under 5%, and in bytes never above 10 GiB
+ * and 2 GiB: a big disk's 10% is room enough to be no worry.
+ */
+export function spaceLevel(free: number, total: number): SpaceLevel {
+  if (free < Math.min(total * 0.05, 2 * GIB)) return 'critical';
+  if (free < Math.min(total * 0.1, 10 * GIB)) return 'low';
+  return 'ok';
+}
+
+/** The sector size /proc/diskstats counts in, whatever the disk's own. */
+const DISKSTATS_SECTOR = 512;
+
+/**
+ * Parse /proc/diskstats for the named disks. Only whole physical disks are
+ * counted: a partition, or an LVM or encrypted volume on one, would count
+ * the same bytes again.
+ */
+export function parseDiskstats(text: string, disks: Set<string>): DiskIo {
+  const io: DiskIo = { read: 0, written: 0, activeMs: 0 };
+  for (const line of text.split('\n')) {
+    // major minor name reads merged sectors-read ms writes merged sectors-written ms in-flight io-ticks ...
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 13 || !disks.has(fields[2])) continue;
+    io.read += (Number(fields[5]) || 0) * DISKSTATS_SECTOR;
+    io.written += (Number(fields[9]) || 0) * DISKSTATS_SECTOR;
+    io.activeMs = Math.max(io.activeMs, Number(fields[12]) || 0);
+  }
+  return io;
+}
+
+/** The physical disks (those with a device behind them, unlike loop, zram and dm-*), found once. */
+let physicalDisks: Promise<Set<string>> | null = null;
+function findPhysicalDisks(): Promise<Set<string>> {
+  physicalDisks ??= (async () => {
+    const names = await fsp.readdir('/sys/block').catch(() => [] as string[]);
+    const found = await Promise.all(
+      names.map((name) =>
+        fsp.access(`/sys/block/${name}/device`).then(
+          () => name,
+          () => null,
+        ),
+      ),
+    );
+    return new Set(found.filter((name): name is string => name !== null));
+  })();
+  return physicalDisks;
+}
+
+export async function readDiskIo(): Promise<DiskIo | null> {
+  try {
+    const [text, disks] = await Promise.all([fsp.readFile('/proc/diskstats', 'utf8'), findPhysicalDisks()]);
+    return disks.size > 0 ? parseDiskstats(text, disks) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The filesystems people fill: the system's and, when it's its own, home's. */
+const WATCHED_FILESYSTEMS = [
+  { label: 'System', mountPoint: '/' },
+  { label: 'Home', mountPoint: '/home' },
+];
+
+/** The space on / and /home, once when they're the same filesystem. */
+export async function readFilesystems(): Promise<FilesystemSpace[]> {
+  const seen = new Set<number>();
+  const result: FilesystemSpace[] = [];
+  for (const { label, mountPoint } of WATCHED_FILESYSTEMS) {
+    try {
+      const [stats, sfs] = await Promise.all([fsp.stat(mountPoint), fsp.statfs(mountPoint)]);
+      if (seen.has(stats.dev) || sfs.blocks === 0) continue;
+      seen.add(stats.dev);
+      const total = sfs.blocks * sfs.bsize;
+      const free = sfs.bavail * sfs.bsize;
+      result.push({ label, mountPoint, total, free, level: spaceLevel(free, total) });
+    } catch {
+      // Not there, or not one that reports space.
+    }
+  }
+  return result;
 }
 
 export async function readUsers(): Promise<Map<number, string>> {
