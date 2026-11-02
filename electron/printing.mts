@@ -37,7 +37,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { BrowserWindow, ipcMain, type WebContents } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { BrowserWindow, ipcMain, session, type WebContents } from 'electron';
 import { CommandError, runCommand } from './system.mts';
 
 const TIMEOUT_MS = 20_000;
@@ -136,7 +137,8 @@ export type PrintEvent =
 /** Something to print, kept between the dialog's previews and its Print. */
 type Source =
   | { kind: 'page'; contents: WebContents }
-  | { kind: 'html'; html: string; baseUrl?: string }
+  /** `network`: its pictures and styles may come from the web (a page's frame, outside Tor). */
+  | { kind: 'html'; html: string; baseUrl?: string; network?: boolean }
   | { kind: 'file'; path: string; type: 'pdf' | 'image' | 'text' };
 
 interface Document {
@@ -461,8 +463,42 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
+/** The files a render may load: its own page, and a picture being printed. */
+const renderFiles = new Set<string>();
+const guardedSessions = new WeakSet<Electron.Session>();
+
+/**
+ * What a render's session lets through: its own files, data: and blob:, and
+ * with `network` the web. Never another local file (an <iframe> of
+ * ~/.ssh/id_ed25519 would print it), and without `network` nothing a
+ * Tor tab's or an app's page couldn't reach itself.
+ */
+function printSession(network: boolean): Electron.Session {
+  const s = session.fromPartition(network ? 'din-print' : 'din-print-offline');
+  if (!guardedSessions.has(s)) {
+    guardedSessions.add(s);
+    s.webRequest.onBeforeRequest((details, callback) => {
+      const { protocol } = new URL(details.url);
+      const file = () => {
+        try {
+          return renderFiles.has(path.resolve(fileURLToPath(details.url)));
+        } catch {
+          return false;
+        }
+      };
+      const ok =
+        protocol === 'data:' || protocol === 'blob:' || (protocol === 'file:' && file()) ||
+        (network && (protocol === 'https:' || protocol === 'http:'));
+      callback({ cancel: !ok });
+    });
+    s.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  }
+  return s;
+}
+
 /** HTML laid out to PDF in a window nobody sees, with no script running. */
-async function htmlToPdf(html: string, layout: PrintLayout, baseUrl?: string): Promise<Buffer> {
+async function htmlToPdf(html: string, layout: PrintLayout, options: { baseUrl?: string; network?: boolean; files?: string[] } = {}): Promise<Buffer> {
+  const { baseUrl, network = false, files = [] } = options;
   const win = new BrowserWindow({
     show: false,
     webPreferences: {
@@ -472,24 +508,28 @@ async function htmlToPdf(html: string, layout: PrintLayout, baseUrl?: string): P
       contextIsolation: true,
       nodeIntegration: false,
       // Its own in-memory session: nothing of the shell's, nothing kept.
-      partition: 'din-print',
+      session: printSession(network),
     },
   });
   // Nothing in it may go anywhere else.
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const file = path.join(temp(), `page-${process.hrtime.bigint()}.html`);
+  let allowed: string[] = [];
   try {
     // A file has no HTTP header to give its encoding, and outerHTML is UTF-16
     // made UTF-8 here, whatever the page's own meta said.
     const base = `<meta charset="utf-8">${baseUrl ? `<base href="${escapeHtml(baseUrl)}">` : ''}`;
     const withBase = /<head(\s[^>]*)?>/i.test(html) ? html.replace(/<head(\s[^>]*)?>/i, (head) => `${head}${base}`) : base + html;
     fs.writeFileSync(file, withBase, 'utf8');
+    allowed = [file, ...files].map((f) => path.resolve(f));
+    for (const url of allowed) renderFiles.add(url);
     await withTimeout(win.loadFile(file), RENDER_TIMEOUT_MS);
     return await withTimeout(win.webContents.printToPDF(pdfOptions(layout)), RENDER_TIMEOUT_MS);
   } finally {
     win.destroy();
     fs.rmSync(file, { force: true });
+    for (const url of allowed) renderFiles.delete(url);
   }
 }
 
@@ -546,9 +586,9 @@ async function pdfFor(id: string, document: Document, layout: PrintLayout): Prom
     if (source.contents.isDestroyed()) throw new Error('That page was closed.');
     pdf = await withTimeout(source.contents.printToPDF(pdfOptions(layout)), RENDER_TIMEOUT_MS);
   } else if (source.kind === 'html') {
-    pdf = await htmlToPdf(source.html, layout, source.baseUrl);
+    pdf = await htmlToPdf(source.html, layout, { baseUrl: source.baseUrl, network: source.network });
   } else if (source.type !== 'pdf') {
-    pdf = await htmlToPdf(fileHtml(source.path, source.type), layout);
+    pdf = await htmlToPdf(fileHtml(source.path, source.type), layout, { files: source.type === 'image' ? [source.path] : [] });
   } else {
     return source.path;
   }
@@ -873,8 +913,10 @@ export function registerPrintingHandlers(options: {
   sendToShell: (channel: string, payload?: unknown) => void;
   /** A <webview> guest of the shell, from a renderer-supplied id. */
   guestFromId: (wcId: unknown) => WebContents | null;
+  /** Whether a session is Tor's, whose pages' printouts mustn't reach the web directly. */
+  isTorSession: (s: Electron.Session) => boolean;
 }): void {
-  const { assertShellSender, guestFromId } = options;
+  const { assertShellSender, guestFromId, isTorSession } = options;
   sendToShell = options.sendToShell;
 
   // print() from a page, through print-preload.cjs. A frame inside the page
@@ -890,7 +932,8 @@ export function registerPrintingHandlers(options: {
     }
     const baseUrl = typeof f.baseUrl === 'string' && /^https?:/.test(f.baseUrl) ? f.baseUrl : contents.getURL();
     const title = (typeof f.title === 'string' && f.title.trim()) || contents.getTitle() || 'Untitled';
-    const document = addDocument(title, { kind: 'html', html: f.html, baseUrl }, contents.id, contents);
+    const network = !isTorSession(contents.session);
+    const document = addDocument(title, { kind: 'html', html: f.html, baseUrl, network }, contents.id, contents);
     sendToShell('printing:open', document);
   });
 

@@ -5879,7 +5879,12 @@ app.whenReady().then(() => {
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
-  registerPrintingHandlers({ assertShellSender, sendToShell, guestFromId: shellGuestFromId });
+  registerPrintingHandlers({
+    assertShellSender,
+    sendToShell,
+    guestFromId: shellGuestFromId,
+    isTorSession: (s) => s === torBrowserSession(),
+  });
   app.on('will-quit', cleanUpPrinting);
   registerSystemMonitorHandlers({
     assertShellSender,
