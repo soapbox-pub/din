@@ -6,6 +6,7 @@ import type { BrightnessStatus } from '@/lib/brightness';
 import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
 import { OverdriveMeter } from '@/components/ui/overdrive-slider';
 import { knockAnimation } from '@/lib/overdrive';
+import { announce } from '@/lib/announce';
 
 /** How long the OSD stays on screen after the last brightness change. */
 const OSD_VISIBLE_MS = 1500;
@@ -34,6 +35,7 @@ export function BrightnessOsd() {
       // The brightness keys stop at 0 and knock once before dimming past it.
       if (next.brightness === 0 && lastLevel.current === 0) knockAnimation(meterRef.current, -1);
       lastLevel.current = next.brightness;
+      announce(`Brightness ${brightnessText(next.brightness ?? 0)}`);
       setStatus(next);
       setVisible(true);
       queryClient.setQueryData(['brightness', 'status'], next);

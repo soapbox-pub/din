@@ -37,6 +37,7 @@ import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/
 import { TileMenuContent } from '@/components/desktop/TileMenuContent';
 import { useMenuAbove, type MenuAboveContentProps } from '@/hooks/useMenuAbove';
 import { useReducedMotion } from '@/shared/reducedMotion';
+import { moveAmongItems } from '@/lib/desktopFocus';
 
 /**
  * Width and height of one dock slot at rest in the previews, in px (icon plus
@@ -675,6 +676,13 @@ export function Dock({
             layout.padding,
             hidden ? 'pointer-events-none' : 'pointer-events-auto',
           )}
+          // Ctrl+F3 lands here (src/lib/desktopFocus.ts); the arrow keys go
+          // from tile to tile, and Shift+F10 opens a tile's menu.
+          role="toolbar"
+          aria-label="Dock"
+          aria-orientation="horizontal"
+          data-focus-area="dock"
+          onKeyDown={(e) => moveAmongItems(e, '[data-dock-tile] button')}
           onMouseMove={(e) => scheduleMagnify(e.clientX)}
           onMouseLeave={() => scheduleMagnify(null)}
           onDragOver={onDragOver}

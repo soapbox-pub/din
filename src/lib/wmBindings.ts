@@ -149,6 +149,17 @@ export const WM_BINDING_HELP: { group: string; bindings: { keys: string[]; label
     ],
   },
   {
+    group: 'Keyboard navigation',
+    bindings: [
+      { keys: ['Ctrl', 'F2'], label: 'Go to the menu bar (the taskbar’s Start button)' },
+      { keys: ['Ctrl', 'F3'], label: 'Go to the Dock or the taskbar’s apps' },
+      { keys: ['Ctrl', 'F8'], label: 'Go to the status icons' },
+      { keys: ['Ctrl', 'F6'], label: 'Go to the next part of the desktop (Shift: previous)' },
+      { keys: ['←', '→'], label: 'Move along the menu bar, Dock or taskbar' },
+      { keys: ['Esc'], label: 'Back to the window' },
+    ],
+  },
+  {
     group: 'Cursor effects (when turned on in Settings → Cursors)',
     bindings: [
       { keys: ['Super', 'Shift', 'K'], label: 'Show where the pointer is (or shake the mouse)' },

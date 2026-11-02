@@ -60,6 +60,7 @@ import { getFsBridge } from '@/lib/fs';
 import { isTaskbarVertical, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { USER_DIRS } from '@/shared/userDirs';
+import { moveAmongItems } from '@/lib/desktopFocus';
 
 /** Wheel travel that steps a button to its app's next window, in px. */
 const WHEEL_STEP = 50;
@@ -129,6 +130,8 @@ export function Taskbar() {
     <BarSideContext.Provider value={position}>
       <footer
         aria-label="Taskbar"
+        // Ctrl+F2 lands on its Start button, as the menu bar's Apps button.
+        data-focus-area="menu-bar"
         className={cn(
           // Chrome, not content: no text cursor or selection anywhere in it.
           'z-20 flex shrink-0 cursor-default select-none items-stretch gap-1 tracking-tight',
@@ -149,7 +152,13 @@ export function Taskbar() {
       >
         <StartMenu sizes={sizes} />
         <TaskButtons sizes={sizes} separate={config.taskbarButtons === 'separate'} />
-        <div className={cn('flex shrink-0 items-center gap-1', vertical ? 'flex-wrap justify-center px-1' : 'pl-1')}>
+        <div
+          role="toolbar"
+          aria-label="Status"
+          data-focus-area="status"
+          onKeyDown={(e) => moveAmongItems(e, 'button', vertical ? 'vertical' : 'horizontal')}
+          className={cn('flex shrink-0 items-center gap-1', vertical ? 'flex-wrap justify-center px-1' : 'pl-1')}
+        >
           <ScreenRecordingMenuItem />
           <StudioMenuItem />
           <ScreenShareMenuItem />
@@ -391,6 +400,8 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
           role="toolbar"
           aria-label="Apps"
           aria-orientation={sizes.vertical ? 'vertical' : 'horizontal'}
+          data-focus-area="dock"
+          onKeyDown={(e) => moveAmongItems(e, 'button', sizes.vertical ? 'vertical' : 'horizontal')}
           className={cn(
             'flex flex-1 items-stretch gap-0.5 overflow-hidden',
             sizes.vertical ? 'min-h-0 flex-col px-0.5' : 'min-w-0 py-0.5',

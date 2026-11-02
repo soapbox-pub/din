@@ -8,6 +8,7 @@ import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
 import { AUDIO_INPUT_KEY } from '@/hooks/useAudio';
 import { OverdriveMeter } from '@/components/ui/overdrive-slider';
 import { knockAnimation } from '@/lib/overdrive';
+import { announce } from '@/lib/announce';
 
 /** How long the OSD stays on screen after the last volume change. */
 const OSD_VISIBLE_MS = 1500;
@@ -39,6 +40,7 @@ export function VolumeOsd() {
     if (!audio) return;
 
     const show = (next: AudioStatus, isInput: boolean, nextDevice: string | null = null) => {
+      announce(volumeAnnouncement(next, isInput, nextDevice));
       setStatus(next);
       setInput(isInput);
       setDevice(nextDevice);
@@ -94,12 +96,11 @@ export function VolumeOsd() {
   const level = muted ? 0 : status.volume ?? 0;
 
   return (
-    <div aria-hidden={!device} role={device ? 'status' : undefined} className={osdClass(visible)}>
+    <div aria-hidden className={osdClass(visible)}>
       <div className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
         {device && (
           <p className="flex items-center justify-center gap-2 text-sm font-medium text-foreground">
             <Headphones className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="sr-only">Now playing through </span>
             {device}
           </p>
         )}
@@ -126,6 +127,13 @@ export function VolumeOsd() {
       </div>
     </div>
   );
+}
+
+/** What the OSD shows, for a screen reader (src/lib/announce.ts). */
+function volumeAnnouncement(status: AudioStatus, input: boolean, device: string | null): string {
+  if (input) return status.muted ? 'Microphone off' : 'Microphone on';
+  const level = status.muted || status.volume === 0 ? 'Muted' : `Volume ${status.volume ?? 0}%`;
+  return device ? `Now playing through ${device}. ${level}` : level;
 }
 
 function osdClass(visible: boolean): string {

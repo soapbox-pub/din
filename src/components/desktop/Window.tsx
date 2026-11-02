@@ -1724,6 +1724,8 @@ export const Window = memo(function Window({
     <section
       ref={sectionRef}
       aria-label={title}
+      // Read as "Mail, window" rather than as a region of the page.
+      aria-roledescription="window"
       data-window-id={win.id}
       data-tiled={win.tiled && !win.maximized ? '' : undefined}
       data-snap-monitor={snapped ? (win.monitor ?? undefined) : undefined}

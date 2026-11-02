@@ -3,6 +3,7 @@ import { getBrightnessBridge, MIN_BRIGHTNESS, MIN_TEMPERATURE, MAX_TEMPERATURE, 
 import { getDisplayBridge, formatRefresh, friendlyOutputName, refreshRates, type DisplayPlacement } from '@/lib/display';
 import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
 import { getKeyboardBridge } from '@/lib/keyboard';
+import { FOCUS_AREAS, leaveArea, runFocusKey, type FocusKey } from '@/lib/desktopFocus';
 import { getDateTimeBridge } from '@/lib/datetime';
 import { getPrintingBridge, printFile } from '@/lib/printing';
 import { CommandError, type Area, type Param } from './types';
@@ -255,8 +256,15 @@ export const powerArea: Area = {
 
 export const keyboardArea: Area = {
   name: 'keyboard',
-  summary: 'The keyboard layout',
+  summary: 'The keyboard layout, and moving the keyboard about the desktop',
   commands: [
+    command('keyboard', 'focus', 'Give the keyboard to a part of the desktop, as Ctrl+F2, F3, F8 and F6 do', [
+      { name: 'part', type: 'string', positional: true, choices: [...FOCUS_AREAS, 'window', 'next', 'previous'], help: 'Where it goes; window gives it back to the window' },
+    ], (args) => {
+      const part = args.string('part');
+      if (part === 'window') leaveArea();
+      else if (!runFocusKey(part as FocusKey)) throw new CommandError(`The ${part} isn’t on screen`);
+    }),
     command('keyboard', 'status', 'The layout in use', [], async () => {
       const status = await call(need(getKeyboardBridge(), 'Keyboard layouts').status());
       return { data: status, text: `${status.layout.name} (${status.layout.layout}${status.layout.variant ? `:${status.layout.variant}` : ''})${status.restartNeeded ? '\nDin’s own windows switch after Din restarts' : ''}` };

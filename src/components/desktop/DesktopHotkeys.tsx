@@ -17,6 +17,7 @@ import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { wmCommandFor, type WmCommand } from '@/lib/wmBindings';
 import { cursorEffects } from '@/lib/cursorEffects';
+import { currentArea, leaveArea, runFocusKey, type FocusKey } from '@/lib/desktopFocus';
 
 /** The built-in Web Browser's app id (see src/lib/apps.ts). */
 const WEB_BROWSER_APP_ID = 'web-browser';
@@ -27,6 +28,16 @@ const SETTINGS_APP_ID = 'settings';
 const SYSTEM_MONITOR_APP_ID = 'system-monitor';
 /** Super+A held this long dictates into the prompt instead of toggling it. */
 const ASSISTANT_HOLD_MS = 300;
+
+/**
+ * Ctrl+F2 / F3 / F8 and Ctrl+F6 (Shift: backwards), as on a Mac. Keep in
+ * step with shellShortcutForInput in electron/main.mts.
+ */
+function focusAreaFor(e: KeyboardEvent): FocusKey | null {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return null;
+  if (e.shiftKey) return e.key === 'F6' ? 'previous' : null;
+  return ({ F2: 'menu-bar', F3: 'dock', F6: 'next', F8: 'status' } as Record<string, FocusKey>)[e.key] ?? null;
+}
 
 let assistantHoldTimer: ReturnType<typeof setTimeout> | null = null;
 let assistantHeld = false;
@@ -79,6 +90,11 @@ function isAssistantKeyPressed(): boolean {
  *   finishes; Esc cancels.
  * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
  *   on Windows.
+ * - Ctrl+F2 gives the keyboard to the menu bar (the taskbar's Start
+ *   button), Ctrl+F3 to the Dock or the taskbar's buttons, Ctrl+F8 to the
+ *   status icons, and Ctrl+F6 (Shift: backwards) goes round them, the
+ *   window and the notifications, as on a Mac; Escape there goes back to
+ *   the window (src/lib/desktopFocus.ts).
  * - Ctrl+Alt+Delete opens the security options screen (SecurityOptions):
  *   lock, switch account, sign out, change the password, System Monitor,
  *   restart and shut down. Everything else stands down while it's up.
@@ -273,6 +289,25 @@ export function DesktopHotkeys() {
         }
       }
 
+      const focusKey = focusAreaFor(e);
+      if (focusKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) runFocusKey(focusKey);
+        return;
+      }
+      // Esc on the menu bar, the Dock and the like: back to the window. A
+      // menu open from one has the keyboard in it, so Esc closes that first.
+      if (
+        e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey &&
+        !isDictating() && currentArea() && e.target instanceof Element && e.target.closest('[data-focus-area]')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        leaveArea();
+        return;
+      }
+
       // Esc: stop dictating, throwing it away.
       if (e.key === 'Escape' && isDictating() && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
         e.preventDefault();
@@ -432,6 +467,8 @@ export function DesktopHotkeys() {
         if (cmd && (!shortcut.repeat || cmd.type === 'resize')) runWmRef.current(cmd);
       } else if (shortcut.action === 'dictation') {
         toggleDictation();
+      } else if (shortcut.action === 'focus-area') {
+        runFocusKey(shortcut.area);
       } else if (shortcut.action === 'security-options') {
         showSecurityOptions();
       } else if (shortcut.action === 'system-monitor') {

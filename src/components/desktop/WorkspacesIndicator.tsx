@@ -10,6 +10,7 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { rectStyle } from '@/lib/monitors';
 import { cn } from '@/lib/utils';
+import { announce } from '@/lib/announce';
 
 /** One monitor's workspaces, as the indicator shows them. */
 interface MonitorWorkspaces {
@@ -205,7 +206,9 @@ export function WorkspaceOsd() {
     prev.current = active;
     const changed = Object.keys(active).find((id) => activeWorkspace(active, id) !== activeWorkspace(before, id));
     if (!changed) return;
-    setShown({ monitor: changed, n: activeWorkspace(active, changed), key: Date.now() });
+    const n = activeWorkspace(active, changed);
+    setShown({ monitor: changed, n, key: Date.now() });
+    announce(`Workspace ${n}`);
     const timer = window.setTimeout(() => setShown(null), OSD_MS);
     return () => window.clearTimeout(timer);
   }, [active]);

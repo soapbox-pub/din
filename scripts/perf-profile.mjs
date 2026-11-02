@@ -40,6 +40,11 @@
  *                heap-snapshot diff of round 2 against the last
  *                (`leak-diff.txt`: what grew, and what holds it).
  *                --leak-rounds <n> (8)
+ *   a11y         not a measurement, and only run when named (--only a11y):
+ *                axe-core's WCAG 2 A/AA checks on the desktop and on
+ *                Settings, and the keyboard's way about the desktop (Ctrl+F2,
+ *                F3, F6, the arrow keys and Escape). Exits 1 on a serious or
+ *                critical violation, or a key that doesn't land where it should
  *
  * Logged-in scenarios use a throwaway key minted here, or the account in
  * DIN_PERF_NSEC to profile a real one's data. Either way nothing is ever
@@ -104,7 +109,9 @@ const VIEWPORT = { width: 1920, height: 1080 };
 // Outside `dist-perf/`, which every build empties.
 const OUT = resolve(root, "perf-reports");
 
-const wants = (name) => ONLY.length === 0 || ONLY.includes(name);
+/** Scenarios that only run when named. */
+const OPT_IN = ["a11y"];
+const wants = (name) => (ONLY.length === 0 && !OPT_IN.includes(name)) || ONLY.includes(name);
 
 /** The launcher's apps, by the name the apps menu finds them under (--apps "A,B" to pick). */
 const APPS = opt("apps", "Web Browser,Files,Terminal,Settings,App Store")
@@ -1194,6 +1201,75 @@ try {
       heapDiff: diff.error ? diff : { heapMB: diff.heapMB, detachedNodes: diff.detachedNodes, growers: diff.growers?.slice(0, 15), netByClass: diff.netByClass?.slice(0, 15), detached: diff.detached },
       errors: errors.slice(mark),
     });
+  }
+
+  if (wants("a11y")) {
+    console.log("\n▶ a11y (axe on the desktop and Settings, keyboard navigation)");
+    const mark = errors.length;
+    await resetStorage();
+    await bootDesktop();
+    const axeSource = readFileSync(resolve(root, "node_modules/axe-core/axe.min.js"), "utf8");
+    const runAxe = async () => {
+      await cdp.send("Runtime.evaluate", { expression: axeSource });
+      return evaluate(async () => {
+        const result = await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] } });
+        return result.violations.map((v) => ({
+          id: v.id,
+          impact: v.impact,
+          help: v.help,
+          nodes: v.nodes.length,
+          targets: v.nodes.slice(0, 4).map((n) => n.target.join(" ")),
+        }));
+      });
+    };
+    const ctrlKey = async (key, code, keyCode, shift = false) => {
+      const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers: 2 | (shift ? 8 : 0) };
+      await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...base });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+      await sleep(150);
+    };
+    const focused = () => evaluate(() => {
+      const el = document.activeElement;
+      return {
+        area: el?.closest("[data-focus-area]")?.getAttribute("data-focus-area") ?? null,
+        name: el?.getAttribute("aria-label") ?? el?.textContent?.trim().slice(0, 40) ?? null,
+      };
+    });
+    const keyboard = [];
+    const expect = async (step, area, act) => {
+      await act();
+      const at = await focused();
+      keyboard.push({ step, want: area, got: at.area, on: at.name, ok: at.area === area });
+    };
+
+    const desktop = await runAxe();
+    await launch("Settings");
+    await waitFor(windowSettled, undefined, 15_000);
+    await sleep(800);
+    const settings = await runAxe();
+
+    await expect("Ctrl+F2", "menu-bar", () => ctrlKey("F2", "F2", 113));
+    const first = (await focused()).name;
+    await expect("→ along the menu bar", "menu-bar", () => pressKey("ArrowRight", "ArrowRight", 39));
+    keyboard.at(-1).ok &&= (await focused()).name !== first;
+    await expect("Ctrl+F3", "dock", () => ctrlKey("F3", "F3", 114));
+    await expect("→ along the Dock", "dock", () => pressKey("ArrowRight", "ArrowRight", 39));
+    await expect("Ctrl+F8", "status", () => ctrlKey("F8", "F8", 119));
+    await expect("Escape", null, () => pressKey("Escape", "Escape", 27));
+    await expect("Ctrl+F6", "menu-bar", () => ctrlKey("F6", "F6", 117));
+    await expect("Ctrl+F6 again", "dock", () => ctrlKey("F6", "F6", 117));
+    await expect("Ctrl+Shift+F6", "menu-bar", () => ctrlKey("F6", "F6", 117, true));
+    await screenshot("a11y");
+
+    const serious = [...desktop, ...settings].filter((v) => v.impact === "serious" || v.impact === "critical");
+    const missed = keyboard.filter((k) => !k.ok);
+    for (const [where, list] of [["desktop", desktop], ["settings", settings]]) {
+      console.log(`  ${where}: ${list.length} violation(s)`);
+      for (const v of list) console.log(`    ${v.impact} ${v.id} ×${v.nodes}: ${v.help} (${v.targets[0] ?? ""})`);
+    }
+    for (const k of keyboard) console.log(`  ${k.ok ? "✓" : "✗"} ${k.step}: ${k.got ?? "the window"}${k.on ? ` (${k.on})` : ""}`);
+    save("a11y", { desktop, settings, keyboard, errors: errors.slice(mark) });
+    if (serious.length > 0 || missed.length > 0) process.exitCode = 1;
   }
 } catch (error) {
   console.error(error);

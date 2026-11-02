@@ -14,6 +14,8 @@
  *   - Super+H                 -> { action: 'dictation' }
  *   - Ctrl+Shift+Escape       -> { action: 'system-monitor' }
  *   - Ctrl+Alt+Delete         -> { action: 'security-options' }
+ *   - Ctrl+F2 / F3 / F8, Ctrl+F6 (+Shift)
+ *                             -> { action: 'focus-area', area }
  *   - Super down / up         -> { action: 'super-key', down }
  *   - Super+arrows, digits, Tab, -, =, Enter, W/Q/T/F/J/M/K (any of
  *     Shift/Ctrl/Alt)         -> { action: 'wm', code, shift, ctrl, alt, repeat }
@@ -50,6 +52,7 @@
  * (Ctrl+F, reload, tab/history navigation) are NOT intercepted there - the
  * host keeps them.
  */
+import type { FocusKey } from '@/lib/desktopFocus';
 
 /** A shell shortcut forwarded from the main process. */
 export type ShellShortcut =
@@ -84,6 +87,15 @@ export type ShellShortcut =
   | {
       /** Ctrl+Alt+Delete pressed inside a guest: open the security options screen. */
       action: 'security-options';
+    }
+  | {
+      /**
+       * Ctrl+F2 (the menu bar), Ctrl+F3 (the Dock), Ctrl+F8 (the status
+       * icons) or Ctrl+F6 (Shift: backwards round them) pressed inside a
+       * guest: the keyboard goes there (src/lib/desktopFocus.ts).
+       */
+      action: 'focus-area';
+      area: FocusKey;
     }
   | {
       /** Super pressed or released inside a guest (Super+drag moves windows). */

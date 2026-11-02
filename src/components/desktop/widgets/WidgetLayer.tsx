@@ -118,7 +118,7 @@ export function WidgetLayer() {
   };
 
   return (
-    <div className="pointer-events-none absolute inset-0" aria-label="Widgets">
+    <div role="group" className="pointer-events-none absolute inset-0" aria-label="Widgets">
       {targetArea && target && (
         <div
           aria-hidden

@@ -3635,6 +3635,7 @@ function forwardShellShortcuts(contents: Electron.WebContents): void {
       shortcut?.action === 'dictation' ||
       shortcut?.action === 'system-monitor' ||
       shortcut?.action === 'security-options' ||
+      shortcut?.action === 'focus-area' ||
       shortcut?.action === 'screenshot' ||
       shortcut?.action === 'screenshot-area' ||
       shortcut?.action === 'wm'
@@ -5469,6 +5470,7 @@ type ShellShortcut =
         | 'screenshot-area';
     }
   | { action: 'super-key'; down: boolean }
+  | { action: 'focus-area'; area: 'menu-bar' | 'dock' | 'status' | 'next' | 'previous' }
   | { action: 'wm'; code: string; shift: boolean; ctrl: boolean; alt: boolean; repeat: boolean }
   | { action: 'alt-released' }
   | {
@@ -5541,6 +5543,15 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
       alt: Boolean(input.alt),
       repeat: Boolean(input.isAutoRepeat),
     };
+  }
+  // Ctrl+F2 / F3 / F8: the keyboard to the menu bar, the Dock, the status
+  // icons; Ctrl+F6 (Shift: backwards) round them, as on a Mac. Keep in step
+  // with focusAreaFor in DesktopHotkeys.tsx.
+  if (input.control && !input.alt && !input.meta) {
+    const area = !input.shift
+      ? ({ F2: 'menu-bar', F3: 'dock', F6: 'next', F8: 'status' } as const)[input.key as 'F2']
+      : input.key === 'F6' ? 'previous' : undefined;
+    if (area) return input.isAutoRepeat ? null : { action: 'focus-area', area };
   }
   // Ctrl+Shift+Escape: the System Monitor, as on Windows.
   if (input.control && input.shift && !input.alt && !input.meta && input.key === 'Escape') {
@@ -6620,6 +6631,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
+        shortcut?.action === 'focus-area' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area' ||
         shortcut?.action === 'wm'
@@ -6684,6 +6696,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
+        shortcut?.action === 'focus-area' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area' ||
         shortcut?.action === 'wm'

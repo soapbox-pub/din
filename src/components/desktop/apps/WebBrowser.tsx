@@ -1887,6 +1887,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'dictation' ||
         shortcut.action === 'system-monitor' ||
         shortcut.action === 'security-options' ||
+        shortcut.action === 'focus-area' ||
         shortcut.action === 'super-key' ||
         shortcut.action === 'alt-released' ||
         shortcut.action === 'screenshot' ||

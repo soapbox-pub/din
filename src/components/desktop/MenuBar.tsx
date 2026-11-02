@@ -47,6 +47,7 @@ import { NotificationsPanel } from '@/components/desktop/NotificationsIndicator'
 import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
 import { Calendar } from '@/components/ui/calendar';
 import { TrayItems } from '@/components/desktop/TrayMenu';
+import { moveAmongItems } from '@/lib/desktopFocus';
 import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
 import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { ScreenRecordingMenuItem } from '@/components/desktop/ScreenRecordingHost';
@@ -126,6 +127,11 @@ export function MenuBar() {
 
   return (
     <header
+      aria-label="Menu bar"
+      // Ctrl+F2 lands on the Apps button (src/lib/desktopFocus.ts), and the
+      // arrow keys go along the bar.
+      data-focus-area="menu-bar"
+      onKeyDown={(e) => moveAmongItems(e, 'button')}
       // The accent is sanitized by the window; its tokens keep the bar's
       // contents legible on it, as on the title bar.
       style={accent ? { backgroundColor: accent, ...themeColorTokens(accent) } : undefined}
@@ -155,7 +161,7 @@ export function MenuBar() {
         <div ref={setMenuBarSlot} className="flex min-w-0 items-center gap-0.5" />
       </div>
       <ClockMenuItem />
-      <div className="flex min-w-0 items-center justify-end gap-1.5">
+      <div aria-label="Status" role="group" data-focus-area="status" className="flex min-w-0 items-center justify-end gap-1.5">
         <ScreenRecordingMenuItem />
         <StudioMenuItem />
         <ScreenShareMenuItem />
@@ -934,7 +940,6 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
         <Button
           variant="ghost"
           size="sm"
-          aria-label={hasUnread ? 'Calendar and notifications, unread' : 'Calendar and notifications'}
           title={doNotDisturb ? 'Calendar and notifications (Do Not Disturb)' : undefined}
           className={cn(
             'gap-1.5 rounded-md px-2.5 font-medium text-foreground/90 hover:bg-foreground/10 hover:text-foreground',
@@ -942,6 +947,8 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
           )}
         >
           <ClockText stacked={taskbar} narrow={vertical} />
+          {/* Named by the time it shows, then what it opens. */}
+          <span className="sr-only">{hasUnread ? ', calendar and notifications, unread' : ', calendar and notifications'}</span>
           {doNotDisturb ? (
             <BellOff className="size-3.5 text-muted-foreground" aria-hidden />
           ) : (

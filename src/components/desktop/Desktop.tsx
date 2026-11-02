@@ -16,6 +16,7 @@ import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { VolumeOsd } from './VolumeOsd';
 import { WorkspaceOsd } from './WorkspacesIndicator';
+import { Announcer } from './Announcer';
 import { DictationOverlay } from './DictationOverlay';
 import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
@@ -271,6 +272,7 @@ function DesktopSession() {
                     <PageFullscreenHost />
                     <BootScreenSync />
                     <WindowSessionHost />
+                    <Announcer />
                     <Wallpaper backdrop={<DesktopMenu />}>
                       {!taskbar && <MenuBar />}
 

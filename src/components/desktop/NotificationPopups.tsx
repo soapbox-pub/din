@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NotificationCard } from '@/components/desktop/NotificationCard';
+import { announce } from '@/lib/announce';
 import { expirePopup, useNotificationCenter, type DesktopNotification } from '@/lib/notificationCenter';
 
 /**
@@ -13,10 +14,30 @@ export function NotificationPopups() {
   const shown = popups
     .map((id) => notifications.find((n) => n.id === id))
     .filter((n): n is DesktopNotification => n !== undefined);
+
+  // Each popup is read out as it comes (a replaced one again), urgent ones
+  // interrupting; Ctrl+F6 takes the keyboard to them.
+  const announced = useRef(new Map<string, number>());
+  useEffect(() => {
+    for (const n of shown) {
+      if (announced.current.get(n.id) === n.createdAt) continue;
+      announced.current.set(n.id, n.createdAt);
+      announce(`${n.source.name}: ${n.title}. ${n.body}`, n.urgency === 'critical' ? 'assertive' : 'polite');
+    }
+    for (const id of announced.current.keys()) {
+      if (!popups.includes(id)) announced.current.delete(id);
+    }
+  });
+
   if (shown.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 top-11 z-[9998] flex w-80 flex-col gap-2">
+    <div
+      role="region"
+      aria-label="Notifications"
+      data-focus-area="notifications"
+      className="pointer-events-none fixed right-4 top-11 z-[9998] flex w-80 flex-col gap-2"
+    >
       {shown.map((notification) => (
         <Popup key={notification.id} notification={notification} />
       ))}
