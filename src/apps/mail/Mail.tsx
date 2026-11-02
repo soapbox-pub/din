@@ -5,6 +5,7 @@ import type { LaunchContext } from '@/sdk/din';
 import { blankSeed, escapeHtml, parseAddresses, type ComposeSeed } from './mail/format';
 import { Compose } from './mail/Compose';
 import { Viewer } from './mail/Viewer';
+import { savedCompose } from './mail/restore';
 import './mail/mail.css';
 
 /**
@@ -32,6 +33,8 @@ function seedOf(launch: LaunchContext): ComposeSeed | null {
 
 export function Mail() {
   const din = useDin();
-  const seed = useMemo(() => seedOf(din.app.launch), [din]);
-  return seed ? <Compose seed={seed} /> : <Viewer />;
+  // A message being written comes back as it was left, not as it was started.
+  const saved = useMemo(() => savedCompose(din.app.launch.state), [din]);
+  const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(din.app.launch)), [din, saved]);
+  return seed ? <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} /> : <Viewer />;
 }

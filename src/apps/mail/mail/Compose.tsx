@@ -9,6 +9,7 @@ import type { MailAccount, MailAddress, MailAttachment, OutgoingMessage } from '
 import { useAccounts, useMail } from './api';
 import { rememberAddresses, suggestAddresses } from './contacts';
 import { EMAIL, fileSize, formatAddress, parseAddresses, textToHtml, type ComposeSeed } from './format';
+import type { SavedWindow } from './restore';
 
 /** An attachment in the message, or one still loading from the message being forwarded. */
 type Attached = { id: string; file: MailAttachment | null; name: string; size: number };
@@ -194,7 +195,11 @@ function FormatButton({ label, active, onClick, children }: { label: string; act
   );
 }
 
-export function Compose({ seed }: { seed: ComposeSeed }) {
+/**
+ * `restored` when Din reopened the window: the seed is the message as it
+ * was left (its body signed already), and `dirty` whether it was unsaved.
+ */
+export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored?: { dirty: boolean } | null }) {
   const din = useDin();
   const mail = useMail();
   const accounts = useAccounts();
@@ -208,7 +213,8 @@ export function Compose({ seed }: { seed: ComposeSeed }) {
   const [subject, setSubject] = useState(seed.subject);
   const [attached, setAttached] = useState<Attached[]>(() => (seed.forwardFrom?.indexes ?? []).map((i) => ({ id: `fwd-${i}`, file: null, name: 'Attachment', size: 0 })));
   const [draftUid, setDraftUid] = useState(seed.draftUid);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(restored?.dirty ?? false);
+  const [revision, setRevision] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState<'close' | 'subject' | null>(null);
@@ -224,7 +230,10 @@ export function Compose({ seed }: { seed: ComposeSeed }) {
     extensions: [StarterKit.configure({ link: { openOnClick: false, autolink: true }, heading: false, codeBlock: false })],
     content: '',
     editorProps: { attributes: { class: 'mail-compose min-h-full px-5 py-4 text-[14px] leading-relaxed outline-none', 'aria-label': 'Message' } },
-    onUpdate: () => setDirty(true),
+    onUpdate: () => {
+      setDirty(true);
+      setRevision((r) => r + 1);
+    },
   });
 
   // The body starts once accounts are known, so the signature is the sender's.
@@ -232,9 +241,36 @@ export function Compose({ seed }: { seed: ComposeSeed }) {
   useEffect(() => {
     if (!editor || started.current || accounts.isPending) return;
     started.current = true;
-    editor.commands.setContent(withSignature(seed, account), { emitUpdate: false });
+    editor.commands.setContent(restored ? seed.html : withSignature(seed, account), { emitUpdate: false });
     if (seed.to.length) editor.commands.focus('start');
-  }, [editor, accounts.isPending, seed, account]);
+  }, [editor, accounts.isPending, seed, account, restored]);
+
+  // Kept for Din to reopen the window with, as it changes. Files attached
+  // from this computer aren't (they can be bigger than what's kept); a
+  // forwarded message's are fetched again.
+  useEffect(() => {
+    if (!editor || !started.current) return;
+    const t = setTimeout(() => {
+      const forwarded = attached.filter((a) => a.id.startsWith('fwd-')).map((a) => Number(a.id.slice(4)));
+      const state: SavedWindow = {
+        kind: 'compose',
+        dirty,
+        seed: {
+          ...seed,
+          accountId,
+          to,
+          cc,
+          bcc,
+          subject,
+          html: editor.getHTML(),
+          draftUid,
+          forwardFrom: seed.forwardFrom && forwarded.length ? { ...seed.forwardFrom, indexes: forwarded } : null,
+        },
+      };
+      din.app.saveState(state);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [din, editor, seed, accountId, to, cc, bcc, subject, attached, draftUid, dirty, revision]);
 
   const format = useEditorState({
     editor,

@@ -14,6 +14,7 @@ import { Sidebar } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
 import { ListSkeleton, MessageList } from './MessageList';
 import { Reader } from './Reader';
+import { savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
 
@@ -114,11 +115,17 @@ export function Viewer() {
   const { boxes, errors, fetching: boxesFetching } = useMailboxes(accounts);
   useLiveUpdates();
 
-  const [chosenMailbox, setSelectionState] = useState<Selection>(loadSelection);
-  const [filter, setFilter] = useState<MessageFilter>(null);
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
+  // A window Din reopened comes back as it was left.
+  const [restored] = useState(() => savedViewer(din.app.launch.state));
+  const [chosenMailbox, setSelectionState] = useState<Selection>(() => restored?.selection ?? loadSelection());
+  const [filter, setFilter] = useState<MessageFilter>(restored?.filter ?? null);
+  const [search, setSearch] = useState(restored?.search ?? '');
+  const [query, setQuery] = useState(() => restored?.search.trim() ?? '');
   const [chosen, setSelected] = useState<Set<string>>(() => new Set());
+  /** The message open when the window was left, until it's found in the list (or isn't). */
+  const [restoring, setRestoring] = useState<string | null>(restored?.message ?? null);
+  const restoreScroll = useRef(restored?.scroll ?? 0);
+  const scrollTop = useRef(restored?.scroll ?? 0);
   const anchor = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const [widths, setWidths] = useState(loadWidths);
@@ -134,6 +141,9 @@ export function Viewer() {
   const setSelection = useCallback((s: Selection) => {
     setSelectionState(s);
     setSelected(new Set());
+    setRestoring(null);
+    restoreScroll.current = 0;
+    scrollTop.current = 0;
     anchor.current = null;
     localStorage.setItem(SELECTION_KEY, JSON.stringify(s));
   }, []);
@@ -173,9 +183,48 @@ export function Viewer() {
   }, [items]);
 
   // The first message is selected when a mailbox opens, as in Apple Mail.
-  const selected = useMemo(() => (chosen.size || narrow || !items.length ? chosen : new Set([items[0].key])), [chosen, narrow, items]);
+  // In a window Din reopened, the message it was left on instead, once
+  // the list has it; nothing while it's being looked for.
+  const restoredFound = !!restoring && items.some((i) => i.key === restoring);
+  const restoreMore = !!messages.hasNextPage && (messages.data?.pages.length ?? 0) < 5;
+  const restoreGone = !restoring || messages.isError || (!restoredFound && messages.isSuccess && !messages.isFetching && !restoreMore);
+  const selected = useMemo(() => {
+    if (chosen.size) return chosen;
+    if (restoring && restoredFound) return new Set([restoring]);
+    return narrow || !items.length || !restoreGone ? chosen : new Set([items[0].key]);
+  }, [chosen, narrow, items, restoring, restoredFound, restoreGone]);
+
+  // A few older pages are read to find it, and then it's given up on.
+  const { isSuccess, isFetching, fetchNextPage } = messages;
+  useEffect(() => {
+    if (restoring && !chosen.size && !restoredFound && isSuccess && !isFetching && restoreMore) void fetchNextPage();
+  }, [restoring, chosen, restoredFound, isSuccess, isFetching, restoreMore, fetchNextPage]);
   const selectedItems = useMemo(() => items.filter((i) => selected.has(i.key)), [items, selected]);
   const current = selectedItems.length === 1 ? selectedItems[0] : null;
+
+  // Kept for Din to reopen the window with: the mailbox, filter, search,
+  // the message the user chose (not the one opened by default, so new mail
+  // still comes first) and the list's scroll.
+  const savedMessage = chosen.size ? (chosen.size === 1 ? [...chosen][0] : null) : restoreGone ? null : restoring;
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveWindow = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      const state: SavedWindow = { kind: 'viewer', selection: chosenMailbox, filter, search, message: savedMessage, scroll: Math.round(scrollTop.current) };
+      din.app.saveState(state);
+    }, 300);
+  }, [din, chosenMailbox, filter, search, savedMessage]);
+  useEffect(() => {
+    saveWindow();
+  }, [saveWindow]);
+  const onListScroll = useCallback(
+    (top: number) => {
+      scrollTop.current = top;
+      saveWindow();
+    },
+    [saveWindow],
+  );
 
   const box = (accountId: string, path: string): MailboxInfo | undefined => boxes.get(accountId)?.find((b) => b.path === path);
   const special = selection.kind === 'all' ? selection.special : box(selection.accountId, selection.path)?.special ?? null;
@@ -619,6 +668,12 @@ export function Viewer() {
                   onAction={(action, item) => void run(action, targetsFor(item))}
                   onMove={(item, path) => void moveTo(targetsFor(item), item.accountId, path)}
                   targetsFor={targetsFor}
+                  restoreScroll={() => {
+                    const top = restoreScroll.current;
+                    restoreScroll.current = 0;
+                    return top;
+                  }}
+                  onScroll={onListScroll}
                 />
               )}
             </section>

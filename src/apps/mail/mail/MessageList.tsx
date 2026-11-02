@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent } from 'react';
 import { Archive, Flag, FlagOff, Folder, Forward, Mail, MailOpen, OctagonAlert, Paperclip, Reply, ReplyAll, Trash2, Inbox, Pencil } from 'lucide-react';
 import {
   ContextMenu,
@@ -94,6 +94,8 @@ export function MessageList({
   onAction,
   onMove,
   targetsFor,
+  restoreScroll,
+  onScroll,
 }: {
   items: Item[];
   selected: Set<string>;
@@ -110,6 +112,9 @@ export function MessageList({
   onMove: (item: Item, path: string) => void;
   /** The messages a menu on this row acts on: the selection if the row is in it. */
   targetsFor: (item: Item) => Item[];
+  /** Where to scroll to on showing, once: where a window Din reopened was left. */
+  restoreScroll?: () => number;
+  onScroll?: (top: number) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -128,6 +133,13 @@ export function MessageList({
     return () => io.disconnect();
   }, [hasMore, items.length]);
 
+  useLayoutEffect(() => {
+    const top = restoreScroll?.() ?? 0;
+    if (top && list.current) list.current.scrollTop = top;
+    // Only on showing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Keep the selected row in view as the keyboard moves it.
   const lastSelected = [...selected].at(-1);
   useEffect(() => {
@@ -144,6 +156,7 @@ export function MessageList({
       aria-activedescendant={lastSelected ? `msg-${lastSelected}` : undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
+      onScroll={onScroll ? (e) => onScroll(e.currentTarget.scrollTop) : undefined}
       className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2 outline-none"
     >
       {items.map((item) => {
