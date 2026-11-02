@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCursorEffectPackages, useRemoveCursorEffectPackage, useSystemCursorStatus } from '@/hooks/useSystemCursor';
 import { useToast } from '@/hooks/useToast';
+import { revealInCarousel } from '@/lib/carousel';
 import {
   CLICK_EFFECTS,
   PACKAGE_PREFIX,
@@ -222,9 +223,9 @@ function EffectCarousel({
 
   useEffect(() => {
     const el = scroller.current;
-    el?.querySelector<HTMLElement>('[aria-checked="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
-    updateEdges();
     if (!el) return;
+    revealInCarousel(el, el.querySelector<HTMLElement>('[aria-checked="true"]'), { center: true });
+    updateEdges();
     const observer = new ResizeObserver(updateEdges);
     observer.observe(el);
     return () => observer.disconnect();
@@ -254,7 +255,7 @@ function EffectCarousel({
     if (next < 0) return;
     e.preventDefault();
     tiles[next].focus({ preventScroll: true });
-    tiles[next].scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    if (scroller.current) revealInCarousel(scroller.current, tiles[next], { smooth: true });
   };
 
   return (
