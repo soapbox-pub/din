@@ -1,10 +1,12 @@
 import type { FsBridge } from '@/lib/fs';
 import type { Din } from '@/sdk';
+import { sessionGet, sessionSet } from '@/shared/appSession';
 
 /**
  * What Files windows share. Like a native file manager's, the undo history
  * spans windows (Ctrl+Z works wherever focus is) and lasts as long as the
- * desktop runs, so it lives in `din.app.session`. The windows share an
+ * Files runs (while a window of it is open), so it lives in the app's
+ * shared session (src/shared/appSession.ts). The windows share an
  * origin, so a BroadcastChannel carries the rest: a change made in one
  * refreshes the others' cached folders and favorites, and a drag of files
  * from one tells the others what it carries before the drop.
@@ -88,10 +90,10 @@ let undoQueue: Promise<unknown> = Promise.resolve();
 
 function editUndo<T>(din: Din, edit: (stack: UndoEntry[]) => T): Promise<T> {
   const next = undoQueue.then(async () => {
-    const stored = await din.app.session.get(UNDO_KEY);
+    const stored = await sessionGet(UNDO_KEY);
     const stack = isUndoStack(stored) ? stored : [];
     const result = edit(stack);
-    din.app.session.set(UNDO_KEY, stack.slice(-UNDO_LIMIT));
+    sessionSet(UNDO_KEY, stack.slice(-UNDO_LIMIT));
     return result;
   });
   undoQueue = next.catch(() => {});

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { DragPoint, TearOff } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import type { TabTransfer } from '@/shared/TabContextMenu';
+import { sessionGet, sessionSet } from '@/shared/appSession';
 import { windowLaunch } from '@/shared/launch';
 
 /**
@@ -13,7 +14,7 @@ import { windowLaunch } from '@/shared/launch';
  * The desktop says which of the app's windows is frontmost under the
  * pointer (din.window.tabDragMove) and shows the tab's label there; the
  * tab itself travels to that window on a BroadcastChannel, or, for a new
- * window, waits in din.app.session for it.
+ * window, waits in the app's shared session (src/shared/appSession.ts).
  *
  * A channel reaches every window of the app and nothing else: each app is
  * an origin of its own, and the only foreign content apps frame can't join
@@ -80,12 +81,12 @@ export function hasAdoptedTab(): boolean {
  * The tab a window was opened to adopt (a tab dropped away from every
  * window), if any. Read it when the window starts; it's removed once read.
  */
-export async function adoptedTab(din: Din): Promise<unknown> {
+export async function adoptedTab(): Promise<unknown> {
   const { params } = windowLaunch();
   const token = params[ADOPT_PARAM];
   if (typeof token !== 'string') return undefined;
-  const payload = await din.app.session.get(token);
-  din.app.session.set(token, undefined);
+  const payload = await sessionGet(token);
+  sessionSet(token, undefined);
   const place = params.place as { x?: unknown; y?: unknown } | undefined;
   if (typeof place?.x === 'number' && typeof place.y === 'number') window.moveTo(place.x, place.y);
   return payload;
@@ -173,7 +174,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     const { options: o } = latest.current;
     const bounds = { x: screenX, y: screenY, width: outerWidth, height: outerHeight };
     const token = `tab-${crypto.randomUUID()}`;
-    din.app.session.set(token, await o.take(id));
+    sessionSet(token, await o.take(id));
     const place = point
       ? { x: Math.round(bounds.x + point.x - GRAB.x), y: Math.max(0, Math.round(bounds.y + point.y - GRAB.y)) }
       : undefined;

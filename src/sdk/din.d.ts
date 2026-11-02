@@ -145,17 +145,10 @@ export interface DinApp {
   canOpen(appId: string): Promise<boolean>;
   /**
    * The app's other open windows, front to back. They talk to each other
-   * on a BroadcastChannel, which reaches the app's windows and nothing else.
+   * on a BroadcastChannel, which reaches the app's windows and nothing else,
+   * and share state in a SharedWorker, which lives while one of them does.
    */
   windows(): Promise<{ id: string; title: string }[]>;
-  /**
-   * State the desktop keeps for the app for as long as it runs, across its
-   * windows opening and closing (Files' undo history). Not saved to disk.
-   */
-  session: {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown): void;
-  };
   /**
    * localStorage keys this app kept on the desktop's origin before it moved
    * out are copied in before the app's code runs (the manifest's

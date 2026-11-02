@@ -341,18 +341,6 @@ export function appWindowIds(appId: string): string[] {
   return [...appWindows].filter(([, w]) => w.appId === appId).map(([id]) => id).sort((a, b) => z(b) - z(a));
 }
 
-// ---------------------------------------------------------------------------
-// din.app.session: state the desktop keeps for an app while it runs.
-// ---------------------------------------------------------------------------
-
-const appSessions = new Map<string, Map<string, unknown>>();
-
-export function appSessionState(appId: string): Map<string, unknown> {
-  let state = appSessions.get(appId);
-  if (!state) appSessions.set(appId, (state = new Map()));
-  return state;
-}
-
 /** The app window another one's tab is dragged over, which hears where (din.window.onTabHover). */
 let hovered: string | null = null;
 

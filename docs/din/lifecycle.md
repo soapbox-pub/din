@@ -131,9 +131,10 @@ the Web Browser. Like a `noopener` open, it returns no window; `_self`,
 An app's windows reach each other: `din.app.windows()` lists the others,
 front to back, with their ids; a `BroadcastChannel` carries messages
 between them, reaching every window of the app (each app is an origin of
-its own) and nothing else, so a message for one names it; and
-`din.app.session` keeps state the desktop holds for the app for as long as
-it runs, across its windows opening and closing (Files' undo history).
+its own) and nothing else, so a message for one names it; and a
+`SharedWorker` keeps state they share for as long as one of them is open
+(Files' undo history, a torn-off tab waiting for its new window):
+`sessionGet` and `sessionSet` in `src/shared/appSession.ts`.
 
 `openFiles` runs a Windows program (`.exe`) through Wine instead of
 opening it, for an app with the `fs` permission; any other gets a

@@ -504,7 +504,7 @@ export function Terminal() {
   useEffect(() => {
     if (!adopting || adoptStarted.current) return;
     adoptStarted.current = true;
-    void adoptedTab(din).then((payload) => {
+    void adoptedTab().then((payload) => {
       const tab = isTabPayload(payload) ? tabFromPayload(payload) : firstTab({});
       setTabs([tab]);
       setActiveId(tab.id);

@@ -456,10 +456,6 @@ export function installDin(transport: Transport): void {
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
-    session: {
-      get: (key) => request('app.sessionGet', { key }),
-      set: (key, value) => tell('app.sessionSet', { key, value }),
-    },
   };
 
   // ---- window ----

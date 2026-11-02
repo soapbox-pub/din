@@ -178,8 +178,6 @@ export interface Requests {
   'app.openUrl': [{ url: string }, void];
   'app.canOpen': [{ appId: string }, boolean];
   'app.windows': [void, { id: string; title: string }[]];
-  'app.sessionGet': [{ key: string }, unknown];
-  'app.sessionSet': [{ key: string; value: unknown }, void];
   'app.saveState': [{ state: unknown }, void];
   'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];
   'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];

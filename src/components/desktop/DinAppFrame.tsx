@@ -71,7 +71,6 @@ import {
   onAppPort,
   storageToMigrate,
   appKeyOf,
-  appSessionState,
   appWindowIds,
   appWindows,
   persistedGrant,
@@ -528,10 +527,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         appWindowIds(appId)
           .filter((id) => id !== windowId)
           .map((id) => ({ id, title: appWindows.get(id)?.title() ?? appName })),
-      'app.sessionGet': ({ key }) => appSessionState(appId).get(String(key)),
-      'app.sessionSet': ({ key, value }) => {
-        appSessionState(appId).set(String(key), value);
-      },
       'app.saveState': ({ state }) => {
         if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);
       },

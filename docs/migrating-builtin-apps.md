@@ -128,7 +128,7 @@ first broke, and what restored it:
 |---|---|
 | Terminal tabs moving between windows | `din.system.pty.release`/`adopt` (main holds the pty's output meanwhile), the screen carried with `@xterm/addon-serialize`, `useDinTabTransfer` |
 | Files' tab drops picking the right window, the drop marker | `din.window.tabDragMove`/`tabDragEnd` (the desktop finds the frontmost window of the app, shows the label), `onTabHover` |
-| Files' undo history outliving its windows | `din.app.session` |
+| Files' undo history shared by its windows | A SharedWorker (`src/shared/appSession.ts`) |
 | Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `din.files.path(handle)` for every app, `din.files.release` |
 | Links from apps opening in installed web apps, `nostr:` links | `window.open` answered with the desktop's `useOpenUrl` |
 | Photo Editor's Quick Export beside the document | `file-folders` |

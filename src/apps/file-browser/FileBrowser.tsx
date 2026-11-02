@@ -196,7 +196,7 @@ export function FileBrowser() {
 
   useEffect(() => {
     let live = true;
-    adoption ??= adoptedTab(din).catch(() => undefined);
+    adoption ??= adoptedTab().catch(() => undefined);
     void adoption.then((adopted) => {
       if (!live) return;
       const tab = isFilesTabTransfer(adopted) ? { id: newTabId(), path: adopted.path || undefined } : launchTab(din);

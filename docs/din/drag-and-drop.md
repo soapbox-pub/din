@@ -92,7 +92,7 @@ drop; the desktop helps instead:
   label and marker go.
 - The tab itself travels on a `BroadcastChannel`, addressed to that
   window's id (the app's other windows ignore it), or for a new window waits in
-  `din.app.session` under a token passed in its launch params.
+  the app's SharedWorker (`src/shared/appSession.ts`) under a token passed in its launch params.
 
 `useDinTabTransfer` (`src/shared/dinTabTransfer.ts`) does all of it and
 returns the `TabTransfer` that `TabStrip` takes, as `useTabTransfer` does
