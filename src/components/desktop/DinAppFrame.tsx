@@ -108,6 +108,12 @@ interface Grant {
   path: string;
   kind: 'file' | 'directory';
   writable: boolean;
+  /**
+   * The path with its links followed when it was granted, which it must
+   * still resolve to when it's used: a file swapped for a link since reaches
+   * nothing. Null outside Electron.
+   */
+  real: string | null;
 }
 
 /** A launch param naming files (Files' `{ path }`, Media Player's `{ paths }`), as paths. */
@@ -344,12 +350,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     model: readStoredModel(),
   });
 
-  /** Grant the app a file it was handed, as a handle for its port. */
-  const grantFile = useCallback((path: string, kind: 'file' | 'directory', writable: boolean): HandleData | null => {
+  /**
+   * Grant the app a file it was handed, as a handle for its port. Never one
+   * of Din's own files (its profile, nostrd's keys), which no app may reach
+   * however it's handed them.
+   */
+  const grantFile = useCallback(async (path: string, kind: 'file' | 'directory', writable: boolean): Promise<HandleData | null> => {
+    const apps = getAppsBridge();
+    const [resolved] = apps ? await apps.resolve([path]) : [null];
+    if (resolved?.protected) return null;
     const s = session.current;
     if (!s) return null;
     const id = `h${s.nextHandle++}`;
-    s.grants.set(id, { path, kind, writable });
+    s.grants.set(id, { path, kind, writable, real: resolved?.real ?? null });
     // With file-folders, the folder of a file the user handed it comes
     // along, writable only if the file is (main refuses home and above).
     if (fileFolders && s.fsRoots) {
@@ -377,7 +390,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       } catch {
         continue; // Gone already.
       }
-      const handle = grantFile(path, kind, writable);
+      const handle = await grantFile(path, kind, writable);
       if (handle) out.push(handle);
     }
     return out;
@@ -407,6 +420,23 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const grantOf = (id: string): Grant => {
     const g = session.current?.grants.get(id);
     if (!g) {
+      const error = new Error('No such file handle');
+      error.name = 'NotFoundError';
+      throw error;
+    }
+    return g;
+  };
+  /**
+   * A handle's grant, checked as it's used: its path must resolve where it
+   * did when it was granted and not into Din's own files, so an app can't
+   * swap the file for a link and reach whatever it points at.
+   */
+  const usableGrant = async (id: string): Promise<Grant> => {
+    const g = grantOf(id);
+    const apps = getAppsBridge();
+    if (!apps || g.real === null) return g;
+    const [now] = await apps.resolve([g.path]);
+    if (!now || now.protected || now.real !== g.real) {
       const error = new Error('No such file handle');
       error.name = 'NotFoundError';
       throw error;
@@ -458,21 +488,21 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useLayoutEffect(() => {
     handlers.current = {
       'app.ready': () => setReady(true),
-      'app.open': ({ appId: target, params: p, handles }) => {
+      'app.open': async ({ appId: target, params: p, handles }) => {
         // The Installer is the desktop's alone to open.
         if (typeof target !== 'string' || target === 'installer') return;
         // Paths in params grant nothing; files travel as handles, which the
         // window manager hands on as paths (and the new window's frame
         // turns back into handles).
         const { path: _path, paths: _paths, ...clean } = (p ?? {}) as Record<string, unknown>;
-        const paths = (handles ?? []).map((id) => grantOf(id).path);
+        const paths = (await Promise.all((handles ?? []).map(usableGrant))).map((g) => g.path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
         // Who asked, which the opened app reads as `launch.opener`.
         live.current.actions.open(target, { ...clean, ...files, opener: appId });
       },
       'app.openFiles': async ({ handles }) => {
         for (const id of handles) {
-          const g = grantOf(id);
+          const g = await usableGrant(id);
           const name = basename(g.path);
           // A Windows program runs, through Wine, instead of opening.
           const native = getNativeAppsBridge();
@@ -681,7 +711,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return grantFile(path, 'file', true);
       },
       'files.read': async ({ handle }) => {
-        const g = grantOf(handle);
+        const g = await usableGrant(handle);
         const fs = getFsBridge();
         if (!fs) throw new Error('Files are only available inside Din');
         const [read, stat] = await Promise.all([fs.readFile(g.path, 1024 * 1024 * 1024), fs.stat(g.path)]);
@@ -689,7 +719,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return { name: basename(g.path), type: mimeOf(g.path), lastModified: stat.mtimeMs ?? Date.now(), bytes };
       },
       'files.write': async ({ handle, data }) => {
-        const g = grantOf(handle);
+        const g = await usableGrant(handle);
         if (!g.writable || g.kind !== 'file') throw new Error('This file was opened read-only');
         const fs = getFsBridge();
         if (!fs) throw new Error('Files are only available inside Din');
@@ -699,7 +729,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         void invalidateListings(queryClient, g.path);
       },
       'files.entries': async ({ handle }) => {
-        const g = grantOf(handle);
+        const g = await usableGrant(handle);
         if (g.kind !== 'directory') return [];
         const fs = getFsBridge();
         if (!fs) return [];
@@ -707,14 +737,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const out: HandleData[] = [];
         for (const e of listing.entries) {
           if (e.kind === 'other') continue;
-          const h = grantFile(`${listing.path.replace(/\/$/, '')}/${e.name}`, e.kind, g.writable);
+          const h = await grantFile(`${listing.path.replace(/\/$/, '')}/${e.name}`, e.kind, g.writable);
           if (h) out.push(h);
         }
         return out;
       },
       'files.watch': async ({ handle }) => {
         const s = session.current;
-        const g = grantOf(handle);
+        const g = await usableGrant(handle);
         const fs = getFsBridge();
         if (!s || !fs || s.watches.has(handle)) return;
         const dir = g.kind === 'directory' ? g.path : dirname(g.path);
@@ -728,7 +758,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         session.current!.watches.delete(handle);
         if (w.id !== null) void getFsBridge()?.unwatch(w.id);
       },
-      'files.persist': ({ handle }) => persistGrant({ appId, ...grantOf(handle) }),
+      'files.persist': ({ handle }) => {
+        const { path, kind, writable } = grantOf(handle);
+        return persistGrant({ appId, path, kind, writable });
+      },
       'files.release': ({ token }) => releaseGrant(appId, String(token)),
       'files.requestAccess': async ({ paths, reason }) => {
         const s = session.current;
@@ -751,13 +784,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         }
         return grantPaths(wanted);
       },
-      'files.parent': ({ handle }) => {
+      'files.parent': async ({ handle }) => {
         if (!fileFolders && !permissions.includes('fs')) return null;
         // A file's folder only: a folder's parent would let file-folders
-        // climb to the root a step at a time.
-        const g = grantOf(handle);
+        // climb to the root a step at a time. Nor home or a folder holding
+        // Din's own files: a file handed over from there brings only itself,
+        // as main's addRoot has it.
+        const g = await usableGrant(handle);
         if (g.kind !== 'file') return null;
-        return grantFile(dirname(g.path), 'directory', false);
+        const parent = dirname(g.path);
+        const apps = getAppsBridge();
+        const [resolved] = apps ? await apps.resolve([parent]) : [null];
+        if (resolved?.holds && !permissions.includes('fs')) return null;
+        return grantFile(parent, 'directory', false);
       },
       'files.restore': async ({ token }) => {
         const entry = persistedGrant(appId, String(token));
@@ -770,7 +809,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return grantFile(entry.path, entry.kind, entry.writable);
       },
       'files.url': async ({ handle }) => {
-        const g = grantOf(handle);
+        const g = await usableGrant(handle);
         const apps = getAppsBridge();
         if (!apps || guestId === null) throw new Error('File URLs are only available inside Din');
         return apps.fileUrl(guestId, g.path);
@@ -798,14 +837,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'desktop.setWallpaper': async ({ handle }) => {
         need('wallpaper');
         if (!background) throw new Error('No desktop to set');
-        await background.setBackground({ path: grantOf(handle).path });
+        await background.setBackground({ path: (await usableGrant(handle)).path });
       },
       'desktop.setCursor': async ({ handle }) => {
         need('cursor');
         const cursor = getSystemCursorBridge();
         if (!cursor) throw new Error('Din can’t change the cursor here');
         try {
-          await cursor.importTheme(grantOf(handle).path);
+          await cursor.importTheme((await usableGrant(handle)).path);
         } catch (error) {
           throw new Error(cleanCursorError(error), { cause: error });
         } finally {
@@ -823,8 +862,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'dictation.finish': () => finishDictation(),
       'dictation.cancel': () => cancelDictation(),
 
-      'drag.startFiles': ({ token, handles, label }) => {
-        const grants = handles.map(grantOf);
+      'drag.startFiles': async ({ token, handles, label }) => {
+        const grants = await Promise.all(handles.map(usableGrant));
         const ok = registerDrag({
           token,
           kind: 'files',
@@ -921,9 +960,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         }
         return { files: await grantPaths(clip.paths), cut: clip.op === 'cut' };
       },
-      'clipboard.writeFiles': ({ handles, cut }) => {
+      'clipboard.writeFiles': async ({ handles, cut }) => {
+        const grants = await Promise.all(handles.map(usableGrant));
         // Nothing to hold clears it, and leaves the text clipboard alone.
-        setFileClipboard(handles.length === 0 ? null : { op: cut ? 'cut' : 'copy', paths: handles.map((id) => grantOf(id).path) });
+        setFileClipboard(grants.length === 0 ? null : { op: cut ? 'cut' : 'copy', paths: grants.map((g) => g.path) });
       },
 
       // The page's `new Notification()`: its id is the page's own, so a
@@ -968,7 +1008,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
       'print.file': async ({ handle }) => {
         need('printing');
-        await printFile(grantOf(handle).path);
+        await printFile((await usableGrant(handle)).path);
       },
 
       'assistant.setSettings': (patch) => {

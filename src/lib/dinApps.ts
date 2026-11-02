@@ -25,6 +25,12 @@ export interface AppsBridge {
   addFsRoot(webContentsId: number, root: string, writable: boolean): Promise<void>;
   /** Whether an app's fs grant reaches each path (to write it, with `write`), as main checks its calls. */
   reaches(webContentsId: number, paths: string[], write: boolean): Promise<boolean[]>;
+  /**
+   * Each path as it resolves now (its links followed), whether it's Din's
+   * own (no app may reach it), and whether it's a folder holding home or
+   * Din's own files.
+   */
+  resolve(paths: string[]): Promise<{ real: string; protected: boolean; holds: boolean }[]>;
   /** Milliseconds since the user last pressed a key or clicked in an app window, or null if never. */
   sinceInput(webContentsId: number): Promise<number | null>;
   revoke(webContentsId: number, permission: SystemPermission): Promise<void>;

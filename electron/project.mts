@@ -47,7 +47,13 @@ function absolute(p: unknown): string {
 /** A git checkout's tracked and untracked-but-not-ignored files, or null outside one. */
 async function gitFiles(root: string): Promise<string[] | null> {
   const run = (args: string[]) =>
-    runCommand('git', ['-C', root, 'ls-files', '-z', ...args], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 });
+    // The folder may be anyone's (an archive, a clone): its .git/config
+    // mustn't run a command of its own, as core.fsmonitor would on reading
+    // the index.
+    runCommand('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', root, 'ls-files', '-z', ...args], {
+      timeout: 20_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
   try {
     const [listed, deleted] = await Promise.all([
       run(['--cached', '--others', '--exclude-standard']),

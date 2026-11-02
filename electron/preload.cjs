@@ -3630,6 +3630,14 @@ expose('apps', {
    */
   reaches: (webContentsId, paths, write) => ipcRenderer.invoke('dinos-apps:reaches', webContentsId, paths, write),
   /**
+   * Each path as it resolves now (its links followed), whether it's Din's
+   * own, which no app may reach, and whether it's a folder holding home or
+   * Din's own files.
+   * @param {string[]} paths
+   * @returns {Promise<{ real: string, protected: boolean, holds: boolean }[]>}
+   */
+  resolve: (paths) => ipcRenderer.invoke('dinos-apps:resolve', paths),
+  /**
    * Milliseconds since the user last pressed a key or clicked in an app window, or null.
    * @param {number} webContentsId
    * @returns {Promise<number | null>}

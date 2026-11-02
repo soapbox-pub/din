@@ -20,7 +20,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ipcMain, MessageChannelMain, net, session, webContents } from 'electron';
-import { LOCAL_FILE_SCHEME, serveLocalFile } from './files.mts';
+import { LOCAL_FILE_SCHEME, serveLocalFile, trashedFrom } from './files.mts';
 import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
 import { ptyRoutes } from './pty-routes.mts';
 import type { MessagePortMain } from 'electron';
@@ -245,16 +245,30 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     return paths.map((p: unknown) => !!entry && typeof p === 'string' && path.isAbsolute(p) && !p.includes('\0') && reaches(entry, p, write === true));
   });
 
+  // Each path as it resolves now, whether it's Din's own (no app may reach
+  // it), and whether it holds home or something of Din's: what the desktop
+  // checks a file handle against when it's handed over and each time it's
+  // used, so a handle whose file became a link elsewhere reaches nothing.
+  ipcMain.handle('dinos-apps:resolve', (event, paths) => {
+    opts.assertShellSender(event);
+    if (!Array.isArray(paths)) return [];
+    return paths.map((p: unknown) => {
+      if (typeof p !== 'string' || !path.isAbsolute(p) || p.includes('\0')) return { real: '', protected: true, holds: true };
+      return { real: realish(p), protected: isProtectedPath(p), holds: holdsHomeOrProtected(p) };
+    });
+  });
+
   // A URL an app can load a file it was granted from (media, big pictures),
   // streamed with Range support instead of sent whole over its port.
   ipcMain.handle('dinos-apps:fileUrl', (event, wcId, file) => {
     opts.assertShellSender(event);
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('No such file');
+    if (isProtectedPath(file)) throw new Error('No such file');
     const appId = appIdOf(contents.getURL());
     if (!appId) throw new Error('Not an app');
     const token = randomUUID();
-    fileUrls.set(token, { file: path.resolve(file), wcId: contents.id, appId });
+    fileUrls.set(token, { file: path.resolve(file), real: realish(file), wcId: contents.id, appId });
     return `${LOCAL_FILE_SCHEME}://${token}/${encodeURIComponent(path.basename(file))}`;
   });
 
@@ -375,7 +389,7 @@ async function serve(request: Request): Promise<Response> {
 }
 
 /** Files granted to apps as URLs, by the token that is the URL's host. */
-const fileUrls = new Map<string, { file: string; wcId: number; appId: string }>();
+const fileUrls = new Map<string, { file: string; real: string; wcId: number; appId: string }>();
 
 function serveFileUrl(request: Request): Promise<Response> | Response {
   let token: string;
@@ -385,7 +399,11 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
     return notFound();
   }
   const grant = fileUrls.get(token);
-  if (grant) return serveLocalFile(request, grant.file, { 'access-control-allow-origin': appOrigin(grant.appId) });
+  if (grant) {
+    // Still the file it was, not a link swapped in since.
+    if (isProtectedPath(grant.file) || realish(grant.file) !== grant.real) return notFound();
+    return serveLocalFile(request, grant.file, { 'access-control-allow-origin': appOrigin(grant.appId) });
+  }
   const base = fsUrlBases.get(token);
   const fsGrant = base ? grants.get(base.wcId)?.get('fs') : undefined;
   if (!base || !fsGrant) return notFound();
@@ -470,7 +488,7 @@ function grant(contents: Electron.WebContents, permission: SystemPermission, roo
         .then(() => invoke(event as unknown as Electron.IpcMainInvokeEvent, ...args))
         .then((result) => {
           if (channel === 'pty:spawn' && typeof result === 'number') entry.ptys.add(result);
-          reply({ result });
+          reply({ result: permission === 'fs' ? withoutProtected(channel, args, result) : result });
         })
         .catch((error: unknown) => {
           const err = error instanceof Error ? error : new Error(String(error));
@@ -501,10 +519,22 @@ function checkCall(permission: SystemPermission, channel: string, args: unknown[
     if (entry.roots && channel === 'fs:compress' && Array.isArray(args[1]) && args[1].some((n) => typeof n !== 'string' || n.includes('/'))) {
       return 'Names only, inside the folder';
     }
+    if (channel === 'fs:restore') {
+      const origin = trashedFrom(args[0]);
+      if (!origin || isProtectedPath(origin) || holdsProtected(origin)) return 'Din doesn’t know where this came from';
+      if (entry.roots) return `${channel} reaches beyond this app's folders`;
+    }
     const written = WRITES[channel] ?? [];
-    for (const [i, arg] of args.entries()) {
+    const whole = WHOLE_TREES.has(channel);
+    const named = channel === 'fs:compress' && typeof args[0] === 'string' && Array.isArray(args[1])
+      ? args[1].filter((n): n is string => typeof n === 'string').map((n) => path.join(args[0] as string, n))
+      : [];
+    for (const [i, arg] of [...args, ...named].entries()) {
       if (typeof arg !== 'string' || !path.isAbsolute(arg)) continue;
       if (isProtectedPath(arg)) return `${path.resolve(arg)} belongs to Din`;
+      // Copying, moving, deleting or searching a folder above Din's own
+      // reaches it as surely as naming it.
+      if (whole && holdsProtected(arg)) return `${path.resolve(arg)} holds Din's own files`;
       if (!entry.roots) continue;
       if (!withinRoots(entry.roots, arg)) return `${path.resolve(arg)} is outside this app's folders`;
       if (written.includes(i) && !withinRoots(entry.roots, arg, true)) return `${path.resolve(arg)} is read-only for this app`;
@@ -519,6 +549,34 @@ const WRITES: Record<string, number[]> = {
   'fs:copyInto': [1], 'fs:moveInto': [0, 1], 'fs:move': [0, 1], 'fs:trash': [0], 'fs:chmod': [0],
   'fs:extract': [1], 'fs:compress': [0],
 };
+
+/** The fs calls that act on all of a folder's contents, which mustn't take in Din's own files. */
+const WHOLE_TREES = new Set([
+  'fs:rename', 'fs:copyFile', 'fs:rm', 'fs:copyInto', 'fs:moveInto', 'fs:move', 'fs:trash', 'fs:chmod',
+  'fs:extract', 'fs:compress',
+]);
+
+/**
+ * A search's or listing's result for an app, without anything of Din's own:
+ * searching home is fine, finding what's in Din's profile isn't. Its paths
+ * are relative to the root searched (args[0]).
+ */
+function withoutProtected(channel: string, args: unknown[], result: unknown): unknown {
+  const root = args[0];
+  if (typeof root !== 'string' || !path.isAbsolute(root) || typeof result !== 'object' || result === null || !holdsProtected(root)) {
+    return result;
+  }
+  const ok = (rel: unknown) => typeof rel === 'string' && !isProtectedPath(path.join(root, rel));
+  const r = result as Record<string, unknown>;
+  if (channel === 'fs:listFiles' && Array.isArray(r.files)) return { ...r, files: r.files.filter(ok) };
+  if (channel === 'fs:search' && Array.isArray(r.files)) {
+    return { ...r, files: r.files.filter((f) => ok((f as { path?: unknown } | null)?.path)) };
+  }
+  if (channel === 'fs:find' && Array.isArray(r.entries)) {
+    return { ...r, entries: r.entries.filter((e) => ok((e as { name?: unknown } | null)?.name)) };
+  }
+  return result;
+}
 
 /** Whether an fs grant reaches a path (to write it, with `write`). */
 function reaches(entry: Grant, file: string, write: boolean): boolean {
@@ -622,6 +680,22 @@ function adoptPty(entry: Grant, token: unknown, appId: string): number {
     for (const [channel, args] of released.held) entry.send(channel, ...args);
   });
   return released.id;
+}
+
+/** Whether a folder holds one of the paths no app may reach (Din's own profile), so taking it whole would take that too. */
+function holdsProtected(file: string): boolean {
+  const resolved = realish(file);
+  return (options?.protectedPaths() ?? []).some((p) => {
+    const real = realish(p);
+    return real === resolved || real.startsWith(resolved === path.sep ? resolved : resolved + path.sep);
+  });
+}
+
+/** Whether a folder is home or holds it, or holds Din's own files. */
+function holdsHomeOrProtected(file: string): boolean {
+  const resolved = realish(file);
+  const home = realish(os.homedir());
+  return home === resolved || home.startsWith(resolved === path.sep ? resolved : resolved + path.sep) || holdsProtected(file);
 }
 
 /** Whether a path is one no app may reach, even with fs (Din's own profile). */

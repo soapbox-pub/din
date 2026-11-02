@@ -175,17 +175,30 @@ export async function trash(target: string): Promise<string> {
   return name;
 }
 
+/** Where a .trashinfo says its item came from, and when it was trashed. */
+function parseTrashInfo(text: string): { path: string; deletedAt: string | null } | null {
+  const p = /^Path=(.*)$/m.exec(text)?.[1];
+  if (!p) return null;
+  const decoded = decodeURIComponent(p);
+  return {
+    path: path.isAbsolute(decoded) ? decoded : path.join(os.homedir(), decoded),
+    deletedAt: /^DeletionDate=(.*)$/m.exec(text)?.[1] ?? null,
+  };
+}
+
 /** Where a trashed item came from, per its .trashinfo (null if unknown). */
 async function trashOrigin(name: string): Promise<{ path: string; deletedAt: string | null } | null> {
   try {
-    const text = await fsp.readFile(path.join(trashDir(), 'info', `${name}.trashinfo`), 'utf8');
-    const p = /^Path=(.*)$/m.exec(text)?.[1];
-    if (!p) return null;
-    const decoded = decodeURIComponent(p);
-    return {
-      path: path.isAbsolute(decoded) ? decoded : path.join(os.homedir(), decoded),
-      deletedAt: /^DeletionDate=(.*)$/m.exec(text)?.[1] ?? null,
-    };
+    return parseTrashInfo(await fsp.readFile(path.join(trashDir(), 'info', `${name}.trashinfo`), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Where restoring a trashed item would put it back, or null: what an app's restore is checked against. */
+export function trashedFrom(name: unknown): string | null {
+  try {
+    return parseTrashInfo(fs.readFileSync(path.join(trashDir(), 'info', `${entryName(name)}.trashinfo`), 'utf8'))?.path ?? null;
   } catch {
     return null;
   }

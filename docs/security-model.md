@@ -83,7 +83,15 @@ which permissions. Each request is checked against those.
 **An app trusts nothing it hasn't been handed.** File handles, drag
 tokens and launch files are capabilities: unguessable ids that the desktop
 issued to that app's port. A handle forged or copied from another app
-resolves to nothing.
+resolves to nothing. A handle is checked each time it's used: its path must
+still resolve (links followed) where it did when it was granted, and never
+into Din's own files, so an app that swaps a file it was handed for a link
+reaches nothing through it. Main refuses Din's own files to bridge calls the
+same way, and a folder holding them to calls that take a folder whole
+(copying, moving, deleting, archiving); searches leave them out.
+
+Unscoped `fs` and `pty` are the user's whole account: an app with either can
+write the shell's startup files. Only apps that need it hold them.
 
 ### How a port is made
 
