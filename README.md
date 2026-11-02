@@ -428,6 +428,15 @@ have becomes an offer to save it, and the toolbar shows a site's saved
 logins to fill or copy. Copied passwords and codes leave the clipboard after
 90 seconds.
 
+Import (the + menu, or Settings) adds another KeePass file's items, KDBX 3 or
+4 with its password or key file, in a folder named after it; or another app's
+export (`electron/passwords-import.mts`): CSVs from Google Passwords, the
+Chromium browsers, Firefox, Safari and Apple Passwords, Bitwarden, 1Password,
+LastPass, KeePassXC, Proton Pass, Dashlane, NordPass and the like, read by
+their header rows, and Bitwarden's unencrypted JSON. The app reads the file
+the user picks and hands its bytes to main, which parses it; items the vault
+already has (same site, username and password) are skipped.
+
 ### Virtual machines
 
 The Virtual Machines app runs other systems (Windows, macOS, Linux, anything

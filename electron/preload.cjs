@@ -1696,7 +1696,7 @@ const passwords = {};
 for (const method of [
   'state', 'create', 'unlock', 'lock', 'setAutoUnlock', 'forgetNever', 'changePassword', 'list', 'get', 'save',
   'setFavorite', 'move', 'trash', 'restore', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
-  'deleteGroup', 'generate', 'copy',
+  'deleteGroup', 'import', 'generate', 'copy',
 ]) {
   passwords[method] = (...args) => ipcRenderer.invoke(`passwords:${method}`, ...args);
 }

@@ -7,6 +7,6 @@
   "din": {
     "permissions": ["passwords"],
     "window": { "size": { "width": 980, "height": 640 }, "frame": "custom" },
-    "keywords": ["password manager", "keychain", "logins", "KeePass", "kdbx", "1Password", "two-factor", "2FA", "verification codes", "TOTP", "authenticator", "secure notes", "autofill"]
+    "keywords": ["password manager", "keychain", "logins", "KeePass", "kdbx", "1Password", "two-factor", "2FA", "verification codes", "TOTP", "authenticator", "secure notes", "autofill", "import passwords", "Google Passwords", "Bitwarden", "LastPass", "CSV"]
   }
 }

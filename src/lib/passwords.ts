@@ -91,6 +91,30 @@ export interface GenerateOptions {
 /** What `copy` puts on the clipboard. Passwords and codes are cleared from it after 90 seconds. */
 export type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | { field: string };
 
+export interface PasswordsImportOptions {
+  /** The file's name, which a KeePass file's folder is named after. */
+  name: string;
+  /** A KeePass file's password. */
+  password?: string;
+  /** A KeePass file's key file. */
+  keyFile?: ArrayBuffer;
+}
+
+export interface PasswordsImportResult {
+  /** Where it came from: "KeePass", "Google Passwords", "Bitwarden", "CSV"… */
+  source: string;
+  added: number;
+  /** Items the vault already had. */
+  skipped: number;
+  /** The folder a KeePass file's items went in; null when they went in at the top. */
+  folderId: string | null;
+}
+
+/** Whether a file is a KeePass database (KDBX), by its first bytes. */
+export function isKdbx(head: Uint8Array): boolean {
+  return [0x03, 0xd9, 0xa2, 0x9a].every((b, i) => head[i] === b);
+}
+
 export interface PasswordsBridge {
   /** Tries the login keyring first, while the vault is locked and wasn't locked by hand. */
   state(): Promise<PasswordsState>;
@@ -114,6 +138,15 @@ export interface PasswordsBridge {
   createGroup(name: string, parentId?: string): Promise<string>;
   renameGroup(id: string, name: string): Promise<void>;
   deleteGroup(id: string): Promise<void>;
+  /**
+   * Add what's in a file to the vault: a KeePass file (KDBX 3 or 4, with its
+   * password or key file), into a folder named after it; or another app's
+   * export: a CSV from Google Passwords, Chrome, Firefox, Safari, Apple
+   * Passwords, Bitwarden, 1Password, LastPass, KeePassXC, Proton Pass and the
+   * like, read by its header row, or Bitwarden's unencrypted JSON. Items the
+   * vault already has are skipped.
+   */
+  import(data: ArrayBuffer, options: PasswordsImportOptions): Promise<PasswordsImportResult>;
   generate(options?: GenerateOptions): Promise<string>;
   copy(id: string, field: CopyField): Promise<void>;
   onChanged(callback: (state: PasswordsState) => void): () => void;

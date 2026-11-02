@@ -1098,7 +1098,7 @@ export function installDin(transport: Transport): void {
         for (const m of [
           'state', 'create', 'unlock', 'lock', 'setAutoUnlock', 'forgetNever', 'changePassword', 'list', 'get', 'save',
           'setFavorite', 'move', 'trash', 'restore', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
-          'deleteGroup', 'generate', 'copy',
+          'deleteGroup', 'import', 'generate', 'copy',
         ]) {
           p[m] = (...args: unknown[]) => sys.call('passwords', `passwords:${m}`, args);
         }

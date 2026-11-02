@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { LoaderCircle, X } from 'lucide-react';
+import { FileUp, LoaderCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -76,10 +76,12 @@ export function SettingsDialog({
   open,
   onOpenChange,
   state,
+  onImport,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   state: PasswordsState;
+  onImport: () => void;
 }) {
   const bridge = useBridge();
   return (
@@ -106,6 +108,19 @@ export function SettingsDialog({
             <h3 className="text-sm font-medium">File</h3>
             <p className="break-all rounded-md bg-muted px-2 py-1.5 font-mono text-xs select-text">{state.file}</p>
             <p className="text-xs text-muted-foreground">A KeePass (KDBX 4) file. KeePassXC, Strongbox and KeePassDX open it with the same password.</p>
+          </div>
+          <Separator />
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-medium">Import</h3>
+              <p className="text-xs text-muted-foreground">
+                From another KeePass file, Google Passwords, a browser, Apple Passwords, Bitwarden, 1Password and other apps’ exports.
+              </p>
+            </div>
+            <Button variant="secondary" size="sm" className="shrink-0" onClick={onImport}>
+              <FileUp className="size-4" aria-hidden />
+              Import…
+            </Button>
           </div>
           {state.never.length > 0 && (
             <>

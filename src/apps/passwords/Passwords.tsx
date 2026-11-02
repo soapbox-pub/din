@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ChevronLeft, KeyRound, Lock, PanelLeft, Plus, Search, StickyNote } from 'lucide-react';
+import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, Search, StickyNote } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,13 +13,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { cleanPasswordsError, type CopyField, type PasswordItem, type PasswordList, type PasswordsState, type PasswordSummary } from '@/lib/passwords';
 import type { LaunchContext } from '@/sdk';
 import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { ImportDialog } from './passwords/ImportDialog';
 import { ItemDetail } from './passwords/ItemDetail';
 import { ItemEditor } from './passwords/ItemEditor';
 import { ItemIcon } from './passwords/ItemIcon';
@@ -135,6 +136,7 @@ function Vault({ state }: { state: PasswordsState }) {
   const [search, setSearch] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [emptying, setEmptying] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
@@ -313,6 +315,11 @@ function Vault({ state }: { state: PasswordsState }) {
                     <StickyNote className="size-4" aria-hidden />
                     New Secure Note
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+                    <FileUp className="size-4" aria-hidden />
+                    Import Passwords…
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -344,7 +351,7 @@ function Vault({ state }: { state: PasswordsState }) {
             {!list ? (
               <ListSkeleton />
             ) : items.length === 0 ? (
-              <EmptyList section={section} searching={!!search.trim()} onNew={startNew} />
+              <EmptyList section={section} searching={!!search.trim()} onNew={startNew} onImport={() => setImportOpen(true)} />
             ) : (
               <ul
                 ref={listRef}
@@ -410,7 +417,24 @@ function Vault({ state }: { state: PasswordsState }) {
         </main>
       </div>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} state={state} />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        state={state}
+        onImport={() => {
+          setSettingsOpen(false);
+          setImportOpen(true);
+        }}
+      />
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={(result) => {
+          if (result.added === 0) return;
+          selectSection(result.folderId ? { type: 'folder', id: result.folderId } : { type: 'all' });
+        }}
+      />
 
       <FolderDialog
         prompt={folderPrompt}
@@ -530,7 +554,17 @@ function ItemRow({
   );
 }
 
-function EmptyList({ section, searching, onNew }: { section: Section; searching: boolean; onNew: (kind: 'login' | 'note') => void }) {
+function EmptyList({
+  section,
+  searching,
+  onNew,
+  onImport,
+}: {
+  section: Section;
+  searching: boolean;
+  onNew: (kind: 'login' | 'note') => void;
+  onImport: () => void;
+}) {
   const text = searching
     ? 'Nothing matches that.'
     : section.type === 'trash'
@@ -549,6 +583,12 @@ function EmptyList({ section, searching, onNew }: { section: Section; searching:
         <Button variant="secondary" size="sm" className="mt-4" onClick={() => onNew(section.type === 'notes' ? 'note' : 'login')}>
           <Plus className="size-4" aria-hidden />
           {section.type === 'notes' ? 'New Secure Note' : 'New Password'}
+        </Button>
+      )}
+      {!searching && section.type === 'all' && (
+        <Button variant="ghost" size="sm" className="mt-2 ml-2" onClick={onImport}>
+          <FileUp className="size-4" aria-hidden />
+          Import…
         </Button>
       )}
     </div>

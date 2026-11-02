@@ -42,6 +42,7 @@ import type { WebContents, WebFrameMain } from 'electron';
 import type { Kdbx, KdbxEntry, KdbxGroup } from 'kdbxweb';
 import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
+import { parseCsvExport, parseJsonExport, type ImportedItem, type ParsedExport } from './passwords-import.mts';
 import { deleteSecret, lookupSecret, storeSecret } from './secret-service.mts';
 
 const require = createRequire(import.meta.url);
@@ -146,6 +147,25 @@ export interface GenerateOptions {
 }
 
 type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | { field: string };
+
+export interface ImportOptions {
+  /** The file's name, which a KeePass file's folder is named after. */
+  name: string;
+  /** A KeePass file's password. */
+  password?: string;
+  /** A KeePass file's key file. */
+  keyFile?: ArrayBuffer | Uint8Array;
+}
+
+export interface ImportResult {
+  /** Where it came from: "KeePass", "Google Passwords", "Bitwarden"… */
+  source: string;
+  added: number;
+  /** Already in the vault. */
+  skipped: number;
+  /** The folder a KeePass file's items went in; null when they went in at the top. */
+  folderId: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Key derivation
@@ -573,13 +593,15 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
   const username = fieldText(entry, 'UserName');
   const url = fieldText(entry, 'URL');
   const hasSecret = !!(username || url || fieldText(entry, 'Password'));
+  // A note, or a card or such brought in from another app: fields and no login.
+  const hasNote = !!fieldText(entry, 'Notes') || [...entry.fields.keys()].some((name) => !STANDARD_FIELDS.has(name));
   return {
     id: entry.uuid.id,
     title: fieldText(entry, 'Title'),
     username,
     url,
     groupId: entry.parentGroup?.uuid.id ?? '',
-    kind: hasSecret || !fieldText(entry, 'Notes') ? 'login' : 'note',
+    kind: hasSecret || !hasNote ? 'login' : 'note',
     favorite: entry.tags.includes(FAVORITE_TAG),
     otp: !!otpOf(entry),
     trashed: inTrash(db, entry.parentGroup),
@@ -716,6 +738,149 @@ function setFavorite(entry: KdbxEntry, favorite: boolean): void {
 function restore(db: Kdbx, entry: KdbxEntry): void {
   const previous = entry.previousParentGroup ? db.getGroup(entry.previousParentGroup) : undefined;
   db.move(entry, previous && !inTrash(db, previous) ? previous : db.getDefaultGroup());
+}
+
+// ---------------------------------------------------------------------------
+// Importing
+// ---------------------------------------------------------------------------
+
+const MAX_IMPORT = 32 * 1024 * 1024;
+/** KDBX's first signature, 0x9AA2D903, little-endian. */
+const KDBX_SIGNATURE = [0x03, 0xd9, 0xa2, 0x9a];
+
+function bytesOf(value: unknown, name: string): Uint8Array {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (value instanceof Uint8Array) return value;
+  throw new Error(`Not a usable ${name}`);
+}
+
+/** What makes two items the same, so importing a file twice adds nothing the second time. */
+function sameness(title: string, username: string, password: string, url: string, notes: string): string {
+  if (!username && !password && !url) return `note\0${title}\0${notes}`;
+  return `login\0${siteOf(url)?.host ?? url.trim()}\0${username}\0${password}`;
+}
+
+function entrySameness(entry: KdbxEntry): string {
+  return sameness(fieldText(entry, 'Title'), fieldText(entry, 'UserName'), fieldText(entry, 'Password'), fieldText(entry, 'URL'), fieldText(entry, 'Notes'));
+}
+
+function liveSameness(db: Kdbx): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of db.getDefaultGroup().allEntries()) {
+    if (!inTrash(db, entry.parentGroup)) keys.add(entrySameness(entry));
+  }
+  return keys;
+}
+
+/** A folder by its path of names from the top, made if it's not there. */
+function folderAt(db: Kdbx, names: string[]): KdbxGroup {
+  const bin = recycleBin(db);
+  let group = db.getDefaultGroup();
+  for (const name of names) group = group.groups.find((g) => g !== bin && g.name === name) ?? db.createGroup(group, name);
+  return group;
+}
+
+/** An item from another app's export into the vault, unless the vault has it. */
+function addImported(db: Kdbx, item: ImportedItem, keys: Set<string>): boolean {
+  const title = item.title || siteOf(item.url)?.host || '';
+  const key = sameness(title, item.username, item.password, item.url, item.notes);
+  if (keys.has(key)) return false;
+  keys.add(key);
+  const entry = db.createEntry(folderAt(db, item.folder));
+  setField(entry, 'Title', title, false);
+  setField(entry, 'UserName', item.username, false);
+  setField(entry, 'Password', item.password, true);
+  setField(entry, 'URL', item.url, false);
+  setField(entry, 'Notes', item.notes, false);
+  if (item.otp) setField(entry, 'otp', item.otp, true);
+  for (const field of item.fields) {
+    let name = field.name;
+    for (let n = 2; STANDARD_FIELDS.has(name) || entry.fields.has(name); n++) name = `${field.name} ${n}`;
+    setField(entry, name, field.value, field.protected);
+  }
+  entry.tags = [...new Set(item.tags.filter((t) => t !== FAVORITE_TAG))];
+  setFavorite(entry, item.favorite);
+  entry.times.update();
+  if (item.created) entry.times.creationTime = item.created;
+  if (item.modified) entry.times.lastModTime = item.modified;
+  return true;
+}
+
+async function readKdbx(data: Uint8Array, opts: Record<string, unknown>): Promise<Kdbx> {
+  const pw = typeof opts.password === 'string' && opts.password ? kdbxweb.ProtectedValue.fromString(password(opts.password)) : null;
+  const keyFile = opts.keyFile ? arrayBuffer(bytesOf(opts.keyFile, 'key file')) : null;
+  if (!pw && !keyFile) throw new Error('A KeePass file needs its password');
+  const derived = lastDerived;
+  // Even a copy of this vault, with its salt, is opened with what was typed.
+  bypassKnownKey = true;
+  try {
+    return await kdbxweb.Kdbx.load(arrayBuffer(data), new kdbxweb.Credentials(pw, keyFile));
+  } catch (error) {
+    if (isWrongKey(error)) throw new Error(keyFile ? 'That password or key file is incorrect' : 'That password is incorrect', { cause: error });
+    throw error;
+  } finally {
+    bypassKnownKey = false;
+    lastDerived = derived;
+  }
+}
+
+/** A KeePass file's items and folders, into a folder of their own named after the file. */
+function copyKdbx(db: Kdbx, source: Kdbx, name: string, keys: Set<string>): { added: number; skipped: number; folder: KdbxGroup | null } {
+  const sourceBin = recycleBin(source);
+  const top = db.createGroup(db.getDefaultGroup(), path.basename(name, path.extname(name)) || source.meta.name || 'Imported');
+  let added = 0;
+  let skipped = 0;
+  const copy = (from: KdbxGroup, to: KdbxGroup) => {
+    for (const entry of from.entries) {
+      const key = entrySameness(entry);
+      if (keys.has(key)) {
+        skipped++;
+        continue;
+      }
+      keys.add(key);
+      const modified = entry.times.lastModTime;
+      db.importEntry(entry, to, source).times.lastModTime = modified;
+      added++;
+    }
+    for (const child of from.groups) {
+      if (child === sourceBin) continue;
+      const group = db.createGroup(to, child.name ?? '');
+      copy(child, group);
+      // A folder left empty because the vault had all of it goes; one that was empty stays.
+      if (group.entries.length === 0 && group.groups.length === 0 && [...child.allEntries()].length > 0) db.move(group, undefined);
+    }
+  };
+  copy(source.getDefaultGroup(), top);
+  if (added > 0) return { added, skipped, folder: top };
+  db.move(top, undefined);
+  return { added, skipped, folder: null };
+}
+
+/** Passwords' Import: a KeePass file, or another app's CSV or JSON export. */
+async function importFile(raw: unknown, rawOpts: unknown): Promise<ImportResult> {
+  const data = bytesOf(raw, 'file');
+  if (data.byteLength > MAX_IMPORT) throw new Error('That file is too big to be a passwords export');
+  const opts = (rawOpts && typeof rawOpts === 'object' ? rawOpts : {}) as Record<string, unknown>;
+  const name = typeof opts.name === 'string' ? opts.name.slice(0, 255) : '';
+  openVault();
+  if (KDBX_SIGNATURE.every((b, i) => data[i] === b)) {
+    const source = await readKdbx(data, opts);
+    await refresh();
+    const db = openVault();
+    const { added, skipped, folder } = copyKdbx(db, source, name, liveSameness(db));
+    await save();
+    return { source: 'KeePass', added, skipped, folderId: folder?.uuid.id ?? null };
+  }
+  const text = new TextDecoder().decode(data);
+  const parsed: ParsedExport = /^\uFEFF?\s*[[{]/.test(text) ? parseJsonExport(text) : parseCsvExport(text);
+  if (parsed.items.length === 0) throw new Error('There are no passwords in that file');
+  await refresh();
+  const db = openVault();
+  const keys = liveSameness(db);
+  let added = 0;
+  for (const item of parsed.items) if (addImported(db, item, keys)) added++;
+  if (added > 0) await save();
+  return { source: parsed.source, added, skipped: parsed.items.length - added, folderId: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,6 +1412,7 @@ export function registerPasswordsHandlers(opts: Options): void {
     if (inTrash(db, group)) db.move(group, undefined);
     else db.remove(group);
   }));
+  handle('import', (data, opts) => serial(() => importFile(data, opts)));
   handle('generate', (raw) => generatePassword((raw ?? {}) as GenerateOptions));
   handle('copy', (id, field) => serial(async () => {
     const db = openVault();
