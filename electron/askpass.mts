@@ -20,8 +20,8 @@
 //   its askpass helper, os/din-askpass.py (DinOS names it in sudo.conf). The
 //   password typed is tried with sudo before it's answered, so a wrong one
 //   stays where it was typed and only the right one goes back to the helper.
-//   A command just denied without a terminal isn't asked for it at all, so
-//   Deny means deny; in a terminal sudo goes on to ask there.
+//   A command just denied isn't asked for it here at all, so Deny means
+//   deny; one reading the password from a terminal goes on to ask there.
 //
 // This module reads what sudo was asked to run, and who asked, from /proc
 // for the user to see, in words for a command of Din's own (describe). Cancel, the asker going away (its command was
@@ -89,8 +89,6 @@ interface Pending {
   request: AskpassRequest;
   /** The conversation it's asked in, or null for the dialog. */
   sessionID: string | null;
-  /** sudo has a terminal to ask for the password on, after a Deny. */
-  tty: boolean;
 }
 
 interface Options {
@@ -208,7 +206,7 @@ function settle(requestId: number, message: Record<string, string> = {}): void {
   else options?.sendToShell('askpass:cancel', { requestId });
 }
 
-function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean, tty: boolean): void {
+function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean): void {
   const args = typeof pid === 'number' && Number.isInteger(pid) && pid > 1 ? argv(pid) : [];
   if (path.basename(args[0] ?? '') !== 'sudo' || !options?.hasShell()) {
     reply(socket, {});
@@ -232,7 +230,7 @@ function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolea
     detail: described?.detail ?? null,
   };
   const sessionID = typeof session === 'string' && SESSION_ID.test(session) ? session : null;
-  pending.set(requestId, { socket, pid: sudo, request, sessionID, tty, timer: setTimeout(() => settle(requestId), TIMEOUT_MS) });
+  pending.set(requestId, { socket, pid: sudo, request, sessionID, timer: setTimeout(() => settle(requestId), TIMEOUT_MS) });
   socket.on('close', () => settle(requestId));
   if (sessionID) passwordsChanged();
   else options.sendToShell('askpass:request', request);
@@ -300,7 +298,9 @@ async function answer(entry: Pending | undefined, password: unknown, remember = 
 function approve(entry: Pending | undefined, decision: unknown): void {
   if (!entry?.request.approve || (decision !== 'once' && decision !== 'conversation' && decision !== 'reject')) return;
   if (decision === 'conversation' && !entry.sessionID) return;
-  if (decision === 'reject' && !entry.tty) {
+  // Even with a terminal: Din's own sudos have tty1, and one that reads the
+  // password from its terminal never asks here anyway.
+  if (decision === 'reject') {
     const start = startOf(entry.pid);
     denied.set(entry.pid, start);
     setTimeout(() => {
@@ -324,14 +324,14 @@ function accept(socket: net.Socket): void {
       return;
     }
     started = true;
-    let request: { pid?: unknown; session?: unknown; approve?: unknown; tty?: unknown } = {};
+    let request: { pid?: unknown; session?: unknown; approve?: unknown } = {};
     try {
       const parsed: unknown = JSON.parse(buffer.slice(0, newline));
       if (typeof parsed === 'object' && parsed !== null) request = parsed;
     } catch {
       // Answered as nothing, below.
     }
-    ask(socket, request.pid, request.session, request.approve === true, request.tty === true);
+    ask(socket, request.pid, request.session, request.approve === true);
   });
 }
 
