@@ -7,6 +7,8 @@
 export interface FileClipboard {
   op: 'copy' | 'cut';
   paths: string[];
+  /** Put there by an app that could only read them: whoever pastes gets read-only copies. */
+  readOnly?: boolean;
 }
 
 let clipboard: FileClipboard | null = null;

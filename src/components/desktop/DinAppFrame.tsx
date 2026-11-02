@@ -397,11 +397,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   }, [grantFile]);
 
   const launchOf = useCallback(async (p: Record<string, unknown> | undefined, reason: Hello['launch']['reason']): Promise<Hello['launch']> => {
-    const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, opener, ...rest } = (p ?? {}) as Record<string, unknown>;
+    const { path: _path, paths: _paths, actionAt: _actionAt, shortcut, opener, readOnlyPaths, ...rest } = (p ?? {}) as Record<string, unknown>;
+    // Files an app opened this one with that it could only read itself stay read-only.
+    const readOnly = new Set(Array.isArray(readOnlyPaths) ? readOnlyPaths.filter((x): x is string => typeof x === 'string') : []);
+    const paths = launchPaths(p);
     return {
       reason,
       params: rest,
-      files: await grantPaths(launchPaths(p)),
+      files: (await Promise.all(paths.map((x) => grantPaths([x], !readOnly.has(x))))).flat(),
       shortcut: typeof shortcut === 'string' ? shortcut : null,
       state: reason === 'relaunch' ? null : windowStateOf(windowId),
       opener: typeof opener === 'string' ? opener : null,
@@ -494,11 +497,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // Paths in params grant nothing; files travel as handles, which the
         // window manager hands on as paths (and the new window's frame
         // turns back into handles).
-        const { path: _path, paths: _paths, ...clean } = (p ?? {}) as Record<string, unknown>;
-        const paths = (await Promise.all((handles ?? []).map(usableGrant))).map((g) => g.path);
+        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, ...clean } = (p ?? {}) as Record<string, unknown>;
+        const grants = await Promise.all((handles ?? []).map(usableGrant));
+        const paths = grants.map((g) => g.path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
+        // What this app could only read, the opened one can only read too.
+        const readOnlyPaths = grants.filter((g) => !g.writable).map((g) => g.path);
         // Who asked, which the opened app reads as `launch.opener`.
-        live.current.actions.open(target, { ...clean, ...files, opener: appId });
+        live.current.actions.open(target, { ...clean, ...files, ...(readOnlyPaths.length > 0 ? { readOnlyPaths } : {}), opener: appId });
       },
       'app.openFiles': async ({ handles }) => {
         for (const id of handles) {
@@ -875,6 +881,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           label: typeof label === 'string' ? label.slice(0, 200) : '',
           paths: grants.map((g) => g.path),
           folders: grants.length > 0 && grants.every((g) => g.kind === 'directory'),
+          // What it could only read, a target only copies.
+          copyOnly: grants.some((g) => !g.writable),
           onEnd: ({ dropped, operation }) => push({ type: 'dragEnd', token, dropped, operation }),
         });
         if (!ok) throw new Error('That drag token is taken');
@@ -926,7 +934,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // Without fs an app can only receive copies: it can't delete the
         // originals. Nor can it move what its source could only read.
         const op = permissions.includes('fs') ? (entry.accepted?.operation ?? operation) : 'copy';
-        return { kind: 'files', files: await grantPaths(entry.paths), operation: op };
+        return { kind: 'files', files: await grantPaths(entry.paths, !entry.copyOnly), operation: op };
       },
       'window.typed': ({ x, y, color }) => {
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -962,12 +970,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
             throw error;
           }
         }
-        return { files: await grantPaths(clip.paths), cut: clip.op === 'cut' };
+        return { files: await grantPaths(clip.paths, !clip.readOnly), cut: clip.op === 'cut' && !clip.readOnly };
       },
       'clipboard.writeFiles': async ({ handles, cut }) => {
         const grants = await Promise.all(handles.map(usableGrant));
         // Nothing to hold clears it, and leaves the text clipboard alone.
-        setFileClipboard(grants.length === 0 ? null : { op: cut ? 'cut' : 'copy', paths: grants.map((g) => g.path) });
+        // What it could only read, it can only copy.
+        const readOnly = grants.some((g) => !g.writable);
+        setFileClipboard(grants.length === 0 ? null : { op: cut && !readOnly ? 'cut' : 'copy', paths: grants.map((g) => g.path), readOnly });
       },
 
       // The page's `new Notification()`: its id is the page's own, so a
