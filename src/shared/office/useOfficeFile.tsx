@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { typesFromFilters, type Din, type DinFileHandle } from '@/sdk';
+import { typesFromFilters, type Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import type { FileFilter } from '@/lib/fileFilters';
 import { ACCENTS, type OfficeApp } from './accent';
 import { OfficeButton, OfficeDialog, type RecentFile } from './chrome';
+import { fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 512 * 1024 * 1024;
@@ -42,12 +43,13 @@ export function readRecent(app: OfficeApp): RecentFile[] {
   }
 }
 
-async function addRecent(din: Din, app: OfficeApp, handle: DinFileHandle): Promise<RecentFile[]> {
-  const token = readRecent(app).find((r) => r.key === handle.key)?.token ?? (await handle.persist());
+async function addRecent(din: Din, app: OfficeApp, handle: FileSystemFileHandle): Promise<RecentFile[]> {
+  const path = din.files.path(handle);
+  const token = readRecent(app).find((r) => r.path === path)?.token ?? (await din.files.persist(handle));
   // Read again after the await: another window may have changed the list meanwhile.
   const list = readRecent(app);
-  const entry = { token, key: handle.key, name: handle.name, path: handle.path, time: Date.now() };
-  const all = [entry, ...list.filter((r) => r.key !== handle.key)];
+  const entry = { token, key: path, name: handle.name, path, time: Date.now() };
+  const all = [entry, ...list.filter((r) => r.path !== path)];
   const next = all.slice(0, RECENT_MAX);
   localStorage.setItem(recentKey(app), JSON.stringify(next));
   for (const r of all.slice(RECENT_MAX)) din.files.release(r.token);
@@ -93,13 +95,13 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     optsRef.current = opts;
   });
 
-  const [initialFile] = useState<DinFileHandle | null>(() => din.app.launch.files[0] ?? null);
+  const [initialFile] = useState<FileSystemFileHandle | null>(() => windowLaunchFile());
   const [untitledName] = useState(() => {
     const n = (untitledCounters[app] ?? 0) + 1;
     untitledCounters[app] = n;
     return `${untitled}${n}`;
   });
-  const [handle, setHandle] = useState<DinFileHandle | null>(null);
+  const [handle, setHandle] = useState<FileSystemFileHandle | null>(null);
   const [dirty, setDirtyState] = useState(false);
   const [loading, setLoading] = useState(initialFile !== null);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   }, [app]);
 
   const remember = useCallback(
-    (target: DinFileHandle) => {
+    (target: FileSystemFileHandle) => {
       addRecent(din, app, target).then(setRecent, () => {});
     },
     [din, app],
@@ -143,7 +145,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   }, []);
 
   const load = useCallback(
-    (target: DinFileHandle) => {
+    (target: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       target
         .getFile()
@@ -175,12 +177,12 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   }, [initialFile, load]);
 
   const writeTo = useCallback(
-    async (target: DinFileHandle): Promise<boolean> => {
+    async (target: FileSystemFileHandle): Promise<boolean> => {
       setSaving(true);
       setStatus('Saving…');
       try {
         const bytes = await optsRef.current.onSave(target.name);
-        await target.write(bytes);
+        await writeFile(target, bytes);
         setHandle(target);
         setDirty(false);
         setError(null);
@@ -200,7 +202,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   const saveAs = useCallback(
     async (filterIndex = 0): Promise<boolean> => {
       const filter = saveTypes[filterIndex] ?? saveTypes[0];
-      const target = await din.files.save({
+      const target = await pickSaveFile({
         title: filterIndex === 0 ? 'Save As' : `Export as ${filter.name}`,
         suggestedName: `${docName}${filter.patterns[0].slice(1)}`,
         startIn: handle ?? undefined,
@@ -208,14 +210,14 @@ export function useOfficeFile(opts: OfficeFileOptions) {
       });
       return target ? writeTo(target) : false;
     },
-    [din, saveTypes, docName, handle, writeTo],
+    [saveTypes, docName, handle, writeTo],
   );
 
   /** Export writes a copy without making it this window's file. */
   const exportCopy = useCallback(
     async (filterIndex: number): Promise<boolean> => {
       const filter = saveTypes[filterIndex];
-      const target = await din.files.save({
+      const target = await pickSaveFile({
         title: `Export as ${filter.name}`,
         suggestedName: `${docName}${filter.patterns[0].slice(1)}`,
         startIn: handle ?? undefined,
@@ -224,7 +226,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
       if (!target) return false;
       try {
         const bytes = await optsRef.current.onSave(target.name);
-        await target.write(bytes);
+        await writeFile(target, bytes);
         setStatus(`Exported ${target.name}`);
         return true;
       } catch (err) {
@@ -232,15 +234,15 @@ export function useOfficeFile(opts: OfficeFileOptions) {
         return false;
       }
     },
-    [din, saveTypes, docName, handle],
+    [saveTypes, docName, handle],
   );
 
   const save = useCallback((): Promise<boolean> => (handle && !error ? writeTo(handle) : saveAs()), [handle, error, writeTo, saveAs]);
 
   /** Open a file here if this window holds nothing yet, otherwise in a new window. */
   const openFile = useCallback(
-    (target: DinFileHandle) => {
-      if (handle && target.key === handle.key && !error) return;
+    (target: FileSystemFileHandle) => {
+      if (handle && din.files.path(target) === din.files.path(handle) && !error) return;
       if (dirtyRef.current || handle) void din.app.open(din.app.id, {}, [target]);
       else {
         setLoading(true);
@@ -253,8 +255,9 @@ export function useOfficeFile(opts: OfficeFileOptions) {
 
   /** A Recent entry's file, or null (and the entry gone from the list) if it can't be found. */
   const restoreRecent = useCallback(
-    async (entry: RecentFile): Promise<DinFileHandle | null> => {
-      const target = await din.files.restore(entry.token).catch(() => null);
+    async (entry: RecentFile): Promise<FileSystemFileHandle | null> => {
+      const restored = await din.files.restore(entry.token).catch(() => null);
+      const target = restored?.kind === 'file' ? (restored as FileSystemFileHandle) : null;
       if (!target) {
         removeRecent(din, app, entry.key);
         setStatus(`Couldn’t find ${entry.name}. It may have been moved or deleted.`);
@@ -282,28 +285,28 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   );
 
   const browse = useCallback(async () => {
-    const [target] = await din.files.open({
+    const [target] = await pickFiles({
       title: 'Open',
-      types: [{ description: ACCENTS[app].files, extensions: openExtensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }],
+      types: fileTypes([{ description: ACCENTS[app].files, extensions: openExtensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }]),
       startIn: handle ?? undefined,
     });
     if (target) openFile(target);
-  }, [din, app, openExtensions, handle, openFile]);
+  }, [app, openExtensions, handle, openFile]);
 
   /** A file picked to put into the document (a picture), read whole. */
   const pickInsert = useCallback(
     async (title: string, extensions: string[]): Promise<{ bytes: Uint8Array; name: string } | null> => {
-      const [target] = await din.files.open({
+      const [target] = await pickFiles({
         title,
-        types: [{ description: 'Pictures', extensions: extensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }],
-        writable: false,
+        types: fileTypes([{ description: 'Pictures', extensions: extensions.map((e) => (e.startsWith('.') ? e : `.${e}`)) }]),
+        mode: 'read',
       });
       if (!target) return null;
       const blob = await target.getFile();
       if (blob.size > 64 * 1024 * 1024) throw new Error(`${target.name} is too big to insert (over 64 MB).`);
       return { bytes: new Uint8Array(await blob.arrayBuffer()), name: target.name };
     },
-    [din],
+    [],
   );
 
   // Closing with unsaved changes asks first.
@@ -358,6 +361,8 @@ export function useOfficeFile(opts: OfficeFileOptions) {
 
   return {
     handle,
+    /** Where the file is, to show; null until it is saved. */
+    path: handle ? din.files.path(handle) : null,
     name,
     docName,
     dirty,

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { cleanFsError } from '@/lib/fs';
-import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { typesFromFilters } from '@/sdk';
+import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import {
   Menubar,
@@ -223,7 +224,7 @@ function twinkle(s: Surface, x: number, y: number, c: Packed, big: boolean) {
 export function Paint() {
   const din = useDin();
   const params = din.app.launch.params;
-  const launchFile = din.app.launch.files[0] ?? null;
+  const [launchFile] = useState(windowLaunchFile);
 
   const [initial] = useState(() => ({
     width: num(params?.width, 640),
@@ -251,7 +252,7 @@ export function Paint() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [floatVersion, setFloatVersion] = useState(0);
   const [textBox, setTextBox] = useState<{ x: number; y: number; value: string } | null>(null);
-  const [file, setFile] = useState<DinFileHandle | null>(null);
+  const [file, setFile] = useState<FileSystemFileHandle | null>(null);
   const [docId, setDocId] = useState(0);
   const [savedId, setSavedId] = useState(0);
   const [history, setHistory] = useState({ undo: 0, redo: 0 });
@@ -1248,7 +1249,7 @@ export function Paint() {
   // ---- Files ------------------------------------------------------------------------
 
   const load = useCallback(
-    (target: DinFileHandle) => {
+    (target: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       target
         .getFile()
@@ -1301,10 +1302,10 @@ export function Paint() {
     if (launchFile) load(launchFile);
   }, [launchFile, load]);
 
-  const writeTo = async (target: DinFileHandle): Promise<boolean> => {
+  const writeTo = async (target: FileSystemFileHandle): Promise<boolean> => {
     settle();
     try {
-      await target.write(await encode(surf(), target.name));
+      await writeFile(target, await encode(surf(), target.name));
       setFile(target);
       setSavedId(idRef.current.current);
       setStatus('Saved');
@@ -1319,7 +1320,7 @@ export function Paint() {
 
   const saveAs = async (): Promise<boolean> => {
     const current = file && savesAs(file.name) ? file.name : `${file ? file.name.replace(/\.[^.]*$/, '') : 'untitled'}.png`;
-    const target = await din.files.save({
+    const target = await pickSaveFile({
       title: 'Save As',
       suggestedName: current,
       startIn: file ?? undefined,
@@ -1333,12 +1334,12 @@ export function Paint() {
     return writeTo(target);
   };
 
-  const save = (): Promise<boolean> => (file && file.writable && savesAs(file.name) ? writeTo(file) : saveAs());
+  const save = async (): Promise<boolean> => (file && savesAs(file.name) && (await canWrite(file)) ? writeTo(file) : saveAs());
 
   const pick = async (title: string) =>
-    (await din.files.open({
+    (await pickFiles({
       title,
-      types: [{ description: 'Pictures', extensions: OPEN_EXTENSIONS }],
+      types: fileTypes([{ description: 'Pictures', extensions: OPEN_EXTENSIONS }]),
       startIn: file ?? undefined,
     }))[0] ?? null;
 

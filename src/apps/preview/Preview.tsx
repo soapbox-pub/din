@@ -10,6 +10,7 @@ import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
 import { useDin, useWindowIcon, useWindowTitle } from '@/sdk/react';
 import { FileViewerBody } from '@/shared/FileViewerBody';
+import { onLaunchFiles, windowLaunchFiles } from '@/shared/fileHandles';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
 
@@ -30,13 +31,14 @@ async function openWith(din: Din, appId: string, path: string, params: Record<st
  */
 export function Preview() {
   const din = useDin();
-  const [path, setPath] = useState(() => din.app.launch.files[0]?.path ?? null);
+  const [path, setPath] = useState(() => {
+    const [file] = windowLaunchFiles();
+    return file ? din.files.path(file) : null;
+  });
   const [dirty, setDirty] = useState(false);
 
   // A new file asked of this window.
-  useEffect(() => din.app.onLaunch(({ files }) => {
-    if (files[0]?.path) setPath(files[0].path);
-  }), [din]);
+  useEffect(() => onLaunchFiles(([file]) => setPath(din.files.path(file))), [din]);
 
   const name = path ? path.slice(path.lastIndexOf('/') + 1) : '';
   useWindowTitle(path ? `${dirty ? '• ' : ''}${name}` : null);

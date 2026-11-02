@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { writeFile } from '@/shared/fileHandles';
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -407,7 +408,7 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
           onSelect={async () => {
             const target = await pickSave({ title: 'Save EQ Preset', suggestedName: 'Preset.eqf', types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
             if (!target) return;
-            await target.write(writeEqf([{ name: target.name.replace(/\.eqf$/i, ''), preamp, bands }]));
+            await writeFile(target, writeEqf([{ name: target.name.replace(/\.eqf$/i, ''), preamp, bands }]));
           }}
         >
           Save to EQF File…

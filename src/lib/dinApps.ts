@@ -277,7 +277,7 @@ export async function recentFilesToMigrate(
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** A stable, opaque key for a path, per app (DinFileHandle.key). */
+/** A stable, opaque key for a path, per app (a grant's key, which isSameEntry compares). */
 export function appKeyOf(appId: string, path: string): string {
   let h = 5381;
   for (const c of `${appId}\u0000${path}`) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0;

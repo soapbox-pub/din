@@ -1429,7 +1429,7 @@ export function WordProcessor() {
             void file.saveAs();
           }}
           onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
-          path={file.handle?.path ?? null}
+          path={file.path ?? null}
           onPrint={
             canPrint
               ? () => {
@@ -1442,7 +1442,7 @@ export function WordProcessor() {
             <div className="max-w-lg space-y-2 text-[13px]">
               <p>
                 <span className="text-[#616161]">Location: </span>
-                {file.handle?.path ?? 'Not saved yet'}
+                {file.path ?? 'Not saved yet'}
               </p>
               <p>
                 <span className="text-[#616161]">Pages: </span>

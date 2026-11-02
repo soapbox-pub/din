@@ -1,4 +1,5 @@
-import type { Din, DinFileHandle, OpenFileOptions, SaveFileOptions } from '@/sdk';
+import type { Din, StartIn } from '@/sdk';
+import { fileTypes, pickFiles as pick, pickFolder, pickSaveFile, type FileTypeFilter } from '@/shared/fileHandles';
 import { parentPath } from '@/lib/fs';
 import { adopt, handleFor } from './grants';
 
@@ -13,25 +14,39 @@ function din(): Din {
   return window.din;
 }
 
-/** Din's file picker; what was chosen (and is now reachable by path), or nothing if cancelled. */
-export async function pickFiles(options: OpenFileOptions): Promise<DinFileHandle[]> {
-  const handles = await din().files.open({ writable: false, ...options });
+interface PickOptions {
+  title: string;
+  types?: FileTypeFilter[];
+  multiple?: boolean;
+  /** A folder instead of files. */
+  directory?: boolean;
+  confirmLabel?: string;
+  startIn?: StartIn;
+}
+
+/** Din's file picker, to read; what was chosen (and is now reachable by path), or nothing if cancelled. */
+export async function pickFiles(options: PickOptions & { directory?: false }): Promise<FileSystemFileHandle[]>;
+export async function pickFiles(options: PickOptions): Promise<FileSystemHandle[]>;
+export async function pickFiles({ types, directory, ...options }: PickOptions): Promise<FileSystemHandle[]> {
+  const handles: FileSystemHandle[] = directory
+    ? [await pickFolder(options)].filter((h) => h !== null)
+    : await pick({ ...options, mode: 'read', types: types && fileTypes(types) });
   await adopt(handles);
   return handles;
 }
 
 /** Din's file picker; the paths chosen, or none if cancelled. */
-export async function pickPaths(options: OpenFileOptions): Promise<string[]> {
-  return (await pickFiles(options)).map((h) => h.path);
+export async function pickPaths(options: PickOptions): Promise<string[]> {
+  return (await pickFiles(options)).map((h) => din().files.path(h));
 }
 
 /** Din's save dialog: a handle to write, with the chosen type's extension, or null. */
-export function pickSave(options: SaveFileOptions): Promise<DinFileHandle | null> {
-  return din().files.save(options);
+export function pickSave({ types, ...options }: { title: string; suggestedName?: string; types?: FileTypeFilter[]; startIn?: StartIn }): Promise<FileSystemFileHandle | null> {
+  return pickSaveFile({ ...options, types: types && fileTypes(types) });
 }
 
 /** A folder of home's as a picker's start: a handle when the player reaches it, else the named folder. */
-export async function startFolder(path: string, named: NonNullable<OpenFileOptions['startIn']>): Promise<NonNullable<OpenFileOptions['startIn']>> {
+export async function startFolder(path: string, named: Exclude<StartIn, FileSystemHandle>): Promise<StartIn> {
   return handleFor(path) ?? (await din().files.fromPath(path).catch(() => null)) ?? named;
 }
 

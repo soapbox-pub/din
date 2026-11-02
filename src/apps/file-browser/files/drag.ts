@@ -10,7 +10,6 @@
  * until it's dropped and its files arrive as handles.
  */
 
-import type { DinFileHandle } from '@/sdk';
 import { DRAG_MIME } from '@/sdk';
 import { broadcastDrag, otherWindowDrag } from './windows';
 
@@ -97,10 +96,9 @@ export async function takeDrop(e: React.DragEvent, copy: boolean): Promise<Dropp
   if (!din) return null;
   const result = await din.drag.accept(e.nativeEvent, copy ? 'copy' : 'move');
   if (result?.kind !== 'files') return null;
-  const withPaths = result.files.filter((f): f is DinFileHandle & { path: string } => f.path !== null);
   return {
-    paths: withPaths.map((f) => f.path),
-    folders: withPaths.filter((f) => f.kind === 'directory').map((f) => f.path),
+    paths: result.files.map((f) => din.files.path(f)),
+    folders: result.files.filter((f) => f.kind === 'directory').map((f) => din.files.path(f)),
     copy: result.operation !== 'move',
   };
 }

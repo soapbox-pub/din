@@ -34,7 +34,7 @@ import {
 import { cn } from '@/lib/utils';
 import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
 import { invalidateListings } from '@/hooks/useFileSystem';
-import type { Din, DinFileHandle } from '@/sdk';
+import type { Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
@@ -59,6 +59,7 @@ import {
   type EditorPrefs,
 } from './code/setup';
 import { useIsDark } from '@/hooks/useIsDark';
+import { pickFiles, pickFolder, pickSaveFile, windowLaunchFiles } from '@/shared/fileHandles';
 
 /** Bigger files than this aren't opened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -103,7 +104,7 @@ const isWorkspace = (v: unknown): v is Workspace => {
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 
 /** A handle to start Din's file picker in, for a folder the editor knows by path. */
-async function startIn(din: Din, dir: string | null | undefined): Promise<DinFileHandle | undefined> {
+async function startIn(din: Din, dir: string | null | undefined): Promise<FileSystemHandle | undefined> {
   return dir ? din.files.fromPath(dir).catch(() => undefined) : undefined;
 }
 
@@ -214,11 +215,12 @@ type Asking = { kind: 'tab'; id: string } | { kind: 'window' } | null;
 export function TextEditor() {
   const din = useDin();
   const params = din.app.launch.params;
-  const launchFiles = din.app.launch.files;
-  const initialPaths = launchFiles.flatMap((f) => (f.kind === 'file' && f.path ? [f.path] : []));
-  const launchFolder = launchFiles.find((f) => f.kind === 'directory')?.path ?? null;
+  const launchFiles = windowLaunchFiles();
+  const initialPaths = launchFiles.flatMap((f) => (f.kind === 'file' ? [din.files.path(f)] : []));
+  const launchFolder = launchFiles.find((f) => f.kind === 'directory');
+  const launchFolderPath = launchFolder ? din.files.path(launchFolder) : null;
   const initialPath = initialPaths[0] ?? null;
-  const initialFolder = typeof params.folder === 'string' ? params.folder : launchFolder;
+  const initialFolder = typeof params.folder === 'string' ? params.folder : launchFolderPath;
   const fs = getFsBridge();
   const queryClient = useQueryClient();
   const dark = useIsDark();
@@ -482,12 +484,12 @@ export function TextEditor() {
   }, [fs, activeId, addTab, patchTab, makeState, detectLanguage, applyReveal, stateOf]);
 
   const openFileDialog = useCallback(async () => {
-    const files = await din.files.open({
+    const files = await pickFiles({
       title: 'Open',
       multiple: true,
       startIn: await startIn(din, activeTab?.path ? parentPath(activeTab.path) : folder),
     });
-    for (const file of files) if (file.path) await openPath(file.path);
+    for (const file of files) await openPath(din.files.path(file));
   }, [din, activeTab, folder, openPath]);
 
   const openFolder = useCallback((path: string) => {
@@ -499,12 +501,11 @@ export function TextEditor() {
   }, []);
 
   const openFolderDialog = useCallback(async () => {
-    const [dir] = await din.files.open({
+    const dir = await pickFolder({
       title: 'Open Folder',
-      directory: true,
       startIn: await startIn(din, folder ? parentPath(folder) : null),
     });
-    if (dir?.path) openFolder(dir.path);
+    if (dir) openFolder(din.files.path(dir));
   }, [din, folder, openFolder]);
 
   const saveTab = useCallback(async (id: string, as = false): Promise<boolean> => {
@@ -513,13 +514,13 @@ export function TextEditor() {
     if (!fs || !tab || !state || tab.loading) return false;
     let target = tab.path;
     if (as || !target || tab.error) {
-      const handle = await din.files.save({
+      const handle = await pickSaveFile({
         title: 'Save As',
         suggestedName: tab.path ? basename(tab.path) : `Untitled-${tab.untitled}.txt`,
         startIn: await startIn(din, tab.path ? parentPath(tab.path) : folder),
       });
-      if (!handle?.path) return false;
-      target = handle.path;
+      if (!handle) return false;
+      target = din.files.path(handle);
     }
     const doc = stateOf(id)!.doc;
     setSaving(true);

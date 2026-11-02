@@ -52,7 +52,7 @@ export async function keepLinks(din: Din, doc: string, docDir: string, paths: st
   for (const path of want) {
     if (read()[path]) continue;
     try {
-      fresh.set(path, await (await din.files.fromPath(path)).persist());
+      fresh.set(path, await din.files.persist(await din.files.fromPath(path)));
     } catch {
       // Gone, or out of reach: nothing to keep.
     }

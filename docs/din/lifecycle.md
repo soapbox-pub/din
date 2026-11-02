@@ -13,13 +13,15 @@ and the app's code starts with everything in place:
 
 ```ts
 await din.ready;  // window.din is Din's; ready resolves after the desktop's hello
-const { reason, params, files, shortcut, state, opener } = din.app.launch;
+const { reason, params, shortcut, state, opener } = din.app.launch;
+launchQueue.setConsumer(({ files }) => {   // the web's: the files it was opened with
+  for (const handle of files) open(handle);
+});
 ```
 
 | Field | |
 |---|---|
 | `params` | What `din.app.open(id, params)` or a shortcut passed: `{ width, height }` for Paint's File > New |
-| `files` | Files the app was opened with, already granted: from Files, a drop on the Dock tile, Open With |
 | `shortcut` | The manifest shortcut's `din.id`, for Dock and launcher jump lists |
 | `reason` | `new`, `relaunch` for `onLaunch` below, or `restore` when Din reopened the window on starting again |
 | `state` | What the window last gave `din.app.saveState`, on `restore` (and on **Reopen** after a crash); else null |
@@ -29,7 +31,24 @@ Launch params are structured-cloneable data. Paths an app puts in
 `din.app.open` params are dropped: files travel as handles. On the
 desktop's side, though, Files and the rest still open apps with
 `{ path }` or `{ paths }` params, which `DinAppFrame` turns into granted
-handles in `files` (and leaves out of `params`).
+handles for the launch's files (and leaves out of `params`).
+
+### The files: `launchQueue`
+
+The files a window is opened with (from Files, a drop on the Dock tile,
+Open With, `din.app.open(id, params, handles)`), already granted, come as
+the web's Launch Handling has them: `launchQueue`'s consumer hears this
+window's launch, then each launch after it, with `targetURL` the page's
+own and `files` the launch's handles ([files.md](files.md)). Launches
+that come before there's a consumer wait for it. Every launch is heard,
+with no files too.
+
+`startApp` waits for the window's own launch before the app first
+renders, so `windowLaunchFile()` and `windowLaunchFiles()` from
+`src/shared/fileHandles.ts` have its files at once, to start with the
+document; `useLaunchFiles(cb)` and `onLaunchFiles(cb)` hear the launches
+after it. They're the page's one consumer: an app uses them or
+`launchQueue` itself, not both.
 
 ### Single-instance apps
 
@@ -38,28 +57,13 @@ manifest, launching a running app focuses its window and calls
 `onLaunch` there instead of opening a new one:
 
 ```ts
-din.app.onLaunch(({ params, files, shortcut }) => {
+din.app.onLaunch(({ params, shortcut }) => {
   if (shortcut === 'mini') showMini();
-  for (const f of files) enqueue(f);
 });
+onLaunchFiles((files) => files.forEach(enqueue));   // or launchQueue's consumer
 ```
 
 This replaces today's `actionAt` timestamps on dock action params.
-
-### The web's `launchQueue`
-
-A page written for the web's Launch Handling and File Handling gets the
-same launches through `launchQueue`: the consumer hears this window's
-launch once the desktop's hello is in, then each `onLaunch` after it,
-with `targetURL` the page's own and `files` the launch's files as
-FileSystemHandles ([files.md](files.md#the-webs-file-system-access)).
-Params, shortcuts and state have no counterpart there.
-
-```ts
-launchQueue.setConsumer(async ({ files }) => {
-  for (const handle of files) open(await handle.getFile(), handle);
-});
-```
 
 ### Restoring after a restart
 

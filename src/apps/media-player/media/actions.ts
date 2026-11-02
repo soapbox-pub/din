@@ -1,6 +1,5 @@
 import { extensionOf } from '@/lib/fileTypes';
 import { cleanFsError, getFsBridge, joinPath, sortEntries } from '@/lib/fs';
-import type { DinFileHandle } from '@/sdk';
 import { makeTrack, player, type Track } from './engine';
 import { adopt, grantsReady, handleFor, homeDir, reachPlaylistSongs, readLocal } from './grants';
 import { isPlayableMedia } from './metadata';
@@ -120,7 +119,7 @@ export async function openPaths(paths: string[], how: 'play' | 'enqueue' | 'next
 }
 
 /** Open files the user handed over (picked, dropped, launched with). */
-export async function openHandles(handles: readonly DinFileHandle[], how: 'play' | 'enqueue' | 'next' = 'play'): Promise<string | null> {
+export async function openHandles(handles: readonly FileSystemHandle[], how: 'play' | 'enqueue' | 'next' = 'play'): Promise<string | null> {
   if (handles.length === 0) return null;
   return openPaths(await adopt(handles), how);
 }

@@ -2435,7 +2435,7 @@ export function Spreadsheet() {
               <p className="flex items-center gap-2 text-[15px] font-semibold">
                 <FileSpreadsheet className="size-5 text-[#107c41]" /> {file.name}
               </p>
-              <p className="text-[#616161]">{file.handle?.path ?? 'Not saved yet'}</p>
+              <p className="text-[#616161]">{file.path ?? 'Not saved yet'}</p>
               <table className="text-[13px]">
                 <tbody>
                   <tr>
@@ -2465,7 +2465,7 @@ export function Spreadsheet() {
             { label: 'Save a copy as OpenDocument Spreadsheet', description: 'An .ods copy for LibreOffice Calc and other OpenDocument apps.', icon: <FileSpreadsheet />, onClick: () => (setBackstage(null), void file.exportCopy(SAVE_ODS)) },
           ]}
           onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
-          path={file.handle?.path ?? null}
+          path={file.path ?? null}
         />
       )}
       {file.prompt}

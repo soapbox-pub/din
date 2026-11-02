@@ -26,7 +26,6 @@ import type {
   DinDictation,
   DinDrag,
   DictationStatus,
-  DinFileHandle,
   DinFiles,
   DinMenus,
   DinPermissions,
@@ -60,7 +59,7 @@ import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
-import { bridgeMediaSession, dinHandleOf, installFilePickers, installLaunchQueue, toWebHandle, watchDocumentHead } from '@/sdk/standards';
+import { bridgeMediaSession, grantOf, installFilePickers, installLaunchQueue, toWebHandle, watchDocumentHead, type Grant } from '@/sdk/standards';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
 export interface Transport {
@@ -356,14 +355,18 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'fileChange') fileListeners.get(p.handle)?.emit(p.change);
   });
-  const handleIds = new WeakMap<DinFileHandle, string>();
-  const idOf = (file: DinFileHandle): string => {
-    const id = handleIds.get(file);
-    if (!id) throw new TypeError('Not a Din file handle');
-    return id;
+  const idOf = (file: FileSystemHandle): string => {
+    const grant = grantOf(file);
+    if (!grant) throw new TypeError('Not a file handle Din granted');
+    return grant.id;
   };
-  function wrap(data: HandleData): DinFileHandle {
-    const handle: DinFileHandle = {
+  const grantFor = (file: FileSystemHandle): Grant => {
+    idOf(file);
+    return grantOf(file)!;
+  };
+  function grant(data: HandleData): Grant {
+    return {
+      id: data.id,
       kind: data.kind,
       name: data.name,
       key: data.key,
@@ -381,38 +384,24 @@ export function installDin(transport: Transport): void {
         else payload = new Uint8Array(content.buffer, content.byteOffset, content.byteLength).slice().buffer;
         await request('files.write', { handle: data.id, data: payload });
       },
-      onChange(cb) {
-        let emitter = fileListeners.get(data.id);
-        if (!emitter) {
-          fileListeners.set(data.id, (emitter = new Emitter()));
-          tell('files.watch', { handle: data.id });
-        }
-        const off = emitter.on(cb);
-        return () => {
-          off();
-        };
-      },
-      persist: () => request('files.persist', { handle: data.id }),
-      parent: async () => {
-        const p = await request('files.parent', { handle: data.id });
-        return p ? wrap(p) : null;
-      },
-      url: () => request('files.url', { handle: data.id }),
+      entries: async () => (data.kind === 'directory' ? (await request('files.entries', { handle: data.id })).map(grant) : []),
     };
-    if (data.kind === 'directory') {
-      handle.entries = async () => (await request('files.entries', { handle: data.id })).map(wrap);
-    }
-    handleIds.set(handle, data.id);
-    return handle;
   }
-  const launchOf = (l: Hello['launch']): LaunchContext => ({ ...l, files: l.files.map(wrap) });
+  const wrap = (data: HandleData): FileSystemHandle => toWebHandle(grant(data)) as unknown as FileSystemHandle;
+  const launchFiles = installLaunchQueue();
+  /** A launch: the context first, so `launchQueue`'s consumer reads this one's params. */
+  const launched = (l: Hello['launch']) => {
+    const { files, ...rest } = l;
+    launch = rest;
+    launchFiles(files.map(grant));
+  };
 
   // ---- app ----
   const launches = new Emitter<LaunchContext>();
-  let launch: LaunchContext = { reason: 'new', params: {}, files: [], shortcut: null, state: null, opener: null };
+  let launch: LaunchContext = { reason: 'new', params: {}, shortcut: null, state: null, opener: null };
   pushes.on((p) => {
     if (p.type === 'launch') {
-      launch = launchOf(p.launch);
+      launched(p.launch);
       launches.emit(launch);
     }
   });
@@ -585,19 +574,34 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- files ----
+  const withHandle = <T extends { startInHandle?: Grant }>(options: T) => {
+    const { startInHandle, ...rest } = options;
+    return { ...rest, startInHandle: startInHandle?.id };
+  };
+  installFilePickers({
+    open: async (options) => (await request('files.open', withHandle(options))).map(grant),
+    save: async (options) => {
+      const result = await request('files.save', withHandle(options));
+      return result ? grant(result) : null;
+    },
+  });
   const files: DinFiles = {
-    open: async (options = {}) => {
-      const { startIn, ...rest } = options;
-      const startInHandle = startIn && typeof startIn === 'object' ? idOf(startIn) : undefined;
-      const result = await request('files.open', { ...rest, startIn: typeof startIn === 'string' ? startIn : undefined, startInHandle });
-      return result.map(wrap);
+    path: (handle) => grantFor(handle).path,
+    url: (handle) => request('files.url', { handle: idOf(handle) }),
+    watch(handle, cb) {
+      const id = idOf(handle);
+      let emitter = fileListeners.get(id);
+      if (!emitter) {
+        fileListeners.set(id, (emitter = new Emitter()));
+        tell('files.watch', { handle: id });
+      }
+      return emitter.on(cb);
     },
-    save: async (options = {}) => {
-      const { startIn, ...rest } = options;
-      const startInHandle = startIn && typeof startIn === 'object' ? idOf(startIn) : undefined;
-      const result = await request('files.save', { ...rest, startIn: typeof startIn === 'string' ? startIn : undefined, startInHandle });
-      return result ? wrap(result) : null;
+    parent: async (handle) => {
+      const p = await request('files.parent', { handle: idOf(handle) });
+      return p ? (wrap(p) as FileSystemDirectoryHandle) : null;
     },
+    persist: (handle) => request('files.persist', { handle: idOf(handle) }),
     restore: async (token) => {
       const result = await request('files.restore', { token });
       return result ? wrap(result) : null;
@@ -608,11 +612,6 @@ export function installDin(transport: Transport): void {
       return wrap(await request('files.fromPath', { path }));
     },
     release: (token) => tell('files.release', { token }),
-    fromWebHandle: (handle) => dinHandleOf(handle),
-    toWebHandle: (file) => {
-      idOf(file);
-      return toWebHandle(file) as unknown as FileSystemHandle;
-    },
     requestAccess: async (paths, reason) => (await request('files.requestAccess', { paths, reason })).map(wrap),
     pathUrl: (path) => {
       needFs();
@@ -923,8 +922,6 @@ export function installDin(transport: Transport): void {
     system,
   };
   Object.defineProperty(window, 'din', { value: din, configurable: false, writable: false, enumerable: true });
-  installFilePickers(files);
-  installLaunchQueue(app, ready.then(() => launch));
 
   // ---- power mode: where the caret is as keys are typed, while it's on ----
   let powerMode = false;
@@ -973,7 +970,7 @@ export function installDin(transport: Transport): void {
     }
 
     for (const p of hello.permissions) permissions.add(p);
-    launch = launchOf(hello.launch);
+    launched(hello.launch);
     state = hello.state;
     frameStyle = hello.frameStyle;
     themeSnapshot = hello.theme;

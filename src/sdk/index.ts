@@ -3,7 +3,7 @@
  * window.din in every app it hosts (src/sdk/runtime.ts); this module only
  * reads it: `connect()` waits for `din.ready` and returns it.
  */
-import type { Din } from '@/sdk/din';
+import type { Din, PickerOptions } from '@/sdk/din';
 
 export type * from '@/sdk/din';
 
@@ -28,10 +28,10 @@ export class DinPermissionError extends Error {
  * File types as the desktop's `FileFilter` lists name them (`{ name,
  * patterns: ['*.png'] }`), for apps that already have such lists.
  */
-export function typesFromFilters(filters: readonly { name: string; patterns: readonly string[] }[]): { description: string; extensions: string[] }[] {
+export function typesFromFilters(filters: readonly { name: string; patterns: readonly string[] }[]): NonNullable<PickerOptions['types']> {
   return filters.map((f) => ({
     description: f.name,
-    extensions: f.patterns.filter((p) => p.startsWith('*.')).map((p) => p.slice(1)),
+    accept: { 'application/octet-stream': f.patterns.filter((p) => p.startsWith('*.')).map((p) => p.slice(1)) },
   }));
 }
 

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
-import type { Din, DinFileHandle } from '@/sdk';
+import type { Din } from '@/sdk';
+import { pickFiles, pickFolder } from '@/shared/fileHandles';
 import { useDin } from '@/sdk/react';
 import { useAssistantEventSync } from '@/hooks/useAssistant';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
 
-async function startIn(din: Din, path: string | undefined): Promise<DinFileHandle | undefined> {
+async function startIn(din: Din, path: string | undefined): Promise<FileSystemHandle | undefined> {
   return path ? din.files.fromPath(path).catch(() => undefined) : undefined;
 }
 
@@ -78,12 +79,12 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
           .fromPath(parentOf(path))
           .then((folder) => din.app.open('file-browser', { select: path.slice(path.lastIndexOf('/') + 1) }, [folder])),
       pickFiles: async ({ title }) => {
-        const picked = await din.files.open({ title, multiple: true, writable: false });
-        return picked.map((handle) => handle.path);
+        const picked = await pickFiles({ title, multiple: true, mode: 'read' });
+        return picked.map((handle) => din.files.path(handle));
       },
       pickFolder: async ({ title, initialPath }) => {
-        const [picked] = await din.files.open({ title, directory: true, writable: false, startIn: await startIn(din, initialPath) });
-        return picked?.path ?? null;
+        const picked = await pickFolder({ title, startIn: await startIn(din, initialPath) });
+        return picked ? din.files.path(picked) : null;
       },
       notify: ({ title, description }) => din.toast(title, { body: description }),
       useDictation: (ref) => useAppDictation(din, ref),

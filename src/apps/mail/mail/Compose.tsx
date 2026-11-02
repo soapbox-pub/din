@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { Bold, ChevronDown, Italic, List, ListOrdered, Loader2, Paperclip, Quote, Send, Strikethrough, Underline, X } from 'lucide-react';
 import { useDin, useCloseGuard, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { DialogButton, Overlay } from '@/shared/dialogs';
+import { pickFiles } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
 import type { MailAccount, MailAddress, MailAttachment, OutgoingMessage } from '@/lib/mail';
 import { useAccounts, useMail } from './api';
@@ -308,14 +309,14 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   }, [mail, seed.forwardFrom]);
 
   const attach = useCallback(async () => {
-    const handles = await din.files.open({ title: 'Attach Files', multiple: true, writable: false, confirmLabel: 'Attach' });
+    const handles = await pickFiles({ title: 'Attach Files', multiple: true, mode: 'read', confirmLabel: 'Attach' });
     for (const h of handles) {
       const file = await h.getFile();
       const content = new Uint8Array(await file.arrayBuffer());
       setAttached((list) => [...list, { id: crypto.randomUUID(), name: h.name, size: content.byteLength, file: { filename: h.name, contentType: file.type || 'application/octet-stream', content } }]);
       setDirty(true);
     }
-  }, [din]);
+  }, []);
 
   const message = useCallback((): OutgoingMessage => {
     const html = editor?.getHTML() ?? '';

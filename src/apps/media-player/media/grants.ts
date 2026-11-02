@@ -1,4 +1,4 @@
-import { connect, type Din, type DinFileHandle } from '@/sdk';
+import { connect, type Din } from '@/sdk';
 import { fileUrl, getFsBridge, joinPath } from '@/lib/fs';
 import { isPlaylistFile } from './playlists';
 
@@ -25,7 +25,10 @@ const OWN_FOLDERS = ['Music', 'Videos', '.local/share/din/skins', '.local/share/
 
 export type GrantUser = 'queue' | 'library' | 'playlists';
 
-const handles = new Map<string, DinFileHandle>();
+const handles = new Map<string, FileSystemHandle>();
+
+/** Where a handle's file is. */
+const pathOf = (handle: FileSystemHandle): string => window.din!.files.path(handle);
 /** Persist tokens by user, then by path. */
 let tokens: Partial<Record<GrantUser, Record<string, string>>> = {};
 let ownRoots: string[] = [];
@@ -112,7 +115,7 @@ async function reachSavedState(din: Din, home: string, lost: string[]) {
     const granted = await din.files
       .requestAccess(wanted, 'Media Player can’t reach some songs and folders it played before. Allow it to reach them again?')
       .catch(() => []);
-    for (const handle of granted) handles.set(handle.path, handle);
+    for (const handle of granted) handles.set(pathOf(handle), handle);
     for (const p of wanted) if (!handles.has(p)) asked.add(p);
   }
   try {
@@ -140,18 +143,18 @@ export function inOwnFolders(path: string): boolean {
  * Take files the user handed over. A playlist's folder comes along, so the
  * songs it names beside it (and below) are reached by path.
  */
-export async function adopt(given: readonly DinFileHandle[]): Promise<string[]> {
+export async function adopt(given: readonly FileSystemHandle[]): Promise<string[]> {
   await Promise.all(given.map(async (handle) => {
-    handles.set(handle.path, handle);
+    handles.set(pathOf(handle), handle);
     if (handle.kind !== 'file' || !isPlaylistFile(handle.name)) return;
-    const folder = await handle.parent().catch(() => null);
-    if (folder && !handles.has(folder.path)) handles.set(folder.path, folder);
+    const folder = await window.din!.files.parent(handle).catch(() => null);
+    if (folder && !handles.has(pathOf(folder))) handles.set(pathOf(folder), folder);
   }));
-  return given.map((h) => h.path);
+  return given.map(pathOf);
 }
 
 /** The handle for exactly this path, if the user handed it over. */
-export function handleFor(path: string): DinFileHandle | null {
+export function handleFor(path: string): FileSystemHandle | null {
   return handles.get(path) ?? null;
 }
 
@@ -176,21 +179,21 @@ export async function reachPlaylistSongs(playlist: string, locations: string[]):
   if (wanted.length === 0) return;
   const name = playlist.slice(playlist.lastIndexOf('/') + 1);
   const granted = await din.files.requestAccess(wanted, `${name} lists songs in other folders.`).catch(() => []);
-  for (const handle of granted) handles.set(handle.path, handle);
+  for (const handle of granted) handles.set(pathOf(handle), handle);
 }
 
 /** A URL to load a local file from: its handle's, or by path in a folder the player reaches. */
 export async function localUrl(path: string): Promise<string> {
   await grantsReady();
   const handle = handles.get(path);
-  return handle ? handle.url() : fileUrl(path);
+  return handle?.kind === 'file' ? window.din!.files.url(handle as FileSystemFileHandle) : fileUrl(path);
 }
 
 /** A local file's bytes: through its handle, or by path. */
 export async function readLocal(path: string, maxBytes: number): Promise<Uint8Array> {
   await grantsReady();
   const handle = handles.get(path);
-  if (handle && handle.kind === 'file') return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+  if (handle?.kind === 'file') return new Uint8Array(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer());
   const fs = getFsBridge();
   if (!fs) throw new Error('Files are only available inside Din');
   return (await fs.readFile(path, maxBytes)).data;
@@ -218,7 +221,8 @@ export function keepFor(user: GrantUser, locations: Iterable<string>): Promise<v
     let changed = false;
     for (const path of needed) {
       if (kept[path]) continue;
-      const token = await handles.get(path)?.persist().catch(() => null);
+      const handle = handles.get(path);
+      const token = handle && (await din.files.persist(handle).catch(() => null));
       if (!token) continue;
       kept[path] = token;
       changed = true;

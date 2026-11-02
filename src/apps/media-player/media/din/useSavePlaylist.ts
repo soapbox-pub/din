@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { getFsBridge, joinPath } from '@/lib/fs';
-import type { FileTypeFilter } from '@/sdk';
+import { writeFile, type FileTypeFilter } from '@/shared/fileHandles';
 import { pickSave, startFolder } from '../host';
 import { playlistText } from '../actions';
 import type { Track } from '../engine';
@@ -31,10 +31,11 @@ export function useSavePlaylist(): (tracks: Track[]) => Promise<string | null> {
         types: SAVE_TYPES,
       });
       if (!target) return null;
-      await target.write(playlistText(target.path, tracks));
-      rememberPlaylist(target.path, tracks.map((t) => t.location));
+      const path = window.din!.files.path(target);
+      await writeFile(target, playlistText(path, tracks));
+      rememberPlaylist(path, tracks.map((t) => t.location));
       void library.scan();
-      return target.path;
+      return path;
     },
     [],
   );

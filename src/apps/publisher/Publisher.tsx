@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, FilePlus, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
-import { type DinFileHandle } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import { looksLikePub, readPub } from './publisher/pub';
 import { rasterizeMetafile } from './publisher/pub/raster';
@@ -45,6 +44,7 @@ import * as text from './publisher/text';
 import { Toolbar } from './publisher/toolbar';
 import { TOOL_GROUPS, toolByCode, type ToolId } from './publisher/tools';
 import { fmtLength, nudgeStep, rulerSteps, unitLabel } from './publisher/units';
+import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 1024 * 1024 * 1024;
@@ -134,7 +134,7 @@ const zoomStep = (z: number, dir: 1 | -1) => (dir > 0 ? (ZOOMS.find((s) => s > z
 export function Publisher() {
   const din = useDin();
   const params = din.app.launch.params;
-  const initial = din.app.launch.files[0] ?? null;
+  const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState<Settings>(readSettings);
   const { panels } = settings;
@@ -148,7 +148,7 @@ export function Publisher() {
   });
   const [hist, setHist] = useState<Hist | null>(() => (boot ? { entries: [boot], index: 0 } : null));
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot);
-  const [file, setFile] = useState<DinFileHandle | null>(null);
+  const [file, setFile] = useState<FileSystemFileHandle | null>(null);
   const [docName, setDocName] = useState('Untitled-1');
   const [converted, setConverted] = useState<Converted>(null);
   const [loading, setLoading] = useState(initial !== null);
@@ -695,7 +695,7 @@ export function Publisher() {
   );
 
   const startDoc = useCallback(
-    (p: Pkg, name: string, f: DinFileHandle | null, from: Converted, previews: Map<string, Uint8Array>) => {
+    (p: Pkg, name: string, f: FileSystemFileHandle | null, from: Converted, previews: Map<string, Uint8Array>) => {
       const m0 = buildModel(p);
       const entry: Entry = { label: f ? 'Open' : 'New', pkg: p, sel: [], direct: null };
       previewsRef.current = previews;
@@ -705,7 +705,7 @@ export function Publisher() {
           setImagesVersion((v) => v + 1);
         },
         previews,
-        f?.path ? parentPath(f.path) : null,
+        f ? parentPath(din.files.path(f)) : null,
         (path) => reachLink(din, path),
       );
       imagesRef.current = store;
@@ -737,7 +737,7 @@ export function Publisher() {
   // ---- Files ------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (f: DinFileHandle) => {
+    (f: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
@@ -790,20 +790,20 @@ export function Publisher() {
   }, [dialog, typing]);
 
   const writeTo = useCallback(
-    async (f: DinFileHandle): Promise<boolean> => {
+    async (f: FileSystemFileHandle): Promise<boolean> => {
       if (!hist) return false;
       const entry = hist.entries[hist.index];
       setBusy(true);
       setStatus('Saving…');
       try {
         await new Promise((r) => setTimeout(r, 30));
-        await f.write(writePackage(entry.pkg));
+        await writeFile(f, writePackage(entry.pkg));
         const linked: string[] = [];
         for (const it of buildModel(entry.pkg).items.values()) {
           const p = it.kind === 'graphic' && it.graphic && !it.graphic.embedded ? linkPath(it.graphic.link) : null;
           if (p) linked.push(p);
         }
-        void keepLinks(din, f.key, parentPath(f.path), linked);
+        void keepLinks(din, din.files.path(f), parentPath(din.files.path(f)), linked);
         setSavedEntry(entry);
         setFile(f);
         setDocName(f.name);
@@ -823,14 +823,14 @@ export function Publisher() {
   /** Din's save dialog for one type; false when the name it comes back with doesn't end in it. */
   const saveTarget = useCallback(
     async (title: string, suggestedName: string, type: { description: string; extension: string }) => {
-      const t = await din.files.save({ title, suggestedName, startIn: file ?? undefined, types: [{ description: type.description, extensions: [type.extension] }] });
+      const t = await pickSaveFile({ title, suggestedName, startIn: file ?? undefined, types: fileTypes([{ description: type.description, extensions: [type.extension] }]) });
       if (t && !t.name.toLowerCase().endsWith(type.extension)) {
         setStatus(`Couldn’t save ${t.name}: its name should end in ${type.extension}.`);
         return null;
       }
       return t;
     },
-    [din, file],
+    [file],
   );
 
   const saveAs = useCallback(async (): Promise<boolean> => {
@@ -839,20 +839,20 @@ export function Publisher() {
     return t ? writeTo(t) : false;
   }, [docName, saveTarget, writeTo]);
 
-  const save = useCallback((): Promise<boolean> => {
-    if (!hist) return Promise.resolve(false);
-    if (file?.writable && !converted && /\.idml$/i.test(file.name)) return writeTo(file);
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!hist) return false;
+    if (file && (await canWrite(file)) && !converted && /\.idml$/i.test(file.name)) return writeTo(file);
     if (converted) {
       setDialog({ kind: 'saveNote' });
-      return Promise.resolve(false);
+      return false;
     }
     return saveAs();
   }, [hist, file, converted, writeTo, saveAs]);
 
   const pick = useCallback(
     async (title: string, description: string, extensions: string[]) =>
-      (await din.files.open({ title, types: [{ description, extensions }], startIn: file ?? undefined }))[0] ?? null,
-    [din, file],
+      (await pickFiles({ title, types: fileTypes([{ description, extensions }]), startIn: file ?? undefined }))[0] ?? null,
+    [file],
   );
 
   const openFile = useCallback(async () => {
@@ -950,7 +950,7 @@ export function Publisher() {
       if (!c) return;
       const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'));
       if (!blob) throw new Error('The page couldn’t be drawn.');
-      await out.write(blob);
+      await writeFile(out, blob);
       setStatus(`Exported page ${t.page.name} to ${out.name}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
@@ -992,7 +992,7 @@ export function Publisher() {
       resetMeasures();
       storiesRef.current.clear();
       const { bytes, notes } = await writePublisherPdf({ model: m, images, text: textSource, title: stem });
-      await out.write(bytes);
+      await writeFile(out, bytes);
       setStatus(`Exported ${out.name}${notes.length ? ` (${notes.join(' ')})` : ''}`);
     } catch (err) {
       setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
@@ -1588,12 +1588,11 @@ export function Publisher() {
     if (!t) return;
     try {
       // Placed graphics are linked by path, as in InDesign.
-      if (!t.path) throw new Error('Din didn’t say where it is.');
       const f = await t.getFile();
       if (f.size > 256 * 1024 * 1024) throw new Error(`It’s too big (${formatBytes(f.size)}).`);
       const { decodeBytes } = await import('./publisher/images');
       const bmp = await decodeBytes(new Uint8Array(await f.arrayBuffer()));
-      const gun: PlaceGun = { path: t.path, w: bmp.width, h: bmp.height, size: f.size };
+      const gun: PlaceGun = { path: din.files.path(t), w: bmp.width, h: bmp.height, size: f.size };
       bmp.close();
       if (into && into.kind !== 'text' && into.kind !== 'group' && into.kind !== 'line') {
         edit('Place', (d) => {
@@ -2924,7 +2923,7 @@ export function Publisher() {
     const it = m?.items.get(self);
     if (!m || !it) return;
     const f = await pick('Relink', 'Graphics', PLACE_EXTENSIONS);
-    const t = f?.path;
+    const t = f && din.files.path(f);
     if (!t) return;
     edit('Relink', (d) => {
       const e = ops.itemEl(d, it);
@@ -3213,7 +3212,7 @@ export function Publisher() {
         <div className="relative flex min-w-0 flex-1 flex-col">
           {model && (
             <div className="flex h-7 shrink-0 items-end border-b border-[#1c1c1c] bg-[#2b2b2b] px-1">
-              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={file?.path ?? docName}>
+              <div className="flex h-6 max-w-full items-center gap-2 truncate rounded-t-[3px] bg-[#383838] px-3 text-[11px] text-[#e6e6e6]" title={file ? din.files.path(file) : docName}>
                 {dirty ? '• ' : ''}
                 {tabTitle}
               </div>

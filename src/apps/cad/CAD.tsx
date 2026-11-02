@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { FolderOpen, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
-import { typesFromFilters, type Din, type DinFileHandle } from '@/sdk';
+import { typesFromFilters, type Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowAccent, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
@@ -64,6 +64,7 @@ import { Icons } from './cad/ui/icons';
 import { AssistantPalette } from './cad/ui/assistant';
 import { useCadAssistant } from './cad/useCadAssistant';
 import { unitsName } from './cad/assistant';
+import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 
 const SETTINGS_KEY = 'din:cad:settings';
 const RECENT_KEY = 'din:cad:recent';
@@ -158,12 +159,13 @@ function writeRecent(din: Din, list: Recent[], keep: Recent[]): Recent[] {
   return keep;
 }
 
-async function addRecent(din: Din, file: DinFileHandle): Promise<Recent[]> {
+async function addRecent(din: Din, file: FileSystemFileHandle): Promise<Recent[]> {
   const list = readRecent();
-  const same = list.find((r) => r.key === file.key);
-  const token = same?.token ?? (await file.persist());
-  const entry = { token, key: file.key, path: file.path, time: Date.now() };
-  return writeRecent(din, list, [entry, ...list.filter((r) => r.key !== file.key)].slice(0, RECENT_MAX));
+  const path = din.files.path(file);
+  const same = list.find((r) => r.path === path);
+  const token = same?.token ?? (await din.files.persist(file));
+  const entry = { token, key: path, path, time: Date.now() };
+  return writeRecent(din, list, [entry, ...list.filter((r) => r.path !== path)].slice(0, RECENT_MAX));
 }
 
 function removeRecent(din: Din, token: string): Recent[] {
@@ -228,7 +230,7 @@ export function CAD() {
 function CADWindow() {
   const din = useDin();
   const params = din.app.launch.params;
-  const launchFile = din.app.launch.files[0] ?? null;
+  const launchFile = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);
   useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
@@ -244,8 +246,8 @@ function CADWindow() {
   const doc = hist ? hist.entries[hist.index].d : null;
   const [savedEntry, setSavedEntry] = useState<Entry | null>(() => hist?.entries[0] ?? null);
   const dirty = !!hist && hist.entries[hist.index] !== savedEntry;
-  const [file, setFile] = useState<DinFileHandle | null>(null);
-  const path = file?.path ?? null;
+  const [file, setFile] = useState<FileSystemFileHandle | null>(null);
+  const path = file ? din.files.path(file) : null;
   const [docName, setDocName] = useState(() => (hist ? `Drawing${++untitled}.dwg` : ''));
   const [loading, setLoading] = useState(launchFile !== null);
   const [error, setError] = useState<string | null>(null);
@@ -657,7 +659,7 @@ function CADWindow() {
   // ---- Files ------------------------------------------------------------------------------------
 
   const startDoc = useCallback(
-    (d: Drawing, name: string, f: DinFileHandle | null) => {
+    (d: Drawing, name: string, f: FileSystemFileHandle | null) => {
       const entry: Entry = { d, label: f ? 'Open' : 'New', run: 0 };
       const h = { entries: [entry], index: 0 };
       histRef.current = h;
@@ -685,7 +687,7 @@ function CADWindow() {
   );
 
   const load = useCallback(
-    (f: DinFileHandle) => {
+    (f: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
@@ -728,7 +730,7 @@ function CADWindow() {
   );
 
   const openHandle = useCallback(
-    (f: DinFileHandle) => {
+    (f: FileSystemFileHandle) => {
       setLoading(true);
       setError(null);
       load(f);
@@ -740,8 +742,8 @@ function CADWindow() {
     (r: Recent) =>
       void din.files.restore(r.token).then(
         (handle) => {
-          if (handle) {
-            openHandle(handle);
+          if (handle?.kind === 'file') {
+            openHandle(handle as FileSystemFileHandle);
             return;
           }
           setRecent(removeRecent(din, r.token));
@@ -771,7 +773,7 @@ function CADWindow() {
   );
 
   const writeTo = useCallback(
-    async (f: DinFileHandle): Promise<boolean> => {
+    async (f: FileSystemFileHandle): Promise<boolean> => {
       const d = docRef.current;
       const h = histRef.current;
       if (!d || !h) return false;
@@ -781,7 +783,7 @@ function CADWindow() {
         await new Promise((r) => setTimeout(r, 16));
         const format = formatOf(f.name) ?? 'dwg';
         const bytes = encode(d, format);
-        await f.write(bytes);
+        await writeFile(f, bytes);
         setSavedEntry(h.entries[h.index]);
         setFile(f);
         setDocName(f.name);
@@ -807,7 +809,7 @@ function CADWindow() {
       const start: Format = format ?? (file ? formatOf(file.name) : null) ?? 'dwg';
       // The format asked for first, so a name typed without one gets its extension.
       const types = typesFromFilters(start === 'dxf' ? [...SAVE_FILTERS].reverse() : SAVE_FILTERS);
-      const t = await din.files.save({
+      const t = await pickSaveFile({
         title: format === 'dxf' ? 'Export DXF' : 'Save Drawing As',
         suggestedName: `${docName.replace(/\.[^.]*$/, '')}.${start}`,
         startIn: file ?? undefined,
@@ -820,18 +822,18 @@ function CADWindow() {
       }
       return writeTo(t);
     },
-    [din, docName, file, writeTo],
+    [docName, file, writeTo],
   );
 
   const save = useCallback(
-    (): Promise<boolean> => (file && file.writable && formatOf(file.name) ? writeTo(file) : saveAs()),
+    async (): Promise<boolean> => (file && (await canWrite(file)) && formatOf(file.name) ? writeTo(file) : saveAs()),
     [file, writeTo, saveAs],
   );
 
   const openFile = useCallback(async () => {
-    const [t] = await din.files.open({
+    const [t] = await pickFiles({
       title: 'Select File',
-      types: [{ description: 'Drawings', extensions: ['.dwg', '.dxf'] }],
+      types: fileTypes([{ description: 'Drawings', extensions: ['.dwg', '.dxf'] }]),
       startIn: file ?? undefined,
     });
     if (!t) return;

@@ -8,23 +8,21 @@
  * - `document.title`, `<link rel="icon">` and `<meta name="theme-color">`
  *   are the window's title, icon and accent.
  * - File System Access (`showOpenFilePicker` and the rest) opens Din's
- *   pickers, its handles backed by `din.files`' handles.
- * - Launch Handling's `launchQueue` hears the launch and its files, as
- *   `din.app.launch` and `onLaunch` do.
+ *   pickers, its handles backed by the desktop's grants.
+ * - Launch Handling's `launchQueue` hears each launch's files.
  *
  * Part of the runtime's bundle, so nothing here may have side effects on
  * import.
  */
 import type {
-  DinApp,
-  DinFileHandle,
-  DinFiles,
-  FileTypeFilter,
-  LaunchContext,
-  OpenFileOptions,
+  DirectoryPickerOptions,
+  LaunchParams,
+  OpenFilePickerOptions,
+  PickerOptions,
+  SaveFilePickerOptions,
   Unsubscribe,
 } from '@/sdk/din';
-import type { MediaAction, MediaReport } from '@/sdk/protocol';
+import type { FileTypeFilter, MediaAction, MediaReport, OpenFileOptions, SaveFileOptions } from '@/sdk/protocol';
 
 /** Pictures larger than this aren't passed on: the desktop gets them as data: URLs. */
 const MAX_PICTURE_BYTES = 512 * 1024;
@@ -260,15 +258,32 @@ export function watchDocumentHead(host: DocumentHeadHost): void {
 // File System Access and Launch Handling
 // ---------------------------------------------------------------------------
 
+/**
+ * A file the desktop granted the app, as the runtime holds it: what crosses
+ * the port, and the calls on it. Apps see it only as the web handle over it.
+ */
+export interface Grant {
+  readonly id: string;
+  readonly kind: 'file' | 'directory';
+  readonly name: string;
+  /** Stable for the same file within the app. */
+  readonly key: string;
+  readonly path: string;
+  readonly writable: boolean;
+  getFile(): Promise<File>;
+  write(data: Blob | ArrayBuffer | ArrayBufferView | string): Promise<void>;
+  entries(): Promise<Grant[]>;
+}
+
 const abort = () => new DOMException('The user aborted a request.', 'AbortError');
 const notAllowed = (what: string) => new DOMException(`${what} isn't allowed here.`, 'NotAllowedError');
 
-/** The handles behind the web ones, for `startIn` and for `din.*` calls given a web handle. */
-const dinHandles = new WeakMap<object, DinFileHandle>();
+/** The grants behind the web handles. */
+const grants = new WeakMap<object, Grant>();
 
-/** The `DinFileHandle` behind a handle from `showOpenFilePicker` and the rest, or null. */
-export function dinHandleOf(handle: unknown): DinFileHandle | null {
-  return handle && typeof handle === 'object' ? (dinHandles.get(handle) ?? null) : null;
+/** The grant behind a handle from the runtime, or null for anything else. */
+export function grantOf(handle: unknown): Grant | null {
+  return handle && typeof handle === 'object' ? (grants.get(handle) ?? null) : null;
 }
 
 type WriteChunk = BufferSource | Blob | string;
@@ -278,10 +293,10 @@ type WriteParams =
   | { type: 'truncate'; size: number };
 
 /**
- * A FileSystemWritableFileStream over a Din handle: writes gather here and
- * the file is replaced on close, as the web's swap file is.
+ * A FileSystemWritableFileStream over a grant: writes gather here and the
+ * file is replaced on close, as the web's swap file is.
  */
-function writableStream(handle: DinFileHandle, initial: Uint8Array): WritableStream & {
+function writableStream(grant: Grant, initial: Uint8Array): WritableStream & {
   write(data: WriteChunk | WriteParams): Promise<void>;
   seek(position: number): Promise<void>;
   truncate(size: number): Promise<void>;
@@ -321,7 +336,7 @@ function writableStream(handle: DinFileHandle, initial: Uint8Array): WritableStr
   };
   const stream = new WritableStream<WriteChunk | WriteParams>({
     write: apply,
-    close: () => handle.write(bytes),
+    close: () => grant.write(bytes),
   });
   const writeVia = (chunk: WriteChunk | WriteParams) => {
     const writer = stream.getWriter();
@@ -335,67 +350,57 @@ function writableStream(handle: DinFileHandle, initial: Uint8Array): WritableStr
 }
 
 /** A handle's permission: what it was granted is all it has. */
-function permission(handle: DinFileHandle, descriptor?: { mode?: 'read' | 'readwrite' }): PermissionState {
-  return descriptor?.mode === 'readwrite' && !handle.writable ? 'denied' : 'granted';
+function permission(grant: Grant, descriptor?: { mode?: 'read' | 'readwrite' }): PermissionState {
+  return descriptor?.mode === 'readwrite' && !grant.writable ? 'denied' : 'granted';
 }
 
-/** Put a class's prototype on the web's, so `instanceof FileSystemFileHandle` holds. */
-function inherit(cls: { prototype: object }, native: string): void {
-  const base = (globalThis as unknown as Record<string, { prototype: object } | undefined>)[native];
-  if (base) Object.setPrototypeOf(cls.prototype, base.prototype);
-}
 
 /**
  * A handle's `kind` and `name`, as its own: the web's prototype, under ours,
  * has them as getters that only its own handles answer.
  */
-function own(target: object, kind: 'file' | 'directory', handle: DinFileHandle): void {
+function own(target: object, grant: Grant): void {
   Object.defineProperties(target, {
-    kind: { value: kind, enumerable: true },
-    name: { value: handle.name, enumerable: true },
+    kind: { value: grant.kind, enumerable: true },
+    name: { value: grant.name, enumerable: true },
   });
-  dinHandles.set(target, handle);
+  grants.set(target, grant);
 }
 
-class WebFileHandle {
-  declare readonly kind: 'file';
+class Handle {
+  declare readonly kind: 'file' | 'directory';
   declare readonly name: string;
-  constructor(handle: DinFileHandle) {
-    own(this, 'file', handle);
+  constructor(grant: Grant) {
+    own(this, grant);
   }
-  private get din(): DinFileHandle {
-    return dinHandles.get(this)!;
-  }
-  getFile(): Promise<File> {
-    return this.din.getFile();
-  }
-  async createWritable(options?: { keepExistingData?: boolean }): Promise<ReturnType<typeof writableStream>> {
-    if (!this.din.writable) throw notAllowed('Writing to this file');
-    const initial = options?.keepExistingData ? new Uint8Array(await (await this.din.getFile()).arrayBuffer()) : new Uint8Array();
-    return writableStream(this.din, initial);
+  protected get grant(): Grant {
+    return grants.get(this)!;
   }
   async isSameEntry(other: unknown): Promise<boolean> {
-    return dinHandleOf(other)?.key === this.din.key;
+    return grantOf(other)?.key === this.grant.key;
   }
   async queryPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState> {
-    return permission(this.din, descriptor);
+    return permission(this.grant, descriptor);
   }
   async requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState> {
-    return permission(this.din, descriptor);
+    return permission(this.grant, descriptor);
   }
 }
 
-class WebDirectoryHandle {
-  declare readonly kind: 'directory';
-  declare readonly name: string;
-  constructor(handle: DinFileHandle) {
-    own(this, 'directory', handle);
+class WebFileHandle extends Handle {
+  getFile(): Promise<File> {
+    return this.grant.getFile();
   }
-  private get din(): DinFileHandle {
-    return dinHandles.get(this)!;
+  async createWritable(options?: { keepExistingData?: boolean }): Promise<ReturnType<typeof writableStream>> {
+    if (!this.grant.writable) throw notAllowed('Writing to this file');
+    const initial = options?.keepExistingData ? new Uint8Array(await (await this.grant.getFile()).arrayBuffer()) : new Uint8Array();
+    return writableStream(this.grant, initial);
   }
+}
+
+class WebDirectoryHandle extends Handle {
   private async list(): Promise<(WebFileHandle | WebDirectoryHandle)[]> {
-    return ((await this.din.entries?.()) ?? []).map(toWebHandle);
+    return (await this.grant.entries()).map(toWebHandle);
   }
   async *entries(): AsyncGenerator<[string, WebFileHandle | WebDirectoryHandle]> {
     for (const handle of await this.list()) yield [handle.name, handle];
@@ -426,38 +431,41 @@ class WebDirectoryHandle {
     throw notAllowed('Removing files from a folder');
   }
   async resolve(possibleDescendant: unknown): Promise<string[] | null> {
-    const other = dinHandleOf(possibleDescendant);
-    const root = this.din.path.replace(/\/+$/, '');
-    if (!other || !other.path.startsWith(`${root}/`)) return other?.key === this.din.key ? [] : null;
+    const other = grantOf(possibleDescendant);
+    const root = this.grant.path.replace(/\/+$/, '');
+    if (!other || !other.path.startsWith(`${root}/`)) return other?.key === this.grant.key ? [] : null;
     return other.path.slice(root.length + 1).split('/');
   }
-  async isSameEntry(other: unknown): Promise<boolean> {
-    return dinHandleOf(other)?.key === this.din.key;
-  }
-  async queryPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState> {
-    return permission(this.din, descriptor);
-  }
-  async requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState> {
-    return permission(this.din, descriptor);
-  }
 }
 
-/** The web's handle for a Din one: a FileSystemFileHandle or FileSystemDirectoryHandle. */
-export function toWebHandle(handle: DinFileHandle): WebFileHandle | WebDirectoryHandle {
-  return handle.kind === 'directory' ? new WebDirectoryHandle(handle) : new WebFileHandle(handle);
+/**
+ * Put a handle class over the web's, so `instanceof FileSystemFileHandle`
+ * (and `FileSystemHandle`) holds: its prototype, then Handle's methods, then
+ * the web's prototype, whose own methods answer only the browser's handles.
+ */
+function inherit(cls: { prototype: object }, native: string): void {
+  const base = (globalThis as unknown as Record<string, { prototype: object } | undefined>)[native];
+  if (!base) return;
+  const { constructor: _, ...methods } = Object.getOwnPropertyDescriptors(Handle.prototype);
+  Object.setPrototypeOf(cls.prototype, Object.create(base.prototype, methods));
 }
 
-interface WebPickerOptions {
-  types?: { description?: string; accept?: Record<string, string | string[]> }[];
-  startIn?: string | object;
-  multiple?: boolean;
-  suggestedName?: string;
-  mode?: 'read' | 'readwrite';
+/** The web's handle over a grant: a FileSystemFileHandle or FileSystemDirectoryHandle. */
+export function toWebHandle(grant: Grant): WebFileHandle | WebDirectoryHandle {
+  return grant.kind === 'directory' ? new WebDirectoryHandle(grant) : new WebFileHandle(grant);
 }
 
 const NAMED_FOLDERS = ['documents', 'pictures', 'music', 'videos', 'downloads'] as const;
+type NamedFolder = (typeof NAMED_FOLDERS)[number];
 
-function pickerTypes(types: WebPickerOptions['types']): FileTypeFilter[] | undefined {
+/** A picker's `startIn`, as the desktop takes it. */
+export function pickerStart(startIn: unknown): { startIn?: NamedFolder; startInHandle?: Grant } {
+  if (typeof startIn === 'string') return (NAMED_FOLDERS as readonly string[]).includes(startIn) ? { startIn: startIn as NamedFolder } : {};
+  const grant = grantOf(startIn);
+  return grant ? { startInHandle: grant } : {};
+}
+
+function pickerTypes(types: PickerOptions['types']): FileTypeFilter[] | undefined {
   const filters = (types ?? []).map((t) => ({
     description: t.description ?? '',
     extensions: Object.values(t.accept ?? {})
@@ -467,34 +475,54 @@ function pickerTypes(types: WebPickerOptions['types']): FileTypeFilter[] | undef
   return filters.length ? filters : undefined;
 }
 
-function pickerStart(startIn: WebPickerOptions['startIn']): OpenFileOptions['startIn'] {
-  if (typeof startIn === 'string') return (NAMED_FOLDERS as readonly string[]).includes(startIn) ? (startIn as OpenFileOptions['startIn']) : undefined;
-  return dinHandleOf(startIn) ?? undefined;
+export interface PickerHost {
+  open(options: OpenFileOptions & { startInHandle?: Grant }): Promise<Grant[]>;
+  save(options: SaveFileOptions & { startInHandle?: Grant }): Promise<Grant | null>;
 }
 
 /**
  * The web's file pickers, as Din's: `showOpenFilePicker`,
  * `showSaveFilePicker` and `showDirectoryPicker` open Din's dialogs and
- * resolve with FileSystemHandles over what was chosen.
+ * resolve with handles over what was chosen, or reject with an
+ * `AbortError` when it's cancelled. Din's `title` and `confirmLabel` come
+ * along, and `mode: 'read'` picks files the app won't write back.
  */
-export function installFilePickers(files: DinFiles): void {
+export function installFilePickers(host: PickerHost): void {
   inherit(WebFileHandle, 'FileSystemFileHandle');
   inherit(WebDirectoryHandle, 'FileSystemDirectoryHandle');
-  const define = (name: string, value: (options?: WebPickerOptions) => Promise<unknown>) =>
+  const define = <O>(name: string, value: (options?: O) => Promise<unknown>) =>
     Object.defineProperty(window, name, { value, writable: true, configurable: true });
 
-  define('showOpenFilePicker', async (options = {}) => {
-    const chosen = await files.open({ multiple: options.multiple, types: pickerTypes(options.types), startIn: pickerStart(options.startIn) });
+  define<OpenFilePickerOptions>('showOpenFilePicker', async (options = {}) => {
+    const chosen = await host.open({
+      title: options.title,
+      multiple: options.multiple,
+      writable: options.mode !== 'read',
+      confirmLabel: options.confirmLabel,
+      types: pickerTypes(options.types),
+      ...pickerStart(options.startIn),
+    });
     if (!chosen.length) throw abort();
     return chosen.map(toWebHandle);
   });
-  define('showSaveFilePicker', async (options = {}) => {
-    const chosen = await files.save({ suggestedName: options.suggestedName, types: pickerTypes(options.types), startIn: pickerStart(options.startIn) });
+  define<SaveFilePickerOptions>('showSaveFilePicker', async (options = {}) => {
+    const chosen = await host.save({
+      title: options.title,
+      suggestedName: options.suggestedName,
+      types: pickerTypes(options.types),
+      ...pickerStart(options.startIn),
+    });
     if (!chosen) throw abort();
     return toWebHandle(chosen);
   });
-  define('showDirectoryPicker', async (options = {}) => {
-    const [chosen] = await files.open({ directory: true, writable: options.mode === 'readwrite', startIn: pickerStart(options.startIn) });
+  define<DirectoryPickerOptions>('showDirectoryPicker', async (options = {}) => {
+    const [chosen] = await host.open({
+      title: options.title,
+      directory: true,
+      writable: options.mode === 'readwrite',
+      confirmLabel: options.confirmLabel,
+      ...pickerStart(options.startIn),
+    });
     if (!chosen) throw abort();
     return toWebHandle(chosen);
   });
@@ -502,29 +530,25 @@ export function installFilePickers(files: DinFiles): void {
 
 /**
  * Launch Handling's `window.launchQueue`: the consumer hears this window's
- * launch, with the files it was opened with as FileSystemHandles, and each
- * launch after it (a single-instance app opened again, a Dock shortcut).
+ * launch, with the files it was opened with, and each launch after it (a
+ * single-instance app opened again, a Dock shortcut). Launches that come
+ * before there's a consumer wait for it.
  */
-export function installLaunchQueue(app: { onLaunch: DinApp['onLaunch'] }, ready: Promise<LaunchContext>): void {
-  type Params = { targetURL: string; files: (WebFileHandle | WebDirectoryHandle)[] };
-  const queued: Params[] = [];
-  let consumer: ((params: Params) => void) | null = null;
-  const deliver = (launch: LaunchContext) => {
-    const params = { targetURL: location.href, files: launch.files.map(toWebHandle) };
-    if (consumer) consumer(params);
-    else queued.push(params);
-  };
-  void ready.then((launch) => {
-    deliver(launch);
-    app.onLaunch(deliver);
-  });
+export function installLaunchQueue(): (files: Grant[]) => void {
+  const queued: LaunchParams[] = [];
+  let consumer: ((params: LaunchParams) => void) | null = null;
   Object.defineProperty(window, 'launchQueue', {
     configurable: true,
     value: {
-      setConsumer(cb: (params: Params) => void) {
+      setConsumer(cb: (params: LaunchParams) => void) {
         consumer = cb;
         for (const params of queued.splice(0)) cb(params);
       },
     },
   });
+  return (files) => {
+    const params: LaunchParams = { targetURL: location.href, files: files.map(toWebHandle) };
+    if (consumer) consumer(params);
+    else queued.push(params);
+  };
 }

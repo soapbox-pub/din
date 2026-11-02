@@ -26,8 +26,8 @@ din.window.onCloseRequest(() => {
   return true;
 });
 
-const [file] = await din.files.open({ types: [{ description: 'Pictures', extensions: ['.png', '.jpg'] }] });
-if (file) load(await file.getFile());
+const [file] = await showOpenFilePicker({ types: [{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg'] } }] });
+load(await file.getFile());
 
 din.app.ready();
 ```
@@ -39,7 +39,7 @@ din.app.ready();
 | `din.app` | [lifecycle.md](lifecycle.md): launch params, opening other apps, `ready` |
 | `din.window` | [window.md](window.md): title, chrome, custom headers, transparency, shape, moving |
 | `din.menus` | [menus.md](menus.md): the menu bar and menus that leave the window |
-| `din.files`, `din.clipboard` | [files.md](files.md) |
+| `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, `din.clipboard` | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
 | `din.theme`, `din.account`, `din.toast`, `Notification`, `navigator.setAppBadge` | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
@@ -102,8 +102,8 @@ its own header (Assistant, Settings) should move over by changing imports.
 ```
  app (din://paint)                    desktop (app://din)
  ─────────────────                    ───────────────────
- din.window.setTitle('x')  ──port──▶  DinAppFrame (window w7) → setTitle
- din.files.open(…)         ──port──▶  checks grants, shows the picker
+ document.title = 'x'      ──port──▶  DinAppFrame (window w7) → setTitle
+ showOpenFilePicker(…)     ──port──▶  checks grants, shows the picker
                            ◀──port──  { type: 'reply', id: 12, result: [handle] }
                            ◀──port──  { type: 'state', state }   (focus changed)
 

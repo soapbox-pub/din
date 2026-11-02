@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin } from '@/sdk/react';
+import { pickSaveFile, writeFile } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
 import type { MailAddress, MailAttachmentInfo, MailMessage } from '@/lib/mail';
 import { useConversation, useMail, useMessage, type Item } from './api';
@@ -45,10 +46,10 @@ function useSaveAttachment(item: Item) {
     async (a: MailAttachmentInfo) => {
       if (!mail) return;
       try {
-        const handle = await din.files.save({ title: 'Save Attachment', suggestedName: a.filename, startIn: 'downloads' });
+        const handle = await pickSaveFile({ title: 'Save Attachment', suggestedName: a.filename, startIn: 'downloads' });
         if (!handle) return;
         const file = await mail.attachment(item.accountId, item.path, item.uid, a.index);
-        await handle.write(file.content);
+        await writeFile(handle, file.content);
       } catch (error) {
         din.toast('Couldn’t save the attachment', { body: error instanceof Error ? error.message : String(error) });
       }

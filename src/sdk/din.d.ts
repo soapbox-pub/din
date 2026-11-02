@@ -97,7 +97,10 @@ declare global {
 // din.app: identity, launching, lifecycle
 // ---------------------------------------------------------------------------
 
-/** Why the app (or this window) was opened. */
+/**
+ * Why the app (or this window) was opened. The files it was opened with
+ * come to `launchQueue`'s consumer.
+ */
 export interface LaunchContext {
   /**
    * `new` for a fresh window; `relaunch` when a running single-instance app
@@ -107,8 +110,6 @@ export interface LaunchContext {
   reason: 'new' | 'relaunch' | 'restore';
   /** App-defined launch parameters, as passed to `din.app.open()` or a shortcut. */
   params: Record<string, unknown>;
-  /** Files the app was opened with (from Files, a drop on its Dock tile). Granted to it. */
-  files: DinFileHandle[];
   /** The manifest shortcut that launched it, by `id`, if any. */
   shortcut: string | null;
   /**
@@ -141,16 +142,16 @@ export interface DinApp {
   ready(): void;
   /**
    * Launch another app (or a new window of this one) with launch
-   * parameters, and files it holds for the new window to open (they arrive
-   * in its `launch.files`).
+   * parameters, and files it holds for the new window to open (they come
+   * to its `launchQueue`).
    */
-  open(appId: string, params?: Record<string, unknown>, files?: DinFileHandle[]): Promise<void>;
+  open(appId: string, params?: Record<string, unknown>, files?: FileSystemHandle[]): Promise<void>;
   /**
    * Open files in whichever app the desktop has for them (Files' default).
    * A Windows program (.exe) runs, through Wine, for an app with `fs`;
    * others get a DinPermissionError.
    */
-  openFiles(files: DinFileHandle[]): Promise<void>;
+  openFiles(files: FileSystemHandle[]): Promise<void>;
   /**
    * Whether an app can be opened now: it's installed, and (the Assistant)
    * set up and switched on.
@@ -364,100 +365,46 @@ export interface DinMenus {
 }
 
 // ---------------------------------------------------------------------------
-// din.files: files the user hands the app
+// din.files: what the web's file handles can't do
 // ---------------------------------------------------------------------------
 
 /**
- * A file the app was given: picked, dropped, launched with, or saved as. A
- * handle is a capability: having one is what lets the app read or write that
- * file and nothing else. Handles last as long as the window; `persist()`
- * keeps one for Recent Files.
+ * Files the user hands an app are the web's `FileSystemFileHandle` and
+ * `FileSystemDirectoryHandle`, backed by the desktop: picked
+ * (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`, which
+ * open Din's pickers), launched with (`launchQueue`), dropped
+ * (`din.drag.accept`), pasted (`din.clipboard.readFiles`) or restored
+ * (`din.files.restore`). A handle is a capability: having one is what lets
+ * the app read or write that file and nothing else. Handles last as long as
+ * the page; `persist` keeps one for Recent Files. These take them.
  */
-export interface DinFileHandle {
-  readonly kind: 'file' | 'directory';
-  /** The file's name, e.g. `holiday.png`. */
-  readonly name: string;
-  /** Opaque and stable for the same file within the app; for comparing handles. */
-  readonly key: string;
+export interface DinFiles {
   /**
-   * Its full path, to show (a Recent list's folder, Copy Path). Knowing it
-   * grants nothing: reaching a file by path takes `fs` or `file-folders`.
+   * Its full path, to show (a Recent list's folder, Copy Path), and stable
+   * for the same file, for comparing handles. Knowing it grants nothing:
+   * reaching a file by path takes `fs` or `file-folders`.
    */
-  readonly path: string;
-  /** Read the whole file. */
-  getFile(): Promise<File>;
+  path(handle: FileSystemHandle): string;
   /**
    * A URL the app can load the file from (an `<img>`, `<audio>`, `<video>`,
    * or `fetch` with Range requests), streamed rather than sent whole. Good
    * while this page stays loaded. Not available outside Electron.
    */
-  url(): Promise<string>;
-  /** Replace its contents (and create it, for a handle from `save`). Needs `writable`. */
-  write(data: Blob | ArrayBuffer | ArrayBufferView | string): Promise<void>;
-  /** Whether `write` is allowed. False for files opened read-only. */
-  readonly writable: boolean;
+  url(handle: FileSystemFileHandle): Promise<string>;
   /** Hear when something else changes or removes the file. */
-  onChange(cb: (change: 'modified' | 'removed') => void): Unsubscribe;
+  watch(handle: FileSystemHandle, cb: (change: 'modified' | 'removed') => void): Unsubscribe;
   /**
    * For apps with `file-folders`: the folder a file is in, as a handle (and
    * `din.system.fs` reaches it by path). Null without the permission, and
    * for a folder (whose parent the user didn't hand over).
    */
-  parent(): Promise<DinFileHandle | null>;
-  /** Directories only: the entries, as handles granted along with it. */
-  entries?(): Promise<DinFileHandle[]>;
-  /** Keep the grant across restarts; resolves with a token for `din.files.restore`. */
-  persist(): Promise<string>;
-}
-
-export interface FileTypeFilter {
-  /** "Pictures", "PNG image". */
-  description: string;
-  /** Extensions with the dot: `['.png', '.jpg']`. */
-  extensions: string[];
-}
-
-export interface OpenFileOptions {
-  title?: string;
-  types?: FileTypeFilter[];
-  multiple?: boolean;
-  directory?: boolean;
-  /** Ask to write back to what's chosen. Default true for files. */
-  writable?: boolean;
-  /** Start in this folder, beside this file, or in a named folder of home. */
-  startIn?: DinFileHandle | 'documents' | 'pictures' | 'music' | 'videos' | 'downloads';
-  /** The button that picks ("Add"); Open or Select by default. */
-  confirmLabel?: string;
-}
-
-export interface SaveFileOptions {
-  title?: string;
-  /**
-   * The types to save as. A name typed without any of these types'
-   * extensions gets the chosen type's first one.
-   */
-  types?: FileTypeFilter[];
-  suggestedName?: string;
-  startIn?: OpenFileOptions['startIn'];
-}
-
-export interface DinFiles {
-  /** Din's file picker. Resolves with what was chosen, or an empty array if cancelled. */
-  open(options?: OpenFileOptions): Promise<DinFileHandle[]>;
-  /** Din's save dialog. Resolves with a writable handle, or null if cancelled. */
-  save(options?: SaveFileOptions): Promise<DinFileHandle | null>;
-  /** A handle kept by `persist()`; null if the file is gone or the grant was revoked. */
-  restore(token: string): Promise<DinFileHandle | null>;
-  /** Forget a `persist()` token the app no longer keeps (a Recent entry removed). */
+  parent(handle: FileSystemHandle): Promise<FileSystemDirectoryHandle | null>;
+  /** Keep the grant across restarts; resolves with a token for `restore`. */
+  persist(handle: FileSystemHandle): Promise<string>;
+  /** A handle kept by `persist`; null if the file is gone or the grant was revoked. */
+  restore(token: string): Promise<FileSystemHandle | null>;
+  /** Forget a `persist` token the app no longer keeps (a Recent entry removed). */
   release(token: string): void;
-  /**
-   * The handle behind a FileSystemHandle from the web's pickers or
-   * `launchQueue` (`showOpenFilePicker` opens Din's), to `persist()` it;
-   * null for anything else.
-   */
-  fromWebHandle(handle: FileSystemHandle): DinFileHandle | null;
-  /** A handle as the web's FileSystemFileHandle or FileSystemDirectoryHandle. */
-  toWebHandle(file: DinFileHandle): FileSystemHandle;
   /**
    * Files and folders by path that nothing granted the app: songs a playlist
    * names elsewhere, folders its saved state lists. Resolves with handles for
@@ -467,19 +414,75 @@ export interface DinFiles {
    * otherwise the desktop asks the user, giving `reason`. Missing paths are
    * left out.
    */
-  requestAccess(paths: string[], reason?: string): Promise<DinFileHandle[]>;
+  requestAccess(paths: string[], reason?: string): Promise<FileSystemHandle[]>;
   /**
    * A handle for a path, for apps with `fs`, which reach files by path
-   * anyway (`din.system.fs`) but want a handle's `url()` or to hand the
-   * file to another app.
+   * anyway (`din.system.fs`) but want a handle's `url` or to hand the file
+   * to another app.
    */
-  fromPath(path: string): Promise<DinFileHandle>;
+  fromPath(path: string): Promise<FileSystemHandle>;
   /**
    * A URL to load a file from by path, for apps with `fs`: no round trip,
    * so cheap enough for a folder of thumbnails. Throws without `fs`, and
    * outside Electron.
    */
   pathUrl(path: string): string;
+}
+
+/** Where a picker starts: beside a handle, or in a named folder of home. */
+export type StartIn = FileSystemHandle | 'documents' | 'pictures' | 'music' | 'videos' | 'downloads';
+
+/** What every picker takes: the web's options, and two of Din's. */
+export interface PickerOptions {
+  /** The dialog's title (Din's). */
+  title?: string;
+  startIn?: StartIn;
+  /** The types to pick or save as: `{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg'] } }`. */
+  types?: { description?: string; accept?: Record<string, string | string[]> }[];
+  excludeAcceptAllOption?: boolean;
+  id?: string;
+}
+
+export interface OpenFilePickerOptions extends PickerOptions {
+  multiple?: boolean;
+  /** `read` for files the app won't write back (Din's; the web has it only for folders). Default `readwrite`. */
+  mode?: 'read' | 'readwrite';
+  /** The button that picks ("Add"); Open by default (Din's). */
+  confirmLabel?: string;
+}
+
+export interface SaveFilePickerOptions extends PickerOptions {
+  /** A name typed without any of `types`' extensions gets the chosen type's first one. */
+  suggestedName?: string;
+}
+
+export interface DirectoryPickerOptions extends Omit<PickerOptions, 'types'> {
+  /** Default `read`. */
+  mode?: 'read' | 'readwrite';
+  /** The button that picks; Select by default (Din's). */
+  confirmLabel?: string;
+}
+
+/** What `launchQueue`'s consumer hears: this window's launch, then each after it. */
+export interface LaunchParams {
+  readonly targetURL: string;
+  /** Files the app was opened with (from Files, a drop on its Dock tile), granted to it. */
+  readonly files: readonly FileSystemHandle[];
+}
+
+declare global {
+  // The web's File System Access and Launch Handling, which TypeScript's
+  // DOM types don't have yet, as Din provides them.
+  function showOpenFilePicker(options?: OpenFilePickerOptions): Promise<FileSystemFileHandle[]>;
+  function showSaveFilePicker(options?: SaveFilePickerOptions): Promise<FileSystemFileHandle>;
+  function showDirectoryPicker(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>;
+  const launchQueue: { setConsumer(consumer: (params: LaunchParams) => void): void };
+  interface FileSystemHandle {
+    /** What the grant allows; never asks. */
+    queryPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
+    /** As `queryPermission`: the user's pick was the grant. */
+    requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +503,7 @@ export interface DragInfo {
 
 /** What a drop hands the target. */
 export type DropResult =
-  | { kind: 'files'; files: DinFileHandle[]; operation: 'copy' | 'move' | 'link' }
+  | { kind: 'files'; files: FileSystemHandle[]; operation: 'copy' | 'move' | 'link' }
   | { kind: 'tab'; tabType: string; state: unknown };
 
 export interface DinDrag {
@@ -508,7 +511,7 @@ export interface DinDrag {
    * Call from `dragstart` to drag files out of the app. Sets the drag's data
    * (the token, and plain text for other targets) and its drag image.
    */
-  startFiles(e: DragEvent, files: DinFileHandle[], label: string): void;
+  startFiles(e: DragEvent, files: FileSystemHandle[], label: string): void;
   /**
    * The same, by path, for apps with `fs`: no handles to wait for, which a
    * dragstart can't do.
@@ -546,8 +549,8 @@ export interface DinClipboard {
    * of a key or click in the focused window, or a pick from its menus;
    * otherwise it rejects with `NotAllowedError`.
    */
-  readFiles(): Promise<{ files: DinFileHandle[]; cut: boolean } | null>;
-  writeFiles(files: DinFileHandle[], cut: boolean): void;
+  readFiles(): Promise<{ files: FileSystemHandle[]; cut: boolean } | null>;
+  writeFiles(files: FileSystemHandle[], cut: boolean): void;
   /** Whether files are on the clipboard (for enabling Paste), and from now on when that changes. */
   onFilesChange(cb: (has: { count: number; cut: boolean } | null) => void): Unsubscribe;
 }
@@ -652,14 +655,14 @@ export type DinToast = (title: string, options?: { body?: string }) => void;
 
 export interface DinDesktop {
   /** Make a picture the app holds the desktop's background. */
-  setWallpaper(file: DinFileHandle): Promise<void>;
+  setWallpaper(file: FileSystemHandle): Promise<void>;
   /**
    * Install the cursor theme in a file the app holds (a .CurXPTheme,
    * .CursorFX, .cape, an archive of a theme…) and make it the pointer, as
    * Settings' Import does. Rejects with why when the file isn't one, or
    * when Din can't change the cursor on this system.
    */
-  setCursor(file: DinFileHandle): Promise<void>;
+  setCursor(file: FileSystemHandle): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -732,7 +735,7 @@ export interface DinPrint {
   /** Din's print dialog for a document, as HTML (with its own styles inline). */
   html(title: string, html: string): Promise<void>;
   /** Din's print dialog for a file the app holds (a PDF, a picture, text). */
-  file(file: DinFileHandle): Promise<void>;
+  file(file: FileSystemHandle): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

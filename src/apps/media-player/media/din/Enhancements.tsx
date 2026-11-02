@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { writeFile } from '@/shared/fileHandles';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError } from '@/lib/fs';
@@ -55,7 +56,7 @@ function Equalizer() {
     const target = await pickSave({ title: 'Save Preset', suggestedName: `${presetName ?? 'Custom'}.eqf`, types: [{ description: 'Winamp EQ preset', extensions: ['.eqf'] }] });
     if (!target) return;
     try {
-      await target.write(writeEqf([{ name: presetName ?? 'Custom', preamp, bands }]));
+      await writeFile(target, writeEqf([{ name: presetName ?? 'Custom', preamp, bands }]));
       setMessage('Saved.');
     } catch (error) {
       setMessage(cleanFsError(error));

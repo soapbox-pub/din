@@ -1,4 +1,5 @@
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLaunchFiles } from '@/shared/fileHandles';
 import { cleanFsError } from '@/lib/fs';
 import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
 import { useCurrentDrag, useDin, useWindowState, useWindowTitle } from '@/sdk/react';
@@ -223,14 +224,11 @@ function useLaunches(setMessage: (message: string) => void) {
   const din = useDin();
   const queryClient = useQueryClient();
   useEffect(() => {
-    const take = ({ params, files, shortcut }: LaunchContext) => {
+    const take = ({ params, shortcut }: LaunchContext) => {
       if (typeof params.skin === 'string') {
         void wearInstalledSkin(params.skin).then((worn) => {
           if (worn) void queryClient.invalidateQueries({ queryKey: ['music', 'skins'] });
         });
-      }
-      if (files.length > 0) {
-        void openHandles(files, params.how === 'enqueue' ? 'enqueue' : 'play').then((message) => message && setMessage(message));
       }
       // A jump-list shortcut from the Dock or the apps menu.
       const show = shortcut ?? (typeof params.show === 'string' ? params.show : null);
@@ -241,6 +239,10 @@ function useLaunches(setMessage: (message: string) => void) {
     take(din.app.launch);
     return din.app.onLaunch(take);
   }, [din, setMessage, queryClient]);
+  useLaunchFiles((files) => {
+    const how = din.app.launch.params.how === 'enqueue' ? 'enqueue' : 'play';
+    void openHandles(files, how).then((message) => message && setMessage(message));
+  });
 }
 
 /**

@@ -60,7 +60,7 @@ export function useFileUrl(path: string | null): string | null {
     let live = true;
     let pending = urls.get(path);
     if (!pending) {
-      pending = din.files.fromPath(path).then((handle) => handle.url());
+      pending = din.files.fromPath(path).then((handle) => din.files.url(handle as FileSystemFileHandle));
       urls.set(path, pending);
       pending.catch(() => urls.delete(path));
     }

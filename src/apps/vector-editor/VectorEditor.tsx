@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ChevronLeft, ChevronRight, FilePlus, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
-import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import { Button, Dialog, NumberField, Select } from '@/shared/photo/chrome';
 import { Panel } from '@/shared/photo/panels';
@@ -69,6 +69,7 @@ import { indexAt, layoutText, textOf } from './vector/text';
 import { replaceRange, runAt, styleRange, wordAt } from './vector/textEdit';
 import { DEFAULT_SHAPE, groupOf, TOOLS, toolInfo, type ToolId } from './vector/tools';
 import { fmtLen } from './vector/units';
+import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 
 const SETTINGS_KEY = 'din:vector-editor:settings';
 const MAX_BYTES = 1024 * 1024 * 1024;
@@ -182,7 +183,7 @@ interface TextEditing {
 export function VectorEditor() {
   const din = useDin();
   const params = din.app.launch.params;
-  const initial = din.app.launch.files[0] ?? null;
+  const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);
   const { panels } = settings;
@@ -200,7 +201,7 @@ export function VectorEditor() {
   const [sel, setSelState] = useState<Set<number>>(new Set());
   const [nodeSel, setNodeSel] = useState<Set<string>>(new Set());
   const [lastSel, setLastSel] = useState<number[]>([]);
-  const [file, setFile] = useState<DinFileHandle | null>(null);
+  const [file, setFile] = useState<FileSystemFileHandle | null>(null);
   const [docName, setDocName] = useState(boot?.name ?? 'Untitled-1');
   const [loading, setLoading] = useState(initial !== null);
   const [error, setError] = useState<string | null>(null);
@@ -515,7 +516,7 @@ export function VectorEditor() {
   );
 
   const startDoc = useCallback(
-    (d: Doc, name: string, f: DinFileHandle | null) => {
+    (d: Doc, name: string, f: FileSystemFileHandle | null) => {
       const entry: Entry = { label: f ? 'Open' : 'New Document', doc: d, sel: [] };
       setHist({ entries: [entry], index: 0 });
       setSavedEntry(entry);
@@ -545,7 +546,7 @@ export function VectorEditor() {
   // ---- Files ------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (f: DinFileHandle) => {
+    (f: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
@@ -576,7 +577,7 @@ export function VectorEditor() {
   }, [dialog, editing]);
 
   const writeTo = useCallback(
-    async (f: DinFileHandle, copy = false): Promise<boolean> => {
+    async (f: FileSystemFileHandle, copy = false): Promise<boolean> => {
       const d = docRef.current;
       if (!d || !hist) return false;
       setBusy(true);
@@ -584,7 +585,7 @@ export function VectorEditor() {
       try {
         await new Promise((r) => setTimeout(r, 30));
         const { bytes, notes } = await encodeDoc(d, f.name, { title: f.name.replace(/\.[^.]*$/, '') });
-        await f.write(bytes);
+        await writeFile(f, bytes);
         if (!copy && savesAs(f.name)) {
           setSavedEntry(hist.entries[hist.index]);
           setFile(f);
@@ -605,7 +606,7 @@ export function VectorEditor() {
   const saveAs = useCallback(
     async (copy = false): Promise<boolean> => {
       const stem = docName.replace(/\.[^.]*$/, '');
-      const t = await din.files.save({
+      const t = await pickSaveFile({
         title: copy ? 'Save a Copy' : 'Save As',
         suggestedName: `${stem}${copy ? ' copy' : ''}.ai`,
         startIn: file ?? undefined,
@@ -618,11 +619,11 @@ export function VectorEditor() {
       }
       return writeTo(t, copy);
     },
-    [din, docName, file, writeTo],
+    [docName, file, writeTo],
   );
 
-  const save = useCallback((): Promise<boolean> => {
-    if (file?.writable && isNative(file.name)) return writeTo(file);
+  const save = useCallback(async (): Promise<boolean> => {
+    if (file && (await canWrite(file)) && isNative(file.name)) return writeTo(file);
     return saveAs();
   }, [file, writeTo, saveAs]);
 
@@ -632,7 +633,7 @@ export function VectorEditor() {
       if (!d) return;
       const stem = docName.replace(/\.[^.]*$/, '');
       const filters = EXPORT_TYPES.filter((t) => t.patterns[0] === `*.${o.format}`);
-      const t = await din.files.save({ title: 'Export As', suggestedName: `${stem}.${o.format}`, startIn: file ?? undefined, types: typesFromFilters(filters) });
+      const t = await pickSaveFile({ title: 'Export As', suggestedName: `${stem}.${o.format}`, startIn: file ?? undefined, types: typesFromFilters(filters) });
       if (!t) return;
       if (extOf(t.name) !== o.format && !(o.format === 'jpg' && extOf(t.name) === 'jpeg')) {
         setStatus(`Couldn’t export ${t.name}: its name should end in .${o.format}.`);
@@ -641,7 +642,7 @@ export function VectorEditor() {
       setBusy(true);
       try {
         const { bytes } = await encodeDoc(d, t.name, { title: stem, artboard: o.artboard, scale: o.scale });
-        await t.write(bytes);
+        await writeFile(t, bytes);
         setStatus(`Exported ${t.name}`);
       } catch (err) {
         setStatus(`Couldn’t export: ${err instanceof Error ? err.message : cleanFsError(err)}`);
@@ -649,13 +650,13 @@ export function VectorEditor() {
         setBusy(false);
       }
     },
-    [din, docName, file],
+    [docName, file],
   );
 
   const pick = useCallback(
     async (title: string, extensions: string[]) =>
-      (await din.files.open({ title, types: [{ description: 'Artwork', extensions }], startIn: file ?? undefined }))[0] ?? null,
-    [din, file],
+      (await pickFiles({ title, types: fileTypes([{ description: 'Artwork', extensions }]), startIn: file ?? undefined }))[0] ?? null,
+    [file],
   );
 
   const openFile = useCallback(async () => {

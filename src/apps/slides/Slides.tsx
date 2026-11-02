@@ -1757,7 +1757,7 @@ export function Slides() {
               <p className="flex items-center gap-2 text-[16px]">
                 <FileText className="size-5 text-[var(--office-accent)]" /> {file.name}
               </p>
-              <p className="text-[#616161]">{file.handle?.path ?? 'Not saved yet'}</p>
+              <p className="text-[#616161]">{file.path ?? 'Not saved yet'}</p>
               <dl className="mt-4 grid grid-cols-[140px_1fr] gap-y-1.5">
                 <dt className="text-[#616161]">Slides</dt>
                 <dd>{deck.slides.length}</dd>
@@ -1778,7 +1778,7 @@ export function Slides() {
             { label: 'Save a copy', description: 'Save the presentation under another name, keeping this one open.', icon: <FolderOpen />, onClick: () => void file.exportCopy(0) },
           ]}
           onShowRecentInFiles={(r) => void file.showRecentInFiles(r)}
-          path={file.handle?.path ?? null}
+          path={file.path ?? null}
         />
       )}
       {show !== null && (

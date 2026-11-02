@@ -1,100 +1,87 @@
-# `din.files` and `din.clipboard`: files the user hands an app
+# Files: the web's handles, and `din.files` and `din.clipboard`
 
 > **Status: in place.** Apps still in the desktop's tree pick paths with
 > `useFilePicker()` and read them with `window.dinos.fs`.
 
 ## Handles, not paths
 
-An app without the `fs` permission never sees the filesystem. It sees
-**file handles**, each of which is a grant to one file (or folder) that
-the user handed it:
+An app without the `fs` permission never sees the filesystem. It sees the
+web's **file handles**, `FileSystemFileHandle` and
+`FileSystemDirectoryHandle`, each of which is a grant to one file (or
+folder) that the user handed it:
 
-- picked in Din's open or save dialog (`din.files.open`, `din.files.save`);
+- picked in Din's open or save dialog (`showOpenFilePicker`,
+  `showSaveFilePicker`, `showDirectoryPicker`);
 - dropped on the app ([drag-and-drop.md](drag-and-drop.md));
 - launched with: opened from Files, Open With, dropped on its Dock tile
-  (`din.app.launch.files`, [lifecycle.md](lifecycle.md));
+  (`launchQueue`, [lifecycle.md](lifecycle.md));
 - pasted from Din's clipboard (`din.clipboard.readFiles`);
-- restored from an earlier `persist()`.
+- restored from an earlier `din.files.persist`.
 
 ```ts
-const [file] = await din.files.open({
-  types: [{ description: 'Pictures', extensions: ['.png', '.jpg', '.gif'] }],
-});
-if (!file) return;                       // cancelled
+const [file] = await showOpenFilePicker({
+  types: [{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg', '.gif'] } }],
+});                                      // an AbortError when cancelled
 const blob = await file.getFile();       // a File, with name, size, type
 // …
-await file.write(await canvas.convertToBlob());
-```
-
-The shape follows the web's File System Access API (`getFile()`, `kind`,
-`name`) so the code reads familiar, but a `DinFileHandle` isn't a
-`FileSystemFileHandle`: it's backed by the desktop, and works the same in
-Electron and in a browser.
-
-| Member | |
-|---|---|
-| `name`, `kind` | `photo.png`, `file` or `directory` |
-| `key` | Stable within the app for the same file; compare handles with it |
-| `path` | The full path, to show (a Recent list's folder, Copy Path). Knowing it grants nothing |
-| `parent()` | With `file-folders`, a file's folder as a handle (null for a folder) |
-| `getFile()` | The contents as a `File`, read through the desktop in one message: fine for documents |
-| `url()` | A `din-file://<token>/<name>` URL to load it from instead (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
-| `write(data)` | Replace the contents. Only if `writable` |
-| `onChange(cb)` | Something else modified or removed it (reload prompts) |
-| `entries()` | Folders: what's in them, granted with the folder |
-| `persist()` | A token that `din.files.restore(token)` turns back into the handle after a restart, for Recent Files and reopening last session's documents |
-
-`startIn` starts the picker in a folder handle, beside a file handle, or
-in a named folder of home (`documents`, `pictures`, `music`, `videos`,
-`downloads`).
-
-### The web's File System Access
-
-The web's pickers open Din's, so a page written for File System Access
-works unchanged (`src/sdk/standards.ts`):
-
-```ts
-const [handle] = await showOpenFilePicker({ types: [{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg'] } }] });
-const file = await handle.getFile();
-const writable = await handle.createWritable();
-await writable.write(blob);
+const writable = await file.createWritable();
+await writable.write(await canvas.convertToBlob());
 await writable.close();                  // the file is replaced now
 ```
 
-`showOpenFilePicker`, `showSaveFilePicker` and `showDirectoryPicker`
-take `types`, `multiple`, `suggestedName`, `mode` and `startIn` (a
-handle, or `documents`, `pictures`, `music`, `videos`, `downloads`), and
-reject with an `AbortError` when cancelled. The handles pass
-`instanceof FileSystemFileHandle` (or `…DirectoryHandle`) and have
-`getFile`, `createWritable` (with `write`, `seek`, `truncate`, and
-`keepExistingData`), `isSameEntry`, `queryPermission` and
-`requestPermission`, which answer what the grant allows and never ask;
-a folder's `entries`, `keys`, `values`, `getFileHandle`,
-`getDirectoryHandle` and `resolve` reach what's in it.
+The pickers are the web's, opening Din's dialogs (`src/sdk/standards.ts`):
+they take `types` (Din goes by the extensions), `multiple`,
+`suggestedName`, `mode` and `startIn` (a handle, or `documents`,
+`pictures`, `music`, `videos`, `downloads`), and two options of Din's,
+`title` and `confirmLabel` ("Attach"). `mode: 'read'` picks files the app
+won't write back (the web has it for folders only); files are picked
+`readwrite` by default, folders `read`.
 
-What they can't do: create or remove a folder's entries
-(`NotAllowedError`), and be kept in IndexedDB, since they aren't the
-browser's own. For Recent Files, `din.files.fromWebHandle(handle)`
-gives the `DinFileHandle` behind one, to `persist()`, and
-`din.files.toWebHandle` turns a restored one back.
+The handles pass `instanceof FileSystemFileHandle` (or
+`…DirectoryHandle`, and `FileSystemHandle`) and have `getFile`,
+`createWritable` (with `write`, `seek`, `truncate`, and
+`keepExistingData`), `isSameEntry`, and `queryPermission` and
+`requestPermission`, which answer what the grant allows and never ask
+(`denied` for `readwrite` on a file picked to read). A folder's `entries`,
+`keys`, `values`, `getFileHandle`, `getDirectoryHandle` and `resolve`
+reach what's in it, granted with it. They can't create or remove a
+folder's entries (`NotAllowedError`), and can't be kept in IndexedDB,
+since they aren't the browser's own: `din.files.persist` keeps them.
+
+`src/shared/fileHandles.ts` has the few helpers Din's apps share over
+these: the pickers resolving with nothing when cancelled (`pickFiles`,
+`pickSaveFile`, `pickFolder`), `writeFile`, `canWrite`, `fileTypes` for
+types listed by extension, and the launch's files (`windowLaunchFile`,
+`useLaunchFiles`).
+
+### What the web's handles can't do: `din.files`
+
+| Call | |
+|---|---|
+| `path(handle)` | The full path, to show (a Recent list's folder, Copy Path), and stable for the same file, to compare handles by. Knowing it grants nothing |
+| `parent(handle)` | With `file-folders`, a file's folder as a handle (null for a folder) |
+| `url(handle)` | A `din-file://<token>/<name>` URL to load it from instead of `getFile()` (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
+| `watch(handle, cb)` | Something else modified or removed it (reload prompts) |
+| `persist(handle)` | A token that `restore(token)` turns back into the handle after a restart, for Recent Files and reopening last session's documents |
 
 ## Saving
 
 ```ts
-const target = await din.files.save({
+const target = await showSaveFilePicker({
   suggestedName: 'Untitled.png',
-  types: [{ description: 'PNG image', extensions: ['.png'] }],
+  types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }],
 });
-if (target) await target.write(blob);
+await writeFile(target, blob);           // createWritable, write, close
 ```
 
-Save As is `save` again; Save is `write` on the handle you already
-have. A handle from `open` is writable unless the app asked for
-`writable: false`, or the file isn't writable.
+Save As is the save picker again; Save writes to the handle you already
+have. A handle from the open picker is writable unless the app picked it
+with `mode: 'read'`, or the file isn't writable:
+`await handle.queryPermission({ mode: 'readwrite' })` says which.
 
 ## Recent files
 
-An app keeps its own recent list: `handle.persist()` gives a token, kept
+An app keeps its own recent list: `din.files.persist(handle)` gives a token, kept
 in the app's storage, that `din.files.restore(token)` turns back into a
 handle after a restart (or null if the file is gone), and
 `din.files.release(token)` forgets one the app drops. The office apps do
@@ -130,7 +117,7 @@ anything is there at any time.
 
 ## Streaming and paths
 
-`handle.url()` asks main for an unguessable URL bound to that file and to
+`din.files.url(handle)` asks main for an unguessable URL bound to that file and to
 the app's window; main serves it on the apps' session with Range support
 (the same code as the desktop's own `din-file://localhost/…` URLs, which
 don't exist there). The URL lasts as long as the page: a reload or a
@@ -150,7 +137,7 @@ only from those folders.
   them. Preview steps through the folder of the picture it shows and lists
   archives beside it; Publisher finds pictures linked next to its
   document. A folder is writable only if the file that brought it is (a
-  read-only handle, `handle.parent()`, brings it read-only). Never `/`,
+  read-only handle's `din.files.parent`, brings it read-only). Never `/`,
   home or a folder above it, nor one holding Din's own profile: a file
   handed over from there brings only itself.
 - **`folders`** (manifest): fixed folders, made if missing: Media Player's

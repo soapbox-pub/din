@@ -3,7 +3,7 @@ import type { AdjustmentLayer, LayerEffectsInfo } from 'ag-psd';
 import { FilePlus, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
-import { typesFromFilters, type DinFileHandle } from '@/sdk';
+import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
 import { ADJUSTMENT_NAMES, defaultAdjustment, FILTER_NAMES, type FilterSpec } from '@/shared/photo/adjust';
 import { OptionsBar, Toolbar } from '@/shared/photo/bars';
@@ -55,6 +55,7 @@ import * as selection from '@/shared/photo/selection';
 import type { Point, SelectMode, Selection } from '@/shared/photo/selection';
 import { DEFAULT_OPTIONS, PAINTS, TOOL_GROUPS, TOOLS, type ToolId, type ToolOptions } from '@/shared/photo/tools';
 import { boxCorners, drawScene, HANDLES, handlePoint, rectHandles, zoomStep, type Box, type Overlay, type View } from '@/shared/photo/view';
+import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 
 const SETTINGS_KEY = 'din:photo-editor:settings';
 /** Bigger files than this aren't read. */
@@ -232,7 +233,7 @@ function placeFloat(f: Float, layer: Layer): Layer {
 export function PhotoEditor() {
   const din = useDin();
   const params = din.app.launch.params;
-  const initial = din.app.launch.files[0] ?? null;
+  const initial = windowLaunchFile();
 
   const [settings, setSettings] = useState(readSettings);
   const { options, fg, bg, panels } = settings;
@@ -251,7 +252,7 @@ export function PhotoEditor() {
   const [activeState, setActiveId] = useState<number | null>(null);
   const [selectedState, setSelectedIds] = useState<Set<number>>(new Set());
   const [editMask, setEditMask] = useState(false);
-  const [file, setFile] = useState<DinFileHandle | null>(null);
+  const [file, setFile] = useState<FileSystemFileHandle | null>(null);
   const fileName = file?.name ?? null;
   const [docName, setDocName] = useState(boot?.name ?? 'Untitled-1');
   const [savedEntry, setSavedEntry] = useState<Entry | null>(boot?.entry ?? null);
@@ -531,7 +532,7 @@ export function PhotoEditor() {
   );
 
   const startDoc = useCallback(
-    (d: Doc, name: string, f: DinFileHandle | null) => {
+    (d: Doc, name: string, f: FileSystemFileHandle | null) => {
       const top = d.layers[d.layers.length - 1];
       const entry: Entry = { label: f ? 'Open' : 'New', doc: d, selection: null, activeId: top?.id ?? null };
       setHist({ entries: [entry], index: 0 });
@@ -561,7 +562,7 @@ export function PhotoEditor() {
   // ---- Files ---------------------------------------------------------------------------------------
 
   const load = useCallback(
-    (f: DinFileHandle) => {
+    (f: FileSystemFileHandle) => {
       const seq = ++loadSeq.current;
       (async () => {
         try {
@@ -593,7 +594,7 @@ export function PhotoEditor() {
   }, [initial, load]);
 
   const writeTo = useCallback(
-    async (f: DinFileHandle): Promise<boolean> => {
+    async (f: FileSystemFileHandle): Promise<boolean> => {
       const d = docRef.current;
       if (!d || !hist) return false;
       setBusy(true);
@@ -601,7 +602,7 @@ export function PhotoEditor() {
       try {
         // Let "Saving…" paint before the encoder holds the thread.
         await new Promise((r) => setTimeout(r, 30));
-        await f.write(await encodeDoc(d, f.name));
+        await writeFile(f, await encodeDoc(d, f.name));
         const entry = hist.entries[hist.index];
         if (isLayered(f.name) || allLayers(d.layers).length === 1) {
           setSavedEntry(entry);
@@ -624,7 +625,7 @@ export function PhotoEditor() {
     async (exporting = false): Promise<boolean> => {
       const stem = docName.replace(/\.[^.]*$/, '');
       const types = exporting ? SAVE_TYPES.filter((f) => !isLayered(f.patterns[0])) : SAVE_TYPES;
-      const t = await din.files.save({
+      const t = await pickSaveFile({
         title: exporting ? 'Export As' : 'Save As',
         suggestedName: `${stem}.${exporting ? 'png' : fileName && isLayered(fileName) ? extOf(fileName) : 'psd'}`,
         startIn: file ?? undefined,
@@ -637,14 +638,14 @@ export function PhotoEditor() {
       }
       return writeTo(t);
     },
-    [din, docName, file, fileName, writeTo],
+    [docName, file, fileName, writeTo],
   );
 
-  const save = useCallback((): Promise<boolean> => {
+  const save = useCallback(async (): Promise<boolean> => {
     const d = docRef.current;
-    if (!d) return Promise.resolve(false);
+    if (!d) return false;
     // Layers only survive in a PSD or OpenRaster file; a flat picture can go back where it came from.
-    if (file?.writable && (isLayered(file.name) || (savesAs(file.name) && allLayers(d.layers).length === 1))) return writeTo(file);
+    if (file && (await canWrite(file)) && (isLayered(file.name) || (savesAs(file.name) && allLayers(d.layers).length === 1))) return writeTo(file);
     return saveAs();
   }, [file, writeTo, saveAs]);
 
@@ -657,7 +658,7 @@ export function PhotoEditor() {
       return;
     }
     // Beside the document, as name.png (its folder is in reach: file-folders).
-    const p = `${file.path.replace(/\.[^./]*$/, '')}.png`;
+    const p = `${din.files.path(file).replace(/\.[^./]*$/, '')}.png`;
     setBusy(true);
     try {
       await fs.writeFile(p, await encodeDoc(d, p));
@@ -671,8 +672,8 @@ export function PhotoEditor() {
 
   const pick = useCallback(
     async (title: string, extensions: string[]) =>
-      (await din.files.open({ title, types: [{ description: 'Pictures', extensions }], startIn: file ?? undefined }))[0] ?? null,
-    [din, file],
+      (await pickFiles({ title, types: fileTypes([{ description: 'Pictures', extensions }]), startIn: file ?? undefined }))[0] ?? null,
+    [file],
   );
 
   const openFile = useCallback(async () => {

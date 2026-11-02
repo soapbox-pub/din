@@ -45,7 +45,8 @@ import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { isWindowsProgram } from '@/lib/nativeApps';
 import { moveItem } from '@/hooks/useDragReorder';
-import type { Din, LaunchContext } from '@/sdk';
+import type { Din } from '@/sdk';
+import { windowLaunchFiles } from '@/shared/fileHandles';
 import { useDin, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
@@ -139,13 +140,12 @@ interface TabSpec {
 }
 
 /** The first tab, from what the window was opened with: a folder, or a file to select in its folder. */
-function launchTab(launch: LaunchContext): TabSpec {
-  const file = launch.files[0];
-  const select = typeof launch.params.select === 'string' ? launch.params.select : undefined;
-  if (file?.path && file.kind === 'file') {
-    return { id: newTabId(), path: parentPath(file.path), select: file.name };
-  }
-  return { id: newTabId(), path: file?.path ?? undefined, select };
+function launchTab(din: Din): TabSpec {
+  const [file] = windowLaunchFiles();
+  const select = typeof din.app.launch.params.select === 'string' ? din.app.launch.params.select : undefined;
+  const path = file && din.files.path(file);
+  if (path && file.kind === 'file') return { id: newTabId(), path: parentPath(path), select: file.name };
+  return { id: newTabId(), path: path || undefined, select };
 }
 
 /** What a Files tab carries to another window: its directory. */
@@ -196,7 +196,7 @@ export function FileBrowser() {
     adoption ??= adoptedTab(din).catch(() => undefined);
     void adoption.then((adopted) => {
       if (!live) return;
-      const tab = isFilesTabTransfer(adopted) ? { id: newTabId(), path: adopted.path || undefined } : launchTab(din.app.launch);
+      const tab = isFilesTabTransfer(adopted) ? { id: newTabId(), path: adopted.path || undefined } : launchTab(din);
       setTabs([tab]);
       setActiveId(tab.id);
     });
@@ -401,7 +401,7 @@ function useClipboardFiles(din: Din): { count: number; cutPaths: string[] } | nu
       else {
         void din.clipboard.readFiles().then((board) => {
           if (n !== seq) return;
-          const cutPaths = board?.cut ? board.files.flatMap((f) => (f.path ? [f.path] : [])) : [];
+          const cutPaths = board?.cut ? board.files.map((f) => din.files.path(f)) : [];
           setState({ count: has.count, cutPaths });
         });
       }
@@ -897,7 +897,7 @@ function FileBrowserTab({
       if (target === null) return;
       din.clipboard.readFiles().then(
         (board) => {
-          const paths = (board?.files ?? []).flatMap((f) => (f.path ? [f.path] : []));
+          const paths = (board?.files ?? []).map((f) => din.files.path(f));
           if (!board || paths.length === 0) return;
           transfer(target, paths, !board.cut);
           // What was cut is gone from where it was: nothing's left to paste.

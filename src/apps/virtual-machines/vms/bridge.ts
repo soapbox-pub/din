@@ -6,6 +6,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
+import { fileTypes, pickFiles } from '@/shared/fileHandles';
 import type { VmInfo, VmInstallerId, VmOs, VmsBridge, VmState } from '@/lib/vms';
 
 const KEY = ['vms'] as const;
@@ -62,17 +63,18 @@ export function useSnapshots(id: string | null) {
 export function usePickDiscImage(): (system?: VmInstallerId | null) => Promise<{ path: string; name: string } | null> {
   const din = useDin();
   return async (system) => {
-    const [file] = await din.files.open({
+    const [file] = await pickFiles({
       title: system === 'macos' ? 'Choose a macOS Recovery Image' : 'Choose a Disc Image',
-      types:
+      types: fileTypes(
         system === 'macos'
           ? [{ description: 'Recovery images', extensions: ['.dmg', '.img'] }]
           : [{ description: 'Disc images', extensions: ['.iso', '.img'] }],
-      writable: false,
+      ),
+      mode: 'read',
       startIn: 'downloads',
       confirmLabel: 'Choose',
     });
-    return file ? { path: file.path, name: file.name } : null;
+    return file ? { path: din.files.path(file), name: file.name } : null;
   };
 }
 

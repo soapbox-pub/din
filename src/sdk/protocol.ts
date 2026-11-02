@@ -9,11 +9,9 @@ import type {
   LaunchContext,
   Menu,
   MenuItem,
-  OpenFileOptions,
   Permission,
   Point,
   Rect,
-  SaveFileOptions,
   ThemeSnapshot,
   WindowChrome,
   WindowState,
@@ -45,7 +43,42 @@ export interface MediaReport {
 
 export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
 
-/** A file handle as it crosses the port; the SDK wraps it in a DinFileHandle. */
+export interface FileTypeFilter {
+  /** "Pictures", "PNG image". */
+  description: string;
+  /** Extensions with the dot: `['.png', '.jpg']`. */
+  extensions: string[];
+}
+
+type NamedFolder = 'documents' | 'pictures' | 'music' | 'videos' | 'downloads';
+
+/** Din's file picker, as the web's pickers ask the desktop for it. */
+export interface OpenFileOptions {
+  title?: string;
+  types?: FileTypeFilter[];
+  multiple?: boolean;
+  directory?: boolean;
+  /** Ask to write back to what's chosen. Default true for files. */
+  writable?: boolean;
+  /** A named folder of home; `startInHandle` starts beside a handle. */
+  startIn?: NamedFolder;
+  /** The button that picks ("Add"); Open or Select by default. */
+  confirmLabel?: string;
+}
+
+/** Din's save dialog, as `showSaveFilePicker` asks the desktop for it. */
+export interface SaveFileOptions {
+  title?: string;
+  /**
+   * The types to save as. A name typed without any of these types'
+   * extensions gets the chosen type's first one.
+   */
+  types?: FileTypeFilter[];
+  suggestedName?: string;
+  startIn?: NamedFolder;
+}
+
+/** A file handle as it crosses the port; the SDK wraps it in a FileSystemHandle. */
 export interface HandleData {
   /** The desktop's id for this grant, unique to the app's port. */
   id: string;

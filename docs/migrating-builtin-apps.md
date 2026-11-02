@@ -37,8 +37,8 @@ replaced as below. `src/apps/calculator/` is the model.
 | `setCloseGuard(windowId, fn)` | `useCloseGuard(fn)` / `din.window.onCloseRequest(fn)` |
 | `<MenuBarMenus>` | `useMenuBar(menus, onAction)` |
 | `portalContainer()` | The app's own `document.body`; `din.menus.popup` for menus that must leave the window |
-| `useFilePicker().pickFile()` → path → `window.fs.readFile` | `din.files.open()` → handle → `getFile()` |
-| `pickFile({ mode: 'save' })` → `window.fs.writeFile` | `din.files.save()` → `write()` |
+| `useFilePicker().pickFile()` → path → `window.fs.readFile` | `showOpenFilePicker()` → handle → `getFile()` |
+| `pickFile({ mode: 'save' })` → `window.fs.writeFile` | `showSaveFilePicker()` → `createWritable()` |
 | `window.fs.*` (general) | `din.system.fs` with the `fs` permission; most apps need handles instead |
 | `window.pty` | `din.system.pty` with `pty` |
 | `printHtml(title, html)`, `printFile(path)` | `din.print.html(title, html)`, `din.print.file(handle)` with `printing` |
@@ -129,7 +129,7 @@ first broke, and what restored it:
 | Terminal tabs moving between windows | `din.system.pty.release`/`adopt` (main holds the pty's output meanwhile), the screen carried with `@xterm/addon-serialize`, `useDinTabTransfer` |
 | Files' tab drops picking the right window, the drop marker | `din.window.tabDragMove`/`tabDragEnd` (the desktop finds the frontmost window of the app, shows the label), `onTabHover` |
 | Files' undo history outliving its windows | `din.app.session` |
-| Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `handle.path` for every app, `din.files.release` |
+| Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `din.files.path(handle)` for every app, `din.files.release` |
 | Links from apps opening in installed web apps, `nostr:` links | `din.app.openUrl` answered with the desktop's `useOpenUrl` |
 | Photo Editor's Quick Export beside the document | `file-folders` |
 | A drag out of an app showing what's dragged | The desktop's drag overlay (`drag.over`) |

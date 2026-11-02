@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { connect } from '@/sdk';
 import { DinProvider } from '@/sdk/react';
+import { launchedFiles } from '@/shared/fileHandles';
 import '@fontsource-variable/inter/index.css';
 import '@/sdk/app.css';
 
@@ -20,6 +21,8 @@ installCpuCanvas();
 /** Connect to the desktop, then render the app into #root. */
 export async function startApp(render: () => ReactNode): Promise<void> {
   const din = await connect();
+  // The window's launch files, so apps' first render can open them.
+  await launchedFiles();
   const queryClient = new QueryClient({
     defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 60_000 } },
   });
