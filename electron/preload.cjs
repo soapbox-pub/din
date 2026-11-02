@@ -1780,7 +1780,7 @@ expose('systemMonitor', {
    */
   forceQuit: (pid) => ipcRenderer.invoke('system-monitor:force-quit', pid),
 
-  /** The space on / and /home, measured now. */
+  /** The space on /home, measured now. */
   filesystems: () => ipcRenderer.invoke('system-monitor:filesystems'),
 });
 

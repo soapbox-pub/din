@@ -128,7 +128,7 @@ export interface SystemMonitorBridge {
   end(pid: number): Promise<void>;
   /** Make a process quit now (SIGKILL). */
   forceQuit(pid: number): Promise<void>;
-  /** The space on / and /home, measured now. */
+  /** The space on /home, measured now. */
   filesystems(): Promise<FilesystemSpace[]>;
 }
 

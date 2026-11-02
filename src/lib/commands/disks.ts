@@ -28,7 +28,7 @@ export const disksArea: Area = {
   name: 'disks',
   summary: 'Disks: free space, and removable ones to list, open, unlock and eject',
   commands: [
-    command('disks', 'space', 'How full the system and home disks are, and whether either is low', [], async () => {
+    command('disks', 'space', 'How full the home disk is, and whether it is low', [], async () => {
       const list = await call(need(getSystemMonitorBridge(), 'Disk space').filesystems());
       return {
         data: list,

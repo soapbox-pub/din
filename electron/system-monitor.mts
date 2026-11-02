@@ -24,7 +24,7 @@
 // together (/proc/diskstats), not a percentage: an NVMe drive serves many
 // requests at once, so the share of time it has one in flight (Windows'
 // "active time", sent along as activeTime) can read 100% at a fraction of
-// what it can do. Space is statfs on / and /home, whose levels the
+// what it can do. Space is statfs on /home, whose level the
 // low-space notification (disk-space.mts) shares.
 //
 // Processes are labelled with what the user sees. Electron's own processes

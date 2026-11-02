@@ -307,7 +307,7 @@ export interface DiskIo {
 
 /** One filesystem's space, from statfs. */
 export interface FilesystemSpace {
-  /** What it is to the user: "System" for /, "Home" for /home. */
+  /** What it is to the user: "Home" for /home. */
   label: string;
   mountPoint: string;
   /** Bytes in all. */
@@ -380,29 +380,23 @@ export async function readDiskIo(): Promise<DiskIo | null> {
   }
 }
 
-/** The filesystems people fill: the system's and, when it's its own, home's. */
-const WATCHED_FILESYSTEMS = [
-  { label: 'System', mountPoint: '/' },
-  { label: 'Home', mountPoint: '/home' },
-];
-
-/** The space on / and /home, once when they're the same filesystem. */
+/**
+ * The space on /home, the filesystem people fill (on a machine without a
+ * home of its own, that's /'s). The system volume isn't shown: on DinOS it
+ * sits near full by design, Nix's garbage collection keeping room in it.
+ */
 export async function readFilesystems(): Promise<FilesystemSpace[]> {
-  const seen = new Set<number>();
-  const result: FilesystemSpace[] = [];
-  for (const { label, mountPoint } of WATCHED_FILESYSTEMS) {
-    try {
-      const [stats, sfs] = await Promise.all([fsp.stat(mountPoint), fsp.statfs(mountPoint)]);
-      if (seen.has(stats.dev) || sfs.blocks === 0) continue;
-      seen.add(stats.dev);
-      const total = sfs.blocks * sfs.bsize;
-      const free = sfs.bavail * sfs.bsize;
-      result.push({ label, mountPoint, total, free, level: spaceLevel(free, total) });
-    } catch {
-      // Not there, or not one that reports space.
-    }
+  const mountPoint = '/home';
+  try {
+    const sfs = await fsp.statfs(mountPoint);
+    if (sfs.blocks === 0) return [];
+    const total = sfs.blocks * sfs.bsize;
+    const free = sfs.bavail * sfs.bsize;
+    return [{ label: 'Home', mountPoint, total, free, level: spaceLevel(free, total) }];
+  } catch {
+    // Not there, or not one that reports space.
+    return [];
   }
-  return result;
 }
 
 export async function readUsers(): Promise<Map<number, string>> {

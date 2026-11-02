@@ -764,7 +764,7 @@ function TableSkeleton() {
  * won't stop. Apps are listed with everything they started folded under
  * them; CPU is a share of the whole machine, so the column adds up to the
  * total in the header. GPU shows where the driver says how busy it is.
- * Disk shows traffic, not a percentage, and how full / and /home are.
+ * Disk shows traffic, not a percentage, and how full /home is.
  */
 export function SystemMonitor() {
   const { available, snapshot, cpuHistory, memoryHistory, gpuHistory, diskHistory } = useSystemMonitor();
