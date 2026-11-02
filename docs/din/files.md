@@ -48,6 +48,36 @@ Electron and in a browser.
 in a named folder of home (`documents`, `pictures`, `music`, `videos`,
 `downloads`).
 
+### The web's File System Access
+
+The web's pickers open Din's, so a page written for File System Access
+works unchanged (`src/sdk/standards.ts`):
+
+```ts
+const [handle] = await showOpenFilePicker({ types: [{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg'] } }] });
+const file = await handle.getFile();
+const writable = await handle.createWritable();
+await writable.write(blob);
+await writable.close();                  // the file is replaced now
+```
+
+`showOpenFilePicker`, `showSaveFilePicker` and `showDirectoryPicker`
+take `types`, `multiple`, `suggestedName`, `mode` and `startIn` (a
+handle, or `documents`, `pictures`, `music`, `videos`, `downloads`), and
+reject with an `AbortError` when cancelled. The handles pass
+`instanceof FileSystemFileHandle` (or `…DirectoryHandle`) and have
+`getFile`, `createWritable` (with `write`, `seek`, `truncate`, and
+`keepExistingData`), `isSameEntry`, `queryPermission` and
+`requestPermission`, which answer what the grant allows and never ask;
+a folder's `entries`, `keys`, `values`, `getFileHandle`,
+`getDirectoryHandle` and `resolve` reach what's in it.
+
+What they can't do: create or remove a folder's entries
+(`NotAllowedError`), and be kept in IndexedDB, since they aren't the
+browser's own. For Recent Files, `din.files.fromWebHandle(handle)`
+gives the `DinFileHandle` behind one, to `persist()`, and
+`din.files.toWebHandle` turns a restored one back.
+
 ## Saving
 
 ```ts

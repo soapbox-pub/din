@@ -46,6 +46,21 @@ din.app.onLaunch(({ params, files, shortcut }) => {
 
 This replaces today's `actionAt` timestamps on dock action params.
 
+### The web's `launchQueue`
+
+A page written for the web's Launch Handling and File Handling gets the
+same launches through `launchQueue`: the consumer hears this window's
+launch once the desktop's hello is in, then each `onLaunch` after it,
+with `targetURL` the page's own and `files` the launch's files as
+FileSystemHandles ([files.md](files.md#the-webs-file-system-access)).
+Params, shortcuts and state have no counterpart there.
+
+```ts
+launchQueue.setConsumer(async ({ files }) => {
+  for (const handle of files) open(await handle.getFile(), handle);
+});
+```
+
 ### Restoring after a restart
 
 Din keeps the windows open on file, on this device, and reopens them when

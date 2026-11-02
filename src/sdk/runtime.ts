@@ -62,7 +62,7 @@ import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
-import { bridgeMediaSession, watchDocumentHead } from '@/sdk/standards';
+import { bridgeMediaSession, dinHandleOf, installFilePickers, installLaunchQueue, toWebHandle, watchDocumentHead } from '@/sdk/standards';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
 export interface Transport {
@@ -615,6 +615,11 @@ export function installDin(transport: Transport): void {
       return wrap(await request('files.fromPath', { path }));
     },
     release: (token) => tell('files.release', { token }),
+    fromWebHandle: (handle) => dinHandleOf(handle),
+    toWebHandle: (file) => {
+      idOf(file);
+      return toWebHandle(file) as unknown as FileSystemHandle;
+    },
     requestAccess: async (paths, reason) => (await request('files.requestAccess', { paths, reason })).map(wrap),
     pathUrl: (path) => {
       needFs();
@@ -941,6 +946,8 @@ export function installDin(transport: Transport): void {
     system,
   };
   Object.defineProperty(window, 'din', { value: din, configurable: false, writable: false, enumerable: true });
+  installFilePickers(files);
+  installLaunchQueue(app, ready.then(() => launch));
 
   // ---- power mode: where the caret is as keys are typed, while it's on ----
   let powerMode = false;

@@ -456,6 +456,14 @@ export interface DinFiles {
   /** Forget a `persist()` token the app no longer keeps (a Recent entry removed). */
   release(token: string): void;
   /**
+   * The handle behind a FileSystemHandle from the web's pickers or
+   * `launchQueue` (`showOpenFilePicker` opens Din's), to `persist()` it;
+   * null for anything else.
+   */
+  fromWebHandle(handle: FileSystemHandle): DinFileHandle | null;
+  /** A handle as the web's FileSystemFileHandle or FileSystemDirectoryHandle. */
+  toWebHandle(file: DinFileHandle): FileSystemHandle;
+  /**
    * Files and folders by path that nothing granted the app: songs a playlist
    * names elsewhere, folders its saved state lists. Resolves with handles for
    * those it may have (and, with `file-folders`, their folders come into
