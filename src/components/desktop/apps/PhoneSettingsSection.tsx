@@ -23,6 +23,7 @@ import {
   InfoRow,
   ToggleRow,
 } from '@/components/desktop/apps/DetailsPage';
+import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -238,10 +239,15 @@ function connectedDetail(phone: PhoneDevice): string {
   return parts.join(' · ');
 }
 
-function PhoneIcon() {
+/** An iPhone or an Android phone when Bluetooth can tell, else a plain phone. */
+function PlatformIcon({ phone }: { phone: PhoneDevice }) {
+  return <BluetoothDeviceIcon device={{ icon: 'phone', kind: phone.platform }} />;
+}
+
+function PhoneIcon({ phone }: { phone: PhoneDevice }) {
   return (
     <span className="relative block">
-      <Smartphone aria-hidden />
+      <PlatformIcon phone={phone} />
       <Bluetooth className="absolute -bottom-1 -right-1.5 size-3! rounded-full bg-background text-muted-foreground" aria-hidden />
     </span>
   );
@@ -262,7 +268,7 @@ function PhoneRow({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
-            icon={<PhoneIcon />}
+            icon={<PhoneIcon phone={phone} />}
             name={phone.name}
             detail={connected ? connectedDetail(phone) : describePhone(phone)}
             connected={connected}
@@ -353,7 +359,7 @@ function PhoneDetails({
       ) : (
         <>
           <DetailsHero
-            icon={<Smartphone aria-hidden />}
+            icon={<PlatformIcon phone={phone} />}
             name={phone.name}
             status={
               <>

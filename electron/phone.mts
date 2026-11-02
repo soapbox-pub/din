@@ -217,6 +217,7 @@ function unread(thread: Thread): number {
 
 function state(): PhoneState {
   const added = new Set(phones.map((p) => p.id));
+  const platforms = new Map(bluetoothCandidates.map((c) => [c.id, c.platform]));
   const devices: PhoneDevice[] = phones.map((p) => {
     const l = live.get(p.id);
     const d = phoneData(p.id);
@@ -224,6 +225,7 @@ function state(): PhoneState {
       id: p.id,
       kind: p.kind,
       name: p.name,
+      platform: platforms.get(p.id) ?? null,
       status: l?.status ?? 'offline',
       error: l?.error ?? null,
       battery: l?.battery ?? null,
@@ -244,7 +246,12 @@ function state(): PhoneState {
 async function refreshBluetoothCandidates(): Promise<void> {
   const found = await bluetoothPhones().catch(() => null);
   bluetoothAvailable = found !== null;
-  bluetoothCandidates = (found ?? []).map((p) => ({ id: bluetoothId(p.address), kind: 'bluetooth', name: p.name }));
+  bluetoothCandidates = (found ?? []).map((p) => ({
+    id: bluetoothId(p.address),
+    kind: 'bluetooth',
+    name: p.name,
+    platform: p.platform,
+  }));
   changed();
 }
 

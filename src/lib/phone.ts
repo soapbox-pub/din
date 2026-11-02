@@ -12,10 +12,14 @@ export type PhoneKind = 'bluetooth';
 
 export type PhoneStatus = 'connected' | 'connecting' | 'offline';
 
+/** Which kind of phone it is, when Bluetooth can tell. */
+export type PhonePlatform = 'iphone' | 'android';
+
 export interface PhoneDevice {
   id: string;
   kind: PhoneKind;
   name: string;
+  platform: PhonePlatform | null;
   status: PhoneStatus;
   /** What went wrong last time it tried to connect, in words for the user. */
   error: string | null;
@@ -34,6 +38,7 @@ export interface PhoneCandidate {
   id: string;
   kind: PhoneKind;
   name: string;
+  platform: PhonePlatform | null;
 }
 
 export interface PhoneState {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Bluetooth, Check, ChevronLeft, Loader2, Smartphone, TriangleAlert } from 'lucide-react';
+import { Bluetooth, Check, ChevronLeft, Loader2, TriangleAlert } from 'lucide-react';
+import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import { Button } from '@/components/ui/button';
 import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
 import { usePhoneActions, usePhoneState } from '@/hooks/usePhone';
@@ -166,7 +167,7 @@ function PairStep({ onPaired }: { onPaired: (address: string, name: string) => v
               </p>
             ) : (
               nearby.map((d) => (
-                <DeviceRow key={d.path} name={d.name}>
+                <DeviceRow key={d.path} device={d}>
                   <Button size="sm" variant="outline" disabled={pairing !== null} onClick={() => void pair(d)}>
                     {pairing === d.path && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
                     Pair
@@ -318,11 +319,11 @@ function DeviceList({ label, busy, children }: { label: string; busy?: boolean; 
   );
 }
 
-function DeviceRow({ name, children }: { name: string; children: React.ReactNode }) {
+function DeviceRow({ device, children }: { device: BluetoothDevice; children: React.ReactNode }) {
   return (
     <li className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-      <Smartphone className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span>
+      <BluetoothDeviceIcon device={device} className="size-5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{device.name}</span>
       {children}
     </li>
   );

@@ -726,6 +726,7 @@ async function cancelPairing(path: string): Promise<void> {
 export interface BluetoothPhone {
   address: string;
   name: string;
+  platform: 'iphone' | 'android' | null;
   connected: boolean;
 }
 
@@ -743,7 +744,13 @@ export async function bluetoothPhones(): Promise<BluetoothPhone[] | null> {
     const uuids = props.get('UUIDs');
     const mas = Array.isArray(uuids) && uuids.includes(MAS_UUID);
     if (!mas && props.get('Icon') !== 'phone') continue;
-    phones.push({ address: String(props.get('Address') ?? ''), name: deviceName(props), connected: props.get('Connected') === true });
+    const kind = deviceKind(props);
+    phones.push({
+      address: String(props.get('Address') ?? ''),
+      name: deviceName(props),
+      platform: kind === 'iphone' || kind === 'android' ? kind : null,
+      connected: props.get('Connected') === true,
+    });
   }
   return phones;
 }
