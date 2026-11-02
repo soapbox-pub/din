@@ -13,7 +13,7 @@ import {
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk/din';
-import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   calendarTemplate,
   coordOf,
@@ -107,7 +107,7 @@ export function Calendar() {
   const [naming, setNaming] = useState<{ source: Source | null; title: string } | null>(null);
   const [deletingCalendar, setDeletingCalendar] = useState<Source | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
-  const sidebarFits = useWindowState((s) => (s.bounds.width || window.innerWidth) >= SIDEBAR_MIN_WIDTH);
+  const sidebarFits = useMediaQuery(`(min-width: ${SIDEBAR_MIN_WIDTH}px)`);
   const showSidebar = sidebarOpen && sidebarFits;
 
   const setView = useCallback((v: View) => {

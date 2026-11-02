@@ -107,15 +107,11 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
         if (live) setOthers(ws.map((w) => ({ windowId: w.id, title: w.title })));
       });
     refresh();
-    let focused = din.window.state.focused;
-    const off = din.window.onChange((s) => {
-      if (s.focused && !focused) refresh();
-      focused = s.focused;
-    });
+    window.addEventListener('focus', refresh);
     window.addEventListener('pointerdown', refresh, true);
     return () => {
       live = false;
-      off();
+      window.removeEventListener('focus', refresh);
       window.removeEventListener('pointerdown', refresh, true);
     };
   }, [din]);
@@ -126,7 +122,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     const open = new BroadcastChannel(CHANNEL);
     channel.current = open;
     open.onmessage = ({ data }: MessageEvent<unknown>) => {
-      if (!isTabMessage(data) || data.to !== din.window.state.id) return;
+      if (!isTabMessage(data) || data.to !== din.window.id) return;
       const strip = latest.current.list;
       const index = data.index ?? (strip && typeof data.x === 'number' ? slotAt(strip, data.x).index : Infinity);
       latest.current.options.receive(data.payload, index);
@@ -173,7 +169,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
 
   const moveToNewWindow = useCallback(async (id: string, point?: DragPoint) => {
     const { options: o } = latest.current;
-    const { bounds } = din.window.state;
+    const bounds = { x: screenX, y: screenY, width: outerWidth, height: outerHeight };
     const token = `tab-${crypto.randomUUID()}`;
     din.app.session.set(token, await o.take(id));
     const place = point
@@ -192,7 +188,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     onDrop: (id, point) => {
       void din.window.tabDragEnd(point).then((target) => {
         const { tabCount } = latest.current;
-        if (target && target.windowId !== din.window.state.id) {
+        if (target && target.windowId !== din.window.id) {
           void Promise.resolve(latest.current.options.take(id)).then((payload) =>
             channel.current?.postMessage({ type: MESSAGE, to: target.windowId, payload, x: target.at.x } satisfies TabMessage),
           );
@@ -203,8 +199,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
           void moveToNewWindow(id, point);
         } else {
           // A window's only tab carries the window along with it.
-          const { bounds } = din.window.state;
-          window.moveTo(Math.round(bounds.x + point.x - GRAB.x), Math.max(0, Math.round(bounds.y + point.y - GRAB.y)));
+          window.moveTo(Math.round(screenX + point.x - GRAB.x), Math.max(0, Math.round(screenY + point.y - GRAB.y)));
         }
       });
     },

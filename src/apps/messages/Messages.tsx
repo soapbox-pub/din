@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import type { PhoneConversation, PhoneDevice, PhoneMessage } from '@/lib/phone';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk/din';
-import { useDin, useMenuBar, useWindowState, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDocumentVisible, useMediaQuery, useMenuBar, useWindowFocused, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { cleanPhoneError, formatAddress, phoneDigits } from '@/shared/phone';
 import { useContacts, useConversations, useMessages, usePhone, usePhoneState, usePhoneSync } from './messages/api';
@@ -66,9 +66,9 @@ export function Messages() {
   usePhoneSync();
   const state = usePhoneState();
   const conversations = useConversations();
-  const focused = useWindowState((s) => s.focused);
-  const visible = useWindowState((s) => s.visible);
-  const narrow = useWindowState((s) => (s.bounds.width || window.innerWidth) < 680);
+  const focused = useWindowFocused();
+  const visible = useDocumentVisible();
+  const narrow = !useMediaQuery('(min-width: 680px)');
 
   const [selection, setSelection] = useState<Selection>(() => fromLaunch(din.app.launch));
   const [search, setSearch] = useState('');

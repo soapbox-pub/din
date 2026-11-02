@@ -1,6 +1,6 @@
 /** React hooks over window.din (docs/din/README.md). */
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
-import type { Din, DragInfo, FrameStyle, Menu, ThemeSnapshot, WindowState } from '@/sdk/din';
+import type { Din, DragInfo, FrameStyle, Menu, Snap, ThemeSnapshot } from '@/sdk/din';
 
 export const DinContext = createContext<Din | null>(null);
 
@@ -17,19 +17,60 @@ export function useDinOptional(): Din | null {
   return useContext(DinContext);
 }
 
+/** Whether the window is the one keyboard input goes to: `document.hasFocus()`, as it changes. */
+export function useWindowFocused(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      window.addEventListener('focus', cb);
+      window.addEventListener('blur', cb);
+      return () => {
+        window.removeEventListener('focus', cb);
+        window.removeEventListener('blur', cb);
+      };
+    },
+    () => document.hasFocus(),
+  );
+}
+
+/** Whether any of the window can be seen: `document.visibilityState`, as it changes. */
+export function useDocumentVisible(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      document.addEventListener('visibilitychange', cb);
+      return () => document.removeEventListener('visibilitychange', cb);
+    },
+    () => document.visibilityState === 'visible',
+  );
+}
+
+let outerSize = { width: 0, height: 0 };
+
 /**
- * The window's state, re-rendering when it changes. With `select`, just the
- * part it picks (a primitive), re-rendering only when that changes: the
- * bounds change on every step of a move, so a component that only needs a
- * width breakpoint or `focused` shouldn't take the whole state.
+ * The window's size, frame included (`outerWidth`, `outerHeight`),
+ * re-rendering on every step of a resize. For a breakpoint, `useMediaQuery`
+ * re-renders only when it's crossed.
  */
-export function useWindowState(): WindowState;
-export function useWindowState<T>(select: (state: WindowState) => T): T;
-export function useWindowState<T>(select?: (state: WindowState) => T): WindowState | T {
+export function useWindowSize(): { width: number; height: number } {
+  return useSyncExternalStore(
+    (cb) => {
+      window.addEventListener('resize', cb);
+      return () => window.removeEventListener('resize', cb);
+    },
+    () => {
+      if (outerSize.width !== window.outerWidth || outerSize.height !== window.outerHeight) {
+        outerSize = { width: window.outerWidth, height: window.outerHeight };
+      }
+      return outerSize;
+    },
+  );
+}
+
+/** The half or quarter of the screen the window is snapped to, or null. */
+export function useSnapped(): Snap | null {
   const din = useDin();
   return useSyncExternalStore(
-    (cb) => din.window.onChange(cb),
-    () => (select ? select(din.window.state) : din.window.state),
+    (cb) => din.window.onSnappedChange(cb),
+    () => din.window.snapped,
   );
 }
 
@@ -53,14 +94,22 @@ export function useDinTheme(): ThemeSnapshot {
 
 /** Whether a media query matches (`(prefers-color-scheme: dark)`), re-rendering when that changes. */
 export function useMediaQuery(query: string): boolean {
+  const list = mediaQuery(query);
   return useSyncExternalStore(
     (cb) => {
-      const list = matchMedia(query);
       list.addEventListener('change', cb);
       return () => list.removeEventListener('change', cb);
     },
-    () => matchMedia(query).matches,
+    () => list.matches,
   );
+}
+
+const mediaQueries = new Map<string, MediaQueryList>();
+
+function mediaQuery(query: string): MediaQueryList {
+  let list = mediaQueries.get(query);
+  if (!list) mediaQueries.set(query, (list = matchMedia(query)));
+  return list;
 }
 
 /** The drag going on anywhere on the desktop, or null. */

@@ -6,12 +6,13 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Din } from '@/sdk/din';
-import { DinContext, frameControlClasses, useDin, useFrameStyle, useWindowState } from '@/sdk/react/hooks';
+import { DinContext, frameControlClasses, useDin, useFrameStyle, useMediaQuery } from '@/sdk/react/hooks';
 
 export function DinProvider({ din, children }: { din: Din; children: ReactNode }) {
   return <DinContext.Provider value={din}>{children}</DinContext.Provider>;
 }
 
+const MAXIMIZED = '(display-state: maximized)';
 const INTERACTIVE = 'button, input, textarea, select, a[href], [role="tab"], [data-window-no-drag]';
 const FIELD = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
 
@@ -55,7 +56,7 @@ export function WindowDragRegion({ className, children, onPointerDown, onDoubleC
         onDoubleClick?.(e);
         if (e.defaultPrevented || !e.currentTarget.contains(e.target as Node)) return;
         if ((e.target as HTMLElement).closest(`${INTERACTIVE}, ${FIELD}`)) return;
-        void (din.window.state.maximized ? window.restore() : window.maximize());
+        void (matchMedia(MAXIMIZED).matches ? window.restore() : window.maximize());
       }}
       onContextMenu={(e) => {
         onContextMenu?.(e);
@@ -74,7 +75,7 @@ export function WindowDragRegion({ className, children, onPointerDown, onDoubleC
 /** Minimize, maximize and close, in the title bar's colors. */
 export function WindowControls({ className }: { className?: string }) {
   const din = useDin();
-  const maximized = useWindowState((s) => s.maximized);
+  const maximized = useMediaQuery(MAXIMIZED);
   const { muted, hover } = frameControlClasses(useFrameStyle());
   const button = 'grid size-6 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   return (

@@ -48,7 +48,7 @@ import { isWindowsProgram } from '@/lib/nativeApps';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { windowLaunchFiles } from '@/shared/fileHandles';
-import { useDin, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import { dinWindowMove } from '@/shared/dinWindowMove';
@@ -180,7 +180,7 @@ export function FileBrowser() {
   const din = useDin();
   const bridge = getFsBridge();
   const queryClient = useQueryClient();
-  const windowFocused = useWindowState((s) => s.focused);
+  const windowFocused = useWindowFocused();
   const home = useHomeDir();
   const trash = useTrashDir();
   const [prefs, setPrefs] = useLocalStorage<FilesPrefs>('din:files:prefs', DEFAULT_PREFS);

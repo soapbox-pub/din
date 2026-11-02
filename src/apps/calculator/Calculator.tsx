@@ -160,8 +160,9 @@ export function Calculator() {
 function FitWindow({ view }: { view: CalculatorView }) {
   const din = useDin();
   useEffect(() => {
-    const { maximized, snapped, bounds, workArea } = din.window.state;
-    if (maximized || snapped) return;
+    if (matchMedia('(display-state: maximized)').matches || din.window.snapped) return;
+    const bounds = { x: screenX, y: screenY, width: outerWidth, height: outerHeight };
+    const workArea = { x: screen.availLeft, y: screen.availTop, width: screen.availWidth, height: screen.availHeight };
     let { width, height } = VIEW_SIZES[view];
     if (bounds.width === width && bounds.height === height) return;
     width = Math.min(width, workArea.width);

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { NPool, NRelay1, type NostrEvent } from '@nostrify/nostrify';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Nip07 } from '@/sdk/din';
-import { useWindowState } from '@/sdk/react';
+import { useWindowFocused } from '@/sdk/react';
 import { calendarFilters, collectCalendar, coordFilters, parseRsvp, RSVP_KIND, type CalendarData, type EventTemplate, type Rsvp } from '@/shared/calendar';
 
 /** Where the account's relay list is looked for, and where to look when it has none. */
@@ -109,7 +109,7 @@ const dataKey = (pubkey: string | null) => ['calendar', pubkey] as const;
  * again every few minutes and when the window comes back to the front.
  */
 export function useCalendarData(pubkey: string | null) {
-  const focused = useWindowState((s) => s.focused);
+  const focused = useWindowFocused();
   const query = useQuery({
     queryKey: dataKey(pubkey),
     enabled: !!pubkey,

@@ -2,7 +2,7 @@ import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLaunchFiles } from '@/shared/fileHandles';
 import { cleanFsError } from '@/lib/fs';
 import { DRAG_MIME, type FrameMode, type LaunchContext, type Rect } from '@/sdk';
-import { useCurrentDrag, useDin, useWindowState, useWindowTitle } from '@/sdk/react';
+import { useCurrentDrag, useDin, useMediaQuery, useSnapped, useWindowSize, useWindowTitle } from '@/sdk/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { openHandles, skinKindOf, skinsDir } from './media/actions';
 import { readLocal } from './media/grants';
@@ -88,7 +88,9 @@ function FitWindow({
   remember: boolean;
 }) {
   const din = useDin();
-  const state = useWindowState();
+  const maximized = useMediaQuery('(display-state: maximized)');
+  const snapped = useSnapped();
+  const size = useWindowSize();
   const chrome = useRef<FrameMode | null>(null);
   const target = useRef<{ width: number; height: number; settled: boolean } | null>(null);
   useEffect(() => {
@@ -97,8 +99,9 @@ function FitWindow({
       chrome.current = frame;
       din.window.setChrome({ frame });
     }
-    const { bounds, workArea: area, maximized, snapped } = din.window.state;
-    if (maximized || snapped) return;
+    if (matchMedia('(display-state: maximized)').matches || din.window.snapped) return;
+    const bounds = { x: screenX, y: screenY, width: outerWidth, height: outerHeight };
+    const area = { x: screen.availLeft, y: screen.availTop, width: screen.availWidth, height: screen.availHeight };
     let width = Math.round(wantWidth);
     let height = Math.round(wantHeight);
     // A framed window is never smaller than the window manager allows.
@@ -125,9 +128,9 @@ function FitWindow({
 
   // Once the window has reached the size asked for, later changes are the
   // user's: remember them. (Before then they're the window manager's.)
-  const free = frame !== 'none' && !state.maximized && !state.snapped;
-  const width = Math.round(state.bounds.width);
-  const height = Math.round(state.bounds.height);
+  const free = frame !== 'none' && !maximized && !snapped;
+  const width = Math.round(size.width);
+  const height = Math.round(size.height);
   useEffect(() => {
     const t = target.current;
     if (!t || !free) return;

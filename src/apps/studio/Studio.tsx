@@ -13,7 +13,7 @@ import {
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk';
-import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
 import { Compositor } from './engine/compositor';
 import { asFraction, CANVAS, type Bubble, type Layout } from './engine/layout';
@@ -77,7 +77,7 @@ function actionOf({ params, reason }: LaunchContext): Action | null {
 export function Studio() {
   const din = useDin();
   const capture = din.system.capture;
-  const visible = useWindowState((s) => s.visible);
+  const visible = useDocumentVisible();
   const [settings, update] = useStudioSettings();
   const [status, setStatus] = useState<CaptureStatus | null>(null);
   const devices = useDevices();

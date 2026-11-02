@@ -88,6 +88,11 @@ declare global {
     maximize(): Promise<void>;
     restore(): Promise<void>;
   }
+  /** Where the work area starts, beside `availWidth` and `availHeight` (every engine has them; TypeScript's DOM types don't). */
+  interface Screen {
+    readonly availLeft: number;
+    readonly availTop: number;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,24 +194,8 @@ export interface DinApp {
 /** Where a window's edge is grabbed to resize it. */
 export type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
-export interface WindowState {
-  /** The window's id, unique on this desktop. */
-  readonly id: string;
-  /** The window is the one keyboard input goes to. */
-  focused: boolean;
-  /** Some of the window can be seen (not minimized, not on another workspace). */
-  visible: boolean;
-  minimized: boolean;
-  maximized: boolean;
-  /** The half or quarter of the screen it's snapped to, or null. */
-  snapped: 'left' | 'right' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | null;
-  /** The page went fullscreen (requestFullscreen). */
-  fullscreen: boolean;
-  /** Where the window is on the desktop and its size, frame included, in CSS pixels. */
-  bounds: Rect;
-  /** The work area of the monitor it's on (the screen minus the menu bar and Dock). */
-  workArea: Rect;
-}
+/** The half or quarter of the screen a window is snapped to. */
+export type Snap = 'left' | 'right' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 /** How much of the window Din draws. docs/din/window.md has pictures. */
 export type FrameMode =
@@ -238,10 +227,22 @@ export interface FrameStyle {
   dark: boolean;
 }
 
+/**
+ * The rest of the window's state is the web's own, which the runtime
+ * answers from the desktop's (docs/din/window.md): `document.hasFocus()`
+ * and window `focus`/`blur` events; `document.visibilityState` and
+ * `visibilitychange`; `matchMedia('(display-state: maximized)')` (and
+ * `minimized`, `fullscreen`, `normal`); `screenX`, `screenY`, `outerWidth`
+ * and `outerHeight` for the window's place and size, frame included; and
+ * `screen.availLeft`, `availTop`, `availWidth` and `availHeight` for the
+ * work area of its monitor.
+ */
 export interface DinWindow {
-  /** Pushed by the desktop; always current. */
-  readonly state: WindowState;
-  onChange(cb: (state: WindowState) => void): Unsubscribe;
+  /** The window's id, unique on this desktop (what `din.app.windows()` lists). */
+  readonly id: string;
+  /** The half or quarter of the screen it's snapped to, or null. */
+  readonly snapped: Snap | null;
+  onSnappedChange(cb: (snapped: Snap | null) => void): Unsubscribe;
 
   /**
    * Title-bar look for `custom` frames, following the accent. The window's

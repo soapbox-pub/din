@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, Search, SquarePen, Star, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
@@ -181,7 +181,7 @@ export function Viewer() {
   const listRef = useRef<HTMLDivElement>(null);
   const readerRef = useRef<HTMLDivElement>(null);
 
-  const sidebarFits = useWindowState((s) => (s.bounds.width || window.innerWidth) >= SIDEBAR_MIN_WIDTH);
+  const sidebarFits = useMediaQuery(`(min-width: ${SIDEBAR_MIN_WIDTH}px)`);
   const showSidebar = sidebarOpen && sidebarFits;
 
   const setSelection = useCallback((s: Selection) => {

@@ -13,8 +13,8 @@ import type {
   Point,
   Rect,
   ThemeSnapshot,
+  Snap,
   WindowChrome,
-  WindowState,
   AssistantSettings,
   DictationStatus,
   Edge,
@@ -96,6 +96,24 @@ export interface FileData {
   type: string;
   lastModified: number;
   bytes: ArrayBuffer;
+}
+
+/** The window as the desktop sees it, which the runtime gives the page as the web's own state. */
+export interface WindowState {
+  id: string;
+  /** The window is the one keyboard input goes to. */
+  focused: boolean;
+  /** Some of the window can be seen (not minimized, not on another workspace). */
+  visible: boolean;
+  minimized: boolean;
+  maximized: boolean;
+  snapped: Snap | null;
+  /** The page went fullscreen (requestFullscreen). */
+  fullscreen: boolean;
+  /** Where the window is on the desktop and its size, frame included, in CSS pixels. */
+  bounds: Rect;
+  /** The work area of the monitor it's on (the screen minus the menu bar and Dock). */
+  workArea: Rect;
 }
 
 /** The theme as the desktop sends it: the snapshot, and its scheme for the runtime's `dark` class. */

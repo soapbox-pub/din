@@ -41,9 +41,9 @@ import type {
   Permission,
   SignedNostrEvent,
   Rect,
+  Snap,
   ThemeSnapshot,
   Unsubscribe,
-  WindowState,
 } from '@/sdk/din';
 import type { FsBridge } from '@/lib/fs';
 import type { AssistantBridge } from '@/lib/assistant';
@@ -55,7 +55,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
-import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData } from '@/sdk/protocol';
+import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import {
@@ -64,6 +64,7 @@ import {
   installFilePickers,
   installFileSystemObserver,
   installLaunchQueue,
+  installWindowState,
   toWebHandle,
   watchDocumentHead,
   type Grant,
@@ -470,7 +471,10 @@ export function installDin(transport: Transport): void {
   // ---- window ----
   let state: WindowState = NO_STATE;
   let frameStyle: FrameStyle = { accent: null, dark: false };
-  const states = new Emitter<WindowState>();
+  let helloed = false;
+  const states = new Emitter<void>();
+  const snaps = new Emitter<Snap | null>();
+  installWindowState({ state: () => (helloed ? state : null), onChange: (cb) => states.on(cb) });
   const styles = new Emitter<FrameStyle>();
   let closeHandler: (() => boolean) | null = null;
   const tabHovers = new Emitter<{ x: number; y: number } | null>();
@@ -490,8 +494,10 @@ export function installDin(transport: Transport): void {
   }
   pushes.on((p) => {
     if (p.type === 'state') {
+      const snapped = state.snapped;
       state = p.state;
-      states.emit(state);
+      states.emit();
+      if (state.snapped !== snapped) snaps.emit(state.snapped);
     } else if (p.type === 'frameStyle') {
       frameStyle = p.style;
       styles.emit(frameStyle);
@@ -531,10 +537,13 @@ export function installDin(transport: Transport): void {
     });
   };
   const win: DinWindow = {
-    get state() {
-      return state;
+    get id() {
+      return state.id;
     },
-    onChange: (cb) => states.on(cb),
+    get snapped() {
+      return state.snapped;
+    },
+    onSnappedChange: (cb) => snaps.on(cb),
     get frameStyle() {
       return frameStyle;
     },
@@ -983,6 +992,8 @@ export function installDin(transport: Transport): void {
     for (const p of hello.permissions) permissions.add(p);
     launched(hello.launch);
     state = hello.state;
+    helloed = true;
+    states.emit();
     frameStyle = hello.frameStyle;
     takeTheme(hello.theme);
     applyTheme(hello.theme, loadedFaces);

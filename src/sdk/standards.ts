@@ -11,6 +11,8 @@
  *   pickers, its handles backed by the desktop's grants, and
  *   `FileSystemObserver` hears when something else changes them.
  * - Launch Handling's `launchQueue` hears each launch's files.
+ * - Focus, visibility, `display-state`, `screenX` and the rest answer for
+ *   the page's own window on the desktop.
  *
  * Part of the runtime's bundle, so nothing here may have side effects on
  * import.
@@ -23,7 +25,7 @@ import type {
   SaveFilePickerOptions,
   Unsubscribe,
 } from '@/sdk/din';
-import type { FileTypeFilter, MediaAction, MediaReport, OpenFileOptions, SaveFileOptions } from '@/sdk/protocol';
+import type { FileTypeFilter, MediaAction, MediaReport, OpenFileOptions, SaveFileOptions, WindowState } from '@/sdk/protocol';
 
 /** Pictures larger than this aren't passed on: the desktop gets them as data: URLs. */
 const MAX_PICTURE_BYTES = 512 * 1024;
@@ -253,6 +255,187 @@ export function watchDocumentHead(host: DocumentHeadHost): void {
   // The parser's work is done before the page's deferred and module scripts run.
   if (document.readyState !== 'loading') start();
   else document.addEventListener('readystatechange', start, { once: true });
+}
+
+// ---------------------------------------------------------------------------
+// The window's state
+// ---------------------------------------------------------------------------
+
+export interface WindowStateHost {
+  /** The desktop's view of the window, current; null before the hello. */
+  state(): WindowState | null;
+  onChange(cb: () => void): Unsubscribe;
+}
+
+const DISPLAY_STATE = /^\s*(not\s+)?\(\s*display-state\s*:\s*(fullscreen|maximized|minimized|normal)\s*\)\s*$/i;
+
+/**
+ * The window as the web's own state, answered from the desktop's: a page in
+ * a webview (or a frame) otherwise sees the host's window, not its own.
+ *
+ * - `document.hasFocus()` and window `focus`/`blur`: whether it's the
+ *   window keyboard input goes to (the page's own focus events for the
+ *   window are held back, which a click on the menu bar would send).
+ * - `document.visibilityState`, `hidden` and `visibilitychange`: hidden
+ *   while minimized or on another workspace, too.
+ * - `matchMedia('(display-state: …)')`, from the Additional Windowing
+ *   Controls draft: `fullscreen`, `maximized`, `minimized` or `normal`.
+ *   Only in script: stylesheets' @media don't know it.
+ * - `screenX`/`screenLeft`, `screenY`/`screenTop`, `outerWidth` and
+ *   `outerHeight`: where the window is and its size, frame included.
+ * - `screen.availLeft`, `availTop`, `availWidth`, `availHeight`: the work
+ *   area of the monitor it's on.
+ *
+ * Until the hello, each answers as the page's own.
+ */
+export function installWindowState(host: WindowStateHost): void {
+  const get = (target: object, name: string, value: () => unknown) =>
+    Object.defineProperty(target, name, { get: value, configurable: true, enumerable: true });
+  const native = (target: object, name: string): (() => unknown) => {
+    for (let o: object | null = target; o; o = Object.getPrototypeOf(o)) {
+      const getter = Object.getOwnPropertyDescriptor(o, name)?.get;
+      if (getter) return () => getter.call(target);
+    }
+    return () => undefined;
+  };
+
+  // Place and size.
+  const sized = () => {
+    const s = host.state();
+    return s && s.bounds.width > 0 ? s : null;
+  };
+  for (const [name, read] of [
+    ['screenX', (s: WindowState) => s.bounds.x],
+    ['screenLeft', (s: WindowState) => s.bounds.x],
+    ['screenY', (s: WindowState) => s.bounds.y],
+    ['screenTop', (s: WindowState) => s.bounds.y],
+    ['outerWidth', (s: WindowState) => s.bounds.width],
+    ['outerHeight', (s: WindowState) => s.bounds.height],
+  ] as const) {
+    const own = native(window, name);
+    get(window, name, () => {
+      const s = sized();
+      return s ? read(s) : own();
+    });
+  }
+  for (const [name, read] of [
+    ['availLeft', (s: WindowState) => s.workArea.x],
+    ['availTop', (s: WindowState) => s.workArea.y],
+    ['availWidth', (s: WindowState) => s.workArea.width],
+    ['availHeight', (s: WindowState) => s.workArea.height],
+  ] as const) {
+    const own = native(screen, name);
+    get(screen, name, () => {
+      const s = sized();
+      return s && s.workArea.width > 0 ? read(s) : own();
+    });
+  }
+
+  // Focus.
+  const ownHasFocus = Document.prototype.hasFocus;
+  let focused: boolean | null = null;
+  Object.defineProperty(document, 'hasFocus', {
+    value: () => focused ?? ownHasFocus.call(document),
+    configurable: true,
+    writable: true,
+  });
+  const holdBack = (e: Event) => {
+    if (e.isTrusted && e.target === window && focused !== null) e.stopImmediatePropagation();
+  };
+  window.addEventListener('focus', holdBack, true);
+  window.addEventListener('blur', holdBack, true);
+
+  // Visibility.
+  const ownVisibility = native(document, 'visibilityState');
+  let shown = true;
+  const visibility = (): DocumentVisibilityState => (shown && ownVisibility() !== 'hidden' ? 'visible' : 'hidden');
+  get(document, 'visibilityState', visibility);
+  get(document, 'hidden', () => visibility() === 'hidden');
+  let lastVisibility = visibility();
+  document.addEventListener(
+    'visibilitychange',
+    (e) => {
+      if (!e.isTrusted) return;
+      const now = visibility();
+      if (now === lastVisibility) e.stopImmediatePropagation();
+      lastVisibility = now;
+    },
+    true,
+  );
+
+  // Display state.
+  const displayState = () => {
+    const s = host.state();
+    if (document.fullscreenElement || s?.fullscreen) return 'fullscreen';
+    if (s?.minimized) return 'minimized';
+    return s?.maximized ? 'maximized' : 'normal';
+  };
+  const queries = new Set<WeakRef<DisplayStateQuery>>();
+  class DisplayStateQuery extends EventTarget {
+    onchange: ((this: MediaQueryList, e: MediaQueryListEvent) => unknown) | null = null;
+    private last: boolean;
+    constructor(
+      readonly media: string,
+      private readonly test: () => boolean,
+    ) {
+      super();
+      this.last = test();
+      queries.add(new WeakRef(this));
+    }
+    get matches(): boolean {
+      return this.test();
+    }
+    addListener(cb: ((e: MediaQueryListEvent) => void) | null): void {
+      if (cb) this.addEventListener('change', cb as EventListener);
+    }
+    removeListener(cb: ((e: MediaQueryListEvent) => void) | null): void {
+      if (cb) this.removeEventListener('change', cb as EventListener);
+    }
+    /** @internal */
+    update(): void {
+      const now = this.test();
+      if (now === this.last) return;
+      this.last = now;
+      const event = new MediaQueryListEvent('change', { matches: now, media: this.media });
+      this.dispatchEvent(event);
+      this.onchange?.call(this as unknown as MediaQueryList, event);
+    }
+  }
+  const ownMatchMedia = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList => {
+      const m = DISPLAY_STATE.exec(String(query));
+      if (!m) return ownMatchMedia.call(window, query);
+      const want = m[2].toLowerCase();
+      const negate = !!m[1];
+      return new DisplayStateQuery(`${negate ? 'not ' : ''}(display-state: ${want})`, () => (displayState() === want) !== negate) as unknown as MediaQueryList;
+    },
+  });
+  const updateQueries = () => {
+    for (const ref of queries) {
+      const q = ref.deref();
+      if (q) q.update();
+      else queries.delete(ref);
+    }
+  };
+  document.addEventListener('fullscreenchange', updateQueries);
+
+  host.onChange(() => {
+    const s = host.state();
+    if (!s) return;
+    const wasFocused = focused;
+    focused = s.focused;
+    if (wasFocused !== null && wasFocused !== focused) window.dispatchEvent(new FocusEvent(focused ? 'focus' : 'blur'));
+    shown = s.visible;
+    const now = visibility();
+    if (now !== lastVisibility) {
+      lastVisibility = now;
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    }
+    updateQueries();
+  });
 }
 
 // ---------------------------------------------------------------------------

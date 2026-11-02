@@ -88,8 +88,8 @@ import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/gu
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
-import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
-import type { FromApp, HandleData, Hello, MediaReport, Method, Push, Requests } from '@/sdk/protocol';
+import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome } from '@/sdk/din';
+import type { FromApp, HandleData, Hello, MediaReport, Method, Push, Requests, WindowState } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */

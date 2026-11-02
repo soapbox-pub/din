@@ -16,7 +16,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | Today (in the desktop) | In an app |
 |---|---|
 | `AppComponentProps.params` | `din.app.launch.params` |
-| `AppComponentProps.windowId` | `din.window.state.id` (rarely needed) |
+| `AppComponentProps.windowId` | `din.window.id` (rarely needed) |
 | `useWindowActions().open(id, params)` | `din.app.open(id, params)` |
 | `open(appForFile(name), { path })` | `din.app.openFiles([handle])` |
 | `useWindowActions().close(windowId)` | `window.close()` |
@@ -31,9 +31,9 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useWindowTitlebar(node)` (content in Din's title bar) | `frame: 'custom'` and the app's own header |
 | `useOwnWindowHeader()` + `WindowDragRegion` + `WindowControls` | `frame: 'custom'` + the same pieces from `@/sdk/react` |
 | `useWindowChrome().beginMove/beginResize` | `din.window.beginMove(e)` / `beginResize(edge, e)` |
-| `useWindowIsTop()`, `useWindowVisible()` | `useWindowState().focused` / `.visible` |
-| `useWindowManager().windows` | Not available. Ask for what's needed (`state.workArea`) |
-| `useWorkAreas()`, `areaFor` | `din.window.state.workArea` |
+| `useWindowIsTop()`, `useWindowVisible()` | `useWindowFocused()` / `useDocumentVisible()` (`document.hasFocus()`, `document.visibilityState`) |
+| `useWindowManager().windows` | Not available. Ask for what's needed (`screen.availWidth`) |
+| `useWorkAreas()`, `areaFor` | `screen.availLeft`, `availTop`, `availWidth`, `availHeight` |
 | `setCloseGuard(windowId, fn)` | `useCloseGuard(fn)` / `din.window.onCloseRequest(fn)` |
 | `<MenuBarMenus>` | `useMenuBar(menus, onAction)` |
 | `portalContainer()` | The app's own `document.body`; `din.menus.popup` for menus that must leave the window |

@@ -11,16 +11,32 @@ decides what's inside, and how much of the frame it draws itself.
 
 ## State
 
-```ts
-din.window.state;  // { id, focused, visible, minimized, maximized, snapped, fullscreen, bounds, workArea }
-din.window.onChange((s) => setDimmed(!s.focused));
-```
+The window's state is the web's own. A page in a webview would otherwise
+see the host's window, so the runtime answers each from what the desktop
+pushes (`installWindowState` in `src/sdk/standards.ts`), and reading never
+waits:
 
-The desktop pushes every change, so reading `state` never waits. Use
-`visible` to pause animation and polling while nobody can see the window;
-the page's own `document.visibilityState` follows it too. `snapped` is
-the half (`'left'`, `'right'`) or quarter (`'top-left'`, …) of its screen
-the window is snapped to, or `null`.
+| | The web's | React (`@/sdk/react`) |
+|---|---|---|
+| Keyboard input goes to it | `document.hasFocus()`, window `focus` and `blur` | `useWindowFocused()` |
+| Some of it can be seen (not minimized, not on another workspace) | `document.visibilityState`, `visibilitychange` | `useDocumentVisible()` |
+| Maximized, minimized, fullscreen | `matchMedia('(display-state: maximized)')` (`minimized`, `fullscreen`, `normal`), from the Additional Windowing Controls draft | `useMediaQuery('(display-state: maximized)')` |
+| Where it is, its size with the frame | `screenX`, `screenY`, `outerWidth`, `outerHeight`; `resize` | `useWindowSize()` |
+| The work area of its monitor (the screen minus the menu bar and Dock) | `screen.availLeft`, `availTop`, `availWidth`, `availHeight` | |
+
+Window `focus` and `blur` follow the desktop's focus: the page's own, which
+a click on the menu bar would send, are held back. `display-state` works
+in script only; a stylesheet's `@media` doesn't know it. For a width
+breakpoint, `useMediaQuery('(min-width: 680px)')` re-renders only when
+it's crossed.
+
+Two things the web has no word for are `din.window`'s:
+
+```ts
+din.window.id;        // unique on this desktop, as din.app.windows() lists them
+din.window.snapped;   // 'left', 'right', 'top-left', …, or null (useSnapped())
+din.window.onSnappedChange((snap) => …);
+```
 
 ## Title, icon, accent
 
@@ -188,8 +204,8 @@ window.resizeTo(1160, 720);                          // Calculator switching to 
   runs it exactly as its own title bar does: snapping to edges, tearing a
   maximized window off, workspaces, wobble. The app gets no more pointer
   events for the gesture (not even its `pointerup`); `window.din` resolves the
-  gesture when the desktop says it ended, and the window's `state`
-  changes.
+  gesture when the desktop says it ended, and `screenX` and the rest have
+  changed.
 
   How the desktop follows a pointer that's over another process: main
   already forwards a webview's mouse moves to the desktop
@@ -209,7 +225,7 @@ window.resizeTo(1160, 720);                          // Calculator switching to 
   `window.restore()`, from the web's Additional Windowing Controls draft,
   do what the title bar's buttons do: `restore` brings a minimized window
   back, and un-maximizes or un-tiles one that isn't. `window.focus()`
-  does what a click does. To toggle, look at `din.window.state.maximized`.
+  does what a click does. To toggle, look at `matchMedia('(display-state: maximized)')`.
 
 ## Closing
 

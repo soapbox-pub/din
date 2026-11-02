@@ -8,7 +8,7 @@ import { SquareTerminal } from 'lucide-react';
 import { getPtyBridge, type PtyBridge } from '@/lib/pty';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
-import { useDin, useDinTheme, useMediaQuery, useWindowAccent, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDinTheme, useMediaQuery, useWindowAccent, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { adoptedTab, hasAdoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
@@ -1500,7 +1500,7 @@ const TerminalSession = memo(function TerminalSession({
   const initialCwdRef = useRef(initialCwd);
   const appRef = useRef(app);
   const handoverRef = useRef(handover);
-  const isTop = useWindowState((s) => s.focused);
+  const isTop = useWindowFocused();
   const isTopRef = useRef(isTop);
   // Always-fresh callbacks for the (long-lived) session.
   const host = useRef<PaneHost>({

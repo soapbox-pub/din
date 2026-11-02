@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk/din';
-import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   addGroup,
   changeGroup,
@@ -126,10 +126,9 @@ export function Contacts() {
   const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
   const [importing, setImporting] = useState<{ name: string; cards: Contact[] } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
-  const width = useWindowState((s) => s.bounds.width || window.innerWidth);
-  const sidebarFits = width >= SIDEBAR_MIN_WIDTH;
+  const sidebarFits = useMediaQuery(`(min-width: ${SIDEBAR_MIN_WIDTH}px)`);
   const showSidebar = sidebarOpen && sidebarFits;
-  const twoPanes = width >= TWO_PANE_MIN_WIDTH;
+  const twoPanes = useMediaQuery(`(min-width: ${TWO_PANE_MIN_WIDTH}px)`);
 
   const setSortBy = (by: SortBy) => {
     setSortByState(by);

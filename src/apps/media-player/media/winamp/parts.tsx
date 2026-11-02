@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useWindowState } from '@/sdk/react';
+import { useDocumentVisible } from '@/sdk/react';
 import { spriteStyle, useSkin } from './hooks';
 import { FONT, SPRITES, type SpriteDef, type SpriteName } from '@/shared/skins/winamp/sprites';
 import { readFrame } from '../visualizations';
@@ -119,7 +119,7 @@ export function SkinText({ text, x = 0, y = 0, style }: { text: string; x?: numb
 export function WinampVis({ x, y, width, height, mode, onClick }: { x: number; y: number; width: number; height: number; mode: number; onClick: () => void }) {
   const skin = useSkin();
   const ref = useRef<HTMLCanvasElement>(null);
-  const visible = useWindowState((s) => s.visible);
+  const visible = useDocumentVisible();
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');

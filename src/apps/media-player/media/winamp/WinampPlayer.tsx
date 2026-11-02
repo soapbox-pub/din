@@ -4,7 +4,7 @@ import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useWindowState } from '@/sdk/react';
+import { useWindowFocused } from '@/sdk/react';
 import { cleanFsError } from '@/lib/fs';
 import { displayTitle, formatTime, player, usePlaybackTime, usePlayer } from '../engine';
 import { EQ_PRESETS, parseEqf, writeEqf } from '../eq';
@@ -183,7 +183,7 @@ function Position({ setOverride }: { setOverride: (t: string | null) => void }) 
 
 function MainWindow({ y, commands, onMenu }: { y: number; commands: Commands; onMenu: (e: React.MouseEvent) => void }) {
   const skin = useSkin();
-  const focused = useWindowState((s) => s.focused);
+  const focused = useWindowFocused();
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const status = usePlayer((s) => s.status);
@@ -423,7 +423,7 @@ function EqPresetsMenu({ children }: { children: ReactNode }) {
 
 function EqWindow({ y, commands }: { y: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowState((s) => s.focused);
+  const focused = useWindowFocused();
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const eqOn = usePlayer((s) => s.eqOn);
@@ -542,7 +542,7 @@ function PlMenu({ which, x, y, actions }: { which: keyof typeof PL_MENUS; x: num
 
 function PlaylistWindow({ y, width, height, commands }: { y: number; width: number; height: number; commands: Commands }) {
   const skin = useSkin();
-  const focused = useWindowState((s) => s.focused);
+  const focused = useWindowFocused();
   const drag = useWindowDrag();
   const prefs = usePrefs((p) => p.winamp);
   const queue = usePlayer((s) => s.queue);

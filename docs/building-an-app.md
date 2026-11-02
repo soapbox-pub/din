@@ -86,10 +86,10 @@ from `@/sdk` and render itself.
 
 ```tsx
 // Stopwatch.tsx
-import { WindowControls, WindowDragRegion, useMenuBar, useWindowState, useWindowTitle } from '@/sdk/react';
+import { WindowControls, WindowDragRegion, useDocumentVisible, useMenuBar, useWindowTitle } from '@/sdk/react';
 
 export function Stopwatch() {
-  const visible = useWindowState((s) => s.visible);
+  const visible = useDocumentVisible();
   const [ms, running, toggle, reset] = useStopwatch({ paused: !visible });
 
   useMenuBar(

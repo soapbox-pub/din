@@ -224,7 +224,7 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   useWindowTitle(subject.trim() || 'New Message');
 
   useEffect(() => {
-    if (din.window.state.bounds.width > 900) window.resizeTo(760, 680);
+    if (window.outerWidth > 900) window.resizeTo(760, 680);
   }, [din]);
 
   // A message to open, sent here (a restored window can't be told from a
