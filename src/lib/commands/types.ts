@@ -2,6 +2,7 @@ import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import type { AppConfig } from '@/contexts/AppContext';
 import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import type { WidgetsContextValue } from '@/contexts/WidgetsContext';
+import type { DesktopIconsContextValue } from '@/contexts/DesktopIconsContext';
 import type { WindowActions, WindowState } from '@/hooks/useWindows';
 
 /**
@@ -100,6 +101,7 @@ export interface CommandContext {
   readonly actions: WindowActions;
   readonly apps: InstalledAppsManager;
   readonly widgets: WidgetsContextValue;
+  readonly desktopIcons: DesktopIconsContextValue;
   /** The workspace each monitor shows, by work area id. */
   readonly workspaces: Readonly<Record<string, number>>;
   /** The monitors' work area ids. */

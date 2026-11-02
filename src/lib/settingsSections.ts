@@ -7,6 +7,7 @@ import {
   Clock,
   Cloud,
   Dock,
+  Grid2x2,
   Info,
   KeyRound,
   Keyboard,
@@ -48,6 +49,7 @@ export type SectionId =
   | 'icons'
   | 'effects'
   | 'windows'
+  | 'desktop'
   | 'dock'
   | 'developers'
   | 'about';
@@ -125,6 +127,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Windows',
     icon: LayoutDashboard,
     search: ['Tiling', 'Tile windows', 'Gaps', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
+  },
+  {
+    id: 'desktop',
+    group: 'Personal',
+    name: 'Desktop',
+    icon: Grid2x2,
+    search: ['Desktop icons', 'Show desktop icons', 'Icon size', 'Small', 'Medium', 'Large', 'Arrange', 'Sort by', 'Clean up', 'Show Desktop in Files', 'Desktop folder', 'shortcuts', 'launchers', 'files on the desktop', 'wallpaper'],
   },
   {
     id: 'dock',

@@ -58,6 +58,8 @@ const SETTINGS: Setting[] = [
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'windows.reopen', field: 'restoreWindows', help: 'Din reopens your windows when it starts again', param: bool },
   { key: 'desktop.layout', field: 'desktopLayout', help: 'The menu bar and Dock, or a taskbar', param: { type: 'string', choices: ['dock', 'taskbar'] } },
+  { key: 'desktop.icons', field: 'desktopIcons', help: 'What’s in ~/Desktop shows as icons on the wallpaper', param: bool },
+  { key: 'desktop.icon-size', field: 'desktopIconSize', help: 'How large desktop icons are', param: { type: 'string', choices: ['small', 'medium', 'large'] } },
   { key: 'dock.size', field: 'dockSize', help: 'The size of a Dock icon, in pixels', param: { type: 'integer', min: 32, max: 160 } },
   { key: 'dock.magnification', field: 'dockMagnification', help: 'Dock icons grow under the pointer', param: bool },
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },

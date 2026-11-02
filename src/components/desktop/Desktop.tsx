@@ -55,6 +55,8 @@ import { PageFullscreenHost } from './PageFullscreenHost';
 import { WindowSessionHost } from './WindowSessionHost';
 import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
+import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
+import { DesktopIconLayer } from './icons/DesktopIconLayer';
 import { isShown, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
@@ -225,93 +227,96 @@ function DesktopSession() {
       <WindowActionsContext.Provider value={manager.actions}>
         <WorkAreasContext.Provider value={areas}>
           <WidgetsProvider>
-            <FilePickerProvider>
-              <DesktopBackgroundProvider>
-                <DesktopAssistantHost>
-                  <FilePickerBridgeHost />
-                  <BrowserExtensionHost />
-                  <ExtensionPopupHost />
-                  <PasswordAutofillHost />
-                  <NostrBridgeHost />
-                  <HighlightBridgeHost />
-                  <NsiteBridgeHost />
-                  <PromptHost />
-                  <AdminPromptHost />
-                  <ScreenSharePicker />
-                  <DesktopHotkeys />
-                  <AssistantHost />
-                  <SecurityOptions />
-                  <ScreenshotHost />
-                  <ScreenRecordingHost />
-                  <SystemEventsHost />
-                  <NativeLinksHost />
-                  <LaunchHost />
-                  <CommandHost />
-                  <SystemNotificationsHost />
-                  <PhoneHost />
-                  <GuestInputHost />
-                  <CursorEffectsLayer />
-                  <DinDragOverlay />
-                  <InstallerAutoOpen />
-                  <UpdateNotifier />
-                  <AirPlayPromptHost />
-                  <BluetoothPromptHost />
-                  <VolumesHost />
-                  <PrintHost />
-                  <PageFullscreenHost />
-                  <BootScreenSync />
-                  <WindowSessionHost />
-                  <Wallpaper backdrop={<DesktopMenu />}>
-                    {!taskbar && <MenuBar />}
+            <DesktopIconsProvider>
+              <FilePickerProvider>
+                <DesktopBackgroundProvider>
+                  <DesktopAssistantHost>
+                    <FilePickerBridgeHost />
+                    <BrowserExtensionHost />
+                    <ExtensionPopupHost />
+                    <PasswordAutofillHost />
+                    <NostrBridgeHost />
+                    <HighlightBridgeHost />
+                    <NsiteBridgeHost />
+                    <PromptHost />
+                    <AdminPromptHost />
+                    <ScreenSharePicker />
+                    <DesktopHotkeys />
+                    <AssistantHost />
+                    <SecurityOptions />
+                    <ScreenshotHost />
+                    <ScreenRecordingHost />
+                    <SystemEventsHost />
+                    <NativeLinksHost />
+                    <LaunchHost />
+                    <CommandHost />
+                    <SystemNotificationsHost />
+                    <PhoneHost />
+                    <GuestInputHost />
+                    <CursorEffectsLayer />
+                    <DinDragOverlay />
+                    <InstallerAutoOpen />
+                    <UpdateNotifier />
+                    <AirPlayPromptHost />
+                    <BluetoothPromptHost />
+                    <VolumesHost />
+                    <PrintHost />
+                    <PageFullscreenHost />
+                    <BootScreenSync />
+                    <WindowSessionHost />
+                    <Wallpaper backdrop={<DesktopMenu />}>
+                      {!taskbar && <MenuBar />}
 
-                    {/* Workspace area - windows render here. It's the primary
-                        monitor below the menu bar, but windows may sit outside it on
-                        the other monitors (the Wallpaper clips to the whole screen,
-                        not to this). The Dock overlays its bottom edge and
-                        auto-hides, so windows can use the full height; the
-                        taskbar takes its own room below, above or beside it
-                        instead (the taskbar comes after it in either case, so
-                        moving the bar never remounts the windows).
-                        `isolate` gives the window stack its own stacking context so
-                        each window's inline z-index (a counter that only climbs as
-                        windows are raised) stays contained here. Without it, a window
-                        whose z grew past a menu's z-50 or the top bar's z-20 would
-                        paint over the portaled app/menu-bar dropdowns and the top bar
-                        itself; isolation keeps those layers - and the Dock - on top no
-                        matter how high the window counter climbs. */}
-                    <main
-                      ref={workspaceRef}
-                      aria-label="Desktop"
-                      className={cn('relative isolate flex-1', taskbar && taskbarWorkspaceClass(config))}
-                    >
-                      <DesktopMenu />
-                      {/* Widgets: over the wallpaper, under every window. */}
-                      <WidgetLayer />
-                      {manager.windows.map((win) => (
-                        <Window
-                          key={win.id}
-                          window={win}
-                          isTop={isShown(win) && win.z === topZ}
-                          covered={covered.has(win.id)}
-                        />
-                      ))}
-                      <SnapAssist />
-                    </main>
+                      {/* Workspace area - windows render here. It's the primary
+                          monitor below the menu bar, but windows may sit outside it on
+                          the other monitors (the Wallpaper clips to the whole screen,
+                          not to this). The Dock overlays its bottom edge and
+                          auto-hides, so windows can use the full height; the
+                          taskbar takes its own room below, above or beside it
+                          instead (the taskbar comes after it in either case, so
+                          moving the bar never remounts the windows).
+                          `isolate` gives the window stack its own stacking context so
+                          each window's inline z-index (a counter that only climbs as
+                          windows are raised) stays contained here. Without it, a window
+                          whose z grew past a menu's z-50 or the top bar's z-20 would
+                          paint over the portaled app/menu-bar dropdowns and the top bar
+                          itself; isolation keeps those layers - and the Dock - on top no
+                          matter how high the window counter climbs. */}
+                      <main
+                        ref={workspaceRef}
+                        aria-label="Desktop"
+                        className={cn('relative isolate flex-1', taskbar && taskbarWorkspaceClass(config))}
+                      >
+                        <DesktopMenu />
+                        {/* ~/Desktop's icons and the widgets: over the wallpaper, under every window. */}
+                        <DesktopIconLayer />
+                        <WidgetLayer />
+                        {manager.windows.map((win) => (
+                          <Window
+                            key={win.id}
+                            window={win}
+                            isTop={isShown(win) && win.z === topZ}
+                            covered={covered.has(win.id)}
+                          />
+                        ))}
+                        <SnapAssist />
+                      </main>
 
-                    {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
-                    <WindowSwitcher />
-                    <VolumeOsd />
-                    <WorkspaceOsd />
-                    <BrightnessOsd />
-                    <AirPlayOsd />
-                    <DictationOverlay />
-                    <ScreenDimmer />
-                    <NotificationPopups />
-                    <NativeDisplayHost />
-                  </Wallpaper>
-                </DesktopAssistantHost>
-              </DesktopBackgroundProvider>
-            </FilePickerProvider>
+                      {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
+                      <WindowSwitcher />
+                      <VolumeOsd />
+                      <WorkspaceOsd />
+                      <BrightnessOsd />
+                      <AirPlayOsd />
+                      <DictationOverlay />
+                      <ScreenDimmer />
+                      <NotificationPopups />
+                      <NativeDisplayHost />
+                    </Wallpaper>
+                  </DesktopAssistantHost>
+                </DesktopBackgroundProvider>
+              </FilePickerProvider>
+            </DesktopIconsProvider>
           </WidgetsProvider>
         </WorkAreasContext.Provider>
       </WindowActionsContext.Provider>

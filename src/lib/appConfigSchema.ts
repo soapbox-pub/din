@@ -51,6 +51,8 @@ export const AppConfigSchema = z.object({
   taskbarStyle: z.enum(['tall', 'slim']),
   taskbarPosition: z.enum(['bottom', 'top', 'left', 'right']),
   taskbarButtons: z.enum(['combine', 'separate']),
+  desktopIcons: z.boolean(),
+  desktopIconSize: z.enum(['small', 'medium', 'large']),
   zoomLevel: z.number(),
   clockFormat: z.enum(['auto', '12', '24']),
   clockShowDate: z.boolean(),

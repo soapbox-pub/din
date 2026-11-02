@@ -81,6 +81,8 @@ const defaultConfig: AppConfig = {
   taskbarStyle: 'tall',
   taskbarPosition: 'bottom',
   taskbarButtons: 'combine',
+  desktopIcons: true,
+  desktopIconSize: 'medium',
   zoomLevel: 100,
   clockFormat: 'auto',
   clockShowDate: true,

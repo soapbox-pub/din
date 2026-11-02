@@ -1,8 +1,9 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import { getBrowserBridge, siteOriginOf } from '@/lib/browser';
-import { appForFile } from '@/lib/fileTypes';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
 import { getFsBridge } from '@/lib/fs';
+import { openPath } from '@/lib/openPath';
+import { DESKTOP_ICON_SORTS, type DesktopIconSort } from '@/lib/desktopIcons';
 import {
   activateNotification, clearNotifications, closeNotification, getNotificationState, notify,
 } from '@/lib/notificationCenter';
@@ -17,7 +18,7 @@ import { CommandError, type Area, type CommandContext, type Param } from './type
 import { bare, call, command, need, pick } from './util';
 
 /**
- * `din apps`, `din windows`, `din workspace`, `din widgets`,
+ * `din apps`, `din windows`, `din workspace`, `din widgets`, `din desktop-icons`,
  * `din notifications`, `din screenshot`, `din browser`, `din open`: what the
  * Dock, the apps menu, window chrome, the menu bar and the Web Browser do.
  */
@@ -242,6 +243,88 @@ export const widgetsArea: Area = {
   ],
 };
 
+const ICON: Param = { name: 'icon', type: 'string', positional: true, help: 'Its file name, or what it’s called on the desktop' };
+
+function findIcon(ctx: CommandContext, query: string) {
+  return pick(ctx.desktopIcons.icons, query, (i) => [i.name, i.label], 'desktop icon');
+}
+
+function needIcons(ctx: CommandContext): string {
+  if (!ctx.desktopIcons.dir) throw new CommandError('Desktop icons need the filesystem, which isn’t here');
+  return ctx.desktopIcons.dir;
+}
+
+export const desktopIconsArea: Area = {
+  name: 'desktop-icons',
+  summary: 'Desktop icons: what’s in ~/Desktop, shortcuts to apps, arranging them (showing them and their size are din settings desktop.*)',
+  commands: [
+    command('desktop-icons', 'list', 'The icons on the desktop, and where they are', [], (_args, ctx) => {
+      needIcons(ctx);
+      return {
+        data: ctx.desktopIcons.icons.map((i) => {
+          const place = ctx.desktopIcons.places.get(i.name);
+          return {
+            name: i.name, label: i.label, kind: i.entry ? 'shortcut' : i.kind,
+            ...(i.entry?.app ? { app: i.entry.app } : {}),
+            monitor: place?.area.id ?? '', col: place?.col ?? null, row: place?.row ?? null,
+          };
+        }),
+      };
+    }),
+    command('desktop-icons', 'open', 'Open an icon, as double-clicking it does', [ICON], async (args, ctx) => {
+      needIcons(ctx);
+      await call(ctx.desktopIcons.open([findIcon(ctx, args.string('icon')).name]));
+    }),
+    command('desktop-icons', 'add-app', 'Put a shortcut to an app on the desktop', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+    ], async (args, ctx) => {
+      needIcons(ctx);
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      const name = await call(ctx.desktopIcons.addApp(app.id));
+      return { data: { name }, text: `Added ${app.name} to the desktop (${name})` };
+    }),
+    command('desktop-icons', 'add', 'Copy files or folders onto the desktop', [
+      { name: 'paths', type: 'path', positional: true, rest: true, help: 'What to put there' },
+      { name: 'move', type: 'boolean', optional: true, help: 'Move them there instead of copying' },
+    ], async (args, ctx) => {
+      needIcons(ctx);
+      const paths = args.list('paths');
+      if (paths.length === 0) throw new CommandError('Name something to add', 'usage');
+      const names = await call(ctx.desktopIcons.addPaths(paths, { move: args.optBool('move') ?? false }));
+      return { data: { names } };
+    }),
+    command('desktop-icons', 'new-folder', 'Make a folder on the desktop', [
+      { name: 'name', type: 'string', positional: true, optional: true, help: 'What to call it (default: New Folder)' },
+    ], async (args, ctx) => {
+      needIcons(ctx);
+      const made = await call(ctx.desktopIcons.newFolder());
+      ctx.desktopIcons.setRenaming(null);
+      const name = args.optString('name');
+      if (name && name !== made) await call(ctx.desktopIcons.rename(made, name));
+      return { data: { name: name ?? made }, text: name ?? made };
+    }),
+    command('desktop-icons', 'rename', 'Rename an icon’s file', [
+      ICON,
+      { name: 'name', type: 'string', positional: true, help: 'Its new name' },
+    ], async (args, ctx) => {
+      needIcons(ctx);
+      await call(ctx.desktopIcons.rename(findIcon(ctx, args.string('icon')).name, args.string('name')));
+    }),
+    command('desktop-icons', 'remove', 'Move an icon’s file to the Trash', [ICON], async (args, ctx) => {
+      needIcons(ctx);
+      const icon = findIcon(ctx, args.string('icon'));
+      await call(ctx.desktopIcons.trash([icon.name]));
+      return { text: `Moved ${icon.name} to the Trash` };
+    }),
+    command('desktop-icons', 'arrange', 'Lay the icons out again from the top-left corner', [
+      { name: 'by', type: 'string', optional: true, choices: DESKTOP_ICON_SORTS.map((s) => s.value), help: 'Sorted by this (default: as they are, closing the gaps)' },
+    ], (args, ctx) => {
+      needIcons(ctx);
+      ctx.desktopIcons.arrange(args.optString('by') as DesktopIconSort | undefined);
+    }),
+  ],
+};
+
 export const notificationsArea: Area = {
   name: 'notifications',
   summary: 'Notifications: list, send, dismiss (Do Not Disturb is under din settings)',
@@ -373,8 +456,7 @@ export const openArea: Area = {
         const fs = need(getFsBridge(), 'Files');
         const path = resolvePath(target, ctx.cwd);
         const stat = await call(fs.stat(path));
-        const name = path.slice(path.lastIndexOf('/') + 1);
-        ctx.actions.open(stat.kind === 'directory' ? 'file-browser' : appForFile(name), { path });
+        await call(openPath(path, stat.kind, { open: ctx.actions.open, openUrl: ctx.openUrl, getApp: ctx.apps.getApp }));
       }
     })),
   ],

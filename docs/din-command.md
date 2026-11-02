@@ -41,6 +41,7 @@ a missing or bad argument).
 | `apps` | List, open, install (websites, nsites), remove; `apps run` runs your own (below) |
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
+| `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
 | `notifications` | List, send, click, dismiss, clear |
 | `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |

@@ -1,5 +1,6 @@
 import { createContext } from "react";
 import type { DesktopTheme, ProfileThemeMetadata } from "@/lib/profileTheme";
+import type { DesktopIconSize } from "@/lib/desktopIcons";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -161,6 +162,10 @@ export interface AppConfig {
   taskbarPosition: TaskbarPosition;
   /** Whether the taskbar has a button per app, its windows combined, or one per window. */
   taskbarButtons: TaskbarButtons;
+  /** Whether what's in ~/Desktop shows as icons on the wallpaper (docs/desktop-icons.md). */
+  desktopIcons: boolean;
+  /** How large desktop icons are. */
+  desktopIconSize: DesktopIconSize;
   /**
    * Interface zoom level, as a percentage (100 = native size). Applied via
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole

@@ -16,6 +16,7 @@ function context(config: Partial<AppConfig> = {}): CommandContext & { config: Ap
     actions: {} as CommandContext['actions'],
     apps: {} as CommandContext['apps'],
     widgets: {} as CommandContext['widgets'],
+    desktopIcons: {} as CommandContext['desktopIcons'],
     workspaces: {},
     monitors: [],
     pubkey: undefined,

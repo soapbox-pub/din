@@ -12,6 +12,7 @@ import {
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useWidgets } from '@/contexts/WidgetsContext';
+import { useDesktopIcons } from '@/contexts/DesktopIconsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -40,6 +41,7 @@ export function CommandHost() {
   const { windows, active, actions } = useWindowManager();
   const apps = useInstalledApps();
   const widgets = useWidgets();
+  const desktopIcons = useDesktopIcons();
   const areas = useWorkAreas();
   const openUrl = useOpenUrl();
   const { user } = useCurrentUser();
@@ -48,9 +50,9 @@ export function CommandHost() {
   const relays = useManifestRelays();
   const [asking, setAsking] = useState<Asking[]>([]);
 
-  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish, upload, relays });
+  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays });
   useLayoutEffect(() => {
-    live.current = { config, updateConfig, windows, active, actions, apps, widgets, areas, openUrl, user, publish, upload, relays };
+    live.current = { config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays };
   });
 
   useEffect(() => {
@@ -67,6 +69,7 @@ export function CommandHost() {
         get actions() { return live.current.actions; },
         get apps() { return live.current.apps; },
         get widgets() { return live.current.widgets; },
+        get desktopIcons() { return live.current.desktopIcons; },
         get workspaces() { return live.current.active; },
         get monitors() { return live.current.areas.map((area) => area.id); },
         get pubkey() { return live.current.user?.pubkey; },

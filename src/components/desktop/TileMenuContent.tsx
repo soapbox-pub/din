@@ -4,6 +4,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
+import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import type { MenuAboveContentProps } from '@/hooks/useMenuAbove';
 import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
@@ -11,8 +12,8 @@ import { cn } from '@/lib/utils';
 
 /**
  * A Dock or taskbar tile's right-click menu: its app's windows by what
- * they're showing, the app's own actions, a new window, pin or unpin, close,
- * and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
+ * they're showing, the app's own actions, a new window, pin or unpin, add to
+ * the desktop, close, and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
  * Given `taskWindow`, it's the menu of that one window's taskbar button, which
  * leads with what can be done to the window and closes it alone.
  */
@@ -117,6 +118,7 @@ export function TileMenuContent({
           </>
         )}
       </ContextMenuItem>
+      <AddToDesktopItem appId={app.id} />
       {taskWindow ? (
         <>
           <ContextMenuSeparator />

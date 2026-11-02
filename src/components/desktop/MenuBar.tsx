@@ -84,6 +84,8 @@ import type { AppDefinition } from '@/lib/apps';
 import { focusedWindow, isShown } from '@/hooks/useWindows';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
+import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
+import { APP_MIME } from '@/components/desktop/icons/wallpaper';
 
 /**
  * Menu bar along the top of the desktop.
@@ -447,6 +449,12 @@ const AppTile = memo(function AppTile({
           <button
             type="button"
             onClick={() => onOpen(app.id)}
+            // Dragged out onto the wallpaper, it leaves a shortcut there.
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(APP_MIME, app.id);
+              e.dataTransfer.effectAllowed = 'copy';
+            }}
             className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <AppIcon icon={app.icon} web={app.web} className="size-9 text-foreground" />
@@ -463,6 +471,7 @@ const AppTile = memo(function AppTile({
             {action.label}
           </ContextMenuItem>
         ))}
+        <AddToDesktopItem appId={app.id} />
         {uninstallable && (
           <ContextMenuItem
             variant="destructive"

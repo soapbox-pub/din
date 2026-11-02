@@ -11,6 +11,7 @@ import {
   Cpu,
   FolderOpen,
   GitBranch,
+  Grid2x2,
   CloudOff,
   Gauge,
   Globe,
@@ -113,6 +114,8 @@ import {
 } from '@/hooks/useDateTime';
 import { useClock } from '@/hooks/useClock';
 import type { ClockFormat, DesktopLayout, TaskbarButtons, TaskbarPosition, TaskbarStyle } from '@/contexts/AppContext';
+import { useDesktopIcons } from '@/contexts/DesktopIconsContext';
+import { DESKTOP_ICON_SORTS, type DesktopIconSize } from '@/lib/desktopIcons';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
@@ -393,6 +396,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <EffectsSection windowId={windowId} />
     ) : id === 'windows' ? (
       <WindowsSection />
+    ) : id === 'desktop' ? (
+      <DesktopSection />
     ) : id === 'dock' ? (
       <DockSection />
     ) : id === 'developers' ? (
@@ -3325,6 +3330,79 @@ function WindowsSection() {
         </div>
       ))}
     </SectionShell>
+  );
+}
+
+const DESKTOP_ICON_SIZE_CHOICES: { value: DesktopIconSize; name: string }[] = [
+  { value: 'small', name: 'Small' },
+  { value: 'medium', name: 'Medium' },
+  { value: 'large', name: 'Large' },
+];
+
+/**
+ * Desktop icons: whether what's in ~/Desktop shows on the wallpaper, how
+ * large, and arranging them, as the desktop's right-click menu does.
+ */
+function DesktopSection() {
+  const { config, updateConfig } = useAppContext();
+  const icons = useDesktopIcons();
+
+  return (
+    <SectionShell title="Desktop">
+      <SettingSwitchRow
+        id="desktop-icons"
+        icon={Grid2x2}
+        label="Show desktop icons"
+        description="Files, folders and app shortcuts in your Desktop folder show on the wallpaper. Drop files there to put them on the desktop, or drag an app out of the apps menu."
+        checked={config.desktopIcons}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, desktopIcons: checked }))}
+      />
+      <SubHeading>Icon size</SubHeading>
+      <PicturedChoices
+        label="Icon size"
+        options={DESKTOP_ICON_SIZE_CHOICES}
+        value={config.desktopIconSize}
+        onChange={(value) => updateConfig((current) => ({ ...current, desktopIconSize: value }))}
+        preview={(value) => <DesktopIconSizePreview size={value} />}
+      />
+      <SubHeading>Arrange</SubHeading>
+      <div className="flex flex-wrap gap-2">
+        {DESKTOP_ICON_SORTS.map((sort) => (
+          <Button key={sort.value} variant="outline" size="sm" disabled={!icons.shown} onClick={() => icons.arrange(sort.value)}>
+            By {sort.name.toLowerCase()}
+          </Button>
+        ))}
+        <Button variant="outline" size="sm" disabled={!icons.shown} onClick={() => icons.arrange()}>
+          Clean up
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Sorting lays the icons out again from the top-left corner. You can also right-click the desktop to sort or clean up.
+      </p>
+      {icons.dir && (
+        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+          <div className="min-w-0">
+            <p className="text-sm">Desktop folder</p>
+            <p className="truncate text-xs text-muted-foreground select-text">{icons.dir}</p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => icons.showInFiles()}>
+            Show in Files
+          </Button>
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+/** A few icons on a wallpaper, at a size. */
+function DesktopIconSizePreview({ size }: { size: DesktopIconSize }) {
+  const px = size === 'small' ? 'size-2.5' : size === 'medium' ? 'size-3.5' : 'size-5';
+  return (
+    <span className="absolute inset-0 flex flex-col gap-1.5 p-2">
+      {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+        <span key={color} className={cn('rounded-[3px] shadow-sm', px, color)} />
+      ))}
+    </span>
   );
 }
 
