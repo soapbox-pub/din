@@ -127,6 +127,7 @@ export const Transcript = memo(function Transcript({
   tasks = NO_TASKS,
   home,
   onCancelQueued,
+  onSendNow,
   onFork,
 }: {
   messages: SessionMessage[];
@@ -141,6 +142,12 @@ export const Transcript = memo(function Transcript({
   tasks?: ReadonlySet<string>;
   home?: string;
   onCancelQueued?: (message: QueuedMessage) => void;
+  /**
+   * Given while it's waiting on a command or subagent that can go to the
+   * background (Ctrl+B): messages waiting for its next step offer Send now,
+   * which moves them there.
+   */
+  onSendNow?: () => void;
   /** Fork the conversation from before one of the user's messages. */
   onFork?: (message: UserMessage) => void;
 }) {
@@ -192,7 +199,11 @@ export const Transcript = memo(function Transcript({
       )}
       {waiting.map((message) => (
         <li key={message.id} className="group/user flex justify-end">
-          <QueuedBubble message={message} onCancel={onCancelQueued && (() => onCancelQueued(message))} />
+          <QueuedBubble
+            message={message}
+            onCancel={onCancelQueued && (() => onCancelQueued(message))}
+            onSendNow={message.delivery === 'steer' ? onSendNow : undefined}
+          />
         </li>
       ))}
     </ol>
@@ -200,7 +211,15 @@ export const Transcript = memo(function Transcript({
   );
 });
 
-function QueuedBubble({ message, onCancel }: { message: QueuedMessage; onCancel?: () => void }) {
+function QueuedBubble({
+  message,
+  onCancel,
+  onSendNow,
+}: {
+  message: QueuedMessage;
+  onCancel?: () => void;
+  onSendNow?: () => void;
+}) {
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
       <Attachments files={message.payload.files} />
@@ -210,6 +229,16 @@ function QueuedBubble({ message, onCancel }: { message: QueuedMessage; onCancel?
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Clock className="size-3" aria-hidden />
         {message.delivery === 'steer' ? 'Sending at its next step' : 'Queued until it’s done'}
+        {onSendNow && (
+          <button
+            type="button"
+            onClick={onSendNow}
+            title="Move what it’s waiting on to the background (Ctrl+B)"
+            className="ml-1 h-6 rounded-md px-2 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Send now
+          </button>
+        )}
         {onCancel && (
           <button
             type="button"

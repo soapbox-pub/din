@@ -961,6 +961,9 @@ function Conversation({
                     onCancelQueued={(message) =>
                       cancelQueued.mutate({ sessionID, id: message.id }, { onError: fail('Couldn’t cancel') })
                     }
+                    onSendNow={
+                      running && inBackground.length < tasks.length && !background.isPending ? toBackground : undefined
+                    }
                     onFork={onFork}
                   />
                   {revert && undone > 0 && (
