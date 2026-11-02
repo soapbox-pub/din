@@ -62,6 +62,8 @@ const SETTINGS: Setting[] = [
   { key: 'dock.magnification', field: 'dockMagnification', help: 'Dock icons grow under the pointer', param: bool },
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },
   { key: 'dock.style', field: 'dockStyle', help: 'What the Dock sits on', param: { type: 'string', choices: ['none', 'modern', 'classic'] } },
+  { key: 'taskbar.style', field: 'taskbarStyle', help: 'A slim taskbar (Windows Vista) or a tall one (Windows 7)', param: { type: 'string', choices: ['slim', 'tall'] } },
+  { key: 'taskbar.buttons', field: 'taskbarButtons', help: 'A taskbar button per app, its windows combined, or one per window', param: { type: 'string', choices: ['combine', 'separate'] } },
   { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent', param: { type: 'integer', min: 50, max: 200 } },
   { key: 'datetime.clock-format', field: 'clockFormat', help: '12- or 24-hour time, or the locale’s', param: { type: 'string', choices: ['auto', '12', '24'] } },
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },

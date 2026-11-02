@@ -1,4 +1,4 @@
-import { Pin, PinOff, Plus, Trash2, X } from 'lucide-react';
+import { Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils';
  * A Dock or taskbar tile's right-click menu: its app's windows by what
  * they're showing, the app's own actions, a new window, pin or unpin, close,
  * and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
+ * Given `taskWindow`, it's the menu of that one window's taskbar button, which
+ * leads with what can be done to the window and closes it alone.
  */
 export function TileMenuContent({
   app,
@@ -22,6 +24,7 @@ export function TileMenuContent({
   bar,
   onTogglePin,
   onUninstall,
+  taskWindow,
 }: {
   app: AppDefinition;
   appWindows: DockWindow[];
@@ -32,13 +35,43 @@ export function TileMenuContent({
   onTogglePin: (appId: string) => void;
   /** Present only for apps that can be uninstalled. */
   onUninstall?: (appId: string) => void;
+  taskWindow?: {
+    id: string;
+    minimized: boolean;
+    maximized: boolean;
+    toggleMaximize: (id: string) => void;
+    close: (id: string) => void;
+  };
 }) {
-  const { open, focus, closeAll } = controls;
+  const { open, focus, minimize, closeAll } = controls;
   return (
     <ContextMenuContent className="z-[10000] w-52">
+      {taskWindow && (
+        <>
+          {taskWindow.minimized ? (
+            <ContextMenuItem onSelect={() => focus(taskWindow.id)}>
+              <SquareArrowOutUpRight aria-hidden /> Restore
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem onSelect={() => minimize(taskWindow.id)}>
+              <Minus aria-hidden /> Minimize
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem
+            onSelect={() => {
+              taskWindow.toggleMaximize(taskWindow.id);
+              focus(taskWindow.id);
+            }}
+          >
+            {taskWindow.maximized ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}{' '}
+            {taskWindow.maximized ? 'Restore down' : 'Maximize'}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
       {/* Every window by what it's showing, to jump straight to one rather
           than cycling there. */}
-      {appWindows.length > 1 && (
+      {!taskWindow && appWindows.length > 1 && (
         <>
           {appWindows.map((w, i) => (
             <ContextMenuItem
@@ -80,7 +113,14 @@ export function TileMenuContent({
           </>
         )}
       </ContextMenuItem>
-      {appWindows.length > 0 && (
+      {taskWindow ? (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => taskWindow.close(taskWindow.id)}>
+            <X aria-hidden /> Close window
+          </ContextMenuItem>
+        </>
+      ) : appWindows.length > 0 && (
         <>
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => closeAll(app.id, appWindows)}>

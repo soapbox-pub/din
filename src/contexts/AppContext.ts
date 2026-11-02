@@ -15,6 +15,19 @@ export type DesktopLayout = "dock" | "taskbar";
 /** What the Dock sits on: nothing, or a macOS Dock's backdrop of today or of old. */
 export type DockStyle = "none" | "modern" | "classic";
 
+/**
+ * The taskbar's build: slim, Windows Vista style, with the Start orb rising
+ * above the bar, or tall, Windows 7 style, with bigger icons and the orb
+ * inside it.
+ */
+export type TaskbarStyle = "slim" | "tall";
+
+/**
+ * What the taskbar's buttons stand for: an app each, its windows combined
+ * (Windows 7), or a window each, labeled with its title (Windows XP, Vista).
+ */
+export type TaskbarButtons = "combine" | "separate";
+
 export interface RelayMetadata {
   /** List of relays with read/write permissions */
   relays: { url: string; read: boolean; write: boolean }[];
@@ -137,6 +150,10 @@ export interface AppConfig {
    * frosted panel since Big Sur) or classic (Leopard's glass shelf).
    */
   dockStyle: DockStyle;
+  /** The taskbar's build: slim (Windows Vista) or tall (Windows 7). */
+  taskbarStyle: TaskbarStyle;
+  /** Whether the taskbar has a button per app, its windows combined, or one per window. */
+  taskbarButtons: TaskbarButtons;
   /**
    * Interface zoom level, as a percentage (100 = native size). Applied via
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole

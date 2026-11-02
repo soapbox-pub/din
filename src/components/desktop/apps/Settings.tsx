@@ -112,7 +112,7 @@ import {
   useTimeZones,
 } from '@/hooks/useDateTime';
 import { useClock } from '@/hooks/useClock';
-import type { ClockFormat, DesktopLayout } from '@/contexts/AppContext';
+import type { ClockFormat, DesktopLayout, TaskbarButtons, TaskbarStyle } from '@/contexts/AppContext';
 import {
   useKeyboardLayouts,
   useKeyboardStatus,
@@ -215,6 +215,7 @@ import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSecti
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
+import { TASKBAR_BUTTONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { WM_BINDING_HELP } from '@/lib/wmBindings';
 import { SECTIONS, matchingSections } from '@/lib/settingsSections';
 import type { SectionId } from '@/lib/settingsSections';
@@ -3334,9 +3335,10 @@ const DESKTOP_LAYOUTS: { value: DesktopLayout; name: string }[] = [
 ];
 
 /**
- * The desktop's layout, then the Dock's size, magnification and backdrop.
- * The Dock's own right-click menu offers the last two, less the
- * magnification level; the taskbar's offers the way back to the Dock.
+ * The desktop's layout, then the Dock's size, magnification and backdrop,
+ * or the taskbar's size and whether it combines windows. The Dock's own
+ * right-click menu offers the last two, less the magnification level; the
+ * taskbar's offers its two and the way back to the Dock.
  */
 function DockSection() {
   const { config, updateConfig } = useAppContext();
@@ -3371,7 +3373,7 @@ function DockSection() {
       <p className="text-xs text-muted-foreground">
         The taskbar puts the Start menu, your apps and windows, and the status icons and clock in one bar along the bottom of the screen, Windows style. It keeps the Dock’s pinned apps, and apps’ menus move into their windows.
       </p>
-      {config.desktopLayout === 'dock' && <DockOptions />}
+      {config.desktopLayout === 'dock' ? <DockOptions /> : <TaskbarOptions />}
     </SectionShell>
   );
 }
@@ -3488,6 +3490,125 @@ function DockOptions() {
       </div>
       <p className="text-xs text-muted-foreground">
         Modern is the frosted panel of macOS today, and Classic the glass shelf of Mac OS X Leopard. You can also right-click the Dock between its icons to change these.
+      </p>
+    </>
+  );
+}
+
+/** A radio group of pictured choices, as the Dock's and taskbar's options are offered. */
+function PicturedChoices<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  preview,
+}: {
+  label: string;
+  options: { value: T; name: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  preview: (value: T) => React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={label}>
+      {options.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              active
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+            )}
+          >
+            <span aria-hidden className="relative flex h-16 w-full flex-col justify-end overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+              {preview(option.value)}
+            </span>
+            <span className="text-xs">{option.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Colors of the stand-in apps in the taskbar previews. */
+const TASKBAR_PREVIEW_APPS = ['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'];
+
+/** A small taskbar of either build, its Start orb rising above the slim one. */
+function TaskbarStylePreview({ style }: { style: TaskbarStyle }) {
+  const slim = style === 'slim';
+  return (
+    <span className={cn('relative flex w-full shrink-0 items-center gap-1 bg-black/45 pr-1 pl-7', slim ? 'h-4' : 'h-6')}>
+      <span
+        className={cn(
+          'absolute left-1.5 rounded-full bg-[radial-gradient(circle_at_50%_30%,rgb(147_197_253),rgb(30_64_175))] ring-1 ring-white/50',
+          slim ? 'bottom-0 size-5' : 'size-4',
+        )}
+      />
+      {TASKBAR_PREVIEW_APPS.map((color) => (
+        <span key={color} className={cn('rounded-[2px]', color, slim ? 'size-2.5' : 'size-3.5')} />
+      ))}
+      <span className="ml-auto h-1.5 w-4 rounded-full bg-white/60" />
+    </span>
+  );
+}
+
+/** A small taskbar with a button per app, or a labeled one per window. */
+function TaskbarButtonsPreview({ buttons }: { buttons: TaskbarButtons }) {
+  return (
+    <span className="flex h-5 w-full shrink-0 items-center gap-1 bg-black/45 px-1">
+      <span className="size-3.5 shrink-0 rounded-full bg-sky-400 ring-1 ring-white/40" />
+      {buttons === 'combine'
+        ? TASKBAR_PREVIEW_APPS.map((color) => (
+            <span key={color} className="grid h-4 w-5 place-items-center rounded-[3px] bg-white/15">
+              <span className={cn('size-2.5 rounded-[2px]', color)} />
+            </span>
+          ))
+        : TASKBAR_PREVIEW_APPS.slice(0, 2).map((color) => (
+            <span key={color} className="flex h-4 w-9 min-w-0 items-center gap-0.5 rounded-[3px] bg-white/15 px-0.5">
+              <span className={cn('size-2 shrink-0 rounded-[2px]', color)} />
+              <span className="h-1 flex-1 rounded-full bg-white/60" />
+            </span>
+          ))}
+    </span>
+  );
+}
+
+/** The taskbar's size and whether it combines an app's windows into one button. */
+function TaskbarOptions() {
+  const { config, updateConfig } = useAppContext();
+
+  return (
+    <>
+      <SubHeading>Taskbar size</SubHeading>
+      <PicturedChoices
+        label="Taskbar size"
+        options={TASKBAR_STYLES}
+        value={config.taskbarStyle}
+        onChange={(value) => updateConfig((current) => ({ ...current, taskbarStyle: value }))}
+        preview={(value) => <TaskbarStylePreview style={value} />}
+      />
+      <p className="text-xs text-muted-foreground">
+        Slim is the bar of Windows Vista, its Start orb rising above it, and Tall the roomier bar of Windows 7, with bigger icons.
+      </p>
+      <SubHeading>Taskbar buttons</SubHeading>
+      <PicturedChoices
+        label="Taskbar buttons"
+        options={TASKBAR_BUTTONS}
+        value={config.taskbarButtons}
+        onChange={(value) => updateConfig((current) => ({ ...current, taskbarButtons: value }))}
+        preview={(value) => <TaskbarButtonsPreview buttons={value} />}
+      />
+      <p className="text-xs text-muted-foreground">
+        Combined, each app has one button for all its windows, as on Windows 7. Separate, each window has its own button with its title, as on Windows XP and Vista, and pinned apps keep their icons until they open. You can also right-click the taskbar between its buttons to change these.
       </p>
     </>
   );

@@ -5,9 +5,15 @@ import { Home, Settings2, Store } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   ContextMenu,
+  ContextMenuCheckboxItem,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -33,6 +39,7 @@ import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { ScreenRecordingMenuItem } from '@/components/desktop/ScreenRecordingHost';
 import { StudioMenuItem } from '@/components/desktop/StudioMenuItem';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
+import type { TaskbarStyle } from '@/contexts/AppContext';
 import { BarSideContext } from '@/contexts/BarSideContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -49,6 +56,7 @@ import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { registerDockTile } from '@/lib/dockTiles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { getFsBridge } from '@/lib/fs';
+import { TASKBAR_STYLES } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { USER_DIRS } from '@/shared/userDirs';
 
@@ -57,31 +65,63 @@ const WHEEL_STEP = 50;
 /** Minimum time between wheel steps, in ms. */
 const WHEEL_COOLDOWN = 120;
 
+/** How each build of the taskbar (AppConfig's taskbarStyle) sizes its parts. */
+interface TaskbarSizes {
+  bar: string;
+  /** The bar's glass: Vista's darker, 7's clearer. */
+  glass: string;
+  /** An app's button. */
+  tile: string;
+  /** The icon on an app's button. */
+  icon: string;
+  /** The icon on a window's button, beside its title. */
+  windowIcon: string;
+}
+
+const TASKBAR_SIZES: Record<TaskbarStyle, TaskbarSizes> = {
+  slim: { bar: 'h-10', glass: 'bg-background/70', tile: 'w-14', icon: 'size-7', windowIcon: 'size-5' },
+  tall: { bar: 'h-13', glass: 'bg-background/55', tile: 'w-16', icon: 'size-9', windowIcon: 'size-6' },
+};
+
+/** One window on the taskbar, with what its button's menu needs to know. */
+type TaskWindow = DockWindow & { maximized: boolean };
+
+/** What a window's taskbar button does to it beyond a Dock tile's controls. */
+interface WindowControls {
+  toggleMaximize: (id: string) => void;
+  close: (id: string) => void;
+}
+
 /**
- * The taskbar, Windows 7 style: one bar along the bottom of the primary
- * monitor in place of the menu bar and the Dock (AppConfig's desktopLayout).
- * The Start button opens the apps launcher beside the user's folders and the
- * power buttons; then come the pinned apps and the running ones, a button per
- * app that groups its windows as a Dock tile does (and shares the Dock's pins,
- * clicks and right-click menu); then the menu bar's status icons and the
- * clock in the corner. Unlike the Dock it never hides, and windows maximize
- * above it.
+ * The taskbar, Windows style: one bar along the bottom of the primary
+ * monitor in place of the menu bar and the Dock (AppConfig's desktopLayout),
+ * slim like Vista's or tall like 7's (taskbarStyle). The Start button opens
+ * the apps launcher beside the user's folders and the power buttons; then
+ * come the pinned apps and the running ones, either a button per app that
+ * groups its windows as a Dock tile does (and shares the Dock's pins, clicks
+ * and right-click menu) or a labeled button per window (taskbarButtons); then
+ * the menu bar's status icons and the clock in the corner. Unlike the Dock it
+ * never hides, and windows maximize above it.
  */
 export function Taskbar() {
+  const { config } = useAppContext();
+  const sizes = TASKBAR_SIZES[config.taskbarStyle];
   return (
     <BarSideContext.Provider value="top">
       <footer
         aria-label="Taskbar"
         className={cn(
           // Chrome, not content: no text cursor or selection anywhere in it.
-          'relative z-20 flex h-10 shrink-0 cursor-default select-none items-stretch gap-1 px-1 tracking-tight',
-          'border-t border-border/60 bg-background/70 backdrop-blur-2xl backdrop-saturate-150',
+          'relative z-20 flex shrink-0 cursor-default select-none items-stretch gap-1 px-1 tracking-tight',
+          sizes.bar,
+          sizes.glass,
+          'border-t border-border/60 backdrop-blur-2xl backdrop-saturate-150',
           // A lit top edge, like glass catching the light.
           'before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-1/2 before:bg-linear-to-b before:from-foreground/[0.06] before:to-transparent',
         )}
       >
-        <StartMenu />
-        <TaskButtons />
+        <StartMenu taskbarStyle={config.taskbarStyle} />
+        <TaskButtons sizes={sizes} separate={config.taskbarButtons === 'separate'} />
         <div className="flex shrink-0 items-center gap-1 pl-1">
           <ScreenRecordingMenuItem />
           <StudioMenuItem />
@@ -108,9 +148,11 @@ export function Taskbar() {
 /**
  * The Start button and its menu: the apps launcher, searched from its foot,
  * beside the user, their folders, Settings and the power buttons. Super+Space
- * opens it, as it does the apps menu.
+ * opens it, as it does the apps menu. On the slim bar the orb is bigger than
+ * the bar and rises above it, as Vista's did; the tall bar has room for it.
  */
-const StartMenu = memo(function StartMenu() {
+const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: TaskbarStyle }) {
+  const slim = taskbarStyle === 'slim';
   const [open, setOpen] = useState(false);
   const [powerAction, setPowerAction] = useState<PowerAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -126,25 +168,34 @@ const StartMenu = memo(function StartMenu() {
             aria-label="Start"
             title="Start"
             className={cn(
-              'group grid w-12 shrink-0 place-items-center rounded-md',
+              'group relative grid shrink-0 place-items-center rounded-md',
+              slim ? 'w-14' : 'w-16',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
             <span
               className={cn(
-                'grid size-8 place-items-center rounded-full border border-white/20 shadow-md ring-1 ring-black/30',
+                'grid place-items-center overflow-hidden rounded-full border border-white/25 shadow-lg ring-1 ring-black/40',
+                slim ? 'absolute bottom-0.5 left-1/2 size-12 -translate-x-1/2' : 'relative size-11',
                 'bg-[radial-gradient(circle_at_50%_30%,rgb(96_165_250),rgb(30_64_175)_60%,rgb(15_23_42))]',
-                'transition-[filter] group-hover:brightness-125 group-data-[state=open]:brightness-125',
+                'transition-[filter,box-shadow] group-hover:brightness-125 group-hover:shadow-sky-400/60',
+                'group-data-[state=open]:brightness-125 group-data-[state=open]:shadow-sky-400/60',
               )}
             >
-              <img src="/din-logo.svg" alt="" className="h-4 w-auto drop-shadow" draggable={false} />
+              {/* The glass's gloss over its upper half. */}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-[12%] top-[4%] h-1/2 rounded-full bg-linear-to-b from-white/50 to-white/0"
+              />
+              <img src="/din-logo.svg" alt="" className="relative h-5 w-auto drop-shadow" draggable={false} />
             </span>
           </button>
         </PopoverTrigger>
         <PopoverContent
           side="top"
           align="start"
-          sideOffset={4}
+          // Clear of the orb where it rises above the bar.
+          sideOffset={slim ? 14 : 4}
           className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-xl p-0"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
@@ -233,9 +284,10 @@ function StartSidebar({ onPower }: { onPower: (action: PowerAction) => void }) {
  * that aren't pinned, in the order they were dragged into or else launch
  * order. Dragging a button moves it, and dropping an unpinned one among the
  * pinned ones pins it there. Right-clicking between them offers the
- * taskbar's own settings.
+ * taskbar's own settings. With `separate`, an app with windows has a button
+ * for each of them in its place instead, dragged together.
  */
-function TaskButtons() {
+function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boolean }) {
   const { windows } = useWindowManager();
   const actions = useWindowActions();
   const { closeApp } = actions;
@@ -264,6 +316,10 @@ function TaskButtons() {
         for (const id of [appId, ...appsDockedAs(appId)]) actions.closeApp(id);
       },
     }),
+    [actions],
+  );
+  const windowControls = useMemo<WindowControls>(
+    () => ({ toggleMaximize: actions.toggleMaximize, close: actions.close }),
     [actions],
   );
 
@@ -314,13 +370,33 @@ function TaskButtons() {
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
-            const appWindows = windows
+            const appWindows: TaskWindow[] = windows
               .filter((w) => tileOf(w.appId) === appId && !w.closing)
-              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
+              .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon, maximized: w.maximized }));
+            if (separate && appWindows.length > 0) {
+              return (
+                <WindowButtons
+                  key={appId}
+                  app={app}
+                  sizes={sizes}
+                  registerRef={registerRef}
+                  appWindows={appWindows}
+                  activeWindowId={activeWindow?.id ?? null}
+                  controls={controls}
+                  windowControls={windowControls}
+                  isPinned={pinned.includes(appId)}
+                  badge={badgeOf(appId)}
+                  onTogglePin={togglePin}
+                  onDragPointerDown={reorder.onPointerDown}
+                  onUninstall={canUninstall(appId) ? uninstall : undefined}
+                />
+              );
+            }
             return (
               <TaskButton
                 key={appId}
                 app={app}
+                sizes={sizes}
                 registerRef={registerRef}
                 appWindows={appWindows}
                 activeWindowId={activeWindow?.id ?? null}
@@ -348,6 +424,7 @@ function TaskButtons() {
  */
 const TaskButton = memo(function TaskButton({
   app,
+  sizes,
   registerRef,
   appWindows,
   activeWindowId,
@@ -359,8 +436,9 @@ const TaskButton = memo(function TaskButton({
   onUninstall,
 }: {
   app: AppDefinition;
+  sizes: TaskbarSizes;
   registerRef: (appId: string, el: HTMLDivElement | null) => void;
-  appWindows: DockWindow[];
+  appWindows: TaskWindow[];
   activeWindowId: string | null;
   controls: DockControls;
   isPinned: boolean;
@@ -391,7 +469,7 @@ const TaskButton = memo(function TaskButton({
     (badge === 'flag' ? ', has news' : badge ? `, ${badge} new` : '');
 
   return (
-    <div ref={ref} data-app-id={app.id} className="relative flex w-14 shrink-0">
+    <div ref={ref} data-app-id={app.id} className={cn('relative flex shrink-0', sizes.tile)}>
       {appWindows.length > 1 && (
         <span aria-hidden className="absolute inset-y-0.5 right-0 left-1 rounded-md border border-foreground/15 bg-foreground/5" />
       )}
@@ -424,20 +502,9 @@ const TaskButton = memo(function TaskButton({
             <AppIcon
               icon={frontmost?.icon ?? app.icon}
               web={app.web}
-              className={cn('size-7 text-foreground drop-shadow-sm', launching && 'motion-safe:animate-pulse')}
+              className={cn(sizes.icon, 'text-foreground drop-shadow-sm', launching && 'motion-safe:animate-pulse')}
             />
-            {badge !== null && (
-              <span
-                aria-hidden
-                className={cn(
-                  'pointer-events-none absolute top-0.5 right-1 flex items-center justify-center rounded-full',
-                  'bg-red-600 text-[10px] leading-none font-semibold text-white tabular-nums shadow ring-1 ring-black/10',
-                  badge === 'flag' ? 'size-2.5' : 'h-4 min-w-4 px-1',
-                )}
-              >
-                {badge === 'flag' ? null : badge > 99 ? '99+' : badge}
-              </span>
-            )}
+            {badge !== null && <TileBadge badge={badge} />}
           </button>
         </ContextMenuTrigger>
         <TileMenuContent
@@ -455,6 +522,7 @@ const TaskButton = memo(function TaskButton({
   );
 }, (prev, next) =>
   prev.app === next.app &&
+  prev.sizes === next.sizes &&
   prev.registerRef === next.registerRef &&
   prev.activeWindowId === next.activeWindowId &&
   prev.controls === next.controls &&
@@ -463,18 +531,183 @@ const TaskButton = memo(function TaskButton({
   prev.onTogglePin === next.onTogglePin &&
   prev.onDragPointerDown === next.onDragPointerDown &&
   prev.onUninstall === next.onUninstall &&
-  prev.appWindows.length === next.appWindows.length &&
-  prev.appWindows.every((w, i) => {
-    const n = next.appWindows[i];
-    return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title && w.icon === n.icon;
-  }));
+  sameWindows(prev.appWindows, next.appWindows));
 
-/** The menu between the taskbar's buttons: back to the menu bar and Dock, or its settings. */
+/** Whether two lists of a button's windows would draw it the same. */
+function sameWindows(a: TaskWindow[], b: TaskWindow[]): boolean {
+  return a.length === b.length && a.every((w, i) => {
+    const n = b[i];
+    return w.id === n.id && w.z === n.z && w.minimized === n.minimized && w.title === n.title && w.icon === n.icon &&
+      w.maximized === n.maximized;
+  });
+}
+
+/** The count or dot on a taskbar button for an app's news. */
+function TileBadge({ badge }: { badge: AppBadge }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'pointer-events-none absolute top-0.5 right-1 flex items-center justify-center rounded-full',
+        'bg-red-600 text-[10px] leading-none font-semibold text-white tabular-nums shadow ring-1 ring-black/10',
+        badge === 'flag' ? 'size-2.5' : 'h-4 min-w-4 px-1',
+      )}
+    >
+      {badge === 'flag' ? null : badge > 99 ? '99+' : badge}
+    </span>
+  );
+}
+
+/**
+ * An app's windows on the taskbar when they're kept separate, as on Windows
+ * XP and Vista: a button for each, its icon beside its title, that shrinks
+ * as the bar fills. A click raises its window or, if it's the active one,
+ * minimizes it; middle-click opens a new one; its menu acts on that window
+ * first, then on its app. The group drags as one, where the app's button
+ * would be.
+ */
+const WindowButtons = memo(function WindowButtons({
+  app,
+  sizes,
+  registerRef,
+  appWindows,
+  activeWindowId,
+  controls,
+  windowControls,
+  isPinned,
+  badge,
+  onTogglePin,
+  onDragPointerDown,
+  onUninstall,
+}: {
+  app: AppDefinition;
+  sizes: TaskbarSizes;
+  registerRef: (appId: string, el: HTMLDivElement | null) => void;
+  appWindows: TaskWindow[];
+  activeWindowId: string | null;
+  controls: DockControls;
+  windowControls: WindowControls;
+  isPinned: boolean;
+  badge: AppBadge | null;
+  onTogglePin: (appId: string) => void;
+  onDragPointerDown: (appId: string, e: React.PointerEvent<HTMLElement>) => void;
+  onUninstall?: (appId: string) => void;
+}) {
+  const ref = useCallback((el: HTMLDivElement | null) => registerRef(app.id, el), [registerRef, app.id]);
+
+  return (
+    <div
+      ref={ref}
+      data-app-id={app.id}
+      className="flex min-w-0 gap-0.5"
+      // As wide as its buttons at their widest, shrinking with the bar.
+      style={{ flex: `0 1 calc(${appWindows.length} * 10rem + ${appWindows.length - 1} * 0.125rem)` }}
+    >
+      {appWindows.map((w, i) => {
+        const active = w.id === activeWindowId;
+        const title = w.title ?? app.name;
+        const shownBadge = i === 0 ? badge : null;
+        const label =
+          title + (w.minimized ? ', minimized' : '') +
+          (shownBadge === 'flag' ? ', has news' : shownBadge ? `, ${shownBadge} new` : '');
+        return (
+          <ContextMenu key={w.id}>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={label}
+                aria-pressed={active}
+                title={title}
+                onClick={() => clickTile(app.id, [w], activeWindowId, controls)}
+                onPointerDown={(e) => {
+                  if (e.button === 0) onDragPointerDown(app.id, e);
+                }}
+                onAuxClick={(e) => {
+                  if (e.button === 1) controls.open(app.id);
+                }}
+                className={cn(
+                  'relative flex max-w-40 min-w-10 flex-1 basis-0 items-center gap-2 overflow-hidden rounded-md border px-2 text-left text-xs transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active
+                    ? 'border-foreground/25 bg-foreground/20 font-medium text-foreground shadow-inner'
+                    : 'border-foreground/15 bg-foreground/10 text-foreground/85 hover:bg-foreground/15 hover:text-foreground',
+                )}
+              >
+                <AppIcon
+                  icon={w.icon ?? app.icon}
+                  web={app.web}
+                  className={cn(sizes.windowIcon, 'shrink-0 text-foreground drop-shadow-sm', w.minimized && 'opacity-70')}
+                />
+                <span className="min-w-0 flex-1 truncate">{title}</span>
+                {shownBadge !== null && <TileBadge badge={shownBadge} />}
+              </button>
+            </ContextMenuTrigger>
+            <TileMenuContent
+              app={app}
+              appWindows={appWindows}
+              activeWindowId={activeWindowId}
+              controls={controls}
+              isPinned={isPinned}
+              bar="taskbar"
+              onTogglePin={onTogglePin}
+              onUninstall={onUninstall}
+              taskWindow={{ ...w, ...windowControls }}
+            />
+          </ContextMenu>
+        );
+      })}
+    </div>
+  );
+}, (prev, next) =>
+  prev.app === next.app &&
+  prev.sizes === next.sizes &&
+  prev.registerRef === next.registerRef &&
+  prev.activeWindowId === next.activeWindowId &&
+  prev.controls === next.controls &&
+  prev.windowControls === next.windowControls &&
+  prev.isPinned === next.isPinned &&
+  prev.badge === next.badge &&
+  prev.onTogglePin === next.onTogglePin &&
+  prev.onDragPointerDown === next.onDragPointerDown &&
+  prev.onUninstall === next.onUninstall &&
+  sameWindows(prev.appWindows, next.appWindows));
+
+/**
+ * The menu between the taskbar's buttons: its size, whether windows combine,
+ * back to the menu bar and Dock, or its settings.
+ */
 function TaskbarMenuContent() {
-  const { updateConfig } = useAppContext();
+  const { config, updateConfig } = useAppContext();
   const { open } = useWindowActions();
   return (
     <ContextMenuContent className="z-[10000] w-56">
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Size</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-40">
+          <ContextMenuRadioGroup
+            value={config.taskbarStyle}
+            onValueChange={(value) => {
+              const style = TASKBAR_STYLES.find((s) => s.value === value);
+              if (style) updateConfig((current) => ({ ...current, taskbarStyle: style.value }));
+            }}
+          >
+            {TASKBAR_STYLES.map((s) => (
+              <ContextMenuRadioItem key={s.value} value={s.value}>
+                {s.name}
+              </ContextMenuRadioItem>
+            ))}
+          </ContextMenuRadioGroup>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuCheckboxItem
+        checked={config.taskbarButtons === 'combine'}
+        onCheckedChange={(checked) =>
+          updateConfig((current) => ({ ...current, taskbarButtons: checked ? 'combine' : 'separate' }))
+        }
+      >
+        Combine windows
+      </ContextMenuCheckboxItem>
+      <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => updateConfig((current) => ({ ...current, desktopLayout: 'dock' }))}>
         Use the menu bar and Dock
       </ContextMenuItem>

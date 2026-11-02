@@ -78,6 +78,8 @@ const defaultConfig: AppConfig = {
   dockMagnificationScale: 1.5,
   dockSize: 80,
   dockStyle: 'none',
+  taskbarStyle: 'slim',
+  taskbarButtons: 'combine',
   zoomLevel: 100,
   clockFormat: 'auto',
   clockShowDate: true,
