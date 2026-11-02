@@ -125,8 +125,13 @@ export function serveFrom(source: Source, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const accept = request.headers.get('accept');
   if (source.kind === 'url') {
+    // The path set on the origin, never parsed against it: din://app//host/x
+    // would otherwise fetch http://host/x for the page to read.
+    const target = new URL(source.origin);
+    target.pathname = url.pathname;
+    target.search = url.search;
     return electronNet
-      .fetch(new URL(url.pathname + url.search, source.origin).toString(), { headers: accept ? { accept } : {} })
+      .fetch(target.toString(), { headers: accept ? { accept } : {} })
       .catch((error: unknown) => new Response(`${source.origin}: ${String(error)}`, { status: 502, headers: { 'content-type': 'text/plain' } }));
   }
   let pathname: string;

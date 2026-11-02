@@ -358,8 +358,14 @@ async function serve(request: Request): Promise<Response> {
     // Main asks for it itself: the page's Origin (din://…) and Sec-Fetch-*
     // headers would read to Vite as a cross-site page fetching its source.
     const accept = request.headers.get('accept');
-    const fetchDev = (target: string) =>
-      net.fetch(new URL(target + url.search, opts.devUrl).toString(), { headers: accept ? { accept } : {} });
+    // The path set on the dev server's URL, never parsed against it: a path
+    // of //host/x would otherwise fetch http://host/x for the page to read.
+    const fetchDev = (target: string) => {
+      const dev = new URL(opts.devUrl!);
+      dev.pathname = target;
+      dev.search = url.search;
+      return net.fetch(dev.toString(), { headers: accept ? { accept } : {} });
+    };
     if (pathname === '/' || pathname === '/index.html') return fetchDev(`/src/apps/${appId}/index.html`);
     if (/^\/(@|node_modules\/|src\/|__)/.test(pathname)) return fetchDev(pathname);
     // Decided by what's on disk: Vite answers a path it doesn't have with
