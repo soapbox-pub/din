@@ -9,10 +9,8 @@
 //!
 //! Frames are paced the way a game's are: Din hears that its last frame is on
 //! screen right after the refresh, and the compositor commits the next one
-//! as late before the following refresh as its recent frames allow (about
-//! 2 ms when Din's buffer is scanned out, never more than
-//! DIN_MAX_RENDER_TIME ms, 4 by default), so a frame Din finishes in time is
-//! on screen at that refresh. Din's buffers
+//! DIN_MAX_RENDER_TIME ms (4 by default) before the following refresh, so a
+//! frame Din finishes in time is on screen at that refresh. Din's buffers
 //! are usually scanned out as they are; the compositor composites only when
 //! a popup, the pointer or a second display needs it.
 //!
