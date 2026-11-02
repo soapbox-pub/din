@@ -11,6 +11,7 @@ import {
   HardDrive,
   Home,
   RotateCw,
+  Smartphone,
   Star,
   Usb,
 } from 'lucide-react';
@@ -194,7 +195,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     const devices: Place[] = [
       { name: 'Computer', path: '/', icon: HardDrive },
       ...(volumes.data?.volumes ?? []).flatMap((v) =>
-        v.mountPoint ? [{ name: v.name, path: v.mountPoint, icon: Usb }] : [],
+        v.mountPoint ? [{ name: v.name, path: v.mountPoint, icon: v.phone ? Smartphone : Usb }] : [],
       ),
     ];
     return [

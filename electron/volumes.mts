@@ -29,11 +29,16 @@
 // ejects the media or powers the drive off, whichever it can, so the light
 // goes out before it's pulled.
 //
+// Phones plugged in by USB are listed here too, with what they're waiting
+// on (Trust, File transfer, unlocking); electron/phone-usb.mts mounts and
+// ejects them.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import { ipcMain } from 'electron';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
+import { ejectPhone, isPhoneVolume, mountPhone, phoneVolumes, startPhones } from './phone-usb.mts';
 
 const UDISKS = 'org.freedesktop.UDisks2';
 const UDISKS_PATH = '/org/freedesktop/UDisks2';
@@ -83,6 +88,10 @@ export interface Volume {
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
   busy: VolumeBusy | null;
+  /** A phone plugged in by USB rather than a disk, and which kind. */
+  phone?: 'android' | 'iphone';
+  /** What a phone is waiting on the user for before it opens, e.g. "Unlock the iPhone and tap Trust." */
+  needs?: string | null;
 }
 
 export interface VolumesState {
@@ -96,7 +105,8 @@ export type VolumeEvent =
   | { type: 'locked'; id: string; name: string }
   | { type: 'ejected'; name: string }
   | { type: 'pulled'; name: string }
-  | { type: 'unreadable'; name: string; error: string };
+  | { type: 'unreadable'; name: string; error: string }
+  | { type: 'waiting'; id: string; name: string; needs: string };
 
 type Interfaces = Map<string, Map<string, unknown>>;
 
@@ -238,6 +248,7 @@ function state(): VolumesState {
     });
   }
   volumes.sort((a, b) => a.device.localeCompare(b.device, undefined, { numeric: true }));
+  volumes.push(...phoneVolumes());
   return { available: udisksOwner !== null, volumes };
 }
 
@@ -595,6 +606,7 @@ export function registerVolumesHandlers(options: {
   // Disks plugged in before Din started are mounted as it starts, not when
   // something first asks.
   void connection();
+  startPhones({ changed, announce });
 
   ipcMain.handle('volumes:state', async (event) => {
     assertShellSender(event);
@@ -605,6 +617,7 @@ export function registerVolumesHandlers(options: {
 
   ipcMain.handle('volumes:mount', async (event, path: unknown) => {
     assertShellSender(event);
+    if (isPhoneVolume(path)) return mountPhone(path);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
     const volume = requireVolume(path);
     if (isLocked(volume)) throw new Error('It’s locked. Unlock it with its passphrase first.');
@@ -622,6 +635,7 @@ export function registerVolumesHandlers(options: {
 
   ipcMain.handle('volumes:eject', async (event, path: unknown) => {
     assertShellSender(event);
+    if (isPhoneVolume(path)) return ejectPhone(path);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
     await eject(requireVolume(path));
   });

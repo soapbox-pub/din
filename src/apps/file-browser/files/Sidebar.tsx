@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   Lock,
   MemoryStick,
+  Smartphone,
   Star,
   Trash2,
   Usb,
@@ -56,7 +57,8 @@ export interface SidebarProps {
 
 /**
  * Places (home and its standard folders, the Trash), Favorites (GTK
- * bookmarks: right-click a folder, or drag one here), and Devices.
+ * bookmarks: right-click a folder, or drag one here), and Devices: the
+ * computer, removable disks, and phones plugged in by USB.
  * Every place is also a drop target that moves (Ctrl: copies) into it.
  */
 export function Sidebar({
@@ -129,7 +131,7 @@ export function Sidebar({
       ? (volumes.data?.volumes ?? []).map((v) => ({
           path: v.mountPoint ?? '',
           name: v.name,
-          icon: v.bus === 'sdio' ? MemoryStick : Usb,
+          icon: v.phone ? Smartphone : v.bus === 'sdio' ? MemoryStick : Usb,
           volume: v,
         }))
       : (media.data?.entries ?? [])
@@ -343,7 +345,7 @@ function SidebarItem({
             onAuxClick={(e) => {
               if (e.button === 1) onOpenInNewTab(place.path);
             }}
-            title={place.path || volume?.device}
+            title={place.path || volume?.needs || volume?.device}
             aria-current={active ? 'location' : undefined}
             className={cn(
               'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
@@ -352,7 +354,14 @@ function SidebarItem({
             )}
           >
             <place.icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
-            <span className="truncate">{place.name}</span>
+            {volume?.needs ? (
+              <span className="min-w-0">
+                <span className="block truncate">{place.name}</span>
+                <span className="block text-xs leading-snug text-muted-foreground">{volume.needs}</span>
+              </span>
+            ) : (
+              <span className="truncate">{place.name}</span>
+            )}
             {volume?.locked && (
               <>
                 <Lock className="ml-auto size-3 shrink-0 text-muted-foreground" aria-hidden />

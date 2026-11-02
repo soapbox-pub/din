@@ -49,7 +49,7 @@ a missing or bad argument).
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, connect or disconnect a phone, whether it can send files here, add one paired in Bluetooth or forget one |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
-| `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks, as Files' sidebar has them: list them, mount, unlock an encrypted one with its passphrase, eject |
+| `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks and phones plugged in by USB, as Files' sidebar has them: list them (with what a phone is waiting on), mount, unlock an encrypted one with its passphrase, eject |
 | `studio` | Studio: its takes in ~/Videos/Studio, recording one (start, stop, mark a highlight or a retake), transcribing one again, and going live (asks on screen first) or ending the stream |
 | `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |

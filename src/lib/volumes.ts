@@ -3,8 +3,9 @@
  * (`window.dinos.volumes`, see electron/preload.cjs + electron/volumes.mts).
  *
  * Backed by UDisks2 over the system bus: removable disks are mounted as
- * they're plugged in (encrypted ones once they're unlocked), and the main process pushes the whole state whenever
- * it changes. Absent in a plain browser; callers feature-detect via
+ * they're plugged in (encrypted ones once they're unlocked), as are phones
+ * plugged in by USB (electron/phone-usb.mts), and the main process pushes
+ * the whole state whenever it changes. Absent in a plain browser; callers feature-detect via
  * `getVolumesBridge()`.
  */
 
@@ -27,6 +28,10 @@ export interface Volume {
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
   busy: VolumeBusy | null;
+  /** A phone plugged in by USB rather than a disk, and which kind. */
+  phone?: 'android' | 'iphone';
+  /** What a phone is waiting on the user for before it opens, e.g. "Unlock the iPhone and tap Trust." */
+  needs?: string | null;
 }
 
 export interface VolumesState {
@@ -40,7 +45,8 @@ export type VolumeEvent =
   | { type: 'locked'; id: string; name: string }
   | { type: 'ejected'; name: string }
   | { type: 'pulled'; name: string }
-  | { type: 'unreadable'; name: string; error: string };
+  | { type: 'unreadable'; name: string; error: string }
+  | { type: 'waiting'; id: string; name: string; needs: string };
 
 export interface VolumesBridge {
   state(): Promise<VolumesState>;

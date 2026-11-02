@@ -35,7 +35,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service | Assistant, CAD |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
-| `volumes` | `din.system.volumes`: removable disks, mounting, unlocking and ejecting | Files |
+| `volumes` | `din.system.volumes`: removable disks and phones plugged in by USB, mounting, unlocking and ejecting | Files |
 | `mail` | `din.system.mail`: the user's IMAP and SMTP accounts (`src/lib/mail.ts`), run in main by `electron/mail.mts`. Passwords stay in main, sealed with the keyring; the app never sees them | Mail |
 | `phone` | `din.system.phone`: the texts on the user's phones (`src/lib/phone.ts`), run in main by `electron/phone.mts`: conversations, their messages, contacts, sending, marking read, deleting a conversation here. Adding and forgetting phones are Settings → Phone's, not the app's | Messages |
 | `passwords` | `din.system.passwords`: the password vault's items, locking and unlocking it, generating passwords, copying a field (cleared from the clipboard after 90 seconds). Not the browser's autofill, which is the desktop's | Passwords |

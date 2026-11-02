@@ -402,12 +402,13 @@ let
   # unar plus gzip/xz/bzip2/zstd for the Files app's archives, and
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
-  # and sudo (from /run/wrappers) for
+  # jmtpfs, ifuse and libimobiledevice's tools for phones plugged in by USB
+  # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
   # Tor's and the WiFi reset's helpers, and for checking the password
   # Din takes for sudo (electron/askpass.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils ]}:/run/wrappers/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -595,6 +596,13 @@ in
   # does unmounting anything Din didn't mount (filesystem-unmount-others):
   # that would include /boot and /home.
   services.udisks2.enable = true;
+
+  # Phones plugged in by USB show up in Files too (electron/phone-usb.mts),
+  # mounted with FUSE under $XDG_RUNTIME_DIR/phones: iPhones through usbmuxd,
+  # which pairs them once the user taps Trust, and Android phones over MTP,
+  # which libmtp's udev rules recognize (ID_MTP_DEVICE) and the rule in
+  # extraRules below gives Din's user.
+  services.usbmuxd.enable = true;
   security.polkit.extraConfig = ''
     polkit.addRule(function (action, subject) {
       if (subject.user != "din") return;
@@ -937,6 +945,7 @@ in
   # go in extraRules (99-local.rules).
   services.udev.packages = [
     pkgs.brightnessctl
+    pkgs.libmtp
     (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
     '')
@@ -965,13 +974,17 @@ in
   # (for /boot, below). systemd's by-designator/esp is the first ESP on the
   # disk, which next to Windows is Windows'.
   #
-  # The last remaps keys the way hwdb does, from the file din-keyboard
+  # The next remaps keys the way hwdb does, from the file din-keyboard
   # writes when the layout needs it (os/din-keyboard.sh).
+  #
+  # The last gives `din` the Android phones libmtp's rules (69-libmtp.rules)
+  # found speaking MTP, for jmtpfs (electron/phone-usb.mts).
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
     SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", PROGRAM="${isBootedEsp} $env{ID_PART_ENTRY_UUID}", SYMLINK+="disk/dinos-esp"
     ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TEST=="/var/lib/din/keyboard-remap", IMPORT{file}="/var/lib/din/keyboard-remap", IMPORT{builtin}="keyboard"
+    ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", OWNER="din", MODE="0660"
   '';
 
   # din-shell: Din on the screen. This is the entire graphical stack - no
