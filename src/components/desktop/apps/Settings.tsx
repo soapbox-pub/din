@@ -3542,17 +3542,12 @@ function PicturedChoices<T extends string>({
 /** Colors of the stand-in apps in the taskbar previews. */
 const TASKBAR_PREVIEW_APPS = ['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'];
 
-/** A small taskbar of either build, its Start orb rising above the slim one. */
+/** A small taskbar of either build, Din's logo as its Start button. */
 function TaskbarStylePreview({ style }: { style: TaskbarStyle }) {
   const slim = style === 'slim';
   return (
-    <span className={cn('relative flex w-full shrink-0 items-center gap-1 bg-black/45 pr-1 pl-7', slim ? 'h-4' : 'h-6')}>
-      <span
-        className={cn(
-          'absolute left-1.5 rounded-full bg-[radial-gradient(circle_at_50%_30%,rgb(147_197_253),rgb(30_64_175))] ring-1 ring-white/50',
-          slim ? 'bottom-0 size-5' : 'size-4',
-        )}
-      />
+    <span className={cn('flex w-full shrink-0 items-center gap-1 bg-black/45 px-1', slim ? 'h-4' : 'h-6')}>
+      <img src="/din-logo.svg" alt="" className={cn('mr-1 w-auto', slim ? 'h-2.5' : 'h-3.5')} draggable={false} />
       {TASKBAR_PREVIEW_APPS.map((color) => (
         <span key={color} className={cn('rounded-[2px]', color, slim ? 'size-2.5' : 'size-3.5')} />
       ))}
@@ -3565,7 +3560,7 @@ function TaskbarStylePreview({ style }: { style: TaskbarStyle }) {
 function TaskbarButtonsPreview({ buttons }: { buttons: TaskbarButtons }) {
   return (
     <span className="flex h-5 w-full shrink-0 items-center gap-1 bg-black/45 px-1">
-      <span className="size-3.5 shrink-0 rounded-full bg-sky-400 ring-1 ring-white/40" />
+      <img src="/din-logo.svg" alt="" className="h-3 w-auto shrink-0" draggable={false} />
       {buttons === 'combine'
         ? TASKBAR_PREVIEW_APPS.map((color) => (
             <span key={color} className="grid h-4 w-5 place-items-center rounded-[3px] bg-white/15">
@@ -3597,7 +3592,7 @@ function TaskbarOptions() {
         preview={(value) => <TaskbarStylePreview style={value} />}
       />
       <p className="text-xs text-muted-foreground">
-        Slim is the bar of Windows Vista, its Start orb rising above it, and Tall the roomier bar of Windows 7, with bigger icons.
+        Tall is the roomier bar of Windows 7, with bigger icons, and Slim the thinner bar of Windows Vista.
       </p>
       <SubHeading>Taskbar buttons</SubHeading>
       <PicturedChoices

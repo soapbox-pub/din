@@ -16,11 +16,10 @@ export type DesktopLayout = "dock" | "taskbar";
 export type DockStyle = "none" | "modern" | "classic";
 
 /**
- * The taskbar's build: slim, Windows Vista style, with the Start orb rising
- * above the bar, or tall, Windows 7 style, with bigger icons and the orb
- * inside it.
+ * The taskbar's build: tall, Windows 7 style, with bigger icons, or slim,
+ * Windows Vista style.
  */
-export type TaskbarStyle = "slim" | "tall";
+export type TaskbarStyle = "tall" | "slim";
 
 /**
  * What the taskbar's buttons stand for: an app each, its windows combined
@@ -150,7 +149,7 @@ export interface AppConfig {
    * frosted panel since Big Sur) or classic (Leopard's glass shelf).
    */
   dockStyle: DockStyle;
-  /** The taskbar's build: slim (Windows Vista) or tall (Windows 7). */
+  /** The taskbar's build: tall (Windows 7) or slim (Windows Vista). */
   taskbarStyle: TaskbarStyle;
   /** Whether the taskbar has a button per app, its windows combined, or one per window. */
   taskbarButtons: TaskbarButtons;

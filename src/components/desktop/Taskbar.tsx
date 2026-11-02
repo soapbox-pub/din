@@ -148,8 +148,7 @@ export function Taskbar() {
 /**
  * The Start button and its menu: the apps launcher, searched from its foot,
  * beside the user, their folders, Settings and the power buttons. Super+Space
- * opens it, as it does the apps menu. On the slim bar the orb is bigger than
- * the bar and rises above it, as Vista's did; the tall bar has room for it.
+ * opens it, as it does the apps menu. The button is Din's logo on its own.
  */
 const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: TaskbarStyle }) {
   const slim = taskbarStyle === 'slim';
@@ -168,34 +167,25 @@ const StartMenu = memo(function StartMenu({ taskbarStyle }: { taskbarStyle: Task
             aria-label="Start"
             title="Start"
             className={cn(
-              'group relative grid shrink-0 place-items-center rounded-md',
+              'my-0.5 grid shrink-0 place-items-center rounded-md border border-transparent transition-colors',
               slim ? 'w-14' : 'w-16',
+              'hover:border-foreground/15 hover:bg-foreground/10',
+              'data-[state=open]:border-foreground/25 data-[state=open]:bg-foreground/20 data-[state=open]:shadow-inner',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
-            <span
-              className={cn(
-                'grid place-items-center overflow-hidden rounded-full border border-white/25 shadow-lg ring-1 ring-black/40',
-                slim ? 'absolute bottom-0.5 left-1/2 size-12 -translate-x-1/2' : 'relative size-11',
-                'bg-[radial-gradient(circle_at_50%_30%,rgb(96_165_250),rgb(30_64_175)_60%,rgb(15_23_42))]',
-                'transition-[filter,box-shadow] group-hover:brightness-125 group-hover:shadow-sky-400/60',
-                'group-data-[state=open]:brightness-125 group-data-[state=open]:shadow-sky-400/60',
-              )}
-            >
-              {/* The glass's gloss over its upper half. */}
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-[12%] top-[4%] h-1/2 rounded-full bg-linear-to-b from-white/50 to-white/0"
-              />
-              <img src="/din-logo.svg" alt="" className="relative h-5 w-auto drop-shadow" draggable={false} />
-            </span>
+            <img
+              src="/din-logo.svg"
+              alt=""
+              className={cn('w-auto drop-shadow-sm', slim ? 'h-6' : 'h-8')}
+              draggable={false}
+            />
           </button>
         </PopoverTrigger>
         <PopoverContent
           side="top"
           align="start"
-          // Clear of the orb where it rises above the bar.
-          sideOffset={slim ? 14 : 4}
+          sideOffset={4}
           className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-xl p-0"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
