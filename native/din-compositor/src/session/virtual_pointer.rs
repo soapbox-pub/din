@@ -104,6 +104,7 @@ impl Dispatch<ZwlrVirtualPointerV1, VirtualPointer> for State {
                     _ => ButtonState::Released,
                 };
                 let serial = SERIAL_COUNTER.next_serial();
+                state.shake.button(button, button_state == ButtonState::Pressed);
                 pointer.button(state, &ButtonEvent { serial, time, button, state: button_state });
             }
             zwlr_virtual_pointer_v1::Request::Axis { time, axis, value } => {

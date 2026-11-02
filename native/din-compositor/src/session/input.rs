@@ -64,6 +64,7 @@ impl State {
                         }
                     }
                 }
+                self.shake.button(button, state == ButtonState::Pressed);
                 pointer.button(
                     self,
                     &ButtonEvent { button, state, serial, time: event.time_msec() },

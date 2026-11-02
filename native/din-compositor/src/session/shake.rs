@@ -13,6 +13,10 @@
 //! stroke, and let go of once they stop, so it shrinks back in one go. The
 //! size drawn follows it on a critically damped spring, so it neither pops
 //! nor stops dead.
+//!
+//! A pointer moved with a button held is dragging something (a window, a
+//! selection, a stroke of paint), however it's shaken, so it never grows
+//! then, and one already big shrinks back as the button goes down.
 
 use std::time::Duration;
 
@@ -59,6 +63,8 @@ pub struct Shake {
     scale: f64,
     velocity: f64,
     last_step: Option<Duration>,
+    /// The buttons held down.
+    pressed: Vec<u32>,
     /// The biggest it's been drawn this shake, for the log.
     peak: f64,
 }
@@ -71,6 +77,14 @@ impl Shake {
         self.enabled = enabled;
     }
 
+    /// A button went down (PRESSED) or up.
+    pub fn button(&mut self, button: u32, pressed: bool) {
+        self.pressed.retain(|&b| b != button);
+        if pressed {
+            self.pressed.push(button);
+        }
+    }
+
     /// The pointer moved to AT at NOW.
     pub fn moved(&mut self, at: Point<f64, Logical>, now: Duration) {
         if !self.enabled {
@@ -78,6 +92,13 @@ impl Shake {
         }
         self.drain(now);
         let Some(last) = self.last.replace(at) else { return };
+        if !self.pressed.is_empty() {
+            self.energy = 0.0;
+            self.stroked_at = None;
+            self.stroke = (0.0, 0.0);
+            self.back = (0.0, 0.0);
+            return;
+        }
         let (dx, dy) = (at.x - last.x, at.y - last.y);
         let (sx, sy) = self.stroke;
         if (sx != 0.0 || sy != 0.0) && dx * sx + dy * sy < 0.0 {
