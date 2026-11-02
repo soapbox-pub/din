@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppWindow, ClipboardCopy, FolderOpen, Pencil, SquareArrowOutUpRight, Trash2 } from 'lucide-react';
 import {
   ContextMenu,
@@ -22,7 +23,19 @@ import { cleanFsError, localFileUrl } from '@/lib/fs';
 import { entryApp } from '@/lib/openPath';
 import { cn } from '@/lib/utils';
 import { FileIcon } from '@/shared/FileIcon';
-import { endIconDrag, setIconLayer, startIconDrag, useFolderDrop, useSelectionBand, useWallpaper } from './wallpaper';
+import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
+import { useDragPoint } from '@/lib/dinDrag';
+import {
+  endIconDrag,
+  setIconLayer,
+  startIconDrag,
+  useDropPreview,
+  useFolderDrop,
+  useIconDrag,
+  useSelectionBand,
+  useWallpaper,
+  type IconDrag,
+} from './wallpaper';
 
 /** The icons a menu or key acts on: the selection, if the icon is in it, else the icon alone. */
 function targetsOf(icons: DesktopIconsContextValue, name: string): string[] {
@@ -37,6 +50,8 @@ function targetsOf(icons: DesktopIconsContextValue, name: string): string[] {
 export function DesktopIconLayer() {
   const icons = useDesktopIcons();
   const band = useSelectionBand();
+  const drag = useIconDrag();
+  const preview = useDropPreview();
   const { toast } = useToast();
   const layerRef = useCallback((el: HTMLDivElement | null) => setIconLayer(el), []);
 
@@ -88,6 +103,15 @@ export function DesktopIconLayer() {
       className="pointer-events-none absolute inset-0"
       onKeyDown={onKeyDown}
     >
+      {preview?.map((rect) => (
+        <div
+          key={`${rect.left},${rect.top}`}
+          aria-hidden
+          className="absolute rounded-md border border-white/70 bg-white/15 shadow-[0_0_0_1px_rgb(0_0_0/0.25)]"
+          style={{ left: rect.left + 2, top: rect.top + 2, width: rect.width - 4, height: rect.height - 4 }}
+        />
+      ))}
+      {drag && <IconDragGhost drag={drag} />}
       {icons.icons.map((icon) => {
         const place = icons.places.get(icon.name);
         return place ? (
@@ -98,6 +122,7 @@ export function DesktopIconLayer() {
             selected={icons.selected.has(icon.name)}
             renaming={icons.renaming === icon.name}
             tabbable={tabStop === icon.name}
+            lifted={!!drag?.names.includes(icon.name)}
           />
         ) : null;
       })}
@@ -138,12 +163,15 @@ function DesktopIconTile({
   selected,
   renaming,
   tabbable,
+  lifted,
 }: {
   icon: DesktopIcon;
   rect: Rect;
   selected: boolean;
   renaming: boolean;
   tabbable: boolean;
+  /** Being dragged: its ghost follows the pointer, and it fades where it was. */
+  lifted: boolean;
 }) {
   const icons = useDesktopIcons();
   const { config } = useAppContext();
@@ -220,35 +248,31 @@ function DesktopIconTile({
             else wallpaper.onDrop(e);
           }}
           className={cn(
-            'group pointer-events-auto absolute flex flex-col items-center gap-1 rounded-lg px-1 pt-2 pb-1 outline-none select-none',
-            'focus-visible:ring-2 focus-visible:ring-white/80',
-            selected ? 'z-10 bg-primary/25' : 'hover:bg-white/10',
-            dropping && 'bg-primary/40 ring-2 ring-primary',
+            'group pointer-events-auto absolute flex flex-col items-center gap-1 rounded-md border px-1 pt-1.5 pb-1 outline-none select-none',
+            'focus-visible:border-white/70',
+            selected
+              ? 'z-10 border-white/40 bg-white/25 hover:bg-white/30'
+              : 'border-transparent hover:border-white/25 hover:bg-white/15',
+            dropping && 'border-white/70 bg-white/35',
+            lifted && 'opacity-50',
           )}
           style={{ left: rect.left + 2, top: rect.top + 2, width: rect.width - 4, minHeight: rect.height - 4 }}
         >
-          <IconImage icon={icon} px={size.icon} />
           {renaming ? (
-            <RenameField
-              icon={icon}
-              onDone={(to) => {
-                icons.setRenaming(null);
-                if (to !== null && to.trim() && to.trim() !== icon.name) {
-                  void icons.rename(icon.name, to).catch(fail(`Couldn’t rename ${icon.name}`));
-                }
-              }}
-            />
+            <>
+              <IconImage icon={icon} px={size.icon} />
+              <RenameField
+                icon={icon}
+                onDone={(to) => {
+                  icons.setRenaming(null);
+                  if (to !== null && to.trim() && to.trim() !== icon.name) {
+                    void icons.rename(icon.name, to).catch(fail(`Couldn’t rename ${icon.name}`));
+                  }
+                }}
+              />
+            </>
           ) : (
-            <span
-              className={cn(
-                'max-w-full rounded px-1 text-center text-xs leading-tight break-words',
-                selected
-                  ? 'bg-primary text-primary-foreground'
-                  : 'line-clamp-2 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.9),0_0_6px_rgb(0_0_0/0.6)]',
-              )}
-            >
-              {icon.label}
-            </span>
+            <IconFace icon={icon} px={size.icon} full={selected && single} />
           )}
         </div>
       </ContextMenuTrigger>
@@ -304,6 +328,62 @@ function DesktopIconTile({
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+/** An icon's picture and label; `full` shows the whole label, else two lines of it. */
+function IconFace({ icon, px, full = false }: { icon: DesktopIcon; px: number; full?: boolean }) {
+  return (
+    <>
+      <IconImage icon={icon} px={px} />
+      <span
+        className={cn(
+          'max-w-full px-0.5 text-center text-xs leading-tight text-white [overflow-wrap:anywhere]',
+          '[text-shadow:0_0_2px_rgb(0_0_0),0_1px_2px_rgb(0_0_0/0.9),0_0_6px_rgb(0_0_0/0.5)]',
+          !full && 'line-clamp-2',
+        )}
+      >
+        {icon.label}
+      </span>
+    </>
+  );
+}
+
+/**
+ * The icons being dragged, following the pointer over everything, as they
+ * sit relative to each other. The pointer comes from the desktop's own
+ * surfaces and the apps' windows (`useDragPoint`).
+ */
+function IconDragGhost({ drag }: { drag: IconDrag }) {
+  const icons = useDesktopIcons();
+  const { config } = useAppContext();
+  const at = useDragPoint();
+  const from = icons.places.get(drag.anchor)?.rect;
+  if (!at || !from) return null;
+  const size = DESKTOP_ICON_SIZES[config.desktopIconSize];
+  return createPortal(
+    // A layer over every monitor, since the point is in viewport coordinates.
+    <ScreenLayer aria-hidden className="pointer-events-none z-[2147483647]">
+      {drag.names.map((name) => {
+        const icon = icons.icons.find((i) => i.name === name);
+        const rect = icons.places.get(name)?.rect;
+        if (!icon || !rect) return null;
+        return (
+          <div
+            key={name}
+            className="absolute left-0 top-0 flex flex-col items-center gap-1 rounded-md border border-white/30 bg-white/15 px-1 pt-1.5 pb-1 opacity-80"
+            style={{
+              width: rect.width - 4,
+              minHeight: rect.height - 4,
+              transform: `translate(${at.x - drag.dx + rect.left - from.left}px, ${at.y - drag.dy + rect.top - from.top}px)`,
+            }}
+          >
+            <IconFace icon={icon} px={size.icon} />
+          </div>
+        );
+      })}
+    </ScreenLayer>,
+    document.getElementById('shell') ?? document.body,
   );
 }
 

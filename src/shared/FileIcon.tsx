@@ -108,8 +108,10 @@ export function FileIcon({
           src={url}
           alt=""
           draggable={false}
+          // In px: a grid item's percentages don't hold a tall picture to its box.
+          style={{ maxWidth: px, maxHeight: px }}
           className={cn(
-            'max-h-full max-w-full rounded-sm object-contain shadow-sm',
+            'rounded-sm object-contain shadow-sm',
             px > 24 && 'ring-1 ring-foreground/10',
             'motion-safe:animate-in motion-safe:fade-in-0',
           )}

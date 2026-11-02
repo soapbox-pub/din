@@ -24,6 +24,7 @@ import {
   xdgDesktopDir,
   type DesktopEntry,
   type IconPlace,
+  type PlacedIcon,
   type Rect,
 } from '@/lib/desktopIcons';
 import { cleanFsError, getFsBridge, isValidEntryName, joinPath } from '@/lib/fs';
@@ -197,12 +198,12 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     return blocked(area, cellRect(gridFor(area), col, row));
   }, [layout, blocked, gridFor]);
 
-  const place = useCallback<DesktopIconsContextValue['place']>((moves) => {
+  const resolve = useCallback<DesktopIconsContextValue['resolve']>((moves) => {
     const primary = areas.find((a) => a.primary) ?? areas[0];
-    if (!primary) return;
+    if (!primary) return [];
     const moving = new Set(moves.map((m) => m.name));
     const claimed = new Set<string>();
-    const updates: Places = {};
+    const resolved: (PlacedIcon & { name: string })[] = [];
     for (const m of moves) {
       const area = areas.find((a) => a.id === m.monitor) ?? primary;
       const g = gridFor(area);
@@ -212,10 +213,16 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
       const cell = isTaken(col, row) ? nearestFree(g, col, row, isTaken) : { col, row };
       if (!cell) continue;
       claimed.add(`${area.id}\0${cell.col}\0${cell.row}`);
-      updates[m.name] = { monitor: area.id, ...cell };
+      resolved.push({ name: m.name, area, ...cell, rect: cellRect(g, cell.col, cell.row) });
     }
+    return resolved;
+  }, [areas, gridFor, taken]);
+
+  const place = useCallback<DesktopIconsContextValue['place']>((moves) => {
+    const updates: Places = {};
+    for (const p of resolve(moves)) updates[p.name] = { monitor: p.area.id, col: p.col, row: p.row };
     setStored((prev: unknown) => ({ ...parsePlaces(prev), ...updates }));
-  }, [areas, gridFor, taken, setStored]);
+  }, [resolve, setStored]);
 
   const arrange = useCallback<DesktopIconsContextValue['arrange']>((by) => {
     const areaOrder = (id: string | undefined) => {
@@ -385,6 +392,7 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     open,
     openWith,
     showInFiles,
+    resolve,
     place,
     arrange,
     newFolder,
@@ -394,7 +402,7 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     addApp,
     addPaths,
     reload,
-  }), [shown, dir, icons, layout, gridFor, taken, liveSelected, liveRenaming, open, openWith, showInFiles, place, arrange, newFolder, newTextFile, rename, trash, addApp, addPaths, reload]);
+  }), [shown, dir, icons, layout, gridFor, taken, liveSelected, liveRenaming, open, openWith, showInFiles, resolve, place, arrange, newFolder, newTextFile, rename, trash, addApp, addPaths, reload]);
 
   return <DesktopIconsContext.Provider value={value}>{children}</DesktopIconsContext.Provider>;
 }

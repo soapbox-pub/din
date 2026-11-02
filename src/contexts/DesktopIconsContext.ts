@@ -37,6 +37,8 @@ export interface DesktopIconsContextValue {
   openWith(appId: string, names: readonly string[]): void;
   /** Show icons in Files (their folder, or the desktop folder with none). */
   showInFiles(names?: readonly string[]): void;
+  /** Where `place` would put icons, without moving them (a drag's preview). */
+  resolve(moves: readonly { name: string; monitor: string; col: number; row: number }[]): (PlacedIcon & { name: string })[];
   /** Put icons on cells; those taken push the moved one to the nearest free cell. */
   place(moves: readonly { name: string; monitor: string; col: number; row: number }[]): void;
   /** Lay every icon out again from the top-left corner, sorted, or with none in the order they're in (Clean Up). */

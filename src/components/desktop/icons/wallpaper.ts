@@ -9,7 +9,7 @@ import { useSyncExternalStore } from 'react';
 import { useDesktopIcons, type DesktopIconsContextValue } from '@/contexts/DesktopIconsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { activeFileDrag, endFileDrag, startFileDrag } from '@/components/desktop/apps/files/dnd';
-import { acceptDrag, currentDrag, DRAG_MIME } from '@/lib/dinDrag';
+import { acceptDrag, currentDrag, DRAG_MIME, setDragPoint } from '@/lib/dinDrag';
 import { cellAt, rectsOverlap, type Rect } from '@/lib/desktopIcons';
 import { useToast } from '@/hooks/useToast';
 import { cleanFsError, getFsBridge, joinPath } from '@/lib/fs';
@@ -51,8 +51,66 @@ export function useSelectionBand(): Rect | null {
   );
 }
 
+/** A value React can follow (useSyncExternalStore). */
+function store<T>(initial: T) {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  const subscribe = (l: () => void) => {
+    listeners.add(l);
+    return () => {
+      listeners.delete(l);
+    };
+  };
+  return {
+    get: () => value,
+    set(next: T) {
+      if (next === value) return;
+      value = next;
+      for (const l of listeners) l();
+    },
+    use: () => useSyncExternalStore(subscribe, () => value),
+  };
+}
+
 /** Icons being dragged by the desktop, and where the pointer holds the one grabbed. */
-let moving: { names: string[]; anchor: string; dx: number; dy: number } | null = null;
+export interface IconDrag {
+  names: string[];
+  anchor: string;
+  dx: number;
+  dy: number;
+}
+
+const moving = store<IconDrag | null>(null);
+
+/** The icons being dragged, for the ghost that follows the pointer. */
+export const useIconDrag = moving.use;
+
+/** The cells the icons being dragged would land on if dropped now, in workspace coordinates. */
+const preview = store<{ key: string; rects: Rect[] } | null>(null);
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function useDropPreview(): Rect[] | null {
+  return preview.use()?.rects ?? null;
+}
+
+/**
+ * Keep the preview while the wallpaper hears the drag. Over a window or a
+ * folder it stops hearing it, and the preview goes a moment later.
+ */
+function holdPreview(next: { key: string; rects: Rect[] }): void {
+  preview.set(next);
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => preview.set(null), 200);
+}
+
+function clearPreview(): void {
+  clearTimeout(previewTimer);
+  preview.set(null);
+}
+
+// The pointer over the desktop's own surfaces, for the ghost (apps report
+// it over their windows, `drag.over`).
+const trackPoint = (e: DragEvent) => setDragPoint({ x: e.clientX, y: e.clientY });
 
 /** Start dragging icons: about the desktop, or out to a window or the Dock. */
 export function startIconDrag(e: React.DragEvent<HTMLElement>, icons: DesktopIconsContextValue, anchor: string): void {
@@ -64,20 +122,54 @@ export function startIconDrag(e: React.DragEvent<HTMLElement>, icons: DesktopIco
     chosen.length === 1 ? chosen[0].label : `${chosen.length} items`,
   );
   const rect = e.currentTarget.getBoundingClientRect();
-  moving = { names, anchor, dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+  moving.set({ names, anchor, dx: e.clientX - rect.left, dy: e.clientY - rect.top });
   e.dataTransfer.setData(ICONS_MIME, '1');
-  e.dataTransfer.setDragImage(e.currentTarget, moving.dx, moving.dy);
+  // The desktop draws the icons following the pointer itself (IconDragGhost),
+  // so the engine's own image is made empty.
+  const blank = document.createElement('div');
+  blank.style.cssText = 'position:fixed;top:-10px;left:-10px;width:1px;height:1px;opacity:0';
+  document.body.appendChild(blank);
+  e.dataTransfer.setDragImage(blank, 0, 0);
+  requestAnimationFrame(() => blank.remove());
+  setDragPoint({ x: e.clientX, y: e.clientY });
+  document.addEventListener('dragover', trackPoint, true);
 }
 
 export function endIconDrag(e: React.DragEvent): void {
-  moving = null;
+  document.removeEventListener('dragover', trackPoint, true);
+  moving.set(null);
+  clearPreview();
   endFileDrag(e);
+  setDragPoint(null);
 }
 
 /** The cell under a point, on whichever monitor holds it. */
 function cellUnder(icons: DesktopIconsContextValue, areas: WorkArea[], x: number, y: number) {
   const area = areaAt(areas, x, y);
   return area ? { monitor: area.id, ...cellAt(icons.grid(area), x, y) } : undefined;
+}
+
+/**
+ * Where icons dragged about the desktop go, dropped at a point of the
+ * workspace: the one grabbed to the cell under its middle, the others kept
+ * where they were relative to it, on its monitor.
+ */
+function iconMoves(icons: DesktopIconsContextValue, areas: WorkArea[], drag: IconDrag, x: number, y: number) {
+  const { names, anchor, dx, dy } = drag;
+  const from = icons.places.get(anchor);
+  if (!from) return null;
+  const at = cellUnder(icons, areas, x - dx + from.rect.width / 2, y - dy + from.rect.height / 2);
+  if (!at) return null;
+  const others = names.filter((n) => n !== anchor);
+  return {
+    key: `${at.monitor}\0${at.col}\0${at.row}`,
+    moves: [anchor, ...others].map((name) => {
+      const p = icons.places.get(name);
+      return p && p.area.id === from.area.id
+        ? { name, monitor: at.monitor, col: at.col + p.col - from.col, row: at.row + p.row - from.row }
+        : { name, ...at };
+    }),
+  };
 }
 
 /** Whether a drag is something the desktop takes. */
@@ -151,6 +243,21 @@ export function useWallpaper() {
     if (!icons.shown || !takes(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = e.dataTransfer.types.includes(ICONS_MIME) || !e.ctrlKey ? 'move' : 'copy';
+    const drag = moving.get();
+    if (!drag || !e.dataTransfer.types.includes(ICONS_MIME)) return;
+    const { x, y } = toWorkspace(e.clientX, e.clientY);
+    const next = iconMoves(icons, areas, drag, x, y);
+    if (!next) return;
+    const shown = preview.get();
+    if (shown?.key === next.key) return holdPreview(shown);
+    // Only the cells an icon would move to; where they are already shows them.
+    const rects = icons.resolve(next.moves)
+      .filter((p) => {
+        const now = icons.places.get(p.name);
+        return !now || now.area.id !== p.area.id || now.col !== p.col || now.row !== p.row;
+      })
+      .map((p) => p.rect);
+    holdPreview({ key: next.key, rects });
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -159,20 +266,11 @@ export function useWallpaper() {
     const { x, y } = toWorkspace(e.clientX, e.clientY);
     const types = e.dataTransfer.types;
 
-    if (types.includes(ICONS_MIME) && moving) {
-      const { names, anchor, dx, dy } = moving;
-      const from = icons.places.get(anchor);
-      if (!from) return;
-      const at = cellUnder(icons, areas, x - dx + from.rect.width / 2, y - dy + from.rect.height / 2);
-      if (!at) return;
-      // The others keep their places relative to the one grabbed, on its monitor.
-      const others = names.filter((n) => n !== anchor);
-      icons.place([anchor, ...others].map((name) => {
-        const p = icons.places.get(name);
-        return p && p.area.id === from.area.id
-          ? { name, monitor: at.monitor, col: at.col + p.col - from.col, row: at.row + p.row - from.row }
-          : { name, ...at };
-      }));
+    const drag = moving.get();
+    if (types.includes(ICONS_MIME) && drag) {
+      clearPreview();
+      const next = iconMoves(icons, areas, drag, x, y);
+      if (next) icons.place(next.moves);
       return;
     }
 
@@ -202,7 +300,10 @@ export function useFolderDrop(folder: string) {
   const accepts = (e: React.DragEvent) => {
     if (!path || !takes(e) || e.dataTransfer.types.includes(APP_MIME)) return false;
     // A folder can't take itself.
-    if (e.dataTransfer.types.includes(ICONS_MIME)) return !!moving && !moving.names.includes(folder);
+    if (e.dataTransfer.types.includes(ICONS_MIME)) {
+      const drag = moving.get();
+      return !!drag && !drag.names.includes(folder);
+    }
     return !(activeFileDrag(e)?.paths.includes(path) ?? false);
   };
   return {

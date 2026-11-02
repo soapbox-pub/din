@@ -39,8 +39,12 @@ its place.
 - **Open:** double-click or Enter. A folder opens in Files, a launcher opens
   its app, a Windows program runs through Wine, and anything else opens in
   the app for its kind (`src/lib/openPath.ts`, which `din open` uses too).
-- **Drag:**
-  - onto the wallpaper, to move icons; a group keeps its shape.
+- **Drag:** the icons follow the pointer as a see-through ghost, drawn by
+  the desktop over everything (`IconDragGhost`; the engine's own drag image
+  is empty), and fade where they were until they're dropped.
+  - onto the wallpaper, to move icons; a group keeps its shape. While over
+    the wallpaper, an outline shows the cells they'll land on, worked out
+    the same way the drop places them (`resolve`).
   - onto a folder icon, to move them into it (Ctrl copies).
   - into a window or onto a Dock tile, which hands them over as files from
     Files do (`startFileDrag`, [din/drag-and-drop.md](din/drag-and-drop.md)).
