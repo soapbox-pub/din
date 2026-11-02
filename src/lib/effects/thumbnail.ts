@@ -7,7 +7,7 @@
  * and kept for the session as blob URLs.
  */
 
-import type { GenieRect } from '@/lib/genie';
+import type { GenieRect, GenieTarget } from '@/lib/genie';
 import { createEffectRenderer, type WindowEffect } from '@/lib/effects/engine';
 import type { EffectEvent } from '@/lib/effects';
 
@@ -16,7 +16,7 @@ const WIN: GenieRect = { x: 260, y: 60, width: 680, height: 460 };
 const DOCK: GenieRect = { x: 456, y: 664, width: 288, height: 64 };
 const DOCK_TILES = 5;
 /** The middle dock tile, where a minimized window goes. */
-const TARGET: GenieRect = { x: 576, y: 672, width: 48, height: 48 };
+const TARGET: GenieTarget = { x: 576, y: 672, width: 48, height: 48, edge: 'bottom' };
 /** Device pixels per desktop pixel in a picture. */
 const SCALE = 0.32;
 const SEED = 7;

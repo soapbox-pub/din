@@ -26,7 +26,7 @@
  * instead of a hard, aliased edge.
  */
 
-import type { GenieRect } from '@/lib/genie';
+import type { GenieRect, GenieTarget } from '@/lib/genie';
 
 /** Floats per mesh vertex: x, y, z, u, v, alpha, shade. */
 const MESH_STRIDE = 7;
@@ -41,7 +41,7 @@ export interface EffectSetup {
   /** The window, in workspace coordinates. */
   win: GenieRect;
   /** Where the window goes: its dock tile when minimizing, null when closing. */
-  target: GenieRect | null;
+  target: GenieTarget | null;
   /** The workspace size. */
   view: { width: number; height: number };
   /**
@@ -313,7 +313,7 @@ export function createEffectRenderer(
   view: { width: number; height: number },
   scale: number,
   win: GenieRect,
-  target: GenieRect | null,
+  target: GenieTarget | null,
   seed: number,
 ): EffectRenderer | null {
   const { width: viewW, height: viewH } = view;
@@ -468,7 +468,7 @@ export function runWindowEffect(
   image: HTMLImageElement,
   effect: WindowEffect,
   win: GenieRect,
-  target: GenieRect | null,
+  target: GenieTarget | null,
   direction: EffectDirection,
   zIndex: number,
   seed: number,

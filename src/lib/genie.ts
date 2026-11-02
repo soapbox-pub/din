@@ -36,6 +36,8 @@
  * sit on a transparent strip.
  *
  * Restore plays the same timeline backwards, as Compiz does for unminimize.
+ * With the taskbar along the top or down a side, the window streams up or
+ * sideways into its tile: the model runs turned (`dockFrame`).
  */
 
 import { quadTransform, type QuadPoint } from '@/lib/wobbly';
@@ -46,6 +48,62 @@ export interface GenieRect {
   y: number;
   width: number;
   height: number;
+}
+
+/** The screen edge the taskbar runs along, where minimized windows go. */
+export type DockEdge = 'bottom' | 'top' | 'left' | 'right';
+
+/** A window's dock tile, and the edge its taskbar is on. */
+export interface GenieTarget extends GenieRect {
+  edge: DockEdge;
+}
+
+/**
+ * The genie model is written for a dock below the window. For the other
+ * edges it runs in a turned frame, where the dock is below, and its points
+ * are turned back.
+ */
+export interface DockFrame {
+  /** A workspace rect in the turned frame. */
+  rect(r: GenieRect): GenieRect;
+  /** The turned frame's fractions of the window at workspace fractions (`gx`, `gy`). */
+  grid(gx: number, gy: number): [number, number];
+  /** A turned-frame point in workspace coordinates. */
+  back(pt: QuadPoint): QuadPoint;
+}
+
+export function dockFrame(edge: DockEdge): DockFrame {
+  switch (edge) {
+    case 'top':
+      return {
+        rect: (r) => ({ x: r.x, y: -(r.y + r.height), width: r.width, height: r.height }),
+        grid: (gx, gy) => [gx, 1 - gy],
+        back: (pt) => ({ x: pt.x, y: -pt.y }),
+      };
+    case 'left':
+      return {
+        rect: (r) => ({ x: r.y, y: -(r.x + r.width), width: r.height, height: r.width }),
+        grid: (gx, gy) => [gy, 1 - gx],
+        back: (pt) => ({ x: -pt.y, y: pt.x }),
+      };
+    case 'right':
+      return {
+        rect: (r) => ({ x: r.y, y: r.x, width: r.height, height: r.width }),
+        grid: (gx, gy) => [gy, gx],
+        back: (pt) => ({ x: pt.y, y: pt.x }),
+      };
+    default:
+      return {
+        rect: (r) => r,
+        grid: (gx, gy) => [gx, gy],
+        back: (pt) => pt,
+      };
+  }
+}
+
+/** Whether the taskbar runs down a side, so the window streams sideways. */
+export function isSideEdge(edge: DockEdge): boolean {
+  return edge === 'left' || edge === 'right';
 }
 
 /** Genie timeline length. Progress over it is linear, like Compiz. */
@@ -88,8 +146,10 @@ function lerp(a: number, b: number, t: number): number {
 export interface GenieFrame {
   /**
    * Where the window point at fractions (`gx`, `gy`) of its width and height
-   * is drawn, in workspace coordinates. Linear in `gx` along a row, so a mesh
-   * needs only two columns; values just outside [0, 1] extrapolate the edges.
+   * is drawn, in workspace coordinates. Linear along the dock's axis (in
+   * `gx` along a row for a dock below or above, in `gy` down a column for
+   * one at a side), so a mesh needs only two columns or rows; values just
+   * outside [0, 1] extrapolate the edges.
    */
   point(gx: number, gy: number): QuadPoint;
   /** The window's opacity, 1 until the end-of-timeline fade. */
@@ -98,10 +158,24 @@ export interface GenieFrame {
 
 /**
  * The deformation for progress `p`: 0 is the window at rest in its own
- * geometry, 1 is fully swallowed by the tile. A port of Compiz
- * `fxMagicLampModelStep` for the minimize-downward case.
+ * geometry, 1 is fully swallowed by the tile, on whichever edge the
+ * taskbar is.
  */
-export function genieFrame(win: GenieRect, target: GenieRect, p: number): GenieFrame {
+export function genieFrame(win: GenieRect, target: GenieTarget, p: number): GenieFrame {
+  const turn = dockFrame(target.edge);
+  const frame = genieFrameDown(turn.rect(win), turn.rect(target), p);
+  return {
+    point: (gx, gy) => turn.back(frame.point(...turn.grid(gx, gy))),
+    opacity: frame.opacity,
+  };
+}
+
+/**
+ * `genieFrame` for a tile below the window, in the frame `dockFrame` turns
+ * the other edges into. A port of Compiz `fxMagicLampModelStep` for the
+ * minimize-downward case.
+ */
+export function genieFrameDown(win: GenieRect, target: GenieRect, p: number): GenieFrame {
   // Compiz's edge names, for a window above the icon: the "close" end is
   // the window's bottom edge, heading for the icon's mouth (top edge); the
   // "far" end is the window's top edge, last to be swallowed.
@@ -153,7 +227,7 @@ export function genieFrame(win: GenieRect, target: GenieRect, p: number): GenieF
 }
 
 /** Paint frame `p` onto the element, as the projective fit of its corners. */
-function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: number): void {
+function paintFrame(el: HTMLElement, win: GenieRect, target: GenieTarget, p: number): void {
   const frame = genieFrame(win, target, p);
   // Corner offsets are relative to the window's layout box.
   const corner = (gx: 0 | 1, gy: 0 | 1): QuadPoint => {
@@ -183,7 +257,7 @@ function paintFrame(el: HTMLElement, win: GenieRect, target: GenieRect, p: numbe
 export function animateGenie(
   el: HTMLElement,
   win: GenieRect,
-  target: GenieRect,
+  target: GenieTarget,
   direction: 'minimize' | 'restore',
   onDone: () => void,
 ): () => void {

@@ -7,7 +7,7 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
-import { animateFlip, animateGenie, type GenieRect } from '@/lib/genie';
+import { animateFlip, animateGenie, type DockEdge, type GenieRect, type GenieTarget } from '@/lib/genie';
 import { effectsFor, resolveEffect, runWindowEffect, type EffectEvent, type WindowEffect } from '@/lib/effects';
 import { onEffectPreview } from '@/lib/effects/preview';
 import { getScreenshotBridge } from '@/lib/screenshot';
@@ -251,22 +251,28 @@ function offsetRect(el: HTMLElement): GenieRect {
 
 /**
  * The app's dock tile, translated into workspace coordinates. An app always
- * has a tile while it has windows; the bottom-center fallback covers a
- * transient gap (e.g. the Dock re-mounting).
+ * has a tile while it has windows; the fallback, the middle of the
+ * taskbar's edge, covers a transient gap (e.g. the Dock re-mounting).
  */
-function dockTarget(workspace: HTMLElement | null, dockId: string): GenieRect {
+function dockTarget(workspace: HTMLElement | null, dockId: string, edge: DockEdge): GenieTarget {
   const ws = workspace?.getBoundingClientRect();
   const wsLeft = ws?.left ?? 0;
   const wsTop = ws?.top ?? 0;
   const tile = getDockTileRect(dockId);
-  return tile
-    ? { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height }
-    : {
-        x: (ws?.width ?? window.innerWidth) / 2 - 40,
-        y: ws?.height ?? window.innerHeight,
-        width: 80,
-        height: 80,
-      };
+  if (tile) return { x: tile.x - wsLeft, y: tile.y - wsTop, width: tile.width, height: tile.height, edge };
+  const w = ws?.width ?? window.innerWidth;
+  const h = ws?.height ?? window.innerHeight;
+  const size = 80;
+  switch (edge) {
+    case 'top':
+      return { x: w / 2 - size / 2, y: -size, width: size, height: size, edge };
+    case 'left':
+      return { x: -size, y: h / 2 - size / 2, width: size, height: size, edge };
+    case 'right':
+      return { x: w, y: h / 2 - size / 2, width: size, height: size, edge };
+    default:
+      return { x: w / 2 - size / 2, y: h, width: size, height: size, edge };
+  }
 }
 
 function hasCaptureBridge(): boolean {
@@ -746,7 +752,7 @@ export const Window = memo(function Window({
     if (winRect.width === 0 || winRect.height === 0) return;
 
     const parent = el.parentElement;
-    const target = dockTarget(parent, app?.dockAs ?? win.appId);
+    const target = dockTarget(parent, app?.dockAs ?? win.appId, config.taskbarPosition);
     const effectZ = minimizing ? DEPARTING_Z + win.z : win.z;
 
     // Warp the live element directly (the pre-snapshot behaviour). Used
@@ -882,9 +888,9 @@ export const Window = memo(function Window({
     }
 
     runLiveGenie();
-    // config.minimizeEffect is read when the flag flips, and a change to it
-    // alone returns at the guard above.
-  }, [win.minimized, win.appId, app?.dockAs, win.z, config.minimizeEffect, beginGesture, endGesture, stopWobble]);
+    // config.minimizeEffect and taskbarPosition are read when the flag
+    // flips, and a change to them alone returns at the guard above.
+  }, [win.minimized, win.appId, app?.dockAs, win.z, config.minimizeEffect, config.taskbarPosition, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or
@@ -1050,7 +1056,7 @@ export const Window = memo(function Window({
         if (!capture) return;
         stopWobble(false);
         const winRect = offsetRect(el);
-        const target = event === 'minimize' ? dockTarget(parent, app?.dockAs ?? win.appId) : null;
+        const target = event === 'minimize' ? dockTarget(parent, app?.dockAs ?? win.appId, config.taskbarPosition) : null;
         const seed = newSeed();
         let cancelled = false;
         let current: (() => void) | null = null;
@@ -1087,7 +1093,7 @@ export const Window = memo(function Window({
             if (!cancelled) done();
           });
       }),
-    [win.id, win.minimized, win.closing, win.z, win.appId, app?.dockAs, stopWobble],
+    [win.id, win.minimized, win.closing, win.z, win.appId, app?.dockAs, config.taskbarPosition, stopWobble],
   );
 
   /**

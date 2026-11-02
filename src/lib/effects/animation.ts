@@ -6,13 +6,21 @@
  * coming and going.
  */
 
-import { GENIE_DURATION_MS, genieFrame, type GenieRect } from '@/lib/genie';
+import {
+  dockFrame,
+  GENIE_DURATION_MS,
+  genieFrame,
+  genieFrameDown,
+  isSideEdge,
+  type GenieRect,
+  type GenieTarget,
+} from '@/lib/genie';
 import type { WindowEffect } from '@/lib/effects/engine';
 import { clamp, easeIn, easeInOut, grid, lerp, segment } from '@/lib/effects/geometry';
 
 /** Where a window zooms to: its dock tile, or a point at its center. */
-function zoomTarget(win: GenieRect, target: GenieRect | null): GenieRect {
-  return target ?? { x: win.x + win.width / 2, y: win.y + win.height / 2, width: 0, height: 0 };
+function zoomTarget(win: GenieRect, target: GenieTarget | null): GenieTarget {
+  return target ?? { x: win.x + win.width / 2, y: win.y + win.height / 2, width: 0, height: 0, edge: 'bottom' };
 }
 
 const magicLamp: WindowEffect = {
@@ -24,10 +32,12 @@ const magicLamp: WindowEffect = {
   create(setup) {
     const { win } = setup;
     const target = zoomTarget(win, setup.target);
+    const side = isSideEdge(target.edge);
     return (p, scene) => {
       const frame = genieFrame(win, target, p);
-      // The model is linear along a row: two columns are exact.
-      grid(scene, setup, 1, 64, (u, v, o) => {
+      // The model is linear along the dock's axis: two columns (or rows,
+      // for a taskbar at a side) are exact.
+      grid(scene, setup, side ? 64 : 1, side ? 1 : 64, (u, v, o) => {
         const pt = frame.point(u, v);
         o.x = pt.x;
         o.y = pt.y;
@@ -44,18 +54,26 @@ const magicLampWavy: WindowEffect = {
   duration: 600,
   minimizeOnly: true,
   create(setup) {
-    const { win } = setup;
-    const target = zoomTarget(win, setup.target);
-    const funnel = Math.max(1, target.y - win.y);
+    const target = zoomTarget(setup.win, setup.target);
+    const side = isSideEdge(target.edge);
+    // Waved in the frame where the dock is below, then turned back.
+    const turn = dockFrame(target.edge);
+    const win = turn.rect(setup.win);
+    const tile = turn.rect(target);
+    const funnel = Math.max(1, tile.y - win.y);
     const amp = Math.min(win.width * 0.15, 80);
     return (p, scene) => {
-      const frame = genieFrame(win, target, p);
-      grid(scene, setup, 1, 96, (u, v, o) => {
-        const pt = frame.point(u, v);
+      const frame = genieFrameDown(win, tile, p);
+      grid(scene, setup, side ? 96 : 1, side ? 1 : 96, (u, v, o) => {
+        const pt = frame.point(...turn.grid(u, v));
         // Up the funnel, 0 at the icon's mouth.
-        const s = clamp((target.y - pt.y) / funnel);
-        o.x = pt.x + amp * Math.sin(s * 3 * Math.PI - p * 4 * Math.PI) * Math.sin(Math.PI * p) * s;
-        o.y = pt.y;
+        const s = clamp((tile.y - pt.y) / funnel);
+        const waved = turn.back({
+          x: pt.x + amp * Math.sin(s * 3 * Math.PI - p * 4 * Math.PI) * Math.sin(Math.PI * p) * s,
+          y: pt.y,
+        });
+        o.x = waved.x;
+        o.y = waved.y;
         o.alpha = frame.opacity;
       });
     };
