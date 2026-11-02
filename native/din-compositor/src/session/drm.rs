@@ -19,7 +19,7 @@
 //! has what Din just drew rather than waiting on a clock of its own; its
 //! refreshes are a steady clock for whatever has it as its main display.
 
-use std::time::Duration;
+use std::{os::fd::AsFd, time::Duration};
 
 use smithay::{
     backend::{
@@ -63,7 +63,7 @@ use smithay::{
             LoopHandle, RegistrationToken,
             timer::{TimeoutAction, Timer},
         },
-        drm::control::{Device as ControlDevice, ModeFlags, ModeTypeFlags, connector, crtc},
+        drm::control::{Device as ControlDevice, ModeFlags, ModeTypeFlags, connector, crtc, property},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_protocols::wp::{
@@ -138,8 +138,9 @@ pub struct Head {
     pub gamma_size: u32,
     /// A gamma table a client set (red, green, then blue), to restore after a VT switch.
     pub gamma: Option<Vec<u16>>,
-    /// The colour matrix blob set on its CRTC, to destroy when it's replaced.
+    /// The colour matrix and gamma table blobs set on its CRTC, to destroy when they're replaced.
     ctm_blob: Option<u64>,
+    gamma_blob: Option<u64>,
 }
 
 /// What a head is.
@@ -392,34 +393,52 @@ impl Backend {
     }
 
     /// Sets a CRTC's gamma table, or the identity with RAMP None.
-    pub fn set_gamma(&self, id: u64, ramp: Option<&[u16]>) -> Result<(), String> {
-        let head = self.head(id).ok_or("no such display")?;
-        let size = head.gamma_size as usize;
-        let Some(crtc) = head.crtc().filter(|_| size > 0) else {
+    ///
+    /// Through its GAMMA_LUT property where it has one: the legacy gamma
+    /// ioctl also resets the colour matrix (CTM), which took the colour
+    /// filters (accessibility.rs) straight off again.
+    pub fn set_gamma(&mut self, id: u64, ramp: Option<&[u16]>) -> Result<(), String> {
+        let Some(index) = self.heads.iter().position(|h| h.id == id) else { return Err("no such display".into()) };
+        let size = self.heads[index].gamma_size as usize;
+        let Some(crtc) = self.heads[index].crtc().filter(|_| size > 0) else {
             return Err("the display has no gamma table".into());
         };
-        let identity: Vec<u16>;
-        let ramp = match ramp {
-            Some(ramp) if ramp.len() == size * 3 => ramp,
+        let identity = || -> Vec<u16> {
+            let one: Vec<u16> = (0..size).map(|i| ((i * 0xffff) / (size - 1).max(1)) as u16).collect();
+            [one.as_slice(), one.as_slice(), one.as_slice()].concat()
+        };
+        let linear = ramp.is_none() && !self.invert;
+        let mut ramp = match ramp {
+            Some(ramp) if ramp.len() == size * 3 => ramp.to_vec(),
             Some(_) => return Err("the gamma table is the wrong size".into()),
-            None => {
-                let one: Vec<u16> =
-                    (0..size).map(|i| ((i * 0xffff) / (size - 1).max(1)) as u16).collect();
-                identity = [one.as_slice(), one.as_slice(), one.as_slice()].concat();
-                &identity
-            }
+            None => identity(),
         };
         // Inverted colours (accessibility.rs): each channel's table back to front.
-        let inverted: Vec<u16>;
-        let ramp = if self.invert {
-            inverted = ramp.chunks(size).flat_map(|channel| channel.iter().rev().copied()).collect();
-            &inverted
-        } else {
-            ramp
-        };
+        if self.invert {
+            ramp = ramp.chunks(size).flat_map(|channel| channel.iter().rev().copied()).collect();
+        }
+
+        let device = self.drm.device();
+        if let Some((prop, _)) = crtc_property(device, crtc, b"GAMMA_LUT") {
+            let blob = if linear {
+                0
+            } else {
+                let entries = crtc_property(device, crtc, b"GAMMA_LUT_SIZE").map_or(size, |(_, n)| n as usize).max(2);
+                let mut bytes = lut_blob(&ramp, size, entries);
+                drm_ffi::mode::create_property_blob(device.as_fd(), &mut bytes)
+                    .map_err(|err| format!("making the gamma table: {err}"))?
+                    .blob_id as u64
+            };
+            device.set_property(crtc, prop, blob).map_err(|err| format!("setting gamma: {err}"))?;
+            let old = std::mem::replace(&mut self.heads[index].gamma_blob, (blob != 0).then_some(blob));
+            if let Some(old) = old {
+                let _ = device.destroy_property_blob(old);
+            }
+            return Ok(());
+        }
         let (red, rest) = ramp.split_at(size);
         let (green, blue) = rest.split_at(size);
-        self.drm.device().set_gamma(crtc, red, green, blue).map_err(|err| format!("setting gamma: {err}"))
+        device.set_gamma(crtc, red, green, blue).map_err(|err| format!("setting gamma: {err}"))
     }
 
     /// Sets a CRTC's colour matrix (row by row, for RGB columns), or takes it off with None.
@@ -427,12 +446,7 @@ impl Backend {
         let Some(index) = self.heads.iter().position(|h| h.id == id) else { return Err("no such display".into()) };
         let Some(crtc) = self.heads[index].crtc() else { return Err("the display has no CRTC".into()) };
         let device = self.drm.device();
-        let props = device.get_properties(crtc).map_err(|err| format!("reading its properties: {err}"))?;
-        let prop = props
-            .iter()
-            .map(|(handle, _)| *handle)
-            .find(|handle| device.get_property(*handle).is_ok_and(|info| info.name().to_bytes() == b"CTM"))
-            .ok_or("the display has no colour matrix")?;
+        let (prop, _) = crtc_property(device, crtc, b"CTM").ok_or("the display has no colour matrix")?;
         let value = match matrix {
             Some(matrix) => {
                 // drm_color_ctm: S31.32 sign-magnitude fixed point.
@@ -577,6 +591,7 @@ impl State {
             gamma_size,
             gamma: None,
             ctm_blob: None,
+            gamma_blob: None,
         });
         if let Err(err) = self.enable_head(id) {
             warn!("{err}");
@@ -644,6 +659,7 @@ impl State {
             gamma_size: 0,
             gamma: None,
             ctm_blob: None,
+            gamma_blob: None,
         });
         if let Err(err) = self.enable_head(id) {
             self.backend.heads.retain(|h| h.id != id);
@@ -1000,19 +1016,49 @@ impl State {
 
     /// Puts the gamma tables clients set back, after another VT had the GPU.
     fn restore_gamma(&mut self) {
-        for head in &self.backend.heads {
-            if let Some(gamma) = &head.gamma {
-                let _ = self.backend.set_gamma(head.id, Some(gamma));
-            }
+        let tables: Vec<(u64, Vec<u16>)> =
+            self.backend.heads.iter().filter_map(|h| h.gamma.clone().map(|g| (h.id, g))).collect();
+        for (id, gamma) in tables {
+            let _ = self.backend.set_gamma(id, Some(&gamma));
         }
         // The colour filter, which another VT may have changed too.
         if self.accessibility.settings.filter != Default::default() {
             for head in &mut self.backend.heads {
                 head.ctm_blob = None;
+                head.gamma_blob = None;
             }
             self.apply_color_filter();
         }
     }
+}
+
+/// A CRTC property by NAME, with its value.
+fn crtc_property(device: &impl ControlDevice, crtc: crtc::Handle, name: &[u8]) -> Option<(property::Handle, u64)> {
+    let props = device.get_properties(crtc).ok()?;
+    props
+        .iter()
+        .find(|(handle, _)| device.get_property(**handle).is_ok_and(|info| info.name().to_bytes() == name))
+        .map(|(handle, value)| (*handle, *value))
+}
+
+/// RAMP (SIZE reds, greens, then blues) as ENTRIES drm_color_lut entries,
+/// interpolated between its own.
+fn lut_blob(ramp: &[u16], size: usize, entries: usize) -> Vec<u8> {
+    let channel = |c: usize, at: f64| -> u16 {
+        let table = &ramp[c * size..(c + 1) * size];
+        let i = at.floor() as usize;
+        let j = (i + 1).min(size - 1);
+        let t = at - i as f64;
+        (table[i] as f64 * (1.0 - t) + table[j] as f64 * t).round() as u16
+    };
+    let mut bytes = Vec::with_capacity(entries * 8);
+    for e in 0..entries {
+        let at = e as f64 * (size - 1) as f64 / (entries - 1) as f64;
+        for value in [channel(0, at), channel(1, at), channel(2, at), 0] {
+            bytes.extend_from_slice(&value.to_ne_bytes());
+        }
+    }
+    bytes
 }
 
 fn update_primary_scanout_output(
