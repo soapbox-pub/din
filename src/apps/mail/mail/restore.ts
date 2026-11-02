@@ -39,9 +39,12 @@ export function savedCompose(state: unknown): Extract<SavedWindow, { kind: 'comp
   return { kind: 'compose', seed: s as ComposeSeed, dirty: state.dirty === true };
 }
 
-/** The message a launch's `{ accountId, path, uid }` asks to open, or null. */
+/**
+ * The message a launch's `{ accountId, mailbox, uid }` asks to open, or
+ * null. (Not `path`: Din takes that for a file to open, and keeps it.)
+ */
 export function messageTarget(params: Record<string, unknown>): { accountId: string; path: string; key: string } | null {
-  const { accountId, path, uid } = params;
+  const { accountId, mailbox: path, uid } = params;
   if (typeof accountId !== 'string' || typeof path !== 'string' || !Number.isInteger(uid)) return null;
   return { accountId, path, key: itemKey(accountId, path, uid as number) };
 }

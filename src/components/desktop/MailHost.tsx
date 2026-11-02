@@ -43,7 +43,7 @@ export function MailHost() {
         body: [m.subject, m.preview].filter(Boolean).join('\n'),
         replaceKey: key(m.accountId, m.path, m.uid),
         onActivate: () => {
-          const params = { accountId: m.accountId, path: m.path, uid: m.uid, nonce: Date.now() };
+          const params = { accountId: m.accountId, mailbox: m.path, uid: m.uid, nonce: Date.now() };
           // The Mail window the user was last in, unless it's one writing a message.
           const viewer = windowsRef.current
             .filter((w) => w.appId === 'mail' && !w.closing && !w.params?.compose && !w.params?.mailto && w.params?.shortcut !== 'compose')
