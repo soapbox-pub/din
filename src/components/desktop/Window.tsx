@@ -58,7 +58,6 @@ import {
   type SnapZone,
   type WorkArea,
 } from '@/lib/monitors';
-import { offerSnapAssist } from '@/lib/snapAssist';
 import { guestElements, isGuestFullscreen } from '@/platform/guest';
 
 /**
@@ -1432,7 +1431,6 @@ export const Window = memo(function Window({
           maximize(win.id, restore, s.snap.area.id);
         } else {
           tile(win.id, s.snap.zone, restore, s.snap.area.id);
-          offerSnapAssist(win.id, s.snap.zone, s.snap.area.id);
         }
         return;
       }

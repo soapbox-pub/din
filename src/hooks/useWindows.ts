@@ -206,7 +206,7 @@ export function windowRect(w: WindowState, areas: WorkArea[]): Rect {
 
 /**
  * The windows snapped on a monitor's workspace, which share their borders
- * (`split`), and which Snap Assist fills the rest of the monitor around.
+ * (`split`).
  */
 export function snapGroup(windows: WindowState[], areaId: string, workspace: number): WindowState[] {
   return windows.filter(

@@ -19,7 +19,6 @@ import { homeArea, inDirection, WORKSPACE_COUNT, type WindowState } from '@/hook
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import type { SnapZone } from '@/lib/monitors';
-import { offerSnapAssist } from '@/lib/snapAssist';
 import type { Direction } from '@/lib/wmBindings';
 
 const CORNERS: { zone: SnapZone; label: string }[] = [
@@ -81,11 +80,9 @@ export function WindowMenuItems({
 
   const from = homeArea(areas, win);
   const snappedTo = win.maximized ? null : win.snapped;
-  // A snap from the menu offers the user's other windows for the rest of the monitor.
   const snap = (zone: SnapZone) => {
     if (!from) return;
     tile(win.id, zone, undefined, from.id);
-    offerSnapAssist(win.id, zone, from.id);
   };
   const others = from
     ? areas.filter((a) => a.id !== from.id).map((a) => ({ item: a, rect: a.bounds }))
