@@ -241,7 +241,11 @@ export interface DinWindow {
   readonly state: WindowState;
   onChange(cb: (state: WindowState) => void): Unsubscribe;
 
-  /** What the window is showing ("Untitled.png"), or null for the app's name. */
+  /**
+   * What the window is showing ("Untitled.png"), or null for the app's name.
+   * Changing `document.title` from what the page's HTML had does the same,
+   * as the icon link does `setIcon` and the theme-color `setAccent`.
+   */
   setTitle(title: string | null): void;
   /** An icon for what it's showing (a data: or https URL, or a root path of Din's public files like `/icons/…`), or null for the app's. */
   setIcon(url: string | null): void;
@@ -664,6 +668,10 @@ export interface MediaSession {
 
 export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
 
+/**
+ * The web's `navigator.mediaSession` does the same with the permission; an
+ * app that calls `setSession` takes over from it (docs/din/media-and-desktop.md).
+ */
 export interface DinMedia {
   /** What's playing now, or null when nothing is (the controls go). */
   setSession(session: MediaSession | null): void;

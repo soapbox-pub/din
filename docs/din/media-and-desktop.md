@@ -25,6 +25,27 @@ https URL: the desktop can't load the app's own files.
 A player that's stopped with something queued sets `idle: true`: it isn't
 listed, but a play key pressed with nothing else playing starts it.
 
+### The Media Session API
+
+With the same permission, the web's Media Session is the session, so a
+player written for the web needs no `din.media`:
+
+```ts
+navigator.mediaSession.metadata = new MediaMetadata({ title: 'So What', artist: 'Miles Davis', artwork: [{ src: cover }] });
+navigator.mediaSession.playbackState = 'playing';
+navigator.mediaSession.setActionHandler('nexttrack', next);   // canNext
+```
+
+`title` falls back to `document.title`, `subtitle` is the artist (or the
+album), and `artwork` the last picture, read into a data: URL when it's
+the app's own file or a blob: (`src/sdk/standards.ts`). `playing` is
+`playbackState`, or whether the page's `<audio>` and `<video>` play
+while it's `none`. An action with no handler set acts on those elements,
+as a browser's media controls do: Pause pauses them, Play plays the last
+one paused. `idle` has no counterpart, so a player that needs it uses
+`din.media`; once an app calls `din.media.setSession`, the Media Session
+is no longer passed on, and its handlers hear nothing from Din.
+
 Plain `<audio>` and `<video>` in an app aren't seen by the desktop on
 their own; an app that wants media keys says so with a session.
 

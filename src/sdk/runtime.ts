@@ -62,6 +62,7 @@ import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
+import { bridgeMediaSession, watchDocumentHead } from '@/sdk/standards';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
 export interface Transport {
@@ -547,6 +548,8 @@ export function installDin(transport: Transport): void {
     },
   };
 
+  watchDocumentHead({ title: win.setTitle, icon: win.setIcon, accent: win.setAccent });
+
   // ---- menus ----
   const menuActions = new Emitter<string>();
   pushes.on((p) => {
@@ -822,13 +825,25 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'mediaAction') mediaActions.emit(p.action);
   });
+  // An app that calls din.media itself has its say over navigator.mediaSession's.
+  let ownMediaSession = false;
   const media: DinMedia = {
     setSession(session) {
       need('media-session');
+      ownMediaSession = true;
       tell('media.setSession', { session });
     },
     onAction: (cb) => mediaActions.on(cb),
   };
+  const webMediaSession = bridgeMediaSession({
+    report(session) {
+      if (!ownMediaSession && permissions.has('media-session')) tell('media.setSession', { session });
+    },
+    onAction: (cb) =>
+      mediaActions.on((action) => {
+        if (!ownMediaSession) cb(action);
+      }),
+  });
   const desktop: DinDesktop = {
     setWallpaper: async (file) => {
       await ready;
@@ -1092,6 +1107,8 @@ export function installDin(transport: Transport): void {
         system.quickShare = q as unknown as QuickShareBridge;
       }
     }
+
+    if (permissions.has('media-session')) webMediaSession.refresh();
 
     // The splash goes on load, or now if that's been: whichever is later.
     if (document.readyState === 'complete') queueMicrotask(() => app.ready());

@@ -35,6 +35,22 @@ window list and the switcher. The accent is sanitized by the desktop,
 which also decides whether the title bar reads as dark; the menu bar
 takes it on while the window is maximized.
 
+The page's own head does the same, as a browser's tab follows it, so a
+page written for the web needs none of these:
+
+```ts
+document.title = 'Budget 2027.xlsx';                       // setTitle
+document.querySelector('link[rel=icon]').href = thumbnail; // setIcon
+document.querySelector('meta[name=theme-color]').content = '#1e7145'; // setAccent
+```
+
+What the page's HTML starts with is taken as the app's own (its name, its
+icon, its manifest's color): only changes from it are passed on, and
+going back to it is the same as `null`. Whichever was set last wins, the
+head or the call. An icon that isn't a data: or https URL (the app's own
+files, a blob:) is read by the SDK into a data: URL, up to 512 KB
+(`src/sdk/standards.ts`).
+
 ## How much Din draws: frame modes
 
 ```ts
