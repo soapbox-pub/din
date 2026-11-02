@@ -11,8 +11,10 @@ import path from 'node:path';
 export function safeFileName(name: string): string {
   const cleaned = path
     .basename(name.replace(/\\/g, '/'))
+    // Control characters, and the ones that reorder text, which would show
+    // "photo\u202Egpj.exe" as "photoexe.jpg".
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/^[.\s]+/, '')
     .trim();
   if (!cleaned) return 'file';
