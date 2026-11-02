@@ -488,12 +488,16 @@ export function installDin(transport: Transport): void {
   /**
    * A move or resize begun from `down`, until `begun` resolves at its end.
    * Framed, the pointer stays here, so it's passed on: as a distance in
-   * screen pixels, which holds while the frame moves along under it.
+   * screen pixels, which holds while the frame moves along under it. So
+   * does a finger or a pen anywhere: a touch goes to the page it began on
+   * until it lifts, and never reaches the desktop's layer over the screen.
    */
   const gesture = (down: PointerEvent, begun: Promise<void>): Promise<void> => {
-    if (!transport.framed) return begun;
-    const send = (e: PointerEvent, done: boolean) =>
+    if (!transport.framed && down.pointerType === 'mouse') return begun;
+    const send = (e: PointerEvent, done: boolean) => {
+      if (e.pointerId !== down.pointerId) return;
       tell('window.gesturePointer', { delta: { x: e.screenX - down.screenX, y: e.screenY - down.screenY }, done });
+    };
     const move = (e: PointerEvent) => send(e, e.buttons === 0);
     const up = (e: PointerEvent) => send(e, true);
     window.addEventListener('pointermove', move, true);
