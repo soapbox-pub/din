@@ -13,7 +13,6 @@ No permission needed:
   way);
 - the theme;
 - opening other apps, files it holds, and URLs;
-- toasts;
 - its own origin's storage and the network.
 
 ## What an app asks for

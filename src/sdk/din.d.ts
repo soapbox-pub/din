@@ -68,7 +68,6 @@ export interface Din {
   clipboard: DinClipboard;
   theme: DinTheme;
   account: DinAccount;
-  toast: DinToast;
   print: DinPrint;
   desktop: DinDesktop;
   dictation: DinDictation;
@@ -626,18 +625,6 @@ export interface Nip07 {
   nip04: { encrypt(pubkey: string, text: string): Promise<string>; decrypt(pubkey: string, text: string): Promise<string> };
   nip44: { encrypt(pubkey: string, text: string): Promise<string>; decrypt(pubkey: string, text: string): Promise<string> };
 }
-
-// ---------------------------------------------------------------------------
-// din.toast
-// ---------------------------------------------------------------------------
-
-/**
- * A short-lived popup from the app that never goes to the notification
- * center. Notifications are the web's own: `new Notification()`, its
- * `close()` and click events, and `navigator.setAppBadge()` (permission
- * `notifications`).
- */
-export type DinToast = (title: string, options?: { body?: string }) => void;
 
 // ---------------------------------------------------------------------------
 // din.desktop (permissions `wallpaper` and `cursor`)

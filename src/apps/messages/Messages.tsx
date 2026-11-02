@@ -16,6 +16,7 @@ import type { PhoneConversation, PhoneDevice, PhoneMessage } from '@/lib/phone';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk/din';
 import { useDin, useMenuBar, useWindowState, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { cleanPhoneError, formatAddress, phoneDigits } from '@/shared/phone';
 import { useContacts, useConversations, useMessages, usePhone, usePhoneState, usePhoneSync } from './messages/api';
 import { Avatar } from './messages/Avatar';
@@ -117,7 +118,7 @@ export function Messages() {
     try {
       return await phone!.send(phoneId, addresses, text);
     } catch (error) {
-      din.toast('Couldn’t send the text', { body: cleanPhoneError(error) });
+      toast('Couldn’t send the text', { body: cleanPhoneError(error), destructive: true });
       throw error;
     }
   };

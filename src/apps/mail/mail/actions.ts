@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import type { MailAccount, MailMessage } from '@/lib/mail';
 import { patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
@@ -41,9 +42,9 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
 
   const fail = useCallback(
     (title: string, error: unknown) => {
-      din.toast(title, { body: error instanceof Error ? error.message : String(error) });
+      toast(title, { body: error instanceof Error ? error.message : String(error), destructive: true });
     },
-    [din],
+    [],
   );
 
   const compose = useCallback((seed: ComposeSeed) => void din.app.open('mail', { compose: seed }), [din]);

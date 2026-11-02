@@ -3,7 +3,7 @@ import { ChevronDown, Download, FileArchive, FileImage, FileText, File as FileIc
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useDin } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { pickSaveFile, writeFile } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
 import type { MailAddress, MailAttachmentInfo, MailMessage } from '@/lib/mail';
@@ -40,7 +40,6 @@ function iconFor(type: string) {
 }
 
 function useSaveAttachment(item: Item) {
-  const din = useDin();
   const mail = useMail();
   return useCallback(
     async (a: MailAttachmentInfo) => {
@@ -51,10 +50,10 @@ function useSaveAttachment(item: Item) {
         const file = await mail.attachment(item.accountId, item.path, item.uid, a.index);
         await writeFile(handle, file.content);
       } catch (error) {
-        din.toast('Couldn’t save the attachment', { body: error instanceof Error ? error.message : String(error) });
+        toast('Couldn’t save the attachment', { body: error instanceof Error ? error.message : String(error), destructive: true });
       }
     },
-    [din, mail, item.accountId, item.path, item.uid],
+    [mail, item.accountId, item.path, item.uid],
   );
 }
 

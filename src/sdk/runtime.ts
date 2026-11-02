@@ -841,7 +841,7 @@ export function installDin(transport: Transport): void {
     onChange: (cb) => accounts.on(cb),
   };
 
-  // ---- notifications (the web's own API), toasts, printing, permissions ----
+  // ---- notifications (the web's own API), printing, permissions ----
   installNotifications({
     permission: () => (h ? (permissions.has('notifications') ? 'granted' : 'denied') : 'default'),
     ready,
@@ -856,7 +856,6 @@ export function installDin(transport: Transport): void {
       if (p.type === 'notification') cb(p.id, p.event, p.action);
     }),
   });
-  const toast: Din['toast'] = (title, options = {}) => tell('toast', { title: String(title), body: options.body });
   const print: DinPrint = {
     get available() {
       return h?.printAvailable ?? false;
@@ -970,7 +969,6 @@ export function installDin(transport: Transport): void {
     clipboard,
     theme,
     account,
-    toast,
     print,
     desktop,
     dictation,

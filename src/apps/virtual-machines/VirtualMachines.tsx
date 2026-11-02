@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { cleanVmsError, type VmInfo, type VmInstallerId, type VmsBridge, type VmsStatus } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
 import { useDin, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { formatBytes, formatMemory, isOn, OS_LABELS, STATE_LABELS, useBridge, usePickDiscImage, useVms, useVmsStatus } from './vms/bridge';
 import { Console, type ConsoleHandle } from './vms/Console';
 import { vmMenuItems, type VmAction } from './vms/actions';
@@ -131,8 +132,8 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   }, [scale]);
 
   const fail = useCallback(
-    (err: unknown) => din.toast('Virtual Machines couldn’t do that', { body: cleanVmsError(err) }),
-    [din],
+    (err: unknown) => toast('Virtual Machines couldn’t do that', { body: cleanVmsError(err), destructive: true }),
+    [],
   );
 
   /** Run something on a machine, its buttons held while it does. */
@@ -164,7 +165,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         case 'shutdown':
           return void busy(id, async () => {
             await bridge.shutdown(id);
-            din.toast(`Asked “${target.config.name}” to shut down`, {
+            toast(`Asked “${target.config.name}” to shut down`, {
               body: 'If it doesn’t, its system isn’t listening for the power button: use Force Off.',
             });
           });

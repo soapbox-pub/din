@@ -6,6 +6,7 @@ import { draftStorageKey } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
+import { ToastViewport } from '@/shared/Toaster';
 
 /** Pasted pictures past this size are left out; the request would be too big. */
 const MAX_PASTE_BYTES = 8 * 1024 * 1024;
@@ -281,6 +282,8 @@ export function Composer({
         className,
       )}
     >
+      {/* In an app, its toasts sit just above where the user writes. */}
+      <ToastViewport className="absolute inset-x-0 bottom-full mb-2" />
       <div aria-live="polite" className="pointer-events-none absolute right-3 bottom-full z-30 mb-2">
         {stopArmed && (
           <span className="rounded-full border border-border bg-popover px-3 py-1 text-xs text-popover-foreground shadow-sm motion-safe:animate-in motion-safe:fade-in">

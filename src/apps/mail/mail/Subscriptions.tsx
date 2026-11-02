@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DialogButton, Overlay } from '@/shared/dialogs';
-import { useDin } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { cn } from '@/lib/utils';
 import { UNSUBSCRIBE_METHODS, type MailAccount, type MailSubscription, type UnsubscribeMethod, type UnsubscribeResult } from '@/lib/mail';
 import { useMail, useMessage, useSubscriptions, type Item } from './api';
@@ -177,7 +177,6 @@ function ListSkeleton() {
  * leave many at once (and clear out their mail).
  */
 export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[]; onShowMail: (s: MailSubscription) => void }) {
-  const din = useDin();
   const mail = useMail();
   const qc = useQueryClient();
   const [span, setSpan] = useState(0);
@@ -232,7 +231,8 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
     const pages = done.filter(([, r]) => r.status === 'page').length;
     const failed = done.filter(([, r]) => r.status === 'failed').length;
     const ok = done.length - pages - failed;
-    din.toast(ok ? `Unsubscribed from ${plural(ok, 'list')}` : 'Nothing was unsubscribed', {
+    toast(ok ? `Unsubscribed from ${plural(ok, 'list')}` : 'Nothing was unsubscribed', {
+      destructive: !ok && failed > 0,
       body: [pages && `${plural(pages, 'list')} ${pages === 1 ? 'needs' : 'need'} a web page to finish.`, failed && `${plural(failed, 'list')} couldn’t be unsubscribed.`].filter(Boolean).join(' ') || undefined,
     });
     void qc.invalidateQueries({ queryKey: ['mail', 'subscriptions'] });

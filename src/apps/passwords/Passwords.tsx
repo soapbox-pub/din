@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { cleanPasswordsError, type CopyField, type PasswordItem, type PasswordList, type PasswordsState, type PasswordSummary } from '@/lib/passwords';
 import type { LaunchContext } from '@/sdk';
 import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { ImportDialog } from './passwords/ImportDialog';
 import { ItemDetail } from './passwords/ItemDetail';
 import { ItemEditor } from './passwords/ItemEditor';
@@ -167,11 +168,7 @@ function Vault({ state }: { state: PasswordsState }) {
   // A selection that's gone (deleted for good) is let go.
   const selected = chosen && (!list || list.items.some((i) => i.id === chosen)) ? chosen : null;
 
-  const notify = useCallback(
-    (title: string, body?: string) => din.toast(title, { body }),
-    [din],
-  );
-  const fail = useCallback((err: unknown) => notify('Passwords couldn’t do that', cleanPasswordsError(err)), [notify]);
+  const fail = useCallback((err: unknown) => toast('Passwords couldn’t do that', { body: cleanPasswordsError(err), destructive: true }), []);
 
   const actions: ItemActions = useMemo(() => {
     const copied: Record<string, string> = {
@@ -185,10 +182,9 @@ function Vault({ state }: { state: PasswordsState }) {
       copy: (id: string, field: CopyField) =>
         void bridge.copy(id, field).then(
           () =>
-            notify(
-              typeof field === 'string' ? copied[field] : `${field.field} copied`,
-              field === 'password' || field === 'otp' ? 'It’s taken off the clipboard in 90 seconds.' : undefined,
-            ),
+            toast(typeof field === 'string' ? copied[field] : `${field.field} copied`, {
+              body: field === 'password' || field === 'otp' ? 'It’s taken off the clipboard in 90 seconds.' : undefined,
+            }),
           fail,
         ),
       openUrl: (url: string) => window.open(url),
@@ -202,7 +198,7 @@ function Vault({ state }: { state: PasswordsState }) {
       restore: (id: string) => void bridge.restore(id).catch(fail),
       deleteForever: (id: string) => setDeleting(id),
     };
-  }, [bridge, notify, fail]);
+  }, [bridge, fail]);
 
   const startNew = useCallback(
     (kind: 'login' | 'note') => {

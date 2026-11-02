@@ -1002,14 +1002,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         need('notifications');
         setWindowBadge(windowId, appId, badge === 'flag' ? 'flag' : typeof badge === 'number' && badge > 0 ? Math.floor(badge) : null);
       },
-      'toast': ({ title, body }) => {
-        notify({
-          source: { appId, name: appName, icon: manifestIcon(manifest) },
-          title: String(title).slice(0, 200),
-          body: typeof body === 'string' ? body.slice(0, 2000) : '',
-          history: false,
-        });
-      },
 
       'print.html': async ({ title, html }) => {
         need('printing');

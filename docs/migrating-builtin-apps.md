@@ -45,7 +45,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `fileClipboard` | `din.clipboard` |
 | `files/dnd.ts` (`startFileDrag`, `activeFileDrag`, `FILES_MIME`) | `din.drag.startFiles`, `din.drag.current`, `din.drag.accept` |
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |
-| `useToast()` / `notify()` | `din.toast(…)`, or `new Notification()` for one kept in the notification center |
+| `useToast()` / `notify()` | `toast(…)` from `@/shared/toast`, drawn in the app's window, or `new Notification()` for one kept in the notification center |
 | `useDesktopBackground().setBackground` | `din.desktop.setWallpaper(handle)` with `wallpaper` |
 | `useOpenUrl()` | `window.open(url)` |
 | `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |

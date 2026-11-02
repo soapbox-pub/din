@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ToastViewport } from '@/shared/Toaster';
 
 /**
  * Where a text is written: Enter sends, Shift+Enter starts a new line. Kept
  * per conversation while the window is open, so switching away and back
- * doesn't lose a half-written text.
+ * doesn't lose a half-written text. The window's toasts sit just above it.
  */
 export function Composer({
   draftKey,
@@ -41,7 +42,8 @@ export function Composer({
   };
 
   return (
-    <div className="shrink-0 border-t border-border/60 px-4 pt-2.5 pb-3">
+    <div className="relative shrink-0 border-t border-border/60 px-4 pt-2.5 pb-3">
+      <ToastViewport className="absolute inset-x-0 bottom-full mb-2 px-4" />
       {disabled && <p className="pb-2 text-xs text-muted-foreground">{disabled}</p>}
       <form
         className="flex items-end gap-2"

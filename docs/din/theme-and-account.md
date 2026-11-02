@@ -82,7 +82,7 @@ own origin). The desktop's NostrProvider connection isn't shared; a
 small app opening a few sockets is fine, and keeps a hung relay query in
 one app from affecting another.
 
-## Notifications, the Dock badge, and `din.toast`
+## Notifications, the Dock badge, and toasts
 
 Notifications are the web's own API: `new Notification()`, its click and
 close events and `close()`, and `navigator.setAppBadge()` /
@@ -102,8 +102,6 @@ n.close();                                       // seen to some other way: take
 navigator.setAppBadge(unread);                   // a number on the Dock tile
 navigator.setAppBadge();                         // a plain mark
 navigator.clearAppBadge();                       // back to counting unread notifications
-
-din.toast('Saved', { body: 'holiday.pdf' });     // a toast, never kept in the center
 ```
 
 Clicking a notification focuses the app's window before its click event.
@@ -122,5 +120,22 @@ as in Chrome. Linux apps badge their tiles with Unity's
 `com.canonical.Unity.LauncherEntry` signal, the badge going when the app
 quits. A built-in app's badge goes with its window.
 
-Toasts need no permission: there's no web API for them, so `din.toast`
-is Din's.
+### Toasts
+
+Feedback on what the user just did in the window ("Password copied",
+"Couldn't send the text") is the app's own, drawn in its window: the web
+has no API for it, and it isn't Din's to show. Din's apps use `toast()`
+from `@/shared/toast`, which `startApp` gives every app a place for
+(`src/shared/Toaster.tsx`):
+
+```ts
+toast('Password copied', { body: 'It’s taken off the clipboard in 90 seconds.' });
+toast('Couldn’t send the text', { body: reason, destructive: true });
+```
+
+One shows at a time, at the bottom centre of the window, for 4 seconds
+(8 for a `destructive` one, which is also read out at once). An app with
+a bar along its bottom puts a `<ToastViewport className="…">` in its
+layout where they should go instead; Messages and the Assistant put theirs
+just above where the user writes. Anything that should outlast the window,
+or reach the user while they're elsewhere, is a `Notification`.

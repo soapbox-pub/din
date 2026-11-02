@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode, type RefObject } from 're
 import type { Din } from '@/sdk';
 import { pickFiles, pickFolder } from '@/shared/fileHandles';
 import { useDin } from '@/sdk/react';
+import { toast } from '@/shared/toast';
 import { useAssistantEventSync } from '@/hooks/useAssistant';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
 
@@ -86,7 +87,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
         const picked = await pickFolder({ title, startIn: await startIn(din, initialPath) });
         return picked ? din.files.path(picked) : null;
       },
-      notify: ({ title, description }) => din.toast(title, { body: description }),
+      notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
       useDictation: (ref) => useAppDictation(din, ref),
     }),
     [din, settings.directory, settings.colorfulReplies],

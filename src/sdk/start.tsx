@@ -1,7 +1,7 @@
 /**
  * An app's entry point in one call: the desktop's polyfills and base
  * styles, connect(), and the providers app code expects (React Query,
- * tooltips, window.din through DinProvider).
+ * tooltips, the app's toasts, window.din through DinProvider).
  */
 import '@/lib/polyfills';
 import { installCpuCanvas } from '@/lib/cpuCanvas';
@@ -13,6 +13,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { connect } from '@/sdk';
 import { DinProvider } from '@/sdk/react';
 import { launchedFiles } from '@/shared/fileHandles';
+import { Toaster } from '@/shared/Toaster';
 import '@fontsource-variable/inter/index.css';
 import '@/sdk/app.css';
 
@@ -30,7 +31,9 @@ export async function startApp(render: () => ReactNode): Promise<void> {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <DinProvider din={din}>
-          <TooltipProvider>{render()}</TooltipProvider>
+          <TooltipProvider>
+            <Toaster>{render()}</Toaster>
+          </TooltipProvider>
         </DinProvider>
       </QueryClientProvider>
     </ErrorBoundary>,
