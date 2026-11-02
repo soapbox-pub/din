@@ -4,7 +4,7 @@
  * works in a Din window as it would in a browser:
  *
  * - The Media Session API (`navigator.mediaSession`) is what Din's media
- *   controls and the media keys show and drive, as `din.media` is.
+ *   controls and the media keys show and drive.
  * - `document.title`, `<link rel="icon">` and `<meta name="theme-color">`
  *   are the window's title, icon and accent, as `din.window.setTitle`,
  *   `setIcon` and `setAccent` are.
@@ -22,11 +22,10 @@ import type {
   DinFiles,
   FileTypeFilter,
   LaunchContext,
-  MediaAction,
-  MediaSession as DinMediaSession,
   OpenFileOptions,
   Unsubscribe,
 } from '@/sdk/din';
+import type { MediaAction, MediaReport } from '@/sdk/protocol';
 
 /** Pictures larger than this aren't passed on: the desktop gets them as data: URLs. */
 const MAX_PICTURE_BYTES = 512 * 1024;
@@ -84,7 +83,7 @@ function coalesce(fn: () => void): () => void {
 
 export interface MediaSessionHost {
   /** What's playing now, or null; called only when it changes. */
-  report(session: DinMediaSession | null): void;
+  report(session: MediaReport | null): void;
   /** Din's media controls and the media keys. */
   onAction(cb: (action: MediaAction) => void): Unsubscribe;
 }
@@ -95,18 +94,32 @@ export interface MediaSessionHost {
  * play and pause act on the page's `<audio>` and `<video>`, as a browser's
  * media controls do.
  */
-export function bridgeMediaSession(host: MediaSessionHost): { /** Report again, whatever was last. */ refresh(): void } {
-  const none = { refresh: () => {} };
-  if (typeof MediaSession === 'undefined' || !navigator.mediaSession) return none;
+export function bridgeMediaSession(host: MediaSessionHost): void {
+  if (typeof MediaSession === 'undefined' || !navigator.mediaSession) return;
   const handlers = new Map<MediaSessionAction, MediaSessionActionHandler>();
   let last = '';
 
   const elements = () => [...document.querySelectorAll<HTMLMediaElement>('audio, video')].filter((el) => el.currentSrc && !el.ended);
 
-  const summarize = (): DinMediaSession | null => {
+  const summarize = (): MediaReport | null => {
     const session = navigator.mediaSession;
     const metadata = session.metadata;
     if (!metadata && handlers.size === 0) return null;
+    // No metadata but a play handler: stopped with something ready to play.
+    // Not shown in Din's media controls, but a play key with nothing else
+    // playing starts it.
+    if (!metadata && handlers.has('play')) {
+      return {
+        title: document.title,
+        subtitle: '',
+        artwork: null,
+        playing: false,
+        canPlay: true,
+        canPrevious: handlers.has('previoustrack'),
+        canNext: handlers.has('nexttrack'),
+        idle: true,
+      };
+    }
     const media = elements();
     const playing = session.playbackState === 'none' ? media.some((el) => !el.paused) : session.playbackState === 'playing';
     const artwork = metadata?.artwork.length ? metadata.artwork[metadata.artwork.length - 1].src : null;
@@ -186,12 +199,6 @@ export function bridgeMediaSession(host: MediaSessionHost): { /** Report again, 
     else if (action === 'play') void media.reverse().find((el) => el.paused)?.play().catch(() => {});
   });
 
-  return {
-    refresh: () => {
-      last = '';
-      report();
-    },
-  };
 }
 
 export interface DocumentHeadHost {

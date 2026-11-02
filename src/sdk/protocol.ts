@@ -20,9 +20,30 @@ import type {
   AssistantSettings,
   DictationStatus,
   Edge,
-  MediaAction,
-  MediaSession,
 } from '@/sdk/din';
+
+/**
+ * What an app's page is playing, for Din's media controls and the media
+ * keys, from its `navigator.mediaSession` (src/sdk/standards.ts).
+ */
+export interface MediaReport {
+  title: string;
+  /** The artist, or what it's playing from. */
+  subtitle: string;
+  /** Cover art: a data: or https URL. */
+  artwork: string | null;
+  playing: boolean;
+  canPlay: boolean;
+  canPrevious: boolean;
+  canNext: boolean;
+  /**
+   * Stopped, with something ready to play: not shown in Din's media
+   * controls, but a play key pressed with nothing else playing starts it.
+   */
+  idle?: boolean;
+}
+
+export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
 
 /** A file handle as it crosses the port; the SDK wraps it in a DinFileHandle. */
 export interface HandleData {
@@ -158,7 +179,7 @@ export interface Requests {
   'files.url': [{ handle: string }, string];
   'files.fromPath': [{ path: string }, HandleData];
 
-  'media.setSession': [{ session: MediaSession | null }, void];
+  'media.setSession': [{ session: MediaReport | null }, void];
   'desktop.setWallpaper': [{ handle: string }, void];
   'desktop.setCursor': [{ handle: string }, void];
   'dictation.start': [{ held: boolean }, void];

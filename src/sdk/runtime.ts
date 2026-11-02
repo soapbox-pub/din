@@ -25,9 +25,7 @@ import type {
   DinDesktop,
   DinDictation,
   DinDrag,
-  DinMedia,
   DictationStatus,
-  MediaAction,
   DinFileHandle,
   DinFiles,
   DinMenus,
@@ -59,7 +57,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
-import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
+import type { AccountSnapshot, FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import { bridgeMediaSession, dinHandleOf, installFilePickers, installLaunchQueue, toWebHandle, watchDocumentHead } from '@/sdk/standards';
@@ -834,24 +832,9 @@ export function installDin(transport: Transport): void {
   pushes.on((p) => {
     if (p.type === 'mediaAction') mediaActions.emit(p.action);
   });
-  // An app that calls din.media itself has its say over navigator.mediaSession's.
-  let ownMediaSession = false;
-  const media: DinMedia = {
-    setSession(session) {
-      need('media-session');
-      ownMediaSession = true;
-      tell('media.setSession', { session });
-    },
+  bridgeMediaSession({
+    report: (session) => tell('media.setSession', { session }),
     onAction: (cb) => mediaActions.on(cb),
-  };
-  const webMediaSession = bridgeMediaSession({
-    report(session) {
-      if (!ownMediaSession && permissions.has('media-session')) tell('media.setSession', { session });
-    },
-    onAction: (cb) =>
-      mediaActions.on((action) => {
-        if (!ownMediaSession) cb(action);
-      }),
   });
   const desktop: DinDesktop = {
     setWallpaper: async (file) => {
@@ -942,7 +925,6 @@ export function installDin(transport: Transport): void {
     account,
     toast,
     print,
-    media,
     desktop,
     dictation,
     assistant,
@@ -1118,8 +1100,6 @@ export function installDin(transport: Transport): void {
         system.quickShare = q as unknown as QuickShareBridge;
       }
     }
-
-    if (permissions.has('media-session')) webMediaSession.refresh();
 
     // The splash goes on load, or now if that's been: whichever is later.
     if (document.readyState === 'complete') queueMicrotask(() => app.ready());

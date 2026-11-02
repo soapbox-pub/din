@@ -70,7 +70,6 @@ export interface Din {
   account: DinAccount;
   toast: DinToast;
   print: DinPrint;
-  media: DinMedia;
   desktop: DinDesktop;
   dictation: DinDictation;
   assistant: DinAssistant;
@@ -652,45 +651,6 @@ export interface Nip07 {
 export type DinToast = (title: string, options?: { body?: string }) => void;
 
 // ---------------------------------------------------------------------------
-// din.media (permission `media-session`)
-// ---------------------------------------------------------------------------
-
-/** What an app is playing, for Din's media controls and the media keys. */
-export interface MediaSession {
-  title: string;
-  /** The artist, or what it's playing from. */
-  subtitle: string;
-  /** Cover art: a data: or https URL. */
-  artwork: string | null;
-  playing: boolean;
-  canPlay: boolean;
-  canPrevious: boolean;
-  canNext: boolean;
-  /**
-   * Stopped, with something ready to play: not shown in Din's media
-   * controls, but a play key pressed with nothing else playing starts it
-   * (`onAction('play')`), as a music player does.
-   */
-  idle?: boolean;
-}
-
-export type MediaAction = 'play' | 'pause' | 'nexttrack' | 'previoustrack';
-
-/**
- * The web's `navigator.mediaSession` does the same with the permission; an
- * app that calls `setSession` takes over from it (docs/din/media-and-desktop.md).
- */
-export interface DinMedia {
-  /** What's playing now, or null when nothing is (the controls go). */
-  setSession(session: MediaSession | null): void;
-  /**
-   * Din's media controls or a media key. `play` also comes when a play key
-   * is pressed with nothing else playing and the session can play.
-   */
-  onAction(cb: (action: MediaAction) => void): Unsubscribe;
-}
-
-// ---------------------------------------------------------------------------
 // din.desktop (permissions `wallpaper` and `cursor`)
 // ---------------------------------------------------------------------------
 
@@ -801,8 +761,6 @@ export type Permission =
   | 'printing'
   /** Notifications kept in the notification center, and a Dock badge. Toasts need nothing. */
   | 'notifications'
-  /** Report what's playing and hear the media keys (`din.media`). */
-  | 'media-session'
   /** Set the desktop wallpaper (`din.desktop`). */
   | 'wallpaper'
   /** Install cursor themes and change the pointer (`din.desktop.setCursor`). */

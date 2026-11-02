@@ -272,7 +272,7 @@ export function MediaPlayer() {
   useWindowTitle(track && playing ? `${track.title}${track.artist ? ` – ${track.artist}` : ''}` : null);
   useLaunches(commands.setMessage);
 
-  useEffect(() => connectMediaSession(din), [din]);
+  useEffect(() => connectMediaSession(), []);
   useEffect(() => keepGrants(), []);
 
   useEffect(() => {

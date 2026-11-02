@@ -2,52 +2,37 @@
 
 > **Status: in place.**
 
-## `din.media` (permission `media-session`)
+## What's playing: the Media Session API
 
-An app that plays sound or video tells Din what's playing, and hears Din's
-media controls (the volume menu's) and the media keys:
-
-```ts
-din.media.setSession({
-  title: 'So What', subtitle: 'Miles Davis', artwork: coverDataUrl,
-  playing: true, canPlay: true, canPrevious: true, canNext: true,
-});
-din.media.onAction((action) => player[action]());   // play, pause, nexttrack, previoustrack
-din.media.setSession(null);                          // nothing playing: the controls go
-```
-
-The desktop lists it among what's playing (`src/lib/nowPlaying.ts`), next
-to web pages and native apps, and the media keys pick among them as for
-any other source. `play` also comes when a play key is pressed with
-nothing else playing, if the session `canPlay`. Artwork is a data: or
-https URL: the desktop can't load the app's own files.
-
-A player that's stopped with something queued sets `idle: true`: it isn't
-listed, but a play key pressed with nothing else playing starts it.
-
-### The Media Session API
-
-With the same permission, the web's Media Session is the session, so a
-player written for the web needs no `din.media`:
+An app that plays sound or video tells Din what's playing with the web's
+Media Session, and hears Din's media controls (the volume menu's) and the
+media keys through its action handlers, as a page in a browser does. No
+permission: web pages in the Web Browser are heard the same way.
 
 ```ts
 navigator.mediaSession.metadata = new MediaMetadata({ title: 'So What', artist: 'Miles Davis', artwork: [{ src: cover }] });
 navigator.mediaSession.playbackState = 'playing';
-navigator.mediaSession.setActionHandler('nexttrack', next);   // canNext
+navigator.mediaSession.setActionHandler('play', play);
+navigator.mediaSession.setActionHandler('nexttrack', next);   // Next shows
+navigator.mediaSession.metadata = null;                       // nothing playing: the controls go
 ```
 
-`title` falls back to `document.title`, `subtitle` is the artist (or the
-album), and `artwork` the last picture, read into a data: URL when it's
-the app's own file or a blob: (`src/sdk/standards.ts`). `playing` is
-`playbackState`, or whether the page's `<audio>` and `<video>` play
-while it's `none`. An action with no handler set acts on those elements,
-as a browser's media controls do: Pause pauses them, Play plays the last
-one paused. `idle` has no counterpart, so a player that needs it uses
-`din.media`; once an app calls `din.media.setSession`, the Media Session
-is no longer passed on, and its handlers hear nothing from Din.
+The desktop lists it among what's playing (`src/lib/nowPlaying.ts`), next
+to web pages and native apps, and the media keys pick among them as for
+any other source. The runtime reads the session (`src/sdk/standards.ts`):
 
-Plain `<audio>` and `<video>` in an app aren't seen by the desktop on
-their own; an app that wants media keys says so with a session.
+- The title falls back to `document.title`, the subtitle is the artist
+  (or the album), and the artwork is the last picture, read into a data:
+  URL when it's the app's own file or a blob:, up to 512 KB.
+- Playing is `playbackState`, or, while that's `none`, whether the page's
+  `<audio>` and `<video>` play.
+- Play shows with a `play` handler or a media element, Previous and Next
+  with their handlers. An action with no handler acts on the page's media
+  elements, as a browser's controls do: Pause pauses them, Play plays the
+  last one paused.
+- **No metadata, but a `play` handler:** stopped with something ready to
+  play (Media Player with a queue). It isn't listed, but a play key
+  pressed with nothing else playing calls the handler.
 
 ## `din.desktop` (permissions `wallpaper` and `cursor`)
 

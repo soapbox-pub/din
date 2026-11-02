@@ -49,7 +49,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useOpenUrl()` | `din.app.openUrl(url)` |
 | `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
-| `registerMediaSource` (now playing) | `din.media.setSession` / `onAction` with `media-session` |
+| `registerMediaSource` (now playing) | `navigator.mediaSession` |
 | `registerDictationTarget` | Nothing: dictation reaches a guest's focused field with `insertText`, as for web pages, and that includes xterm's, so Terminal needed no hook. An app's own mic button uses `din.dictation` |
 | `useLocalStorage` | Unchanged; it's the app's own origin now. List old keys in `migrateStorage` |
 
@@ -133,7 +133,7 @@ first broke, and what restored it:
 | Photo Editor's Quick Export beside the document | `file-folders` |
 | A drag out of an app showing what's dragged | The desktop's drag overlay (`drag.over`) |
 | Settling after a move begun in an app | `din.window.beginMove` resolves when the move ends |
-| Media Player's play key while stopped | `MediaSession.idle` |
+| Media Player's play key while stopped | A `play` handler with no metadata |
 | The Assistant's notifications (quiet only while you look at that conversation), its settings and model | `din.assistant` (`follow`, `setViewing`, settings) |
 | Preview, Publisher, Media Player and CAD holding the whole filesystem | Scoped `fs`: `file-folders`, the manifest's `folders`; `requestAccess` and `migrateFiles` for paths their old state named |
 

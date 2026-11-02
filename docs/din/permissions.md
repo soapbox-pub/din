@@ -30,7 +30,6 @@ When nsites get `window.din`, the user approves the list at install.
 | `pty` | `din.system.pty`: terminals | Terminal |
 | `printing` | `din.print`: Din's print dialog for HTML or a file the app holds | Word Processor, Publisher, Preview |
 | `notifications` | `new Notification()` and `navigator.setAppBadge()` | Assistant, Terminal |
-| `media-session` | `din.media`: report what's playing; hear the media keys and Din's media controls | Media Player |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service. Only the Assistant reaches all of it; any other app talks only to conversations it started, in `~/.cache/din/<id>-assistant/`, hears only their events, and can't answer sudo | Assistant, CAD |

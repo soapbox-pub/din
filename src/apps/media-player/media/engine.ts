@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react';
-import type { Din, MediaSession } from '@/sdk';
 import { EQ_BANDS, EQ_MAX_DB } from './eq';
 import { baseTitle, coverFor, isUrl, isVideoLocation, mediaUrl, trackInfo } from './metadata';
 
@@ -540,51 +539,6 @@ class MusicEngine {
     }
     if (i === this.state.current) {
       this.set({ info: { bitrate: info.bitrate ?? null, sampleRate: info.sampleRate ?? null, channels: info.channels ?? null } }, false);
-      void this.updateMediaSession();
-    }
-  }
-
-  private async updateMediaSession(): Promise<void> {
-    const ms = typeof navigator !== 'undefined' ? navigator.mediaSession : undefined;
-    if (!ms) return;
-    const track = this.currentTrack;
-    if (!track) {
-      ms.metadata = null;
-      return;
-    }
-    const cover = await coverFor(track.location);
-    if (this.currentTrack?.key !== track.key) return;
-    try {
-      ms.metadata = new MediaMetadata({
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        artwork: cover ? [{ src: cover }] : [],
-      });
-    } catch {
-      // MediaMetadata rejects some artwork URLs; the title still matters more.
-    }
-  }
-
-  private registerMediaSession(): void {
-    const ms = typeof navigator !== 'undefined' ? navigator.mediaSession : undefined;
-    if (!ms) return;
-    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
-      ['play', () => this.play()],
-      ['pause', () => this.pause()],
-      ['stop', () => this.stop()],
-      ['previoustrack', () => this.previous()],
-      ['nexttrack', () => this.next()],
-      ['seekto', (d) => d.seekTime != null && this.seek(d.seekTime)],
-      ['seekbackward', (d) => this.seekBy(-(d.seekOffset ?? 10))],
-      ['seekforward', (d) => this.seekBy(d.seekOffset ?? 10)],
-    ];
-    for (const [action, handler] of handlers) {
-      try {
-        ms.setActionHandler(action, handler);
-      } catch {
-        // Unsupported action.
-      }
     }
   }
 
@@ -597,7 +551,6 @@ class MusicEngine {
       return;
     }
     this.ensureGraph();
-    this.registerMediaSession();
     const useDirect = isUrl(track.location) && this.directUrls.has(track.location);
     // Stop whatever else is sounding.
     for (const deck of this.decks) {
@@ -633,7 +586,6 @@ class MusicEngine {
     }
     this.setTime(startAt, track.duration ?? 0);
     void this.fillInfo(track.key);
-    void this.updateMediaSession();
   }
 
   /** Point a deck at a location, then go on, unless it's been given another meanwhile. */
@@ -897,7 +849,6 @@ class MusicEngine {
     if (s.shuffle && !this.shuffleOrder.includes(next)) this.reshuffle();
     this.applySettings();
     void this.fillInfo(track.key);
-    void this.updateMediaSession();
     this.fadeTimer = window.setTimeout(() => {
       from.el.pause();
       this.fading = false;
@@ -982,7 +933,6 @@ class MusicEngine {
     this.set({ queue: [], current: -1, error: null });
     this.shuffleOrder = [];
     this.setTime(0, 0);
-    void this.updateMediaSession();
   }
 
   /** Move the songs `keys` so they sit before position `to` (in the list as it is). */
@@ -1134,8 +1084,33 @@ async function artworkDataUrl(src: string): Promise<string | null> {
   }
 }
 
-/** What's playing, in Din's media controls (the volume menu's) and for the media keys. */
-export function connectMediaSession(din: Din): () => void {
+/**
+ * What's playing, as the page's Media Session: Din's media controls (the
+ * volume menu's) and the media keys show and drive it.
+ */
+export function connectMediaSession(): () => void {
+  const ms = typeof navigator !== 'undefined' ? navigator.mediaSession : undefined;
+  if (!ms) return () => {};
+  const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+    ['play', () => player.play()],
+    ['pause', () => player.pause()],
+    ['stop', () => player.stop()],
+    ['previoustrack', () => player.previous()],
+    ['nexttrack', () => player.next()],
+    ['seekto', (d) => d.seekTime != null && player.seek(d.seekTime)],
+    ['seekbackward', (d) => player.seekBy(-(d.seekOffset ?? 10))],
+    ['seekforward', (d) => player.seekBy(d.seekOffset ?? 10)],
+  ];
+  const setHandlers = (on: boolean) => {
+    for (const [action, handler] of handlers) {
+      try {
+        ms.setActionHandler(action, on ? handler : null);
+      } catch {
+        // Unsupported action.
+      }
+    }
+  };
+
   let cover: { location: string; url: string | null } | null = null;
   let listed = false;
   let sent = '';
@@ -1144,21 +1119,13 @@ export function connectMediaSession(din: Din): () => void {
     const track = player.currentTrack;
     // Once it's been playing it stays: Next while paused stops the player
     // (as Winamp does), and its controls mustn't vanish for that.
-    let session: MediaSession | null = null;
+    let metadata: MediaMetadataInit | null = null;
+    let state: MediaSessionPlaybackState = 'none';
     if (!track) {
       listed = false;
     } else if (status === 'stopped' && !listed) {
-      // Stopped with something queued: not listed, but a play key starts it.
-      session = {
-        title: track.title,
-        subtitle: track.artist || 'Media Player',
-        artwork: null,
-        playing: false,
-        canPlay: true,
-        canPrevious: true,
-        canNext: true,
-        idle: true,
-      };
+      // Stopped with something queued: no metadata, but the play handler
+      // stays, so a play key with nothing else playing starts it.
     } else {
       listed = true;
       if (cover?.location !== track.location) {
@@ -1171,33 +1138,32 @@ export function connectMediaSession(din: Din): () => void {
           update();
         });
       }
-      session = {
+      metadata = {
         title: track.title,
-        subtitle: track.artist || 'Media Player',
-        artwork: cover.url,
-        playing: status === 'playing',
-        canPlay: true,
-        canPrevious: true,
-        canNext: true,
+        artist: track.artist || 'Media Player',
+        album: track.album,
+        artwork: cover.url ? [{ src: cover.url }] : [],
       };
+      state = status === 'playing' ? 'playing' : 'paused';
     }
-    const json = JSON.stringify(session);
+    const json = JSON.stringify([!!track, metadata, state]);
     if (json === sent) return;
     sent = json;
-    din.media.setSession(session);
+    setHandlers(!!track);
+    try {
+      ms.metadata = metadata && new MediaMetadata(metadata);
+    } catch {
+      ms.metadata = metadata && new MediaMetadata({ ...metadata, artwork: [] });
+    }
+    ms.playbackState = state;
   };
   const unsubscribe = player.subscribe(update);
-  const offAction = din.media.onAction((action) => {
-    if (action === 'play') player.play();
-    else if (action === 'pause') player.pause();
-    else if (action === 'nexttrack') player.next();
-    else player.previous();
-  });
   update();
   return () => {
     unsubscribe();
-    offAction();
-    din.media.setSession(null);
+    setHandlers(false);
+    ms.metadata = null;
+    ms.playbackState = 'none';
   };
 }
 

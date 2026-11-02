@@ -91,8 +91,8 @@ import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/gu
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
-import type { AssistantSettings, DinManifest, FrameStyle, MediaSession, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
-import type { AccountSnapshot, FromApp, HandleData, Hello, Method, Push, Requests } from '@/sdk/protocol';
+import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
+import type { AccountSnapshot, FromApp, HandleData, Hello, MediaReport, Method, Push, Requests } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */
@@ -288,7 +288,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   } | null>(null);
 
   /** What the app is playing, among the desktop's media sources (registered below). */
-  const media = useRef<{ session: MediaSession | null; since: number; notify: () => void }>({
+  const media = useRef<{ session: MediaReport | null; since: number; notify: () => void }>({
     session: null,
     since: 0,
     notify: () => {},
@@ -840,7 +840,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       },
 
       'media.setSession': ({ session: next }) => {
-        need('media-session');
         media.current.session = next;
         media.current.notify();
       },
@@ -1228,7 +1227,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
 
   // What the app is playing, among the desktop's media sources.
   useEffect(() => {
-    if (!permissions.includes('media-session')) return;
     const listeners = new Set<() => void>();
     const current = (): MediaSource | null => {
       const { session, since } = media.current;
@@ -1267,7 +1265,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         return true;
       },
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowId, push]);
 
   // Dictation's status, for the app's mic buttons.

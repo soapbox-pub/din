@@ -46,8 +46,7 @@
   ],
   "din": {
     "permissions": [
-      "file-folders",
-      "media-session"
+      "file-folders"
     ],
     "folders": [
       "~/Music",
