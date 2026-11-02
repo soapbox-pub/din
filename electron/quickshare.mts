@@ -1,34 +1,52 @@
 // Quick Share (the Quick Share app, din.system.quickShare): Android phones,
-// tablets and Chromebooks on the same network share files and links to this
-// computer from their share sheet, as they share with each other. This
-// computer is visible only while a Quick Share window is open, as with
-// AirDrop's window or Android's Receive screen: the app calls `receive`, and
-// closing its last window withdraws the announcement, closes the port and
-// ends any share still going.
+// tablets and Chromebooks share files and links to this computer from their
+// share sheet, as they share with each other. This computer is visible while
+// a Quick Share window is open, as with AirDrop's window or Android's Receive
+// screen: the app calls `receive`, and closing its last window withdraws the
+// announcements, closes the port and ends the shares it was showing.
+//
+// It's also visible for a little while when one of the user's own phones
+// opens its share sheet: while a phone from Settings → Phone with "Receive
+// files" on is connected over Bluetooth (phone.mts, connectedFilePhones),
+// an LE scan listens for the beacon Quick Share sends then (service data
+// 0xFE2C, "fast initiation"), and hearing it makes this computer visible
+// over Bluetooth for NEARBY_MS more (not on the network, where a share can't
+// say which phone it's from).
 //
 // Quick Share (once Nearby Share) runs on Google's Nearby Connections, which
 // isn't published; this follows NearDrop's and rquickshare's reading of it,
-// with field numbers from the .proto files in Google's open-source Nearby
-// code. No server is involved: it's all on the local network.
+// Google's open-source Nearby code, and the field numbers in its .proto
+// files. No server is involved.
 //
-// - Discovery: this computer announces itself over mDNS through Avahi
-//   (service _FC9F5ED42C8A._tcp, an endpoint id in the service's name and
-//   its name and device type in the TXT record), and listens on PORT, which
-//   DinOS's firewall lets in.
-// - Connection: the phone connects and asks to (ConnectionRequest), then the
-//   two run a UKEY2 handshake (ECDH on P-256). Everything after it is
-//   encrypted with AES-256-CBC and signed with HMAC-SHA256, in keys derived
-//   from the handshake, which also gives a 4-digit PIN both screens show.
-// - Sharing: the phone offers files or a piece of text (Introduction). The
-//   app asks the user, with the PIN, whether to take it: anyone on the
-//   network could be sending, since only Google's own devices can prove
-//   they're "yours" or a contact's. Accepted files are written straight into
-//   ~/Downloads, under a name of their own (`photo (1).jpg` beside
-//   `photo.jpg`); one that doesn't arrive whole is deleted. Text arrives as a
-//   .txt file, and a link is handed to the app to offer to open.
-//
-// The phone may offer to move to Wi-Fi Direct or a hotspot for speed; that's
-// ignored, so everything stays on the network both are on.
+// - Discovery: on the network, this computer announces itself over mDNS
+//   through Avahi (service _FC9F5ED42C8A._tcp, an endpoint id in the
+//   service's name and its name and device type in the TXT record), and
+//   listens on PORT, which DinOS's firewall lets in. Over Bluetooth, it sends
+//   the LE advertisement Android receivers send (bleAdvertisement), which
+//   carries its Bluetooth address (quickshare-bluetooth.mts).
+// - Connection: the phone connects, over TCP or Bluetooth RFCOMM, and asks
+//   to (ConnectionRequest), then the two run a UKEY2 handshake (ECDH on
+//   P-256). Everything after it is encrypted with AES-256-CBC and signed with
+//   HMAC-SHA256, in keys derived from the handshake, which also gives a
+//   4-digit PIN both screens show.
+// - Moving to Wi-Fi: Bluetooth manages tens of KB/s, so a phone that
+//   connected over it is offered a Wi-Fi hotspot this computer hosts
+//   (quickshare-hotspot.mts; Android phones leave their own Wi-Fi while the
+//   share sheet is open). It joins it, connects to PORT there and says it's
+//   the same phone (ClientIntroduction), then both sides finish with
+//   Bluetooth and carry on over Wi-Fi, with the same keys. Without a hotspot
+//   the share stays on Bluetooth.
+// - Sharing: the phone offers files or a piece of text (Introduction).
+//   Anyone could be sending, since only Google's own devices can prove
+//   they're "yours" or a contact's, so the user is asked, with the PIN: in
+//   the app, or in a notification from the desktop when no window is open
+//   (`background`). Not for a phone from Settings → Phone with "Receive
+//   files" on, connected over Bluetooth on a link with the pairing's key:
+//   that proves which phone it is, so its share arrives without asking.
+//   Accepted files are written straight into ~/Downloads, under a name of
+//   their own (`photo (1).jpg` beside `photo.jpg`); one that doesn't arrive
+//   whole is deleted. Text arrives as a .txt file, and a link is offered to
+//   open.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -39,7 +57,18 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { app, ipcMain, webContents } from 'electron';
-import { DBusConnection, DBusError, type Message } from './dbus.mts';
+import { onBluetoothChanged } from './bluetooth.mts';
+import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
+import { connectedFilePhones, fileSender, onPhonesChanged } from './phone.mts';
+import {
+  advertiseOverBluetooth,
+  advertisingOverBluetooth,
+  bluetoothMayWork,
+  onBluetooth,
+  quitBluetooth,
+  type BluetoothPeer,
+} from './quickshare-bluetooth.mts';
+import { holdHotspot, hotspot, quitHotspot } from './quickshare-hotspot.mts';
 import { claim, freeBytes, safeFileName } from './received-files.mts';
 import { Writer, big, bytes, decode, int, message, messages, str, type Fields } from './protobuf.mts';
 import type { QuickShareDeviceType, QuickShareState, QuickShareTransfer } from '../src/lib/quickShare.ts';
@@ -47,6 +76,8 @@ import type { QuickShareDeviceType, QuickShareState, QuickShareTransfer } from '
 /** The port Quick Share listens on; os/configuration.nix opens it in the firewall. */
 const PORT = 47331;
 const SERVICE_TYPE = '_FC9F5ED42C8A._tcp';
+/** The first three bytes of SHA-256("NearbySharing"), Quick Share's service id in Nearby's announcements. */
+const SERVICE_HASH = Buffer.from([0xfc, 0x9f, 0x5e]);
 const SYSTEM_BUS = process.env.DBUS_SYSTEM_BUS_ADDRESS || 'unix:path=/run/dbus/system_bus_socket';
 const AVAHI = 'org.freedesktop.Avahi';
 const AVAHI_SERVER = 'org.freedesktop.Avahi.Server';
@@ -67,11 +98,23 @@ const IDLE_MS = 60_000;
 const PROGRESS_MS = 250;
 /** Room kept free on the disk beyond what a share needs. */
 const SPARE_BYTES = 64 * 1024 * 1024;
+/** How long the share-sheet beacon of one of the user's phones keeps this computer visible. */
+const NEARBY_MS = 90_000;
+/** Quick Share's share-sheet beacon (fast initiation), as BlueZ names its service data. */
+const FAST_INIT_UUID = '0000fe2c-0000-1000-8000-00805f9b34fb';
+/** The weakest signal (dBm) the share-sheet scan hears: a phone in the room. */
+const NEARBY_RSSI = -75;
+const BLUEZ = 'org.bluez';
+const ADAPTER = 'org.bluez.Adapter1';
+const DEVICE = 'org.bluez.Device1';
 /** How long to wait before trying Avahi again when it isn't there. */
 const RETRY_MS = 10_000;
 
 // Nearby Connections' OfflineFrame (offline_wire_formats.proto).
-const FRAME = { connectionRequest: 1, connectionResponse: 2, payloadTransfer: 3, keepAlive: 5, disconnection: 6 } as const;
+const FRAME = { connectionRequest: 1, connectionResponse: 2, payloadTransfer: 3, bandwidthUpgrade: 4, keepAlive: 5, disconnection: 6 } as const;
+// BandwidthUpgradeNegotiationFrame's events and UpgradePathInfo's media.
+const UPGRADE = { pathAvailable: 1, lastWrite: 2, safeToClose: 3, clientIntroduction: 4, failure: 5, clientIntroductionAck: 6 } as const;
+const UPGRADE_MEDIUM = { wifiHotspot: 3 } as const;
 const PAYLOAD = { bytes: 1, file: 2 } as const;
 const PACKET = { data: 1, control: 2 } as const;
 const LAST_CHUNK = 1;
@@ -97,6 +140,15 @@ type Deps = {
 let deps: Deps;
 /** The windows receiving, by WebContents id, each with what stops following it. */
 const leases = new Map<number, () => void>();
+/** Until when a phone's share sheet keeps this computer visible (ms), and its timer. */
+let nearbyUntil = 0;
+let nearbyTimer: NodeJS.Timeout | null = null;
+/** Keeps the hotspot up while a phone's share sheet keeps this computer visible. */
+let nearbyHotspot: (() => void) | null = null;
+/** The adapter scanning for share sheets, or null when not scanning. */
+let scanning: string | null = null;
+let unwatchScan: (() => void) | null = null;
+let checkingPhones: Promise<void> = Promise.resolve();
 let server: net.Server | null = null;
 let listeningPort = 0;
 let avahiBus: DBusConnection | null = null;
@@ -131,6 +183,23 @@ function deviceName(): string {
 function endpointInfo(): Buffer {
   const name = Buffer.from(deviceName(), 'utf8');
   return Buffer.concat([Buffer.from([3 << 1]), crypto.randomBytes(16), Buffer.from([name.length]), name]);
+}
+
+/**
+ * The LE advertisement's service data (0xFEF3): Nearby's BLE medium
+ * advertisement (version 2, socket version 2, not fast: the service hash,
+ * the length, then the data and two random bytes) around a connections
+ * advertisement (version 1, point to point: the service hash, endpoint id,
+ * endpoint info, then the Bluetooth address phones connect to over RFCOMM,
+ * and no UWB address or extra fields).
+ */
+function bleAdvertisement(address: string): Buffer {
+  const info = endpointInfo();
+  const mac = Buffer.from(address.split(':').map((byte) => parseInt(byte, 16)));
+  const connections = Buffer.concat([Buffer.from([0x23]), SERVICE_HASH, endpointId, Buffer.from([info.length]), info, mac, Buffer.from([0, 0])]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(connections.length);
+  return Buffer.concat([Buffer.from([(2 << 5) | (2 << 2)]), SERVICE_HASH, length, connections, crypto.randomBytes(2)]);
 }
 
 function offlineFrame(type: number, field?: number, body?: Writer): Buffer {
@@ -220,6 +289,12 @@ class Connection {
   private socket: net.Socket;
   private chunks: Buffer[] = [];
   private queued = 0;
+  /** The device's endpoint id, from its connection request: how its upgraded channel names it. */
+  remoteEndpointId = '';
+  /** Moving to a faster channel: offered, then the new socket while the old one drains. */
+  upgrade: 'none' | 'offered' | 'switching' | 'done' = 'none';
+  private upgradeSocket: net.Socket | null = null;
+  private upgradeChunks: Buffer[] = [];
   private stage: 'request' | 'client-init' | 'client-finish' | 'connection-response' | 'secure' = 'request';
   private sharing: 'paired-key' | 'paired-result' | 'introduction' | 'asking' | 'receiving' | 'over' = 'paired-key';
   private device = 'A nearby device';
@@ -241,15 +316,106 @@ class Connection {
   private lastEmit = 0;
   private emitTimer: NodeJS.Timeout | null = null;
   private closed = false;
+  /** The DISCONNECTION frame has been sent. */
+  private saidGoodbye = false;
+  /** Where it connected from over Bluetooth, or null over the network. */
+  readonly bluetooth: BluetoothPeer | null;
+  /** Only a phone's faster channel for another connection, so nothing but its introduction. */
+  private readonly upgradeOnly: boolean;
+  /** The phone from Settings → Phone it proved to be, whose shares arrive without asking. */
+  private trusted: Promise<{ phoneId: string; name: string } | null>;
+  private releaseHotspot: (() => void) | null = null;
 
-  constructor(socket: net.Socket) {
+  /** Whether a window is showing this share (so closing the last one ends it). */
+  get windowed(): boolean {
+    return this.transfer !== null && !this.transfer.background;
+  }
+
+  constructor(socket: net.Socket, options: { bluetooth?: BluetoothPeer; upgradeOnly?: boolean } = {}) {
     this.id = `quickshare-${nextTransfer++}`;
     this.socket = socket;
-    socket.setNoDelay(true);
-    socket.on('data', (chunk) => this.ingest(chunk));
-    socket.on('error', () => this.lost());
-    socket.on('close', () => this.lost());
+    this.bluetooth = options.bluetooth ?? null;
+    this.upgradeOnly = options.upgradeOnly ?? false;
+    const peer = this.bluetooth;
+    // A paired phone's address alone could be claimed by anything; the link's encryption can't.
+    this.trusted = peer?.paired && peer.secured ? fileSender(peer.address).catch(() => null) : Promise.resolve(null);
+    // The faster channel it'll be offered.
+    if (peer) this.releaseHotspot = holdHotspot();
+    this.listenTo(socket);
+    socket.resume();
     this.wait(HANDSHAKE_MS, () => this.fail(new ProtocolError('handshake timed out')));
+  }
+
+  private listenTo(socket: net.Socket): void {
+    socket.setNoDelay(true);
+    socket.on('data', (chunk) => {
+      if (socket === this.socket) this.ingest(chunk);
+      else if (socket === this.upgradeSocket) this.upgradeChunks.push(chunk);
+    });
+    const gone = () => {
+      if (socket === this.socket) this.lost();
+      else if (socket === this.upgradeSocket) {
+        console.warn(`quickshare: ${this.device}: the faster channel closed before it was used`);
+        this.upgradeSocket = null;
+        this.upgradeChunks = [];
+        this.upgrade = 'none';
+      }
+    };
+    socket.on('error', gone);
+    socket.on('close', gone);
+  }
+
+  /**
+   * Offer the device the hotspot, once it's up: it joins it, connects to
+   * PORT there and introduces itself (adopt), then both sides drain and close
+   * this channel. UpgradePathInfo's 7 and 9: it needn't encrypt the new
+   * channel again, and may introduce itself unencrypted on it.
+   */
+  private async offerUpgrade(): Promise<void> {
+    const spot = await hotspot();
+    await applying;
+    if (!spot || !server || this.closed || this.upgrade !== 'none' || this.sharing === 'over') return;
+    const credentials = new Writer().bytes(1, spot.ssid).bytes(2, spot.password).int(3, listeningPort).bytes(4, spot.gateway).int(5, spot.frequency);
+    const path = new Writer().int(1, UPGRADE_MEDIUM.wifiHotspot).bytes(2, credentials).int(7, false).int(9, true);
+    this.upgrade = 'offered';
+    this.sendOffline(offlineFrame(FRAME.bandwidthUpgrade, 5, new Writer().int(1, UPGRADE.pathAvailable).bytes(2, path)));
+  }
+
+  /** The device connected again over the faster channel: answer it, and drain this one. */
+  adopt(socket: net.Socket, leftover: Buffer[]): void {
+    if (this.upgrade !== 'offered' || this.closed) {
+      socket.destroy();
+      return;
+    }
+    this.upgrade = 'switching';
+    this.upgradeSocket = socket;
+    this.upgradeChunks = leftover;
+    this.listenTo(socket);
+    const ack = new Writer().int(1, 1).bytes(2, new Writer().int(1, FRAME.bandwidthUpgrade).bytes(5, new Writer().int(1, UPGRADE.clientIntroductionAck).bytes(4, new Writer()))).finish();
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(ack.length);
+    socket.write(Buffer.concat([length, ack]));
+    this.sendOffline(offlineFrame(FRAME.bandwidthUpgrade, 5, new Writer().int(1, UPGRADE.lastWrite)));
+  }
+
+  /** Both sides are done with the old channel: say goodbye on it, unencrypted, and carry on over the new one. */
+  private switchChannel(): void {
+    const old = this.socket;
+    const next = this.upgradeSocket;
+    if (!next) return;
+    const goodbye = offlineFrame(FRAME.disconnection, 7, new Writer().int(1, false).int(2, false));
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(goodbye.length);
+    this.socket = next;
+    this.upgradeSocket = null;
+    this.upgrade = 'done';
+    old.removeAllListeners('data');
+    old.end(Buffer.concat([length, goodbye]));
+    setTimeout(() => old.destroy(), 2000).unref();
+    this.chunks = this.upgradeChunks;
+    this.queued = this.chunks.reduce((n, c) => n + c.length, 0);
+    this.upgradeChunks = [];
+    this.ingest(Buffer.alloc(0));
   }
 
   // --- Framing -------------------------------------------------------------
@@ -301,7 +467,10 @@ class Connection {
 
   private connectionRequest(frame: Fields): void {
     const v1 = message(frame, 2);
+    if (v1 && int(v1, 1) === FRAME.bandwidthUpgrade) return this.handOver(message(v1, 5) ?? new Map());
+    if (this.upgradeOnly) throw new ProtocolError('expected an upgrade’s introduction');
     if (!v1 || int(v1, 1) !== FRAME.connectionRequest) throw new ProtocolError('expected a connection request');
+    this.remoteEndpointId = str(message(v1, 2) ?? new Map(), 1) ?? '';
     const info = bytes(message(v1, 2) ?? new Map(), 6);
     if (!info || info.length < 18) throw new ProtocolError('no endpoint info');
     this.type = deviceType((info[0] >> 1) & 7);
@@ -377,6 +546,25 @@ class Connection {
     this.stage = 'connection-response';
   }
 
+  /** This socket is another connection's faster channel: give it to that connection. */
+  private handOver(upgrade: Fields): void {
+    const introduction = message(upgrade, 3);
+    const endpoint = introduction && str(introduction, 1);
+    const target = [...connections.values()].find((c) => c !== this && c.upgrade === 'offered' && c.remoteEndpointId === endpoint);
+    if (int(upgrade, 1) !== UPGRADE.clientIntroduction || !target) throw new ProtocolError('an upgrade nobody offered');
+    const socket = this.socket;
+    const leftover = this.chunks;
+    this.chunks = [];
+    this.queued = 0;
+    socket.removeAllListeners('data');
+    socket.removeAllListeners('error');
+    socket.removeAllListeners('close');
+    this.closed = true;
+    clearTimeout(this.timer ?? undefined);
+    connections.delete(this.id);
+    target.adopt(socket, leftover);
+  }
+
   private connectionResponse(frame: Fields): void {
     const v1 = message(frame, 2);
     if (!v1 || int(v1, 1) !== FRAME.connectionResponse) throw new ProtocolError('expected a connection response');
@@ -388,6 +576,7 @@ class Connection {
     this.sendSharing(
       sharingFrame(SHARING.pairedKeyEncryption, 4, new Writer().bytes(1, crypto.randomBytes(72)).bytes(2, crypto.randomBytes(6))),
     );
+    if (this.bluetooth) void this.offerUpgrade();
   }
 
   // --- Encryption ----------------------------------------------------------
@@ -451,6 +640,18 @@ class Connection {
           this.sendOffline(offlineFrame(FRAME.keepAlive, 6, new Writer().int(1, true)));
         }
         return;
+      case FRAME.bandwidthUpgrade: {
+        const event = int(message(v1, 5) ?? new Map(), 1);
+        if (event === UPGRADE.lastWrite && this.upgrade === 'switching') {
+          this.sendOffline(offlineFrame(FRAME.bandwidthUpgrade, 5, new Writer().int(1, UPGRADE.safeToClose)));
+        } else if (event === UPGRADE.safeToClose && this.upgrade === 'switching') {
+          this.switchChannel();
+        } else if (event === UPGRADE.failure) {
+          console.warn(`quickshare: ${this.device}: couldn't move to the faster channel; staying on this one`);
+          this.upgrade = 'done';
+        }
+        return;
+      }
       case FRAME.disconnection:
         return this.lost();
     }
@@ -532,6 +733,8 @@ class Connection {
       transferred: 0,
       total: 0,
       error: null,
+      // No window to show it in: the desktop asks.
+      background: leases.size === 0,
     };
     const unsupported = (why: string) => {
       this.sendSharing(sharingFrame(SHARING.response, 3, new Writer().int(1, RESPONSE.unsupported)));
@@ -572,7 +775,14 @@ class Connection {
       this.sendSharing(sharingFrame(SHARING.response, 3, new Writer().int(1, RESPONSE.timedOut)));
       this.finish('failed', 'Nobody accepted it in time.');
     });
-    this.emit(true);
+    void this.trusted.then((phone) => {
+      if (this.sharing !== 'asking' || !this.transfer) return;
+      if (!phone) return this.emit(true);
+      // One of the user's phones, proven: it arrives under the name Settings gives it, without asking.
+      this.device = phone.name;
+      this.transfer.device = phone.name;
+      this.respond(true);
+    });
   }
 
   // --- Accepting, and what arrives -----------------------------------------
@@ -668,7 +878,6 @@ class Connection {
     if (this.sharing !== 'receiving') return;
     if ([...this.files.values()].some((f) => !f.done)) return;
     if (this.text && !this.text.done) return;
-    this.sendOffline(offlineFrame(FRAME.disconnection, 7));
     this.finish('done');
   }
 
@@ -736,13 +945,26 @@ class Connection {
     this.close();
   }
 
+  /**
+   * Hang up, saying so first once the channel is encrypted: a phone that
+   * isn't told keeps the connection open on its side, and won't connect to
+   * this computer over Bluetooth again until it gives up on it.
+   */
   private close(): void {
     if (this.closed) return;
+    if (this.stage === 'secure' && !this.saidGoodbye && !this.socket.destroyed) {
+      this.saidGoodbye = true;
+      this.sendOffline(offlineFrame(FRAME.disconnection, 7));
+    }
     this.closed = true;
     clearTimeout(this.timer ?? undefined);
     connections.delete(this.id);
+    this.upgradeSocket?.destroy();
     this.socket.end();
     setTimeout(() => this.socket.destroy(), 1000).unref();
+    this.releaseHotspot?.();
+    this.releaseHotspot = null;
+    if (this.bluetooth) void apply();
   }
 }
 
@@ -754,27 +976,51 @@ function cleanTitle(title: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Being visible: the server and the mDNS announcement
+// Being visible: the server, the mDNS announcement and the Bluetooth one
 // ---------------------------------------------------------------------------
 
+/** Whether a window is receiving, so this computer is visible on the network. */
+function receiving(): boolean {
+  return leases.size > 0;
+}
+
+/** Whether this computer should be visible over Bluetooth: a window is receiving, or a phone's share sheet is open. */
+function listening(): boolean {
+  return receiving() || nearbyUntil > Date.now();
+}
+
+/** Whether the server should be up: devices may connect over the network, or phones move over to the hotspot. */
+function serving(): boolean {
+  return listening() || [...connections.values()].some((c) => c.bluetooth);
+}
+
 function state(): QuickShareState {
-  const listening = leases.size > 0;
-  return { listening, name: deviceName(), visible: listening && advertised && server !== null, error: listening ? error : null };
+  const visible = (advertised && server !== null) || advertisingOverBluetooth();
+  return { listening: receiving(), name: deviceName(), visible: listening() && visible, error: receiving() ? error : null };
 }
 
 function changed(): void {
   deps.sendToShell('quickshare:changed', state());
 }
 
+function track(connection: Connection): void {
+  connections.set(connection.id, connection);
+}
+
 function listen(port: number): Promise<net.Server> {
   return new Promise((resolve, reject) => {
     const s = net.createServer((socket) => {
-      if (leases.size === 0 || connections.size >= MAX_CONNECTIONS) {
+      if (connections.size >= MAX_CONNECTIONS) {
         socket.destroy();
         return;
       }
-      const connection = new Connection(socket);
-      connections.set(connection.id, connection);
+      if (receiving()) return track(new Connection(socket));
+      // Not visible on the network: only a phone moving over from Bluetooth, to the hotspot.
+      if (![...connections.values()].some((c) => c.upgrade === 'offered')) {
+        socket.destroy();
+        return;
+      }
+      track(new Connection(socket, { upgradeOnly: true }));
     });
     s.once('error', reject);
     s.listen(port, () => {
@@ -808,11 +1054,22 @@ async function systemBus(): Promise<DBusConnection> {
     group = null;
     unwatchGroup = null;
     advertised = false;
+    scanning = null;
+    unwatchScan = null;
     changed();
     scheduleRetry();
+    checkPhones();
   };
   // Avahi starting again (or for the first time) takes everything published with it.
   bus.subscribe({ sender: 'org.freedesktop.DBus', interface: 'org.freedesktop.DBus', member: 'NameOwnerChanged' }, (m: Message) => {
+    if (m.body[0] === BLUEZ) {
+      // BlueZ starting again ends every search; start ours afresh.
+      unwatchScan?.();
+      unwatchScan = null;
+      scanning = null;
+      checkPhones();
+      return;
+    }
     if (m.body[0] !== AVAHI) return;
     unwatchGroup?.();
     unwatchGroup = null;
@@ -828,7 +1085,7 @@ async function systemBus(): Promise<DBusConnection> {
 }
 
 function scheduleRetry(): void {
-  if (leases.size === 0 || retry) return;
+  if (!receiving() || retry) return;
   retry = setTimeout(() => {
     retry = null;
     void apply();
@@ -859,7 +1116,7 @@ async function publish(): Promise<void> {
       }
     });
   }
-  const name = Buffer.concat([Buffer.from([0x23]), endpointId, Buffer.from([0xfc, 0x9f, 0x5e, 0, 0])]).toString('base64url');
+  const name = Buffer.concat([Buffer.from([0x23]), endpointId, SERVICE_HASH, Buffer.from([0, 0])]).toString('base64url');
   const txt = [Buffer.from(`n=${endpointInfo().toString('base64url')}`)];
   await bus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Reset' });
   await bus.call({
@@ -879,19 +1136,24 @@ async function withdraw(): Promise<void> {
   await avahiBus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Reset' }).catch(() => {});
 }
 
-/** Bring the server and the announcement in line with whether a window is receiving; `again` announces anew. */
+/**
+ * Bring the server and the announcements in line with whether a window is
+ * receiving, a phone's share sheet is open, and shares over Bluetooth may
+ * move to the hotspot; `again` announces anew.
+ */
 function apply(again = false): Promise<void> {
   applying = applying.then(async () => {
-    if (leases.size === 0) {
+    advertiseOverBluetooth(listening() ? bleAdvertisement : null);
+    if (!receiving()) {
       clearTimeout(retry ?? undefined);
       retry = null;
       await withdraw();
-      // Stops listening now; connections still open are ended just below.
+      error = null;
+    }
+    if (!serving()) {
+      // Stops listening for new devices; shares already connected go on.
       server?.close();
       server = null;
-      error = null;
-      // Closing the last window that receives ends every share, asking or arriving.
-      for (const connection of [...connections.values()]) connection.cancel();
       changed();
       return;
     }
@@ -906,6 +1168,10 @@ function apply(again = false): Promise<void> {
       }
     } catch (e) {
       error = `Couldn’t listen for devices: ${e instanceof Error ? e.message : String(e)}`;
+      changed();
+      return;
+    }
+    if (!receiving()) {
       changed();
       return;
     }
@@ -950,7 +1216,111 @@ function release(id: number): Promise<void> {
   if (!drop) return applying;
   drop();
   leases.delete(id);
+  // Closing the last window ends the shares it was showing, asking or arriving.
+  if (leases.size === 0) for (const connection of [...connections.values()]) if (connection.windowed) connection.cancel();
   return apply();
+}
+
+// ---------------------------------------------------------------------------
+// The user's phones opening their share sheet
+// ---------------------------------------------------------------------------
+
+function hasFastInit(serviceData: unknown): boolean {
+  const map = unwrap(serviceData);
+  return map instanceof Map && map.has(FAST_INIT_UUID);
+}
+
+/**
+ * One of the user's phones opened its share sheet: be visible over
+ * Bluetooth for a while, with the hotspot ready for the share to move to.
+ */
+function shareSheetOpened(): void {
+  const wasVisible = listening();
+  nearbyUntil = Date.now() + NEARBY_MS;
+  nearbyHotspot ??= holdHotspot();
+  clearTimeout(nearbyTimer ?? undefined);
+  nearbyTimer = setTimeout(() => {
+    nearbyTimer = null;
+    nearbyHotspot?.();
+    nearbyHotspot = null;
+    void apply();
+  }, NEARBY_MS + 100);
+  if (!wasVisible) void apply();
+}
+
+/** A phone connected over Bluetooth (quickshare-bluetooth.mts). */
+function bluetoothConnected(socket: net.Socket, peer: BluetoothPeer): void {
+  if (!listening() || connections.size >= MAX_CONNECTIONS) {
+    socket.destroy();
+    return;
+  }
+  track(new Connection(socket, { bluetooth: peer }));
+  // The server, for the hotspot it'll be offered.
+  void apply();
+}
+
+async function startScan(): Promise<void> {
+  const bus = await systemBus();
+  const [objects] = (await bus.call({ destination: BLUEZ, path: '/', interface: 'org.freedesktop.DBus.ObjectManager', member: 'GetManagedObjects' })) as [
+    Map<string, Map<string, Map<string, unknown>>>,
+  ];
+  const adapter = [...objects].find(([, ifaces]) => unwrap(ifaces.get(ADAPTER)?.get('Powered')) === true)?.[0];
+  if (!adapter) return;
+  const [owner] = await bus.bus('GetNameOwner', 's', [BLUEZ]);
+  const subscriptions = [
+    bus.subscribe({ sender: String(owner), interface: 'org.freedesktop.DBus.ObjectManager', member: 'InterfacesAdded' }, (m: Message) => {
+      const ifaces = m.body[1] as Map<string, Map<string, unknown>>;
+      if (hasFastInit(ifaces.get(DEVICE)?.get('ServiceData'))) shareSheetOpened();
+    }),
+    bus.subscribe({ sender: String(owner), interface: 'org.freedesktop.DBus.Properties', member: 'PropertiesChanged' }, (m: Message) => {
+      if (m.body[0] === DEVICE && hasFastInit((m.body[1] as Map<string, unknown>).get('ServiceData'))) shareSheetOpened();
+    }),
+  ];
+  unwatchScan = () => subscriptions.forEach((unsubscribe) => unsubscribe());
+  // This connection's own search, with its own filter: BlueZ merges it with
+  // Settings' searches, and stops it alone. Not by UUID: BlueZ matches that
+  // against advertised services, and the beacon has its UUID only as
+  // service data, so it would never get through. Close by instead: the phone
+  // is in the user's hand, and devices further off stay out of Settings'
+  // list of devices nearby.
+  const filter = new Map<string, Variant>([
+    ['Transport', new Variant('s', 'le')],
+    ['DuplicateData', new Variant('b', true)],
+    ['RSSI', new Variant('n', NEARBY_RSSI)],
+  ]);
+  await bus.call({ destination: BLUEZ, path: adapter, interface: ADAPTER, member: 'SetDiscoveryFilter', signature: 'a{sv}', body: [filter] });
+  await bus.call({ destination: BLUEZ, path: adapter, interface: ADAPTER, member: 'StartDiscovery' }).catch((e: unknown) => {
+    if (!(e instanceof DBusError && e.type === 'org.bluez.Error.InProgress')) throw e;
+  });
+  scanning = adapter;
+}
+
+async function stopScan(): Promise<void> {
+  const adapter = scanning;
+  scanning = null;
+  unwatchScan?.();
+  unwatchScan = null;
+  if (adapter && avahiBus) await avahiBus.call({ destination: BLUEZ, path: adapter, interface: ADAPTER, member: 'StopDiscovery' }).catch(() => {});
+}
+
+let checkTimer: NodeJS.Timeout | null = null;
+
+/** Listen for share sheets while one of the user's phones may send and is connected; not otherwise. */
+function checkPhones(): void {
+  if (checkTimer) return;
+  checkTimer = setTimeout(() => {
+    checkTimer = null;
+    checkingPhones = checkingPhones.then(async () => {
+      const phones = await connectedFilePhones().catch(() => []);
+      try {
+        if (phones.length && !scanning) await startScan();
+        else if (!phones.length && scanning) await stopScan();
+      } catch (e) {
+        console.warn('quickshare: listening for share sheets failed', e);
+        await stopScan();
+      }
+    });
+  }, 500);
 }
 
 function transferArg(id: unknown): Connection {
@@ -972,4 +1342,17 @@ export function registerQuickShareHandlers(options: Deps): void {
   handle('quickshare:stop', (event) => release(event.sender.id));
   handle('quickshare:respond', (_event, id, accept) => transferArg(id).respond(accept === true));
   handle('quickshare:cancel', (_event, id) => transferArg(id).cancel());
+
+  onBluetooth(bluetoothConnected, changed);
+  onPhonesChanged(checkPhones);
+  // A phone connecting or going, Bluetooth turned on or off, BlueZ starting again.
+  onBluetoothChanged(() => {
+    checkPhones();
+    bluetoothMayWork();
+  });
+  checkPhones();
+  app.on('will-quit', () => {
+    quitBluetooth();
+    quitHotspot();
+  });
 }

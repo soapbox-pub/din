@@ -113,7 +113,7 @@ export const phoneArea: Area = {
     command('phone', 'disconnect', 'Stop talking to a phone until it’s connected again (din phone refresh)', [PHONE], async (args) => {
       await call(phone().disconnect((await device(args.optString('phone'))).id));
     }),
-    command('phone', 'receive-files', 'Whether files the phone shares over Bluetooth are saved to Downloads', [
+    command('phone', 'receive-files', 'Whether the phone can share files here, over Bluetooth or with Quick Share while it’s connected', [
       { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off (leave out to see which)' },
       PHONE,
     ], async (args) => {
@@ -124,7 +124,7 @@ export const phoneArea: Area = {
       await call(phone().setReceiveFiles(p.id, state === 'on'));
       return { text: `Receiving files from ${p.name} is ${state}` };
     }),
-    command('phone', 'quick-share', 'Open Quick Share, so Android devices on the same Wi-Fi can share files and links here while it’s open', [], async (_args, ctx) => {
+    command('phone', 'quick-share', 'Open Quick Share, so Android devices nearby can share files and links here while it’s open', [], async (_args, ctx) => {
       ctx.actions.open('quick-share');
       return { text: 'Quick Share is open; accepting what’s shared is on screen' };
     }),

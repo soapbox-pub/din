@@ -89,6 +89,7 @@ let
       # The cursor converter's sandboxed page, bundled above.
       install -m444 electron/cursor-converter.js $out/share/din/cursor-converter.js
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+      install -m555 electron/quickshare-bt.py $out/share/din/quickshare-bt.py
       # Publisher's INDD reader (electron/indd.mts), committed prebuilt.
       install -m444 electron/indd.wasm $out/share/din/indd.wasm
       # The ad blocker's extension, with its engine bundle built above.
@@ -236,6 +237,18 @@ let
     runtimeInputs = with pkgs; [ coreutils gnused kmod ];
     text = builtins.readFile ./din-wifi.sh;
   };
+
+  # Adds and removes the interface Quick Share's Wi-Fi hotspot runs on (see
+  # the script, and electron/quickshare-hotspot.mts).
+  din-hotspot = pkgs.writeShellApplication {
+    name = "din-hotspot";
+    runtimeInputs = with pkgs; [ coreutils iw ];
+    text = builtins.readFile ./din-hotspot.sh;
+  };
+
+  # Quick Share's Bluetooth helper (electron/quickshare-bt.py) takes the
+  # RFCOMM connections BlueZ hands over on D-Bus.
+  quickshare-python = pkgs.python3.withPackages (ps: [ ps.dbus-python ps.pygobject3 ]);
 
   # Puts what the boot screen shows on the boot partition (see the script,
   # and electron/boot-screen.mts).
@@ -405,7 +418,7 @@ let
   # jmtpfs, ifuse and libimobiledevice's tools for phones plugged in by USB
   # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
-  # Tor's and the WiFi reset's helpers, and for checking the password
+  # Tor's, the WiFi reset's and Quick Share's hotspot's helpers, and for checking the password
   # Din takes for sudo (electron/askpass.mts).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
     export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH
@@ -422,6 +435,8 @@ let
     export DIN_TIME=${din-time}/bin/din-time
     export DIN_TOR=${din-tor}/bin/din-tor
     export DIN_WIFI=${din-wifi}/bin/din-wifi
+    export DIN_HOTSPOT=${din-hotspot}/bin/din-hotspot
+    export DIN_QUICKSHARE_PYTHON=${quickshare-python}/bin/python3
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
     export DIN_PASSWORD=${din-password}/bin/din-password
@@ -684,8 +699,11 @@ in
     };
   };
   # Quick Share's port (PORT in electron/quickshare.mts). Nothing listens
-  # on it unless Quick Share's window is open.
+  # on it unless Quick Share's window is open, or its hotspot is up.
   networking.firewall.allowedTCPPorts = [ 47331 ];
+  # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
+  # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.
+  networking.firewall.interfaces.dinqs0.allowedUDPPorts = [ 53 67 ];
 
   # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`
@@ -753,6 +771,8 @@ in
       "${din-time}/bin/din-time"
       "${din-tor}/bin/din-tor"
       "${din-wifi}/bin/din-wifi reset"
+      "${din-hotspot}/bin/din-hotspot up"
+      "${din-hotspot}/bin/din-hotspot down"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.
@@ -943,11 +963,21 @@ in
   # which a USB stick or disk (subclass 06) never is. It has to sort before
   # 73-seat-late.rules, which turns the `uaccess` tag into an ACL, so it can't
   # go in extraRules (99-local.rules).
+  #
+  # The third keeps Quick Share's hotspot interface (os/din-hotspot.sh) from
+  # restarting wpa_supplicant as it comes and goes, which drops the
+  # computer's own Wi-Fi connection: NixOS's wpa_supplicant rule in
+  # 99-local.rules does that for any Wi-Fi interface, and NetworkManager,
+  # which tells wpa_supplicant about interfaces itself, doesn't need it. Its
+  # `:=` makes the empty list final, so the later rule can't add to it.
   services.udev.packages = [
     pkgs.brightnessctl
     pkgs.libmtp
     (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
+    '')
+    (pkgs.writeTextDir "lib/udev/rules.d/98-din-hotspot.rules" ''
+      ACTION=="add|remove", SUBSYSTEM=="net", KERNEL=="dinqs0", RUN:=""
     '')
   ];
 

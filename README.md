@@ -625,15 +625,33 @@ files — `git add` new source files before `npm run os:build`.
   share for its progress and then Open or Show in Files. Other devices are
   turned away; "Receive files" on the phone's page (`din phone
   receive-files`) turns it off.
-- Android phones and tablets on the same network can share files, text and
-  links with Quick Share (`electron/quickshare.mts`) while the Quick Share
-  app is open (Settings → Phone opens it, as does `din phone quick-share`).
-  Only then does Din announce itself over mDNS through Avahi and listen on
-  TCP 47331 (open in the firewall); closing the window stops both. No server
-  is involved. Anyone on the network could be sending, so each share asks in
-  the window first, with the code the sender's screen shows, then shows its
-  progress there and lands in Downloads. Wi-Fi Direct and hotspot upgrades are
-  turned down, so both devices have to be on the same network.
+- Android phones and tablets can share files, text and links with Quick
+  Share (`electron/quickshare.mts`) while the Quick Share app is open
+  (Settings → Phone opens it, as does `din phone quick-share`). Only then
+  does Din announce itself on the network over mDNS through Avahi and listen
+  on TCP 47331 (open in the firewall), and send the Bluetooth LE
+  advertisement Android receivers send; closing the window stops them. No
+  server is involved. Anyone could be sending, so each share asks in the
+  window first, with the code the sender's screen shows, then shows its
+  progress there and lands in Downloads.
+- A phone added in Settings → Phone with "Receive files" on doesn't need the
+  window: while it's connected over Bluetooth, Din listens for the beacon its
+  share sheet sends, and advertises over Bluetooth for 90 seconds after. The
+  phone connects over Bluetooth (RFCOMM, through `electron/quickshare-bt.py`,
+  since Node can't take the socket BlueZ hands over), on a link encrypted
+  with the pairing's key, which proves which phone it is, so its share
+  arrives without asking, in a notification. Anything else connecting that
+  way is asked about in a notification, with the code.
+- Bluetooth is slow, so a share over it moves to a WPA2 hotspot Din hosts on
+  the Wi-Fi card alongside its own connection, on the same channel
+  (`electron/quickshare-hotspot.mts`); Android phones leave their own Wi-Fi
+  while the share sheet is open, so a hotspot is what both can reach. Adding
+  its interface (`dinqs0`) needs root, so `os/din-hotspot.sh` does that
+  through sudo, and NetworkManager runs the network from a profile it doesn't
+  save, with a new name and password each time. A udev rule keeps the
+  interface coming and going from restarting wpa_supplicant (NixOS's rule
+  for any Wi-Fi interface), which would drop the computer's own connection.
+  Without the helper (outside DinOS) the share stays on Bluetooth.
 - On hardware, Din runs GPU-accelerated (Mesa via `hardware.graphics`, plus
   redistributable firmware). Only the QEMU demo variant passes
   `--disable-gpu` (no virgl) and falls back to software rendering.

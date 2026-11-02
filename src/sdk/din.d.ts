@@ -802,8 +802,9 @@ export type Permission =
   | 'capture'
   /**
    * Receiving with Quick Share (`din.system.quickShare`): this computer is
-   * visible to Android devices on the network while the app has asked to
-   * receive, and the app accepts or declines what they offer. Quick Share.
+   * visible to Android devices on the network and over Bluetooth while the
+   * app has asked to receive, and the app accepts or declines what they
+   * offer. Quick Share.
    */
   | 'quickshare'
   /**

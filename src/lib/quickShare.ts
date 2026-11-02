@@ -1,11 +1,13 @@
 /**
  * Quick Share (`din.system.quickShare`, for the Quick Share app with the
- * `quickshare` permission): Android phones, tablets and Chromebooks on the
- * same network share files and links to this computer from their share
- * sheet, as they do with each other. Run in Electron main by
- * electron/quickshare.mts; this computer is visible only while a window has
- * asked to receive. Types shared by both sides (main checks every argument
- * itself).
+ * `quickshare` permission): Android phones, tablets and Chromebooks nearby
+ * share files and links to this computer from their share sheet, over the
+ * network or Bluetooth, as they do with each other. Run in Electron main by
+ * electron/quickshare.mts; this computer is visible while a window has asked
+ * to receive, and over Bluetooth for a little while after one of the user's
+ * connected phones opens its share sheet. Types shared by both sides (main
+ * checks every argument itself), and the desktop's getter: it shows shares
+ * no window is showing.
  */
 
 export interface QuickShareState {
@@ -13,7 +15,7 @@ export interface QuickShareState {
   listening: boolean;
   /** The name this computer shows up as. */
   name: string;
-  /** Receiving and announced on the network, so devices can see it. */
+  /** Announced on the network or over Bluetooth, so devices can see it (because a window is receiving, or a phone opened its share sheet). */
   visible: boolean;
   /** Why it isn't visible though it's receiving, in words for the user. */
   error: string | null;
@@ -47,6 +49,13 @@ export interface QuickShareTransfer {
   total: number;
   /** Why something didn't arrive, in words for the user. */
   error: string | null;
+  /**
+   * It arrived with no Quick Share window open (a phone's share sheet made
+   * this computer visible): the desktop shows it in a notification, and
+   * asks about it there unless it's from one of the user's own phones, and
+   * windows leave it alone.
+   */
+  background: boolean;
 }
 
 export interface QuickShareBridge {
@@ -63,4 +72,20 @@ export interface QuickShareBridge {
   cancel(id: string): Promise<void>;
   onChanged(cb: (state: QuickShareState) => void): () => void;
   onTransfer(cb: (transfer: QuickShareTransfer) => void): () => void;
+}
+
+/** The desktop's part (`window.dinos.quickShare`): answering and stopping the shares no window is showing. */
+export type QuickShareDesktopBridge = Pick<QuickShareBridge, 'respond' | 'cancel' | 'onTransfer'>;
+
+declare global {
+  interface Dinos {
+    /** Present only inside the Electron shell. */
+    quickShare?: QuickShareDesktopBridge;
+  }
+}
+
+/** The desktop's Quick Share bridge (QuickShareHost's notifications), or undefined outside Electron. */
+export function getQuickShareDesktopBridge(): QuickShareDesktopBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.dinos?.quickShare;
 }

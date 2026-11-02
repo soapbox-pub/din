@@ -217,7 +217,7 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
       <Button
         variant="outline"
         className="self-start"
-        title="Android phones and tablets on the same Wi-Fi can share files and links here while Quick Share is open"
+        title="Android phones and tablets nearby can share files and links here while Quick Share is open"
         onClick={() => open('quick-share')}
       >
         <Share2 className="size-4" aria-hidden />
@@ -403,7 +403,7 @@ function PhoneDetails({
           <DetailsGroup>
             <ToggleRow
               label="Receive files"
-              description="Files you share to this computer from the phone over Bluetooth are saved to Downloads."
+              description="Share from the phone to this computer over Bluetooth, or with Quick Share while it’s connected, without being asked. Files are saved to Downloads."
               checked={phone.receiveFiles}
               onChange={onReceiveFiles}
             />

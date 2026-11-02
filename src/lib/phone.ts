@@ -29,7 +29,7 @@ export interface PhoneDevice {
   unread: number;
   /** When it last connected (ms), or null if it never has. */
   lastSeen: number | null;
-  /** Whether files it shares over Bluetooth are saved to Downloads (electron/phone-receive.mts). */
+  /** Whether it may share files here: over Bluetooth (electron/phone-receive.mts), and with Quick Share while it's connected (electron/quickshare.mts). */
   receiveFiles: boolean;
 }
 

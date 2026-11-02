@@ -19,7 +19,10 @@
 //
 // Files a phone shares over Bluetooth land in Downloads (phone-receive.mts),
 // from phones here with "Receive files" on; `phone:receive` (the shell's
-// alone) tells the desktop how each share is going.
+// alone) tells the desktop how each share is going. While one of them is
+// connected, opening its share sheet makes this computer visible to its Quick
+// Share too (quickshare.mts, connectedFilePhones), and what it shares that
+// way over Bluetooth arrives without asking (fileSender).
 //
 // Types are src/lib/phone.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
@@ -202,8 +205,16 @@ function flush(id: string): void {
 // ---------------------------------------------------------------------------
 
 let emitTimer: NodeJS.Timeout | null = null;
+const phoneListeners = new Set<() => void>();
+
+/** Hear when the phones, or whether they may send files, change (quickshare.mts). */
+export function onPhonesChanged(listener: () => void): () => void {
+  phoneListeners.add(listener);
+  return () => phoneListeners.delete(listener);
+}
 
 function changed(): void {
+  for (const listener of phoneListeners) listener();
   if (emitTimer) return;
   emitTimer = setTimeout(() => {
     emitTimer = null;
@@ -512,13 +523,29 @@ function setReceiveFiles(phoneId: string, on: boolean): void {
   changed();
 }
 
-/** The phone a file from this Bluetooth address comes from, if it may send files: still paired, and receiving. */
-async function fileSender(address: string): Promise<{ phoneId: string; name: string } | null> {
+/**
+ * The phone a file from this Bluetooth address comes from, if it may send
+ * files: still paired, and receiving. Over OBEX (phone-receive.mts), and
+ * Quick Share over Bluetooth (quickshare.mts).
+ */
+export async function fileSender(address: string): Promise<{ phoneId: string; name: string } | null> {
   const p = phones.find((x) => x.address.toUpperCase() === address.toUpperCase());
   if (!p || p.receiveFiles === false) return null;
   const paired = await bluetoothPhones().catch(() => null);
   if (!paired?.some((x) => x.address.toUpperCase() === p.address.toUpperCase())) return null;
   return { phoneId: p.id, name: p.name };
+}
+
+/**
+ * The phones that may share files here and are connected over Bluetooth now:
+ * Quick Share makes this computer visible to them when one of them opens its
+ * share sheet (quickshare.mts).
+ */
+export async function connectedFilePhones(): Promise<{ phoneId: string; name: string }[]> {
+  const paired = await bluetoothPhones().catch(() => null);
+  if (!paired) return [];
+  const connected = new Set(paired.filter((x) => x.connected).map((x) => x.address.toUpperCase()));
+  return phones.filter((p) => p.receiveFiles !== false && connected.has(p.address.toUpperCase())).map((p) => ({ phoneId: p.id, name: p.name }));
 }
 
 function forget(phoneId: string): void {

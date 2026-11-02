@@ -20,12 +20,13 @@ import type { Din } from '@/sdk/din';
 import { useCloseGuard, useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
 
 /**
- * Quick Share: Android phones and tablets on the same network share files
- * and links here from their share sheet. This computer is visible to them
- * only while this window is open (electron/quickshare.mts ends it when the
- * window goes), the way AirDrop's window and Android's Receive screen work.
- * Each share asks here, with the code the sender's screen shows too, since
- * anyone on the network could be sending; then its progress, then what
+ * Quick Share: Android phones and tablets nearby share files and links here
+ * from their share sheet, over the network or Bluetooth. This computer is
+ * visible to them while this window is open (electron/quickshare.mts ends it
+ * when the window goes), the way AirDrop's window and Android's Receive
+ * screen work. Each share asks here, with the code the sender's screen shows
+ * too, since anyone could be sending (not one from the user's own phone over
+ * Bluetooth, which proves it's theirs); then its progress, then what
  * arrived, all in the window. Closing it while a share is going asks first,
  * and stops the share.
  */
@@ -41,6 +42,8 @@ export function QuickShare() {
     if (!bridge) return;
     const offChanged = bridge.onChanged(setState);
     const offTransfer = bridge.onTransfer((t) => {
+      // Shares that came with no window open are the desktop's to ask about.
+      if (t.background) return;
       setTransfers((list) => {
         const at = list.findIndex((x) => x.id === t.id);
         if (at < 0) return [t, ...list];

@@ -31,6 +31,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { app, ipcMain, session } from 'electron';
 import { setOnionProxyTorPort, startOnionProxy } from './onion-proxy.mts';
+import { HOTSPOT_IFACE } from './quickshare-hotspot.mts';
 import { CommandError, runCommand } from './system.mts';
 
 type AssertSender = (event: Electron.IpcMainInvokeEvent) => void;
@@ -554,7 +555,8 @@ interface NmDevice {
 
 async function firstDevice(type: string): Promise<NmDevice | null> {
   const rows = terseRows(await nmcli(['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'device', 'status']));
-  const row = rows.find((fields) => fields[1] === type);
+  // Not Quick Share's hotspot, which NetworkManager lists as a second WiFi device while it's up.
+  const row = rows.find((fields) => fields[1] === type && fields[0] !== HOTSPOT_IFACE);
   if (!row) return null;
   return { iface: row[0], state: row[2], connection: row[3] || null };
 }
