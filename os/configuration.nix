@@ -822,7 +822,11 @@ in
       "${din-password}/bin/din-password sudo revoke"
     ];
   }];
+  # sudo finds commands only where root's own programs are: on the user's
+  # PATH (~/.cargo/bin, ~/.opencode/bin, ~/.nix-profile/bin) a `sudo foo`
+  # the user approved could run a foo any program of theirs put there.
   security.sudo.extraConfig = ''
+    Defaults secure_path="/run/wrappers/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin"
     @includedir /run/din/sudoers.d
     @includedir /var/lib/din/sudoers.d
     @includedir /etc/sudoers.d
