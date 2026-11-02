@@ -2,7 +2,19 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { AppDefinition } from '@/lib/apps';
 import { endLaunching } from '@/lib/appLaunches';
 import { closeIntercepted } from '@/lib/closeGuards';
-import { areaAt, areaFor, primaryArea, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
+import {
+  areaAt,
+  areaFor,
+  EVEN_SPLIT,
+  primaryArea,
+  snapRect,
+  zoneRow,
+  zoneSide,
+  type Rect,
+  type SnapSplit,
+  type SnapZone,
+  type WorkArea,
+} from '@/lib/monitors';
 import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
 import { fullscreenMonitorIds } from '@/lib/pageFullscreen';
@@ -113,12 +125,17 @@ export interface WindowState {
   /** Whether the window fills its monitor's work area. */
   maximized: boolean;
   /**
-   * Half-monitor edge tile, or null. Like `maximized`, this is a layout
-   * derived from the monitor (the window renders at half its width against
-   * the given edge); the window's own x/y/width/height keep their pre-tile
-   * values so `restore` can return it there.
+   * The half or quarter of its monitor the window is snapped to, or null.
+   * Like `maximized`, this is a layout derived from the monitor; the
+   * window's own x/y/width/height keep their pre-tile values so `restore`
+   * can return it there.
    */
-  snapped: 'left' | 'right' | null;
+  snapped: SnapZone | null;
+  /**
+   * Where the borders between snapped windows sit, shared by every window
+   * snapped on its monitor's workspace (see snapGroup); null is even.
+   */
+  split: SnapSplit | null;
   /**
    * The monitor (work area id) a maximized or tiled window fills; null
    * otherwise. Kept apart from x/y because those hold the restore spot,
@@ -177,14 +194,24 @@ export interface WindowState {
 
 /**
  * Where a window is painted, in workspace coordinates: its monitor's work
- * area when maximized, its tile while tiled, half its monitor's work area
- * when edge-tiled, else its own geometry.
+ * area when maximized, its tile while tiled, its half or quarter of its
+ * monitor's work area when snapped, else its own geometry.
  */
 export function windowRect(w: WindowState, areas: WorkArea[]): Rect {
   if (w.tiled && !w.maximized) return w.tiled;
   if (!w.maximized && !w.snapped) return { x: w.x, y: w.y, width: w.width, height: w.height };
   const area = areas.find((a) => a.id === w.monitor) ?? areaFor(areas, w);
-  return snapRect(area, w.maximized ? 'max' : (w.snapped ?? 'left'));
+  return snapRect(area, w.maximized ? 'max' : (w.snapped ?? 'left'), w.split ?? EVEN_SPLIT);
+}
+
+/**
+ * The windows snapped on a monitor's workspace, which share their borders
+ * (`split`), and which Snap Assist fills the rest of the monitor around.
+ */
+export function snapGroup(windows: WindowState[], areaId: string, workspace: number): WindowState[] {
+  return windows.filter(
+    (w) => w.snapped !== null && !w.maximized && !w.closing && w.monitor === areaId && w.workspace === workspace,
+  );
 }
 
 /** Whether a window is on screen: not minimized, closing, or on another workspace. */
@@ -660,6 +687,7 @@ export function useWindows(
           closing: false,
           maximized: false,
           snapped: null,
+          split: null,
           monitor: null,
           restore: null,
           frameless,
@@ -677,6 +705,7 @@ export function useWindows(
             minimized: placed.minimized,
             maximized: placed.maximized,
             snapped: placed.snapped,
+            split: placed.split ?? null,
             monitor: placed.monitor,
             restore: placed.restore,
             workspace: Math.min(placed.workspace, WORKSPACE_COUNT),
@@ -865,42 +894,65 @@ export function useWindows(
   );
 
   /**
-   * Tile a window to the left or right half of a monitor (no-op if already
-   * tiled to that side there). `restore` overrides the geometry remembered
-   * for un-tiling - the drag-to-edge snap passes the window's pre-drag spot
-   * so a later restore returns it there. Like `maximize`, the tile is
-   * derived from the monitor, so the window's x/y/width/height are left
-   * untouched. `monitor` defaults to the one the window is on.
+   * Snap a window to a half or quarter of a monitor (no-op if already
+   * snapped there). `restore` overrides the geometry remembered for
+   * un-tiling - the drag-to-edge snap passes the window's pre-drag spot so
+   * a later restore returns it there. Like `maximize`, the tile is derived
+   * from the monitor, so the window's x/y/width/height are left untouched.
+   * `monitor` defaults to the one the window is on. The window takes the
+   * borders of the windows already snapped there, or even ones.
    */
   const tile = useCallback(
     (
       id: string,
-      side: 'left' | 'right',
+      zone: SnapZone,
       restore?: { x: number; y: number; width: number; height: number },
       monitor?: string,
     ) => {
-      setWindows((ws) => {
-        const top = maxZ(ws);
-        return ws.map((w) => {
-          if (w.id !== id) return w;
-          const target = monitor ?? w.monitor ?? areaOf(getAreas(), w)?.id ?? null;
-          return w.snapped !== side || w.monitor !== target
-            ? {
-                ...w,
-                snapped: side,
-                maximized: false,
-                monitor: target,
-                restore:
-                  restore ??
-                  w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
-                z: top + 1,
-              }
-            : w;
-        });
+      update((s) => {
+        const w = s.windows.find((x) => x.id === id);
+        if (!w) return s;
+        const areas = getAreas();
+        const target = monitor ?? w.monitor ?? areaOf(areas, w)?.id ?? null;
+        if (w.snapped === zone && w.monitor === target && !w.maximized) return s;
+        const workspace =
+          target !== null && target !== homeArea(areas, w)?.id ? activeWorkspace(s.active, target) : w.workspace;
+        const split = target !== null ? (snapGroup(s.windows, target, workspace).find((x) => x.id !== id)?.split ?? null) : null;
+        const top = maxZ(s.windows);
+        return {
+          ...s,
+          windows: s.windows.map((x) =>
+            x.id === id
+              ? {
+                  ...x,
+                  snapped: zone,
+                  split,
+                  maximized: false,
+                  monitor: target,
+                  restore: restore ?? x.restore ?? { x: x.x, y: x.y, width: x.width, height: x.height },
+                  z: top + 1,
+                }
+              : x,
+          ),
+        };
       });
     },
-    [getAreas, setWindows],
+    [getAreas, update],
   );
+
+  /**
+   * Move the borders between the windows snapped beside `id` (dragging the
+   * edge one shares with another): every window snapped on its monitor's
+   * workspace takes the new split.
+   */
+  const setSnapSplit = useCallback((id: string, split: SnapSplit) => {
+    setWindows((ws) => {
+      const w = ws.find((x) => x.id === id);
+      if (!w?.snapped || w.monitor === null) return ws;
+      const group = new Set(snapGroup(ws, w.monitor, w.workspace).map((x) => x.id));
+      return ws.map((x) => (group.has(x.id) ? { ...x, split } : x));
+    });
+  }, [setWindows]);
 
   /**
    * Alt+Tab-style focus cycling through the non-minimized windows.
@@ -985,6 +1037,7 @@ export function useWindows(
           closing: false,
           maximized: w.maximized,
           snapped: w.snapped,
+          split: w.split ?? null,
           monitor: w.monitor,
           restore: w.restore,
           frameless: w.frameless,
@@ -1069,7 +1122,12 @@ export function useWindows(
     update((s) => {
       const target = s.windows.find((w) => w.id === id);
       if (!target || target.workspace === n) return s;
-      const moved = { ...s, windows: s.windows.map((w) => (w.id === id ? { ...w, workspace: n } : w)) };
+      // A snapped window takes the borders of those snapped over there.
+      const split =
+        target.snapped && target.monitor !== null
+          ? (snapGroup(s.windows, target.monitor, n)[0]?.split ?? null)
+          : target.split;
+      const moved = { ...s, windows: s.windows.map((w) => (w.id === id ? { ...w, workspace: n, split } : w)) };
       const area = homeArea(getAreas(), target);
       if (!follow || !area) return moved;
       const shown = showWorkspace(moved, getAreas(), area.id, n, false);
@@ -1153,8 +1211,10 @@ export function useWindows(
    * Super+Shift+arrow: a tiled window swaps with the tiled window that way
    * (or, at the edge, moves to the monitor that way). A floating window
    * snaps instead, as Windows' Win+arrows do: left and right tile it to that
-   * half (or bring it back from the other one), up maximizes, and down
-   * restores, or minimizes a window that's already restored.
+   * half (a quarter crosses to the one beside it; a half on the other side
+   * comes back), up and down take a half to its top or bottom quarter and a
+   * quarter back to its half, and otherwise up maximizes and down restores,
+   * or minimizes a window that's already restored.
    */
   const swapDirection = useCallback((dir: Direction) => {
     const areas = getAreas();
@@ -1172,10 +1232,17 @@ export function useWindows(
     }
     const restore = () =>
       unmaximize(focused.id, focused.restore ?? { x: focused.x, y: focused.y, width: focused.width, height: focused.height });
+    const snapTo = (zone: SnapZone) => tile(focused.id, zone, undefined, homeArea(areas, focused)?.id);
+    const zone = focused.maximized ? null : focused.snapped;
+    const row = zone && zoneRow(zone);
     if (dir === 'left' || dir === 'right') {
-      const other = dir === 'left' ? 'right' : 'left';
-      if (focused.snapped === other) restore();
-      else tile(focused.id, dir, undefined, homeArea(areas, focused)?.id);
+      if (zone === (dir === 'left' ? 'right' : 'left')) restore();
+      else if (zone && row && zoneSide(zone) !== dir) snapTo(`${row}-${dir}`);
+      else snapTo(dir);
+    } else if (zone === 'left' || zone === 'right') {
+      snapTo(`${dir === 'up' ? 'top' : 'bottom'}-${zone}`);
+    } else if (zone && row !== (dir === 'up' ? 'top' : 'bottom')) {
+      snapTo(zoneSide(zone));
     } else if (dir === 'up') {
       maximize(focused.id);
     } else if (focused.maximized || focused.snapped) {
@@ -1278,6 +1345,7 @@ export function useWindows(
       maximize,
       unmaximize,
       tile,
+      setSnapSplit,
       toggleMaximize,
       cycleFocus,
       setFrameless,
@@ -1301,7 +1369,7 @@ export function useWindows(
       adoptSession,
       getSession,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

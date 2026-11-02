@@ -45,7 +45,20 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
-import { areaFor, areaNear, hasNeighbor, snapRect, type Rect, type WorkArea } from '@/lib/monitors';
+import {
+  areaFor,
+  areaNear,
+  EVEN_SPLIT,
+  hasNeighbor,
+  snapRect,
+  zoneRow,
+  zoneSide,
+  type Rect,
+  type SnapSplit,
+  type SnapZone,
+  type WorkArea,
+} from '@/lib/monitors';
+import { offerSnapAssist } from '@/lib/snapAssist';
 import { guestElements, isGuestFullscreen } from '@/platform/guest';
 
 /**
@@ -64,18 +77,22 @@ const SNAP_TOP_PX = 6;
 const SNAP_EDGE_PX = 24;
 
 /**
+ * Riding a left or right edge this close to a monitor's top or bottom (at
+ * most a quarter of its height) snaps to that corner's quarter instead of
+ * the half, as does the top edge's last SNAP_EDGE_PX at either end.
+ */
+const SNAP_CORNER_PX = 120;
+
+/**
  * How long a window must stay covered before it's hidden: long enough for
  * the window over it to finish popping in (its open animation scales it up
  * from 95%) and for a burst of raises to settle.
  */
 const COVERED_HIDE_MS = 1000;
 
-/** Which edge a title-bar drag is currently snapping to, or null. */
-type SnapZone = 'top' | 'left' | 'right' | null;
-
-/** The snap a drag would drop into: the zone and the monitor it's on. */
+/** The snap a drag would drop into: maximized (top) or a zone, and the monitor it's on. */
 interface SnapTarget {
-  zone: Exclude<SnapZone, null>;
+  zone: 'top' | SnapZone;
   area: WorkArea;
 }
 
@@ -107,14 +124,49 @@ function tileUnder(clientX: number, clientY: number, self: string): { id: string
 
 function snapTargetAt(areas: WorkArea[], px: number, py: number): SnapTarget | null {
   const { area, x, y } = pointerOn(areas, px, py);
-  // Top wins its (thinner) corner overlap. On the primary monitor the
-  // pointer can be above the work area, over the menu bar: that's the top.
-  if (y - area.y <= SNAP_TOP_PX && !hasNeighbor(areas, area, 'top', x)) return { zone: 'top', area };
-  if (x - area.x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'left', y)) return { zone: 'left', area };
-  if (area.x + area.width - x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'right', y)) {
-    return { zone: 'right', area };
+  const side =
+    x - area.x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'left', y)
+      ? 'left'
+      : area.x + area.width - x <= SNAP_EDGE_PX && !hasNeighbor(areas, area, 'right', y)
+        ? 'right'
+        : null;
+  // On the primary monitor the pointer can be above the work area, over
+  // the menu bar (that's the top), or below it, over the taskbar.
+  if (side) {
+    const corner = Math.min(SNAP_CORNER_PX, area.height / 4);
+    if (y - area.y <= corner) return { zone: `top-${side}`, area };
+    if (area.y + area.height - y <= corner) return { zone: `bottom-${side}`, area };
+    return { zone: side, area };
   }
+  if (y - area.y <= SNAP_TOP_PX && !hasNeighbor(areas, area, 'top', x)) return { zone: 'top', area };
   return null;
+}
+
+/**
+ * The sections of the windows snapped on a monitor's shown workspace
+ * (data-snap-monitor), in the workspace element.
+ */
+function snappedSections(workspace: HTMLElement | null | undefined, areaId: string): HTMLElement[] {
+  return [...(workspace?.querySelectorAll<HTMLElement>(`[data-snap-monitor="${CSS.escape(areaId)}"]`) ?? [])];
+}
+
+/** The borders the windows snapped on a monitor share, but for `self`'s (even, with none). */
+function snapSplitOn(workspace: HTMLElement | null | undefined, areaId: string, self: string): SnapSplit {
+  for (const el of snappedSections(workspace, areaId)) {
+    if (el.dataset.windowId === self) continue;
+    const [x, left, right] = (el.dataset.snapSplit ?? '').split(',').map(Number);
+    if ([x, left, right].every(Number.isFinite)) return { x, left, right };
+  }
+  return EVEN_SPLIT;
+}
+
+/** The edges of a snapped window that border the rest of its monitor, which resize it and its neighbors. */
+function innerEdges(zone: SnapZone): ResizeDir[] {
+  const h = zoneSide(zone) === 'left' ? 'e' : 'w';
+  const row = zoneRow(zone);
+  if (!row) return [h];
+  const v = row === 'top' ? 's' : 'n';
+  return [h, v, `${v}${h}` as ResizeDir];
 }
 
 /**
@@ -336,7 +388,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object, `isTop` or `covered` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
     useWindowActions();
   const { config } = useAppContext();
   // Whether closing plays an effect on a snapshot rather than the CSS pop,
@@ -419,6 +471,11 @@ export const Window = memo(function Window({
     /** The highest the top edge may go (its monitor's work area top). */
     minTop: number;
     cur: { x: number; y: number; width: number; height: number };
+    /**
+     * Resizing a snapped window: the borders it shares with the windows
+     * snapped beside it, as they were and as they are now.
+     */
+    snap?: { area: WorkArea; zone: SnapZone; from: SnapSplit; split: SnapSplit };
   } | null>(null);
   const wobblyRef = useRef<WobblyDrag | null>(null);
   // Cancel handle of whichever window-body animation (genie minimize/restore
@@ -1299,7 +1356,15 @@ export const Window = memo(function Window({
       }
       if (snap?.zone !== s.snap?.zone || snap?.area.id !== s.snap?.area.id) {
         s.snap = snap;
-        setSnapHint(snap ? snapRect(snap.area, snap.zone === 'top' ? 'max' : snap.zone) : null);
+        setSnapHint(
+          snap
+            ? snapRect(
+                snap.area,
+                snap.zone === 'top' ? 'max' : snap.zone,
+                snapSplitOn(el.parentElement, snap.area.id, win.id),
+              )
+            : null,
+        );
       }
 
       const st = wobblyRef.current;
@@ -1355,8 +1420,12 @@ export const Window = memo(function Window({
         // The FLIP into the snap target starts from the drop position, where
         // the window visually sat (the drag never committed geometry).
         paintedRect.current = { x: s.x, y: s.y, width: win.width, height: win.height };
-        if (s.snap.zone === 'top') maximize(win.id, restore, s.snap.area.id);
-        else tile(win.id, s.snap.zone, restore, s.snap.area.id);
+        if (s.snap.zone === 'top') {
+          maximize(win.id, restore, s.snap.area.id);
+        } else {
+          tile(win.id, s.snap.zone, restore, s.snap.area.id);
+          offerSnapAssist(win.id, s.snap.zone, s.snap.area.id);
+        }
         return;
       }
 
@@ -1422,13 +1491,19 @@ export const Window = memo(function Window({
     [onPointerUp],
   );
 
-  /** Begin a resize from `dir`, like startDrag; false while maximized/tiled. */
+  /**
+   * Begin a resize from `dir`, like startDrag; false while maximized/tiled,
+   * or from a snapped window's edge against its monitor's.
+   */
   const startResize = useCallback(
     (dir: ResizeDir, e: ChromePoint) => {
-      if (win.maximized || win.snapped || win.tiled) return false;
+      if (win.maximized || win.tiled) return false;
+      const snapArea = win.snapped ? areasRef.current.find((a) => a.id === win.monitor) : undefined;
+      if (win.snapped && (!snapArea || !innerEdges(win.snapped).includes(dir))) return false;
       focus(win.id);
       // Resizing a still-jiggling window snaps it rigid first.
       stopWobble(false);
+      const split = win.split ?? EVEN_SPLIT;
       resizeState.current = {
         dir,
         px: e.clientX,
@@ -1439,11 +1514,12 @@ export const Window = memo(function Window({
         height: win.height,
         minTop: areaFor(areasRef.current, { x: win.x, y: win.y, width: win.width, height: win.height }).y,
         cur: { x: win.x, y: win.y, width: win.width, height: win.height },
+        snap: snapArea && win.snapped ? { area: snapArea, zone: win.snapped, from: split, split } : undefined,
       };
       beginGesture();
       return true;
     },
-    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.tiled, beginGesture, stopWobble],
+    [focus, win.id, win.x, win.y, win.width, win.height, win.maximized, win.snapped, win.split, win.monitor, win.tiled, beginGesture, stopWobble],
   );
 
   const onResizePointerDown = useCallback(
@@ -1460,6 +1536,30 @@ export const Window = memo(function Window({
     if (!o || !el) return;
     const dx = e.clientX - o.px;
     const dy = e.clientY - o.py;
+
+    if (o.snap) {
+      // Move the border, and with it every window snapped against it.
+      const { area, zone, from } = o.snap;
+      const side = zoneSide(zone);
+      let split = from;
+      if (o.dir.includes('e') || o.dir.includes('w')) {
+        const min = Math.min(MIN_WIDTH, area.width / 2);
+        split = { ...split, x: Math.min(Math.max(from.x * area.width + dx, min), area.width - min) / area.width };
+      }
+      if (o.dir.includes('n') || o.dir.includes('s')) {
+        const min = Math.min(MIN_HEIGHT, area.height / 2);
+        split = { ...split, [side]: Math.min(Math.max(from[side] * area.height + dy, min), area.height - min) / area.height };
+      }
+      o.snap.split = split;
+      for (const section of snappedSections(el.parentElement, area.id)) {
+        const r = snapRect(area, section.dataset.snapZone as SnapZone, split);
+        section.style.left = `${r.x}px`;
+        section.style.top = `${r.y}px`;
+        section.style.width = `${r.width}px`;
+        section.style.height = `${r.height}px`;
+      }
+      return;
+    }
 
     let { x, y, width, height } = o;
 
@@ -1491,8 +1591,12 @@ export const Window = memo(function Window({
     if (!o) return;
     resizeState.current = null;
     endGesture();
+    if (o.snap) {
+      if (o.snap.split !== o.snap.from) setSnapSplit(win.id, o.snap.split);
+      return;
+    }
     resize(win.id, o.cur);
-  }, [resize, win.id, endGesture]);
+  }, [resize, setSnapSplit, win.id, endGesture]);
 
   const onResizePointerUp = useCallback(
     (e: React.PointerEvent) => {
@@ -1560,6 +1664,10 @@ export const Window = memo(function Window({
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
+  // Snapped beside others on the workspace its monitor shows: they share
+  // their borders, which drag (and preview) through these attributes.
+  const snapped = win.snapped !== null && !win.maximized && !win.closing && !win.away;
+  const split = win.split ?? EVEN_SPLIT;
   // A window whose app draws its own title bar (or none) is just the app:
   // no title bar, border, shadow or background, and resize handles only
   // outside it.
@@ -1611,6 +1719,9 @@ export const Window = memo(function Window({
       aria-label={title}
       data-window-id={win.id}
       data-tiled={win.tiled && !win.maximized ? '' : undefined}
+      data-snap-monitor={snapped ? (win.monitor ?? undefined) : undefined}
+      data-snap-zone={snapped ? (win.snapped ?? undefined) : undefined}
+      data-snap-split={snapped ? `${split.x},${split.left},${split.right}` : undefined}
       data-app-name={app?.name}
       onPointerDown={() => focus(win.id)}
       // Raise when focus lands anywhere inside the window (React's onFocus is
@@ -1736,10 +1847,14 @@ export const Window = memo(function Window({
       </div>
       </WindowFrameContext.Provider>
 
-      {/* Tiled windows are sized by the layout (Super+- / Super+=). */}
-      {!flush &&
+      {/* Tiled windows are sized by the layout (Super+- / Super+=); a
+          snapped one only at the edges it shares with the rest of its
+          monitor, moving the windows snapped there along with it. */}
+      {!win.maximized &&
         !win.tiled &&
-        (frameless ? FRAMELESS_RESIZE_HANDLES : RESIZE_HANDLES).map(({ dir, className }) => (
+        (frameless ? FRAMELESS_RESIZE_HANDLES : RESIZE_HANDLES)
+          .filter(({ dir }) => !win.snapped || innerEdges(win.snapped).includes(dir))
+          .map(({ dir, className }) => (
           <div
             key={dir}
             onPointerDown={onResizePointerDown(dir)}

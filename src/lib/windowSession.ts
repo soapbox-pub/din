@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SNAP_ZONES, type SnapSplit, type SnapZone } from '@/lib/monitors';
 import type { TileNode } from '@/lib/tiling';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
 
@@ -61,7 +62,9 @@ const savedWindowSchema = z.object({
   z: z.number(),
   minimized: z.boolean(),
   maximized: z.boolean(),
-  snapped: z.enum(['left', 'right']).nullable(),
+  snapped: z.enum(SNAP_ZONES).nullable(),
+  /** Older sessions have none: even borders. */
+  split: z.object({ x: z.number(), left: z.number(), right: z.number() }).nullable().optional(),
   monitor: z.string().nullable(),
   restore: rectSchema.nullable(),
   frameless: z.boolean(),
@@ -97,7 +100,8 @@ export interface LiveSession {
     minimized: boolean;
     closing: boolean;
     maximized: boolean;
-    snapped: 'left' | 'right' | null;
+    snapped: SnapZone | null;
+    split: SnapSplit | null;
     monitor: string | null;
     restore: { x: number; y: number; width: number; height: number } | null;
     frameless: boolean;
@@ -229,6 +233,7 @@ export function snapshotSession(
         minimized: w.minimized,
         maximized: w.maximized,
         snapped: w.snapped,
+        split: w.split,
         monitor: w.monitor,
         restore: w.restore,
         frameless: w.frameless,

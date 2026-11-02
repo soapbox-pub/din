@@ -18,7 +18,16 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { homeArea, inDirection, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
+import type { SnapZone } from '@/lib/monitors';
+import { offerSnapAssist } from '@/lib/snapAssist';
 import type { Direction } from '@/lib/wmBindings';
+
+const CORNERS: { zone: SnapZone; label: string }[] = [
+  { zone: 'top-left', label: 'Top left' },
+  { zone: 'top-right', label: 'Top right' },
+  { zone: 'bottom-left', label: 'Bottom left' },
+  { zone: 'bottom-right', label: 'Bottom right' },
+];
 
 const DIRECTIONS: { dir: Direction; arrow: string }[] = [
   { dir: 'left', arrow: '←' },
@@ -29,7 +38,7 @@ const DIRECTIONS: { dir: Direction; arrow: string }[] = [
 
 /**
  * A window title bar's right-click menu: minimize, maximize or restore, tile
- * to a half, float or tile (while tiling is on), move to another workspace or
+ * to a half or a quarter, float or tile (while tiling is on), move to another workspace or
  * display, and close. `children` is the title bar itself. The title bar's
  * minimize and maximize buttons pass their handlers in, so both stop the
  * window wobbling the same way.
@@ -71,6 +80,13 @@ export function WindowMenuItems({
   const { monitors } = useMonitors();
 
   const from = homeArea(areas, win);
+  const snappedTo = win.maximized ? null : win.snapped;
+  // A snap from the menu offers the user's other windows for the rest of the monitor.
+  const snap = (zone: SnapZone) => {
+    if (!from) return;
+    tile(win.id, zone, undefined, from.id);
+    offerSnapAssist(win.id, zone, from.id);
+  };
   const others = from
     ? areas.filter((a) => a.id !== from.id).map((a) => ({ item: a, rect: a.bounds }))
     : [];
@@ -112,14 +128,24 @@ export function WindowMenuItems({
           )}
         </>
       )}
-      {!win.tiled && (
+      {!win.tiled && from && (
         <>
-          <ContextMenuItem disabled={win.snapped === 'left'} onSelect={() => tile(win.id, 'left')}>
+          <ContextMenuItem disabled={snappedTo === 'left'} onSelect={() => snap('left')}>
             Tile left
           </ContextMenuItem>
-          <ContextMenuItem disabled={win.snapped === 'right'} onSelect={() => tile(win.id, 'right')}>
+          <ContextMenuItem disabled={snappedTo === 'right'} onSelect={() => snap('right')}>
             Tile right
           </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>Tile to a corner</ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-44">
+              {CORNERS.map(({ zone, label }) => (
+                <ContextMenuItem key={zone} disabled={snappedTo === zone} onSelect={() => snap(zone)}>
+                  {label}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
         </>
       )}
       {config.tilingEnabled && (

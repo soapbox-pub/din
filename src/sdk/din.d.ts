@@ -194,8 +194,8 @@ export interface WindowState {
   visible: boolean;
   minimized: boolean;
   maximized: boolean;
-  /** Half-screen tile, or null. */
-  snapped: 'left' | 'right' | null;
+  /** The half or quarter of the screen it's snapped to, or null. */
+  snapped: 'left' | 'right' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | null;
   /** The page went fullscreen (requestFullscreen). */
   fullscreen: boolean;
   /** Where the window is on the desktop and its size, frame included, in CSS pixels. */

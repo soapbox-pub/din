@@ -259,11 +259,46 @@ export function rectStyle(rect: Rect): { position: 'absolute'; left: number; top
   return { position: 'absolute', left: rect.x, top: rect.y, width: rect.width, height: rect.height };
 }
 
-/** The rect a maximized or edge-tiled window fills in `area`. */
-export function snapRect(area: Rect, mode: 'max' | 'left' | 'right'): Rect {
+export const SNAP_ZONES = ['left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
+
+/** Where on a monitor a window snaps: a half, or a quarter in a corner. */
+export type SnapZone = (typeof SNAP_ZONES)[number];
+
+/**
+ * Where the borders between snapped windows sit, as fractions of the work
+ * area: `x` between the left and right columns, `left` and `right` between
+ * the top and bottom quarters of each column. Snapped windows on a monitor's
+ * workspace share one, so dragging the border between two moves both.
+ */
+export interface SnapSplit {
+  x: number;
+  left: number;
+  right: number;
+}
+
+export const EVEN_SPLIT: SnapSplit = { x: 0.5, left: 0.5, right: 0.5 };
+
+/** The column a zone is in. */
+export function zoneSide(zone: SnapZone): 'left' | 'right' {
+  return zone === 'left' || zone.endsWith('-left') ? 'left' : 'right';
+}
+
+/** The row a zone is in: a half has both. */
+export function zoneRow(zone: SnapZone): 'top' | 'bottom' | null {
+  return zone.startsWith('top') ? 'top' : zone.startsWith('bottom') ? 'bottom' : null;
+}
+
+/** The rect a maximized or snapped window fills in `area`. */
+export function snapRect(area: Rect, mode: 'max' | SnapZone, split: SnapSplit = EVEN_SPLIT): Rect {
   if (mode === 'max') return { x: area.x, y: area.y, width: area.width, height: area.height };
-  const half = Math.round(area.width / 2);
-  return mode === 'left'
-    ? { x: area.x, y: area.y, width: half, height: area.height }
-    : { x: area.x + half, y: area.y, width: area.width - half, height: area.height };
+  const leftWidth = Math.round(area.width * split.x);
+  const side = zoneSide(mode);
+  const x = side === 'left' ? area.x : area.x + leftWidth;
+  const width = side === 'left' ? leftWidth : area.width - leftWidth;
+  const row = zoneRow(mode);
+  if (!row) return { x, y: area.y, width, height: area.height };
+  const topHeight = Math.round(area.height * split[side]);
+  return row === 'top'
+    ? { x, y: area.y, width, height: topHeight }
+    : { x, y: area.y + topHeight, width, height: area.height - topHeight };
 }

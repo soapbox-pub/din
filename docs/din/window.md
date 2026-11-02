@@ -18,7 +18,9 @@ din.window.onChange((s) => setDimmed(!s.focused));
 
 The desktop pushes every change, so reading `state` never waits. Use
 `visible` to pause animation and polling while nobody can see the window;
-the page's own `document.visibilityState` follows it too.
+the page's own `document.visibilityState` follows it too. `snapped` is
+the half (`'left'`, `'right'`) or quarter (`'top-left'`, …) of its screen
+the window is snapped to, or `null`.
 
 ## Title, icon, accent
 

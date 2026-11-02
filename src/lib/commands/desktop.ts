@@ -1,6 +1,7 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import { getBrowserBridge, siteOriginOf } from '@/lib/browser';
 import { appForFile } from '@/lib/fileTypes';
+import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
 import { getFsBridge } from '@/lib/fs';
 import {
   activateNotification, clearNotifications, closeNotification, getNotificationState, notify,
@@ -141,11 +142,11 @@ export const windowsArea: Area = {
     command('windows', 'maximize', 'Maximize a window, or restore it', [WINDOW], (args, ctx) => {
       ctx.actions.toggleMaximize(findWindow(ctx, args.string('window')).id);
     }),
-    command('windows', 'tile', 'Tile a window to half the screen', [
+    command('windows', 'tile', 'Snap a window to half or a quarter of the screen', [
       WINDOW,
-      { name: 'side', type: 'string', positional: true, choices: ['left', 'right'], help: 'Which half' },
+      { name: 'zone', type: 'string', positional: true, choices: [...SNAP_ZONES], help: 'Which half or quarter' },
     ], (args, ctx) => {
-      ctx.actions.tile(findWindow(ctx, args.string('window')).id, args.string('side') as 'left' | 'right');
+      ctx.actions.tile(findWindow(ctx, args.string('window')).id, args.string('zone') as SnapZone);
     }),
     command('windows', 'move', 'Move a window', [
       WINDOW,

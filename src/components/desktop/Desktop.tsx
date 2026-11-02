@@ -22,6 +22,7 @@ import { GuestInputHost } from './GuestInputHost';
 import { CursorEffectsLayer } from './CursorEffectsLayer';
 import { DinDragOverlay } from './DinDragOverlay';
 import { Window } from './Window';
+import { SnapAssist } from './SnapAssist';
 import { WindowSwitcher } from './WindowSwitcher';
 import { FilePickerProvider } from './FilePickerProvider';
 import { FilePickerBridgeHost } from './FilePickerBridgeHost';
@@ -285,6 +286,7 @@ function DesktopSession() {
                           covered={covered.has(win.id)}
                         />
                       ))}
+                      <SnapAssist />
                     </main>
 
                     {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
