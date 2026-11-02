@@ -313,7 +313,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
+          window.focus();
           setAsking(true);
           return true;
         }
@@ -322,8 +322,8 @@ export function useOfficeFile(opts: OfficeFileOptions) {
 
   const closeNow = useCallback(() => {
     setAsking(false);
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   const requestClose = useCallback(() => {
     if (dirtyRef.current) setAsking(true);

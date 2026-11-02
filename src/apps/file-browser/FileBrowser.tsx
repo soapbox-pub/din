@@ -226,7 +226,7 @@ export function FileBrowser() {
         if (index === -1) return ts;
         const next = ts.filter((t) => t.id !== id);
         if (next.length === 0) {
-          din.window.close();
+          window.close();
           return ts;
         }
         setActiveId((current) =>
@@ -239,7 +239,7 @@ export function FileBrowser() {
         return rest;
       });
     },
-    [din],
+    [],
   );
 
   const cycleTab = useCallback(
@@ -282,7 +282,7 @@ export function FileBrowser() {
         // A tab still finding its home directory carries no path.
         const path = cwdsRef.current[id] ?? '';
         // The last tab takes the window with it, once the tab is on its way.
-        if (tabsRef.current.length === 1) setTimeout(() => din.window.close());
+        if (tabsRef.current.length === 1) setTimeout(() => window.close());
         else closeTab(id);
         return { path };
       },

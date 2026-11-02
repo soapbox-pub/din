@@ -1,15 +1,16 @@
 import type { ThemeSnapshot } from '@/sdk/din';
 import { themeFontFaces } from '@/lib/themeFontFaces';
 import { fileThemeIcons } from '@/shared/themeIcons';
-import { onReducedMotionChange, prefersReducedMotion } from '@/shared/reducedMotion';
-import { INCREASE_CONTRAST_ATTRIBUTE, REDUCE_TRANSPARENCY_ATTRIBUTE } from '@/lib/accessibility';
+import { INCREASE_CONTRAST_ATTRIBUTE } from '@/lib/accessibility';
 
 /**
  * The desktop's look as apps get it: every design token as the desktop
- * computes it (profile theme included), its scheme, fonts and file icons. Tailwind's own
- * internals (`--tw-*`) stay out.
+ * computes it (profile theme included, and Increase contrast's stronger
+ * ones), its scheme, fonts and file icons. Tailwind's own internals
+ * (`--tw-*`) stay out. Settings → Accessibility reach apps as media
+ * features instead (electron/accessibility.mts).
  */
-export function themeSnapshot(zoom: number): ThemeSnapshot {
+export function themeSnapshot(): ThemeSnapshot {
   const root = document.documentElement;
   const computed = getComputedStyle(root);
   const tokens: Record<string, string> = {};
@@ -22,10 +23,6 @@ export function themeSnapshot(zoom: number): ThemeSnapshot {
     scheme: root.classList.contains('dark') ? 'dark' : 'light',
     tokens,
     fontFaces: themeFontFaces(),
-    zoom,
-    reducedMotion: prefersReducedMotion(),
-    reducedTransparency: root.hasAttribute(REDUCE_TRANSPARENCY_ATTRIBUTE),
-    increasedContrast: root.hasAttribute(INCREASE_CONTRAST_ATTRIBUTE),
     icons: fileThemeIcons(),
   };
 }
@@ -40,12 +37,10 @@ export function onThemeChange(listener: () => void): () => void {
   const observer = new MutationObserver(schedule);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['class', 'style', 'data-icon-theme', REDUCE_TRANSPARENCY_ATTRIBUTE, INCREASE_CONTRAST_ATTRIBUTE],
+    attributeFilter: ['class', 'style', 'data-icon-theme', INCREASE_CONTRAST_ATTRIBUTE],
   });
-  const stopMotion = onReducedMotionChange(schedule);
   return () => {
     cancelAnimationFrame(frame);
     observer.disconnect();
-    stopMotion();
   };
 }

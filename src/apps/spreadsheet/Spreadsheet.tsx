@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DropdownMenu as Menu } from 'radix-ui';
 import { ClipboardPaste, Copy, FileSpreadsheet, FileText, Grid2x2, Link2, Scissors, Table } from 'lucide-react';
-import { useDin } from '@/sdk/react';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import type { FileFilter } from '@/lib/fileFilters';
 import '@/shared/office/fonts';
@@ -175,7 +174,6 @@ const selOf = (r: number, c: number): Selection => ({ active: { r, c }, ranges: 
  * Opens the file it was launched with; without one it starts a blank workbook.
  */
 export function Spreadsheet() {
-  const din = useDin();
   const [hist, setHist] = useState<Hist>(() => ({ entries: [{ wb: newWorkbook(), label: 'New', sheet: 0, sel: null }], index: 0 }));
   const wb = hist.entries[hist.index].wb;
   const [activeRaw, setActive] = useState(0);
@@ -1389,7 +1387,7 @@ export function Spreadsheet() {
       setMessage('Spreadsheet can only open web (http and https) links.');
       return;
     }
-    din.app.openUrl(url).catch(() => setMessage('Spreadsheet couldn’t open that link.'));
+    window.open(url);
   };
 
   const insertLink = (text: string, url: string) => {

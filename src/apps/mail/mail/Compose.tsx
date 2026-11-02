@@ -224,7 +224,7 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   useWindowTitle(subject.trim() || 'New Message');
 
   useEffect(() => {
-    if (din.window.state.bounds.width > 900) din.window.setBounds({ width: 760, height: 680 });
+    if (din.window.state.bounds.width > 900) window.resizeTo(760, 680);
   }, [din]);
 
   // A message to open, sent here (a restored window can't be told from a
@@ -339,8 +339,8 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   const closing = useRef(false);
   const close = useCallback(() => {
     closing.current = true;
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   const saveDraft = useCallback(async (): Promise<boolean> => {
     if (!mail || !account) return false;

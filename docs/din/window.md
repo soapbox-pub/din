@@ -169,7 +169,8 @@ din.window.setShape([
   window's container still swallows them. `mask-image` clips drawing but
   not clicks, so it isn't used.
 - Moving and resizing are the app's job: `beginMove` from its own grab
-  areas, `beginResize(edge, e)` from its own grips, or `setBounds`.
+  areas, `beginResize(edge, e)` from its own grips, or the web's
+  `window.moveTo` and `resizeTo`.
 
 Minimum and maximum sizes, aspect ratios and windows the user can't
 resize aren't in the API yet; they'll come with the first app that needs
@@ -180,7 +181,7 @@ one.
 ```ts
 grip.addEventListener('pointerdown', (e) => din.window.beginMove(e));
 corner.addEventListener('pointerdown', (e) => din.window.beginResize('se', e));
-din.window.setBounds({ width: 1160, height: 720 });  // Calculator switching to Advanced
+window.resizeTo(1160, 720);                          // Calculator switching to Advanced
 ```
 
 - `beginMove` and `beginResize` hand the gesture to the desktop, which
@@ -199,12 +200,15 @@ din.window.setBounds({ width: 1160, height: 720 });  // Calculator switching to 
   (a frame or two later; 120–160 ms headless) and follows it anywhere.
   After a move, clicks can land at the webview's old spot for about a
   frame.
-- `setBounds` is clamped to the monitor's work area and the min/max
-  size. A tiled or maximized window ignores it until restored.
+- The web's `window.moveTo`, `moveBy`, `resizeTo` and `resizeBy` move
+  and size the window, in the desktop's CSS pixels with its frame included
+  (as `outerWidth` and `outerHeight` are), clamped to the monitor's work
+  area and the min/max size. A move and a resize made together go as one.
+  A tiled or maximized window ignores them until restored.
 - The page's own `window.minimize()`, `window.maximize()` and
   `window.restore()`, from the web's Additional Windowing Controls draft,
   do what the title bar's buttons do: `restore` brings a minimized window
-  back, and un-maximizes or un-tiles one that isn't. `din.window.focus()`
+  back, and un-maximizes or un-tiles one that isn't. `window.focus()`
   does what a click does. To toggle, look at `din.window.state.maximized`.
 
 ## Closing
@@ -214,8 +218,8 @@ din.window.onCloseRequest(() => {
   if (!dirty) return false;            // let it close
   confirmSave().then((save) => {
     if (save === 'cancel') return;
-    if (save === 'save') void saveFile().then(() => din.window.close());
-    else din.window.close();
+    if (save === 'save') void saveFile().then(() => window.close());
+    else window.close();
   });
   return true;                         // keep it open; we're asking
 });
@@ -223,8 +227,8 @@ din.window.onCloseRequest(() => {
 
 The handler must answer at once (true or false); the asking happens after.
 An app that doesn't answer within five seconds is shown as not responding
-([lifecycle.md](lifecycle.md)). `din.window.close()` from the app itself
-never asks its own handler; `din.window.requestClose()` closes as the user
+([lifecycle.md](lifecycle.md)). The web's `window.close()` from the app
+itself never asks its own handler; `din.window.requestClose()` closes as the user
 would, through it (`<WindowControls>`' close button does that).
 
 In React, `useCloseGuard(() => dirty && (askToSave(), true))` from

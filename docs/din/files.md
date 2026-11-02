@@ -54,6 +54,17 @@ these: the pickers resolving with nothing when cancelled (`pickFiles`,
 types listed by extension, and the launch's files (`windowLaunchFile`,
 `useLaunchFiles`).
 
+To hear when something else changes a file (reload prompts), use the
+web's `FileSystemObserver`: `observe(handle)` reports `modified`, and
+`disappeared` when it's removed.
+
+```ts
+const observer = new FileSystemObserver((records) => {
+  if (records.some((r) => r.type === 'modified')) offerReload();
+});
+await observer.observe(handle);
+```
+
 ### What the web's handles can't do: `din.files`
 
 | Call | |
@@ -61,7 +72,6 @@ types listed by extension, and the launch's files (`windowLaunchFile`,
 | `path(handle)` | The full path, to show (a Recent list's folder, Copy Path), and stable for the same file, to compare handles by. Knowing it grants nothing |
 | `parent(handle)` | With `file-folders`, a file's folder as a handle (null for a folder) |
 | `url(handle)` | A `din-file://<token>/<name>` URL to load it from instead of `getFile()` (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
-| `watch(handle, cb)` | Something else modified or removed it (reload prompts) |
 | `persist(handle)` | A token that `restore(token)` turns back into the handle after a restart, for Recent Files and reopening last session's documents |
 
 ## Saving

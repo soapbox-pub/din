@@ -6,7 +6,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { CopyField, PasswordItem, PasswordList } from '@/lib/passwords';
 import { parseTotp, totpCode } from '@/shared/totp';
-import { useDin } from '@/sdk/react';
 import { ItemIcon } from './ItemIcon';
 import { ItemMenuItems, type ItemActions } from './ItemActions';
 import { displayTitle, openableUrl, siteHost, useBridge, useVaultItem } from './vault';
@@ -141,7 +140,6 @@ export function ItemDetail({
   actions: ItemActions;
   onEdit: (item: PasswordItem) => void;
 }) {
-  const din = useDin();
   const bridge = useBridge();
   const { data: item, isLoading, error } = useVaultItem(id);
   const [shown, setShown] = useState<Set<string>>(new Set());
@@ -241,7 +239,7 @@ export function ItemDetail({
                     className="size-8 shrink-0 text-muted-foreground"
                     aria-label={`Open ${siteHost(item.url)}`}
                     title={`Open ${siteHost(item.url)}`}
-                    onClick={() => void din.app.openUrl(url)}
+                    onClick={() => window.open(url)}
                   >
                     <ExternalLink className="size-4" />
                   </Button>

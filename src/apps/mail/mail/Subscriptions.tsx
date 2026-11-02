@@ -200,7 +200,7 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
   const left = sorted.filter((s) => !current.includes(s));
   const chosen = sorted.filter((s) => checked.has(rowKey(s)));
   const accountName = (id: string) => (accounts.length > 1 ? accounts.find((a) => a.id === id)?.name ?? null : null);
-  const openPage = (url: string) => void din.app.openUrl(url);
+  const openPage = (url: string) => window.open(url);
 
   const check = (s: MailSubscription, on: boolean) =>
     setChecked((c) => {
@@ -406,7 +406,6 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
 
 /** Leave the list one message came from, after asking. */
 export function UnsubscribeDialog({ item, onClose }: { item: Item; onClose: () => void }) {
-  const din = useDin();
   const mail = useMail();
   const qc = useQueryClient();
   const message = useMessage(item);
@@ -443,7 +442,7 @@ export function UnsubscribeDialog({ item, onClose }: { item: Item; onClose: () =
     actions = (
       <>
         <DialogButton onClick={onClose}>Cancel</DialogButton>
-        <DialogButton variant="primary" autoFocus onClick={() => { void din.app.openUrl(url); onClose(); }}>Open Page</DialogButton>
+        <DialogButton variant="primary" autoFocus onClick={() => { window.open(url); onClose(); }}>Open Page</DialogButton>
       </>
     );
   } else if (result) {

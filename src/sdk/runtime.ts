@@ -42,6 +42,7 @@ import type {
   NostrEventTemplate,
   Permission,
   SignedNostrEvent,
+  Rect,
   ThemeSnapshot,
   Unsubscribe,
   WindowState,
@@ -59,7 +60,16 @@ import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
-import { bridgeMediaSession, grantOf, installFilePickers, installLaunchQueue, toWebHandle, watchDocumentHead, type Grant } from '@/sdk/standards';
+import {
+  bridgeMediaSession,
+  grantOf,
+  installFilePickers,
+  installFileSystemObserver,
+  installLaunchQueue,
+  toWebHandle,
+  watchDocumentHead,
+  type Grant,
+} from '@/sdk/standards';
 
 /** How the runtime reaches the desktop: the preload's ports, or a port posted into a frame. */
 export interface Transport {
@@ -215,15 +225,31 @@ function rename(error: { name: string; message: string }): Error {
   return e;
 }
 
+/**
+ * Settings → Accessibility reach the app as the web's media features (set
+ * on each app by electron/accessibility.mts); Din's stylesheet keys its
+ * rules for them to root attributes, as the desktop's own root has them.
+ */
+function markAccessibility(): void {
+  const root = document.documentElement;
+  for (const [query, attribute] of [
+    ['(prefers-reduced-motion: reduce)', 'data-reduce-motion'],
+    ['(prefers-reduced-transparency: reduce)', 'data-reduce-transparency'],
+    ['(prefers-contrast: more)', 'data-increase-contrast'],
+  ]) {
+    const media = matchMedia(query);
+    const mark = () => root.toggleAttribute(attribute, media.matches);
+    mark();
+    media.addEventListener('change', mark);
+  }
+}
+
 /** Apply the desktop's theme to this document. */
 function applyTheme(theme: ThemeSnapshot, loadedFaces: Set<string>): void {
   const root = document.documentElement;
   root.classList.remove('light', 'dark');
   root.classList.add(theme.scheme);
   root.style.colorScheme = theme.scheme;
-  root.toggleAttribute('data-reduce-motion', theme.reducedMotion);
-  root.toggleAttribute('data-reduce-transparency', theme.reducedTransparency);
-  root.toggleAttribute('data-increase-contrast', theme.increasedContrast);
   for (const [name, value] of Object.entries(theme.tokens)) root.style.setProperty(`--${name}`, value);
   for (const face of theme.fontFaces) {
     const key = `${face.family}\u0000${face.url}`;
@@ -351,9 +377,23 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- file handles ----
-  const fileListeners = new Map<string, Emitter<'modified' | 'removed'>>();
+  const fileListeners = new Map<string, Set<(change: 'modified' | 'removed') => void>>();
   pushes.on((p) => {
-    if (p.type === 'fileChange') fileListeners.get(p.handle)?.emit(p.change);
+    if (p.type === 'fileChange') for (const cb of [...(fileListeners.get(p.handle) ?? [])]) cb(p.change);
+  });
+  installFileSystemObserver(({ id }, cb) => {
+    let listeners = fileListeners.get(id);
+    if (!listeners) {
+      fileListeners.set(id, (listeners = new Set()));
+      tell('files.watch', { handle: id });
+    }
+    listeners.add(cb);
+    return () => {
+      listeners.delete(cb);
+      if (listeners.size || fileListeners.get(id) !== listeners) return;
+      fileListeners.delete(id);
+      tell('files.unwatch', { handle: id });
+    };
   });
   const idOf = (file: FileSystemHandle): string => {
     const grant = grantOf(file);
@@ -421,7 +461,6 @@ export function installDin(transport: Transport): void {
     },
     open: (appId, params, files) => request('app.open', { appId, params, handles: files?.map(idOf) }),
     openFiles: (files) => request('app.openFiles', { handles: files.map(idOf) }),
-    openUrl: (url) => request('app.openUrl', { url }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
     session: {
@@ -507,9 +546,6 @@ export function installDin(transport: Transport): void {
     setShape: (shape) => tell('window.setShape', { shape }),
     beginMove: (e) => gesture(e, request('window.beginMove', { at: point(e) })),
     beginResize: (edge, e) => gesture(e, request('window.beginResize', { edge, at: point(e) })),
-    setBounds: (bounds) => tell('window.setBounds', bounds),
-    focus: () => tell('window.focus'),
-    close: () => tell('window.close'),
     requestClose: () => tell('window.requestClose'),
     showWindowMenu: (at) => tell('window.menu', { at }),
     tabDragMove: (at, label) => request('window.tabDragMove', { at, label }),
@@ -527,10 +563,47 @@ export function installDin(transport: Transport): void {
     icon: (url) => tell('window.setIcon', { url }),
     accent: (color) => tell('window.setAccent', { color }),
   });
+  const define = (name: string, value: unknown) => Object.defineProperty(window, name, { value, writable: true, configurable: true });
   // The Additional Windowing Controls draft's.
-  for (const name of ['minimize', 'maximize', 'restore'] as const) {
-    Object.defineProperty(window, name, { value: () => request(`window.${name}`), writable: true, configurable: true });
-  }
+  for (const name of ['minimize', 'maximize', 'restore'] as const) define(name, () => request(`window.${name}`));
+  // The web's own: in the desktop's CSS pixels, frame included (outerWidth
+  // and outerHeight). A move and a resize in the same task go as one, so
+  // neither undoes the other.
+  let bounds: Partial<Rect> | null = null;
+  const setBounds = (next: Partial<Rect>) => {
+    if (!Object.values(next).every(Number.isFinite)) return;
+    if (!bounds) {
+      bounds = {};
+      queueMicrotask(() => {
+        const b = bounds!;
+        bounds = null;
+        tell('window.setBounds', b);
+      });
+    }
+    Object.assign(bounds, next);
+  };
+  const now = () => ({ ...state.bounds, ...bounds });
+  define('moveTo', (x: number, y: number) => setBounds({ x: Number(x), y: Number(y) }));
+  define('moveBy', (dx: number, dy: number) => setBounds({ x: now().x + Number(dx), y: now().y + Number(dy) }));
+  define('resizeTo', (width: number, height: number) => setBounds({ width: Number(width), height: Number(height) }));
+  define('resizeBy', (dw: number, dh: number) => setBounds({ width: now().width + Number(dw), height: now().height + Number(dh) }));
+  // focus() brings the window forward; close() closes it at once, without
+  // consulting its own onCloseRequest.
+  define('focus', () => tell('window.focus'));
+  define('close', () => tell('window.close'));
+  // Links open as they do anywhere on the desktop: into an installed app
+  // that owns the site, mailto: in Mail, nostr: in its viewer, else the Web
+  // Browser. Like a noopener open, it returns no window.
+  define('open', (url?: string | URL, target?: string) => {
+    if (url === undefined || String(url) === '') return null;
+    const href = new URL(String(url), location.href).href;
+    if (target === '_self' || target === '_parent' || target === '_top') {
+      location.assign(href);
+      return window;
+    }
+    tell('app.openUrl', { url: href });
+    return null;
+  });
 
   // ---- menus ----
   const menuActions = new Emitter<string>();
@@ -588,15 +661,6 @@ export function installDin(transport: Transport): void {
   const files: DinFiles = {
     path: (handle) => grantFor(handle).path,
     url: (handle) => request('files.url', { handle: idOf(handle) }),
-    watch(handle, cb) {
-      const id = idOf(handle);
-      let emitter = fileListeners.get(id);
-      if (!emitter) {
-        fileListeners.set(id, (emitter = new Emitter()));
-        tell('files.watch', { handle: id });
-      }
-      return emitter.on(cb);
-    },
     parent: async (handle) => {
       const p = await request('files.parent', { handle: idOf(handle) });
       return p ? (wrap(p) as FileSystemDirectoryHandle) : null;
@@ -728,10 +792,6 @@ export function installDin(transport: Transport): void {
     scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
     tokens: {},
     fontFaces: [],
-    zoom: 1,
-    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-    reducedTransparency: false,
-    increasedContrast: false,
     icons: {},
   };
   const themes = new Emitter<ThemeSnapshot>();
@@ -779,9 +839,6 @@ export function installDin(transport: Transport): void {
       return accountSnapshot.blossom;
     },
     onChange: (cb) => accounts.on(cb),
-    get nostr() {
-      return permissions.has('nostr') ? nostr : null;
-    },
   };
 
   // ---- notifications (the web's own API), toasts, printing, permissions ----
@@ -975,6 +1032,7 @@ export function installDin(transport: Transport): void {
     frameStyle = hello.frameStyle;
     themeSnapshot = hello.theme;
     applyTheme(themeSnapshot, loadedFaces);
+    markAccessibility();
     accountSnapshot = hello.account;
     currentDrag = hello.drag;
     reportDragOver(hello.drag !== null);

@@ -63,7 +63,7 @@ export function showFileInFiles(path: string): Promise<void> {
 
 /** Open a web page in the Web Browser. */
 export function openUrl(url: string): void {
-  void din().app.openUrl(url);
+  window.open(url);
 }
 
 /** Open the App Store at its Media Player skins. */

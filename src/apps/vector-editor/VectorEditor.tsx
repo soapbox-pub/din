@@ -674,7 +674,7 @@ export function VectorEditor() {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
+          window.focus();
           setDialog({ kind: 'unsaved' });
           return true;
         }
@@ -683,8 +683,8 @@ export function VectorEditor() {
 
   const closeNow = useCallback(() => {
     setDialog(null);
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   // ---- Selection info -----------------------------------------------------------------------
 

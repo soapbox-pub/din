@@ -8,7 +8,8 @@
  * - `document.title`, `<link rel="icon">` and `<meta name="theme-color">`
  *   are the window's title, icon and accent.
  * - File System Access (`showOpenFilePicker` and the rest) opens Din's
- *   pickers, its handles backed by the desktop's grants.
+ *   pickers, its handles backed by the desktop's grants, and
+ *   `FileSystemObserver` hears when something else changes them.
  * - Launch Handling's `launchQueue` hears each launch's files.
  *
  * Part of the runtime's bundle, so nothing here may have side effects on
@@ -526,6 +527,59 @@ export function installFilePickers(host: PickerHost): void {
     if (!chosen) throw abort();
     return toWebHandle(chosen);
   });
+}
+
+/** Hear when something else changes or removes the file behind a grant. */
+export type WatchHost = (grant: Grant, cb: (change: 'modified' | 'removed') => void) => Unsubscribe;
+
+/**
+ * The File System Observer API's `FileSystemObserver`, over Din's watches:
+ * each observed handle's changes come to the callback as records, with the
+ * handle itself as both root and changed handle (`modified`, or
+ * `disappeared` when it's removed).
+ */
+export function installFileSystemObserver(watch: WatchHost): void {
+  class DinFileSystemObserver {
+    private readonly callback: (records: object[], observer: DinFileSystemObserver) => void;
+    private readonly watches = new Map<string, Unsubscribe>();
+    constructor(callback: (records: object[], observer: DinFileSystemObserver) => void) {
+      if (typeof callback !== 'function') throw new TypeError('FileSystemObserver needs a callback');
+      this.callback = callback;
+    }
+    async observe(handle: FileSystemHandle): Promise<void> {
+      const grant = grantOf(handle);
+      if (!grant) throw new DOMException('That handle can’t be observed here.', 'NotFoundError');
+      if (this.watches.has(grant.key)) return;
+      this.watches.set(
+        grant.key,
+        watch(grant, (change) => {
+          const record = {
+            root: handle,
+            changedHandle: handle,
+            relativePathComponents: [],
+            relativePathMovedFrom: null,
+            type: change === 'removed' ? 'disappeared' : 'modified',
+          };
+          try {
+            this.callback([record], this);
+          } catch (e) {
+            console.error('din: FileSystemObserver callback threw:', e);
+          }
+        }),
+      );
+    }
+    unobserve(handle: FileSystemHandle): void {
+      const key = grantOf(handle)?.key;
+      if (key === undefined) return;
+      this.watches.get(key)?.();
+      this.watches.delete(key);
+    }
+    disconnect(): void {
+      for (const stop of this.watches.values()) stop();
+      this.watches.clear();
+    }
+  }
+  Object.defineProperty(window, 'FileSystemObserver', { value: DinFileSystemObserver, writable: true, configurable: true });
 }
 
 /**

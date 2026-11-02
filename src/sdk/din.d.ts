@@ -178,8 +178,6 @@ export interface DinApp {
    * changes: Din can stop at any time.
    */
   saveState(state: unknown): void;
-  /** Open a URL in the Web Browser (or the app that handles its scheme). */
-  openUrl(url: string): Promise<void>;
   /**
    * localStorage keys this app kept on the desktop's origin before it moved
    * out are copied in before the app's code runs (the manifest's
@@ -275,13 +273,11 @@ export interface DinWindow {
   beginMove(e: PointerEvent): Promise<void>;
   /** Start resizing from an edge, as `beginMove` (skins with their own grips). */
   beginResize(edge: Edge, e: PointerEvent): Promise<void>;
-  /** Move or resize; clamped to the work area and the min/max size. */
-  setBounds(bounds: Partial<Rect>): void;
 
-  focus(): void;
-  /** Close this window. Doesn't consult its own `onCloseRequest`. */
-  close(): void;
-  /** Close it as the user would (`<WindowControls>`' close button): through `onCloseRequest`. */
+  /**
+   * Close it as the user would (`<WindowControls>`' close button): through
+   * `onCloseRequest`. The web's `window.close()` closes it without asking.
+   */
   requestClose(): void;
   /**
    * Din's window menu (Minimize, Maximize, tiling, workspaces, Close) at a
@@ -391,8 +387,6 @@ export interface DinFiles {
    * while this page stays loaded. Not available outside Electron.
    */
   url(handle: FileSystemFileHandle): Promise<string>;
-  /** Hear when something else changes or removes the file. */
-  watch(handle: FileSystemHandle, cb: (change: 'modified' | 'removed') => void): Unsubscribe;
   /**
    * For apps with `file-folders`: the folder a file is in, as a handle (and
    * `din.system.fs` reaches it by path). Null without the permission, and
@@ -483,6 +477,21 @@ declare global {
     /** As `queryPermission`: the user's pick was the grant. */
     requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
   }
+  /** The File System Observer API: what else changes a file or folder the app holds. */
+  interface FileSystemChangeRecord {
+    readonly root: FileSystemHandle;
+    readonly changedHandle: FileSystemHandle | null;
+    readonly relativePathComponents: readonly string[];
+    readonly relativePathMovedFrom: readonly string[] | null;
+    /** Din reports `modified`, and `disappeared` when it's removed. */
+    readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
+  }
+  class FileSystemObserver {
+    constructor(callback: (records: FileSystemChangeRecord[], observer: FileSystemObserver) => void);
+    observe(handle: FileSystemHandle, options?: { recursive?: boolean }): Promise<void>;
+    unobserve(handle: FileSystemHandle): void;
+    disconnect(): void;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,21 +579,6 @@ export interface ThemeSnapshot {
   tokens: Record<string, string>;
   /** A profile theme's web fonts, which the SDK loads. */
   fontFaces: { family: string; url: string }[];
-  /** The desktop's interface zoom. The desktop already scales the window; for canvas apps. */
-  zoom: number;
-  /**
-   * The user prefers reduced motion: the system says so, or Settings →
-   * Accessibility. The SDK marks the app's root `data-reduce-motion`, which
-   * Tailwind's `motion-safe:` and `motion-reduce:` follow.
-   */
-  reducedMotion: boolean;
-  /** Settings → Accessibility → Reduce transparency (or Increase contrast); the root is marked `data-reduce-transparency`. */
-  reducedTransparency: boolean;
-  /**
-   * Settings → Accessibility → Increase contrast; the root is marked
-   * `data-increase-contrast`, and the tokens are already the stronger ones.
-   */
-  increasedContrast: boolean;
   /**
    * File-type icons from the system's icon theme, as data URLs keyed by
    * freedesktop icon name (`folder`, `image-x-generic`, …). Empty while Din
@@ -610,11 +604,6 @@ export interface DinAccount {
   /** The user's Blossom servers. */
   readonly blossom: string[];
   onChange(cb: () => void): Unsubscribe;
-  /**
-   * NIP-07, backed by Din's signer and its prompts. Needs `nostr`; the SDK
-   * also installs it as `window.nostr`.
-   */
-  readonly nostr: Nip07 | null;
 }
 
 export interface NostrEventTemplate {
@@ -630,6 +619,7 @@ export interface SignedNostrEvent extends NostrEventTemplate {
   sig: string;
 }
 
+/** `window.nostr` in an app with `nostr`: NIP-07, backed by Din's signer and its prompts. */
 export interface Nip07 {
   getPublicKey(): Promise<string>;
   signEvent(event: NostrEventTemplate): Promise<SignedNostrEvent>;

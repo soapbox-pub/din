@@ -109,7 +109,7 @@ export function useWindowAccent(color: string | null): void {
 
 /**
  * Have a say when the window closes, while mounted: return true to keep it
- * open (and ask), then call din.window.close() yourself. Null for no guard.
+ * open (and ask), then call window.close() yourself. Null for no guard.
  */
 export function useCloseGuard(guard: (() => boolean) | null): void {
   const din = useDin();

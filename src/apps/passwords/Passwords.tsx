@@ -189,7 +189,7 @@ function Vault({ state }: { state: PasswordsState }) {
             ),
           fail,
         ),
-      openUrl: (url: string) => void din.app.openUrl(url),
+      openUrl: (url: string) => window.open(url),
       edit: (id: string) => {
         setSelected(id);
         void bridge.get(id).then((initial) => setEditing({ initial }), fail);
@@ -200,7 +200,7 @@ function Vault({ state }: { state: PasswordsState }) {
       restore: (id: string) => void bridge.restore(id).catch(fail),
       deleteForever: (id: string) => setDeleting(id),
     };
-  }, [bridge, din, notify, fail]);
+  }, [bridge, notify, fail]);
 
   const startNew = useCallback(
     (kind: 'login' | 'note') => {

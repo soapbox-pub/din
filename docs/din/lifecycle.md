@@ -110,9 +110,14 @@ so a simple app needn't think about it.
 ```ts
 await din.app.open('paint', { width: 800, height: 600 });   // a new window, or the running one
 await din.app.openFiles([handle]);                           // whichever app the desktop has for it
-await din.app.openUrl('https://example.com');                // the Web Browser
+window.open('https://example.com');                          // as links open anywhere on the desktop
 await din.app.canOpen('assistant');                          // installed (and, the Assistant, switched on)?
 ```
+
+The web's `window.open(url)` opens a link into an installed app that owns
+the site, `mailto:` in Mail, `nostr:` in its viewer, and anything else in
+the Web Browser. Like a `noopener` open, it returns no window; `_self`,
+`_parent` and `_top` navigate the app's own page.
 
 An app's windows reach each other: `din.app.windows()` lists the others,
 front to back, with their ids; a `BroadcastChannel` carries messages

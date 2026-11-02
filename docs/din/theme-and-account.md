@@ -17,7 +17,7 @@ and shadcn/ui components then match without any code.
 For anything drawn by hand (canvases, terminals, charts):
 
 ```ts
-const { scheme, tokens, fonts, zoom, reducedMotion } = din.theme.current;
+const { scheme, tokens, fonts } = din.theme.current;
 din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 ```
 
@@ -26,23 +26,25 @@ din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 | `scheme` | `light` or `dark` |
 | `tokens` | Every design token, without the `--` |
 | `fonts` | `{ sans, mono }` font stacks |
-| `zoom` | The interface zoom. The desktop already scales the webview; canvas apps use it for crisp pixels |
-| `reducedMotion` | The system prefers reduced motion, or Settings → Accessibility asks for it. In Electron `prefers-reduced-motion` says the same; framed in a browser it knows only the first, so check `prefersReducedMotion()` (`src/shared/reducedMotion.ts`) or `motion-safe:` / `motion-reduce:`, which follow both |
-| `reducedTransparency` | Settings → Accessibility → Reduce transparency: draw solid surfaces instead of frosted glass |
-| `increasedContrast` | Settings → Accessibility → Increase contrast. The tokens already carry the stronger borders and text |
 | `icons` | The icon theme's file-type icons by name, or `{}` |
 
-Settings → Accessibility's preferences also mark the app's `:root`
-(`data-reduce-motion`, `data-reduce-transparency`, `data-increase-contrast`),
-and its Text size reaches the app as `--din-text-scale`, which Tailwind's
-`text-xs` to `text-2xl` are multiplied by. Size text with those classes and
-it grows with the setting.
+The interface zoom is the page's own `devicePixelRatio`: the desktop
+scales the webview, so a canvas sized by it is crisp.
 
-In Electron they're the web's media features as well, for every app and
-web page, in stylesheets and `matchMedia` alike: Reduce motion is
-`prefers-reduced-motion: reduce`, Reduce transparency (or Increase
+Settings → Accessibility reaches apps as the web's media features, as it
+does every web page, in stylesheets and `matchMedia` alike: Reduce motion
+is `prefers-reduced-motion: reduce`, Reduce transparency (or Increase
 contrast) `prefers-reduced-transparency: reduce`, and Increase contrast
-`prefers-contrast: more` (`electron/accessibility.mts`).
+`prefers-contrast: more` (`electron/accessibility.mts`). With Increase
+contrast the tokens already carry the stronger borders and text. The
+runtime also marks the app's `:root` with them (`data-reduce-motion`,
+`data-reduce-transparency`, `data-increase-contrast`), as the desktop's
+own root is, which Din's stylesheet and `prefersReducedMotion()`
+(`src/shared/reducedMotion.ts`) follow, and Tailwind's `motion-safe:` and
+`motion-reduce:` with them. Framed in a plain browser, apps see only the
+browser's own preferences. Text size reaches the app as
+`--din-text-scale`, which Tailwind's `text-xs` to `text-2xl` are
+multiplied by. Size text with those classes and it grows with the setting.
 
 A profile theme (the signed-in user's colors) arrives as tokens like any
 other; apps don't need to know.
@@ -67,9 +69,9 @@ Without the permission, `pubkey` is null and the lists are empty.
 
 ### Signing (permission `nostr`)
 
-`din.account.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
-`signEvent`, `nip04` and `nip44`. `window.din` also installs it as
-`window.nostr`, so Nostrify and other NIP-07 libraries work unchanged.
+`window.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
+`signEvent`, `nip04` and `nip44`, so Nostrify and other NIP-07 libraries
+work unchanged.
 For built-in apps, whose code is Din's own and reviewed, requests go
 straight to the signed-in user's signer, as they did when the apps lived
 in the desktop. (nsites, when they get `window.din`, will go through

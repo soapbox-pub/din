@@ -385,9 +385,9 @@ export function Studio() {
       setNotice(`The take couldn’t be saved: ${cleanCaptureError(error)}`);
     } finally {
       setPhase('idle');
-      din.window.focus();
+      window.focus();
     }
-  }, [din, phase]);
+  }, [phase]);
 
   const mark = useCallback((kind: 'highlight' | 'retake') => {
     const t = take.current;

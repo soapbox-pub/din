@@ -148,7 +148,7 @@ main gain over today, where every app could read the whole home folder.
   wouldn't get `window.din` anyway, since the preload only connects the
   main frame.
 - `window.open` and links are denied as pop-ups; http(s) and nsite URLs
-  open in the Web Browser instead. Apps open URLs with `din.app.openUrl`.
+  open in the Web Browser instead. Apps open URLs with the web's `window.open`.
 - The apps' session grants only clipboard, fullscreen and pointer lock;
   every other permission request is refused without a prompt.
 - Apps can't frame `app://` and can't fetch it: the apps' session has no

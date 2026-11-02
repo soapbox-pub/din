@@ -19,11 +19,11 @@ replaced as below. `src/apps/calculator/` is the model.
 | `AppComponentProps.windowId` | `din.window.state.id` (rarely needed) |
 | `useWindowActions().open(id, params)` | `din.app.open(id, params)` |
 | `open(appForFile(name), { path })` | `din.app.openFiles([handle])` |
-| `useWindowActions().close(windowId)` / `window.close()` | `din.window.close()` |
-| `focus` | `din.window.focus` |
+| `useWindowActions().close(windowId)` | `window.close()` |
+| `focus` | `window.focus()` |
 | `minimize`, `maximize`, `toggleMaximize` | `window.minimize()`, `window.maximize()`, `window.restore()` |
-| `resize(windowId, w, h)` | `din.window.setBounds({ width, height })` |
-| `setFrameless(windowId, true, geometry)` | `din.window.setChrome({ frame: 'none', … })` + `setBounds` |
+| `resize(windowId, w, h)` | `window.resizeTo(w, h)` (and `moveTo`) |
+| `setFrameless(windowId, true, geometry)` | `din.window.setChrome({ frame: 'none', … })` + `window.moveTo` and `resizeTo` |
 | `useWindowTitle(title)` | `useWindowTitle(title)` from `@/sdk/react`, or `document.title` |
 | `import '…/files/Dialogs'` for `Overlay`, `DialogButton` | `@/shared/dialogs` |
 | `useWindowIcon(url)` | `useWindowIcon(url)` from `@/sdk/react`, or a `<link rel="icon">` |
@@ -47,7 +47,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `tabTransfer` | `din.drag.startTab`, `onTabDetached` |
 | `useToast()` / `notify()` | `din.toast(…)`, or `new Notification()` for one kept in the notification center |
 | `useDesktopBackground().setBackground` | `din.desktop.setWallpaper(handle)` with `wallpaper` |
-| `useOpenUrl()` | `din.app.openUrl(url)` |
+| `useOpenUrl()` | `window.open(url)` |
 | `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
 | `registerMediaSource` (now playing) | `navigator.mediaSession` |
@@ -95,7 +95,7 @@ a time.
 
 | # | App | First to use |
 |---|---|---|
-| 1 | Calculator ✓ | The whole path: `din://`, the port, the manifest, `setBounds`, `workArea` |
+| 1 | Calculator ✓ | The whole path: `din://`, the port, the manifest, `resizeTo`, `workArea` |
 | 2 | Paint ✓ | Files by handle, close requests, the title |
 | 3 | Word Processor, Spreadsheet, Slides ✓ | Shared office code, accent, printing, opening URLs |
 | 4 | Photo Editor, Vector Editor, Publisher ✓ | Shared `photo/` code |
@@ -130,7 +130,7 @@ first broke, and what restored it:
 | Files' tab drops picking the right window, the drop marker | `din.window.tabDragMove`/`tabDragEnd` (the desktop finds the frontmost window of the app, shows the label), `onTabHover` |
 | Files' undo history outliving its windows | `din.app.session` |
 | Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `din.files.path(handle)` for every app, `din.files.release` |
-| Links from apps opening in installed web apps, `nostr:` links | `din.app.openUrl` answered with the desktop's `useOpenUrl` |
+| Links from apps opening in installed web apps, `nostr:` links | `window.open` answered with the desktop's `useOpenUrl` |
 | Photo Editor's Quick Export beside the document | `file-folders` |
 | A drag out of an app showing what's dragged | The desktop's drag overlay (`drag.over`) |
 | Settling after a move begun in an app | `din.window.beginMove` resolves when the move ends |

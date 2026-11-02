@@ -168,7 +168,8 @@ function FitWindow({ view }: { view: CalculatorView }) {
     height = Math.min(height, workArea.height);
     const x = Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width));
     const y = Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height));
-    din.window.setBounds({ x, y, width, height });
+    window.moveTo(x, y);
+    window.resizeTo(width, height);
   }, [din, view]);
 
   return null;

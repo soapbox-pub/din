@@ -582,15 +582,15 @@ export function TextEditor() {
 
   const anyDirty = tabs.some((t) => t.dirty);
   useCloseGuard(anyDirty ? () => {
-    din.window.focus();
+    window.focus();
     setAsking({ kind: 'window' });
     return true;
   } : null);
 
   const closeWindowNow = useCallback(() => {
     setAsking(null);
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   const launched = useRef(false);
   useEffect(() => {

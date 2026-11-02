@@ -51,7 +51,7 @@ export function QuickShare() {
         next[at] = t;
         return next;
       });
-      if (t.status === 'asking') din.window.focus();
+      if (t.status === 'asking') window.focus();
     });
     bridge.receive().then(setState, (error: unknown) => setFailure(error instanceof Error ? error.message : String(error)));
     return () => {
@@ -116,7 +116,7 @@ export function QuickShare() {
               className="bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20"
               onClick={() => {
                 for (const t of going) act(bridge?.cancel(t.id));
-                din.window.close();
+                window.close();
               }}
             >
               Stop and close
@@ -343,7 +343,7 @@ function Arrived({ transfer: t }: { transfer: QuickShareTransfer }) {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
       });
-    const open = () => void din.app.openUrl(url);
+    const open = () => window.open(url);
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>

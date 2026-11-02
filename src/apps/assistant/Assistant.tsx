@@ -419,7 +419,7 @@ function AssistantWindow() {
     // Closing the last tab closes the window, which opens fresh next time.
     if (tabs.length === 1) {
       saveAssistantTabs([], '');
-      din.window.close();
+      window.close();
       return;
     }
     setState((prev) => {

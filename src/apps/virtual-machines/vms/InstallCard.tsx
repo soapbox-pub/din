@@ -3,7 +3,6 @@ import { AlertTriangle, Disc3, ExternalLink, Monitor, Play, RotateCcw } from 'lu
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import type { VmInfo, VmInstall } from '@/lib/vms';
-import { useDin } from '@/sdk/react';
 import { formatBytes } from './bridge';
 import { OsBadge } from './fields';
 import { SYSTEMS } from './systems';
@@ -82,7 +81,6 @@ export function InstallCard({
   onChooseIso: () => void;
   onCancel: () => void;
 }) {
-  const din = useDin();
   const install = vm.install!;
   const name = SYSTEMS.find((s) => s.id === install.installer)?.name ?? 'the system';
   const rate = useRate(install.phase === 'downloading' ? install.receivedBytes : 0);
@@ -124,7 +122,7 @@ export function InstallCard({
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {install.manualUrl && (
-                <Button variant="outline" onClick={() => void din.app.openUrl(install.manualUrl)}>
+                <Button variant="outline" onClick={() => window.open(install.manualUrl)}>
                   <ExternalLink className="size-4" aria-hidden />
                   Get {name}
                 </Button>

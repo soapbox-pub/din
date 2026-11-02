@@ -85,7 +85,7 @@ export async function adoptedTab(din: Din): Promise<unknown> {
   const payload = await din.app.session.get(token);
   din.app.session.set(token, undefined);
   const place = din.app.launch.params.place as { x?: unknown; y?: unknown } | undefined;
-  if (typeof place?.x === 'number' && typeof place.y === 'number') din.window.setBounds({ x: place.x, y: place.y });
+  if (typeof place?.x === 'number' && typeof place.y === 'number') window.moveTo(place.x, place.y);
   return payload;
 }
 
@@ -130,7 +130,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
       const strip = latest.current.list;
       const index = data.index ?? (strip && typeof data.x === 'number' ? slotAt(strip, data.x).index : Infinity);
       latest.current.options.receive(data.payload, index);
-      din.window.focus();
+      window.focus();
     };
     return () => {
       open.close();
@@ -204,7 +204,7 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
         } else {
           // A window's only tab carries the window along with it.
           const { bounds } = din.window.state;
-          din.window.setBounds({ x: Math.round(bounds.x + point.x - GRAB.x), y: Math.max(0, Math.round(bounds.y + point.y - GRAB.y)) });
+          window.moveTo(Math.round(bounds.x + point.x - GRAB.x), Math.max(0, Math.round(bounds.y + point.y - GRAB.y)));
         }
       });
     },

@@ -871,7 +871,7 @@ export function Publisher() {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
+          window.focus();
           setDialog({ kind: 'unsaved' });
           return true;
         }
@@ -880,8 +880,8 @@ export function Publisher() {
 
   const closeNow = useCallback(() => {
     setDialog(null);
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   // ---- Rendering pages to pictures (export, print, thumbnails) -----------------------------------------
 

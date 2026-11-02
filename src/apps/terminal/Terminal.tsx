@@ -483,7 +483,7 @@ export function Terminal() {
     '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
   } as CSSProperties;
   useWindowAccent(palette.background);
-  const closeWindow = useCallback(() => din.window.close(), [din]);
+  const closeWindow = useCallback(() => window.close(), []);
 
   // A window opened for a tab torn off another one starts empty, and gets
   // the tab.
@@ -699,9 +699,9 @@ export function Terminal() {
     (tabId: string, paneId: string) => {
       setActiveId(tabId);
       focusPane(tabId, paneId);
-      din.window.focus();
+      window.focus();
     },
-    [focusPane, din],
+    [focusPane],
   );
 
   const resizeSplit = useCallback((tabId: string, splitId: string, ratio: number) => {
@@ -1490,7 +1490,7 @@ const TerminalSession = memo(function TerminalSession({
 }) {
   const din = useDin();
   const bridge = getPtyBridge();
-  const openUrl = useCallback((url: string) => void din.app.openUrl(url), [din]);
+  const openUrl = useCallback((url: string) => window.open(url), []);
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);

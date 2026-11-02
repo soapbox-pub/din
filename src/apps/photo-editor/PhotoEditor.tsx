@@ -693,7 +693,7 @@ export function PhotoEditor() {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
+          window.focus();
           setDialog({ kind: 'unsaved' });
           return true;
         }
@@ -702,8 +702,8 @@ export function PhotoEditor() {
 
   const closeNow = useCallback(() => {
     setDialog(null);
-    din.window.close();
-  }, [din]);
+    window.close();
+  }, []);
 
   // ---- Helpers for edits ----------------------------------------------------------------------------
 

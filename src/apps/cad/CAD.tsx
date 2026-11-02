@@ -854,14 +854,14 @@ function CADWindow() {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
-          setDialog({ kind: 'unsaved', then: () => din.window.close() });
+          window.focus();
+          setDialog({ kind: 'unsaved', then: () => window.close() });
           return true;
         }
       : null,
   );
 
-  const closeNow = useCallback(() => din.window.close(), [din]);
+  const closeNow = useCallback(() => window.close(), []);
 
   // ---- The command engine -----------------------------------------------------------------------
 

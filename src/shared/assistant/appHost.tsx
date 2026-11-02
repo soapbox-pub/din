@@ -69,7 +69,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
       colorfulReplies: settings.colorfulReplies,
       setEnabled: (enabled) => din.assistant.setSettings({ enabled }),
       openApp: (appId, params) => void din.app.open(appId, params),
-      openUrl: (url) => void din.app.openUrl(url),
+      openUrl: (url) => window.open(url),
       openPath: (path, kind) =>
         void din.files.fromPath(path).then((handle) =>
           kind === 'directory' ? din.app.open('file-browser', {}, [handle]) : din.app.openFiles([handle]),

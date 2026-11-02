@@ -22,7 +22,7 @@ await din.ready;
 document.title = 'Untitled.png';
 din.window.onCloseRequest(() => {
   if (!dirty) return false;
-  askToSave().then((ok) => ok && din.window.close());
+  askToSave().then((ok) => ok && window.close());
   return true;
 });
 

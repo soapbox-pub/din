@@ -119,7 +119,8 @@ function FitWindow({
       x = Math.max(area.x, Math.min(x, area.x + area.width - Math.min(width, area.width)));
       y = Math.max(area.y, Math.min(y, area.y + area.height - Math.min(height, area.height)));
     }
-    din.window.setBounds({ x, y, width, height });
+    window.moveTo(x, y);
+    window.resizeTo(width, height);
   }, [din, frame, wantWidth, wantHeight]);
 
   // Once the window has reached the size asked for, later changes are the

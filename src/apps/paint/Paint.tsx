@@ -1370,7 +1370,7 @@ export function Paint() {
   useCloseGuard(
     dirty
       ? () => {
-          din.window.focus();
+          window.focus();
           setDialog('unsaved');
           return true;
         }
@@ -1379,7 +1379,7 @@ export function Paint() {
 
   const closeNow = () => {
     setDialog(null);
-    din.window.close();
+    window.close();
   };
 
   // ---- Canvas size -----------------------------------------------------------------

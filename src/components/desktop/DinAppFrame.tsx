@@ -225,7 +225,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const queryClient = useQueryClient();
   const openUrl = useOpenUrl();
   const { updateConfig } = useAppContext();
-  const zoom = config.zoomLevel / 100;
   const permissions = manifestPermissions(manifest);
   const appName = manifest.short_name ?? manifest.name;
   // fs scoped to some folders: those of files the user hands it, or fixed ones.
@@ -322,9 +321,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       : { pubkey: null, relays: [], blossom: [] };
 
   // Everything a request handler reads, current as of the last render.
-  const live = useRef({ win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop });
+  const live = useRef({ win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop });
   useLayoutEffect(() => {
-    live.current = { win, actions, chrome, frame, user, config, zoom, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop };
+    live.current = { win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop };
   });
 
   const push = useCallback((message: Push) => session.current?.port.postMessage(message), []);
@@ -1175,7 +1174,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       launch,
       state: l.windowState(l.win),
       frameStyle: frameStyle(l.win?.accent ?? null),
-      theme: themeSnapshot(l.zoom),
+      theme: themeSnapshot(),
       account: l.account(),
       permissions,
       storage: storageToMigrate(manifest),
@@ -1338,7 +1337,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useEffect(() => {
     let last = '';
     const send = () => {
-      const theme = themeSnapshot(live.current.zoom);
+      const theme = themeSnapshot();
       const json = JSON.stringify(theme);
       if (json === last) return;
       last = json;
@@ -1346,7 +1345,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     };
     send();
     return onThemeChange(send);
-  }, [push, zoom]);
+  }, [push]);
   const accountJson = JSON.stringify(account());
   useEffect(() => {
     push({ type: 'account', account: JSON.parse(accountJson) as AccountSnapshot });
