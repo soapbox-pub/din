@@ -5,6 +5,16 @@ import type { NsiteAppEntry } from '@/lib/nsiteApps';
 import type { NostrHandler } from '@/lib/nostrUri';
 import type { FileAppEntry, OpenedFolder } from '@/lib/fileApps';
 
+/** A website whose links an installed nsite opens (InstalledAppsManager.linkedWebsites). */
+export interface LinkedWebsite {
+  appId: string;
+  /** `https://host[:port]`. */
+  origin: string;
+  /** The path the website allows, `/` for all of it. */
+  scope: string;
+  on: boolean;
+}
+
 /**
  * The desktop app registry: built-in apps, user-installed web apps and nsites,
  * and the host's Linux apps.
@@ -42,6 +52,21 @@ export interface InstalledAppsManager {
    * app window rather than a browser tab.
    */
   findAppIdForUrl: (url: string) => string | undefined;
+  /**
+   * Where a link the user opens goes, when an installed app takes it: the
+   * app that owns its URL (findAppIdForUrl), or an installed nsite a website
+   * named as its own (`linkedWebsites`), at the same path on the nsite.
+   */
+  findAppForLink: (url: string) => { appId: string; url: string } | undefined;
+  /**
+   * Websites whose links installed nsites open: each nsite's manifest asks
+   * for them (`scope_extensions`) and the website names the nsite back
+   * (`/.well-known/web-app-origin-association`). `on` is false where the user
+   * turned it off.
+   */
+  linkedWebsites: readonly LinkedWebsite[];
+  /** Let an installed nsite open its linked websites' links, or stop it. */
+  setOpensLinks: (appId: string, on: boolean) => void;
   /** Apps from folders on this computer (empty outside the Electron shell). */
   fileApps: readonly FileAppEntry[];
   /** Add a folder main opened (dinos.apps.folder) as an app, or update it. */

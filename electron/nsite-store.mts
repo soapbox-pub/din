@@ -91,6 +91,25 @@ export interface NsiteAppInfo {
   themeColor: string | null;
   /** How the site opens `nostr:` links: a path with `%s` for the URI, and the kinds it shows. */
   nostr?: { path: string; kinds: number[] | null } | null;
+  /**
+   * The app's web app manifest id as a path on the site (`/` for most), which
+   * a website's `web-app-origin-association` names as `nsite://<host><id>`.
+   */
+  id?: string | null;
+  /** The https origins its manifest's `scope_extensions` ask for. */
+  scopeExtensions?: string[];
+}
+
+/**
+ * A website whose links an installed site opens: the site's manifest asked
+ * for its origin (`scope_extensions`), and the website's
+ * `/.well-known/web-app-origin-association` names the site back.
+ */
+export interface NsiteLink {
+  /** `https://host[:port]`. */
+  origin: string;
+  /** The path the association allows, `/` for the whole website. */
+  scope: string;
 }
 
 interface SiteRecord {
@@ -105,6 +124,8 @@ interface SiteRecord {
   /** Unix ms. */
   lastUsed: number;
   app: NsiteAppInfo | null;
+  /** The websites an installed site opens links for, as last checked. */
+  links: { checkedAt: number; origins: NsiteLink[] } | null;
 }
 
 /** What the shell sees of a stored site. */
@@ -118,6 +139,8 @@ export interface NsiteSummary {
   app: NsiteAppInfo | null;
   /** Path -> sha256 of the current manifest. */
   paths: Record<string, string>;
+  /** The websites it opens links for; only ever an installed site's. */
+  links: NsiteLink[];
 }
 
 /** Visited (not installed) sites unused this long are forgotten. */
@@ -140,6 +163,18 @@ const CACHE_TRIM_INTERVAL_BYTES = 32 * 1024 * 1024;
 
 /** Blobs fetched at once while installing or updating a site. */
 const DOWNLOAD_CONCURRENCY = 4;
+
+/** Websites one site's `scope_extensions` may ask for. */
+const MAX_SCOPE_EXTENSIONS = 8;
+
+/** How long a website's association is trusted before it's fetched again. */
+const LINKS_RECHECK_MS = 24 * 60 * 60_000;
+
+/** How long a website gets to answer for its association file. */
+const ASSOCIATION_TIMEOUT_MS = 15_000;
+
+/** Largest association file read. */
+const MAX_ASSOCIATION_BYTES = 64 * 1024;
 
 /** Largest stored app icon (a 256px webp is ~20 KB). */
 const MAX_ICON_LENGTH = 256 * 1024;
@@ -331,6 +366,7 @@ function summaryOf(record: SiteRecord): NsiteSummary {
     installedAt: record.installedAt,
     app: record.app,
     paths: collectPaths(record.manifest),
+    links: record.installed ? (record.links?.origins ?? []) : [],
   };
 }
 
@@ -390,7 +426,39 @@ function parseRecord(raw: unknown): SiteRecord | null {
     installedAt: typeof value.installedAt === 'number' ? value.installedAt : null,
     lastUsed: typeof value.lastUsed === 'number' ? value.lastUsed : 0,
     app: parseAppInfo(value.app),
+    links: parseLinks(value.links),
   };
+}
+
+/** An https origin on a public host, as `https://host[:port]`, or null. */
+function httpsOrigin(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || !isPublicHost(url.hostname)) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+/** A scope path: absolute, and nothing a URL would read as another host. */
+function isScopePath(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && value.length <= 2048;
+}
+
+function parseLinks(raw: unknown): SiteRecord['links'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const { checkedAt, origins } = raw as Record<string, unknown>;
+  if (typeof checkedAt !== 'number' || !Array.isArray(origins)) return null;
+  const links: NsiteLink[] = [];
+  for (const entry of origins.slice(0, MAX_SCOPE_EXTENSIONS)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const origin = httpsOrigin((entry as Record<string, unknown>).origin);
+    const { scope } = entry as Record<string, unknown>;
+    if (origin && isScopePath(scope)) links.push({ origin, scope });
+  }
+  return { checkedAt, origins: links };
 }
 
 function parseAppInfo(raw: unknown): NsiteAppInfo | null {
@@ -410,7 +478,24 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
       ? value.version
       : undefined;
   const nostr = parseNostrHandler(value.nostr);
-  return { from: value.from, ...(version ? { version } : {}), name, icon, favicon, themeColor, nostr };
+  const id = isScopePath(value.id) && !/[\s\\#]/.test(value.id) ? value.id : null;
+  const scopeExtensions = Array.isArray(value.scopeExtensions)
+    ? [...new Set(value.scopeExtensions.map(httpsOrigin).filter((origin) => origin !== null))].slice(
+        0,
+        MAX_SCOPE_EXTENSIONS,
+      )
+    : [];
+  return {
+    from: value.from,
+    ...(version ? { version } : {}),
+    name,
+    icon,
+    favicon,
+    themeColor,
+    nostr,
+    id,
+    scopeExtensions,
+  };
 }
 
 function parseNostrHandler(raw: unknown): NsiteAppInfo['nostr'] {
@@ -473,6 +558,8 @@ export function initNsiteStore(options: { onChange: (host: string) => void }): v
       for (const record of records.values()) {
         if (record.installed) void ensureBlobs(record.host);
       }
+      void recheckLinks();
+      setInterval(() => void recheckLinks(), LINKS_RECHECK_MS / 4);
     });
 }
 
@@ -548,6 +635,7 @@ export function acceptSite(
       installedAt: null,
       lastUsed: Date.now(),
       app: null,
+      links: null,
     };
     records.set(host, created);
     void saveRecord(created);
@@ -626,6 +714,8 @@ export async function markInstalled(host: string): Promise<boolean> {
     record.installedAt = Date.now();
     await saveRecord(record);
     onChange(host);
+    // A site visited before it was installed may already have its app info.
+    if (record.app?.from === record.manifest.id) void checkLinks(host);
   }
   return true;
 }
@@ -638,6 +728,7 @@ export async function markUninstalled(host: string): Promise<void> {
   record.installed = false;
   record.installedAt = null;
   record.previous = null;
+  record.links = null;
   record.lastUsed = Date.now();
   staging.delete(host);
   await saveRecord(record);
@@ -653,6 +744,110 @@ export async function setAppInfo(host: string, info: unknown): Promise<void> {
   record.app = parsed;
   await saveRecord(record);
   onChange(host);
+  if (record.installed) void checkLinks(host);
+}
+
+// ---------------------------------------------------------------------------
+// Links: websites an installed site opens (scope_extensions)
+// ---------------------------------------------------------------------------
+
+/** Link checks in flight, by host. */
+const checkingLinks = new Map<string, Promise<void>>();
+
+/**
+ * What a website's association file allows the app with this manifest id:
+ * the scope it names, null when it doesn't name the app (or has no file),
+ * or undefined when the website couldn't be asked.
+ */
+async function associatedScope(origin: string, manifestId: string): Promise<string | null | undefined> {
+  let text: string;
+  try {
+    const response = await net.fetch(`${origin}/.well-known/web-app-origin-association`, {
+      credentials: 'omit',
+      // The file has to be at this origin, not wherever it redirects.
+      redirect: 'error',
+      signal: AbortSignal.timeout(ASSOCIATION_TIMEOUT_MS),
+    });
+    if (response.status >= 500) return undefined;
+    if (!response.ok) return null;
+    const length = Number(response.headers.get('content-length'));
+    if (length > MAX_ASSOCIATION_BYTES) return null;
+    text = await response.text();
+  } catch {
+    return undefined;
+  }
+  if (text.length > MAX_ASSOCIATION_BYTES) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+  for (const [key, value] of Object.entries(json)) {
+    let id: string;
+    try {
+      id = new URL(key).href;
+    } catch {
+      continue;
+    }
+    if (id !== manifestId || !value || typeof value !== 'object') continue;
+    const { scope } = value as Record<string, unknown>;
+    if (scope === undefined) return '/';
+    if (typeof scope !== 'string') return null;
+    try {
+      const url = new URL(scope, `${origin}/`);
+      return url.origin === origin ? url.pathname : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Ask each website an installed site's manifest extends its scope to whether
+ * it names the site back, and keep the ones that do. A website that can't be
+ * reached keeps what it said last time, so being offline unlinks nothing.
+ */
+function checkLinks(host: string): Promise<void> {
+  const running = checkingLinks.get(host);
+  if (running) return running;
+  const promise = (async () => {
+    const record = records.get(host);
+    if (!record?.installed || !record.app) return;
+    const { from, id, scopeExtensions = [] } = record.app;
+    const manifestId = id ? new URL(`nsite://${host}${id}`).href : null;
+    const previous = record.links?.origins ?? [];
+    const origins: NsiteLink[] = [];
+    if (manifestId) {
+      const scopes = await Promise.all(scopeExtensions.map((origin) => associatedScope(origin, manifestId)));
+      scopeExtensions.forEach((origin, i) => {
+        const scope = scopes[i] === undefined ? previous.find((link) => link.origin === origin)?.scope : scopes[i];
+        if (scope) origins.push({ origin, scope });
+      });
+    }
+    const current = records.get(host);
+    if (!current?.installed || current.app?.from !== from) return;
+    const changed = JSON.stringify(origins) !== JSON.stringify(previous);
+    current.links = { checkedAt: Date.now(), origins };
+    await saveRecord(current);
+    if (changed) onChange(host);
+  })()
+    .catch((error: unknown) => console.warn('[nsite] could not check links for', host, error))
+    .finally(() => checkingLinks.delete(host));
+  checkingLinks.set(host, promise);
+  return promise;
+}
+
+/** Check installed sites' links that haven't been checked for a while. */
+async function recheckLinks(): Promise<void> {
+  const now = Date.now();
+  for (const record of records.values()) {
+    if (!record.installed || !record.app?.scopeExtensions?.length) continue;
+    if (record.links && now - record.links.checkedAt < LINKS_RECHECK_MS) continue;
+    await checkLinks(record.host);
+  }
 }
 
 /**

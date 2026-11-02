@@ -174,6 +174,7 @@ import {
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { NostrLinkSettings } from '@/components/desktop/NostrLinkSettings';
+import { WebsiteLinkSettings } from '@/components/desktop/WebsiteLinkSettings';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -3336,6 +3337,10 @@ function NostrStorageSection() {
 
       <div className="border-t border-border/60 pt-4">
         <NostrLinkSettings />
+      </div>
+
+      <div className="border-t border-border/60 pt-4">
+        <WebsiteLinkSettings />
       </div>
     </SectionShell>
   );

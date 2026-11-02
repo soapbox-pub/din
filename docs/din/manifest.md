@@ -52,6 +52,7 @@ when the app is published as an nsite, and Din reads ordinary members
 | `shortcuts` | `actions` | Dock and launcher jump lists; `din.id` and `din.params` reach the app as `launch.shortcut` and `launch.params` |
 | `file_handlers` | `appForFile` | Not read yet. Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
 | `protocol_handlers` | | Which `nostr:` links open here, and which event kinds; see below |
+| `id`, `scope_extensions` | | Which websites' links an installed nsite opens; see below |
 
 ## Opening `nostr:` links
 
@@ -81,6 +82,41 @@ or else as a preview in the Web Browser with **Open in…** and **Open
 with…** buttons. Native apps whose desktop entry lists
 `x-scheme-handler/nostr` and takes a `%u` are offered for every kind.
 Defaults are listed, and reset, in Settings > Nostr & Storage.
+
+## Opening a website's links
+
+> **Status: works for installed nsites** (`pickScope` in
+> `src/lib/nsiteAppInfo.ts`, checked by `checkLinks` in
+> `electron/nsite-store.mts`). An installed web app already opens its own
+> origin's links.
+
+An nsite that is also a website (Ditto is `ditto.pub`) can open that
+website's links, the way the web's
+[scope extensions](https://github.com/WICG/manifest-incubations/blob/gh-pages/scope_extensions-explainer.md)
+let an app take another origin's. It takes both sides agreeing. The
+nsite's manifest asks:
+
+```json
+"scope_extensions": [{ "type": "origin", "origin": "https://ditto.pub" }]
+```
+
+and the website answers at `https://ditto.pub/.well-known/web-app-origin-association`,
+naming the app by its manifest id (its `id`, or else its `start_url`,
+on the nsite's canonical host):
+
+```json
+{ "nsite://2zrgjemvgxppn2jwgm61w6yrqqlcmm8njvhby68a9cj7ooo5phditto/": { "scope": "/" } }
+```
+
+Only https origins count, eight at most. Main fetches each association
+file when the site is installed, when it updates, and again once a day;
+it doesn't follow redirects, and a website it can't reach keeps its last
+answer. A website that drops the app stops being linked. A link to
+`https://ditto.pub/npub1…?x#y` then opens the nsite at
+`nsite://<host>/npub1…?x#y`, from anywhere a link opens (`useOpenUrl`,
+pages' new windows, native apps' `xdg-open`). An installed web app on the
+same origin wins. The links are listed, and turned off, in Settings >
+Nostr & Storage, or with `din apps links` and `din apps open-links`.
 
 ## The `din` member
 

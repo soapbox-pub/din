@@ -31,6 +31,26 @@ export interface NsiteAppInfo {
    * a path on the site, with `%s` where the URI goes. Null when it doesn't.
    */
   nostr?: { path: string; kinds: number[] | null } | null;
+  /**
+   * The web app manifest's id, as a path on the site (`/` for most). A
+   * website names the app as `nsite://<host><id>` to let it open its links.
+   */
+  id?: string | null;
+  /** The https origins the manifest's `scope_extensions` ask for. */
+  scopeExtensions?: string[];
+}
+
+/**
+ * A website whose links an installed site opens: the site's manifest asks
+ * for it (`scope_extensions`) and the website's
+ * `/.well-known/web-app-origin-association` names the site back, as main
+ * checked it.
+ */
+export interface NsiteLink {
+  /** `https://host[:port]`. */
+  origin: string;
+  /** The path the website allows, `/` for all of it. */
+  scope: string;
 }
 
 /** What the shell sees of a stored site. */
@@ -48,6 +68,8 @@ export interface NsiteSummary {
   app: NsiteAppInfo | null;
   /** Path -> sha256 of the current manifest. */
   paths: Record<string, string>;
+  /** The websites it opens links for; only ever an installed site's. */
+  links: NsiteLink[];
 }
 
 export type NsiteInstallResult =

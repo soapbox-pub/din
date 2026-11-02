@@ -19,15 +19,16 @@ import { isMailtoUrl } from '@/lib/mailto';
  * drained on mount).
  *
  * It also routes plain link opens (target=_blank / window.open) whose URL
- * belongs to an installed web app into that app's own window, so e.g. a
- * ditto.pub link opens in the Ditto app rather than a generic browser tab.
+ * belongs to an installed app into that app's own window (findAppForLink),
+ * so e.g. a ditto.pub link opens in the Ditto nsite, which ditto.pub names as
+ * its own, rather than a generic browser tab.
  * A window.open that asked for a pop-up opens a pop-up window (WebPopup).
  *
  * Renders nothing. Does nothing outside the Electron shell.
  */
 export function BrowserExtensionHost() {
   const { open } = useWindowActions();
-  const { findAppIdForUrl } = useInstalledApps();
+  const { findAppForLink } = useInstalledApps();
   const { openNostrUri } = useNostrLinks();
 
   useEffect(() => {
@@ -64,9 +65,9 @@ export function BrowserExtensionHost() {
         return;
       }
       if (command.type === 'open') {
-        const appId = findAppIdForUrl(command.url);
-        if (appId) {
-          open(appId, { url: command.url });
+        const target = findAppForLink(command.url);
+        if (target) {
+          open(target.appId, { url: target.url });
           return;
         }
       }
@@ -77,7 +78,7 @@ export function BrowserExtensionHost() {
       }
       publishTabCommand(command);
     });
-  }, [open, findAppIdForUrl, openNostrUri]);
+  }, [open, findAppForLink, openNostrUri]);
 
   return null;
 }

@@ -208,9 +208,10 @@ const FAVICON_SIZE = 64;
 /**
  * Bumped whenever the derivation changes what it produces, so info stored by
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
- * 4: favicons are kept too; 5: and how it opens nostr: links).
+ * 4: favicons are kept too; 5: and how it opens nostr: links; 6: and its
+ * manifest id and scope_extensions, so installed sites can open websites' links).
  */
-export const NSITE_APP_INFO_VERSION = 5;
+export const NSITE_APP_INFO_VERSION = 6;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -414,6 +415,48 @@ function pickNostrHandler(webManifest: unknown, manifestPath: string): NsiteAppI
   return { path: `${url.pathname}${url.search}${url.hash}`, kinds: handler.kinds };
 }
 
+/**
+ * The manifest's id and the websites it extends its scope to. The id is a
+ * path on the site: `id` resolved against the start URL's origin, or the
+ * start URL itself, without its fragment, as the Manifest spec has it. The
+ * websites are `scope_extensions` origins, https only; each one has to name
+ * the app back before Din lets it open their links (electron/nsite-store.mts).
+ */
+function pickScope(
+  webManifest: unknown,
+  manifestPath: string,
+): Pick<NsiteAppInfo, 'id' | 'scopeExtensions'> {
+  if (typeof webManifest !== 'object' || webManifest === null) return { id: null, scopeExtensions: [] };
+  const { id, start_url, scope_extensions } = webManifest as Record<string, unknown>;
+  const origin = 'https://nsite.invalid';
+  const resolve = (value: unknown, base: string) => {
+    if (typeof value !== 'string' || value === '') return null;
+    try {
+      const url = new URL(value, base);
+      return url.origin === origin ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  const start = resolve(start_url, `${origin}${manifestPath}`) ?? new URL('/', origin);
+  const identity = resolve(id, origin) ?? start;
+  identity.hash = '';
+
+  const scopeExtensions: string[] = [];
+  for (const entry of Array.isArray(scope_extensions) ? scope_extensions : []) {
+    const { type, origin: value } =
+      typeof entry === 'string' ? { type: 'origin', origin: entry } : ((entry ?? {}) as Record<string, unknown>);
+    if ((type !== undefined && type !== 'origin') || typeof value !== 'string') continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'https:' && !scopeExtensions.includes(url.origin)) scopeExtensions.push(url.origin);
+    } catch {
+      // Not a URL.
+    }
+  }
+  return { id: `${identity.pathname}${identity.search}`, scopeExtensions: scopeExtensions.slice(0, 8) };
+}
+
 /** Path of the web app manifest the document links, if any. */
 function webManifestPath(doc: Document): string | null {
   const href = doc.querySelector('link[rel~="manifest"][href]')?.getAttribute('href')?.trim();
@@ -570,6 +613,8 @@ export async function deriveNsiteAppDetails(
     favicon: null,
     themeColor: null,
     nostr: null,
+    id: null,
+    scopeExtensions: [],
     description: null,
     installable: false,
   };
@@ -591,6 +636,7 @@ export async function deriveNsiteAppDetails(
     candidates.push(...collectFromWebManifest(webManifest, manifestBase));
     info.installable = isInstallable(webManifest, manifestBase, paths);
     info.nostr = pickNostrHandler(webManifest, manifestPath);
+    Object.assign(info, pickScope(webManifest, manifestPath));
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {
       const { theme_color } = webManifest as { theme_color?: unknown };

@@ -21,6 +21,7 @@ import { normalizeNostrHandler } from '@/lib/nostrUri';
 import { useAppData } from '@/hooks/useAppData';
 import {
   canonicalHostOfUrl,
+  linkIntoNsite,
   NO_NSITE_APPS,
   NSITE_APPS_KEY,
   NsiteAppsSchema,
@@ -45,6 +46,7 @@ import { parseCanonicalNsiteHost } from '@/lib/nsite';
 import {
   InstalledAppsContext,
   type InstalledAppsManager,
+  type LinkedWebsite,
 } from '@/contexts/InstalledAppsContext';
 import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
 import { requestThemeIcons } from '@/lib/iconTheme';
@@ -305,6 +307,22 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
     const nsiteEntryFor = (id: string) =>
       nsiteApps.find((entry) => nsiteAppId(entry.host) === id);
 
+    const linkedWebsites: LinkedWebsite[] = nsiteApps.flatMap((entry) =>
+      (storedSites?.find((site) => site.host === entry.host)?.links ?? []).map((link) => ({
+        appId: nsiteAppId(entry.host),
+        ...link,
+        on: entry.openLinks !== false,
+      })),
+    );
+
+    const findAppIdForUrl = (url: string) => {
+      const host = canonicalHostOfUrl(url);
+      if (host) {
+        return nsiteApps.some((entry) => entry.host === host) ? nsiteAppId(host) : undefined;
+      }
+      return webApps.find((webApp) => sameOrigin(webApp.url, url))?.id;
+    };
+
     return {
       apps,
       webApps,
@@ -314,12 +332,29 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       getApp: (id) => apps.find((app) => app.id === id) ?? launchedApp(id)?.definition,
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
       findNsiteApp: (host) => nsiteApps.find((entry) => entry.host === host),
-      findAppIdForUrl: (url) => {
-        const host = canonicalHostOfUrl(url);
-        if (host) {
-          return nsiteApps.some((entry) => entry.host === host) ? nsiteAppId(host) : undefined;
+      findAppIdForUrl,
+      findAppForLink: (url) => {
+        const appId = findAppIdForUrl(url);
+        if (appId) return { appId, url };
+        for (const linked of linkedWebsites) {
+          if (!linked.on) continue;
+          const entry = nsiteEntryFor(linked.appId);
+          const target = entry && linkIntoNsite(url, entry.host, linked);
+          if (target) return { appId: linked.appId, url: target };
         }
-        return webApps.find((webApp) => sameOrigin(webApp.url, url))?.id;
+        return undefined;
+      },
+      linkedWebsites,
+      setOpensLinks: (appId, on) => {
+        const entry = nsiteEntryFor(appId);
+        if (!entry) return;
+        setNsiteEntries((prev) =>
+          prev.map((e) => {
+            if (e.host !== entry.host) return e;
+            const { openLinks: _openLinks, ...rest } = e;
+            return on ? rest : { ...rest, openLinks: false };
+          }),
+        );
       },
       canUninstall: (id) =>
         webApps.some((webApp) => webApp.id === id) ||

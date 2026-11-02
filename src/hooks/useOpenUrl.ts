@@ -11,11 +11,11 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 
 /**
  * Open an http/https/nsite URL the way the rest of the desktop routes links: if an
- * installed app owns the URL - a web app by origin, an nsite by canonical host -
- * deep-link into that app's window (e.g. a `ditto.pub` link opens in the
- * installed Ditto app); otherwise open
- * it as a tab in the Web Browser app, launching a browser window first when
- * none is open.
+ * installed app owns the URL - a web app by origin, an nsite by canonical host,
+ * or an nsite a website names as its own (e.g. a `ditto.pub` link opens in
+ * the installed Ditto nsite, which ditto.pub's web-app-origin-association
+ * names) - deep-link into that app's window; otherwise open it as a tab in
+ * the Web Browser app, launching a browser window first when none is open.
  *
  * A `mailto:` link opens a new message in Mail.
  *
@@ -30,7 +30,7 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  */
 export function useOpenUrl(): (url: string) => void {
   const { open } = useWindowActions();
-  const { findAppIdForUrl } = useInstalledApps();
+  const { findAppForLink } = useInstalledApps();
   const { openNostrUri } = useNostrLinks();
 
   return useCallback(
@@ -55,9 +55,9 @@ export function useOpenUrl(): (url: string) => void {
       // Route into an installed app that owns this URL. An nsite link only
       // matches on its canonical host: an `nsite://naddr1…/` opens in the Web
       // Browser, which redirects it.
-      const appId = findAppIdForUrl(url);
-      if (appId) {
-        open(appId, { url });
+      const target = findAppForLink(url);
+      if (target) {
+        open(target.appId, { url: target.url });
         return;
       }
 
@@ -76,6 +76,6 @@ export function useOpenUrl(): (url: string) => void {
       if (!hasTabConsumer()) open('web-browser');
       publishTabCommand({ type: 'open', url });
     },
-    [open, findAppIdForUrl, openNostrUri],
+    [open, findAppForLink, openNostrUri],
   );
 }

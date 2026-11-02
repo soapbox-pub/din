@@ -12,6 +12,7 @@ import {
   getScreenRecorderBridge, startRecording, stopRecording, type RecordingAudio, type RecordingRequest,
 } from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
+import { websiteLabel } from '@/lib/nsiteApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
@@ -102,6 +103,26 @@ export const appsArea: Area = {
       if (!ctx.apps.canUninstall(app.id)) throw new CommandError(`${app.name} can’t be removed`);
       ctx.apps.uninstallApp(app.id);
       return { text: `Removed ${app.name}` };
+    }),
+    command('apps', 'links', 'Websites whose links an installed nsite opens, because the website names it as its own', [], (_args, ctx) => ({
+      data: ctx.apps.linkedWebsites.map((website) => ({
+        website: websiteLabel(website),
+        app: website.appId,
+        name: appRow(ctx, website.appId),
+        on: website.on,
+      })),
+    })),
+    command('apps', 'open-links', 'Let an nsite open the links of websites that name it, or stop it', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+      { name: 'on', type: 'boolean', positional: true, help: 'on or off' },
+    ], (args, ctx) => {
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      const websites = ctx.apps.linkedWebsites.filter((website) => website.appId === app.id);
+      if (websites.length === 0) throw new CommandError(`No website names ${app.name} as its own`);
+      const on = args.bool('on');
+      ctx.apps.setOpensLinks(app.id, on);
+      const list = websites.map(websiteLabel).join(', ');
+      return { text: on ? `${list} links open in ${app.name}` : `${list} links open in the Web Browser` };
     }),
     {
       path: ['apps', 'run'],
