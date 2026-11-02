@@ -7,8 +7,10 @@
 //! and composites with GLES when it can't.
 //!
 //! Each output renders on demand. A commit, a moving pointer or a changed
-//! cursor queues a frame, which is rendered and committed max_render_time
-//! before the next refresh, extrapolated from the last one; while a frame
+//! cursor queues a frame, which is rendered and committed before the next
+//! refresh, extrapolated from the last one, by as long as recent frames took
+//! to render plus room for the display (and the GPU, when they were
+//! composited), up to max_render_time; while a frame
 //! waits for its refresh, the next waits for that. At the refresh, clients
 //! hear that their frame is on screen (frame callbacks and presentation
 //! feedback), so they draw the next one in the time that's left.
@@ -30,7 +32,7 @@ use smithay::{
         },
         drm::{
             DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
-            compositor::FrameFlags,
+            compositor::{FrameFlags, PrimaryPlaneElement},
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
         },
@@ -109,7 +111,7 @@ pub struct Backend {
     /// Whether the session has the GPU and input (not on another VT).
     pub active: bool,
     next_id: u64,
-    /// How long before a refresh a frame is committed.
+    /// The most before a refresh a frame is committed.
     max_render_time: Duration,
 }
 
@@ -161,7 +163,16 @@ pub struct Screen {
     estimated_vblank: Option<RegistrationToken>,
     last_vblank: Option<Duration>,
     refresh: Duration,
+    /// How long rendering a frame took lately: the slowest, decaying.
+    render_time: Duration,
+    /// Whether the last frame was composited, rather than scanning a buffer out.
+    composited: bool,
 }
+
+/// Room left after rendering for the commit to reach the display in time.
+const SCANOUT_MARGIN: Duration = Duration::from_micros(1500);
+/// And for the GPU to finish compositing too.
+const COMPOSITE_MARGIN: Duration = Duration::from_millis(3);
 
 enum Target {
     Drm(Surface),
@@ -173,11 +184,27 @@ enum Target {
 
 impl Screen {
     /// When the next refresh after NOW is, from the last one.
+    ///
+    /// The kernel stamps a refresh with when the screen starts showing the
+    /// frame, the end of vertical blanking, which is a little after the event
+    /// arrives: NOW can be just before LAST. The next refresh is then the one
+    /// after it, not "unknown", which rendered a frame at once and left Din's
+    /// next frame for the refresh after, a frame late, about half the time.
     fn next_vblank(&self, now: Duration) -> Option<Duration> {
-        let last = self.last_vblank.filter(|&last| now >= last)?;
+        let last = self.last_vblank?;
         let refresh = self.refresh.max(Duration::from_micros(100));
+        if now < last {
+            return (last - now < refresh).then_some(last + refresh);
+        }
         let periods = ((now - last).as_nanos() / refresh.as_nanos()) as u32 + 1;
         Some(last + refresh * periods)
+    }
+
+    /// How long before a refresh to render for it: as long as the last frames
+    /// took, with room for the GPU when they were composited, at most MAX.
+    fn deadline(&self, max: Duration) -> Duration {
+        let margin = if self.composited { COMPOSITE_MARGIN } else { SCANOUT_MARGIN };
+        (self.render_time + margin).min(max)
     }
 
     fn cancel_timers(&mut self, handle: &LoopHandle<'static, State>) {
@@ -665,6 +692,8 @@ impl State {
                 estimated_vblank: None,
                 last_vblank,
                 refresh: mode_refresh(&head.mode),
+                render_time: Duration::ZERO,
+                composited: true,
             });
             info!("{} is on", head.name);
         }
@@ -720,9 +749,9 @@ impl State {
             Redraw::Flipping { again } => *again = true,
             Redraw::Idle => {
                 let delay = match &screen.target {
-                    Target::Drm(_) => screen
-                        .next_vblank(now)
-                        .map_or(Duration::ZERO, |next| next.saturating_sub(max_render_time).saturating_sub(now)),
+                    Target::Drm(_) => screen.next_vblank(now).map_or(Duration::ZERO, |next| {
+                        next.saturating_sub(screen.deadline(max_render_time)).saturating_sub(now)
+                    }),
                     // Twice a refresh at most: the pointer moves far more often.
                     Target::Virtual { last_render, .. } => {
                         last_render.map_or(Duration::ZERO, |last| (last + screen.refresh / 2).saturating_sub(now))
@@ -791,12 +820,18 @@ impl State {
             cursors: &mut self.cursor,
             dnd_icon: self.dnd_icon.as_ref(),
         };
+        let started = std::time::Instant::now();
         let elements = render::elements(&mut scene, renderer, area, scale, true);
         let now: Duration = self.clock.now().into();
         let (damaged, states) = match &mut screen.target {
             Target::Drm(surface) => {
                 let (damaged, states) = match surface.render_frame(renderer, &elements, BACKDROP, FrameFlags::DEFAULT) {
-                    Ok(frame) => (!frame.is_empty, frame.states),
+                    Ok(frame) => {
+                        if !frame.is_empty {
+                            screen.composited = matches!(frame.primary_element, PrimaryPlaneElement::Swapchain(_));
+                        }
+                        (!frame.is_empty, frame.states)
+                    }
                     Err(err) => {
                         warn!("{}: rendering: {err}", head.name);
                         return;
@@ -809,6 +844,9 @@ impl State {
                         Ok(()) => screen.redraw = Redraw::Flipping { again: false },
                         Err(err) => warn!("{}: queueing a frame: {err}", head.name),
                     }
+                    // A slow frame raises the deadline at once; it comes back
+                    // down over a few dozen frames.
+                    screen.render_time = started.elapsed().max(screen.render_time.mul_f64(0.95));
                 } else {
                     // Nothing changed on screen. Whoever drew hears at the refresh the
                     // frame would have made, so a client committing nothing new
