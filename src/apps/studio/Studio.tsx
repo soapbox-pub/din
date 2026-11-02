@@ -13,7 +13,7 @@ import {
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk';
-import { useDin, useMenuBar, useWindowState, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
 import { Compositor } from './engine/compositor';
 import { asFraction, CANVAS, type Bubble, type Layout } from './engine/layout';
@@ -526,11 +526,11 @@ export function Studio() {
     return () => window.removeEventListener('keydown', key);
   }, [phase, cancelCountdown]);
 
-  useEffect(() => {
-    if (recording && takeStart !== null) din.window.setTitle(`● ${formatTime(now - takeStart)}`);
-    else if (live?.phase === 'live') din.window.setTitle(`LIVE ${formatTime(now - live.startedAt)}`);
-    else din.window.setTitle(null);
-  }, [din, recording, live, now, takeStart]);
+  useWindowTitle(
+    recording && takeStart !== null ? `● ${formatTime(now - takeStart)}`
+      : live?.phase === 'live' ? `LIVE ${formatTime(now - live.startedAt)}`
+        : null,
+  );
 
   // While recording, closing asks first: the take would be cut off.
   useEffect(() => {

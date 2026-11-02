@@ -122,7 +122,7 @@ din apps run ./dist --detach             # leave it open and return
 This runs a web app in a Din window at `din://<origin>/`, the way Din runs
 its built-in apps: in the apps' session, with `window.din` defined before
 the page's scripts run, so a plain `index.html` can call
-`await din.ready; din.window.setTitle('…')` with no build step. It's for
+`await din.ready; din.window.setChrome({ frame: 'custom' })` with no build step. It's for
 developing apps outside Din's tree.
 
 The window's console prints in the terminal (warnings and errors on

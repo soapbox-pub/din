@@ -8,7 +8,7 @@ import { SquareTerminal } from 'lucide-react';
 import { getPtyBridge, type PtyBridge } from '@/lib/pty';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
-import { useDin, useDinTheme, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDinTheme, useWindowAccent, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
 import { adoptedTab, hasAdoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
@@ -482,10 +482,7 @@ export function Terminal() {
     '--foreground': palette.foreground,
     '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
   } as CSSProperties;
-  useEffect(() => {
-    din.window.setAccent(palette.background);
-    return () => din.window.setAccent(null);
-  }, [din, palette.background]);
+  useWindowAccent(palette.background);
   const closeWindow = useCallback(() => din.window.close(), [din]);
 
   // A window opened for a tab torn off another one starts empty, and gets

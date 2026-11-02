@@ -13,7 +13,7 @@
  *   the desktop pushes changes and the SDK keeps a copy. Each has an
  *   `onChange` that returns an unsubscribe function.
  * - Requests that the desktop answers return promises. Fire-and-forget
- *   setters (`setTitle`) return nothing and apply in order.
+ *   setters (`setChrome`) return nothing and apply in order.
  * - Anything that needs a permission rejects with an error named
  *   `DinPermissionError` when the app's manifest didn't ask for it
  *   (docs/din/permissions.md).
@@ -241,16 +241,10 @@ export interface DinWindow {
   onChange(cb: (state: WindowState) => void): Unsubscribe;
 
   /**
-   * What the window is showing ("Untitled.png"), or null for the app's name.
-   * Changing `document.title` from what the page's HTML had does the same,
-   * as the icon link does `setIcon` and the theme-color `setAccent`.
+   * Title-bar look for `custom` frames, following the accent. The window's
+   * title, icon and accent are the page's own `document.title`,
+   * `<link rel="icon">` and `<meta name="theme-color">` (docs/din/window.md).
    */
-  setTitle(title: string | null): void;
-  /** An icon for what it's showing (a data: or https URL, or a root path of Din's public files like `/icons/…`), or null for the app's. */
-  setIcon(url: string | null): void;
-  /** Tint the title bar (a CSS color, e.g. a page's theme-color), or null. */
-  setAccent(color: string | null): void;
-  /** Title-bar look for `custom` frames, following the accent. */
   readonly frameStyle: FrameStyle;
   onFrameStyleChange(cb: (style: FrameStyle) => void): Unsubscribe;
 

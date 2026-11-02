@@ -8,7 +8,7 @@ import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
-import { useDin, useWindowTitle } from '@/sdk/react';
+import { useDin, useWindowIcon, useWindowTitle } from '@/sdk/react';
 import { FileViewerBody } from '@/shared/FileViewerBody';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
@@ -40,13 +40,11 @@ export function Preview() {
 
   const name = path ? path.slice(path.lastIndexOf('/') + 1) : '';
   useWindowTitle(path ? `${dirty ? '• ' : ''}${name}` : null);
-  useEffect(() => {
-    din.window.setIcon(
-      isViewableImage(name) ? '/icons/apps/preview-photo.png'
-        : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
-          : null,
-    );
-  }, [din, name]);
+  useWindowIcon(
+    isViewableImage(name) ? '/icons/apps/preview-photo.png'
+      : isPlayableVideo(name) ? '/icons/apps/preview-video.png'
+        : null,
+  );
 
   const dir = path ? parentPath(path) : null;
   const listing = useDirectory(dir);

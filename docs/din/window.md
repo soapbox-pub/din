@@ -24,10 +24,21 @@ the window is snapped to, or `null`.
 
 ## Title, icon, accent
 
+The window follows the page's head, as a browser's tab does:
+
 ```ts
-din.window.setTitle('Budget 2027.xlsx');   // null: the app's name
-din.window.setIcon(thumbnailDataUrl);      // null: the app's icon
-din.window.setAccent('#1e7145');           // tints the title bar; null: default
+document.title = 'Budget 2027.xlsx';                         // the title
+iconLink.href = thumbnailDataUrl;                            // <link rel="icon">: the icon
+themeColorMeta.content = '#1e7145';                          // <meta name="theme-color">: tints the title bar
+```
+
+React apps use the SDK's hooks, which do that while mounted and put back
+the app's own when they unmount or are given null:
+
+```tsx
+useWindowTitle(dirty ? `• ${name}` : name);   // null: the app's name
+useWindowIcon(thumbnailDataUrl);               // null: the app's icon
+useWindowAccent('#1e7145');                    // null: the default
 ```
 
 The title shows in the title bar (for `standard` frames), the Dock's
@@ -35,21 +46,12 @@ window list and the switcher. The accent is sanitized by the desktop,
 which also decides whether the title bar reads as dark; the menu bar
 takes it on while the window is maximized.
 
-The page's own head does the same, as a browser's tab follows it, so a
-page written for the web needs none of these:
-
-```ts
-document.title = 'Budget 2027.xlsx';                       // setTitle
-document.querySelector('link[rel=icon]').href = thumbnail; // setIcon
-document.querySelector('meta[name=theme-color]').content = '#1e7145'; // setAccent
-```
-
 What the page's HTML starts with is taken as the app's own (its name, its
 icon, its manifest's color): only changes from it are passed on, and
-going back to it is the same as `null`. Whichever was set last wins, the
-head or the call. An icon that isn't a data: or https URL (the app's own
-files, a blob:) is read by the SDK into a data: URL, up to 512 KB
-(`src/sdk/standards.ts`).
+going back to it is the same as having none. Where the head has several
+icon links or theme-colors, the last wins. An icon that isn't a data: or
+https URL (the app's own files, Din's `/icons/…`, a blob:) is read by the
+SDK into a data: URL, up to 512 KB (`src/sdk/standards.ts`).
 
 ## How much Din draws: frame modes
 

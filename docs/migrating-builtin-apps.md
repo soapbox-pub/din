@@ -23,10 +23,10 @@ replaced as below. `src/apps/calculator/` is the model.
 | `focus`, `minimize`, `maximize`, `toggleMaximize` | the same on `din.window` |
 | `resize(windowId, w, h)` | `din.window.setBounds({ width, height })` |
 | `setFrameless(windowId, true, geometry)` | `din.window.setChrome({ frame: 'none', … })` + `setBounds` |
-| `useWindowTitle(title)` | `useWindowTitle(title)` from `@/sdk/react`, or `din.window.setTitle` |
+| `useWindowTitle(title)` | `useWindowTitle(title)` from `@/sdk/react`, or `document.title` |
 | `import '…/files/Dialogs'` for `Overlay`, `DialogButton` | `@/shared/dialogs` |
-| `useWindowIcon(url)` | `din.window.setIcon(url)` |
-| `useWindowAccent(color)` | `din.window.setAccent(color)` |
+| `useWindowIcon(url)` | `useWindowIcon(url)` from `@/sdk/react`, or a `<link rel="icon">` |
+| `useWindowAccent(color)` | `useWindowAccent(color)` from `@/sdk/react`, or a `<meta name="theme-color">` |
 | `useWindowTitlebar(node)` (content in Din's title bar) | `frame: 'custom'` and the app's own header |
 | `useOwnWindowHeader()` + `WindowDragRegion` + `WindowControls` | `frame: 'custom'` + the same pieces from `@/sdk/react` |
 | `useWindowChrome().beginMove/beginResize` | `din.window.beginMove(e)` / `beginResize(edge, e)` |

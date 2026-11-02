@@ -3,7 +3,7 @@ import { FolderOpen, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
 import { typesFromFilters, type Din, type DinFileHandle } from '@/sdk';
-import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useCloseGuard, useDin, useWindowAccent, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
 import '@fontsource/arimo/700.css';
@@ -1756,7 +1756,7 @@ function CADWindow() {
   );
   // The title bar is the app's own, in the drawing area's colors; the accent
   // gives Din's window controls on it their light icons.
-  useEffect(() => din.window.setAccent('#1b2028'), [din]);
+  useWindowAccent('#1b2028');
 
   // ---- The assistant ------------------------------------------------------------------------------
 

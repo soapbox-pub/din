@@ -53,13 +53,58 @@ export function useCurrentDrag(): DragInfo | null {
   );
 }
 
-/** Show this title while mounted (null: the app's name). */
+/** The page's own title, which the window shows as the app's name. */
+const appTitle = typeof document === 'undefined' ? '' : document.title;
+
+/**
+ * Show this title while mounted (null: the app's name). It's the page's
+ * `document.title`, which the window follows (docs/din/window.md).
+ */
 export function useWindowTitle(title: string | null): void {
-  const din = useDin();
   useEffect(() => {
-    din.window.setTitle(title);
-  }, [din, title]);
-  useEffect(() => () => din.window.setTitle(null), [din]);
+    document.title = title ?? appTitle;
+  }, [title]);
+  useEffect(
+    () => () => {
+      document.title = appTitle;
+    },
+    [],
+  );
+}
+
+/** A `<link>` or `<meta>` in the head while mounted and given a value: the last added wins. */
+function useHeadElement(tag: 'link' | 'meta', value: string | null, apply: (el: HTMLElement, value: string) => void): void {
+  useEffect(() => {
+    if (value === null) return;
+    const el = document.createElement(tag);
+    apply(el, value);
+    document.head.append(el);
+    return () => el.remove();
+    // `apply` is a fixed function per hook.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tag, value]);
+}
+
+/**
+ * Show this icon for the window while mounted (null: the app's): a
+ * `<link rel="icon">` in the page's head, which the window follows.
+ */
+export function useWindowIcon(url: string | null): void {
+  useHeadElement('link', url, (el, href) => {
+    el.setAttribute('rel', 'icon');
+    el.setAttribute('href', href);
+  });
+}
+
+/**
+ * Tint the title bar while mounted (null: the default): a
+ * `<meta name="theme-color">` in the page's head, which the window follows.
+ */
+export function useWindowAccent(color: string | null): void {
+  useHeadElement('meta', color, (el, content) => {
+    el.setAttribute('name', 'theme-color');
+    el.setAttribute('content', content);
+  });
 }
 
 /**

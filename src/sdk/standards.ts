@@ -6,8 +6,7 @@
  * - The Media Session API (`navigator.mediaSession`) is what Din's media
  *   controls and the media keys show and drive.
  * - `document.title`, `<link rel="icon">` and `<meta name="theme-color">`
- *   are the window's title, icon and accent, as `din.window.setTitle`,
- *   `setIcon` and `setAccent` are.
+ *   are the window's title, icon and accent.
  * - File System Access (`showOpenFilePicker` and the rest) opens Din's
  *   pickers, its handles backed by `din.files`' handles.
  * - Launch Handling's `launchQueue` hears the launch and its files, as
@@ -209,17 +208,17 @@ export interface DocumentHeadHost {
 
 /**
  * The window's title, icon and accent from the page's `<title>`, icon link
- * and theme-color, as a browser's tab follows them. What the page's HTML
- * starts with is the app's own (its name, its icon, its manifest's color),
- * so only changes from that are passed on, and going back to it gives the
- * window the app's again.
+ * and theme-color, as a browser's tab follows them (the last of each in the
+ * head). What the page's HTML starts with is the app's own (its name, its
+ * icon, its manifest's color), so only changes from that are passed on,
+ * and going back to it gives the window the app's again.
  */
 export function watchDocumentHead(host: DocumentHeadHost): void {
   const read = () => {
     const icons = document.querySelectorAll<HTMLLinkElement>('link[rel~="icon" i][href]');
-    const themeColor = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color" i][content]')].find(
-      (m) => !m.media || matchMedia(m.media).matches,
-    );
+    const themeColor = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color" i][content]')]
+      .reverse()
+      .find((m) => !m.media || matchMedia(m.media).matches);
     return {
       title: document.title.trim(),
       icon: icons.length ? icons[icons.length - 1].href : '',

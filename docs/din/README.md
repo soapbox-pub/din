@@ -19,7 +19,7 @@ run, the way a browser provides `navigator` (and Din provides
 ```ts
 await din.ready;
 
-din.window.setTitle('Untitled.png');
+document.title = 'Untitled.png';
 din.window.onCloseRequest(() => {
   if (!dirty) return false;
   askToSave().then((ok) => ok && din.window.close());
@@ -88,7 +88,7 @@ For React apps, `src/sdk/react` adds:
 | `<WindowControls>` | the same | Minimize, maximize, close, in the title bar's colors |
 | `useWindowState()` | `useWindowIsTop`, `useWindowVisible` | The window's state, re-rendering on change |
 | `useFrameStyle()` | `useWindowFrame().muted/hover` | The title bar's accent and darkness (`frameControlClasses` turns it into classes) |
-| `useWindowTitle(title)` | `useWindowTitle` | `din.window.setTitle` for as long as it's mounted |
+| `useWindowTitle(title)`, `useWindowIcon(url)`, `useWindowAccent(color)` | the same | The page's `document.title`, icon link and theme-color, which the window follows, for as long as it's mounted |
 | `useCloseGuard(fn)` | `setCloseGuard` | `din.window.onCloseRequest` for as long as it's mounted |
 | `useMenuBar(menus, onAction)` | `<MenuBarMenus>` | A declarative menu bar ([menus.md](menus.md)) |
 | `useDinTheme()` | reading the desktop's CSS | The theme snapshot |

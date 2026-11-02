@@ -516,9 +516,6 @@ export function installDin(transport: Transport): void {
       return state;
     },
     onChange: (cb) => states.on(cb),
-    setTitle: (title) => tell('window.setTitle', { title }),
-    setIcon: (url) => tell('window.setIcon', { url }),
-    setAccent: (color) => tell('window.setAccent', { color }),
     get frameStyle() {
       return frameStyle;
     },
@@ -546,7 +543,11 @@ export function installDin(transport: Transport): void {
     },
   };
 
-  watchDocumentHead({ title: win.setTitle, icon: win.setIcon, accent: win.setAccent });
+  watchDocumentHead({
+    title: (title) => tell('window.setTitle', { title }),
+    icon: (url) => tell('window.setIcon', { url }),
+    accent: (color) => tell('window.setAccent', { color }),
+  });
   // The Additional Windowing Controls draft's, for pages written for it.
   for (const name of ['minimize', 'maximize', 'restore'] as const) {
     Object.defineProperty(window, name, { value: async () => win[name](), writable: true, configurable: true });

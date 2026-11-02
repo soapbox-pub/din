@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useWindowAccent, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { AERO_CSS } from './aero';
 import { ACCENTS, AppContext, FIELD, FOCUS, keepFocus, refocusFrame, useOfficeApp, type OfficeApp } from './accent';
@@ -86,7 +86,6 @@ interface TitleBarProps {
  */
 export function TitleBar(props: TitleBarProps) {
   const app = useOfficeApp();
-  const din = useDin();
   const latest = useRef(props);
   useLayoutEffect(() => {
     latest.current = props;
@@ -94,10 +93,7 @@ export function TitleBar(props: TitleBarProps) {
   const { title, status, canUndo, canRedo } = props;
   const placeholder = props.search ? (props.search.placeholder ?? 'Search') : null;
   const [query, setQuery] = useState('');
-  useEffect(() => {
-    din.window.setAccent(ACCENTS[app].accent);
-    return () => din.window.setAccent(null);
-  }, [app, din]);
+  useWindowAccent(ACCENTS[app].accent);
   return (
     <WindowDragRegion
       className="grid h-9 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-3 bg-[var(--office-accent)] px-2 text-white"

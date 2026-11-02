@@ -86,11 +86,9 @@ from `@/sdk` and render itself.
 
 ```tsx
 // Stopwatch.tsx
-import { useEffect } from 'react';
-import { WindowControls, WindowDragRegion, useDin, useMenuBar, useWindowState } from '@/sdk/react';
+import { WindowControls, WindowDragRegion, useMenuBar, useWindowState, useWindowTitle } from '@/sdk/react';
 
 export function Stopwatch() {
-  const din = useDin();
   const { visible } = useWindowState();
   const [ms, running, toggle, reset] = useStopwatch({ paused: !visible });
 
@@ -102,7 +100,7 @@ export function Stopwatch() {
     (id) => (id === 'toggle' ? toggle() : reset()),
   );
 
-  useEffect(() => din.window.setTitle(running ? format(ms) : null), [din, running, ms]);
+  useWindowTitle(running ? format(ms) : null);
 
   return (
     <div className="flex h-full flex-col text-foreground">
