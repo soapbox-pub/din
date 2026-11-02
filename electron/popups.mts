@@ -196,6 +196,12 @@ export function mayOpenWindow(contents: Electron.WebContents, url: string): bool
   return false;
 }
 
+/** Whether the user just pressed a key, clicked or tapped in a guest, as main saw it (not the page's word). */
+export function justPressed(contents: Electron.WebContents): boolean {
+  const pressed = activations.get(contents.id);
+  return pressed !== undefined && Date.now() - pressed <= ACTIVATION_MS;
+}
+
 // --- Openers -----------------------------------------------------------------
 
 /**

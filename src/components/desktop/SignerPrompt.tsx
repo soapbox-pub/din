@@ -204,8 +204,9 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
       <DialogContent
         showCloseButton={false}
         className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-sm"
+        // Nothing focused to answer with: a page that asks while the user is
+        // typing mustn't have their Enter press Connect (or Allow).
         onOpenAutoFocus={(event) => {
-          if (isConnect) return;
           event.preventDefault();
           (event.currentTarget as HTMLElement).focus();
         }}
@@ -260,7 +261,7 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
         <DialogFooter className="flex-col gap-2 p-6 pt-6 sm:flex-col">
           {isConnect ? (
             <>
-              <Button onClick={() => answer('allow')} autoFocus>
+              <Button onClick={() => answer('allow')}>
                 Connect
               </Button>
               <Button variant="secondary" onClick={() => answer('deny')}>

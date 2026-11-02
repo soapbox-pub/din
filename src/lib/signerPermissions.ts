@@ -45,8 +45,6 @@ export function isSignerMethod(method: string): method is SignerMethod {
   return (SIGNER_METHODS as readonly string[]).includes(method);
 }
 
-/** NIP-42 relay authentication: signed without asking, for connected sites. */
-export const AUTH_KIND = 22242;
 
 const DecisionSchema = z.enum(['allow', 'deny']);
 export type Decision = z.infer<typeof DecisionSchema>;
@@ -89,7 +87,6 @@ export function decide(
   }
   if (!grant) return 'ask';
   if (method === 'signEvent') {
-    if (kind === AUTH_KIND) return 'allow';
     return kind === undefined ? 'ask' : (grant.kinds[String(kind)] ?? 'ask');
   }
   return grant.methods[method] ?? 'ask';

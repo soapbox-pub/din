@@ -56,6 +56,7 @@ import {
 import { attachAdblock, ensureAdblockEngine, isAdblockExtension, setupAdblock } from './adblock.mts';
 import {
   attachPopups,
+  justPressed,
   mayOpenWindow,
   popupAttached,
   popupAttaching,
@@ -3892,7 +3893,9 @@ function registerNostrBridge(): void {
       origin: caller.origin,
       source: caller.source,
       wcId: event.sender.id,
-      userActivated: Boolean(payload && payload.userActivated),
+      // The page's navigator.userActivation is the page's to fake: the user
+      // must also have pressed something in it, as main saw.
+      userActivated: Boolean(payload && payload.userActivated) && justPressed(event.sender),
     });
   });
 
