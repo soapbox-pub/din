@@ -19,6 +19,7 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
@@ -164,12 +165,44 @@ function batchByTransfer(transfer: string): Batch | undefined {
   return undefined;
 }
 
+/**
+ * Whether the Bluetooth link to `address` is authenticated and encrypted,
+ * from the kernel (HCIGETCONNINFO, as electron/quickshare-bt.py asks): only
+ * the phone that holds the pairing's key can make it so, where its address
+ * alone is anyone's to claim. Node has no Bluetooth sockets, so Python asks.
+ */
+const LINK_SECURED = `
+import fcntl, socket, struct, sys
+address = bytes(reversed([int(x, 16) for x in sys.argv[1].split(':')]))
+for hci in range(8):
+    try:
+        s = socket.socket(31, socket.SOCK_RAW, 1)
+        s.bind((hci,))
+        request = bytearray(address + bytes([1, 0]) + bytes(16))
+        fcntl.ioctl(s.fileno(), 0x800448D5, request, True)
+        mode = struct.unpack_from('<I', request, 20)[0]
+        if mode & 0x0002 and mode & 0x0004:
+            print('secured')
+            break
+    except OSError:
+        pass
+`;
+
+function linkSecured(address: string): Promise<boolean> {
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(address)) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile(process.env.DIN_QUICKSHARE_PYTHON || 'python3', ['-I', '-c', LINK_SECURED, address], { timeout: 10_000 }, (error, stdout) =>
+      resolve(!error && stdout.trim() === 'secured'),
+    );
+  });
+}
+
 async function authorize(b: DBusConnection, transfer: string): Promise<string> {
   const props = await getAll(b, transfer, TRANSFER);
   const session = String(unwrap(props.get('Session')) ?? '');
   const sessionProps = session ? await getAll(b, session, SESSION).catch(() => null) : null;
   const address = String(unwrap(sessionProps?.get('Destination')) ?? '');
-  const who = address ? await deps.sender(address) : null;
+  const who = address && (await linkSecured(address)) ? await deps.sender(address) : null;
   if (!who) {
     console.warn(`phone: turned away a file from ${address || 'an unknown device'}`);
     throw rejected('Not one of this computer’s phones');
