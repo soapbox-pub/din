@@ -1,5 +1,5 @@
 import { useMemo, useState, type ComponentProps, type DragEvent } from 'react';
-import { ChevronRight, Folder, Inbox, RefreshCw, Settings2, TriangleAlert, UserPlus } from 'lucide-react';
+import { ChevronRight, Folder, Inbox, MailMinus, RefreshCw, Settings2, TriangleAlert, UserPlus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
@@ -180,6 +180,13 @@ export function Sidebar({
             />
           );
         })}
+        <Row
+          icon={MailMinus}
+          label="Subscriptions"
+          title="Mailing lists in your inbox, to unsubscribe from"
+          selected={selection.kind === 'subscriptions'}
+          onClick={() => onSelect({ kind: 'subscriptions' })}
+        />
       </Section>
 
       {accounts.map((a) => {

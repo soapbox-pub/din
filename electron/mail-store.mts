@@ -10,7 +10,9 @@
 //     shown, by mailbox and uid;
 //   - the messages that have been opened, as fetched (a big one without its
 //     big attachments), up to BODY_BYTES in all, the least recently opened
-//     going first.
+//     going first;
+//   - for the inbox's messages Subscriptions has looked at, what their
+//     List-Unsubscribe headers say (or that they have none).
 //
 // A mailbox whose UIDVALIDITY changes has its uids renumbered, so what's
 // kept of it is thrown away.
@@ -39,6 +41,20 @@ export interface StoredSummary {
   previewed: boolean;
 }
 
+/** What a message's list headers say, for Subscriptions. */
+export interface ListHeader {
+  date: number;
+  name: string;
+  address: string;
+  listId: string | null;
+  /** List-Unsubscribe's links, in its order. */
+  urls: string[];
+  /** List-Unsubscribe-Post offers RFC 8058's one click. */
+  oneClick: boolean;
+  /** The sender's domain passed DKIM. */
+  verified: boolean;
+}
+
 export type Flags = Pick<MessageSummary, 'seen' | 'flagged' | 'answered' | 'draft'>;
 
 const SCHEMA = `
@@ -48,6 +64,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS mailbox (path TEXT PRIMARY KEY, validity TEXT NOT NULL, modseq TEXT, uids BLOB NOT NULL, synced INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS message (path TEXT NOT NULL, uid INTEGER NOT NULL, summary TEXT NOT NULL, previewed INTEGER NOT NULL, PRIMARY KEY (path, uid));
 CREATE TABLE IF NOT EXISTS body (path TEXT NOT NULL, uid INTEGER NOT NULL, raw BLOB NOT NULL, opened INTEGER NOT NULL, PRIMARY KEY (path, uid));
+CREATE TABLE IF NOT EXISTS list (path TEXT NOT NULL, uid INTEGER NOT NULL, header TEXT, PRIMARY KEY (path, uid));
 `;
 
 function packUids(uids: number[]): Uint8Array {
@@ -157,7 +174,7 @@ export class MailStore {
 
   forget(path: string): void {
     this.transaction(() => {
-      for (const table of ['mailbox', 'message', 'body']) this.db.prepare(`DELETE FROM ${table} WHERE path = ?`).run(path);
+      for (const table of ['mailbox', 'message', 'body', 'list']) this.db.prepare(`DELETE FROM ${table} WHERE path = ?`).run(path);
     });
   }
 
@@ -236,9 +253,36 @@ export class MailStore {
         const args: SQLInputValue[] = [path, ...some];
         this.db.prepare(`DELETE FROM message WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
         this.db.prepare(`DELETE FROM body WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
+        this.db.prepare(`DELETE FROM list WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
       }
       const box = this.box(path);
       if (box) this.setBox(path, { ...box, uids: box.uids.filter((u) => !gone.has(u)) });
+    });
+  }
+
+  /** The list headers kept for these uids: null for a message with none, missing when not looked at. */
+  listHeaders(path: string, uids: number[]): Map<number, ListHeader | null> {
+    const out = new Map<number, ListHeader | null>();
+    for (const some of chunks(uids)) {
+      const rows = this.db
+        .prepare(`SELECT uid, header FROM list WHERE path = ? AND uid IN (${placeholders(some.length)})`)
+        .all(path, ...some) as { uid: number; header: string | null }[];
+      for (const r of rows) out.set(r.uid, r.header ? (JSON.parse(r.header) as ListHeader) : null);
+    }
+    return out;
+  }
+
+  /** Every message kept with list headers, by uid. */
+  allListHeaders(path: string): Map<number, ListHeader> {
+    const rows = this.db.prepare('SELECT uid, header FROM list WHERE path = ? AND header IS NOT NULL').all(path) as { uid: number; header: string }[];
+    return new Map(rows.map((r) => [r.uid, JSON.parse(r.header) as ListHeader]));
+  }
+
+  putListHeaders(path: string, list: [number, ListHeader | null][]): void {
+    if (!list.length) return;
+    const put = this.db.prepare('INSERT INTO list (path, uid, header) VALUES (?, ?, ?) ON CONFLICT (path, uid) DO UPDATE SET header = excluded.header');
+    this.transaction(() => {
+      for (const [uid, header] of list) put.run(path, uid, header ? JSON.stringify(header) : null);
     });
   }
 

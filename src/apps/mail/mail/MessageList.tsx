@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent } from 'react';
-import { Archive, Flag, FlagOff, Folder, Forward, Mail, MailOpen, OctagonAlert, Paperclip, Reply, ReplyAll, Trash2, Inbox, Pencil } from 'lucide-react';
+import { Archive, Flag, FlagOff, Folder, Forward, Mail, MailMinus, MailOpen, OctagonAlert, Paperclip, Reply, ReplyAll, Trash2, Inbox, Pencil } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -93,6 +93,7 @@ export function MessageList({
   onKeyDown,
   onAction,
   onMove,
+  onUnsubscribe,
   targetsFor,
   restoreScroll,
   onScroll,
@@ -110,6 +111,8 @@ export function MessageList({
   onKeyDown: (e: KeyboardEvent) => void;
   onAction: (action: MessageAction, item: Item) => void;
   onMove: (item: Item, path: string) => void;
+  /** Leave the list a message came from. */
+  onUnsubscribe: (item: Item) => void;
   /** The messages a menu on this row acts on: the selection if the row is in it. */
   targetsFor: (item: Item) => Item[];
   /** Where to scroll to on showing, once: where a window Din reopened was left. */
@@ -236,6 +239,14 @@ export function MessageList({
                     })}
                   </ContextMenuSubContent>
                 </ContextMenuSub>
+              )}
+              {item.listUnsubscribe && !many && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => onUnsubscribe(item)}>
+                    <MailMinus /> Unsubscribe…
+                  </ContextMenuItem>
+                </>
               )}
               <ContextMenuSeparator />
               <ContextMenuItem variant="destructive" onSelect={() => onAction('trash', item)}>

@@ -48,6 +48,7 @@ a missing or bad argument).
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, connect or disconnect a phone, whether it can send files here, add one paired in Bluetooth or forget one |
+| `mail` | Mail's accounts, and the mailing lists in their inboxes as Mail's Subscriptions shows them: list them (most mail first, how each is left, whether its sender checks out, ones still mailing after unsubscribing), unsubscribe from some (asks on screen first), optionally moving their mail to the Trash |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks and phones plugged in by USB, as Files' sidebar has them: list them (with what a phone is waiting on), mount, unlock an encrypted one with its passphrase, eject |
 | `studio` | Studio: its takes in ~/Videos/Studio, recording one (start, stop, mark a highlight or a retake), transcribing one again, and going live (asks on screen first) or ending the stream |
@@ -67,7 +68,7 @@ down (`din power restart|off`), restarting Din (`din update restart`),
 installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
-(`din phone send`) and forgetting a phone with its messages (`din phone forget`) put the question on
+(`din phone send`), unsubscribing from mailing lists (`din mail unsubscribe`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings.

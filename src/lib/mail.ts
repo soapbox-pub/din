@@ -1,7 +1,8 @@
 /**
  * The mail bridge (`din.system.mail`, permission `mail`): IMAP and SMTP
  * accounts, run in Electron main by electron/mail.mts, for the Mail app
- * (src/apps/mail/). Types only, shared by both sides; main checks every
+ * (src/apps/mail/), and on `window.dinos.mail` the part `din mail` needs.
+ * Types shared by both sides (main imports nothing else); main checks every
  * argument itself.
  */
 
@@ -92,6 +93,8 @@ export interface MessageSummary {
   /** The start of the text, or null when it couldn't be read. */
   preview: string | null;
   size: number;
+  /** It has a List-Unsubscribe header; unknown (undefined) for summaries kept from before Mail looked. */
+  listUnsubscribe?: boolean;
 }
 
 export type MessageFilter = 'unread' | 'flagged' | null;
@@ -122,6 +125,56 @@ export interface MailMessage extends MessageSummary {
   html: string | null;
   text: string;
   attachments: MailAttachmentInfo[];
+  /** How to unsubscribe from the list it came from, or null when it doesn't say. */
+  unsubscribe: UnsubscribeInfo | null;
+}
+
+/**
+ * How a list is left (List-Unsubscribe, RFC 2369): a POST to its https link
+ * (RFC 8058's one click), a message to its mailto: address, or only a web
+ * page for the user to finish on.
+ */
+export type UnsubscribeMethod = 'one-click' | 'email' | 'web';
+
+export interface UnsubscribeInfo {
+  /** The list, the way Mail groups its mail: by List-Id, else the sender. */
+  id: string;
+  method: UnsubscribeMethod;
+  /** The sender's domain passed DKIM, by the account's own server's Authentication-Results. */
+  verified: boolean;
+  /** When it was unsubscribed from here, or null. */
+  unsubscribed: number | null;
+}
+
+/** A mailing list that has mailed the inbox: one sender, or one List-Id. */
+export interface MailSubscription extends UnsubscribeInfo {
+  accountId: string;
+  name: string;
+  address: string;
+  listId: string | null;
+  /** Its messages in the inbox in the time looked at. */
+  count: number;
+  /** The newest one's date, ms. */
+  last: number;
+  /** Messages that came over two days after unsubscribing: it isn't listening. */
+  since: number;
+}
+
+export interface SubscriptionScan {
+  subscriptions: MailSubscription[];
+  /** How far back it looked, ms. */
+  from: number;
+}
+
+export interface UnsubscribeResult {
+  id: string;
+  /** done: it's sent; page: only a web page can do it (`url`); failed: `error` says why. */
+  status: 'done' | 'page' | 'failed';
+  method: UnsubscribeMethod | null;
+  url: string | null;
+  error: string | null;
+  /** Messages moved to the Trash. */
+  trashed: number;
 }
 
 export interface MailAttachment {
@@ -171,5 +224,37 @@ export interface MailBridge {
   send(accountId: string, message: OutgoingMessage): Promise<void>;
   /** Resolves with the draft's uid in Drafts, when the server says. */
   saveDraft(accountId: string, message: OutgoingMessage): Promise<number | null>;
+  /** The mailing lists in the inbox over the last `months` (default 6), most mail first. */
+  subscriptions(accountId: string, options?: { months?: number }): Promise<SubscriptionScan>;
+  /**
+   * Leave these lists (by `MailSubscription.id`), each the best way it
+   * offers, and with `trash` move their mail in the inbox to the Trash.
+   */
+  unsubscribe(accountId: string, ids: string[], options?: { trash?: boolean }): Promise<UnsubscribeResult[]>;
+  /** Leave the list one message came from. */
+  unsubscribeMessage(accountId: string, path: string, uid: number): Promise<UnsubscribeResult>;
   onChanged(cb: (change: MailChange) => void): () => void;
 }
+
+/** What the desktop has of it, for `din mail`. */
+export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'subscriptions' | 'unsubscribe'>;
+
+declare global {
+  interface Dinos {
+    /** Present only inside the Electron shell. */
+    mail?: MailDesktopBridge;
+  }
+}
+
+/** The desktop's mail bridge (`din mail`), or undefined outside Electron. */
+export function getMailDesktopBridge(): MailDesktopBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.dinos?.mail;
+}
+
+/** How a list is left, in words, as Mail and `din mail` show it. */
+export const UNSUBSCRIBE_METHODS: Record<UnsubscribeMethod, string> = {
+  'one-click': 'One click',
+  email: 'By email',
+  web: 'Needs a web page',
+};

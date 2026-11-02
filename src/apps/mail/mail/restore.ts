@@ -16,6 +16,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 function isSelection(v: unknown): v is Selection {
   if (!isObject(v)) return false;
   if (v.kind === 'all') return typeof v.special === 'string';
+  if (v.kind === 'subscriptions') return true;
   return v.kind === 'mailbox' && typeof v.accountId === 'string' && typeof v.path === 'string';
 }
 

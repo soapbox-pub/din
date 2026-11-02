@@ -6,6 +6,7 @@ import { extensionsArea } from './extensions';
 import { cursorsArea, iconsArea, skinsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
+import { mailArea } from './mail';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
 import { studioArea } from './studio';
@@ -36,6 +37,7 @@ export const AREAS: readonly Area[] = [
   wifiArea,
   bluetoothArea,
   phoneArea,
+  mailArea,
   vpnArea,
   torArea,
   soundArea,

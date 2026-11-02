@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, FileArchive, FileImage, FileText, File as FileIcon, Mails, Pencil, ShieldCheck } from 'lucide-react';
+import { Download, FileArchive, FileImage, FileText, File as FileIcon, MailMinus, Mails, Pencil, ShieldCheck } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
@@ -152,7 +152,9 @@ function ReaderSkeleton() {
   );
 }
 
-function Header({ m }: { m: MailMessage }) {
+const unsubscribedOn = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+
+function Header({ m, onUnsubscribe }: { m: MailMessage; onUnsubscribe: () => void }) {
   const [details, setDetails] = useState(false);
   return (
     <header className="flex gap-3 border-b border-border/60 px-6 pt-5 pb-4">
@@ -166,7 +168,17 @@ function Header({ m }: { m: MailMessage }) {
             {fullDate(m.date)}
           </time>
         </div>
-        <div className="mt-0.5 text-[13px] font-medium select-text">{m.subject || 'No Subject'}</div>
+        <div className="mt-0.5 flex items-baseline gap-3">
+          <div className="min-w-0 flex-1 text-[13px] font-medium select-text">{m.subject || 'No Subject'}</div>
+          {m.unsubscribe &&
+            (m.unsubscribe.unsubscribed ? (
+              <span className="shrink-0 text-xs text-muted-foreground">Unsubscribed {unsubscribedOn.format(m.unsubscribe.unsubscribed)}</span>
+            ) : (
+              <button type="button" onClick={onUnsubscribe} className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary outline-none hover:underline focus-visible:underline">
+                <MailMinus className="size-3.5" /> Unsubscribe
+              </button>
+            ))}
+        </div>
         <div className="mt-1 space-y-0.5">
           <People label="To" list={m.to} />
           {(details || m.to.length === 0) && <People label="Cc" list={m.cc} />}
@@ -186,7 +198,19 @@ function Header({ m }: { m: MailMessage }) {
   );
 }
 
-export function Reader({ item, count, onMailto, onEditDraft }: { item: Item | null; count: number; onMailto: (url: string) => void; onEditDraft: (item: Item) => void }) {
+export function Reader({
+  item,
+  count,
+  onMailto,
+  onEditDraft,
+  onUnsubscribe,
+}: {
+  item: Item | null;
+  count: number;
+  onMailto: (url: string) => void;
+  onEditDraft: (item: Item) => void;
+  onUnsubscribe: (item: Item) => void;
+}) {
   const query = useMessage(count === 1 ? item : null);
   const [alwaysRemote, setAlwaysRemote] = useState(() => localStorage.getItem(REMOTE_KEY) === 'always');
   const [loadRemote, setLoadRemote] = useState<string | null>(null);
@@ -237,7 +261,7 @@ export function Reader({ item, count, onMailto, onEditDraft }: { item: Item | nu
 
   return (
     <article className="min-h-full" aria-label={m.subject || 'Message'}>
-      <Header m={m} />
+      <Header m={m} onUnsubscribe={() => onUnsubscribe(item)} />
       {item.draft && (
         <div className="flex items-center gap-3 border-b border-border/60 bg-muted/40 px-6 py-2 text-[13px]">
           <span className="flex-1 text-muted-foreground">This message is a draft.</span>

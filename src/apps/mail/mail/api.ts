@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
-import type { MailAccount, MailBridge, MailboxInfo, MailMessage, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
+import type { MailAccount, MailBridge, MailboxInfo, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
   return useDin().system.mail ?? null;
@@ -24,15 +24,16 @@ export function itemKey(accountId: string, path: string, uid: number): string {
   return `${accountId}\u0000${path}\u0000${uid}`;
 }
 
-/** What the sidebar has selected: a mailbox, or one of the Favorites across every account. */
+/** What the sidebar has selected: a mailbox, one of the Favorites across every account, or Subscriptions. */
 export type Selection =
   | { kind: 'mailbox'; accountId: string; path: string }
-  | { kind: 'all'; special: SpecialMailbox };
+  | { kind: 'all'; special: SpecialMailbox }
+  | { kind: 'subscriptions' };
 
 export function sameSelection(a: Selection, b: Selection): boolean {
   if (a.kind === 'mailbox' && b.kind === 'mailbox') return a.accountId === b.accountId && a.path === b.path;
   if (a.kind === 'all' && b.kind === 'all') return a.special === b.special;
-  return false;
+  return a.kind === 'subscriptions' && b.kind === 'subscriptions';
 }
 
 const ACCOUNTS = ['mail', 'accounts'] as const;
@@ -92,6 +93,7 @@ export function useMailboxes(accounts: MailAccount[]): Mailboxes {
 /** The mailboxes a selection reads from. */
 export function sourcesOf(selection: Selection, boxes: Map<string, MailboxInfo[]>): Source[] {
   if (selection.kind === 'mailbox') return [{ accountId: selection.accountId, path: selection.path }];
+  if (selection.kind === 'subscriptions') return [];
   const out: Source[] = [];
   for (const [accountId, list] of boxes) {
     const special = selection.special === 'flagged' ? 'inbox' : selection.special;
@@ -193,6 +195,46 @@ export function patchUnseen(qc: QueryClient, accountId: string, path: string, de
   qc.setQueryData<MailboxInfo[]>(mailboxesKey(accountId), (list) =>
     list?.map((b) => (b.path === path ? { ...b, unseen: Math.max(0, b.unseen + delta) } : b)),
   );
+}
+
+export function subscriptionsKey(accountId: string, months: number) {
+  return ['mail', 'subscriptions', accountId, months] as const;
+}
+
+export interface Subscriptions {
+  list: MailSubscription[];
+  /** Why an account's lists couldn't be read. */
+  errors: Map<string, string>;
+  /** Some account hasn't answered yet. */
+  pending: boolean;
+  fetching: boolean;
+}
+
+/** Every account's mailing lists over the last `months`, most mail first. */
+export function useSubscriptions(accounts: MailAccount[], months: number): Subscriptions {
+  const mail = useMail();
+  const combine = useCallback(
+    (results: UseQueryResult<MailSubscription[]>[]): Subscriptions => {
+      const errors = new Map<string, string>();
+      results.forEach((r, i) => {
+        const id = accounts[i]?.id;
+        if (id && r.error) errors.set(id, r.error instanceof Error ? r.error.message : String(r.error));
+      });
+      const list = results.flatMap((r) => r.data ?? []).sort((x, y) => y.count - x.count || y.last - x.last);
+      return { list, errors, pending: results.some((r) => r.isPending && !r.error), fetching: results.some((r) => r.isFetching) };
+    },
+    [accounts],
+  );
+  return useQueries({
+    queries: accounts.map((a) => ({
+      queryKey: subscriptionsKey(a.id, months),
+      queryFn: async () => (await mail!.subscriptions(a.id, { months })).subscriptions,
+      enabled: !!mail,
+      staleTime: 5 * 60_000,
+      retry: 1,
+    })),
+    combine,
+  });
 }
 
 /** Refetch what a change on the server touched. */

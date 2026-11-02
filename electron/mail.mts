@@ -26,6 +26,12 @@
 // pictures into data: URLs; the app sanitizes and sandboxes the HTML. A big
 // message opens without its big attachments, which are fetched when asked for.
 //
+// Subscriptions finds the mailing lists in each inbox from a few headers of
+// each message (List-Unsubscribe and its kin, never the bodies), kept in the
+// stored copy so only new mail is looked at again, and leaves them: by
+// RFC 8058's one click, else a message to the list's address, else by
+// giving back the web page the user has to finish on (electron/mail-lists.mts).
+//
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
@@ -34,11 +40,12 @@ import path from 'node:path';
 import dns from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import { app, ipcMain, net, safeStorage } from 'electron';
-import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
+import { ImapFlow, type FetchMessageObject, type FetchQueryObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
 import { createTransport } from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
-import { MailStore, type Flags } from './mail-store.mts';
+import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
+import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, webLink } from './mail-lists.mts';
 import type {
   MailAccount,
   MailAccountPatch,
@@ -48,12 +55,16 @@ import type {
   MailMessage,
   MailServer,
   MailSettings,
+  MailSubscription,
   MessageFilter,
   MessagePage,
   MessageSummary,
   NewMailAccount,
   OutgoingMessage,
   SpecialMailbox,
+  SubscriptionScan,
+  UnsubscribeInfo,
+  UnsubscribeResult,
 } from '../src/lib/mail.ts';
 
 interface Deps {
@@ -717,7 +728,7 @@ function storedPage(store: MailStore, mailbox: string, before: number | undefine
 async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: string, uids: number[]): Promise<boolean> {
   if (!uids.length) return false;
   const fetched: FetchMessageObject[] = [];
-  for await (const m of client.fetch(uidRanges(uids), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true })) {
+  for await (const m of client.fetch(uidRanges(uids), { ...SUMMARY_FIELDS }, { uid: true })) {
     fetched.push(m);
   }
   const changed = store.putSummaries(mailbox, fetched.map(summary));
@@ -848,6 +859,9 @@ function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
   state.timer.unref();
 }
 
+/** What's fetched for a message's summary. */
+const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, headers: ['list-unsubscribe'] };
+
 function summary(m: FetchMessageObject): MessageSummary {
   const date = m.envelope?.date ?? m.internalDate;
   return {
@@ -862,6 +876,7 @@ function summary(m: FetchMessageObject): MessageSummary {
     hasAttachments: hasAttachments(m.bodyStructure),
     preview: null,
     size: m.size ?? 0,
+    listUnsubscribe: m.headers ? /\S/.test(m.headers.toString('latin1')) : undefined,
   };
 }
 
@@ -1023,7 +1038,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
   }
   return inMailbox(a, mailbox, async (client) => {
     if (client.mailbox) checkValidity(a, store, mailbox, String(client.mailbox.uidValidity));
-    const meta = await client.fetchOne(String(uid), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true });
+    const meta = await client.fetchOne(String(uid), { ...SUMMARY_FIELDS }, { uid: true });
     if (!meta) throw new Error('That message is gone.');
     if ((meta.size ?? 0) > MAX_MESSAGE_BYTES) throw new Error('That message is too big to open here.');
     const raw = ((meta.size ?? 0) > SKIM_BYTES && (await skimmedMessage(client, uid, meta.bodyStructure))) || (await wholeMessage(client, uid));
@@ -1040,6 +1055,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
 
 async function message(a: StoredAccount, mailbox: string, uid: number): Promise<MailMessage> {
   const { summary: s, mail } = await parsedMessage(a, mailbox, uid);
+  const list = parsedListHeader(mail, s);
   const references = Array.isArray(mail.references) ? mail.references : mail.references ? [mail.references] : [];
   return {
     ...s,
@@ -1060,6 +1076,7 @@ async function message(a: StoredAccount, mailbox: string, uid: number): Promise<
       size: Number(x.headers.get('x-din-size')) || x.size,
       inline: x.related === true && !!x.cid,
     })),
+    unsubscribe: list ? unsubscribeInfo(a, list) : null,
   };
 }
 
@@ -1267,6 +1284,206 @@ async function saveDraft(a: StoredAccount, m: OutgoingMessage): Promise<number |
 }
 
 // ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+/** Lists may take a while to stop (US law gives them ten days); mail within this of leaving doesn't count against them. */
+const UNSUBSCRIBE_GRACE_MS = 2 * DAY_MS;
+const HEADER_CHUNK = 500;
+
+/** When each list was left from here, by its key. */
+function unsubscribedFrom(a: StoredAccount): Record<string, number> {
+  try {
+    const saved: unknown = JSON.parse(storeOf(a).getMeta('unsubscribed') ?? '{}');
+    return typeof saved === 'object' && saved !== null ? (saved as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function markUnsubscribed(a: StoredAccount, id: string): void {
+  storeOf(a).setMeta('unsubscribed', JSON.stringify({ ...unsubscribedFrom(a), [id]: Date.now() }));
+}
+
+function unsubscribeInfo(a: StoredAccount, h: ListHeader): UnsubscribeInfo {
+  const id = listKey(h);
+  return { id, method: methodOf(h), verified: h.verified, unsubscribed: unsubscribedFrom(a)[id] ?? null };
+}
+
+function parsedListHeader(mail: ParsedMail, s: MessageSummary): ListHeader | null {
+  const raw = mail.headerLines.filter((l) => LIST_HEADERS.includes(l.key)).map((l) => l.line).join('\r\n');
+  return listHeader(headerFields(raw), s.from[0], s.date);
+}
+
+async function inboxPath(a: StoredAccount): Promise<string> {
+  return specialPath(a, 'inbox').catch(() => 'INBOX');
+}
+
+/** The list headers of the inbox's mail since `from`: kept ones as they are, the rest fetched and kept. */
+async function inboxListHeaders(a: StoredAccount, inbox: string, from: number): Promise<Map<number, ListHeader>> {
+  const store = storeOf(a);
+  const uids = await inMailbox(a, inbox, async (client) => {
+    const box = client.mailbox;
+    if (!box) return [];
+    checkValidity(a, store, inbox, String(box.uidValidity));
+    if (!box.exists) return [];
+    return (await client.search({ since: new Date(from) }, { uid: true })) || [];
+  });
+  const kept = store.listHeaders(inbox, uids);
+  const want = uids.filter((u) => !kept.has(u)).sort((x, y) => y - x);
+  // A slice at a time, so the rest of Mail isn't kept waiting on the mailbox.
+  for (let i = 0; i < want.length; i += HEADER_CHUNK) {
+    const some = want.slice(i, i + HEADER_CHUNK);
+    const found = await inMailbox(a, inbox, async (client) => {
+      const out: [number, ListHeader | null][] = [];
+      for await (const m of client.fetch(uidRanges(some), { uid: true, envelope: true, internalDate: true, headers: LIST_HEADERS }, { uid: true })) {
+        const when = m.envelope?.date ?? m.internalDate;
+        out.push([m.uid, listHeader(headerFields(m.headers?.toString('utf8') ?? ''), addresses(m.envelope?.from)[0], when ? new Date(when).getTime() || 0 : 0)]);
+      }
+      return out;
+    });
+    store.putListHeaders(inbox, found);
+    for (const [uid, h] of found) kept.set(uid, h);
+  }
+  const out = new Map<number, ListHeader>();
+  for (const [uid, h] of kept) if (h) out.set(uid, h);
+  return out;
+}
+
+interface ListGroup {
+  /** The newest message's headers. */
+  newest: ListHeader;
+  uids: number[];
+  dates: number[];
+}
+
+function groupLists(headers: Map<number, ListHeader>): Map<string, ListGroup> {
+  const groups = new Map<string, ListGroup>();
+  for (const [uid, h] of headers) {
+    const key = listKey(h);
+    const g = groups.get(key);
+    if (!g) groups.set(key, { newest: h, uids: [uid], dates: [h.date] });
+    else {
+      g.uids.push(uid);
+      g.dates.push(h.date);
+      if (h.date > g.newest.date) g.newest = h;
+    }
+  }
+  return groups;
+}
+
+async function subscriptions(a: StoredAccount, months: number): Promise<SubscriptionScan> {
+  const from = Date.now() - Math.round(months * 30.44 * DAY_MS);
+  const inbox = await inboxPath(a);
+  const groups = groupLists(await inboxListHeaders(a, inbox, from));
+  const left = unsubscribedFrom(a);
+  const list: MailSubscription[] = [];
+  for (const [id, g] of groups) {
+    const unsubscribed = left[id] ?? null;
+    list.push({
+      id,
+      accountId: a.id,
+      name: g.newest.name,
+      address: g.newest.address,
+      listId: g.newest.listId,
+      count: g.uids.length,
+      last: Math.max(...g.dates),
+      method: methodOf(g.newest),
+      verified: g.newest.verified,
+      unsubscribed,
+      since: unsubscribed === null ? 0 : g.dates.filter((d) => d > unsubscribed + UNSUBSCRIBE_GRACE_MS).length,
+    });
+  }
+  list.sort((x, y) => y.count - x.count || y.last - x.last);
+  return { subscriptions: list, from };
+}
+
+/** Write to a list's address from the account, as its mailto: link asks. */
+async function sendUnsubscribe(a: StoredAccount, link: string): Promise<void> {
+  const m = parseUnsubscribeMailto(link);
+  if (!EMAIL.test(m.to)) throw new Error('The unsubscribe address isn’t valid.');
+  await send(a, outgoing({ to: [{ name: '', address: m.to }], cc: [], bcc: [], subject: m.subject, text: m.body, html: '', attachments: [] }));
+}
+
+/** Leave a list the best way it offers, falling back to the next. */
+async function leave(a: StoredAccount, h: ListHeader): Promise<Omit<UnsubscribeResult, 'trashed'>> {
+  const id = listKey(h);
+  let error: string | null = null;
+  const https = httpsLink(h);
+  if (h.oneClick && https) {
+    try {
+      await postOneClick(https);
+      markUnsubscribed(a, id);
+      return { id, status: 'done', method: 'one-click', url: null, error: null };
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const mailto = mailtoLink(h);
+  if (mailto) {
+    try {
+      await sendUnsubscribe(a, mailto);
+      markUnsubscribed(a, id);
+      return { id, status: 'done', method: 'email', url: null, error: null };
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const web = webLink(h);
+  if (web) return { id, status: 'page', method: 'web', url: web, error };
+  return { id, status: 'failed', method: null, url: null, error: error ?? 'It doesn’t say how to unsubscribe.' };
+}
+
+/** A list's mail in the inbox: what Subscriptions has seen, and older mail the server finds. */
+async function listMail(a: StoredAccount, inbox: string, g: ListGroup): Promise<number[]> {
+  const found = await inMailbox(a, inbox, async (client) => {
+    const criteria: SearchObject = g.newest.listId ? { header: { 'list-id': g.newest.listId } } : { from: g.newest.address };
+    const uids = await client.search(criteria, { uid: true }).catch(() => false as const);
+    return Array.isArray(uids) ? uids : [];
+  });
+  return [...new Set([...g.uids, ...found])];
+}
+
+/** Run over a list a few at a time. */
+async function inBatches<T, R>(list: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < list.length; i += size) out.push(...(await Promise.all(list.slice(i, i + size).map(fn))));
+  return out;
+}
+
+async function unsubscribe(a: StoredAccount, ids: string[], trash: boolean): Promise<UnsubscribeResult[]> {
+  const inbox = await inboxPath(a);
+  const groups = groupLists(storeOf(a).allListHeaders(inbox));
+  const results = await inBatches(ids, 4, async (id): Promise<UnsubscribeResult> => {
+    const g = groups.get(id);
+    if (!g) return { id, status: 'failed', method: null, url: null, error: 'Mail hasn’t seen that list in the inbox.', trashed: 0 };
+    return { ...(await leave(a, g.newest)), trashed: 0 };
+  });
+  if (trash) {
+    for (const r of results) {
+      const g = groups.get(r.id);
+      if (!g) continue;
+      try {
+        const uids = await listMail(a, inbox, g);
+        if (uids.length) await move(a, inbox, uids, { special: 'trash' });
+        r.trashed = uids.length;
+      } catch (e) {
+        if (!r.error) r.error = `Its mail couldn’t be moved to the Trash: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+  }
+  return results;
+}
+
+async function unsubscribeMessage(a: StoredAccount, mailbox: string, uid: number): Promise<UnsubscribeResult> {
+  const { summary: s, mail } = await parsedMessage(a, mailbox, uid);
+  const h = parsedListHeader(mail, s);
+  if (!h) throw new Error('This message doesn’t say how to unsubscribe.');
+  return { ...(await leave(a, h)), trashed: 0 };
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
@@ -1391,6 +1608,18 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:remove', (id, mailbox, uids) => remove(account(id), mailboxArg(mailbox), uidList(uids)));
   handle('mail:send', (id, m) => send(account(id), outgoing(m)));
   handle('mail:saveDraft', (id, m) => saveDraft(account(id), outgoing(m)));
+  handle('mail:subscriptions', (id, opts) => {
+    const months = (opts as { months?: unknown } | undefined)?.months;
+    return subscriptions(account(id), typeof months === 'number' && months >= 1 && months <= 240 ? months : 6);
+  });
+  handle('mail:unsubscribe', (id, ids, opts) => {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || !ids.every((x) => typeof x === 'string' && x.length <= 1000)) throw new Error('No lists');
+    return unsubscribe(account(id), [...new Set(ids as string[])], (opts as { trash?: unknown } | undefined)?.trash === true);
+  });
+  handle('mail:unsubscribeMessage', (id, mailbox, uid) => {
+    if (!Number.isInteger(uid)) throw new Error('Bad uid');
+    return unsubscribeMessage(account(id), mailboxArg(mailbox), uid as number);
+  });
 
   app.on('will-quit', () => {
     for (const id of [...sessions.keys()]) closeSession(id);

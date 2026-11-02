@@ -4,9 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
-import type { MailAccount, MailboxInfo, MessageFilter, SpecialMailbox } from '@/lib/mail';
+import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
-import { itemKey, sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessages, type Item, type Selection } from './api';
+import { itemKey, sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
 import { useMessageActions, type MessageAction } from './actions';
 import { blankSeed, displayName, parseAddresses } from './format';
 import { rememberAddresses } from './contacts';
@@ -17,6 +17,7 @@ import { Reader } from './Reader';
 import { savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
+import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
 
 const SELECTION_KEY = 'din:mail:selection';
 const SIDEBAR_KEY = 'din:mail:sidebar';
@@ -25,7 +26,7 @@ const WIDTHS_KEY = 'din:mail:widths';
 function loadSelection(): Selection {
   try {
     const s = JSON.parse(localStorage.getItem(SELECTION_KEY) ?? 'null') as Selection | null;
-    if (s && (s.kind === 'all' || (s.kind === 'mailbox' && typeof s.accountId === 'string' && typeof s.path === 'string'))) return s;
+    if (s && (s.kind === 'all' || s.kind === 'subscriptions' || (s.kind === 'mailbox' && typeof s.accountId === 'string' && typeof s.path === 'string'))) return s;
   } catch {
     // The default below.
   }
@@ -130,6 +131,7 @@ export function Viewer() {
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const [widths, setWidths] = useState(loadWidths);
   const [dialog, setDialog] = useState<{ kind: 'setup' } | { kind: 'settings'; accountId: string | null } | null>(null);
+  const [leaving, setLeaving] = useState<Item | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -227,15 +229,17 @@ export function Viewer() {
   );
 
   const box = (accountId: string, path: string): MailboxInfo | undefined => boxes.get(accountId)?.find((b) => b.path === path);
-  const special = selection.kind === 'all' ? selection.special : box(selection.accountId, selection.path)?.special ?? null;
+  const special = selection.kind === 'all' ? selection.special : selection.kind === 'mailbox' ? box(selection.accountId, selection.path)?.special ?? null : null;
   const recipients = special === 'sent' || special === 'drafts';
 
   const title =
-    selection.kind === 'all'
-      ? selection.special === 'inbox' && accounts.length > 1
-        ? 'All Inboxes'
-        : SPECIAL_NAMES[selection.special]
-      : mailboxTitle(box(selection.accountId, selection.path)) || selection.path;
+    selection.kind === 'subscriptions'
+      ? 'Subscriptions'
+      : selection.kind === 'all'
+        ? selection.special === 'inbox' && accounts.length > 1
+          ? 'All Inboxes'
+          : SPECIAL_NAMES[selection.special]
+        : mailboxTitle(box(selection.accountId, selection.path)) || selection.path;
   const unseenHere = sources.reduce((n, s) => n + (box(s.accountId, s.path)?.unseen ?? 0), 0);
   const subtitle = query
     ? `${total.toLocaleString()} ${total === 1 ? 'result' : 'results'}`
@@ -313,6 +317,20 @@ export function Viewer() {
     marked.current = current.key;
     void run('read', [current]);
   }, [current, run]);
+
+  const currentMessage = useMessage(current);
+  const canUnsubscribe = !!current && (current.listUnsubscribe || !!currentMessage.data?.unsubscribe);
+
+  // A list's mail, from Subscriptions: its sender searched for in its inbox.
+  const showListMail = useCallback(
+    (sub: MailSubscription) => {
+      const inbox = boxes.get(sub.accountId)?.find((b) => b.special === 'inbox')?.path ?? 'INBOX';
+      setSelection({ kind: 'mailbox', accountId: sub.accountId, path: inbox });
+      setSearch(sub.address);
+      setQuery(sub.address);
+    },
+    [boxes, setSelection],
+  );
 
   const targetsFor = useCallback((item: Item) => (selected.has(item.key) ? selectedItems : [item]), [selected, selectedItems]);
 
@@ -425,9 +443,11 @@ export function Viewer() {
       type: 'submenu',
       items: (boxes.get(a.id) ?? []).filter((b) => b.selectable).map((b) => ({ id: `box:${a.id}\u0000${b.path}`, label: mailboxTitle(b) })),
     }));
-    const choice = await din.menus.popup([...favorites, { type: 'separator' }, ...perAccount], { x: r.left, y: r.bottom + 4 });
+    const subscriptions: MenuItem = { id: 'subscriptions', label: 'Subscriptions', type: 'radio', group: 'mailbox', checked: selection.kind === 'subscriptions' };
+    const choice = await din.menus.popup([...favorites, subscriptions, { type: 'separator' }, ...perAccount], { x: r.left, y: r.bottom + 4 });
     if (!choice) return;
-    if (choice.startsWith('all:')) setSelection({ kind: 'all', special: choice.slice(4) as SpecialMailbox });
+    if (choice === 'subscriptions') setSelection({ kind: 'subscriptions' });
+    else if (choice.startsWith('all:')) setSelection({ kind: 'all', special: choice.slice(4) as SpecialMailbox });
     else if (choice.startsWith('box:')) {
       const [accountId, path] = choice.slice(4).split('\u0000');
       setSelection({ kind: 'mailbox', accountId, path });
@@ -457,7 +477,11 @@ export function Viewer() {
       },
       {
         label: 'Mailbox',
-        items: [{ id: 'refresh', label: 'Get All New Mail', accelerator: 'Ctrl+Shift+N' }],
+        items: [
+          { id: 'refresh', label: 'Get All New Mail', accelerator: 'Ctrl+Shift+N' },
+          { type: 'separator' },
+          { id: 'subscriptions', label: 'Subscriptions' },
+        ],
       },
       {
         label: 'Message',
@@ -472,6 +496,8 @@ export function Viewer() {
           { id: 'archive', label: 'Archive', accelerator: 'Ctrl+Shift+A', enabled: has },
           { id: inJunk ? 'not-junk' : 'junk', label: inJunk ? 'Not Junk' : 'Move to Junk', accelerator: 'Ctrl+Shift+J', enabled: has },
           { id: 'trash', label: 'Delete', accelerator: 'Delete', notInFields: true, enabled: has, destructive: true },
+          { type: 'separator' },
+          { id: 'unsubscribe', label: 'Unsubscribe…', enabled: canUnsubscribe },
         ],
       },
     ],
@@ -490,6 +516,8 @@ export function Viewer() {
         case 'unread': return setFilter((f) => (f === 'unread' ? null : 'unread'));
         case 'search': return searchInput.current?.focus();
         case 'refresh': return refresh();
+        case 'subscriptions': return setSelection({ kind: 'subscriptions' });
+        case 'unsubscribe': return current ? setLeaving(current) : undefined;
         case 'read-msg': return act('read');
         case 'unread-msg': return act('unread');
         case 'reply':
@@ -606,6 +634,23 @@ export function Viewer() {
           <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end px-3"><WindowControls /></WindowDragRegion>
           <Welcome onAdd={() => setDialog({ kind: 'setup' })} />
         </div>
+      ) : selection.kind === 'subscriptions' ? (
+        <Subscriptions
+          accounts={accounts}
+          onShowMail={showListMail}
+          leading={
+            showSidebar ? undefined : (
+              <>
+                <ToolButton label="Show sidebar" onClick={() => { setSidebarOpen(true); localStorage.setItem(SIDEBAR_KEY, 'shown'); }} disabled={width < 860}>
+                  <PanelLeft className="size-4" strokeWidth={1.75} />
+                </ToolButton>
+                <ToolButton label="Back to Inbox" onClick={() => setSelection({ kind: 'all', special: 'inbox' })}>
+                  <ChevronLeft className="size-4" strokeWidth={1.75} />
+                </ToolButton>
+              </>
+            )
+          }
+        />
       ) : (
         <>
           {!readerOnly && (
@@ -667,6 +712,7 @@ export function Viewer() {
                   onKeyDown={onListKey}
                   onAction={(action, item) => void run(action, targetsFor(item))}
                   onMove={(item, path) => void moveTo(targetsFor(item), item.accountId, path)}
+                  onUnsubscribe={setLeaving}
                   targetsFor={targetsFor}
                   restoreScroll={() => {
                     const top = restoreScroll.current;
@@ -689,7 +735,7 @@ export function Viewer() {
             <main className="flex min-w-0 flex-1 flex-col bg-background">
               {toolbar}
               <div className="min-h-0 flex-1 overflow-y-auto">
-                <Reader item={current} count={selectedItems.length} onMailto={openMailto} onEditDraft={(item) => void run('open-draft', [item])} />
+                <Reader item={current} count={selectedItems.length} onMailto={openMailto} onEditDraft={(item) => void run('open-draft', [item])} onUnsubscribe={setLeaving} />
               </div>
             </main>
           )}
@@ -707,6 +753,7 @@ export function Viewer() {
           }}
         />
       )}
+      {leaving && <UnsubscribeDialog item={leaving} onClose={() => setLeaving(null)} />}
       {dialog?.kind === 'settings' && (
         <AccountSettings accounts={accounts} initial={dialog.accountId} onClose={() => setDialog(null)} onAdd={() => setDialog({ kind: 'setup' })} />
       )}
