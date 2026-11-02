@@ -342,7 +342,11 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           webpreferences={installedApp ? APP_GUEST_MARK : undefined}
           // Guest-initiated popups, which main routes into tabs and apps.
           allowPopups
-          guestClassName="h-full w-full bg-background"
+          // An installed app paints nothing under its page, so the window's
+          // color (the title bar's) is all that shows through the sliver a
+          // transformed window leaves at the page's edge while it's dragged.
+          // It never parks on about:blank, which paintBlank colors from this.
+          guestClassName={installedApp ? 'h-full w-full' : 'h-full w-full bg-background'}
           pageZoom={pageZoom}
           hidden={hidden}
           acceptFileDrops

@@ -187,7 +187,9 @@ export function WebAppFrame({
   const splashDark = splashColor ? isDarkThemeColor(splashColor) : false;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-background">
+    // No background of its own: the window paints its color under the title
+    // bar and the page alike (see BrowserView's installedApp).
+    <div className="relative h-full w-full overflow-hidden">
       <BrowserView
         ref={viewRef}
         src={src}
