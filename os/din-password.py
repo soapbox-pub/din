@@ -46,8 +46,9 @@ process din-shell's compositor starts, which nothing else `din` runs can
 become, and whose Electron takes no debugger (os/configuration.nix). Its
 `allow-session` answer grants the conversation, as `grant` does.
 
-A sudo typed at the prompt of a Din Terminal tab is asked about too, and Din
-opens its dialog at once for one with a terminal. Nothing in /proc tells one
+A sudo typed at the prompt of a Din Terminal tab is asked about too, from a
+notification like any other; one with a terminal says there where to look.
+Nothing in /proc tells one
 the user typed from one a program they ran went on to exec, and anything
 writing to the tab could fake any mark the shell left.
 """

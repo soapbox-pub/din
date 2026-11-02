@@ -154,8 +154,8 @@ everywhere at once (`os/din-password.py`, disk first).
 
 `sudo` (Din's own helpers excepted) asks you to approve the command in Din,
 with a click and no password: the agent's commands in the Assistant's
-conversation, others from a notification, and one with a terminal (typed
-in Din's Terminal, say) in Din's dialog at once. Root asks from
+conversation, others (typed in Din's Terminal, say) from a notification.
+Root asks from
 sudo's PAM stack (`os/din-password.py`'s `sudo check`) and only takes an
 answer from Din's main process, the one child of din-shell's compositor,
 whose Electron has its Node inspector fused off so nothing else can run code

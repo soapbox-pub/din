@@ -10,9 +10,8 @@
 //
 // - Approval. On DinOS sudo's PAM stack asks Din to approve the command
 //   before it asks for the password (os/din-password.py's `sudo check`, as
-//   root), wherever sudo runs, terminal or not. One with a terminal (typed
-//   in the Terminal, say) opens the dialog at once, since someone's waiting
-//   at it. The user clicks Allow or Deny; nothing is typed. Root checks that
+//   root), wherever sudo runs, terminal or not, from a notification like
+//   any other. The user clicks Allow or Deny; nothing is typed. Root checks that
 //   this socket is Din's main process before it asks, so only Din can
 //   approve, and Din answers only root asking for the sudo above it, so
 //   nothing else puts up an approval. "Allow for this conversation"
@@ -323,7 +322,7 @@ function settle(requestId: number, message: Record<string, string> = {}): void {
   else options?.sendToShell('askpass:cancel', { requestId });
 }
 
-async function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean, tty: boolean): Promise<void> {
+async function ask(socket: net.Socket, pid: unknown, session: unknown, approve: boolean): Promise<void> {
   const sudo = typeof pid === 'number' && Number.isInteger(pid) && pid > 1 ? pid : 0;
   const peer = sudo ? await peerOf(socket) : null;
   // An approval only from root's din-password under that sudo (its PAM
@@ -346,7 +345,7 @@ async function ask(socket: net.Socket, pid: unknown, session: unknown, approve: 
     requester: direct ? 'Din' : requesterOf(sudo),
     command: ['sudo', ...args.slice(1).filter((arg) => !direct || arg !== '-A')].map(quote).join(' '),
     approve,
-    direct: direct || (approve && tty),
+    direct,
     action: described?.action ?? null,
     detail: described?.detail ?? null,
   };
@@ -445,14 +444,14 @@ function accept(socket: net.Socket): void {
       return;
     }
     started = true;
-    let request: { pid?: unknown; session?: unknown; approve?: unknown; tty?: unknown } = {};
+    let request: { pid?: unknown; session?: unknown; approve?: unknown } = {};
     try {
       const parsed: unknown = JSON.parse(buffer.slice(0, newline));
       if (typeof parsed === 'object' && parsed !== null) request = parsed;
     } catch {
       // Answered as nothing, below.
     }
-    void ask(socket, request.pid, request.session, request.approve === true, request.tty === true);
+    void ask(socket, request.pid, request.session, request.approve === true);
   });
 }
 
