@@ -236,8 +236,38 @@ export interface MailBridge {
   onChanged(cb: (change: MailChange) => void): () => void;
 }
 
-/** What the desktop has of it, for `din mail`. */
-export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'subscriptions' | 'unsubscribe'>;
+/** New unread mail in an inbox, for a notification. */
+export interface MailArrival {
+  accountId: string;
+  /** The account's name in Mail's sidebar. */
+  accountName: string;
+  path: string;
+  uid: number;
+  from: MailAddress[];
+  subject: string;
+  preview: string | null;
+  date: number;
+}
+
+/** Announced mail that's been read, moved or deleted: its notification goes. */
+export interface MailRead {
+  accountId: string;
+  path: string;
+  uids: number[];
+}
+
+/**
+ * What the desktop has of it: the mailing lists, for `din mail`; and new
+ * mail and each inbox's unread count, watched from the moment Din starts,
+ * for notifications and Mail's Dock badge.
+ */
+export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'subscriptions' | 'unsubscribe'> & {
+  /** Each account's unread mail in its inbox, as last counted. */
+  unseen(): Promise<Record<string, number>>;
+  onUnseen(cb: (unseen: Record<string, number>) => void): () => void;
+  onArrived(cb: (arrival: MailArrival) => void): () => void;
+  onRead(cb: (read: MailRead) => void): () => void;
+};
 
 declare global {
   interface Dinos {

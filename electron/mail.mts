@@ -6,9 +6,16 @@
 // by safeStorage (the login keyring, see main.mts's --password-store; only
 // base64 where there's none), and never go back to the app. Each
 // account gets one IMAP connection for what the app asks (imapflow queues
-// commands behind its mailbox locks) and one more that idles on the inbox,
-// so new mail shows up as it arrives; both close after a while without
-// calls, and the app's periodic refresh keeps them up while it's open.
+// commands behind its mailbox locks), closed after a while without calls,
+// and one more that idles on the inbox from the moment Din starts, Mail
+// open or not, so new mail shows up as it arrives. That one reconnects
+// when it drops (backing off while the server can't be reached, and at
+// once when the computer wakes).
+//
+// New mail in an inbox is pushed to the desktop as `mail:arrived` (a
+// MailArrival each, for a notification), and `mail:read` once it's read,
+// moved or deleted (here or anywhere else), so its notification goes; and
+// each inbox's unread count as `mail:unseen`, for Mail's Dock badge.
 //
 // What Mail has seen is kept on this computer (electron/mail-store.mts): the
 // folders, each mailbox's uids, the summaries the list has shown, and the
@@ -39,7 +46,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
-import { app, ipcMain, net, safeStorage } from 'electron';
+import { app, ipcMain, net, powerMonitor, safeStorage } from 'electron';
 import { ImapFlow, type FetchMessageObject, type FetchQueryObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
 import { createTransport } from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
@@ -50,6 +57,7 @@ import type {
   MailAccount,
   MailAccountPatch,
   MailAddress,
+  MailArrival,
   MailAttachment,
   MailboxInfo,
   MailMessage,
@@ -321,6 +329,9 @@ interface Session {
   connecting: Promise<ImapFlow> | null;
   watcher: ImapFlow | null;
   watching: boolean;
+  /** The watcher's next try after it dropped, and how long it waits. */
+  retry: NodeJS.Timeout | null;
+  backoff: number;
   lastUse: number;
   /** Mailbox paths by special use, from the last listing. */
   specials: Map<SpecialMailbox, string>;
@@ -328,24 +339,106 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-/** An account's session; `touch` when the app asked, keeping its connections up. */
+/** An account's session; `touch` when the app asked, keeping its connection up. */
 function sessionOf(id: string, touch = true): Session {
   let s = sessions.get(id);
-  if (!s) sessions.set(id, (s = { client: null, connecting: null, watcher: null, watching: false, lastUse: 0, specials: new Map() }));
+  if (!s) sessions.set(id, (s = { client: null, connecting: null, watcher: null, watching: false, retry: null, backoff: RETRY_MIN_MS, lastUse: 0, specials: new Map() }));
   if (touch) s.lastUse = Date.now();
+  // Work Din does by itself (a sync for new mail) keeps it a minute or two.
+  else s.lastUse = Math.max(s.lastUse, Date.now() - IDLE_CLOSE_MS + 60_000);
   return s;
 }
 
 const pending = new Map<string, NodeJS.Timeout>();
 
-/** Tell the apps a mailbox changed, once per burst. */
+/** Tell the apps a mailbox changed, once per burst; an inbox is counted again. */
 function changed(accountId: string, mailbox: string): void {
   const key = `${accountId}\0${mailbox}`;
   if (pending.has(key)) return;
   pending.set(key, setTimeout(() => {
     pending.delete(key);
     deps.sendToShell('mail:changed', { accountId, path: mailbox });
+    const a = accounts.find((x) => x.id === accountId);
+    if (a && isInbox(mailbox)) void countUnseen(a);
   }, 250));
+}
+
+function isInbox(mailbox: string): boolean {
+  return mailbox.toUpperCase() === 'INBOX';
+}
+
+// ---------------------------------------------------------------------------
+// New mail, for the desktop's notifications and Mail's Dock badge
+// ---------------------------------------------------------------------------
+
+/** Mail older than this when it's found isn't announced (it came while Din was off). */
+const ARRIVAL_FRESH_MS = 30 * 60_000;
+/** At most this many notifications for one burst of new mail. */
+const ARRIVAL_MAX = 5;
+
+/** Each inbox's unread count, by account. */
+const unseen = new Map<string, number>();
+/** The newest uid in each account's inbox as last synced, past which mail is new. */
+const inboxNewest = new Map<string, number>();
+/** The unread messages announced, by account: their uids in the inbox. */
+const announced = new Map<string, Set<number>>();
+
+/** Count an inbox's unread mail again, telling the desktop of the count and of announced mail now read. */
+async function countUnseen(a: StoredAccount): Promise<void> {
+  let uids: number[];
+  try {
+    uids = await inMailbox(a, 'INBOX', async (client) => (await client.search({ seen: false }, { uid: true })) || [], false);
+  } catch {
+    return;
+  }
+  if (!accounts.includes(a)) return;
+  if (unseen.get(a.id) !== uids.length) {
+    unseen.set(a.id, uids.length);
+    deps.sendToShell('mail:unseen', Object.fromEntries(unseen));
+  }
+  const told = announced.get(a.id);
+  if (!told) return;
+  const still = new Set(uids);
+  const read = [...told].filter((u) => !still.has(u));
+  if (!read.length) return;
+  for (const u of read) told.delete(u);
+  deps.sendToShell('mail:read', { accountId: a.id, path: 'INBOX', uids: read });
+}
+
+/** Announce the new unread mail among these uids, just stored. */
+function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
+  const now = Date.now();
+  const fresh = [...store.summaries('INBOX', uids).values()]
+    .map((k) => k.summary)
+    .filter((m) => !m.seen && !m.draft && now - m.date < ARRIVAL_FRESH_MS)
+    .sort((x, y) => y.uid - x.uid)
+    .slice(0, ARRIVAL_MAX);
+  if (!fresh.length) return;
+  let told = announced.get(a.id);
+  if (!told) announced.set(a.id, (told = new Set()));
+  for (const m of fresh.reverse()) {
+    told.add(m.uid);
+    const arrival: MailArrival = {
+      accountId: a.id,
+      accountName: a.name,
+      path: 'INBOX',
+      uid: m.uid,
+      from: m.from,
+      subject: m.subject,
+      preview: m.preview,
+      date: m.date,
+    };
+    deps.sendToShell('mail:arrived', arrival);
+  }
+}
+
+/** Forget an account's counts and announcements (it's gone, or moved servers). */
+function forgetArrivals(id: string): void {
+  inboxNewest.delete(id);
+  const told = announced.get(id);
+  announced.delete(id);
+  if (told?.size) deps.sendToShell('mail:read', { accountId: id, path: 'INBOX', uids: [...told] });
+  if (unseen.delete(id)) deps.sendToShell('mail:unseen', Object.fromEntries(unseen));
 }
 
 /** The server says a mailbox changed: bring the stored copy up to date, which tells the app if anything did. */
@@ -389,49 +482,90 @@ async function connection(a: StoredAccount, touch = true): Promise<ImapFlow> {
   return client;
 }
 
-/** Keep a second connection idling on the inbox, for new mail. */
+/** The watcher's first wait to reconnect, doubling to the last while it can't. */
+const RETRY_MIN_MS = 15_000;
+const RETRY_MAX_MS = 5 * 60_000;
+
+/**
+ * Keep a second connection idling on the inbox, for new mail, for as long
+ * as the account is here. Each time it connects, the inbox is synced, for
+ * mail that came while it wasn't.
+ */
 function watch(a: StoredAccount, s: Session): void {
   if (s.watching) return;
   s.watching = true;
+  if (s.retry) clearTimeout(s.retry);
+  s.retry = null;
   // It idles right away, and renews the IDLE now and then for servers that drop quiet ones.
   const client = imapClient(a.imap, unseal(a.password), { autoIdleDelay: 500, maxIdleTime: 5 * 60_000 });
   listen(a, client);
   s.watcher = client;
-  let retry: NodeJS.Timeout | null = null;
   client.on('close', () => {
     if (s.watcher !== client) return;
     s.watcher = null;
     s.watching = false;
-    // Reconnect while the app is still using the account.
-    if (Date.now() - s.lastUse < IDLE_CLOSE_MS && accounts.some((x) => x.id === a.id)) {
-      retry = setTimeout(() => {
-        retry = null;
-        if (!s.watching) watch(a, s);
-      }, 15_000);
-      retry.unref();
-    }
+    if (sessions.get(a.id) !== s || !accounts.includes(a)) return;
+    s.retry = setTimeout(() => {
+      s.retry = null;
+      if (!s.watching) watch(a, s);
+    }, s.backoff);
+    s.retry.unref();
+    s.backoff = Math.min(s.backoff * 2, RETRY_MAX_MS);
   });
   client
     .connect()
     .then(() => client.mailboxOpen('INBOX', { readOnly: true }))
+    .then(() => {
+      s.backoff = RETRY_MIN_MS;
+      scheduleSync(a, 'INBOX', 0);
+      void countUnseen(a);
+    })
     .catch(() => {
-      // The main connection reports problems; this one just stops.
+      // The main connection reports problems; this one just tries again later.
       client.close();
     });
 }
 
+/** Watch every account's inbox. */
+function watchAll(): void {
+  for (const a of accounts) watch(a, sessionOf(a.id, false));
+}
+
+/** Connect every watcher again at once (the computer woke: their sockets are likely dead). */
+function rewatchAll(): void {
+  for (const a of accounts) {
+    const s = sessionOf(a.id, false);
+    const old = s.watcher;
+    s.watcher = null;
+    s.watching = false;
+    s.backoff = RETRY_MIN_MS;
+    old?.close();
+    watch(a, s);
+  }
+}
+
+/** Close the connection the app's calls use; the watcher stays. */
+function closeClient(s: Session): void {
+  const client = s.client;
+  s.client = null;
+  if (client) void client.logout().catch(() => client.close());
+}
+
+/** Close both of an account's connections, for good or until `watch` starts again. */
 function closeSession(id: string): void {
   const s = sessions.get(id);
   if (!s) return;
   sessions.delete(id);
   s.watching = true;
+  if (s.retry) clearTimeout(s.retry);
+  s.retry = null;
   for (const client of [s.client, s.watcher]) {
     if (client) void client.logout().catch(() => client.close());
   }
 }
 
 setInterval(() => {
-  for (const [id, s] of sessions) if (Date.now() - s.lastUse > IDLE_CLOSE_MS) closeSession(id);
+  for (const s of sessions.values()) if (s.client && Date.now() - s.lastUse > IDLE_CLOSE_MS) closeClient(s);
 }, 60_000).unref();
 
 /**
@@ -793,13 +927,24 @@ function flagsOf(flags: Set<string> | undefined): Flags {
 async function sync(a: StoredAccount, mailbox: string): Promise<void> {
   const store = storeOf(a);
   let dirty = false;
+  let arrived: number[] = [];
+  let newestNow: number | null = null;
   await inMailbox(a, mailbox, async (client) => {
     const box = client.mailbox;
     if (!box) return;
     const validity = String(box.uidValidity);
-    if (checkValidity(a, store, mailbox, validity)) dirty = true;
+    const renumbered = checkValidity(a, store, mailbox, validity);
+    if (renumbered) dirty = true;
     const prev = store.box(mailbox);
     const uids = box.exists > 0 ? ((await client.search({ all: true }, { uid: true })) || []).sort((x, y) => y - x) : [];
+    // New mail: uids past the newest one synced before (none the first
+    // time, or after renumbering). Kept apart from the stored uids, which
+    // the app's reads bring up to date too.
+    if (isInbox(mailbox)) {
+      const newest = renumbered ? undefined : (inboxNewest.get(a.id) ?? (prev ? (prev.uids[0] ?? 0) : undefined));
+      if (newest !== undefined) arrived = uids.filter((u) => u > newest);
+      newestNow = Math.max(uids[0] ?? 0, newest ?? 0);
+    }
     if (!prev || !sameList(prev.uids, uids)) dirty = true;
     const present = new Set(uids);
     const stored = store.storedUids(mailbox);
@@ -822,6 +967,8 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     const have = store.summaries(mailbox, uids.slice(0, PAGE));
     if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => !have.has(u)))) dirty = true;
   }, false);
+  if (newestNow !== null) inboxNewest.set(a.id, newestNow);
+  if (arrived.length) announce(a, store, arrived);
   if (dirty) changed(a.id, mailbox);
 }
 
@@ -1528,6 +1675,7 @@ async function addAccount(input: unknown): Promise<MailAccount> {
   };
   accounts.push(stored);
   save();
+  watch(stored, sessionOf(stored.id, false));
   return publicAccount(stored);
 }
 
@@ -1556,7 +1704,11 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   save();
   if (servers) closeSession(a.id);
   // Another server numbers its messages its own way.
-  if (movedServer) dropStore(a.id);
+  if (movedServer) {
+    dropStore(a.id);
+    forgetArrivals(a.id);
+  }
+  if (servers) watch(a, sessionOf(a.id, false));
   return publicAccount(a);
 }
 
@@ -1578,6 +1730,7 @@ export function registerMailHandlers(options: Deps): void {
   };
 
   handle('mail:accounts', () => accounts.map(publicAccount));
+  handle('mail:unseen', () => Object.fromEntries(unseen));
   handle('mail:discover', (email) => {
     if (typeof email !== 'string' || !EMAIL.test(email.trim())) throw new Error('That isn’t an email address.');
     return discover(email.trim());
@@ -1586,9 +1739,10 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:updateAccount', (id, patch) => updateAccount(id, patch));
   handle('mail:removeAccount', (id) => {
     const a = account(id);
+    accounts = accounts.filter((x) => x !== a);
     closeSession(a.id);
     dropStore(a.id);
-    accounts = accounts.filter((x) => x !== a);
+    forgetArrivals(a.id);
     save();
   });
   handle('mail:mailboxes', (id) => mailboxes(account(id)));
@@ -1626,6 +1780,10 @@ export function registerMailHandlers(options: Deps): void {
     if (!Number.isInteger(uid)) throw new Error('Bad uid');
     return unsubscribeMessage(account(id), mailboxArg(mailbox), uid as number);
   });
+
+  // A moment after Din starts, out of its way.
+  setTimeout(watchAll, 5000).unref();
+  powerMonitor.on('resume', () => setTimeout(rewatchAll, 3000).unref());
 
   app.on('will-quit', () => {
     for (const id of [...sessions.keys()]) closeSession(id);

@@ -1,5 +1,5 @@
 import type { MessageFilter } from '@/lib/mail';
-import type { Selection } from './api';
+import { itemKey, type Selection } from './api';
 import type { ComposeSeed } from './format';
 
 /**
@@ -37,4 +37,11 @@ export function savedCompose(state: unknown): Extract<SavedWindow, { kind: 'comp
   const s = state.seed as Partial<ComposeSeed>;
   if (!Array.isArray(s.to) || !Array.isArray(s.cc) || !Array.isArray(s.bcc) || typeof s.subject !== 'string' || typeof s.html !== 'string') return null;
   return { kind: 'compose', seed: s as ComposeSeed, dirty: state.dirty === true };
+}
+
+/** The message a launch's `{ accountId, path, uid }` asks to open, or null. */
+export function messageTarget(params: Record<string, unknown>): { accountId: string; path: string; key: string } | null {
+  const { accountId, path, uid } = params;
+  if (typeof accountId !== 'string' || typeof path !== 'string' || !Number.isInteger(uid)) return null;
+  return { accountId, path, key: itemKey(accountId, path, uid as number) };
 }

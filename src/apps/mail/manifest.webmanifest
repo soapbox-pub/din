@@ -8,7 +8,7 @@
     { "name": "New Message", "url": "/", "din": { "id": "compose" } }
   ],
   "din": {
-    "permissions": ["mail", "notifications"],
+    "permissions": ["mail"],
     "window": { "size": { "width": 1180, "height": 760 }, "frame": "custom" },
     "keywords": ["email", "e-mail", "inbox", "imap", "smtp", "gmail", "icloud", "outlook", "thunderbird", "letters"]
   }

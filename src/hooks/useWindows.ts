@@ -585,6 +585,19 @@ export function useWindows(
     });
   }, [update, getAreas]);
 
+  /**
+   * Launch an app again in one of its windows: focus it, merging in the new
+   * params, which a Din app hears as `onLaunch`. What `open` does for a
+   * single-instance app, and the desktop for any app when it knows the
+   * window (a notification's).
+   */
+  const launchIn = useCallback((id: string, params?: WindowParams) => {
+    if (params) {
+      setWindows((ws) => ws.map((w) => (w.id === id ? { ...w, params: { ...withoutOpener(w.params), ...params } } : w)));
+    }
+    focus(id);
+  }, [setWindows, focus]);
+
   const open = useCallback((requestedId: string, requestedParams?: WindowParams) => {
     let appId = requestedId;
     let params = requestedParams;
@@ -618,16 +631,7 @@ export function useWindows(
       // each focus, move and resize.
       const existing = windowsRef.current.find((w) => w.appId === appId && !w.closing);
       if (existing) {
-        if (params) {
-          setWindows((ws) =>
-            ws.map((w) =>
-              w.id === existing.id
-                ? { ...w, params: { ...withoutOpener(w.params), ...params } }
-                : w,
-            ),
-          );
-        }
-        focus(existing.id);
+        launchIn(existing.id, params);
         return existing.id;
       }
     }
@@ -716,7 +720,7 @@ export function useWindows(
       return placed ? fitWindows({ ...s, windows }, areas) : { ...s, windows };
     });
     return id;
-  }, [getApp, getAreas, getLaunchMonitor, update, setWindows, focus]);
+  }, [getApp, getAreas, getLaunchMonitor, update, launchIn]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the
@@ -1335,6 +1339,7 @@ export function useWindows(
   const actions = useMemo(
     () => ({
       open,
+      launchIn,
       close,
       closeApp,
       destroy,
@@ -1369,7 +1374,7 @@ export function useWindows(
       adoptSession,
       getSession,
     }),
-    [open, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

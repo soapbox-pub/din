@@ -9,7 +9,7 @@ import type { MailAccount, MailAddress, MailAttachment, OutgoingMessage } from '
 import { useAccounts, useMail } from './api';
 import { rememberAddresses, suggestAddresses } from './contacts';
 import { EMAIL, fileSize, formatAddress, parseAddresses, textToHtml, type ComposeSeed } from './format';
-import type { SavedWindow } from './restore';
+import { messageTarget, type SavedWindow } from './restore';
 
 /** An attachment in the message, or one still loading from the message being forwarded. */
 type Attached = { id: string; file: MailAttachment | null; name: string; size: number };
@@ -225,6 +225,16 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   useEffect(() => {
     if (din.window.state.bounds.width > 900) din.window.setBounds({ width: 760, height: 680 });
   }, [din]);
+
+  // A message to open, sent here (a restored window can't be told from a
+  // viewer): it opens in a viewer of its own.
+  useEffect(
+    () =>
+      din.app.onLaunch(({ params }) => {
+        if (messageTarget(params)) void din.app.open('mail', params);
+      }),
+    [din],
+  );
 
   const editor = useEditor({
     extensions: [StarterKit.configure({ link: { openOnClick: false, autolink: true }, heading: false, codeBlock: false })],

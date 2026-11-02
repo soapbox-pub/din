@@ -19,6 +19,7 @@ import { BrightnessOsd } from './BrightnessOsd';
 import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
+import { MailHost } from './MailHost';
 import { PhoneHost } from './PhoneHost';
 import { QuickShareHost } from './QuickShareHost';
 import { GuestInputHost } from './GuestInputHost';
@@ -252,6 +253,7 @@ function DesktopSession() {
                     <CommandHost />
                     <SystemNotificationsHost />
                     <PhoneHost />
+                    <MailHost />
                     <QuickShareHost />
                     <GuestInputHost />
                     <CursorEffectsLayer />

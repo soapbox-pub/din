@@ -1711,14 +1711,23 @@ expose('phone', {
 });
 
 // Mail (window.dinos.mail), backed by electron/mail.mts: the accounts'
-// mailing lists, for the `din mail` commands; Mail has all of it through
-// its bridge port. Types in src/lib/mail.ts.
+// mailing lists, for the `din mail` commands, and new mail and unread
+// counts, for notifications and Mail's Dock badge; Mail has all of it
+// through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'subscriptions', 'unsubscribe']) {
+for (const method of ['accounts', 'subscriptions', 'unsubscribe', 'unseen']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
-expose('mail', mail);
+expose('mail', {
+  ...mail,
+  /** @param {(unseen: unknown) => void} callback */
+  onUnseen: (callback) => listen('mail:unseen', callback),
+  /** @param {(arrival: unknown) => void} callback */
+  onArrived: (callback) => listen('mail:arrived', callback),
+  /** @param {(read: unknown) => void} callback */
+  onRead: (callback) => listen('mail:read', callback),
+});
 
 // Quick Share (window.dinos.quickShare), backed by electron/quickshare.mts:
 // the desktop answers shares that arrive with no Quick Share window open (a

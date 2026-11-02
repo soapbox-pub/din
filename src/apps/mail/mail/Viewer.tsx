@@ -6,15 +6,15 @@ import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
-import { itemKey, sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
+import { sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
 import { useMessageActions, type MessageAction } from './actions';
-import { blankSeed, displayName, parseAddresses } from './format';
+import { blankSeed, parseAddresses } from './format';
 import { rememberAddresses } from './contacts';
 import { Sidebar } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
 import { ListSkeleton, MessageList } from './MessageList';
 import { Reader } from './Reader';
-import { savedViewer, type SavedWindow } from './restore';
+import { messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
 import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
@@ -116,8 +116,14 @@ export function Viewer() {
   const { boxes, errors, fetching: boxesFetching } = useMailboxes(accounts);
   useLiveUpdates();
 
-  // A window Din reopened comes back as it was left.
-  const [restored] = useState(() => savedViewer(din.app.launch.state));
+  // A window Din reopened comes back as it was left; one opened for a
+  // message (a new mail notification's click) opens on it.
+  const [restored] = useState(() => {
+    const target = din.app.launch.reason === 'restore' ? null : messageTarget(din.app.launch.params);
+    if (!target) return savedViewer(din.app.launch.state);
+    const selection: Selection = { kind: 'mailbox', accountId: target.accountId, path: target.path };
+    return { selection, filter: null, search: '', message: target.key, scroll: 0 };
+  });
   const [chosenMailbox, setSelectionState] = useState<Selection>(() => restored?.selection ?? loadSelection());
   const [filter, setFilter] = useState<MessageFilter>(restored?.filter ?? null);
   const [search, setSearch] = useState(restored?.search ?? '');
@@ -249,52 +255,18 @@ export function Viewer() {
 
   useWindowTitle(title ? `${title}` : null);
 
-  // Badge: unread mail in every inbox.
-  const inboxUnseen = useMemo(() => [...boxes.values()].flat().filter((b) => b.special === 'inbox').reduce((n, b) => n + b.unseen, 0), [boxes]);
-  useEffect(() => {
-    void (inboxUnseen ? navigator.setAppBadge(inboxUnseen) : navigator.clearAppBadge()).catch(() => {});
-  }, [inboxUnseen]);
-
-  // New mail while the window isn't in front: a notification per message,
-  // which opens it when clicked.
-  const lastUnseen = useRef(new Map<string, number>());
-  const notified = useRef(new Map<string, Notification>());
-  useEffect(() => {
-    if (!mail) return;
-    for (const [accountId, list] of boxes) {
-      const inbox = list.find((b) => b.special === 'inbox');
-      if (!inbox) continue;
-      const before = lastUnseen.current.get(accountId);
-      lastUnseen.current.set(accountId, inbox.unseen);
-      if (before === undefined || inbox.unseen <= before || din.window.state.focused) continue;
-      const fresh = inbox.unseen - before;
-      void mail.messages(accountId, inbox.path, { filter: 'unread', limit: Math.min(fresh, 5) }).then((page) => {
-        for (const m of page.messages) {
-          if (Date.now() - m.date > 30 * 60_000) continue;
-          const key = itemKey(accountId, inbox.path, m.uid);
-          const notification = new Notification(displayName(m.from[0]) || 'New Mail', {
-            body: [m.subject, m.preview].filter(Boolean).join('\n'),
-            tag: key,
-          });
-          notified.current.get(key)?.close();
-          notified.current.set(key, notification);
-          notification.onclose = () => {
-            if (notified.current.get(key) === notification) notified.current.delete(key);
-          };
-          notification.onclick = () => {
-            din.window.focus();
-            setSelection({ kind: 'mailbox', accountId, path: inbox.path });
-            setSelected(new Set([key]));
-          };
-        }
-      }).catch(() => {});
-    }
-  }, [boxes, mail, din, setSelection]);
-
-  // A message on screen is read: its notification has nothing more to say.
-  useEffect(() => {
-    for (const key of selected) notified.current.get(key)?.close();
-  }, [selected]);
+  // A message to open (a new mail notification's click, see MailHost):
+  // its mailbox, and the message once the list has it.
+  useEffect(
+    () =>
+      din.app.onLaunch((launch) => {
+        const target = messageTarget(launch.params);
+        if (!target) return;
+        setSelection({ kind: 'mailbox', accountId: target.accountId, path: target.path });
+        setRestoring(target.key);
+      }),
+    [din, setSelection],
+  );
 
   // Choosing a message reads it.
   const onRemoved = useCallback(
