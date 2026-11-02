@@ -34,8 +34,18 @@ type Selection =
 function fromLaunch(launch: Pick<LaunchContext, 'params' | 'shortcut'>): Selection {
   const { phoneId, threadId } = launch.params;
   if (typeof phoneId === 'string' && typeof threadId === 'string') return { kind: 'thread', phoneId, threadId, addresses: [] };
-  if (launch.shortcut === 'new') return { kind: 'new' };
+  if (launch.shortcut === 'new' || recipientsOf(launch).length) return { kind: 'new' };
   return null;
+}
+
+/** A launch's `{ to: [{ name, address }] }` (Contacts' Send Message): who a new message is for. */
+function recipientsOf(launch: Pick<LaunchContext, 'params'>): Recipient[] {
+  const { to } = launch.params;
+  if (!Array.isArray(to)) return [];
+  return to.flatMap((r: unknown) => {
+    const { name, address } = (r ?? {}) as { name?: unknown; address?: unknown };
+    return typeof address === 'string' && address.trim() ? [{ name: typeof name === 'string' && name ? name : formatAddress(address), address: address.trim() }] : [];
+  });
 }
 
 function sameAddresses(a: string[], b: string[]): boolean {
@@ -47,7 +57,7 @@ function sameAddresses(a: string[], b: string[]): boolean {
  * Messages: the texts on the user's phones (Settings → Phone adds them), in
  * conversations, answered from here. A launch with `{ phoneId, threadId }`
  * (a notification's click) opens that conversation; the New Message
- * shortcut starts one.
+ * shortcut starts one, and `{ to: [{ name, address }] }` one to them.
  */
 export function Messages() {
   const din = useDin();
@@ -64,7 +74,7 @@ export function Messages() {
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<PhoneConversation | null>(null);
   const [newFrom, setNewFrom] = useState<string | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [recipients, setRecipients] = useState<Recipient[]>(() => recipientsOf(din.app.launch));
 
   const phones = useMemo(() => state.data?.phones ?? [], [state.data]);
   const phoneById = useMemo(() => new Map(phones.map((p) => [p.id, p])), [phones]);
@@ -75,6 +85,8 @@ export function Messages() {
       din.app.onLaunch((launch) => {
         const next = fromLaunch(launch);
         if (next) setSelection(next);
+        const to = recipientsOf(launch);
+        if (to.length || next?.kind === 'new') setRecipients(to);
       }),
     [din],
   );
