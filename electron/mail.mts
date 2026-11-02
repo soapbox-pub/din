@@ -9,8 +9,16 @@
 // commands behind its mailbox locks) and one more that idles on the inbox,
 // so new mail shows up as it arrives; both close after a while without
 // calls, and the app's periodic refresh keeps them up while it's open.
-// Anything that changes a mailbox, here or on the server, is pushed as
-// `mail:changed` ({ accountId, path }) to the apps granted `mail`.
+//
+// What Mail has seen is kept on this computer (electron/mail-store.mts): the
+// folders, each mailbox's uids, the summaries the list has shown, and the
+// messages that have been opened. The app's reads are answered from that
+// copy when it has them, so Mail opens instantly and reads offline, and the
+// copy is synced behind it: when it's a minute old, and whenever the server
+// says a mailbox changed (only the flags changed since last time, where the
+// server has CONDSTORE). Anything that changes a mailbox, here or on the
+// server, is pushed as `mail:changed` ({ accountId, path }) to the apps
+// granted `mail`, once the copy has it.
 //
 // Sending is nodemailer over the account's SMTP server, with a copy
 // appended to Sent (except where the server keeps one itself: Gmail,
@@ -30,6 +38,7 @@ import { ImapFlow, type FetchMessageObject, type ListResponse, type MessageAddre
 import { createTransport } from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
+import { MailStore, type Flags } from './mail-store.mts';
 import type {
   MailAccount,
   MailAccountPatch,
@@ -308,10 +317,11 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-function sessionOf(id: string): Session {
+/** An account's session; `touch` when the app asked, keeping its connections up. */
+function sessionOf(id: string, touch = true): Session {
   let s = sessions.get(id);
   if (!s) sessions.set(id, (s = { client: null, connecting: null, watcher: null, watching: false, lastUse: 0, specials: new Map() }));
-  s.lastUse = Date.now();
+  if (touch) s.lastUse = Date.now();
   return s;
 }
 
@@ -327,9 +337,10 @@ function changed(accountId: string, mailbox: string): void {
   }, 250));
 }
 
-function listen(accountId: string, client: ImapFlow): void {
+/** The server says a mailbox changed: bring the stored copy up to date, which tells the app if anything did. */
+function listen(a: StoredAccount, client: ImapFlow): void {
   const onChange = (e: { path?: string }) => {
-    if (typeof e?.path === 'string') changed(accountId, e.path);
+    if (typeof e?.path === 'string') scheduleSync(a, e.path, 300);
   };
   client.on('exists', onChange);
   client.on('expunge', onChange);
@@ -337,15 +348,15 @@ function listen(accountId: string, client: ImapFlow): void {
   client.on('error', () => {});
 }
 
-async function connection(a: StoredAccount): Promise<ImapFlow> {
-  const s = sessionOf(a.id);
+async function connection(a: StoredAccount, touch = true): Promise<ImapFlow> {
+  const s = sessionOf(a.id, touch);
   if (s.client?.usable) {
     watch(a, s);
     return s.client;
   }
   if (!s.connecting) {
     const client = imapClient(a.imap, unseal(a.password));
-    listen(a.id, client);
+    listen(a, client);
     client.on('close', () => {
       if (s.client === client) s.client = null;
     });
@@ -373,7 +384,7 @@ function watch(a: StoredAccount, s: Session): void {
   s.watching = true;
   // It idles right away, and renews the IDLE now and then for servers that drop quiet ones.
   const client = imapClient(a.imap, unseal(a.password), { autoIdleDelay: 500, maxIdleTime: 5 * 60_000 });
-  listen(a.id, client);
+  listen(a, client);
   s.watcher = client;
   let retry: NodeJS.Timeout | null = null;
   client.on('close', () => {
@@ -419,8 +430,8 @@ setInterval(() => {
  * opening an unread message marks it read right away. Reads fetch with
  * BODY.PEEK, so they never set \Seen themselves.
  */
-async function inMailbox<T>(a: StoredAccount, mailbox: string, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
-  const client = await connection(a);
+async function inMailbox<T>(a: StoredAccount, mailbox: string, fn: (client: ImapFlow) => Promise<T>, touch = true): Promise<T> {
+  const client = await connection(a, touch);
   let lock;
   try {
     lock = await client.getMailboxLock(mailbox);
@@ -451,7 +462,49 @@ const SPECIAL: Record<string, SpecialMailbox> = {
   '\\Flagged': 'flagged',
 };
 
+function noteSpecials(s: Session, list: MailboxInfo[]): void {
+  s.specials.clear();
+  for (const m of list) if (m.special && !s.specials.has(m.special)) s.specials.set(m.special, m.path);
+}
+
+function storedMailboxes(a: StoredAccount): MailboxInfo[] | null {
+  try {
+    const saved = storeOf(a).getMeta('mailboxes');
+    return saved ? (JSON.parse(saved) as MailboxInfo[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The folders as last listed, when there's no connection yet: right away,
+ * and listed again behind them (telling the app if they changed). Listed
+ * on the connection when there is one, so counts the app has just changed
+ * come back current; and from the stored list when the server can't be
+ * reached.
+ */
 async function mailboxes(a: StoredAccount): Promise<MailboxInfo[]> {
+  const s = sessionOf(a.id);
+  const saved = storedMailboxes(a);
+  if (saved && !s.client?.usable) {
+    if (!s.specials.size) noteSpecials(s, saved);
+    void listMailboxes(a)
+      .then((list) => {
+        if (JSON.stringify(list) !== JSON.stringify(saved)) changed(a.id, list.find((m) => m.special === 'inbox')?.path ?? 'INBOX');
+      })
+      .catch(() => {});
+    return saved;
+  }
+  try {
+    return await listMailboxes(a);
+  } catch (error) {
+    if (!saved) throw error;
+    if (!s.specials.size) noteSpecials(s, saved);
+    return saved;
+  }
+}
+
+async function listMailboxes(a: StoredAccount): Promise<MailboxInfo[]> {
   const client = await connection(a);
   let list: ListResponse[];
   try {
@@ -459,11 +512,8 @@ async function mailboxes(a: StoredAccount): Promise<MailboxInfo[]> {
   } catch (error) {
     throw explain(error);
   }
-  const s = sessionOf(a.id);
-  s.specials.clear();
   const out: MailboxInfo[] = list.map((m) => {
     const special = m.path.toUpperCase() === 'INBOX' ? 'inbox' : (m.specialUse && SPECIAL[m.specialUse]) || null;
-    if (special && !s.specials.has(special)) s.specials.set(special, m.path);
     return {
       path: m.path,
       name: m.path.toUpperCase() === 'INBOX' ? 'Inbox' : m.name,
@@ -475,6 +525,8 @@ async function mailboxes(a: StoredAccount): Promise<MailboxInfo[]> {
       unseen: m.status?.unseen ?? 0,
     };
   });
+  noteSpecials(sessionOf(a.id), out);
+  storeOf(a).setMeta('mailboxes', JSON.stringify(out));
   return out;
 }
 
@@ -601,11 +653,202 @@ function previewText(part: MessageStructureObject, raw: Buffer): string {
     .slice(0, PREVIEW_CHARS);
 }
 
-/** Previews already read, by account, mailbox, UIDVALIDITY and uid. */
-const previews = new Map<string, string | null>();
+// ---------------------------------------------------------------------------
+// The stored copy
+// ---------------------------------------------------------------------------
+
+/** A mailbox's stored copy is brought up to date when it's read and older than this. */
+const SYNC_AFTER_MS = 60_000;
+
+const stores = new Map<string, MailStore>();
+
+function storeFile(id: string): string {
+  return path.join(app.getPath('userData'), 'mail', `${id}.db`);
+}
+
+function storeOf(a: StoredAccount): MailStore {
+  let store = stores.get(a.id);
+  if (!store) {
+    fs.mkdirSync(path.dirname(storeFile(a.id)), { recursive: true, mode: 0o700 });
+    stores.set(a.id, (store = new MailStore(storeFile(a.id))));
+  }
+  return store;
+}
+
+/** Throw an account's stored mail away: it's removed, or its servers changed. */
+function dropStore(id: string): void {
+  stores.get(id)?.close();
+  stores.delete(id);
+  MailStore.remove(storeFile(id));
+  for (const key of parsed.keys()) if (key.startsWith(`${id}\0`)) parsed.delete(key);
+}
+
+/** A mailbox renumbered (new UIDVALIDITY): forget what was kept of it. */
+function checkValidity(a: StoredAccount, store: MailStore, mailbox: string, validity: string): boolean {
+  if (!store.checkValidity(mailbox, validity)) return false;
+  for (const key of parsed.keys()) if (key.startsWith(`${a.id}\0${mailbox}\0`)) parsed.delete(key);
+  return true;
+}
+
+function byDate(list: MessageSummary[]): MessageSummary[] {
+  return list.sort((x, y) => y.date - x.date || y.uid - x.uid);
+}
+
+/**
+ * A page of a mailbox from its stored copy, or null when it doesn't have
+ * all of it. `fallback` (the server can't be reached) settles for what it
+ * has, and filters it.
+ */
+function storedPage(store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter = null, fallback = false): MessagePage | null {
+  const box = store.box(mailbox);
+  if (!box) return null;
+  if (!fallback) {
+    const older = before ? box.uids.filter((u) => u < before) : box.uids;
+    const page = older.slice(0, limit);
+    const kept = store.summaries(mailbox, page);
+    if (kept.size < page.length) return null;
+    return { messages: byDate([...kept.values()].map((k) => k.summary)), total: box.uids.length, more: older.length > page.length };
+  }
+  const all = store.allSummaries(mailbox, before).filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true));
+  return { messages: byDate(all.slice(0, limit)), total: filter ? all.length : box.uids.length, more: all.length > limit };
+}
+
+/** Fetch and keep the summaries of these messages, with previews for those that have none yet. */
+async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: string, uids: number[]): Promise<boolean> {
+  if (!uids.length) return false;
+  const fetched: FetchMessageObject[] = [];
+  for await (const m of client.fetch(uidRanges(uids), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true })) {
+    fetched.push(m);
+  }
+  const changed = store.putSummaries(mailbox, fetched.map(summary));
+
+  // Previews, a few KB of each message's text, fetched together for messages whose text is the same part.
+  const kept = store.summaries(mailbox, fetched.map((m) => m.uid));
+  const want = new Map<string, { part: MessageStructureObject; uids: number[] }>();
+  for (const m of fetched) {
+    if (kept.get(m.uid)?.previewed) continue;
+    const part = previewPart(m.bodyStructure);
+    if (!part) {
+      store.setPreview(mailbox, m.uid, null);
+      continue;
+    }
+    const id = part.part ?? '1';
+    const group = `${id}\0${part.type}\0${part.encoding}\0${part.parameters?.charset ?? ''}`;
+    const entry = want.get(group) ?? { part: { ...part, part: id }, uids: [] };
+    entry.uids.push(m.uid);
+    want.set(group, entry);
+  }
+  for (const { part, uids: some } of want.values()) {
+    try {
+      for await (const m of client.fetch(uidRanges(some), { uid: true, bodyParts: [{ key: part.part ?? '1', maxLength: PREVIEW_BYTES }] }, { uid: true })) {
+        const raw = m.bodyParts ? [...m.bodyParts.values()][0] : undefined;
+        store.setPreview(mailbox, m.uid, raw ? previewText(part, raw) : null);
+      }
+    } catch {
+      // Previews are a nicety; the list still shows.
+    }
+  }
+  return changed || want.size > 0;
+}
+
+/** A uid set in IMAP's shorthand: 1:5,7,9:12. */
+function uidRanges(uids: number[]): string {
+  const sorted = [...new Set(uids)].sort((x, y) => x - y);
+  const out: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i];
+    while (i + 1 < sorted.length && sorted[i + 1] === sorted[i] + 1) i++;
+    out.push(start === sorted[i] ? String(start) : `${start}:${sorted[i]}`);
+  }
+  return out.join(',');
+}
+
+function sameList(x: number[], y: number[]): boolean {
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+function flagsOf(flags: Set<string> | undefined): Flags {
+  const f = flags ?? new Set<string>();
+  return { seen: f.has('\\Seen'), flagged: f.has('\\Flagged'), answered: f.has('\\Answered'), draft: f.has('\\Draft') };
+}
+
+/**
+ * Bring a mailbox's stored copy up to date: its uids (new mail, and what
+ * went), the flags of the messages kept (only what changed since last
+ * time, where the server has CONDSTORE), and the newest page's summaries.
+ * Tells the app when anything changed. Never keeps the connection up by
+ * itself: only the app's asking does.
+ */
+async function sync(a: StoredAccount, mailbox: string): Promise<void> {
+  const store = storeOf(a);
+  let dirty = false;
+  await inMailbox(a, mailbox, async (client) => {
+    const box = client.mailbox;
+    if (!box) return;
+    const validity = String(box.uidValidity);
+    if (checkValidity(a, store, mailbox, validity)) dirty = true;
+    const prev = store.box(mailbox);
+    const uids = box.exists > 0 ? ((await client.search({ all: true }, { uid: true })) || []).sort((x, y) => y - x) : [];
+    if (!prev || !sameList(prev.uids, uids)) dirty = true;
+    const present = new Set(uids);
+    const stored = store.storedUids(mailbox);
+    store.removeUids(mailbox, stored.filter((u) => !present.has(u)));
+    const keep = stored.filter((u) => present.has(u));
+
+    const condstore = client.enabled.has('CONDSTORE') && !!box.highestModseq;
+    let modseq = condstore ? box.highestModseq! : null;
+    if (keep.length) {
+      const since = condstore && prev?.modseq ? BigInt(prev.modseq) : null;
+      const range = since !== null ? '1:*' : uidRanges(keep);
+      const kept = new Set(keep);
+      for await (const m of client.fetch(range, { uid: true, flags: true }, { uid: true, changedSince: since ?? undefined })) {
+        if (m.modseq && modseq !== null && m.modseq > modseq) modseq = m.modseq;
+        if (kept.has(m.uid) && store.patchFlags(mailbox, [m.uid], flagsOf(m.flags))) dirty = true;
+      }
+    }
+    store.setBox(mailbox, { validity, modseq: modseq?.toString() ?? null, uids, synced: Date.now() });
+
+    const have = store.summaries(mailbox, uids.slice(0, PAGE));
+    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => !have.has(u)))) dirty = true;
+  }, false);
+  if (dirty) changed(a.id, mailbox);
+}
+
+const syncs = new Map<string, { timer: NodeJS.Timeout | null; running: boolean; again: boolean }>();
+
+/** Sync a mailbox soon, once per burst, one at a time. */
+function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
+  const key = `${a.id}\0${mailbox}`;
+  let s = syncs.get(key);
+  if (!s) syncs.set(key, (s = { timer: null, running: false, again: false }));
+  const state = s;
+  if (state.running) {
+    state.again = true;
+    return;
+  }
+  if (state.timer) return;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    if (!accounts.some((x) => x.id === a.id)) return;
+    state.running = true;
+    void sync(a, mailbox)
+      .catch(() => {
+        // Offline, or the server's busy: the stored copy stands until next time.
+      })
+      .finally(() => {
+        state.running = false;
+        if (state.again) {
+          state.again = false;
+          scheduleSync(a, mailbox, delay);
+        } else if (!state.timer) {
+          syncs.delete(key);
+        }
+      });
+  }, delay);
+  state.timer.unref();
+}
 
 function summary(m: FetchMessageObject): MessageSummary {
-  const flags = m.flags ?? new Set<string>();
   const date = m.envelope?.date ?? m.internalDate;
   return {
     uid: m.uid,
@@ -615,20 +858,43 @@ function summary(m: FetchMessageObject): MessageSummary {
     to: addresses(m.envelope?.to),
     cc: addresses(m.envelope?.cc),
     date: date ? new Date(date).getTime() || 0 : 0,
-    seen: flags.has('\\Seen'),
-    flagged: flags.has('\\Flagged'),
-    answered: flags.has('\\Answered'),
-    draft: flags.has('\\Draft'),
+    ...flagsOf(m.flags),
     hasAttachments: hasAttachments(m.bodyStructure),
     preview: null,
     size: m.size ?? 0,
   };
 }
 
+/**
+ * A page of a mailbox's messages. Straight from the stored copy when it
+ * has the whole page (syncing behind it when it's old); otherwise from the
+ * server, keeping what comes back. Searches and filters ask the server,
+ * and settle for the stored copy when it can't be reached.
+ */
 async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter): Promise<MessagePage> {
+  const store = storeOf(a);
+  sessionOf(a.id);
+  if (!query && !filter) {
+    const local = storedPage(store, mailbox, before, limit);
+    if (local) {
+      if (Date.now() - (store.box(mailbox)?.synced ?? 0) > SYNC_AFTER_MS) scheduleSync(a, mailbox, 0);
+      return local;
+    }
+  }
+  try {
+    return await serverPage(a, store, mailbox, before, limit, query, filter);
+  } catch (error) {
+    const local = query ? null : storedPage(store, mailbox, before, limit, filter, true);
+    if (local) return local;
+    throw error;
+  }
+}
+
+async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter): Promise<MessagePage> {
   return inMailbox(a, mailbox, async (client) => {
     const box = client.mailbox;
     const validity = box ? String(box.uidValidity) : '';
+    checkValidity(a, store, mailbox, validity);
     let uids: number[] = [];
     if (box && box.exists > 0) {
       const criteria: SearchObject = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true } : { all: true };
@@ -641,50 +907,23 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
       uids = (await client.search(criteria, { uid: true })) || [];
     }
     uids.sort((x, y) => y - x);
+    if (!query && !filter && box) {
+      // The whole mailbox's uids: keep them, and forget what's gone. Flags
+      // kept from before stay as current as they were (the modseq too), for
+      // the next sync to bring up to date.
+      const present = new Set(uids);
+      store.removeUids(mailbox, store.storedUids(mailbox).filter((u) => !present.has(u)));
+      const prev = store.box(mailbox);
+      const modseq = prev ? prev.modseq : client.enabled.has('CONDSTORE') && box.highestModseq ? box.highestModseq.toString() : null;
+      store.setBox(mailbox, { validity, modseq, uids, synced: prev?.synced ?? Date.now() });
+    }
     const older = before ? uids.filter((u) => u < before) : uids;
     const page = older.slice(0, limit);
     if (!page.length) return { messages: [], total: uids.length, more: false };
-
-    const fetched: FetchMessageObject[] = [];
-    for await (const m of client.fetch(page.join(','), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true })) {
-      fetched.push(m);
-    }
-
-    // Previews, a few KB of each message's text, fetched together for messages whose text is the same part.
-    const want = new Map<string, { part: MessageStructureObject; uids: number[] }>();
-    for (const m of fetched) {
-      const key = `${a.id}\0${mailbox}\0${validity}\0${m.uid}`;
-      if (previews.has(key)) continue;
-      const part = previewPart(m.bodyStructure);
-      if (!part) {
-        previews.set(key, null);
-        continue;
-      }
-      const id = part.part ?? '1';
-      const group = `${id}\0${part.type}\0${part.encoding}\0${part.parameters?.charset ?? ''}`;
-      const entry = want.get(group) ?? { part: { ...part, part: id }, uids: [] };
-      entry.uids.push(m.uid);
-      want.set(group, entry);
-    }
-    for (const { part, uids: some } of want.values()) {
-      try {
-        for await (const m of client.fetch(some.join(','), { uid: true, bodyParts: [{ key: part.part ?? '1', maxLength: PREVIEW_BYTES }] }, { uid: true })) {
-          const raw = m.bodyParts ? [...m.bodyParts.values()][0] : undefined;
-          previews.set(`${a.id}\0${mailbox}\0${validity}\0${m.uid}`, raw ? previewText(part, raw) : null);
-        }
-      } catch {
-        // Previews are a nicety; the list still shows.
-      }
-    }
-    if (previews.size > 20_000) previews.clear();
-
-    const out = fetched.map((m) => {
-      const s = summary(m);
-      s.preview = previews.get(`${a.id}\0${mailbox}\0${validity}\0${m.uid}`) ?? null;
-      return s;
-    });
-    out.sort((x, y) => y.date - x.date || y.uid - x.uid);
-    return { messages: out, total: uids.length, more: older.length > page.length };
+    await fetchSummaries(client, store, mailbox, page);
+    const kept = store.summaries(mailbox, page);
+    const out = page.map((u) => kept.get(u)?.summary).filter((s): s is MessageSummary => !!s);
+    return { messages: byDate(out), total: uids.length, more: older.length > page.length };
   });
 }
 
@@ -757,26 +996,44 @@ async function skimmedMessage(client: ImapFlow, uid: number, root: MessageStruct
   return build(root, m.headers) ? Buffer.concat(out) : null;
 }
 
-/** Recently opened messages, parsed. */
+/** Recently opened messages, parsed, by account, mailbox and uid. */
 const parsed = new Map<string, { summary: MessageSummary; mail: ParsedMail }>();
 
+function remember(key: string, entry: { summary: MessageSummary; mail: ParsedMail }): void {
+  parsed.delete(key);
+  parsed.set(key, entry);
+  while (parsed.size > 24) parsed.delete(parsed.keys().next().value as string);
+}
+
+/** A message, from memory, then the stored copy, then the server (keeping it). */
 async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Promise<{ summary: MessageSummary; mail: ParsedMail }> {
+  const key = `${a.id}\0${mailbox}\0${uid}`;
+  const hit = parsed.get(key);
+  if (hit) {
+    remember(key, hit);
+    return hit;
+  }
+  const store = storeOf(a);
+  const kept = store.summaries(mailbox, [uid]).get(uid)?.summary;
+  const stored = kept && store.body(mailbox, uid);
+  if (kept && stored) {
+    const entry = { summary: kept, mail: await simpleParser(stored) };
+    remember(key, entry);
+    return entry;
+  }
   return inMailbox(a, mailbox, async (client) => {
-    const key = `${a.id}\0${mailbox}\0${String(client.mailbox ? client.mailbox.uidValidity : '')}\0${uid}`;
-    const hit = parsed.get(key);
-    if (hit) {
-      parsed.delete(key);
-      parsed.set(key, hit);
-      return hit;
-    }
+    if (client.mailbox) checkValidity(a, store, mailbox, String(client.mailbox.uidValidity));
     const meta = await client.fetchOne(String(uid), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true });
     if (!meta) throw new Error('That message is gone.');
     if ((meta.size ?? 0) > MAX_MESSAGE_BYTES) throw new Error('That message is too big to open here.');
     const raw = ((meta.size ?? 0) > SKIM_BYTES && (await skimmedMessage(client, uid, meta.bodyStructure))) || (await wholeMessage(client, uid));
     const mail = await simpleParser(raw);
     const entry = { summary: summary(meta), mail };
-    parsed.set(key, entry);
-    while (parsed.size > 24) parsed.delete(parsed.keys().next().value as string);
+    if (store.box(mailbox)) {
+      store.putSummaries(mailbox, [entry.summary]);
+      store.putBody(mailbox, uid, raw);
+    }
+    remember(key, entry);
     return entry;
   });
 }
@@ -838,6 +1095,10 @@ async function setFlags(a: StoredAccount, mailbox: string, uids: number[], flags
     await apply(flags.seen, '\\Seen');
     await apply(flags.flagged, '\\Flagged');
   });
+  const patch: Partial<Flags> = {};
+  if (typeof flags.seen === 'boolean') patch.seen = flags.seen;
+  if (typeof flags.flagged === 'boolean') patch.flagged = flags.flagged;
+  storeOf(a).patchFlags(mailbox, uids, patch);
   changed(a.id, mailbox);
 }
 
@@ -856,14 +1117,17 @@ async function move(a: StoredAccount, mailbox: string, uids: number[], to: unkno
   }
   if (dest === mailbox) return;
   await inMailbox(a, mailbox, (client) => client.messageMove(uids.join(','), dest, { uid: true }));
+  storeOf(a).removeUids(mailbox, uids);
   changed(a.id, mailbox);
   changed(a.id, dest);
+  scheduleSync(a, dest, 0);
 }
 
 async function remove(a: StoredAccount, mailbox: string, uids: number[]): Promise<void> {
   const trash = await specialPath(a, 'trash', 'Trash');
   if (mailbox === trash) {
     await inMailbox(a, mailbox, (client) => client.messageDelete(uids.join(','), { uid: true }));
+    storeOf(a).removeUids(mailbox, uids);
     changed(a.id, mailbox);
   } else {
     await move(a, mailbox, uids, trash);
@@ -942,7 +1206,9 @@ function keepsSentCopy(server: MailServer): boolean {
 async function deleteDraft(a: StoredAccount, uid: number): Promise<void> {
   const drafts = await specialPath(a, 'drafts').catch(() => null);
   if (!drafts) return;
-  await inMailbox(a, drafts, (client) => client.messageDelete(String(uid), { uid: true })).catch(() => {});
+  await inMailbox(a, drafts, (client) => client.messageDelete(String(uid), { uid: true }))
+    .then(() => storeOf(a).removeUids(drafts, [uid]))
+    .catch(() => {});
   changed(a.id, drafts);
 }
 
@@ -968,9 +1234,12 @@ async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
       const client = await connection(a);
       await client.append(sent, await buildRaw(a, m, messageId, true), ['\\Seen']);
       changed(a.id, sent);
+      scheduleSync(a, sent, 0);
     } catch {
       // No Sent copy, but the message went.
     }
+  } else {
+    void specialPath(a, 'sent').then((sent) => scheduleSync(a, sent, 2000)).catch(() => {});
   }
   if (m.answering) await setFlagsRaw(a, m.answering.path, m.answering.uid, '\\Answered').catch(() => {});
   if (m.draftUid) await deleteDraft(a, m.draftUid);
@@ -978,6 +1247,7 @@ async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
 
 async function setFlagsRaw(a: StoredAccount, mailbox: string, uid: number, flag: string): Promise<void> {
   await inMailbox(a, mailbox, (client) => client.messageFlagsAdd(String(uid), [flag], { uid: true }));
+  if (flag === '\\Answered') storeOf(a).patchFlags(mailbox, [uid], { answered: true });
   changed(a.id, mailbox);
 }
 
@@ -992,6 +1262,7 @@ async function saveDraft(a: StoredAccount, m: OutgoingMessage): Promise<number |
   }
   if (m.draftUid) await deleteDraft(a, m.draftUid);
   changed(a.id, drafts);
+  scheduleSync(a, drafts, 0);
   return appended && appended.uid ? appended.uid : null;
 }
 
@@ -1055,11 +1326,14 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   if (typeof p.name === 'string') a.name = p.name.trim().slice(0, 100) || a.name;
   if (typeof p.fullName === 'string') a.fullName = p.fullName.trim().slice(0, 200).replace(/[\r\n]/g, ' ');
   if (typeof p.signature === 'string') a.signature = p.signature.slice(0, 10_000);
+  const movedServer = a.imap.host !== imap.host || a.imap.port !== imap.port || a.imap.user !== imap.user;
   a.imap = { ...imap };
   a.smtp = { ...smtp };
   if (typeof p.password === 'string' && p.password) a.password = seal(p.password);
   save();
   if (servers) closeSession(a.id);
+  // Another server numbers its messages its own way.
+  if (movedServer) dropStore(a.id);
   return publicAccount(a);
 }
 
@@ -1090,6 +1364,7 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:removeAccount', (id) => {
     const a = account(id);
     closeSession(a.id);
+    dropStore(a.id);
     accounts = accounts.filter((x) => x !== a);
     save();
   });
