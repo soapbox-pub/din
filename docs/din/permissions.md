@@ -25,7 +25,7 @@ When nsites get `window.din`, the user approves the list at install.
 | Permission | Grants | Built-in apps that need it |
 |---|---|---|
 | `account` | `din.account`: pubkey, relays, Blossom servers | Assistant, App Store |
-| `nostr` | `window.nostr`, signing as the signed-in user. Implies `account` | App Store |
+| `nostr` | `window.nostr`, signing as the signed-in user. Implies `account` | App Store, Calendar |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
 | `notifications` | `new Notification()` and `navigator.setAppBadge()`; with `background`, `registration.showNotification()` from the app's service worker | Assistant, Terminal |

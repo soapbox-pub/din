@@ -622,6 +622,13 @@ files — `git add` new source files before `npm run os:build`.
   pairing, connecting and forgetting devices. Prompts a pairing needs (a code
   to compare or type) appear on the desktop. Headsets show up in the Sound
   panel through WirePlumber once connected.
+- Calendar keeps the signed-in account's events on its Nostr relays as
+  NIP-52 calendar events (`src/shared/calendar.ts`), so any NIP-52 client
+  sees the same calendar: day, week and month views, all-day and timed
+  events, invitations by npub with Going / Maybe / Not Going answers, and
+  the account's calendars (kind 31924) as the sidebar's colored lists.
+  Nostr calendar events are public. The menu bar's clock opens it, and
+  `din calendar` lists, adds, answers and deletes events.
 - Messages reads and answers the texts on the user's phones, added in
   Settings → Phone (`electron/phone.mts`): iPhones and Android phones alike
   over Bluetooth's Message Access Profile, through BlueZ's obexd

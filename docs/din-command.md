@@ -49,6 +49,7 @@ a missing or bad argument).
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
 | `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, connect or disconnect a phone, whether it can send files here, add one paired in Bluetooth or forget one |
 | `mail` | Mail's accounts, marking a mailbox (the inbox by default) all read (asks on screen first), whether senders' pictures are looked up, and the mailing lists in their inboxes as Mail's Subscriptions shows them: list them (most mail first, how each is left, whether its sender checks out, ones still mailing after unsubscribing), unsubscribe from some (asks on screen first), optionally moving their mail to the Trash |
+| `calendar` | The account's calendar on Nostr (NIP-52), as Calendar has it: what's coming up, yours and invitations, adding an event (optionally inviting people and putting it in a calendar), answering an invitation, deleting an event (asks on screen first), and opening Calendar on a day |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks and phones plugged in by USB, as Files' sidebar has them: list them (with what a phone is waiting on), mount, unlock an encrypted one with its passphrase, eject |
 | `studio` | Studio: its takes in ~/Videos/Studio, recording one (start, stop, mark a highlight or a retake), transcribing one again, and going live (asks on screen first) or ending the stream |
@@ -68,7 +69,7 @@ down (`din power restart|off`), restarting Din (`din update restart`),
 installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
-(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), removing an app's background schedule (`din background remove`) and forgetting a phone with its messages (`din phone forget`) put the question on
+(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), removing an app's background schedule (`din background remove`), deleting a calendar event (`din calendar delete`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings.

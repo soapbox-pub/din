@@ -184,6 +184,9 @@ export const APPS: readonly AppDefinition[] = [
   // params `{ phoneId, threadId }` open a conversation (a notification's
   // click).
   dinApp('messages'),
+  // NIP-52 events and invitations by day, week or month. Launch params
+  // `{ date: 'YYYY-MM-DD', view }` show a day; the menu bar's clock opens it.
+  dinApp('calendar'),
   // Receiving from Android devices nearby; visible to them only while it's open.
   dinApp('quick-share'),
   dinApp('file-browser'),

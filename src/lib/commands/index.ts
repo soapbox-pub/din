@@ -1,6 +1,7 @@
 import { assistantArea } from './assistant';
 import { backgroundArea } from './background';
 import { appsArea, browserArea, desktopIconsArea, notificationsArea, openArea, screenshotArea, widgetsArea, windowsArea, workspaceArea } from './desktop';
+import { calendarArea } from './calendar';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { extensionsArea } from './extensions';
@@ -40,6 +41,7 @@ export const AREAS: readonly Area[] = [
   bluetoothArea,
   phoneArea,
   mailArea,
+  calendarArea,
   vpnArea,
   torArea,
   soundArea,

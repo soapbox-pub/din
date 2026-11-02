@@ -1,0 +1,15 @@
+{
+  "name": "Calendar",
+  "description": "Your events and invitations, kept on Nostr.",
+  "icons": [{ "src": "/icons/apps/calendar.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "shortcuts": [
+    { "name": "New Event", "url": "/", "din": { "id": "new-event" } }
+  ],
+  "din": {
+    "permissions": ["nostr"],
+    "window": { "size": { "width": 1120, "height": 760 }, "frame": "custom" },
+    "keywords": ["events", "schedule", "agenda", "meetings", "appointments", "invitations", "rsvp", "dates", "nip-52"]
+  }
+}

@@ -1,4 +1,4 @@
-import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -46,6 +46,7 @@ import { getAirPlayBridge } from '@/lib/airplay';
 import { NotificationsPanel } from '@/components/desktop/NotificationsIndicator';
 import { useNotificationsBadge } from '@/hooks/useNotificationsBadge';
 import { Calendar } from '@/components/ui/calendar';
+import { isoDate } from '@/shared/calendar';
 import { TrayItems } from '@/components/desktop/TrayMenu';
 import { moveAmongItems } from '@/lib/desktopFocus';
 import { AssistantMenuItem } from '@/components/desktop/AssistantIndicator';
@@ -1037,6 +1038,18 @@ function CalendarSection({ onOpenSettings }: { onOpenSettings: () => void }) {
         }}
       />
       <div className="px-1.5 pb-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            onOpenSettings();
+            open('calendar', { date: isoDate(today) });
+          }}
+        >
+          <CalendarDays aria-hidden />
+          Open Calendar
+        </Button>
         <Button
           variant="ghost"
           size="sm"
