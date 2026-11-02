@@ -17,6 +17,7 @@ import { ListSkeleton, MessageList } from './MessageList';
 import { Reader } from './Reader';
 import { messageMenu, type MenuPick } from './menu';
 import { DropdownEntries } from './MenuEntries';
+import { groupConversations, type Conversation } from './conversations';
 import { messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
@@ -160,10 +161,10 @@ export function Viewer() {
   const [filter, setFilter] = useState<MessageFilter>(restored?.filter ?? null);
   const [search, setSearch] = useState(restored?.search ?? '');
   const [query, setQuery] = useState(() => restored?.search.trim() ?? '');
-  /** Messages chosen to act on together, with Ctrl- and Shift-click. */
+  /** Conversations chosen to act on together, with Ctrl- and Shift-click, by key. */
   const [chosen, setChosen] = useState<Set<string>>(() => new Set());
-  /** The message open in place of the list. */
-  const [opened, setOpened] = useState<Item | null>(null);
+  /** The conversation open in place of the list. */
+  const [opened, setOpened] = useState<Conversation | null>(null);
   /** The row the keyboard is on. */
   const [cursor, setCursor] = useState<string | null>(null);
   /** A message to open once the list has it: where the window was left, or a notification's. */
@@ -229,15 +230,17 @@ export function Viewer() {
     return out;
   }, [messages.data]);
 
+  const conversations = useMemo(() => groupConversations(items), [items]);
+
   // People in the list become address suggestions.
   useEffect(() => {
     rememberAddresses(items.slice(0, 50).flatMap((i) => i.from));
   }, [items]);
 
-  // The message to open, once the list has it. A few older pages are read
-  // to find it, and then it's given up on.
+  // The message to open (in its conversation), once the list has it. A few
+  // older pages are read to find it, and then it's given up on.
   const restoreMore = !!messages.hasNextPage && (messages.data?.pages.length ?? 0) < 5;
-  const restoreFound = restoring ? items.find((i) => i.key === restoring) : undefined;
+  const restoreFound = restoring ? conversations.find((c) => c.items.some((i) => i.key === restoring)) : undefined;
   const restoreGone = !restoring || messages.isError || (!restoreFound && messages.isSuccess && !messages.isFetching && !restoreMore);
   if (restoring && (restoreFound || restoreGone)) {
     setRestoring(null);
@@ -251,16 +254,23 @@ export function Viewer() {
     if (restoring && !restoreFound && isSuccess && !isFetching && restoreMore) void fetchNextPage();
   }, [restoring, restoreFound, isSuccess, isFetching, restoreMore, fetchNextPage]);
 
-  // The open message as the list has it now (its flags), or as it was opened.
-  const current = useMemo(() => (opened ? items.find((i) => i.key === opened.key) ?? opened : null), [opened, items]);
-  const selectedItems = useMemo(() => items.filter((i) => chosen.has(i.key)), [items, chosen]);
-  const cursorItem = useMemo(() => items.find((i) => i.key === cursor) ?? null, [items, cursor]);
-  /** What the menu bar and keyboard act on: the open message, else the chosen ones, else the keyboard's row. */
-  const targets = useMemo(() => (current ? [current] : selectedItems.length ? selectedItems : cursorItem ? [cursorItem] : []), [current, selectedItems, cursorItem]);
+  // The open conversation as the list has it now (new mail in it, its
+  // flags), or as it was opened.
+  const current = useMemo(() => {
+    if (!opened) return null;
+    const keys = new Set(opened.items.map((i) => i.key));
+    return conversations.find((c) => c.items.some((i) => keys.has(i.key))) ?? opened;
+  }, [opened, conversations]);
+  const chosenConversations = useMemo(() => conversations.filter((c) => chosen.has(c.key)), [conversations, chosen]);
+  const selectedItems = useMemo(() => chosenConversations.flatMap((c) => c.items), [chosenConversations]);
+  const cursorConversation = useMemo(() => conversations.find((c) => c.key === cursor) ?? null, [conversations, cursor]);
+  /** What the menu bar and keyboard act on: the open conversation, else the chosen ones, else the keyboard's row. */
+  const targetConversations = useMemo(() => (current ? [current] : chosenConversations.length ? chosenConversations : cursorConversation ? [cursorConversation] : []), [current, chosenConversations, cursorConversation]);
+  const targets = useMemo(() => targetConversations.flatMap((c) => c.items), [targetConversations]);
 
   // Kept for Din to reopen the window with: the mailbox, filter, search,
   // the open message and the list's scroll.
-  const savedMessage = current?.key ?? (restoreGone ? null : restoring);
+  const savedMessage = current?.latest.key ?? (restoreGone ? null : restoring);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveWindow = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -294,7 +304,7 @@ export function Viewer() {
           : SPECIAL_NAMES[selection.special]
         : mailboxTitle(box(selection.accountId, selection.path)) || selection.path;
 
-  useWindowTitle(current ? current.subject || 'No Subject' : title);
+  useWindowTitle(current ? current.items.at(-1)?.subject || 'No Subject' : title);
 
   // A message to open (a new mail notification's click, see MailHost):
   // its mailbox, and the message once the list has it.
@@ -309,21 +319,24 @@ export function Viewer() {
     [din, setSelection],
   );
 
-  // Messages that left the list: the open one closes, back to the list on the one after it.
+  // Messages that left the list: a conversation they were all of closes,
+  // back to the list on the one after it.
   const onRemoved = useCallback(
     (keys: Set<string>) => {
-      const at = items.findIndex((i) => keys.has(i.key));
-      const next = items.slice(at).find((i) => !keys.has(i.key)) ?? items.slice(0, at).reverse().find((i) => !keys.has(i.key));
+      const gone = (c: Conversation) => c.items.every((i) => keys.has(i.key));
+      const goneKeys = new Set(conversations.filter(gone).map((c) => c.key));
+      const at = conversations.findIndex(gone);
+      const next = at < 0 ? undefined : conversations.slice(at).find((c) => !gone(c)) ?? conversations.slice(0, at).reverse().find((c) => !gone(c));
       setOpened((o) => {
-        if (!o || !keys.has(o.key)) return o;
+        if (!o || !o.items.every((i) => keys.has(i.key))) return o;
         restoreScroll.current = scrollTop.current;
         return null;
       });
-      setChosen((sel) => (sel.size ? new Set([...sel].filter((k) => !keys.has(k))) : sel));
-      setCursor((c) => (c && !keys.has(c) ? c : next?.key ?? null));
+      setChosen((sel) => (sel.size ? new Set([...sel].filter((k) => !goneKeys.has(k))) : sel));
+      setCursor((c) => (c && !goneKeys.has(c) ? c : next?.key ?? c));
       anchor.current = null;
     },
-    [items],
+    [conversations],
   );
   const { run, moveTo, newMessage, compose } = useMessageActions(accounts, onRemoved);
 
@@ -332,32 +345,24 @@ export function Viewer() {
       if (!list.length) return;
       if (typeof pick === 'object') return void moveTo(list, list[0].accountId, pick.move);
       if (pick === 'unsubscribe') return setLeaving(list[0]);
-      // An open message marked unread goes back to the list, as it would be read again otherwise.
-      if (pick === 'unread' && current && list.some((i) => i.key === current.key)) setOpened(null);
+      // An open conversation marked unread goes back to the list, as it would be read again otherwise.
+      if (pick === 'unread' && current && list.some((i) => current.items.some((c) => c.key === i.key))) setOpened(null);
       void run(pick, list);
     },
     [moveTo, run, current],
   );
 
-  // Opening a message reads it.
-  const marked = useRef<string | null>(null);
-  useEffect(() => {
-    if (!current || current.seen || current.draft || marked.current === current.key) return;
-    marked.current = current.key;
-    void run('read', [current]);
-  }, [current, run]);
+  const currentMessage = useMessage(current?.latest ?? null);
+  const canUnsubscribe = !!current && (current.latest.listUnsubscribe || !!currentMessage.data?.unsubscribe);
 
-  const currentMessage = useMessage(current);
-  const canUnsubscribe = !!current && (current.listUnsubscribe || !!currentMessage.data?.unsubscribe);
-
-  const openItem = useCallback(
-    (item: Item) => {
-      if (item.draft) return void run('open-draft', [item]);
-      marked.current = null;
+  const openConversation = useCallback(
+    (c: Conversation) => {
+      // A draft by itself is written on, not read.
+      if (c.items.length === 1 && c.latest.draft) return void run('open-draft', [c.latest]);
       // The list comes back where it was left.
       restoreScroll.current = scrollTop.current;
-      setOpened(item);
-      setCursor(item.key);
+      setOpened(c);
+      setCursor(c.key);
       setChosen(new Set());
     },
     [run],
@@ -392,42 +397,55 @@ export function Viewer() {
     setSearch(value);
   };
 
-  const targetsFor = useCallback((item: Item) => (chosen.has(item.key) ? selectedItems : [item]), [chosen, selectedItems]);
+  const targetsFor = useCallback((c: Conversation) => (chosen.has(c.key) ? chosenConversations : [c]), [chosen, chosenConversations]);
 
-  const onClickRow = (e: MouseEvent, item: Item) => {
+  /**
+   * What a pick on conversations acts on: the newest message for Reply and
+   * Forward; the newest for a star, and every starred message to take it
+   * off; all of them otherwise.
+   */
+  const pickTargets = (pick: MenuPick, list: Conversation[]): Item[] => {
+    if (pick === 'reply' || pick === 'reply-all' || pick === 'forward' || pick === 'open-draft') return list.slice(0, 1).map((c) => c.latest);
+    if (pick === 'flag') return list.map((c) => c.latest);
+    if (pick === 'unflag') return list.flatMap((c) => c.items.filter((i) => i.flagged));
+    if (pick === 'unread') return list.map((c) => c.latest);
+    return list.flatMap((c) => c.items);
+  };
+
+  const onClickRow = (e: MouseEvent, c: Conversation) => {
     const from = anchor.current ?? cursor;
     if (e.shiftKey && from) {
-      const a = items.findIndex((i) => i.key === from);
-      const b = items.findIndex((i) => i.key === item.key);
+      const a = conversations.findIndex((x) => x.key === from);
+      const b = conversations.findIndex((x) => x.key === c.key);
       const [lo, hi] = a < b ? [a, b] : [b, a];
-      setChosen(new Set(items.slice(lo, hi + 1).map((i) => i.key)));
-      setCursor(item.key);
+      setChosen(new Set(conversations.slice(lo, hi + 1).map((x) => x.key)));
+      setCursor(c.key);
       return;
     }
     if (e.ctrlKey || e.metaKey) {
       const n = new Set(chosen);
-      if (n.has(item.key)) n.delete(item.key);
-      else n.add(item.key);
+      if (n.has(c.key)) n.delete(c.key);
+      else n.add(c.key);
       setChosen(n);
-      setCursor(item.key);
-      anchor.current = item.key;
+      setCursor(c.key);
+      anchor.current = c.key;
       return;
     }
-    anchor.current = item.key;
-    openItem(item);
+    anchor.current = c.key;
+    openConversation(c);
   };
 
   const onListKey = (e: KeyboardEvent) => {
-    const at = items.findIndex((i) => i.key === cursor);
+    const at = conversations.findIndex((c) => c.key === cursor);
     const go = (index: number) => {
-      const target = items[Math.max(0, Math.min(items.length - 1, index))];
+      const target = conversations[Math.max(0, Math.min(conversations.length - 1, index))];
       if (!target) return;
       if (e.shiftKey) {
         const from = anchor.current ?? cursor ?? target.key;
         anchor.current = from;
-        const a = items.findIndex((i) => i.key === from);
+        const a = conversations.findIndex((c) => c.key === from);
         const [lo, hi] = a < index ? [a, index] : [index, a];
-        setChosen(new Set(items.slice(lo, hi + 1).map((i) => i.key)));
+        setChosen(new Set(conversations.slice(lo, hi + 1).map((c) => c.key)));
       } else {
         anchor.current = target.key;
       }
@@ -444,24 +462,24 @@ export function Viewer() {
       go(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      go(items.length - 1);
+      go(conversations.length - 1);
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && targets.length) {
       e.preventDefault();
       void run('trash', targets);
-    } else if (e.key === 'Enter' && cursorItem) {
+    } else if (e.key === 'Enter' && cursorConversation) {
       e.preventDefault();
-      openItem(cursorItem);
-    } else if (e.key === ' ' && cursorItem) {
+      openConversation(cursorConversation);
+    } else if (e.key === ' ' && cursorConversation) {
       e.preventDefault();
       const n = new Set(chosen);
-      if (n.has(cursorItem.key)) n.delete(cursorItem.key);
-      else n.add(cursorItem.key);
+      if (n.has(cursorConversation.key)) n.delete(cursorConversation.key);
+      else n.add(cursorConversation.key);
       setChosen(n);
     } else if (e.key === 'Escape' && chosen.size) {
       setChosen(new Set());
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setChosen(new Set(items.map((i) => i.key)));
+      setChosen(new Set(conversations.map((c) => c.key)));
     }
   };
 
@@ -482,10 +500,10 @@ export function Viewer() {
     void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
   }, [qc]);
 
-  const defaultAccount = selection.kind === 'mailbox' ? selection.accountId : current?.accountId ?? accounts[0]?.id ?? null;
+  const defaultAccount = selection.kind === 'mailbox' ? selection.accountId : current?.latest.accountId ?? accounts[0]?.id ?? null;
   const has = targets.length > 0;
-  const allFlagged = has && targets.every((i) => i.flagged);
-  const allRead = has && targets.every((i) => i.seen);
+  const allFlagged = has && targetConversations.every((c) => c.flagged);
+  const allRead = has && targetConversations.every((c) => !c.unread);
   const inJunk = has && box(targets[0].accountId, targets[0].path)?.special === 'junk';
 
   const openMailto = useCallback(
@@ -556,9 +574,9 @@ export function Viewer() {
       {
         label: 'Message',
         items: [
-          { id: 'reply', label: 'Reply', accelerator: 'Ctrl+R', enabled: targets.length === 1 },
-          { id: 'reply-all', label: 'Reply All', accelerator: 'Ctrl+Shift+R', enabled: targets.length === 1 },
-          { id: 'forward', label: 'Forward', accelerator: 'Ctrl+Shift+F', enabled: targets.length === 1 },
+          { id: 'reply', label: 'Reply', accelerator: 'Ctrl+R', enabled: targetConversations.length === 1 },
+          { id: 'reply-all', label: 'Reply All', accelerator: 'Ctrl+Shift+R', enabled: targetConversations.length === 1 },
+          { id: 'forward', label: 'Forward', accelerator: 'Ctrl+Shift+F', enabled: targetConversations.length === 1 },
           { type: 'separator' },
           { id: allRead ? 'unread' : 'read', label: allRead ? 'Mark as Unread' : 'Mark as Read', accelerator: 'Ctrl+Shift+U', enabled: has },
           { id: allFlagged ? 'unflag' : 'flag', label: allFlagged ? 'Remove Star' : 'Star', accelerator: 'Ctrl+Shift+L', enabled: has },
@@ -583,7 +601,7 @@ export function Viewer() {
         case 'search': return searchInput.current?.focus();
         case 'refresh': return refresh();
         case 'subscriptions': return setSelection({ kind: 'subscriptions' });
-        case 'unsubscribe': return current ? setLeaving(current) : undefined;
+        case 'unsubscribe': return current ? setLeaving(current.latest) : undefined;
         case 'read':
         case 'unread':
         case 'reply':
@@ -595,7 +613,7 @@ export function Viewer() {
         case 'junk':
         case 'not-junk':
         case 'trash':
-          return pickFor(id, targets);
+          return pickFor(id, pickTargets(id, targetConversations));
       }
     },
   );
@@ -669,26 +687,26 @@ export function Viewer() {
     <ActionBar>
       <ToolButton label="Back to messages" onClick={backToList}><ArrowLeft className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <span className="mx-1 h-5 w-px bg-border" />
-      <ToolButton label="Archive" onClick={() => pickFor('archive', [current])}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label="Delete" onClick={() => pickFor('trash', [current])}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <MoreMenu entries={messageMenu([current], boxesOf(current.accountId), TOOLBAR_PICKS)} onPick={(pick) => pickFor(pick, [current])} />
+      <ToolButton label="Archive" onClick={() => pickFor('archive', current.items)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label="Delete" onClick={() => pickFor('trash', current.items)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current.latest])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), TOOLBAR_PICKS, true)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
     </ActionBar>
   );
 
-  const selectionBar = !current && selectedItems.length > 0 && first && (
+  const selectionBar = !current && chosenConversations.length > 0 && first && (
     <ActionBar>
       <ToolButton label="Clear selection" onClick={() => setChosen(new Set())}><X className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <span className="mr-2 text-sm font-medium tabular-nums">{selectedItems.length.toLocaleString()} selected</span>
+      <span className="mr-2 text-sm font-medium tabular-nums">{chosenConversations.length.toLocaleString()} selected</span>
       <ToolButton label="Archive" onClick={() => pickFor('archive', selectedItems)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Delete" onClick={() => pickFor('trash', selectedItems)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label={allRead ? 'Mark as unread' : 'Mark as read'} onClick={() => pickFor(allRead ? 'unread' : 'read', selectedItems)}>
+      <ToolButton label={allRead ? 'Mark as unread' : 'Mark as read'} onClick={() => pickFor(allRead ? 'unread' : 'read', pickTargets(allRead ? 'unread' : 'read', chosenConversations))}>
         {allRead ? <MailIcon className="size-4.5" strokeWidth={1.75} /> : <MailOpen className="size-4.5" strokeWidth={1.75} />}
       </ToolButton>
-      <ToolButton label={allFlagged ? 'Remove star' : 'Star'} onClick={() => pickFor(allFlagged ? 'unflag' : 'flag', selectedItems)}>
+      <ToolButton label={allFlagged ? 'Remove star' : 'Star'} onClick={() => pickFor(allFlagged ? 'unflag' : 'flag', pickTargets(allFlagged ? 'unflag' : 'flag', chosenConversations))}>
         <Star className={cn('size-4.5', allFlagged && 'fill-amber-400 text-amber-500')} strokeWidth={1.75} />
       </ToolButton>
-      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), SELECTION_PICKS)} onPick={(pick) => pickFor(pick, selectedItems)} />
+      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), SELECTION_PICKS, chosenConversations.length === 1)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
     </ActionBar>
   );
 
@@ -709,13 +727,13 @@ export function Viewer() {
           <p>{messages.error instanceof Error ? messages.error.message : 'Mail couldn’t load this mailbox.'}</p>
           <button type="button" onClick={() => void messages.refetch()} className="mt-3 text-primary hover:underline">Try Again</button>
         </div>
-      ) : !items.length ? (
+      ) : !conversations.length ? (
         <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
           {sources.length === 0 && boxes.size < accounts.length ? <ListSkeleton /> : query ? 'No messages matched your search.' : effectiveFilter ? `No ${effectiveFilter === 'unread' ? 'unread' : 'starred'} messages.` : 'Nothing here.'}
         </div>
       ) : (
         <MessageList
-          items={items}
+          conversations={conversations}
           selected={chosen}
           cursor={cursor}
           recipients={recipients}
@@ -727,7 +745,7 @@ export function Viewer() {
           }}
           onClickRow={onClickRow}
           onKeyDown={onListKey}
-          onPick={(pick, item) => pickFor(pick, targetsFor(item))}
+          onPick={(pick, c) => pickFor(pick, pickTargets(pick, targetsFor(c)))}
           targetsFor={targetsFor}
           restoreScroll={() => {
             const top = restoreScroll.current;
@@ -793,11 +811,12 @@ export function Viewer() {
                 className="min-h-0 flex-1 overflow-y-auto outline-none"
               >
                 <Reader
-                  key={current.key}
-                  item={current}
+                  key={opened?.key}
+                  items={current.items}
                   me={me}
-                  menu={messageMenu([current], boxesOf(current.accountId), READER_PICKS)}
-                  onPick={(pick) => pickFor(pick, [current])}
+                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), READER_PICKS)}
+                  onPick={(pick, item) => pickFor(pick, [item])}
+                  onRead={(list) => void run('read', list)}
                   onMailto={openMailto}
                   onUnsubscribe={setLeaving}
                 />

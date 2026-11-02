@@ -170,6 +170,45 @@ export function useMessage(item: Item | null) {
   });
 }
 
+/** Look this far before a conversation's oldest message in the list for the rest of it. */
+const CONVERSATION_LOOKBACK_MS = 90 * 86_400_000;
+
+/**
+ * A conversation's every message, wherever it's filed (the inbox, Sent,
+ * Archive), oldest first; `known` are the ones the list has, shown until
+ * the rest arrive, and kept if the search misses them.
+ */
+export function useConversation(known: Item[] | null) {
+  const mail = useMail();
+  const first = known?.[0];
+  const ids = [...new Set((known ?? []).flatMap((i) => [i.messageId, i.inReplyTo, ...(i.references ?? [])]).filter((x): x is string => !!x))].slice(0, 30);
+  const threadId = known?.find((i) => i.threadId)?.threadId ?? null;
+  const since = known?.length ? Math.min(...known.map((i) => i.date)) - CONVERSATION_LOOKBACK_MS : undefined;
+  const query = useQuery({
+    queryKey: ['mail', 'conversation', first?.accountId, threadId ?? ids.join(' ')],
+    queryFn: async () => {
+      const found = await mail!.conversation(first!.accountId, { messageIds: ids, threadId, since });
+      return found.map((m): Item => ({ ...m.summary, accountId: first!.accountId, path: m.path, key: itemKey(first!.accountId, m.path, m.summary.uid) }));
+    },
+    enabled: !!mail && !!first && (ids.length > 0 || !!threadId),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const merged = (() => {
+    if (!known) return [];
+    // The list's own copies win: they're what its actions act on.
+    const out = [...known];
+    const have = new Set(known.flatMap((i) => [i.key, i.messageId ?? '']).filter(Boolean));
+    for (const i of query.data ?? []) {
+      if (have.has(i.key) || (i.messageId && have.has(i.messageId))) continue;
+      have.add(i.key);
+      out.push(i);
+    }
+    return out.sort((x, y) => x.date - y.date);
+  })();
+  return { items: merged, loading: query.isPending && query.fetchStatus !== 'idle' };
+}
+
 /** Change list items in every cached page (flags read or flagged, items gone). */
 export function patchItems(qc: QueryClient, keys: Set<string>, patch: Partial<MessageSummary> | null): void {
   qc.setQueriesData<InfiniteData<Page>>({ queryKey: ['mail', 'messages'] }, (data) => {
@@ -182,6 +221,9 @@ export function patchItems(qc: QueryClient, keys: Set<string>, patch: Partial<Me
       })),
     };
   });
+  qc.setQueriesData<Item[]>({ queryKey: ['mail', 'conversation'] }, (list) =>
+    list && (patch === null ? list.filter((i) => !keys.has(i.key)) : list.map((i) => (keys.has(i.key) ? { ...i, ...patch } : i))),
+  );
   if (patch) {
     for (const key of keys) {
       const [accountId, path, uid] = key.split('\u0000');

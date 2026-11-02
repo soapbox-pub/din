@@ -20,12 +20,13 @@ const separator: MenuEntry = { kind: 'separator' };
  * What can be done to these messages (the row right-clicked, or the
  * selection it's in), for the right-click menu and the ⋯ button alike.
  * `boxes` are their account's mailboxes; `skip` leaves out what's
- * already a button beside the menu.
+ * already a button beside the menu. `one` is whether they're one message
+ * or one conversation (newest first), which Reply and Forward answer.
  */
-export function messageMenu(targets: Item[], boxes: MailboxInfo[], skip: ReadonlySet<MenuPick> = new Set()): MenuEntry[] {
+export function messageMenu(targets: Item[], boxes: MailboxInfo[], skip: ReadonlySet<MenuPick> = new Set(), one = targets.length === 1): MenuEntry[] {
   if (!targets.length) return [];
   const first = targets[0];
-  const many = targets.length > 1;
+  const many = !one;
   const allRead = targets.every((t) => t.seen);
   const allStarred = targets.every((t) => t.flagged);
   const inJunk = boxes.find((b) => b.path === first.path)?.special === 'junk';

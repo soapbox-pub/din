@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState, type ComponentProps, type ReactNode } from 'react';
-import { ChevronDown, Download, FileArchive, FileImage, FileText, File as FileIcon, Forward, MailMinus, MoreVertical, Pencil, Reply, ReplyAll, ShieldCheck, Star } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { ChevronDown, Download, FileArchive, FileImage, FileText, File as FileIcon, Forward, MailMinus, Loader2, MoreVertical, Pencil, Reply, ReplyAll, ShieldCheck, Star } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import type { MailAddress, MailAttachmentInfo, MailMessage } from '@/lib/mail';
-import { useMail, useMessage, type Item } from './api';
-import { displayName, fileSize, formatAddress, fullDate, initials } from './format';
+import { useConversation, useMail, useMessage, type Item } from './api';
+import { displayName, fileSize, formatAddress, fullDate, initials, listDate } from './format';
 import { HtmlBody, TextBody } from './MessageBody';
 import { useOpenLink } from './links';
 import type { MenuEntry, MenuPick } from './menu';
@@ -179,7 +179,7 @@ function recipientLine(m: MailMessage, me: Set<string>): string {
   return names.length ? `to ${names.join(', ')}` : 'to undisclosed recipients';
 }
 
-function Header({ item, m, me, menu, onPick, onUnsubscribe }: { item: Item; m: MailMessage; me: Set<string>; menu: MenuEntry[]; onPick: (pick: MenuPick) => void; onUnsubscribe: () => void }) {
+function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item: Item; m: MailMessage; me: Set<string>; menu: MenuEntry[]; onPick: (pick: MenuPick) => void; onUnsubscribe: () => void; onCollapse?: () => void }) {
   const [details, setDetails] = useState(false);
   const sender = m.from[0];
   return (
@@ -187,13 +187,21 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe }: { item: Item; m: M
       <Avatar who={sender} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 truncate text-sm">
-            <span className="font-semibold">{displayName(sender) || 'Unknown Sender'}</span>
-            {sender?.name && sender.address && <span className="ml-1.5 text-xs text-muted-foreground select-text">&lt;{sender.address}&gt;</span>}
-          </div>
-          <time className="shrink-0 text-xs text-muted-foreground" dateTime={new Date(m.date).toISOString()}>
-            {fullDate(m.date)}
-          </time>
+          <button
+            type="button"
+            onClick={onCollapse}
+            disabled={!onCollapse}
+            aria-label={onCollapse ? `Collapse the message from ${displayName(sender) || 'Unknown Sender'}` : undefined}
+            className="flex min-w-0 flex-1 items-baseline gap-2 rounded text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-text"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-semibold">{displayName(sender) || 'Unknown Sender'}</span>
+              {sender?.name && sender.address && <span className="ml-1.5 text-xs text-muted-foreground select-text">&lt;{sender.address}&gt;</span>}
+            </span>
+            <time className="shrink-0 text-xs text-muted-foreground" dateTime={new Date(m.date).toISOString()}>
+              {fullDate(m.date)}
+            </time>
+          </button>
           <div className="flex shrink-0 items-center">
             <IconButton label={item.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(item.flagged ? 'unflag' : 'flag')}>
               <Star className={cn('size-4', item.flagged && 'fill-amber-400 text-amber-500')} strokeWidth={1.75} />
@@ -260,28 +268,145 @@ function AnswerButton({ onClick, icon: Icon, children }: { onClick: () => void; 
   );
 }
 
-export function Reader({
+/** A message of the conversation folded to one line: who, the start of it, when. */
+function Folded({ item, onOpen }: { item: Item; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full items-center gap-3 rounded-xl py-2 pr-2 text-left text-sm outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <Avatar who={item.from[0]} />
+      <span className={cn('w-40 shrink-0 truncate', !item.seen && 'font-semibold')}>{displayName(item.from[0]) || 'Unknown Sender'}</span>
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.draft ? 'Draft' : item.preview ?? ''}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{listDate(item.date)}</span>
+    </button>
+  );
+}
+
+/** One message of the conversation, open. */
+function Opened({
   item,
   me,
   menu,
+  remote: alwaysRemote,
   onPick,
   onMailto,
   onUnsubscribe,
+  onCollapse,
 }: {
   item: Item;
+  me: Set<string>;
+  menu: MenuEntry[];
+  remote: boolean;
+  onPick: (pick: MenuPick) => void;
+  onMailto: (url: string) => void;
+  onUnsubscribe: () => void;
+  onCollapse?: () => void;
+}) {
+  const query = useMessage(item);
+  const [loadRemote, setLoadRemote] = useState(false);
+  const [hasRemote, setHasRemote] = useState(false);
+  const openLink = useOpenLink(onMailto);
+  const m = query.data;
+  const remote = alwaysRemote || loadRemote;
+
+  if (query.isError) {
+    return (
+      <div className="rounded-xl border border-border/60 p-4 text-sm">
+        <p className="font-medium">This message couldn’t be opened.</p>
+        <p className="mt-1 text-muted-foreground">{query.error instanceof Error ? query.error.message : String(query.error)}</p>
+        <button type="button" onClick={() => void query.refetch()} className="mt-3 rounded-full bg-primary px-3 py-1.5 text-primary-foreground">
+          Try Again
+        </button>
+      </div>
+    );
+  }
+  if (!m) return <ReaderSkeleton />;
+  return (
+    <div className="py-2">
+      <Header item={item} m={m} me={me} menu={menu} onPick={onPick} onUnsubscribe={onUnsubscribe} onCollapse={onCollapse} />
+      <div className="mt-3 pl-13">
+        {item.draft && (
+          <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
+            <span className="flex-1 text-muted-foreground">This message is a draft.</span>
+            <button type="button" onClick={() => onPick('open-draft')} className="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+              <Pencil className="size-3.5" /> Edit
+            </button>
+          </div>
+        )}
+        {m.html && hasRemote && !remote && (
+          <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
+            <ShieldCheck className="size-4 shrink-0 text-primary" />
+            <span className="flex-1 text-muted-foreground">Remote content is hidden to keep the sender from seeing when you read this.</span>
+            <button type="button" onClick={() => setLoadRemote(true)} className="shrink-0 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+              Load Remote Content
+            </button>
+          </div>
+        )}
+        {m.html ? <HtmlBody html={m.html} allowRemote={remote} onRemote={setHasRemote} onLink={openLink} /> : <TextBody text={m.text} onLink={openLink} />}
+        <Attachments item={item} list={m.attachments} />
+      </div>
+    </div>
+  );
+}
+
+/** "Re: Re: Fwd: Lunch" as "Lunch", for the conversation's title. */
+function baseSubject(subject: string): string {
+  return subject.replace(/^(\s*(re|fwd?|aw|sv|vs)(\[\d+\])?\s*:\s*)+/i, '').trim() || subject;
+}
+
+/**
+ * A conversation, oldest first: the messages read before folded to a line,
+ * the newest and the unread open, and Reply, Reply All and Forward below
+ * for the newest.
+ */
+export function Reader({
+  items: known,
+  me,
+  menuFor,
+  onPick,
+  onRead,
+  onMailto,
+  onUnsubscribe,
+}: {
+  /** The conversation's messages the list has. */
+  items: Item[];
   /** The accounts' own addresses, lowercased, to call "me". */
   me: Set<string>;
-  /** Its ⋯ menu. */
-  menu: MenuEntry[];
-  onPick: (pick: MenuPick) => void;
+  /** A message's ⋯ menu. */
+  menuFor: (item: Item) => MenuEntry[];
+  onPick: (pick: MenuPick, item: Item) => void;
+  /** Mark these read: they're shown. */
+  onRead: (items: Item[]) => void;
   onMailto: (url: string) => void;
   onUnsubscribe: (item: Item) => void;
 }) {
-  const query = useMessage(item);
+  const { items, loading } = useConversation(known);
   const [alwaysRemote, setAlwaysRemote] = useState(() => localStorage.getItem(REMOTE_KEY) === 'always');
-  const [loadRemote, setLoadRemote] = useState<string | null>(null);
-  const [hasRemote, setHasRemote] = useState(false);
-  const openLink = useOpenLink(onMailto);
+  // Open from the start: what was unread when it was first shown (it's read now).
+  const [unread, setUnread] = useState<Set<string>>(() => new Set());
+  const [shown, setShown] = useState<Set<string>>(() => new Set());
+  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
+  const fresh = items.filter((i) => !shown.has(i.key));
+  if (fresh.length) {
+    setShown(new Set([...shown, ...fresh.map((i) => i.key)]));
+    const more = fresh.filter((i) => !i.seen);
+    if (more.length) setUnread(new Set([...unread, ...more.map((i) => i.key)]));
+  }
+
+  // Reading a conversation reads all of it.
+  const toRead = items.filter((i) => !i.seen && !i.draft);
+  const toReadKey = toRead.map((i) => i.key).join(' ');
+  const read = useRef(onRead);
+  useEffect(() => {
+    read.current = onRead;
+  });
+  useEffect(() => {
+    if (toRead.length) read.current(toRead);
+    // Once for each set of unread messages.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toReadKey]);
 
   useEffect(() => {
     const onStorage = () => setAlwaysRemote(localStorage.getItem(REMOTE_KEY) === 'always');
@@ -293,59 +418,52 @@ export function Reader({
     };
   }, []);
 
-  if (query.isError) {
-    return (
-      <div className="grid h-full place-items-center p-8 text-center">
-        <div className="max-w-sm">
-          <p className="font-medium">This message couldn’t be opened.</p>
-          <p className="mt-1 text-sm text-muted-foreground">{query.error instanceof Error ? query.error.message : String(query.error)}</p>
-          <button type="button" onClick={() => void query.refetch()} className="mt-4 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground">
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-  const m = query.data;
-  const remote = alwaysRemote || loadRemote === item.key;
+  const toggle = (key: string) =>
+    setToggled((t) => {
+      const n = new Set(t);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+
+  const last = items.at(-1);
+  const answer = [...items].reverse().find((i) => !i.draft) ?? last;
+  const subject = baseSubject(items[0]?.subject || known[0]?.subject || '') || 'No Subject';
 
   return (
-    <article className="mx-auto max-w-5xl px-6 pt-4 pb-10" aria-label={item.subject || 'Message'}>
-      <h1 className="mb-5 pl-13 text-[22px] leading-snug font-normal select-text">{item.subject || 'No Subject'}</h1>
-      {!m ? (
-        <ReaderSkeleton />
-      ) : (
-        <>
-          <Header item={item} m={m} me={me} menu={menu} onPick={onPick} onUnsubscribe={() => onUnsubscribe(item)} />
-          <div className="mt-3 pl-13">
-            {item.draft && (
-              <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
-                <span className="flex-1 text-muted-foreground">This message is a draft.</span>
-                <button type="button" onClick={() => onPick('open-draft')} className="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
-                  <Pencil className="size-3.5" /> Edit
-                </button>
-              </div>
-            )}
-            {m.html && hasRemote && !remote && (
-              <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
-                <ShieldCheck className="size-4 shrink-0 text-primary" />
-                <span className="flex-1 text-muted-foreground">Remote content is hidden to keep the sender from seeing when you read this.</span>
-                <button type="button" onClick={() => setLoadRemote(item.key)} className="shrink-0 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
-                  Load Remote Content
-                </button>
-              </div>
-            )}
-            {m.html ? <HtmlBody html={m.html} allowRemote={remote} onRemote={setHasRemote} onLink={openLink} /> : <TextBody text={m.text} onLink={openLink} />}
-            <Attachments item={item} list={m.attachments} />
-            {!item.draft && (
-              <div className="mt-8 flex flex-wrap gap-3">
-                <AnswerButton icon={Reply} onClick={() => onPick('reply')}>Reply</AnswerButton>
-                <AnswerButton icon={ReplyAll} onClick={() => onPick('reply-all')}>Reply all</AnswerButton>
-                <AnswerButton icon={Forward} onClick={() => onPick('forward')}>Forward</AnswerButton>
-              </div>
-            )}
-          </div>
-        </>
+    <article className="mx-auto max-w-5xl px-6 pt-4 pb-10" aria-label={subject}>
+      <h1 className="mb-4 flex items-baseline gap-3 pl-13 text-[22px] leading-snug font-normal">
+        <span className="select-text">{subject}</span>
+        {items.length > 1 && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
+        {loading && <Loader2 aria-label="Finding the rest of the conversation" className="size-4 shrink-0 animate-spin self-center text-muted-foreground motion-reduce:animate-none" />}
+      </h1>
+      <div className="divide-y divide-border/60">
+        {items.map((item) => {
+          const isLast = item.key === last?.key;
+          const open = (isLast || unread.has(item.key)) !== toggled.has(item.key);
+          return open ? (
+            <Opened
+              key={item.key}
+              item={item}
+              me={me}
+              menu={menuFor(item)}
+              remote={alwaysRemote}
+              onPick={(pick) => onPick(pick, item)}
+              onMailto={onMailto}
+              onUnsubscribe={() => onUnsubscribe(item)}
+              onCollapse={items.length > 1 ? () => toggle(item.key) : undefined}
+            />
+          ) : (
+            <Folded key={item.key} item={item} onOpen={() => toggle(item.key)} />
+          );
+        })}
+      </div>
+      {answer && !answer.draft && (
+        <div className="mt-6 flex flex-wrap gap-3 pl-13">
+          <AnswerButton icon={Reply} onClick={() => onPick('reply', answer)}>Reply</AnswerButton>
+          <AnswerButton icon={ReplyAll} onClick={() => onPick('reply-all', answer)}>Reply all</AnswerButton>
+          <AnswerButton icon={Forward} onClick={() => onPick('forward', answer)}>Forward</AnswerButton>
+        </div>
       )}
     </article>
   );
