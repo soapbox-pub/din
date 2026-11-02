@@ -27,7 +27,7 @@ din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 | `tokens` | Every design token, without the `--` |
 | `fonts` | `{ sans, mono }` font stacks |
 | `zoom` | The interface zoom. The desktop already scales the webview; canvas apps use it for crisp pixels |
-| `reducedMotion` | The system prefers reduced motion, or Settings → Accessibility asks for it. `prefers-reduced-motion` only knows the first; check `prefersReducedMotion()` (`src/shared/reducedMotion.ts`) or `motion-safe:` / `motion-reduce:`, which follow both |
+| `reducedMotion` | The system prefers reduced motion, or Settings → Accessibility asks for it. In Electron `prefers-reduced-motion` says the same; framed in a browser it knows only the first, so check `prefersReducedMotion()` (`src/shared/reducedMotion.ts`) or `motion-safe:` / `motion-reduce:`, which follow both |
 | `reducedTransparency` | Settings → Accessibility → Reduce transparency: draw solid surfaces instead of frosted glass |
 | `increasedContrast` | Settings → Accessibility → Increase contrast. The tokens already carry the stronger borders and text |
 | `icons` | The icon theme's file-type icons by name, or `{}` |
@@ -37,6 +37,12 @@ Settings → Accessibility's preferences also mark the app's `:root`
 and its Text size reaches the app as `--din-text-scale`, which Tailwind's
 `text-xs` to `text-2xl` are multiplied by. Size text with those classes and
 it grows with the setting.
+
+In Electron they're the web's media features as well, for every app and
+web page, in stylesheets and `matchMedia` alike: Reduce motion is
+`prefers-reduced-motion: reduce`, Reduce transparency (or Increase
+contrast) `prefers-reduced-transparency: reduce`, and Increase contrast
+`prefers-contrast: more` (`electron/accessibility.mts`).
 
 A profile theme (the signed-in user's colors) arrives as tokens like any
 other; apps don't need to know.

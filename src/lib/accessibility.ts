@@ -4,8 +4,9 @@ import { REDUCE_MOTION_ATTRIBUTE } from '@/shared/reducedMotion';
  * Settings → Accessibility, applied. Each preference marks the desktop's
  * root, where src/index.css acts on it; the theme Din sends its apps carries
  * them (src/components/desktop/dinHost/theme.ts), so each app's root gets the
- * same marks. On DinOS, Linux apps hear of them too, through GSettings
- * (electron/accessibility.mts).
+ * same marks. Web pages and apps also see them as the standard media
+ * features (prefers-reduced-motion…), and on DinOS, Linux apps hear of them
+ * through GSettings (electron/accessibility.mts).
  */
 
 export interface AccessibilityPreferences {
@@ -30,8 +31,13 @@ export function clampTextSize(percent: number): number {
 }
 
 export interface AccessibilityBridge {
-  /** Pass the preferences on to Linux apps (GSettings); a no-op where Din isn't the desktop. */
-  set(preferences: { reduceMotion: boolean; highContrast: boolean }): Promise<void>;
+  /**
+   * Pass the preferences on: to every web page and app as the CSS media
+   * features `prefers-reduced-motion`, `prefers-reduced-transparency` and
+   * `prefers-contrast`, and to Linux apps through GSettings (only where Din
+   * is the desktop).
+   */
+  set(preferences: { reduceMotion: boolean; reduceTransparency: boolean; highContrast: boolean }): Promise<void>;
 }
 
 declare global {

@@ -85,14 +85,14 @@ function useApplyZoom(zoomLevel: number) {
   }, [zoomLevel]);
 }
 
-/** Apply Settings → Accessibility to the document root, and pass it on to Linux apps. */
+/** Apply Settings → Accessibility to the document root, and pass it on to guests and Linux apps. */
 function useApplyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize }: AppConfig) {
   useEffect(() => {
     applyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize });
   }, [reduceMotion, reduceTransparency, increaseContrast, textSize]);
   useEffect(() => {
-    void getAccessibilityBridge()?.set({ reduceMotion, highContrast: increaseContrast }).catch(() => {});
-  }, [reduceMotion, increaseContrast]);
+    void getAccessibilityBridge()?.set({ reduceMotion, reduceTransparency, highContrast: increaseContrast }).catch(() => {});
+  }, [reduceMotion, reduceTransparency, increaseContrast]);
 }
 
 /** Apply the Light/Dark/System setting to the document root (src/lib/rootScheme.ts). */

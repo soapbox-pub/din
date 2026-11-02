@@ -95,6 +95,7 @@ import {
 } from './site-locations.mts';
 import { registerCursorHandlers } from './cursor.mts';
 import { registerAccessibilityHandlers } from './accessibility.mts';
+import { holdDebugger, releaseDebugger } from './guest-debugger.mts';
 import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
 import { registerMailHandlers } from './mail.mts';
@@ -1471,8 +1472,6 @@ function registerGuestVisibilityHandlers(): void {
 
 /** A drag being replayed into a guest. */
 interface GuestDrag {
-  /** Whether the debugger was attached for the drag (and so is detached after). */
-  ownsDebugger: boolean;
   /** Commands go out in order, each after the last has been answered. */
   queue: Promise<unknown>;
 }
@@ -1494,13 +1493,8 @@ function registerGuestFileDropHandlers(): void {
     let drag = guestDrags.get(guest.id);
     if (!drag) {
       if (type !== 'over' || paths.length === 0) return;
-      const ownsDebugger = !guest.debugger.isAttached();
-      try {
-        if (ownsDebugger) guest.debugger.attach('1.3');
-      } catch {
-        return;
-      }
-      drag = { ownsDebugger, queue: Promise.resolve() };
+      if (!holdDebugger(guest, 'file-drop')) return;
+      drag = { queue: Promise.resolve() };
       guestDrags.set(guest.id, drag);
       dispatchGuestDrag(guest, drag, 'dragEnter', x, y, paths);
     }
@@ -1510,15 +1504,7 @@ function registerGuestFileDropHandlers(): void {
     }
     dispatchGuestDrag(guest, drag, type === 'drop' ? 'drop' : 'dragCancel', x, y, paths);
     guestDrags.delete(guest.id);
-    const { ownsDebugger } = drag;
-    void drag.queue.then(() => {
-      if (!ownsDebugger || guest.isDestroyed()) return;
-      try {
-        if (guest.debugger.isAttached()) guest.debugger.detach();
-      } catch {
-        // Gone already.
-      }
-    });
+    void drag.queue.then(() => releaseDebugger(guest, 'file-drop'));
   });
 }
 

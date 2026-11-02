@@ -35,6 +35,7 @@ import crypto from 'node:crypto';
 import type net from 'node:net';
 import type { Duplex } from 'node:stream';
 import { webContents } from 'electron';
+import { holdDebugger, releaseDebugger } from './guest-debugger.mts';
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const DEVTOOLS_ORIGIN = 'devtools://devtools';
@@ -188,18 +189,17 @@ export class DevtoolsBridge {
   _sessions: Map<string, BridgeSession>;
 
   /**
-   * Device-emulation attachments, keyed by target WebContents id. Device
-   * emulation is independent of devtools sessions (the responsive/device
-   * view works with the pane closed), so it keeps its own debugger
-   * attachment when no devtools session already holds one.
+   * Targets under device emulation. Device emulation is independent of
+   * devtools sessions (the responsive/device view works with the pane
+   * closed), so it holds the debugger itself (guest-debugger.mts).
    */
-  _emulations: Map<number, { ownsDebugger: boolean }>;
+  _emulations: Set<number>;
 
   constructor({ onSessionEnded }: { onSessionEnded?: (targetId: number) => void } = {}) {
     this._onSessionEnded = onSessionEnded;
     this._listening = null;
     this._sessions = new Map();
-    this._emulations = new Map();
+    this._emulations = new Set();
   }
 
   /** Lazily start the loopback server; resolves to its ephemeral port. */
@@ -280,8 +280,8 @@ export class DevtoolsBridge {
   /**
    * Apply or clear device-metrics + user-agent emulation on a tab (the
    * responsive/device view). `metrics` null clears all overrides. Works
-   * whether or not the tab's devtools pane is open: it reuses an existing
-   * debugger attachment (from a devtools session) or makes its own.
+   * whether or not the tab's devtools pane is open: it holds the tab's
+   * debugger alongside whoever else does.
    */
   async emulate(targetId: number, metrics: EmulationMetrics | null): Promise<void> {
     const target = webContents.fromId(targetId);
@@ -289,8 +289,7 @@ export class DevtoolsBridge {
     const dbg = target.debugger;
 
     if (metrics === null) {
-      // Clear overrides, then release any debugger attachment we own.
-      const emulation = this._emulations.get(targetId);
+      // Clear overrides, then let go of the debugger.
       try {
         if (dbg.isAttached()) {
           await dbg.sendCommand('Emulation.clearDeviceMetricsOverride');
@@ -300,32 +299,12 @@ export class DevtoolsBridge {
       } catch {
         // Target navigated/died mid-clear; nothing more to do.
       }
-      if (emulation) {
-        this._emulations.delete(targetId);
-        // Only detach if a devtools session isn't also using the debugger.
-        if (emulation.ownsDebugger && !this._sessionForTarget(targetId)) {
-          try {
-            if (dbg.isAttached()) dbg.detach();
-          } catch {
-            // best effort
-          }
-        }
-      }
+      if (this._emulations.delete(targetId)) releaseDebugger(target, 'device-emulation');
       return;
     }
 
-    // Ensure a debugger attachment. If a devtools session already holds one,
-    // piggyback on it; otherwise attach and remember that we own it.
-    let ownsDebugger = this._emulations.get(targetId)?.ownsDebugger ?? false;
-    try {
-      if (!dbg.isAttached()) {
-        dbg.attach('1.3');
-        ownsDebugger = true;
-      }
-    } catch {
-      return;
-    }
-    this._emulations.set(targetId, { ownsDebugger });
+    if (!holdDebugger(target, 'device-emulation', () => void this.emulate(targetId, metrics))) return;
+    this._emulations.add(targetId);
 
     const {
       width,
@@ -377,18 +356,8 @@ export class DevtoolsBridge {
     session.dispose?.();
     session.closeSocket?.();
     const target = webContents.fromId(session.targetId);
-    if (target && !target.isDestroyed()) {
-      // Keep the debugger attached if device emulation is still using it;
-      // detaching would drop the active metrics/user-agent overrides.
-      const emulated = this._emulations.has(session.targetId);
-      if (!emulated) {
-        try {
-          if (target.debugger.isAttached()) target.debugger.detach();
-        } catch {
-          // best effort
-        }
-      }
-    }
+    // Afresh for whoever else holds it, without the domains the frontend enabled.
+    if (target && !target.isDestroyed()) releaseDebugger(target, 'devtools', { reset: true });
     if (notify) this._onSessionEnded?.(session.targetId);
   }
 
@@ -437,9 +406,7 @@ export class DevtoolsBridge {
     }
 
     const dbg = target.debugger;
-    try {
-      if (!dbg.isAttached()) dbg.attach('1.3');
-    } catch {
+    if (!holdDebugger(target, 'devtools')) {
       socket.destroy();
       return;
     }

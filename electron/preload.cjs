@@ -991,11 +991,12 @@ expose('datetime', {
 });
 
 // Accessibility bridge (window.dinos.accessibility), backed by
-// electron/accessibility.mts: Reduce motion and Increase contrast, for the
+// electron/accessibility.mts: Reduce motion, Reduce transparency and
+// Increase contrast, for web pages and apps (as CSS media features) and the
 // Linux apps Din runs (GSettings, on DinOS).
 expose('accessibility', {
   /**
-   * @param {{ reduceMotion: boolean, highContrast: boolean }} preferences
+   * @param {{ reduceMotion: boolean, reduceTransparency: boolean, highContrast: boolean }} preferences
    */
   set: (preferences) => ipcRenderer.invoke('accessibility:set', preferences),
 });
