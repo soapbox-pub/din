@@ -8,8 +8,11 @@
 //! energy, which drains away steadily, so a stroke or two in passing never
 //! adds up, while shaking keeps it topped up the higher the quicker the
 //! strokes come. Past a couple of strokes' worth, how far past sets how big
-//! the pointer is to be; the size drawn follows that on a critically damped
-//! spring, so it neither pops nor stops dead.
+//! the pointer is to be. That's held while the strokes keep coming, sagging
+//! only slowly if the shaking eases, so the pointer doesn't throb with each
+//! stroke, and let go of once they stop, so it shrinks back in one go. The
+//! size drawn follows it on a critically damped spring, so it neither pops
+//! nor stops dead.
 
 use std::time::Duration;
 
@@ -28,8 +31,12 @@ const MIN_STROKE: f64 = 40.0;
 /// How far the pointer must come back before it has turned, not just wavered.
 const TURN: f64 = 12.0;
 /// The spring's stiffness, as an angular frequency: growing, and shrinking back.
-const GROW: f64 = 24.0;
-const SHRINK: f64 = 13.0;
+const GROW: f64 = 22.0;
+const SHRINK: f64 = 16.0;
+/// How long after the last stroke the shake still holds the pointer big.
+const HOLD: Duration = Duration::from_millis(350);
+/// How fast a held size sags while the shaking eases, in times its size a second.
+const SAG: f64 = 2.5;
 
 #[derive(Default)]
 pub struct Shake {
@@ -41,6 +48,9 @@ pub struct Shake {
     back: (f64, f64),
     energy: f64,
     energy_at: Option<Duration>,
+    /// When the last stroke counted, and how big it's held to be meanwhile, past 1.
+    stroked_at: Option<Duration>,
+    held: f64,
     /// How big it's drawn, past 1, and how fast that's changing.
     scale: f64,
     velocity: f64,
@@ -72,6 +82,7 @@ impl Shake {
                 if sx.hypot(sy) >= MIN_STROKE {
                     let before = self.wanted();
                     self.energy += 1.0;
+                    self.stroked_at = Some(now);
                     if before == 0.0 && self.wanted() > 0.0 {
                         debug!("shake: the pointer grows");
                     }
@@ -102,7 +113,9 @@ impl Shake {
         let dt = self.last_step.map_or(0.0, |last| now.saturating_sub(last).as_secs_f64().min(0.05));
         self.last_step = Some(now);
         self.drain(now);
-        let target = self.wanted();
+        let shaking = self.stroked_at.is_some_and(|at| now.saturating_sub(at) < HOLD);
+        self.held = if shaking { self.wanted().max(self.held - SAG * dt) } else { 0.0 };
+        let target = self.held;
         // In small steps, so a slow frame doesn't throw the spring.
         let mut left = dt;
         while left > 0.0 {

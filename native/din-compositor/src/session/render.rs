@@ -72,7 +72,9 @@ pub fn elements(
         let big = scene.magnify > 1.001 && !matches!(scene.cursor_status, CursorImageStatus::Hidden);
         match scene.cursor_status {
             _ if big => {
-                let px = scene.cursors.size as f64 * scale * scene.magnify;
+                // From the size the arrow's drawn at anyway, which with a theme
+                // of few sizes can be well off the size asked for.
+                let px = scene.cursors.arrow_size(scale) * scene.magnify;
                 if let Some(image) = scene.cursors.arrow(px) {
                     // Physical pixels to each of the image's.
                     let k = px / image.nominal.max(1) as f64;

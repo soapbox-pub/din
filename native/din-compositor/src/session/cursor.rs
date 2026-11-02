@@ -88,6 +88,22 @@ impl Cursors {
     /// The arrow for drawing PX pixels big: the theme's smallest image at
     /// least that big, so it's only ever drawn smaller, or else its biggest.
     pub fn arrow(&mut self, px: f64) -> Option<Image> {
+        let arrows = self.arrows();
+        arrows.iter().find(|i| i.nominal as f64 >= px).or(arrows.last()).cloned()
+    }
+
+    /// The size the arrow's drawn at normally on an output at SCALE: the
+    /// theme's nearest to the size asked for, as clients and get() choose.
+    pub fn arrow_size(&mut self, scale: f64) -> f64 {
+        let px = self.size as f64 * scale;
+        self.arrows()
+            .iter()
+            .map(|i| i.nominal as f64)
+            .min_by(|a, b| (a - px).abs().total_cmp(&(b - px).abs()))
+            .unwrap_or(px)
+    }
+
+    fn arrows(&mut self) -> &[Image] {
         if self.arrows.is_none() {
             let arrows = std::iter::once(CursorIcon::Default.name())
                 .chain(CursorIcon::Default.alt_names().iter().copied())
@@ -95,8 +111,7 @@ impl Cursors {
                 .unwrap_or_default();
             self.arrows = Some(arrows);
         }
-        let arrows = self.arrows.as_ref()?;
-        arrows.iter().find(|i| i.nominal as f64 >= px).or(arrows.last()).cloned()
+        self.arrows.as_deref().unwrap_or_default()
     }
 
     fn load_image(&self, name: &str, px: u32) -> Option<Image> {
