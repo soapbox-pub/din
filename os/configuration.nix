@@ -969,7 +969,8 @@ in
   # computer's own Wi-Fi connection: NixOS's wpa_supplicant rule in
   # 99-local.rules does that for any Wi-Fi interface, and NetworkManager,
   # which tells wpa_supplicant about interfaces itself, doesn't need it. Its
-  # `:=` makes the empty list final, so the later rule can't add to it.
+  # `:=` makes the list just `true`, finally, so the later rule can't add to
+  # it.
   services.udev.packages = [
     pkgs.brightnessctl
     pkgs.libmtp
@@ -977,7 +978,7 @@ in
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
     '')
     (pkgs.writeTextDir "lib/udev/rules.d/98-din-hotspot.rules" ''
-      ACTION=="add|remove", SUBSYSTEM=="net", KERNEL=="dinqs0", RUN:=""
+      ACTION=="add|remove", SUBSYSTEM=="net", KERNEL=="dinqs0", RUN:="${pkgs.coreutils}/bin/true"
     '')
   ];
 
