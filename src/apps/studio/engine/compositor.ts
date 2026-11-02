@@ -9,9 +9,14 @@ import { CANVAS, frameFor, type Frame, type Layout, type Size } from './layout';
  * Frames are read from the tracks themselves (MediaStreamTrackProcessor),
  * not from <video> elements, and the clock is a worker's: both keep going
  * while the window is minimized, which it is while the screen is recorded.
+ * A tick with nothing new draws nothing.
  */
 
 const FPS = 30;
+/** How often the haze behind the screen catches up with it. */
+const HAZE_MS = 250;
+/** The longest a still picture goes without a frame, so what records or streams it keeps a steady pulse. */
+const IDLE_MS = 1000;
 
 /** Chromium has it on windows too; TypeScript's DOM types have it only in workers. */
 type TrackProcessor = new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> };
@@ -82,6 +87,11 @@ export class Compositor {
   private camera: FrameSource | null = null;
   private stopTicker: (() => void) | null = null;
   private listeners = new Set<() => void>();
+  /** Something other than a frame changed since the last draw. */
+  private dirty = true;
+  private drawn: { screen: VideoFrame | null; camera: VideoFrame | null } = { screen: null, camera: null };
+  private hazedAt = 0;
+  private drawnAt = 0;
   layout: Layout;
   mirror = false;
   /** The part of a screen capture that's the display being recorded, as fractions of it. */
@@ -103,7 +113,7 @@ export class Compositor {
   }
 
   start(): void {
-    this.stopTicker ??= ticker(FPS, () => this.draw());
+    this.stopTicker ??= ticker(FPS, () => this.tick());
   }
 
   /** Show the picture in an element; returns how to take it out again. */
@@ -117,14 +127,18 @@ export class Compositor {
 
   setMirror(mirror: boolean): void {
     this.mirror = mirror;
+    this.dirty = true;
   }
 
   setScreenCrop(crop: CaptureRect): void {
     this.screenCrop = crop;
+    this.dirty = true;
   }
 
   setPointer(pointer: { x: number; y: number } | null): void {
+    if (pointer?.x === this.pointer?.x && pointer?.y === this.pointer?.y) return;
     this.pointer = pointer;
+    this.dirty = true;
   }
 
   dispose(): void {
@@ -138,6 +152,7 @@ export class Compositor {
   setLayout(layout: Layout): void {
     const reshape = layout.aspect !== this.layout.aspect;
     this.layout = layout;
+    this.dirty = true;
     if (reshape) this.resize();
   }
 
@@ -145,12 +160,14 @@ export class Compositor {
     if (this.screen?.track === track) return;
     this.screen?.stop();
     this.screen = track?.readyState === 'live' ? new FrameSource(track) : null;
+    this.dirty = true;
   }
 
   setCamera(track: MediaStreamTrack | null): void {
     if (this.camera?.track === track) return;
     this.camera?.stop();
     this.camera = track?.readyState === 'live' ? new FrameSource(track) : null;
+    this.dirty = true;
   }
 
   get hasScreen(): boolean {
@@ -161,8 +178,8 @@ export class Compositor {
     return this.camera !== null;
   }
 
-  /** Called after every frame drawn (the stage follows the camera's place). */
-  onDraw(listener: () => void): () => void {
+  /** Called on every tick of the clock, drawn or not. */
+  onTick(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -181,6 +198,7 @@ export class Compositor {
     const { width, height } = CANVAS[this.layout.aspect];
     this.canvas.width = width;
     this.canvas.height = height;
+    this.dirty = true;
   }
 
   /** The screen's size once cropped to the display. */
@@ -190,10 +208,21 @@ export class Compositor {
     return { width: Math.round(size.width * this.screenCrop.width), height: Math.round(size.height * this.screenCrop.height) };
   }
 
-  private draw(): void {
-    const { ctx, canvas } = this;
+  private tick(): void {
     const screenFrame = this.screen?.latest ?? null;
     const cameraFrame = this.camera?.latest ?? null;
+    const now = performance.now();
+    if (this.dirty || screenFrame !== this.drawn.screen || cameraFrame !== this.drawn.camera || now - this.drawnAt >= IDLE_MS) {
+      this.dirty = false;
+      this.drawnAt = now;
+      this.drawn = { screen: screenFrame, camera: cameraFrame };
+      this.draw(screenFrame, cameraFrame);
+    }
+    for (const listener of this.listeners) listener();
+  }
+
+  private draw(screenFrame: VideoFrame | null, cameraFrame: VideoFrame | null): void {
+    const { ctx, canvas } = this;
     const frame = frameFor(this.layout, screenFrame ? this.screenSize() : null, cameraFrame !== null);
     this.frame = frame;
 
@@ -211,8 +240,13 @@ export class Compositor {
       const area = frame.screenArea;
       const fills = Math.abs(frame.screen.width - area.width) < 2 && Math.abs(frame.screen.height - area.height) < 2;
       if (!fills) {
-        // Blurred and dimmed, by drawing it tiny and stretching it back.
-        this.hazeCtx.drawImage(screenFrame, crop.x, crop.y, crop.width, crop.height, 0, 0, this.haze.width, this.haze.height);
+        // Blurred and dimmed, by drawing it tiny and stretching it back. Being a blur, a few
+        // times a second is enough, which spares reading the whole frame back every tick.
+        const now = performance.now();
+        if (now - this.hazedAt >= HAZE_MS) {
+          this.hazedAt = now;
+          this.hazeCtx.drawImage(screenFrame, crop.x, crop.y, crop.width, crop.height, 0, 0, this.haze.width, this.haze.height);
+        }
         ctx.save();
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(this.haze, area.x, area.y, area.width, area.height);
@@ -225,8 +259,6 @@ export class Compositor {
     }
 
     if (cameraFrame && frame.camera) this.drawCamera(cameraFrame, frame.camera, frame.cameraClip);
-
-    for (const listener of this.listeners) listener();
   }
 
   private drawCamera(source: VideoFrame, rect: CaptureRect, clip: Frame['cameraClip']): void {

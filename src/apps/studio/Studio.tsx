@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { cleanCaptureError, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
+import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
 import type { LaunchContext } from '@/sdk';
 import { useDin, useMenuBar, useWindowState, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -176,9 +176,13 @@ export function Studio() {
       }),
     'microphone',
   );
+  // The capture is of Din's whole frame, of which the picture shows the display: asked for at the
+  // size that puts the display at the picture's own (1920 at most), not more. Every pixel of it is
+  // read back from the GPU and drawn again each frame, and main records the screen itself.
+  const shot = status && captureSize(status.screenRect);
   const scr = useCapture(
-    screenOn ? 'screen' : null,
-    () => navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false }),
+    screenOn && shot ? `screen:${shot.width}x${shot.height}` : null,
+    () => navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, width: { max: shot!.width }, height: { max: shot!.height } }, audio: false }),
     'screen',
   );
   // The computer's sound, where it's offered as an input, goes into the picture's sound too.
@@ -224,7 +228,7 @@ export function Studio() {
       return;
     }
     let pending = false;
-    return compositor.onDraw(() => {
+    return compositor.onTick(() => {
       if (pending) return;
       pending = true;
       capture.pointer().then(
@@ -580,7 +584,6 @@ export function Studio() {
   return (
     <div className="@container/studio flex h-full flex-col bg-background text-foreground">
       <WindowDragRegion className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <WindowControls />
         <div className="flex items-center gap-2 pl-1 text-sm font-semibold">
           <Clapperboard className="size-4 text-muted-foreground" aria-hidden />
           <span className="hidden @2xl/studio:inline">Studio</span>
@@ -603,6 +606,7 @@ export function Studio() {
           >
             <PanelRight className="size-4" />
           </button>
+          <WindowControls className="ml-2" />
         </div>
       </WindowDragRegion>
 
@@ -722,6 +726,15 @@ export function Studio() {
       </AlertDialog>
     </div>
   );
+}
+
+/** The most a capture of Din's frame needs to be for the display in it to fill the picture. */
+function captureSize(display: CaptureRect): { width: number; height: number } {
+  const longest = Math.max(...Object.values(CANVAS).map((c) => Math.max(c.width, c.height)));
+  return {
+    width: Math.min(7680, Math.round(longest / Math.max(display.width, 0.01))),
+    height: Math.min(7680, Math.round(longest / Math.max(display.height, 0.01))),
+  };
 }
 
 function StageMessage({ title, body }: { title: string; body: string }) {
