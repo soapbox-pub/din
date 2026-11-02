@@ -32,13 +32,16 @@ const PROFILE_REACT = PROFILE_BUILD && process.env.VITE_PROFILE_REACT === "1";
  * and from <id>.localhost here in a plain browser, so the HMR client is
  * pointed at localhost, and their CSP (and the desktop's, for framing them
  * outside Electron) lets it through. Each app page's first script is
- * src/sdk/frame.ts, window.din where no preload provides it.
+ * src/sdk/frame.ts, window.din where no preload provides it. An app's
+ * service worker, src/apps/<id>/sw.ts, is built to src/apps/<id>/sw.js, its
+ * din://<id>/sw.js (registered as a module: docs/din/background.md).
  */
 function dinApps(): Plugin {
   const appsDir = path.resolve(__dirname, "src/apps");
   const pages = fs.existsSync(appsDir)
     ? fs.readdirSync(appsDir).filter((id) => fs.existsSync(path.join(appsDir, id, "index.html")))
     : [];
+  const workers = pages.filter((id) => fs.existsSync(path.join(appsDir, id, "sw.ts")));
   return {
     name: "din-apps",
     config: () => ({
@@ -47,6 +50,11 @@ function dinApps(): Plugin {
           input: {
             main: path.resolve(__dirname, "index.html"),
             ...Object.fromEntries(pages.map((id) => [`app-${id}`, path.join(appsDir, id, "index.html")])),
+            ...Object.fromEntries(workers.map((id) => [`appsw-${id}`, path.join(appsDir, id, "sw.ts")])),
+          },
+          output: {
+            entryFileNames: (chunk: { name: string }) =>
+              chunk.name.startsWith("appsw-") ? `src/apps/${chunk.name.slice("appsw-".length)}/sw.js` : "assets/[name]-[hash].js",
           },
         },
       },

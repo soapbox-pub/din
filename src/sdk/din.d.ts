@@ -721,6 +721,12 @@ export type Permission =
   | 'pty'
   /** Notifications kept in the notification center, and a Dock badge. Toasts need nothing. */
   | 'notifications'
+  /**
+   * Work while no window is open: `registration.periodicSync` wakes the app's
+   * service worker on a schedule (every 15 minutes at most), which with
+   * `notifications` may also notify. docs/din/background.md.
+   */
+  | 'background'
   /** Set the desktop wallpaper (`din.desktop`). */
   | 'wallpaper'
   /** Install cursor themes and change the pointer (`din.desktop.setCursor`). */

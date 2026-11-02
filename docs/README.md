@@ -60,6 +60,7 @@ So Din is splitting into three layers, each trusting only the one below it:
 | [din/theme-and-account.md](din/theme-and-account.md) | Theme tokens, the signed-in user, `window.nostr`, notifications |
 | [din/media-and-desktop.md](din/media-and-desktop.md) | What's playing and the media keys, the wallpaper, dictation |
 | [din/permissions.md](din/permissions.md) | What each permission grants, and `din.system` |
+| [din/background.md](din/background.md) | Service workers, and `registration.periodicSync` for apps, nsites and web apps |
 | [guest-surfaces.md](guest-surfaces.md) | The `GuestSurface` abstraction over `<webview>` |
 | [building-an-app.md](building-an-app.md) | A built-in app from scratch |
 | [migrating-builtin-apps.md](migrating-builtin-apps.md) | Old desktop hooks and their `window.din` replacements, app by app |

@@ -68,7 +68,7 @@ down (`din power restart|off`), restarting Din (`din update restart`),
 installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
-(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`) and forgetting a phone with its messages (`din phone forget`) put the question on
+(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), removing an app's background schedule (`din background remove`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings.

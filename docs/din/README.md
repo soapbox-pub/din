@@ -44,6 +44,7 @@ din.app.ready();
 | `din.theme`, `din.account`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `window.print()`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.permissions`, `din.system` | [permissions.md](permissions.md) |
+| Service workers, `registration.periodicSync` | [background.md](background.md) |
 | The manifest | [manifest.md](manifest.md) |
 
 ## The runtime, and the SDK

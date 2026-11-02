@@ -28,7 +28,8 @@ When nsites get `window.din`, the user approves the list at install.
 | `nostr` | `window.nostr`, signing as the signed-in user. Implies `account` | App Store |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
-| `notifications` | `new Notification()` and `navigator.setAppBadge()` | Assistant, Terminal |
+| `notifications` | `new Notification()` and `navigator.setAppBadge()`; with `background`, `registration.showNotification()` from the app's service worker | Assistant, Terminal |
+| `background` | `registration.periodicSync`: the app's service worker woken on a schedule while no window is open, at most every 15 minutes ([background.md](background.md)). Listed in Settings → Background Activity, where the user can pause or remove it | — |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service. Only the Assistant reaches all of it; any other app talks only to conversations it started, in `~/.cache/din/<id>-assistant/`, hears only their events, and can't answer sudo | Assistant, CAD |

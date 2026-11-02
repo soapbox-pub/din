@@ -11,12 +11,17 @@
 //   - registration.showNotification / getNotifications, into Din's
 //     notification center (Electron shows none from a registration)
 //   - registration.unregister, which ends the registration's subscription
+//     and schedule
+//   - registration.periodicSync: register (from an installed web app's
+//     window, or again from the worker), unregister, getTags
 //   - navigator.setAppBadge / clearAppBadge, for the Dock tile of the site's
 //     installed web app (top documents only, in a frame)
+// In a top document: navigator.permissions.query for
+// 'periodic-background-sync'.
 // In the service worker:
 //   - clients.openWindow / WindowClient.focus, through the shell
-//   - the push, pushsubscriptionchange, notificationclick and
-//     notificationclose events web-push.mts raises, with waitUntil() waited
+//   - the push, pushsubscriptionchange, notificationclick, notificationclose
+//     and periodicsync events web-push.mts raises, with waitUntil() waited
 //     on before it's told they ran
 //
 // Every call goes to web-push.mts, which reads the site from the calling
@@ -215,6 +220,56 @@ function installWebPush(bridge) {
   define(proto, 'unregister', unregister);
 
   // -------------------------------------------------------------------------
+  // Periodic sync
+  // -------------------------------------------------------------------------
+
+  /** @type {WeakMap<object, object>} */
+  const syncManagers = new WeakMap();
+
+  /**
+   * registration.periodicSync: one per registration. Always ours, even where
+   * Chromium has its own, since nothing would ever fire Chromium's.
+   * @this {ServiceWorkerRegistration}
+   */
+  function periodicSync() {
+    let manager = syncManagers.get(this);
+    if (!manager) {
+      const registrationScope = this.scope;
+      /** @type {object} */
+      const created = Object.create(protoOf('PeriodicSyncManager'));
+      manager = created;
+      define(manager, 'register', async (/** @type {string} */ tag, /** @type {{ minInterval?: number }} */ options = {}) => {
+        await call('sync.register', { scope: registrationScope, tag: String(tag), minInterval: Number(options.minInterval ?? 0) });
+      });
+      define(manager, 'unregister', async (/** @type {string} */ tag) => {
+        await call('sync.unregister', { scope: registrationScope, tag: String(tag) });
+      });
+      define(manager, 'getTags', () => call('sync.tags', { scope: registrationScope }));
+      syncManagers.set(this, manager);
+    }
+    return manager;
+  }
+  Object.defineProperty(proto, 'periodicSync', { get: periodicSync, configurable: true, enumerable: true });
+
+  const permissions = navigator.permissions;
+  if (permissions && (inWorker || window.top === window.self)) {
+    const nativeQuery = permissions.query.bind(permissions);
+    /** @param {PermissionDescriptor} descriptor */
+    const query = async (descriptor) => {
+      if (descriptor?.name !== /** @type {PermissionName} */ ('periodic-background-sync')) return nativeQuery(descriptor);
+      const state = await call('sync.permission', { scope: inWorker ? scope.registration.scope : `${location.origin}/` });
+      const status = new EventTarget();
+      Object.defineProperties(status, {
+        name: { value: 'periodic-background-sync', enumerable: true },
+        state: { value: state, enumerable: true },
+        onchange: { value: null, writable: true, enumerable: true },
+      });
+      return status;
+    };
+    define(Object.getPrototypeOf(permissions), 'query', query);
+  }
+
+  // -------------------------------------------------------------------------
   // Notifications
   // -------------------------------------------------------------------------
 
@@ -383,6 +438,9 @@ function installWebPush(bridge) {
       Object.defineProperty(event, 'notification', { value: toNotification(snapshot, ownScope()), enumerable: true });
       Object.defineProperty(event, 'action', { value: typeof init.action === 'string' ? init.action : '', enumerable: true });
       Object.defineProperty(event, 'reply', { value: null, enumerable: true });
+    } else if (type === 'periodicsync') {
+      eventProto = protoOf('PeriodicSyncEvent') === Object.prototype ? eventProto : protoOf('PeriodicSyncEvent');
+      Object.defineProperty(event, 'tag', { value: String(init.tag), enumerable: true });
     }
     Object.setPrototypeOf(event, eventProto);
 

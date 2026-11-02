@@ -1140,6 +1140,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           s.fsGranted = true;
         }
       }
+      if (permissions.includes('background')) {
+        await apps
+          .grantBackground(webContentsId, { notifications: permissions.includes('notifications') })
+          .catch((e: unknown) => console.error('din: granting background:', e));
+      }
     }
 
     // Recent files it kept here before it moved, as persisted handles.

@@ -19,7 +19,8 @@
 // registration.showNotification). They outlive the page; clicks and
 // dismissals go back to napp.mts, which raises them in the site's worker.
 // Other websites' registration.showNotification (a push, typically) comes
-// from web-push.mts the same way.
+// from web-push.mts the same way, and Din apps' (a periodic sync, typically)
+// from din-app-workers.mts.
 //
 // App badges, the number or mark on an app's Dock tile, come the same ways:
 // websites' and nsites' navigator.setAppBadge() (web-push.mts, napp.mts),
@@ -293,7 +294,7 @@ function webText(value: unknown, max: number): string {
  * cut short, it decodes as just the picture's top rows.
  */
 async function fetchIcon(s: Electron.Session, url: string, credentials: RequestCredentials = 'include'): Promise<string | null> {
-  if (!/^(https?|nsite):/i.test(url)) {
+  if (!/^(https?|nsite|din|din\+file):/i.test(url)) {
     return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url) && url.length <= MAX_IMAGE_BYTES ? url : null;
   }
   if (url.length > 4096) return null;
@@ -514,12 +515,67 @@ export function closeWorkerNotification(id: number): void {
   sendToShell('notifications:close', `sw:${id}`);
 }
 
-type NotificationKind = 'dbus' | 'web' | 'napp' | 'sw';
+// ---------------------------------------------------------------------------
+// Din apps' service workers (din-app-workers.mts)
+// ---------------------------------------------------------------------------
+
+let appHandlers: SiteNotificationHandlers | null = null;
+
+export function setAppNotificationHandlers(handlers: SiteNotificationHandlers): void {
+  appHandlers = handlers;
+}
+
+/**
+ * Show a Din app's registration.showNotification (din-app-workers.mts has
+ * checked it may). It's filed under the app by id; a click always goes back
+ * to its worker (the `default` action), which opens a window if it wants one.
+ */
+export async function showAppNotification(
+  s: Electron.Session,
+  notification: {
+    id: number;
+    appId: string;
+    title: string;
+    body: string;
+    icon: string;
+    actions: { action: string; title: string }[];
+    requireInteraction: boolean;
+    silent: boolean;
+  },
+): Promise<void> {
+  const image = notification.icon ? await fetchIcon(s, notification.icon, 'omit') : null;
+  const shown: SystemNotification = {
+    id: `app:${notification.id}`,
+    appName: notification.appId,
+    appId: notification.appId,
+    icon: null,
+    image,
+    title: notification.title.slice(0, MAX_WEB_TITLE),
+    body: notification.body.slice(0, MAX_WEB_BODY),
+    actions: [{ id: 'default', label: '' }, ...notification.actions.slice(0, 3).map((a) => ({ id: a.action, label: a.title }))],
+    urgency: notification.silent ? 'low' : 'normal',
+    timeout: notification.requireInteraction ? 0 : -1,
+    resident: false,
+    transient: false,
+    guest: null,
+    tag: '',
+    site: null,
+    worker: null,
+  };
+  sendToShell('notifications:show', shown);
+}
+
+/** Take down a Din app's service-worker notification. */
+export function closeAppNotification(id: number): void {
+  sendToShell('notifications:close', `app:${id}`);
+}
+
+type NotificationKind = 'dbus' | 'web' | 'napp' | 'sw' | 'app';
 
 /** The id behind an opaque shell id, by kind. */
 function parseId(id: unknown): { kind: NotificationKind; id: number } | null {
   if (typeof id !== 'string') return null;
-  const match = /^(dbus|web|napp|sw):(\d+)$/.exec(id);
+  const match = /^(dbus|web|napp|sw|app):(\d+)$/.exec(id);
   return match ? { kind: match[1] as NotificationKind, id: Number(match[2]) } : null;
 }
 
@@ -541,6 +597,7 @@ export function registerNotificationHandlers(options: {
     if (target.kind === 'dbus') command({ type: 'action', id: target.id, key: action.slice(0, 256) });
     else if (target.kind === 'napp') siteHandlers?.activate(target.id, action.slice(0, 256));
     else if (target.kind === 'sw') workerHandlers?.activate(target.id, action.slice(0, 256));
+    else if (target.kind === 'app') appHandlers?.activate(target.id, action.slice(0, 256));
     else if (action === 'default') webEvent(target.id, 'click');
   });
   ipcMain.on('notifications:closed', (event, id, reason) => {
@@ -550,6 +607,7 @@ export function registerNotificationHandlers(options: {
     if (target.kind === 'dbus') command({ type: 'closed', id: target.id, reason: REASON_CODES[reason as CloseReason] ?? 4 });
     else if (target.kind === 'napp') siteHandlers?.closed(target.id, why);
     else if (target.kind === 'sw') workerHandlers?.closed(target.id, why);
+    else if (target.kind === 'app') appHandlers?.closed(target.id, why);
     else webEvent(target.id, 'close');
   });
 

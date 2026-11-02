@@ -1,4 +1,5 @@
 import { assistantArea } from './assistant';
+import { backgroundArea } from './background';
 import { appsArea, browserArea, desktopIconsArea, notificationsArea, openArea, screenshotArea, widgetsArea, windowsArea, workspaceArea } from './desktop';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
@@ -29,6 +30,7 @@ export const AREAS: readonly Area[] = [
   widgetsArea,
   desktopIconsArea,
   notificationsArea,
+  backgroundArea,
   browserArea,
   extensionsArea,
   openArea,
@@ -84,6 +86,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   nostr: 'nostr',
   connected: { not: 'giving apps the signer is only done by hand' },
   datetime: 'datetime',
+  background: 'background',
   accessibility: 'settings',
   about: 'update',
   developers: { not: 'debugging the desktop itself' },

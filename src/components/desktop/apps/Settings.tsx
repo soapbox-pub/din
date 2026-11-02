@@ -153,6 +153,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
 import { NotificationSitesList } from '@/components/desktop/apps/NotificationSitesList';
+import { BackgroundActivity } from '@/components/desktop/apps/BackgroundActivity';
 import { PushServiceSetting } from '@/components/desktop/apps/PushServiceSetting';
 import { useToast } from '@/hooks/useToast';
 import { useFilePicker } from '@/contexts/FilePickerContext';
@@ -397,6 +398,10 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <PasswordSection />
     ) : id === 'notifications' ? (
       <NotificationsSection />
+    ) : id === 'background' ? (
+      <SectionShell title="Background Activity">
+        <BackgroundActivity />
+      </SectionShell>
     ) : id === 'nostr' ? (
       <NostrStorageSection />
     ) : id === 'connected' ? (

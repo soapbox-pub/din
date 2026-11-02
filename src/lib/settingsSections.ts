@@ -19,6 +19,7 @@ import {
   MousePointer2,
   Palette,
   Printer,
+  RefreshCw,
   Shapes,
   Smartphone,
   Sparkles,
@@ -42,6 +43,7 @@ export type SectionId =
   | 'mouse'
   | 'printers'
   | 'datetime'
+  | 'background'
   | 'accessibility'
   | 'password'
   | 'notifications'
@@ -236,6 +238,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Accessibility',
     icon: Accessibility,
     search: ['Reduce motion', 'Reduce transparency', 'Increase contrast', 'Text size', 'Makes text larger without zooming everything else.', 'Zoom', 'Zoom the screen with the keyboard', 'Color filters', 'Color filter', 'Invert colors', 'Grayscale', 'Sticky keys', 'Slow keys', 'Bounce keys', 'magnifier', 'magnify', 'color blindness', 'colour blind', 'protanopia', 'deuteranopia', 'tritanopia', 'inverted', 'monochrome', 'black and white', 'a11y', 'animation', 'blur', 'glass', 'high contrast', 'larger text', 'font size', 'vision', 'low vision', 'motion sickness', 'vestibular'],
+  },
+  {
+    id: 'background',
+    group: 'System',
+    name: 'Background Activity',
+    icon: RefreshCw,
+    search: ['Let apps refresh in the background', 'Scheduled', 'Run now', 'Pause', 'Resume', 'Remove', 'periodic sync', 'periodicSync', 'background refresh', 'background sync', 'service worker', 'cron', 'schedule', 'wake up', 'battery'],
   },
   {
     id: 'datetime',

@@ -152,6 +152,11 @@ export function serveLaunched(appId: string, request: Request): Promise<Response
   return entry ? serveFrom(entry.source, request) : null;
 }
 
+/** Whether an app the `din` command ran is still being served. */
+export function isLaunchedApp(appId: string): boolean {
+  return running.has(appId);
+}
+
 /** A file of the app, by URL path, as the app would load it. */
 async function read(source: Source, host: string, pathname: string, max: number): Promise<{ bytes: Buffer; type: string } | null> {
   const response = await serveFrom(source, new Request(`${DIN_SCHEME}://${host}${pathname}`)).catch(() => null);

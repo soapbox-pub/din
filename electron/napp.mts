@@ -11,7 +11,8 @@
 //     raises `notificationclose`.
 //   - napp.fetch / self.napp.fetch: a request without CORS (napp-fetch.mts).
 //   - registration.periodicSync: the worker woken on a schedule, at most every
-//     15 minutes, after the user allows "Refresh in the background".
+//     15 minutes, after the user allows "Refresh in the background". The
+//     schedule is periodic-sync.mts's, shared with apps and web apps.
 //   - window.ENV: per-device variables the user sets in the app's info.
 //   - navigator.setAppBadge / clearAppBadge, from the page and the worker,
 //     for the app's Dock tile.
@@ -52,6 +53,7 @@ import {
 } from './napp-push.mts';
 import { isInstalledSite, nsiteStoreReady, parseCanonicalHost } from './nsite-store.mts';
 import { badgeFromSite, closeSiteNotification, setAppBadge, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
+import { adoptTags, forgetSite, PeriodicSyncError, registerSyncRunner, registerTag, tagsOf, unregisterTag } from './periodic-sync.mts';
 import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 
 /** A capability a site asks the user for, as main.mts files it. */
@@ -68,17 +70,15 @@ export interface NappOptions {
   permission: (origin: string, capability: NappCapability) => NotificationPermission;
   /** Ask the user (if they haven't answered); resolves with whether it's allowed. */
   requestPermission: (origin: string, capability: NappCapability) => Promise<boolean>;
-  /** Forget everything the user answered for a site. */
-  forgetPermissions: (origin: string) => void;
+  /** Forget what the user answered for a site: everything, or for one capability. */
+  forgetPermissions: (origin: string, capability?: NappCapability) => void;
 }
 
 /** How long after a click on its notification a worker may open its window. */
 const INTERACTION_WINDOW_MS = 60_000;
 const MAX_NOTIFICATIONS_PER_SITE = 32;
 const MAX_NOTIFICATION_BYTES = 64 * 1024;
-const MIN_SYNC_INTERVAL_MS = 15 * 60_000;
-const MAX_SYNC_TAGS = 10;
-const SYNC_CHECK_MS = 60_000;
+const POOL_WAKE_MS = 60_000;
 const MAX_ENV_VARS = 100;
 const MAX_ENV_VALUE = 4096;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -153,21 +153,16 @@ function logWorkerConsole(host: string, details: Electron.MessageDetails): void 
 }
 
 // ---------------------------------------------------------------------------
-// Stored state: subscriptions, periodic sync tags and ENV, per site
+// Stored state: subscriptions and ENV, per site (periodic sync tags are
+// periodic-sync.mts's)
 // ---------------------------------------------------------------------------
-
-interface SyncTag {
-  minInterval: number;
-  nextRun: number;
-}
 
 interface Stored {
   push: Record<string, SitePush>;
-  sync: Record<string, Record<string, SyncTag>>;
   env: Record<string, Record<string, string>>;
 }
 
-let stored: Stored = { push: {}, sync: {}, env: {} };
+let stored: Stored = { push: {}, env: {} };
 let saveTimer: NodeJS.Timeout | null = null;
 
 function statePath(): string {
@@ -176,12 +171,18 @@ function statePath(): string {
 
 function load(): void {
   try {
-    const parsed = JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Partial<Stored>;
+    const parsed = JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Partial<Stored> & { sync?: unknown };
     stored = {
       push: parsed.push && typeof parsed.push === 'object' ? parsed.push : {},
-      sync: parsed.sync && typeof parsed.sync === 'object' ? parsed.sync : {},
       env: parsed.env && typeof parsed.env === 'object' ? parsed.env : {},
     };
+    // Tags kept here before the schedule was shared: moved over once.
+    if (parsed.sync && typeof parsed.sync === 'object') {
+      for (const [host, tags] of Object.entries(parsed.sync as Record<string, Record<string, { minInterval?: unknown; nextRun?: unknown }>>)) {
+        if (parseCanonicalHost(host) && tags && typeof tags === 'object') adoptTags(originOf(host), `${originOf(host)}/`, tags);
+      }
+      save();
+    }
   } catch {
     // Nothing stored yet (or unreadable): no site has asked for anything.
   }
@@ -480,46 +481,24 @@ function closeAllNotifications(host: string): void {
 
 async function registerSync(host: string, params: unknown, worker: boolean): Promise<void> {
   const { tag, minInterval } = (params ?? {}) as { tag?: unknown; minInterval?: unknown };
-  if (typeof tag !== 'string' || !tag || tag.length > 256) throw new NappError('Invalid tag', 'TypeError');
-  const tags = (stored.sync[host] ??= {});
   const origin = originOf(host);
   if (worker) {
     // Nobody to ask from a worker: only what the site already holds.
-    if (!tags[tag] || options.permission(origin, 'background-sync') !== 'granted') {
+    if (options.permission(origin, 'background-sync') !== 'granted') {
       throw new NappError('Register new tags from the page', 'NotAllowedError');
     }
   } else if (!(await options.requestPermission(origin, 'background-sync'))) {
     throw new NappError('Permission denied.', 'NotAllowedError');
   }
-  if (!tags[tag] && Object.keys(tags).length >= MAX_SYNC_TAGS) {
-    throw new NappError(`At most ${MAX_SYNC_TAGS} tags`, 'QuotaExceededError');
-  }
-  const interval = Math.max(MIN_SYNC_INTERVAL_MS, typeof minInterval === 'number' && minInterval > 0 ? minInterval : 0);
-  // Registering again keeps the tag's place in the schedule.
-  tags[tag] = { minInterval: interval, nextRun: tags[tag]?.nextRun ?? Date.now() + interval };
-  save();
+  registerTag(origin, `${origin}/`, tag, minInterval, worker);
 }
 
-function unregisterSync(host: string, tag: unknown): void {
-  const tags = stored.sync[host];
-  if (!tags || typeof tag !== 'string' || !tags[tag]) return;
-  delete tags[tag];
-  if (Object.keys(tags).length === 0) delete stored.sync[host];
-  save();
-}
-
-function runDueSyncs(): void {
-  if (!net.isOnline()) return;
-  const now = Date.now();
-  for (const [host, tags] of Object.entries(stored.sync)) {
-    if (options.permission(originOf(host), 'background-sync') !== 'granted') continue;
-    for (const [tag, entry] of Object.entries(tags)) {
-      if (entry.nextRun > now) continue;
-      entry.nextRun = now + entry.minInterval;
-      save();
-      enqueue(host, () => dispatch(host, 'periodicsync', { tag }));
-    }
-  }
+/** The schedule's side: wake an installed site's worker for one of its tags. */
+function runSync(host: string, tag: string): Promise<DispatchResult> {
+  return new Promise((resolve) => {
+    const queued = events.enqueue(host, async () => resolve(await dispatch(host, 'periodicsync', { tag })));
+    if (!queued) resolve('failed');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -614,10 +593,10 @@ async function call(caller: { host: string; worker: boolean }, method: unknown, 
         await registerSync(host, params, worker);
         break;
       case 'sync.unregister':
-        unregisterSync(host, params);
+        unregisterTag(origin, params);
         break;
       case 'sync.tags':
-        result = Object.keys(stored.sync[host] ?? {});
+        result = tagsOf(origin);
         break;
       case 'sync.permission':
         result = options.permission(origin, 'background-sync');
@@ -643,7 +622,7 @@ async function call(caller: { host: string; worker: boolean }, method: unknown, 
     }
     return { ok: true, result };
   } catch (error) {
-    if (error instanceof NappError) return failure(error.message, error.kind);
+    if (error instanceof NappError || error instanceof PeriodicSyncError) return failure(error.message, error.kind);
     return failure(error instanceof Error ? error.message : String(error));
   }
 }
@@ -661,7 +640,7 @@ async function call(caller: { host: string; worker: boolean }, method: unknown, 
 export function forgetNappSite(host: string): void {
   if (!parseCanonicalHost(host)) return;
   setPush(host, []);
-  delete stored.sync[host];
+  forgetSite(originOf(host));
   delete stored.env[host];
   save();
   closeAllNotifications(host);
@@ -683,15 +662,11 @@ async function clearNappSite(host: string): Promise<void> {
   await options.session().clearStorageData({ origin: originOf(host) }).catch(() => {});
 }
 
-/** The user changed a site's answer: what depended on it stops. */
+/** The user changed a site's answer: its push subscriptions stop (its schedule is periodic-sync.mts's to drop). */
 export function nappPermissionChanged(origin: string, capability: string, allow: boolean | null): void {
   const host = hostOf(origin);
   if (!host || allow === true) return;
   if (capability === 'notifications' && stored.push[host]) setPush(host, []);
-  if (capability === 'background-sync' && stored.sync[host]) {
-    delete stored.sync[host];
-    save();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -712,9 +687,18 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
   powerMonitor.on('resume', () => pool.wake());
   setInterval(() => {
     if (net.isOnline()) pool.wake();
-    runDueSyncs();
-  }, SYNC_CHECK_MS);
+  }, POOL_WAKE_MS);
   app.on('will-quit', () => pool.close());
+
+  registerSyncRunner('nsite', {
+    dispatch: async (origin, _scope, tag) => {
+      const host = hostOf(origin);
+      if (!host || !(await isInstalled(host))) return 'no-worker';
+      return runSync(host, tag);
+    },
+    allowed: (origin) => options.permission(origin, 'background-sync') === 'granted',
+    forgetPermission: (origin) => options.forgetPermissions(origin, 'background-sync'),
+  });
 
   watchWorkers(options.session());
 
@@ -775,7 +759,7 @@ export function registerNappHandlers(nappOptions: NappOptions): void {
     return {
       env: stored.env[host] ?? {},
       subscriptions: stored.push[host]?.subscriptions.length ?? 0,
-      syncTags: Object.keys(stored.sync[host] ?? {}),
+      syncTags: tagsOf(originOf(host)),
     };
   });
   ipcMain.handle('napp:setEnv', (event, rawHost, env) => {

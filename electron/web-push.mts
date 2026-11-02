@@ -21,6 +21,10 @@
 //   - navigator.setAppBadge / clearAppBadge, from the page and the worker,
 //     for the Dock tile of the site's installed web app (the shell drops a
 //     badge from a site that isn't installed, as Chrome does).
+//   - registration.periodicSync, for installed web apps as in Chrome: new
+//     tags only from the app's own window, after the user allows "Refresh in
+//     the background", and the `periodicsync` event when they're due. The
+//     schedule is periodic-sync.mts's.
 //
 // Websites in the Web Browser's session get it, in tabs and in installed web
 // apps' windows, which share it (and so a site's worker and subscription).
@@ -50,6 +54,16 @@ import {
   type PushHeaders,
   type SubscriptionKeys,
 } from './push-crypto.mts';
+import {
+  forgetKind,
+  forgetSite,
+  PeriodicSyncError,
+  registerSyncRunner,
+  registerTag,
+  registrationGone,
+  tagsOf,
+  unregisterTag,
+} from './periodic-sync.mts';
 import { DEFAULT_PUSH_SERVER, PushService, type AckCode, type UnregisterCode } from './push-service.mts';
 import { WorkerEvents } from './worker-events.mts';
 
@@ -62,6 +76,12 @@ export interface WebPushOptions {
   permission: (origin: string) => NotificationPermission;
   /** Ask the user (if they haven't answered); resolves with whether it's allowed. */
   requestPermission: (origin: string) => Promise<boolean>;
+  /** Whether a WebContents is an installed web app's window (not a browser tab). */
+  isInstalledApp: (contents: Electron.WebContents) => boolean;
+  /** What the user answered for a site's "Refresh in the background", without asking. */
+  syncPermission: (origin: string) => NotificationPermission;
+  requestSyncPermission: (origin: string) => Promise<boolean>;
+  forgetSyncPermission: (origin: string) => void;
 }
 
 /** How long after a click on its notification a worker may open or focus a window. */
@@ -174,6 +194,8 @@ interface Caller {
   origin: string;
   /** The registration a worker belongs to; a page names one per call. */
   scope: string | null;
+  /** A page in an installed web app's window. */
+  installed: boolean;
 }
 
 /**
@@ -187,14 +209,14 @@ function pageCaller(event: Electron.IpcMainInvokeEvent): Caller | null {
   if (!frame || contents.getType() !== 'webview' || contents.session !== options.session()) return null;
   const origin = frame.origin;
   if (!originOf(frame.url) || contents.mainFrame.origin !== origin) return null;
-  return { origin, scope: null };
+  return { origin, scope: null, installed: frame === contents.mainFrame && options.isInstalledApp(contents) };
 }
 
 function workerCaller(event: Electron.IpcMainServiceWorkerInvokeEvent): Caller | null {
   const scope = event.serviceWorker.scope;
   const origin = originOf(scope);
   if (event.session !== options.session() || !origin) return null;
-  return { origin, scope };
+  return { origin, scope, installed: false };
 }
 
 /** The registration a call is about: a worker's own, or one of the page's origin. */
@@ -616,9 +638,24 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
         break;
       }
       case 'registration.unregistered': {
-        // The worker's registration is gone, and with it its subscription.
+        // The worker's registration is gone, and with it its subscription and schedule.
         const found = findSubscription(scope);
         if (found) unsubscribe(found[0], 200, 'its service worker was unregistered');
+        registrationGone(caller.origin, scope);
+        break;
+      }
+      case 'sync.register':
+        await registerSync(caller, scope, args, worker);
+        break;
+      case 'sync.unregister':
+        unregisterTag(caller.origin, args.tag);
+        break;
+      case 'sync.tags':
+        result = tagsOf(caller.origin);
+        break;
+      case 'sync.permission': {
+        const answer = options.syncPermission(caller.origin);
+        result = answer === 'default' ? 'prompt' : answer;
         break;
       }
       case 'notification.show':
@@ -645,10 +682,40 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
     }
     return { ok: true, result };
   } catch (error) {
-    if (error instanceof WebPushError) return failure(error.message, error.kind);
+    if (error instanceof WebPushError || error instanceof PeriodicSyncError) return failure(error.message, error.kind);
     return failure(error instanceof Error ? error.message : String(error));
   }
 }
+
+// ---------------------------------------------------------------------------
+// Periodic sync
+// ---------------------------------------------------------------------------
+
+/**
+ * registration.periodicSync.register(): from an installed web app's window
+ * (a browser tab can't, as in Chrome), asking the user first; from its
+ * worker, only a tag the site already holds.
+ */
+async function registerSync(caller: Caller, scope: string, args: Record<string, unknown>, worker: boolean): Promise<void> {
+  if (worker) {
+    if (options.syncPermission(caller.origin) !== 'granted') {
+      throw new WebPushError('Register new tags from the page', 'NotAllowedError');
+    }
+  } else {
+    if (!caller.installed) throw new WebPushError('Only installed web apps can refresh in the background.', 'NotAllowedError');
+    if (!(await options.requestSyncPermission(caller.origin))) throw new WebPushError('Permission denied.', 'NotAllowedError');
+  }
+  registerTag(caller.origin, scope, args.tag, args.minInterval, worker);
+}
+
+/** The schedule's side: wake a site's worker for one of its tags. */
+function runSync(scope: string, tag: string): Promise<'handled' | 'failed' | 'no-worker'> {
+  return new Promise((resolve) => {
+    const queued = events.enqueue(scope, async () => resolve(await dispatch(scope, 'periodicsync', { tag })));
+    if (!queued) resolve('failed');
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // Forgetting
@@ -683,6 +750,8 @@ export function forgetWebPushSubscriptions(origin?: string): void {
   if (!options) return;
   forgetWhere((sub) => !origin || sub.scope.startsWith(`${origin}/`), 200, 'site data cleared');
   closeNotificationsWhere((n) => !origin || n.origin === origin);
+  if (origin) forgetSite(origin);
+  else forgetKind('web');
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +789,12 @@ export function registerWebPushHandlers(webPushOptions: WebPushOptions): void {
   });
 
   watchWorkers(options.session());
+
+  registerSyncRunner('web', {
+    dispatch: (_origin, scope, tag) => runSync(scope, tag),
+    allowed: (origin) => options.syncPermission(origin) === 'granted',
+    forgetPermission: (origin) => options.forgetSyncPermission(origin),
+  });
 
   setWorkerNotificationHandlers({
     activate: (id, action) => {

@@ -32,6 +32,7 @@ import {
 import { getNsiteStore, type NsiteSummary } from '@/lib/nsiteStore';
 import { launchedApp, launchedApps, subscribeLaunchedApps } from '@/lib/launchedApps';
 import { getAppsBridge } from '@/lib/dinApps';
+import { getPeriodicSyncBridge } from '@/lib/periodicSync';
 import {
   FILE_APPS_KEY,
   fileAppDefinition,
@@ -51,6 +52,15 @@ import {
 import { WebAppFrame } from '@/components/desktop/apps/WebAppFrame';
 import { requestThemeIcons } from '@/lib/iconTheme';
 import { themeIcon, useThemeIcons } from '@/shared/themeIcons';
+
+/** A URL's origin, or null. */
+function originOfUrl(url: string | undefined): string | null {
+  try {
+    return url ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Per-web-app window components, cached so a given app keeps the same
@@ -397,6 +407,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         if (fileApps.some((e) => e.appId === id)) {
           setStoredFileApps((prev: unknown) => parseFileApps(prev).filter((e) => e.appId !== id));
           void getAppsBridge()?.closeFolder(id);
+          void getPeriodicSyncBridge()?.forget(`din+file://${id.slice('file-'.length)}`);
           return;
         }
         const entry = nsiteEntryFor(id);
@@ -405,6 +416,11 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
           installRequested.delete(entry.host);
           void store?.uninstall(entry.host);
           return;
+        }
+        // What it scheduled goes too, unless another installed app is the same site.
+        const origin = originOfUrl(webApps.find((w) => w.id === id)?.url);
+        if (origin && !webApps.some((w) => w.id !== id && originOfUrl(w.url) === origin)) {
+          void getPeriodicSyncBridge()?.forget(origin);
         }
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },

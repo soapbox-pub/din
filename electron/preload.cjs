@@ -86,6 +86,8 @@
 //     their data, opening their windows (see src/lib/napp.ts / electron/napp.mts)
 //   - window.dinos.webPushHost: websites' Web Push - the push service, and their
 //     workers opening windows (see src/lib/webPush.ts / electron/web-push.mts)
+//   - window.dinos.periodicSync: what apps, nsites and web apps have scheduled
+//     to do while closed (see src/lib/periodicSync.ts / electron/periodic-sync.mts)
 //   - window.dinos.promptHost: yes/no questions for the user - site permissions and
 //     extension installs (see PromptHost)
 //   - window.dinos.screenShare: pages asking to share the screen, and the shares
@@ -3315,6 +3317,50 @@ expose('nappHost', {
   },
 });
 
+// What apps, nsites and web apps do while they're closed (window.dinos.periodicSync),
+// backed by the periodic-sync:* handlers in electron/periodic-sync.mts: their
+// schedules, for Settings → Background Activity and `din background`.
+expose('periodicSync', {
+  /** Whether anything runs at all, and every app's schedule. */
+  status: () => ipcRenderer.invoke('periodic-sync:status'),
+  /**
+   * The global switch.
+   * @param {boolean} enabled
+   */
+  setEnabled: (enabled) => ipcRenderer.invoke('periodic-sync:setEnabled', enabled),
+  /**
+   * Keep an app's schedule without running it, or run it again.
+   * @param {string} origin
+   * @param {boolean} paused
+   */
+  setPaused: (origin, paused) => ipcRenderer.invoke('periodic-sync:setPaused', origin, paused),
+  /**
+   * Run an app's tags now (one, or all of them), paused or not; resolves with how each went.
+   * @param {string} origin
+   * @param {string} [tag]
+   */
+  run: (origin, tag) => ipcRenderer.invoke('periodic-sync:run', origin, tag),
+  /**
+   * Drop an app's schedule; a site that asked the user will ask again.
+   * @param {string} origin
+   */
+  remove: (origin) => ipcRenderer.invoke('periodic-sync:remove', origin),
+  /**
+   * Drop an app's schedule as it's uninstalled (nothing if it had none).
+   * @param {string} origin
+   */
+  forget: (origin) => ipcRenderer.invoke('periodic-sync:forget', origin),
+  /**
+   * The status changed. Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('periodic-sync:changed', listener);
+    return () => ipcRenderer.removeListener('periodic-sync:changed', listener);
+  },
+});
+
 // Websites' Web Push (window.dinos.webPushHost), backed by the web-push:* handlers
 // in electron/web-push.mts: the push service and its state for Settings, and
 // a site's service worker asking for a window after a click on one of its
@@ -3664,6 +3710,28 @@ expose('apps', {
    * @returns {Promise<string | null>} for fs, the URL base the app loads files by path from
    */
   grant: (webContentsId, permission, roots) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission, roots),
+  /**
+   * Grant an app window `background`: its page may give the app a schedule
+   * (registration.periodicSync), and, with `notifications`, its worker may
+   * notify (electron/din-app-workers.mts).
+   * @param {number} webContentsId
+   * @param {{ notifications: boolean }} options
+   * @returns {Promise<void>}
+   */
+  grantBackground: (webContentsId, options) => ipcRenderer.invoke('dinos-apps:grantBackground', webContentsId, options),
+  /**
+   * An app's service worker opened a window (clients.openWindow: `url`) or
+   * focused one (WindowClient.focus: `focus`), after a click on one of its
+   * notifications. Returns an unsubscribe fn.
+   * @param {(request: { appId: string, url: string | null, focus: boolean }) => void} callback
+   * @returns {() => void}
+   */
+  onWorkerOpen: (callback) => {
+    /** @param {unknown} _event @param {{ appId: string, url: string | null, focus: boolean }} request */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('din-app-sw:open', listener);
+    return () => ipcRenderer.removeListener('din-app-sw:open', listener);
+  },
   /**
    * Another folder an app's scoped fs grant reaches.
    * @param {number} webContentsId

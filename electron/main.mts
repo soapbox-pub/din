@@ -23,10 +23,13 @@ import {
   DIN_SCHEME,
   appsSession,
   forwardPushToGrants,
+  backgroundGrant,
   isAppGuest as isDinAppGuest,
   isBridgeEvent,
   registerDinApps,
 } from './din-apps.mts';
+import { registerDinAppWorkers } from './din-app-workers.mts';
+import { periodicSyncPermissionChanged, registerPeriodicSyncHandlers } from './periodic-sync.mts';
 import {
   attachWidgetGuest,
   isWidgetGuest,
@@ -207,13 +210,16 @@ protocol.registerSchemesAsPrivileged([
   },
   {
     // Built-in apps (electron/din-apps.mts): an origin of their own each,
-    // secure, fetchable and streamable, but none of the desktop's app:.
+    // secure, fetchable and streamable, but none of the desktop's app:. A
+    // service worker each, for work done while no window is open
+    // (electron/din-app-workers.mts).
     scheme: DIN_SCHEME,
     privileges: {
       standard: true,
       secure: true,
       supportFetchAPI: true,
       stream: true,
+      allowServiceWorkers: true,
     },
   },
   {
@@ -224,6 +230,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       stream: true,
+      allowServiceWorkers: true,
     },
   },
   {
@@ -3523,6 +3530,9 @@ const NAPP_PRELOAD = path.join(import.meta.dirname, 'napp-preload.cjs');
 // Built-in apps' preload: their ports to the desktop and main, nothing else.
 // din-app-preload.cjs with window.din's runtime bundled in (scripts/build-din-runtime.mjs).
 const DIN_APP_PRELOAD = path.join(import.meta.dirname, 'din-app-preload.built.cjs');
+// Built-in apps' service workers (electron/din-app-workers.mts): periodic sync
+// and notifications from a registration, for the page and the worker.
+const DIN_APP_WORKER_PRELOAD = path.join(import.meta.dirname, 'din-app-worker-preload.cjs');
 // Widgets' preload: frames the widget and relays its messages to the desktop.
 const WIDGET_PRELOAD = path.join(import.meta.dirname, 'widget-preload.cjs');
 
@@ -4538,6 +4548,7 @@ function decide(s: Electron.Session, origin: string, capability: SiteCapability,
   saveDecisions(decisions);
   nappPermissionChanged(origin, capability, allow);
   webPushPermissionChanged(origin, capability, allow);
+  periodicSyncPermissionChanged(origin, capability, allow);
   sendToShell('site-permissions:changed');
 }
 
@@ -5797,6 +5808,8 @@ app.whenReady().then(() => {
   );
   // An app prints as a page does, with the web's print().
   appsSession().registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
+  appsSession().registerPreloadScript({ id: 'din-app-sw', type: 'frame', filePath: DIN_APP_WORKER_PRELOAD });
+  appsSession().registerPreloadScript({ id: 'din-app-sw-worker', type: 'service-worker', filePath: DIN_APP_WORKER_PRELOAD });
   registerWidgets(
     {
       // In development dist/ may hold nothing but them (npm run dev builds them).
@@ -5903,8 +5916,8 @@ app.whenReady().then(() => {
       return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
     },
     requestPermission: (origin, capability) => requestSiteCapability(browserSession(), origin, capability),
-    forgetPermissions: (origin) => {
-      for (const capability of SITE_CAPABILITIES) decide(browserSession(), origin, capability, null);
+    forgetPermissions: (origin, only) => {
+      for (const capability of only ? [only] : SITE_CAPABILITIES) decide(browserSession(), origin, capability, null);
     },
   });
   registerWebPushHandlers({
@@ -5913,7 +5926,16 @@ app.whenReady().then(() => {
     assertShellSender,
     permission: (origin) => siteNotificationPermission(browserSession(), origin),
     requestPermission: (origin) => requestSiteCapability(browserSession(), origin, 'notifications'),
+    isInstalledApp: isAppGuest,
+    syncPermission: (origin) => {
+      const allowed = decisionsFor(browserSession()).get(decisionKey(origin, 'background-sync'));
+      return allowed === undefined ? 'default' : allowed ? 'granted' : 'denied';
+    },
+    requestSyncPermission: (origin) => requestSiteCapability(browserSession(), origin, 'background-sync'),
+    forgetSyncPermission: (origin) => decide(browserSession(), origin, 'background-sync', null),
   });
+  registerDinAppWorkers({ sendToShell, backgroundGrant });
+  registerPeriodicSyncHandlers({ assertShellSender, sendToShell });
   registerGeolocationHandlers({
     request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),
     allowed: (s, origin) => siteCapabilityAllowed(s, origin, 'geolocation'),

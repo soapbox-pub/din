@@ -32,6 +32,11 @@ interface Options {
 /** Folders the desktop opened as apps, by their din+file:// host. */
 const folders = new Map<string, { root: string; watcher: fs.FSWatcher | null }>();
 
+/** Whether a folder's app is being served (the desktop opened it since Din started). */
+export function isServedFolder(host: string): boolean {
+  return folders.has(host);
+}
+
 /** Changes there are a project's, not its app's. */
 const IGNORED = /(^|[/\\])(\.git|node_modules)([/\\]|$)/;
 

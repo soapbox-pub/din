@@ -222,6 +222,19 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     return null;
   });
 
+  // `background`: the window may give its app a schedule (registration.periodicSync,
+  // din-app-workers.mts), and with `notifications` its worker may notify. No port:
+  // what the app's page asks is checked against this.
+  ipcMain.handle('dinos-apps:grantBackground', (event, wcId, grantOptions) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    const appId = appIdOf(contents.getURL());
+    if (!appId) throw new Error('Not an app');
+    const notifications = (grantOptions as { notifications?: unknown } | null)?.notifications === true;
+    backgroundGrants.set(contents.id, { appId, notifications });
+  });
+
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
     opts.assertShellSender(event);
     if (typeof wcId === 'number' && typeof permission === 'string') revoke(wcId, permission as SystemPermission);
@@ -368,6 +381,9 @@ async function serve(request: Request): Promise<Response> {
       return net.fetch(dev.toString(), { headers: accept ? { accept } : {} });
     };
     if (pathname === '/' || pathname === '/index.html') return fetchDev(`/src/apps/${appId}/index.html`);
+    // Its service worker, which the build makes sw.js of (vite.config.ts).
+    const appSrc = path.resolve(import.meta.dirname, '..', 'src', 'apps', appId);
+    if (pathname === '/sw.js' && fs.existsSync(path.join(appSrc, 'sw.ts'))) return fetchDev(`/src/apps/${appId}/sw.ts`);
     if (/^\/(@|node_modules\/|src\/|__)/.test(pathname)) return fetchDev(pathname);
     // Decided by what's on disk: Vite answers a path it doesn't have with
     // its HTML fallback, status 200, so an icon from public/ came back as a
@@ -446,6 +462,14 @@ interface Grant {
 }
 
 const grants = new Map<number, Map<SystemPermission, Grant>>();
+
+/** Windows the desktop granted `background`, by webContents id. */
+const backgroundGrants = new Map<number, { appId: string; notifications: boolean }>();
+
+/** What the desktop granted an app window for its worker, or null without `background`. */
+export function backgroundGrant(wcId: number): { appId: string; notifications: boolean } | null {
+  return backgroundGrants.get(wcId) ?? null;
+}
 
 function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Map<string, boolean> | null = null): void {
   revoke(contents.id, permission);
@@ -782,6 +806,7 @@ function revoke(wcId: number, permission: SystemPermission): void {
 
 function revokeAll(wcId: number): void {
   for (const permission of Object.keys(SYSTEM_PERMISSIONS) as SystemPermission[]) revoke(wcId, permission);
+  backgroundGrants.delete(wcId);
   for (const [token, grant] of fileUrls) {
     if (grant.wcId === wcId) fileUrls.delete(token);
   }

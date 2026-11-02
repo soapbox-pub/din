@@ -21,6 +21,14 @@ export interface AppsBridge {
    * `roots` scopes an fs grant to those folders.
    */
   grant(webContentsId: number, permission: SystemPermission, roots?: { path: string; writable: boolean }[]): Promise<string | null>;
+  /**
+   * `background`: the window may give its app a schedule
+   * (registration.periodicSync), and, with `notifications`, the app's worker
+   * may notify (electron/din-app-workers.mts).
+   */
+  grantBackground(webContentsId: number, options: { notifications: boolean }): Promise<void>;
+  /** An app's worker opened (`url`) or focused (`focus`) a window, after a click on one of its notifications. */
+  onWorkerOpen(callback: (request: { appId: string; url: string | null; focus: boolean }) => void): () => void;
   /** Another folder an app's scoped fs grant reaches. */
   addFsRoot(webContentsId: number, root: string, writable: boolean): Promise<void>;
   /** Whether an app's fs grant reaches each path (to write it, with `write`), as main checks its calls. */

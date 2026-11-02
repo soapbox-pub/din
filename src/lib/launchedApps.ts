@@ -79,6 +79,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   fs: 'Read, change and delete any of your files',
   pty: 'Run commands in terminals',
   notifications: 'Keep notifications and a Dock badge',
+  background: 'Wake up every so often while it’s closed, to fetch what’s new',
   wallpaper: 'Change the desktop wallpaper',
   cursor: 'Install cursors and change the pointer',
   assistant: 'Use the Assistant',

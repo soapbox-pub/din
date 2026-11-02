@@ -6,6 +6,7 @@ import type { WindowState } from '@/hooks/useWindows';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { getNappHost } from '@/lib/napp';
 import { getBrowserBridge } from '@/lib/browser';
+import { getAppsBridge } from '@/lib/dinApps';
 import {
   closeNotification,
   closeNotificationsFrom,
@@ -31,7 +32,8 @@ const MIN_POPUP_MS = 2000;
  * installed nsite's window at the notification's `data.url` - which its
  * service worker may then move (clients.openWindow, see electron/napp.mts).
  * A website's service worker decides for itself what a click on its
- * notification opens or focuses (electron/web-push.mts), as in Chrome.
+ * notification opens or focuses (electron/web-push.mts), as in Chrome, and so
+ * does a Din app's (electron/din-app-workers.mts).
  *
  * Also puts the badges installed web apps, nsites and Linux apps set on
  * their Dock tiles (navigator.setAppBadge(), LauncherEntry).
@@ -118,7 +120,7 @@ export function SystemNotificationsHost() {
             ? { appId: siteApp?.id, name: siteApp?.name ?? `${site.host.slice(0, 12)}…`, origin: `nsite://${site.host}` }
             : worker
               ? workerSource(n, worker)
-              : { appId: n.appId, name: n.appName || 'Notification', icon: n.icon },
+              : { appId: n.appId, name: (n.appId && getAppRef.current(n.appId)?.name) || n.appName || 'Notification', icon: n.icon },
         title: n.title,
         body: n.body,
         image: n.image,
@@ -150,8 +152,9 @@ export function SystemNotificationsHost() {
             return;
           }
           if (action !== 'default' || takesClick) bridge.activate(n.id, action);
-          // Apps that don't take a click still get their window raised.
-          if (action === 'default' && n.appId) raiseApp(n.appId);
+          // Apps that don't take a click still get their window raised. A Din
+          // app's worker's raises or opens one itself, if it wants to.
+          if (action === 'default' && n.appId && !n.id.startsWith('app:')) raiseApp(n.appId);
         },
         onClose: (reason) => bridge.closed(n.id, reason),
       });
@@ -163,12 +166,20 @@ export function SystemNotificationsHost() {
     const webPush = getWebPushHost();
     const offWorkerOpen = webPush?.onOpen(({ url }) => openForWorker(url));
     const offWorkerFocus = webPush?.onFocus(({ webContentsId }) => raiseGuest(webContentsId));
+    // A Din app's worker, after a click on one of its notifications: a new
+    // window of the app (with the URL it asked for as `url`), or its frontmost.
+    const offAppOpen = getAppsBridge()?.onWorkerOpen(({ appId, url, focus: toFront }) => {
+      if (!getAppRef.current(appId)) return;
+      if (toFront) raiseApp(appId);
+      else open(appId, url ? { url } : undefined);
+    });
     return () => {
       offShow();
       offClose();
       offOpen?.();
       offWorkerOpen?.();
       offWorkerFocus?.();
+      offAppOpen?.();
     };
   }, [focus, open]);
 
