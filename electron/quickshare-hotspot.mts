@@ -13,9 +13,9 @@
 // Bluetooth.
 //
 // It's up while something holds it (holdHotspot: a phone's share sheet open
-// nearby, a share over Bluetooth), and for LINGER_MS after. Joining another
-// network takes it down first (dropHotspot, network.mts): the card can't
-// move its own connection to another channel while it hosts one on this.
+// nearby, a share over Bluetooth), and for LINGER_MS after. It's down while
+// the computer joins another network (withoutHotspot, network.mts): the card
+// can't move its own connection to another channel while it hosts one.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -52,6 +52,8 @@ let downTimer: NodeJS.Timeout | null = null;
 /** Up and down one at a time, in order. */
 let queue: Promise<unknown> = Promise.resolve();
 let failedAt = 0;
+/** Networks being joined (withoutHotspot), during which it stays down. */
+let switching = 0;
 
 function serial<T>(task: () => Promise<T>): Promise<T> {
   const next = queue.then(task, task);
@@ -145,7 +147,7 @@ export function holdHotspot(): () => void {
   holds++;
   clearTimeout(downTimer ?? undefined);
   downTimer = null;
-  current ??= serial(up);
+  if (!switching) current ??= serial(up);
   let released = false;
   return () => {
     if (released) return;
@@ -166,17 +168,28 @@ export function hotspot(): Promise<Hotspot | null> {
 }
 
 /**
- * The computer is joining another network: take the hotspot down now, even
- * if something holds it (a share waiting for it stays on Bluetooth). The
- * next hold starts it again, on the new network's channel.
+ * Join another network (`join`) with the hotspot down, even if something
+ * holds it (a share waiting for it stays on Bluetooth): the card can't move
+ * its own connection off the hotspot's channel. It comes back after, on the
+ * new network's channel, if something still holds it; not after a failed
+ * join, when the computer is on no network and a hotspot would keep it from
+ * finding one (the next hold starts it).
  */
-export function dropHotspot(): Promise<void> {
+export async function withoutHotspot<T>(join: () => Promise<T>): Promise<T> {
+  switching++;
   clearTimeout(downTimer ?? undefined);
   downTimer = null;
   const was = current;
-  if (!was) return Promise.resolve();
   current = null;
-  return serial(async () => ((await was) ? down() : undefined));
+  let joined = false;
+  try {
+    if (was) await serial(async () => ((await was) ? down() : undefined));
+    const result = await join();
+    joined = true;
+    return result;
+  } finally {
+    if (--switching === 0 && joined && holds > 0) current ??= serial(up);
+  }
 }
 
 /** Din is quitting: take the hotspot down without waiting. */

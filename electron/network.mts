@@ -31,7 +31,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { app, ipcMain, session } from 'electron';
 import { setOnionProxyTorPort, startOnionProxy } from './onion-proxy.mts';
-import { HOTSPOT_IFACE, dropHotspot } from './quickshare-hotspot.mts';
+import { HOTSPOT_IFACE, withoutHotspot } from './quickshare-hotspot.mts';
 import { CommandError, runCommand } from './system.mts';
 
 type AssertSender = (event: Electron.IpcMainInvokeEvent) => void;
@@ -873,9 +873,8 @@ function passwordArgs(security: WifiSecurity, password: string): string[] {
 }
 
 /** Bring a saved profile up, rejecting with NetworkManager's reason. */
-async function activate(uuid: string): Promise<string> {
-  await dropHotspot();
-  return nmcli(['connection', 'up', 'uuid', uuid], NMCLI_CONNECT_TIMEOUT_MS);
+function activate(uuid: string): Promise<string> {
+  return withoutHotspot(() => nmcli(['connection', 'up', 'uuid', uuid], NMCLI_CONNECT_TIMEOUT_MS));
 }
 
 /** Apply a change set to a saved network; reconnects if it's up and that's needed. */
@@ -1127,9 +1126,8 @@ export function registerWifiHandlers(options: {
 
     const args = ['device', 'wifi', 'connect', ssid];
     if (password !== undefined) args.push('password', password);
-    await dropHotspot();
     try {
-      await nmcli(args, NMCLI_CONNECT_TIMEOUT_MS);
+      await withoutHotspot(() => nmcli(args, NMCLI_CONNECT_TIMEOUT_MS));
     } catch (error) {
       // A failed first attempt (wrong password) leaves a broken profile
       // behind that would shadow the next try; drop it.
