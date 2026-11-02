@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
+import { OpenCodeUpdate } from '@/shared/assistant/OpenCodeUpdate';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { WindowDragRegion } from '@/sdk/react';
@@ -498,6 +499,7 @@ export function SessionList({
           </div>
         )}
       </div>
+      <OpenCodeUpdate className="mx-2.5 mb-2.5 shrink-0" />
       <DeleteConversationDialog
         session={deleting ?? undefined}
         open={deleting !== null}

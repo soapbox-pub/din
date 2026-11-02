@@ -2129,6 +2129,12 @@ expose('assistant', {
   /** Restart the server. */
   restart: () => ipcRenderer.invoke('assistant:restart'),
 
+  /** Ask OpenCode's update service now: the newer version, or null. */
+  checkUpdate: () => ipcRenderer.invoke('assistant:checkUpdate'),
+
+  /** Update OpenCode to its newest release and restart the server on it. */
+  upgrade: () => ipcRenderer.invoke('assistant:upgrade'),
+
   /** The models OpenCode's own interface used last. */
   recentModels: () => ipcRenderer.invoke('assistant:recentModels'),
 

@@ -530,7 +530,11 @@ user's own self-updating install in `~/.opencode/bin` (DinOS puts it on
 PATH). DinOS's disk image comes with it there (`opencode` in
 `os/flake.nix`; bump its version and hash now and then). Where it's missing,
 or won't run (it's the AVX2 build), Din runs the v2 installer;
-`$DIN_OPENCODE` names another binary.
+`$DIN_OPENCODE` names another binary. As OpenCode's TUI does, Din asks
+OpenCode's update service for a newer release every few hours while the
+assistant is on, and offers it at the foot of the Assistant's list and in
+Settings → Assistant (`din assistant update`): `opencode upgrade`, then the
+server restarts on it.
 
 ### Dictation
 

@@ -14,7 +14,10 @@
 // itself, rather than a copy pinned into DinOS: it moves faster than DinOS
 // releases. DinOS's disk image comes with it there (os/flake.nix); where
 // it's missing, turning the assistant on runs OpenCode's v2 installer.
-// DIN_OPENCODE names another binary.
+// DIN_OPENCODE names another binary. As OpenCode's TUI does, Din asks
+// OpenCode's update service now and then whether there's a newer release,
+// and says so; updating runs `opencode upgrade` and restarts the server on
+// the new binary.
 //
 // The server's API is HTTP with Basic auth, and that password is as good as
 // a shell as this user: the agent runs commands. It stays in this process.
@@ -41,9 +44,12 @@ const STATE_DIR = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir()
 const SERVICE_FILE = path.join(STATE_DIR, 'service.json');
 const MODEL_FILE = path.join(STATE_DIR, 'model.json');
 const INSTALLER_URL = 'https://opencode.ai/v2/install';
+/** What the TUI asks: the newest release on its channel. */
+const UPDATE_URL = 'https://opencode.ai/update/api/latest/cli/npm';
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const UPDATE_CHECK_MS = 6 * 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const RECONNECT_MS = 3_000;
 const MAX_RECONNECT_MS = 60_000;
@@ -69,6 +75,10 @@ export interface AssistantStatus {
   connected: boolean;
   /** The installer is running. */
   installing: boolean;
+  /** A newer release than the one installed ("2.2.6"), or null. */
+  update: string | null;
+  /** `opencode upgrade` is running, or the server restarting after it. */
+  updating: boolean;
   /** The last thing that went wrong, for Settings to say. */
   error: string | null;
 }
@@ -87,6 +97,8 @@ let status: AssistantStatus = {
   running: false,
   connected: false,
   installing: false,
+  update: null,
+  updating: false,
   error: null,
 };
 let emitStatus: (status: AssistantStatus) => void = () => {};
@@ -96,6 +108,9 @@ let starting: Promise<Service> | null = null;
 let installing: Promise<void> | null = null;
 /** Installing on its own is tried once; after a failure, Settings' button. */
 let autoInstallTried = false;
+let updating: Promise<void> | null = null;
+let lastUpdateCheck = 0;
+let updateTimer: ReturnType<typeof setInterval> | null = null;
 let stream: AbortController | null = null;
 
 function messageOf(error: unknown): string {
@@ -198,7 +213,73 @@ async function locate(): Promise<string | null> {
   const binary = findBinary();
   const version = binary ? await readVersion(binary) : null;
   update({ binary: binary && isSupported(version) ? binary : null, version });
+  if (status.update && (!version || !isNewer(status.update, version))) update({ update: null });
   return status.binary;
+}
+
+/** A version's numbers, and whether it's a prerelease. */
+function parseVersion(version: string): { core: number[]; pre: boolean } | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(-[\w.-]+)?/.exec(version.trim());
+  return match ? { core: [Number(match[1]), Number(match[2]), Number(match[3])], pre: Boolean(match[4]) } : null;
+}
+
+function isNewer(latest: string, current: string): boolean {
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i];
+  }
+  return b.pre && !a.pre;
+}
+
+/**
+ * Ask OpenCode's update service for its newest release, at most hourly
+ * unless `force`d. OPENCODE_DISABLE_AUTOUPDATE turns it off, as for the TUI.
+ */
+async function checkForUpdate(force = false): Promise<string | null> {
+  if (process.env.OPENCODE_DISABLE_AUTOUPDATE) return null;
+  if (!force && Date.now() - lastUpdateCheck < 60 * 60_000) return status.update;
+  const current = status.version;
+  if (!status.binary || !current) return null;
+  lastUpdateCheck = Date.now();
+  const response = await fetch(`${UPDATE_URL}?current=${encodeURIComponent(current)}`, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`OpenCode’s update service answered ${response.status}`);
+  const { version } = (await response.json()) as { version?: unknown };
+  if (typeof version !== 'string' || !parseVersion(version)) throw new Error('OpenCode’s update service didn’t say which version is newest');
+  update({ update: isNewer(version, current) ? version.replace(/^v/, '') : null });
+  return status.update;
+}
+
+/**
+ * Update OpenCode to its newest release with its own `opencode upgrade`,
+ * then restart the server on it. That stops whatever the agent is doing,
+ * in Din and in Terminals; its conversations stay.
+ */
+function upgrade(): Promise<void> {
+  updating ??= (async () => {
+    update({ updating: true, error: null });
+    try {
+      const binary = status.binary ?? (await locate());
+      if (!binary) throw new Error('OpenCode isn’t installed');
+      const target = status.update ?? (await checkForUpdate(true));
+      await run(binary, target ? ['upgrade', target] : ['upgrade'], INSTALL_TIMEOUT_MS);
+      const after = await locate();
+      if (!after) throw new Error('OpenCode was updated but can’t be found');
+      if (target && status.version && isNewer(target, status.version)) throw new Error(`OpenCode is still ${status.version}`);
+      update({ update: null });
+      if (status.running || readService()) {
+        service = null;
+        update({ running: false });
+        await run(after, ['service', 'restart']);
+        await ensureService();
+      }
+    } finally {
+      update({ updating: false });
+      updating = null;
+    }
+  })();
+  return updating;
 }
 
 /** Run OpenCode's v2 installer into ~/.opencode/bin. */
@@ -444,6 +525,14 @@ function setEnabled(enabled: boolean): void {
     stream = null;
     update({ connected: false });
   }
+  if (enabled && !updateTimer) {
+    const check = () => void (status.binary ? Promise.resolve(status.binary) : locate()).then(() => checkForUpdate()).catch(() => {});
+    check();
+    updateTimer = setInterval(check, UPDATE_CHECK_MS);
+  } else if (!enabled && updateTimer) {
+    clearInterval(updateTimer);
+    updateTimer = null;
+  }
 }
 
 /** The models the TUI used last, newest first, so Din starts on the same one. */
@@ -507,6 +596,22 @@ export function registerAssistantHandlers(options: {
     update({ running: false });
     await run(binary, ['service', 'restart']);
     await ensureService();
+  });
+
+  ipcMain.handle('assistant:checkUpdate', async (event) => {
+    assertShellSender(event);
+    if (!status.binary) await locate();
+    return checkForUpdate(true);
+  });
+
+  ipcMain.handle('assistant:upgrade', async (event) => {
+    assertShellSender(event);
+    try {
+      await upgrade();
+    } catch (error) {
+      update({ error: messageOf(error) });
+      throw error;
+    }
   });
 
   ipcMain.handle('assistant:recentModels', (event) => {

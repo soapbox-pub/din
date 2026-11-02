@@ -58,7 +58,7 @@ export function appOrigin(appId: string): string {
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
   pty: /^pty:(spawn|write|resize|kill|release|adopt)$/,
-  assistant: /^assistant:(status|setEnabled|install|restart|recentModels|request|passwords|answerPassword|approve)$/,
+  assistant: /^assistant:(status|setEnabled|install|restart|checkUpdate|upgrade|recentModels|request|passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|unlock|eject)$/,
   mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|attachment|setFlags|move|remove|send|saveDraft)$/,

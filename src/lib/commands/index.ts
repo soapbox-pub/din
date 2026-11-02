@@ -1,3 +1,4 @@
+import { assistantArea } from './assistant';
 import { appsArea, browserArea, desktopIconsArea, notificationsArea, openArea, screenshotArea, widgetsArea, windowsArea, workspaceArea } from './desktop';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
@@ -46,6 +47,7 @@ export const AREAS: readonly Area[] = [
   powerArea,
   datetimeArea,
   vmsArea,
+  assistantArea,
   nostrArea,
   updateArea,
   firmwareArea,

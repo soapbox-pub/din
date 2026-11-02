@@ -92,7 +92,7 @@ function InstallOpenCode({
       <p className="text-sm text-muted-foreground">
         {version
           ? `The assistant needs OpenCode 2 or newer, and this computer has ${version}.`
-          : 'The assistant is OpenCode, the AI agent, which isn’t on this computer yet. It installs into your home folder and keeps itself up to date.'}
+          : 'The assistant is OpenCode, the AI agent, which isn’t on this computer yet. It installs into your home folder, and Din offers its updates.'}
       </p>
       <Button size="sm" onClick={() => install.mutate()} disabled={install.isPending} className="mt-2">
         {install.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}

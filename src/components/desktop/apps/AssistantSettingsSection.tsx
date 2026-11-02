@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { Bot, CircleAlert, Folder, Loader2, Palette, RotateCw } from 'lucide-react';
+import { ArrowUpCircle, Bot, CircleAlert, Folder, Loader2, Palette, RotateCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -95,18 +95,22 @@ function ServerStatus() {
   const bridge = getAssistantBridge();
   const install = useMutation({ mutationFn: () => bridge!.install() });
   const restart = useMutation({ mutationFn: () => bridge!.restart() });
+  const upgrade = useMutation({ mutationFn: () => bridge!.upgrade() });
 
   if (!status) return <Skeleton className="h-20 w-full rounded-md" />;
 
+  const updating = status.updating || upgrade.isPending;
   const state = status.installing
     ? { label: 'Installing OpenCode…', tone: 'muted' }
-    : !status.binary
-      ? { label: status.version ? `OpenCode ${status.version} is too old` : 'OpenCode isn’t installed', tone: 'warn' }
-      : status.running
-        ? { label: status.connected ? 'Running' : 'Running, connecting…', tone: 'ok' }
-        : status.error
-          ? { label: 'Not running', tone: 'warn' }
-          : { label: 'Starting…', tone: 'muted' };
+    : updating
+      ? { label: `Updating OpenCode${status.update ? ` to ${status.update}` : ''}…`, tone: 'muted' }
+      : !status.binary
+        ? { label: status.version ? `OpenCode ${status.version} is too old` : 'OpenCode isn’t installed', tone: 'warn' }
+        : status.running
+          ? { label: status.connected ? 'Running' : 'Running, connecting…', tone: 'ok' }
+          : status.error
+            ? { label: 'Not running', tone: 'warn' }
+            : { label: 'Starting…', tone: 'muted' };
 
   const fail = (title: string) => (error: unknown) =>
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
@@ -128,10 +132,21 @@ function ServerStatus() {
             {state.label}
           </p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground" title={status.binary ?? undefined}>
-            {status.binary ? `OpenCode ${status.version ?? ''} · ${status.binary}` : 'OpenCode’s installer puts it in ~/.opencode, and it keeps itself up to date.'}
+            {status.binary ? `OpenCode ${status.version ?? ''} · ${status.binary}` : 'OpenCode’s installer puts it in ~/.opencode, and Din offers its updates.'}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
+          {status.binary && (status.update || updating) && (
+            <Button
+              size="sm"
+              disabled={updating}
+              title="Restarts OpenCode on the new version, stopping whatever the agent is doing"
+              onClick={() => upgrade.mutate(undefined, { onError: fail('Couldn’t update OpenCode') })}
+            >
+              {updating ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <ArrowUpCircle className="size-3.5" aria-hidden />}
+              {status.update ? `Update to ${status.update}` : 'Update'}
+            </Button>
+          )}
           {!status.binary || (status.error && !status.running) ? (
             <Button
               size="sm"
@@ -145,7 +160,7 @@ function ServerStatus() {
             <Button
               size="sm"
               variant="outline"
-              disabled={restart.isPending}
+              disabled={restart.isPending || updating}
               title="Stops whatever the agent is doing, in Din and in Terminals"
               onClick={() => restart.mutate(undefined, { onError: fail('Couldn’t restart OpenCode') })}
             >

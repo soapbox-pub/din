@@ -18,6 +18,10 @@ export interface AssistantStatus {
   running: boolean;
   connected: boolean;
   installing: boolean;
+  /** A newer OpenCode release than the one installed, or null. */
+  update: string | null;
+  /** OpenCode is updating to it, and its server restarting. */
+  updating: boolean;
   error: string | null;
 }
 
@@ -60,6 +64,10 @@ export interface AssistantBridge {
   setEnabled(enabled: boolean): Promise<AssistantStatus>;
   install(): Promise<void>;
   restart(): Promise<void>;
+  /** Ask OpenCode's update service now: the newer version, or null. */
+  checkUpdate(): Promise<string | null>;
+  /** Update OpenCode to its newest release, restarting its server (and stopping what the agent is doing). */
+  upgrade(): Promise<void>;
   recentModels(): Promise<{ providerID: string; modelID: string }[]>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
   /** sudo's password and approval requests from the agent's commands. */
