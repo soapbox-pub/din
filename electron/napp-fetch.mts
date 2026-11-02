@@ -107,8 +107,9 @@ export function isPublicAddress(address: string): boolean {
   const family = net.isIP(address);
   if (family === 4) return !blocked.check(address, 'ipv4');
   if (family !== 6) return false;
-  // An IPv4 address written as IPv6 (::ffff:127.0.0.1) is that IPv4 address.
-  const mapped = /^::ffff:(?:0:)?(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+  // An IPv4 address written as IPv6 (::ffff:127.0.0.1, or the old
+  // ::127.0.0.1) is that IPv4 address.
+  const mapped = /^::(?:ffff:(?:0:)?)?(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
   if (mapped) return isPublicAddress(mapped[1]);
   const hex = /^::ffff:(?:0:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(address);
   if (hex) {
@@ -117,6 +118,17 @@ export function isPublicAddress(address: string): boolean {
     return isPublicAddress(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
   }
   return !blocked.check(address, 'ipv6');
+}
+
+/**
+ * Whether a URL's host may be one the main process connects to for a site:
+ * not localhost or a .local name, nor a literal address that isn't public.
+ * Names are checked as written only; napp.fetch checks what they resolve to.
+ */
+export function isPublicHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return false;
+  return net.isIP(host) ? isPublicAddress(host) : true;
 }
 
 /** A refusal the site sees as fetch's own TypeError. */

@@ -27,6 +27,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
+import { isPublicHost } from './napp-fetch.mts';
 
 export type { NostrEvent };
 
@@ -275,7 +276,7 @@ function normalizeServers(urls: unknown[]): string[] {
       // https only: the list comes from the site author, and these fetches
       // run from the main process - a plain-http "server" would let any site
       // aim requests at the user's LAN or localhost.
-      if (url.protocol !== 'https:') continue;
+      if (url.protocol !== 'https:' || !isPublicHost(url.hostname)) continue;
       const normalized = url.toString();
       if (seen.has(normalized)) continue;
       seen.add(normalized);

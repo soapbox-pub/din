@@ -35,6 +35,7 @@
 
 import crypto from 'node:crypto';
 import { verifyEvent, type Event as NostrEvent } from 'nostr-tools/pure';
+import { isPublicHost } from './napp-fetch.mts';
 
 export const MAX_SUBSCRIPTIONS = 10;
 const MAX_FILTERS = 10;
@@ -191,6 +192,8 @@ function normalizeRelay(raw: unknown): string {
     throw new Error(`${raw} is not a relay URL`);
   }
   if (url.protocol !== 'wss:' && url.protocol !== 'ws:') throw new Error(`${raw} is not a relay URL`);
+  // Main holds the connection, so a site mustn't aim it at this computer or its network.
+  if (!isPublicHost(url.hostname)) throw new Error(`${raw} isn't on the internet`);
   if (url.username || url.password) throw new Error(`${raw} is not a relay URL`);
   url.hash = '';
   return url.href.replace(/\/+$/, '');
