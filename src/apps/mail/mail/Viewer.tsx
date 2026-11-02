@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
-import { Archive, ChevronDown, ChevronLeft, Flag, Forward, ListFilter, Loader2, Mail as MailIcon, MailOpen, OctagonAlert, PanelLeft, RefreshCw, Reply, ReplyAll, Search, SquarePen, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, Search, SquarePen, Star, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMenuBar, useWindowState, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
 import { sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
-import { useMessageActions, type MessageAction } from './actions';
+import { useMessageActions } from './actions';
 import { blankSeed, parseAddresses } from './format';
 import { rememberAddresses } from './contacts';
 import { Sidebar } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
 import { ListSkeleton, MessageList } from './MessageList';
 import { Reader } from './Reader';
+import { messageMenu, type MenuPick } from './menu';
+import { DropdownEntries } from './MenuEntries';
 import { messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
@@ -22,6 +25,14 @@ import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
 const SELECTION_KEY = 'din:mail:selection';
 const SIDEBAR_KEY = 'din:mail:sidebar';
 const WIDTHS_KEY = 'din:mail:widths';
+
+/** The narrowest window that has room for the sidebar beside the list. */
+const SIDEBAR_MIN_WIDTH = 760;
+
+/** What the toolbars have as buttons, so their ⋯ menus leave out. */
+const TOOLBAR_PICKS = new Set<MenuPick>(['archive', 'trash', 'read', 'unread', 'reply', 'reply-all', 'forward']);
+const SELECTION_PICKS = new Set<MenuPick>(['archive', 'trash', 'read', 'unread', 'flag', 'unflag']);
+const READER_PICKS = new Set<MenuPick>(['reply', 'flag', 'unflag']);
 
 function loadSelection(): Selection {
   try {
@@ -33,12 +44,12 @@ function loadSelection(): Selection {
   return { kind: 'all', special: 'inbox' };
 }
 
-function loadWidths(): { sidebar: number; list: number } {
+function loadSidebarWidth(): number {
   try {
-    const w = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? 'null') as { sidebar?: number; list?: number } | null;
-    return { sidebar: w?.sidebar ?? 220, list: w?.list ?? 360 };
+    const w = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? 'null') as { sidebar?: number } | null;
+    return w?.sidebar ?? 232;
   } catch {
-    return { sidebar: 220, list: 360 };
+    return 232;
   }
 }
 
@@ -71,24 +82,44 @@ function Splitter({ onDrag, onDone, label }: { onDrag: (dx: number) => void; onD
   );
 }
 
-function ToolButton({ label, onClick, disabled, children, active, className }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode; active?: boolean; className?: string }) {
+function ToolButton({ label, onClick, disabled, children, className, ...props }: React.ComponentProps<'button'> & { label: string }) {
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
-      aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
+      {...props}
       className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground outline-none',
-        'hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-35',
-        active && 'bg-foreground/10 text-foreground',
+        'grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none',
+        'hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-35',
         className,
       )}
     >
       {children}
     </button>
+  );
+}
+
+/** The row of buttons above an open message, or above messages chosen together. */
+function ActionBar({ children }: { children: ReactNode }) {
+  return <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-border/60 px-2">{children}</div>;
+}
+
+function MoreMenu({ entries, onPick }: { entries: ReturnType<typeof messageMenu>; onPick: (pick: MenuPick) => void }) {
+  if (!entries.length) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ToolButton label="More">
+          <MoreVertical className="size-4.5" strokeWidth={1.75} />
+        </ToolButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownEntries entries={entries} onPick={onPick} />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -113,7 +144,8 @@ export function Viewer() {
   const qc = useQueryClient();
   const accountsQuery = useAccounts();
   const accounts = useMemo<MailAccount[]>(() => accountsQuery.data ?? [], [accountsQuery.data]);
-  const { boxes, errors, fetching: boxesFetching } = useMailboxes(accounts);
+  const me = useMemo(() => new Set(accounts.map((a) => a.email.toLowerCase())), [accounts]);
+  const { boxes, errors } = useMailboxes(accounts);
   useLiveUpdates();
 
   // A window Din reopened comes back as it was left; one opened for a
@@ -128,32 +160,45 @@ export function Viewer() {
   const [filter, setFilter] = useState<MessageFilter>(restored?.filter ?? null);
   const [search, setSearch] = useState(restored?.search ?? '');
   const [query, setQuery] = useState(() => restored?.search.trim() ?? '');
-  const [chosen, setSelected] = useState<Set<string>>(() => new Set());
-  /** The message open when the window was left, until it's found in the list (or isn't). */
+  /** Messages chosen to act on together, with Ctrl- and Shift-click. */
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set());
+  /** The message open in place of the list. */
+  const [opened, setOpened] = useState<Item | null>(null);
+  /** The row the keyboard is on. */
+  const [cursor, setCursor] = useState<string | null>(null);
+  /** A message to open once the list has it: where the window was left, or a notification's. */
   const [restoring, setRestoring] = useState<string | null>(restored?.message ?? null);
   const restoreScroll = useRef(restored?.scroll ?? 0);
   const scrollTop = useRef(restored?.scroll ?? 0);
   const anchor = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
-  const [widths, setWidths] = useState(loadWidths);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [dialog, setDialog] = useState<{ kind: 'setup' } | { kind: 'settings'; accountId: string | null } | null>(null);
   const [leaving, setLeaving] = useState<Item | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
 
   const { bounds } = useWindowState();
   const width = bounds.width || window.innerWidth;
-  const narrow = width < 640;
-  const showSidebar = sidebarOpen && width >= 860;
+  const sidebarFits = width >= SIDEBAR_MIN_WIDTH;
+  const showSidebar = sidebarOpen && sidebarFits;
 
   const setSelection = useCallback((s: Selection) => {
     setSelectionState(s);
-    setSelected(new Set());
+    setChosen(new Set());
+    setOpened(null);
+    setCursor(null);
     setRestoring(null);
     restoreScroll.current = 0;
     scrollTop.current = 0;
     anchor.current = null;
     localStorage.setItem(SELECTION_KEY, JSON.stringify(s));
+  }, []);
+
+  const toggleSidebar = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    localStorage.setItem(SIDEBAR_KEY, open ? 'shown' : 'hidden');
   }, []);
 
   // A mailbox whose account went away falls back to the inboxes.
@@ -183,37 +228,39 @@ export function Viewer() {
     }
     return out;
   }, [messages.data]);
-  const total = messages.data?.pages[0]?.total ?? 0;
 
   // People in the list become address suggestions.
   useEffect(() => {
     rememberAddresses(items.slice(0, 50).flatMap((i) => i.from));
   }, [items]);
 
-  // The first message is selected when a mailbox opens, as in Apple Mail.
-  // In a window Din reopened, the message it was left on instead, once
-  // the list has it; nothing while it's being looked for.
-  const restoredFound = !!restoring && items.some((i) => i.key === restoring);
+  // The message to open, once the list has it. A few older pages are read
+  // to find it, and then it's given up on.
   const restoreMore = !!messages.hasNextPage && (messages.data?.pages.length ?? 0) < 5;
-  const restoreGone = !restoring || messages.isError || (!restoredFound && messages.isSuccess && !messages.isFetching && !restoreMore);
-  const selected = useMemo(() => {
-    if (chosen.size) return chosen;
-    if (restoring && restoredFound) return new Set([restoring]);
-    return narrow || !items.length || !restoreGone ? chosen : new Set([items[0].key]);
-  }, [chosen, narrow, items, restoring, restoredFound, restoreGone]);
-
-  // A few older pages are read to find it, and then it's given up on.
+  const restoreFound = restoring ? items.find((i) => i.key === restoring) : undefined;
+  const restoreGone = !restoring || messages.isError || (!restoreFound && messages.isSuccess && !messages.isFetching && !restoreMore);
+  if (restoring && (restoreFound || restoreGone)) {
+    setRestoring(null);
+    if (restoreFound) {
+      setOpened(restoreFound);
+      setCursor(restoreFound.key);
+    }
+  }
   const { isSuccess, isFetching, fetchNextPage } = messages;
   useEffect(() => {
-    if (restoring && !chosen.size && !restoredFound && isSuccess && !isFetching && restoreMore) void fetchNextPage();
-  }, [restoring, chosen, restoredFound, isSuccess, isFetching, restoreMore, fetchNextPage]);
-  const selectedItems = useMemo(() => items.filter((i) => selected.has(i.key)), [items, selected]);
-  const current = selectedItems.length === 1 ? selectedItems[0] : null;
+    if (restoring && !restoreFound && isSuccess && !isFetching && restoreMore) void fetchNextPage();
+  }, [restoring, restoreFound, isSuccess, isFetching, restoreMore, fetchNextPage]);
+
+  // The open message as the list has it now (its flags), or as it was opened.
+  const current = useMemo(() => (opened ? items.find((i) => i.key === opened.key) ?? opened : null), [opened, items]);
+  const selectedItems = useMemo(() => items.filter((i) => chosen.has(i.key)), [items, chosen]);
+  const cursorItem = useMemo(() => items.find((i) => i.key === cursor) ?? null, [items, cursor]);
+  /** What the menu bar and keyboard act on: the open message, else the chosen ones, else the keyboard's row. */
+  const targets = useMemo(() => (current ? [current] : selectedItems.length ? selectedItems : cursorItem ? [cursorItem] : []), [current, selectedItems, cursorItem]);
 
   // Kept for Din to reopen the window with: the mailbox, filter, search,
-  // the message the user chose (not the one opened by default, so new mail
-  // still comes first) and the list's scroll.
-  const savedMessage = chosen.size ? (chosen.size === 1 ? [...chosen][0] : null) : restoreGone ? null : restoring;
+  // the open message and the list's scroll.
+  const savedMessage = current?.key ?? (restoreGone ? null : restoring);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveWindow = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -246,14 +293,8 @@ export function Viewer() {
           ? 'All Inboxes'
           : SPECIAL_NAMES[selection.special]
         : mailboxTitle(box(selection.accountId, selection.path)) || selection.path;
-  const unseenHere = sources.reduce((n, s) => n + (box(s.accountId, s.path)?.unseen ?? 0), 0);
-  const subtitle = query
-    ? `${total.toLocaleString()} ${total === 1 ? 'result' : 'results'}`
-    : effectiveFilter === 'unread'
-      ? `${total.toLocaleString()} unread`
-      : `${total.toLocaleString()} ${total === 1 ? 'message' : 'messages'}${unseenHere ? `, ${unseenHere.toLocaleString()} unread` : ''}`;
 
-  useWindowTitle(title ? `${title}` : null);
+  useWindowTitle(current ? current.subject || 'No Subject' : title);
 
   // A message to open (a new mail notification's click, see MailHost):
   // its mailbox, and the message once the list has it.
@@ -268,21 +309,37 @@ export function Viewer() {
     [din, setSelection],
   );
 
-  // Choosing a message reads it.
+  // Messages that left the list: the open one closes, back to the list on the one after it.
   const onRemoved = useCallback(
     (keys: Set<string>) => {
-      setSelected((sel) => {
-        if (sel.size && ![...sel].some((k) => keys.has(k))) return sel;
-        const at = items.findIndex((i) => keys.has(i.key));
-        const next = items.slice(at).find((i) => !keys.has(i.key)) ?? items.slice(0, at).reverse().find((i) => !keys.has(i.key));
-        anchor.current = next?.key ?? null;
-        return next ? new Set([next.key]) : new Set();
+      const at = items.findIndex((i) => keys.has(i.key));
+      const next = items.slice(at).find((i) => !keys.has(i.key)) ?? items.slice(0, at).reverse().find((i) => !keys.has(i.key));
+      setOpened((o) => {
+        if (!o || !keys.has(o.key)) return o;
+        restoreScroll.current = scrollTop.current;
+        return null;
       });
+      setChosen((sel) => (sel.size ? new Set([...sel].filter((k) => !keys.has(k))) : sel));
+      setCursor((c) => (c && !keys.has(c) ? c : next?.key ?? null));
+      anchor.current = null;
     },
     [items],
   );
   const { run, moveTo, newMessage, compose } = useMessageActions(accounts, onRemoved);
 
+  const pickFor = useCallback(
+    (pick: MenuPick, list: Item[]) => {
+      if (!list.length) return;
+      if (typeof pick === 'object') return void moveTo(list, list[0].accountId, pick.move);
+      if (pick === 'unsubscribe') return setLeaving(list[0]);
+      // An open message marked unread goes back to the list, as it would be read again otherwise.
+      if (pick === 'unread' && current && list.some((i) => i.key === current.key)) setOpened(null);
+      void run(pick, list);
+    },
+    [moveTo, run, current],
+  );
+
+  // Opening a message reads it.
   const marked = useRef<string | null>(null);
   useEffect(() => {
     if (!current || current.seen || current.draft || marked.current === current.key) return;
@@ -292,6 +349,29 @@ export function Viewer() {
 
   const currentMessage = useMessage(current);
   const canUnsubscribe = !!current && (current.listUnsubscribe || !!currentMessage.data?.unsubscribe);
+
+  const openItem = useCallback(
+    (item: Item) => {
+      if (item.draft) return void run('open-draft', [item]);
+      marked.current = null;
+      // The list comes back where it was left.
+      restoreScroll.current = scrollTop.current;
+      setOpened(item);
+      setCursor(item.key);
+      setChosen(new Set());
+    },
+    [run],
+  );
+
+  const backToList = useCallback(() => {
+    setOpened(null);
+    requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus());
+  }, []);
+
+  // The open message takes the keyboard, for Escape to go back.
+  useEffect(() => {
+    if (opened) readerRef.current?.focus({ preventScroll: true });
+  }, [opened]);
 
   // A list's mail, from Subscriptions: its sender searched for in its inbox.
   const showListMail = useCallback(
@@ -304,65 +384,84 @@ export function Viewer() {
     [boxes, setSelection],
   );
 
-  const targetsFor = useCallback((item: Item) => (selected.has(item.key) ? selectedItems : [item]), [selected, selectedItems]);
+  const filterUnread = () => setFilter((f) => (f === 'unread' ? null : 'unread'));
+
+  const onSearch = (value: string) => {
+    if (selection.kind === 'subscriptions') setSelection({ kind: 'all', special: 'inbox' });
+    setOpened(null);
+    setSearch(value);
+  };
+
+  const targetsFor = useCallback((item: Item) => (chosen.has(item.key) ? selectedItems : [item]), [chosen, selectedItems]);
 
   const onClickRow = (e: MouseEvent, item: Item) => {
-    const from = anchor.current ?? [...selected][0];
+    const from = anchor.current ?? cursor;
     if (e.shiftKey && from) {
       const a = items.findIndex((i) => i.key === from);
       const b = items.findIndex((i) => i.key === item.key);
       const [lo, hi] = a < b ? [a, b] : [b, a];
-      setSelected(new Set(items.slice(lo, hi + 1).map((i) => i.key)));
+      setChosen(new Set(items.slice(lo, hi + 1).map((i) => i.key)));
+      setCursor(item.key);
       return;
     }
     if (e.ctrlKey || e.metaKey) {
-      const n = new Set(selected);
+      const n = new Set(chosen);
       if (n.has(item.key)) n.delete(item.key);
       else n.add(item.key);
-      setSelected(n);
+      setChosen(n);
+      setCursor(item.key);
       anchor.current = item.key;
       return;
     }
-    setSelected(new Set([item.key]));
     anchor.current = item.key;
+    openItem(item);
   };
 
   const onListKey = (e: KeyboardEvent) => {
-    const at = items.findIndex((i) => i.key === ([...selected].at(-1) ?? anchor.current));
+    const at = items.findIndex((i) => i.key === cursor);
     const go = (index: number) => {
       const target = items[Math.max(0, Math.min(items.length - 1, index))];
       if (!target) return;
-      if (e.shiftKey && anchor.current) {
-        const a = items.findIndex((i) => i.key === anchor.current);
+      if (e.shiftKey) {
+        const from = anchor.current ?? cursor ?? target.key;
+        anchor.current = from;
+        const a = items.findIndex((i) => i.key === from);
         const [lo, hi] = a < index ? [a, index] : [index, a];
-        const keys = items.slice(lo, hi + 1).map((i) => i.key);
-        // The moving end goes last, for scrolling and the next step.
-        setSelected(new Set([...keys.filter((k) => k !== target.key), target.key]));
+        setChosen(new Set(items.slice(lo, hi + 1).map((i) => i.key)));
       } else {
-        setSelected(new Set([target.key]));
         anchor.current = target.key;
       }
+      setCursor(target.key);
     };
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       go(at + 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      go(at - 1);
+      go(at < 0 ? 0 : at - 1);
     } else if (e.key === 'Home') {
       e.preventDefault();
       go(0);
     } else if (e.key === 'End') {
       e.preventDefault();
       go(items.length - 1);
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItems.length) {
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && targets.length) {
       e.preventDefault();
-      void run('trash', selectedItems);
-    } else if (e.key === 'Enter' && current?.draft) {
-      void run('open-draft', [current]);
+      void run('trash', targets);
+    } else if (e.key === 'Enter' && cursorItem) {
+      e.preventDefault();
+      openItem(cursorItem);
+    } else if (e.key === ' ' && cursorItem) {
+      e.preventDefault();
+      const n = new Set(chosen);
+      if (n.has(cursorItem.key)) n.delete(cursorItem.key);
+      else n.add(cursorItem.key);
+      setChosen(n);
+    } else if (e.key === 'Escape' && chosen.size) {
+      setChosen(new Set());
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      setSelected(new Set(items.map((i) => i.key)));
+      setChosen(new Set(items.map((i) => i.key)));
     }
   };
 
@@ -384,12 +483,10 @@ export function Viewer() {
   }, [qc]);
 
   const defaultAccount = selection.kind === 'mailbox' ? selection.accountId : current?.accountId ?? accounts[0]?.id ?? null;
-  const act = (action: MessageAction) => void run(action, selectedItems);
-  const has = selectedItems.length > 0;
-  const allFlagged = has && selectedItems.every((i) => i.flagged);
-  const allRead = has && selectedItems.every((i) => i.seen);
-  const inJunk = special === 'junk';
-  const refreshing = boxesFetching || messages.isRefetching;
+  const has = targets.length > 0;
+  const allFlagged = has && targets.every((i) => i.flagged);
+  const allRead = has && targets.every((i) => i.seen);
+  const inJunk = has && box(targets[0].accountId, targets[0].path)?.special === 'junk';
 
   const openMailto = useCallback(
     (url: string) => {
@@ -399,7 +496,7 @@ export function Viewer() {
     [compose, defaultAccount],
   );
 
-  // Without the sidebar, the list's title picks the mailbox.
+  // Without the sidebar, the menu button picks the mailbox.
   const pickMailbox = async (e: MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const favorites: MenuItem[] = (['inbox', 'flagged', 'drafts', 'sent'] as const).map((sp) => ({
@@ -441,9 +538,10 @@ export function Viewer() {
       {
         label: 'View',
         items: [
-          { id: 'sidebar', label: 'Show Sidebar', type: 'checkbox', checked: sidebarOpen, accelerator: 'Ctrl+Alt+S' },
-          { id: 'unread', label: 'Show Only Unread', type: 'checkbox', checked: filter === 'unread', accelerator: 'Ctrl+Alt+U' },
+          { id: 'sidebar', label: 'Show Sidebar', type: 'checkbox', checked: sidebarOpen, enabled: sidebarFits, accelerator: 'Ctrl+Alt+S' },
+          { id: 'unread-only', label: 'Show Only Unread', type: 'checkbox', checked: filter === 'unread', accelerator: 'Ctrl+Alt+U' },
           { type: 'separator' },
+          { id: 'back', label: 'Back to Messages', enabled: !!current },
           { id: 'search', label: 'Search', accelerator: 'Ctrl+F', notInFields: true },
         ],
       },
@@ -458,12 +556,12 @@ export function Viewer() {
       {
         label: 'Message',
         items: [
-          { id: 'reply', label: 'Reply', accelerator: 'Ctrl+R', enabled: !!current },
-          { id: 'reply-all', label: 'Reply All', accelerator: 'Ctrl+Shift+R', enabled: !!current },
-          { id: 'forward', label: 'Forward', accelerator: 'Ctrl+Shift+F', enabled: !!current },
+          { id: 'reply', label: 'Reply', accelerator: 'Ctrl+R', enabled: targets.length === 1 },
+          { id: 'reply-all', label: 'Reply All', accelerator: 'Ctrl+Shift+R', enabled: targets.length === 1 },
+          { id: 'forward', label: 'Forward', accelerator: 'Ctrl+Shift+F', enabled: targets.length === 1 },
           { type: 'separator' },
-          { id: allRead ? 'unread-msg' : 'read-msg', label: allRead ? 'Mark as Unread' : 'Mark as Read', accelerator: 'Ctrl+Shift+U', enabled: has },
-          { id: allFlagged ? 'unflag' : 'flag', label: allFlagged ? 'Unflag' : 'Flag', accelerator: 'Ctrl+Shift+L', enabled: has },
+          { id: allRead ? 'unread' : 'read', label: allRead ? 'Mark as Unread' : 'Mark as Read', accelerator: 'Ctrl+Shift+U', enabled: has },
+          { id: allFlagged ? 'unflag' : 'flag', label: allFlagged ? 'Remove Star' : 'Star', accelerator: 'Ctrl+Shift+L', enabled: has },
           { type: 'separator' },
           { id: 'archive', label: 'Archive', accelerator: 'Ctrl+Shift+A', enabled: has },
           { id: inJunk ? 'not-junk' : 'junk', label: inJunk ? 'Not Junk' : 'Move to Junk', accelerator: 'Ctrl+Shift+J', enabled: has },
@@ -479,19 +577,15 @@ export function Viewer() {
         case 'window': return void din.app.open('mail', { viewer: true });
         case 'add-account': return setDialog({ kind: 'setup' });
         case 'settings': return setDialog({ kind: 'settings', accountId: null });
-        case 'sidebar':
-          setSidebarOpen((v) => {
-            localStorage.setItem(SIDEBAR_KEY, v ? 'hidden' : 'shown');
-            return !v;
-          });
-          return;
-        case 'unread': return setFilter((f) => (f === 'unread' ? null : 'unread'));
+        case 'sidebar': return toggleSidebar(!sidebarOpen);
+        case 'unread-only': return filterUnread();
+        case 'back': return backToList();
         case 'search': return searchInput.current?.focus();
         case 'refresh': return refresh();
         case 'subscriptions': return setSelection({ kind: 'subscriptions' });
         case 'unsubscribe': return current ? setLeaving(current) : undefined;
-        case 'read-msg': return act('read');
-        case 'unread-msg': return act('unread');
+        case 'read':
+        case 'unread':
         case 'reply':
         case 'reply-all':
         case 'forward':
@@ -501,7 +595,7 @@ export function Viewer() {
         case 'junk':
         case 'not-junk':
         case 'trash':
-          return act(id);
+          return pickFor(id, targets);
       }
     },
   );
@@ -516,203 +610,204 @@ export function Viewer() {
   }
 
   const noAccounts = accountsQuery.isSuccess && accounts.length === 0;
-  const readerOnly = narrow && !!current;
 
-  const toolbar = (
-    <WindowDragRegion className="flex h-13 shrink-0 items-center gap-0.5 border-b border-border/60 pr-3 pl-2">
-      {narrow && current && (
-        <ToolButton label="Back to messages" onClick={() => setSelected(new Set())}><ChevronLeft className="size-4.5" /></ToolButton>
-      )}
-      <ToolButton label="Archive" onClick={() => act('archive')} disabled={!has}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label="Delete" onClick={() => act('trash')} disabled={!has}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label={inJunk ? 'Not Junk' : 'Move to Junk'} onClick={() => act(inJunk ? 'not-junk' : 'junk')} disabled={!has}><OctagonAlert className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <span className="mx-1.5 h-5 w-px bg-border" />
-      <ToolButton label="Reply" onClick={() => act('reply')} disabled={!current}><Reply className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label="Reply All" onClick={() => act('reply-all')} disabled={!current}><ReplyAll className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <ToolButton label="Forward" onClick={() => act('forward')} disabled={!current}><Forward className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <span className="mx-1.5 h-5 w-px bg-border" />
-      <ToolButton label={allFlagged ? 'Unflag' : 'Flag'} onClick={() => act(allFlagged ? 'unflag' : 'flag')} disabled={!has} active={allFlagged}>
-        <Flag className={cn('size-4.5', allFlagged && 'fill-orange-500 text-orange-500')} strokeWidth={1.75} />
-      </ToolButton>
-      <ToolButton label={allRead ? 'Mark as Unread' : 'Mark as Read'} onClick={() => act(allRead ? 'unread' : 'read')} disabled={!has}>
-        {allRead ? <MailIcon className="size-4.5" strokeWidth={1.75} /> : <MailOpen className="size-4.5" strokeWidth={1.75} />}
-      </ToolButton>
-      <div className="min-w-2 flex-1" />
-      <div className="relative mr-2 w-full max-w-56 min-w-28">
-        <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <input
-          ref={searchInput}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              setSearch('');
-              listRef.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus();
-            }
-          }}
-          placeholder="Search"
-          aria-label={`Search ${title}`}
-          className="h-7 w-full rounded-md bg-foreground/[0.06] pr-7 pl-7 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-        />
-        {search && (
-          <button type="button" aria-label="Clear search" onClick={() => setSearch('')} className="absolute top-1/2 right-1.5 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-muted-foreground/40 text-background">
-            <X className="size-3" />
-          </button>
+  const header = (
+    <WindowDragRegion className="flex h-14 shrink-0 items-center gap-2 pr-3 pl-2">
+      <div className="flex shrink-0 items-center gap-1" style={showSidebar && !noAccounts ? { width: sidebarWidth - 8 } : undefined}>
+        {!noAccounts && (
+          <ToolButton
+            label={sidebarFits ? (showSidebar ? 'Hide sidebar' : 'Show sidebar') : 'Mailboxes'}
+            aria-haspopup={sidebarFits ? undefined : 'menu'}
+            onClick={(e) => (sidebarFits ? toggleSidebar(!showSidebar) : void pickMailbox(e))}
+          >
+            <Menu className="size-4.5" strokeWidth={1.75} />
+          </ToolButton>
         )}
+        <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
+        {(showSidebar || noAccounts) && <span className="truncate pl-1 font-[family-name:var(--font-title)] text-lg text-foreground/90">Mail</span>}
       </div>
+      {!noAccounts && (
+        <div className="relative max-w-3xl min-w-0 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            ref={searchInput}
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                onSearch('');
+                listRef.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus();
+              } else if (e.key === 'Enter') {
+                setQuery(search.trim());
+              }
+            }}
+            placeholder={selection.kind === 'all' && selection.special === 'inbox' ? 'Search mail' : `Search ${title}`}
+            aria-label={`Search ${title}`}
+            className="h-10 w-full rounded-full bg-foreground/[0.06] pr-10 pl-10 text-sm outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border"
+          />
+          {search && (
+            <button type="button" aria-label="Clear search" onClick={() => onSearch('')} className="absolute top-1/2 right-2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground">
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+      )}
+      <div className="min-w-2 flex-1" />
+      {!showSidebar && !noAccounts && (
+        <ToolButton label="New message" onClick={() => newMessage(defaultAccount)}>
+          <SquarePen className="size-4.5" strokeWidth={1.75} />
+        </ToolButton>
+      )}
       <WindowControls />
     </WindowDragRegion>
   );
 
-  return (
-    <div className="relative flex h-full text-foreground">
-      {showSidebar && !noAccounts && (
-        <>
-          <aside className="flex shrink-0 flex-col border-r border-border/60 bg-background/30" style={{ width: widths.sidebar }}>
-            <WindowDragRegion className="flex h-13 shrink-0 items-center gap-0.5 pr-2 pl-3">
-              <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="mr-1.5 size-4 shrink-0 object-contain" />
-              <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
-                Mail
-              </span>
-              <ToolButton label={refreshing ? 'Getting new mail' : 'Get new mail'} onClick={refresh}>
-                <RefreshCw className={cn('size-4', refreshing && 'animate-spin motion-reduce:animate-none')} strokeWidth={1.75} />
-              </ToolButton>
-              <ToolButton label="Hide sidebar" onClick={() => { setSidebarOpen(false); localStorage.setItem(SIDEBAR_KEY, 'hidden'); }}>
-                <PanelLeft className="size-4" strokeWidth={1.75} />
-              </ToolButton>
-            </WindowDragRegion>
-            <Sidebar
-              accounts={accounts}
-              boxes={boxes}
-              errors={errors}
-              selection={selection}
-              onSelect={setSelection}
-              onDropMessages={onDropMessages}
-              onRefresh={refresh}
-              onAccountSettings={(accountId) => setDialog({ kind: 'settings', accountId })}
-              onAddAccount={() => setDialog({ kind: 'setup' })}
-            />
-          </aside>
-          <Splitter
-            label="Resize sidebar"
-            onDrag={(dx) => setWidths((w) => ({ ...w, sidebar: Math.min(360, Math.max(170, w.sidebar + dx)) }))}
-            onDone={() => setWidths((w) => (localStorage.setItem(WIDTHS_KEY, JSON.stringify(w)), w))}
-          />
-        </>
-      )}
+  const first = targets[0];
+  const boxesOf = (accountId: string) => boxes.get(accountId) ?? [];
 
-      {noAccounts ? (
-        <div className="flex min-w-0 flex-1 flex-col bg-background">
-          <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end px-3"><WindowControls /></WindowDragRegion>
-          <Welcome onAdd={() => setDialog({ kind: 'setup' })} />
+  const readerBar = current && (
+    <ActionBar>
+      <ToolButton label="Back to messages" onClick={backToList}><ArrowLeft className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <span className="mx-1 h-5 w-px bg-border" />
+      <ToolButton label="Archive" onClick={() => pickFor('archive', [current])}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label="Delete" onClick={() => pickFor('trash', [current])}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <MoreMenu entries={messageMenu([current], boxesOf(current.accountId), TOOLBAR_PICKS)} onPick={(pick) => pickFor(pick, [current])} />
+    </ActionBar>
+  );
+
+  const selectionBar = !current && selectedItems.length > 0 && first && (
+    <ActionBar>
+      <ToolButton label="Clear selection" onClick={() => setChosen(new Set())}><X className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <span className="mr-2 text-sm font-medium tabular-nums">{selectedItems.length.toLocaleString()} selected</span>
+      <ToolButton label="Archive" onClick={() => pickFor('archive', selectedItems)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label="Delete" onClick={() => pickFor('trash', selectedItems)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      <ToolButton label={allRead ? 'Mark as unread' : 'Mark as read'} onClick={() => pickFor(allRead ? 'unread' : 'read', selectedItems)}>
+        {allRead ? <MailIcon className="size-4.5" strokeWidth={1.75} /> : <MailOpen className="size-4.5" strokeWidth={1.75} />}
+      </ToolButton>
+      <ToolButton label={allFlagged ? 'Remove star' : 'Star'} onClick={() => pickFor(allFlagged ? 'unflag' : 'flag', selectedItems)}>
+        <Star className={cn('size-4.5', allFlagged && 'fill-amber-400 text-amber-500')} strokeWidth={1.75} />
+      </ToolButton>
+      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), SELECTION_PICKS)} onPick={(pick) => pickFor(pick, selectedItems)} />
+    </ActionBar>
+  );
+
+  const list = (
+    <section ref={listRef} aria-label={title} className="flex min-h-0 flex-1 flex-col">
+      {selectionBar}
+      {filter === 'unread' && !current && (
+        <div className="flex shrink-0 items-center gap-2 px-4 pt-2 pb-1">
+          <button type="button" onClick={filterUnread} className="flex h-7 items-center gap-1.5 rounded-full bg-primary/12 pr-2 pl-3 text-xs font-medium outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60">
+            Unread only <X className="size-3.5" aria-label="Show all" />
+          </button>
         </div>
-      ) : selection.kind === 'subscriptions' ? (
-        <Subscriptions
-          accounts={accounts}
-          onShowMail={showListMail}
-          leading={
-            showSidebar ? undefined : (
-              <>
-                <ToolButton label="Show sidebar" onClick={() => { setSidebarOpen(true); localStorage.setItem(SIDEBAR_KEY, 'shown'); }} disabled={width < 860}>
-                  <PanelLeft className="size-4" strokeWidth={1.75} />
-                </ToolButton>
-                <ToolButton label="Back to Inbox" onClick={() => setSelection({ kind: 'all', special: 'inbox' })}>
-                  <ChevronLeft className="size-4" strokeWidth={1.75} />
-                </ToolButton>
-              </>
-            )
-          }
-        />
-      ) : (
-        <>
-          {!readerOnly && (
-            <section
-              ref={listRef}
-              aria-label={title}
-              className={cn('flex min-w-0 shrink-0 flex-col border-r border-border/60 bg-background', narrow && 'flex-1')}
-              style={narrow ? undefined : { width: widths.list }}
-            >
-              <WindowDragRegion className="flex h-13 shrink-0 items-center gap-1 border-b border-border/60 pr-2 pl-3">
-                {!showSidebar && (
-                  <ToolButton label="Show sidebar" onClick={() => { setSidebarOpen(true); localStorage.setItem(SIDEBAR_KEY, 'shown'); }} disabled={width < 860}>
-                    <PanelLeft className="size-4" strokeWidth={1.75} />
-                  </ToolButton>
-                )}
-                <div className="min-w-0 flex-1 pl-1 leading-tight">
-                  {showSidebar ? (
-                    <h1 className="truncate text-[15px] font-bold">{title}</h1>
-                  ) : (
-                    <button type="button" onClick={(e) => void pickMailbox(e)} className="flex max-w-full items-center gap-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60" aria-haspopup="menu">
-                      <h1 className="truncate text-[15px] font-bold">{title}</h1>
-                      <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-                    </button>
-                  )}
-                  <p className="truncate text-[11px] text-muted-foreground">{messages.isPending && sources.length ? 'Checking for mail…' : subtitle}</p>
-                </div>
-                <ToolButton label={filter === 'unread' ? 'Show all messages' : 'Show only unread'} active={filter === 'unread'} onClick={() => setFilter((f) => (f === 'unread' ? null : 'unread'))}>
-                  <ListFilter className={cn('size-4', filter === 'unread' && 'text-primary')} strokeWidth={1.75} />
-                </ToolButton>
-                <ToolButton label="New message" onClick={() => newMessage(defaultAccount)}>
-                  <SquarePen className="size-4" strokeWidth={1.75} />
-                </ToolButton>
-                {narrow && <WindowControls />}
-              </WindowDragRegion>
-              {messages.isPending && sources.length > 0 ? (
-                <ListSkeleton />
-              ) : messages.isError ? (
-                <div className="p-6 text-center text-[13px] text-muted-foreground">
-                  <p>{messages.error instanceof Error ? messages.error.message : 'Mail couldn’t load this mailbox.'}</p>
-                  <button type="button" onClick={() => void messages.refetch()} className="mt-3 text-primary hover:underline">Try Again</button>
-                </div>
-              ) : !items.length ? (
-                <div className="grid flex-1 place-items-center p-6 text-center text-[13px] text-muted-foreground">
-                  {sources.length === 0 && boxes.size < accounts.length ? <Loader2 className="size-5 animate-spin motion-reduce:animate-none" /> : query ? 'No Results' : effectiveFilter ? `No ${effectiveFilter === 'unread' ? 'Unread' : 'Flagged'} Messages` : 'No Messages'}
-                </div>
-              ) : (
-                <MessageList
-                  items={items}
-                  selected={selected}
-                  recipients={recipients}
-                  boxesFor={(id) => boxes.get(id) ?? []}
-                  hasMore={!!messages.hasNextPage}
-                  loadingMore={messages.isFetchingNextPage}
-                  onLoadMore={() => {
-                    if (!messages.isFetchingNextPage) void messages.fetchNextPage();
-                  }}
-                  onClickRow={onClickRow}
-                  onOpenRow={(item) => (item.draft ? void run('open-draft', [item]) : undefined)}
-                  onKeyDown={onListKey}
-                  onAction={(action, item) => void run(action, targetsFor(item))}
-                  onMove={(item, path) => void moveTo(targetsFor(item), item.accountId, path)}
-                  onUnsubscribe={setLeaving}
-                  targetsFor={targetsFor}
-                  restoreScroll={() => {
-                    const top = restoreScroll.current;
-                    restoreScroll.current = 0;
-                    return top;
-                  }}
-                  onScroll={onListScroll}
-                />
-              )}
-            </section>
-          )}
-          {!narrow && (
-            <Splitter
-              label="Resize message list"
-              onDrag={(dx) => setWidths((w) => ({ ...w, list: Math.min(600, Math.max(260, w.list + dx)) }))}
-              onDone={() => setWidths((w) => (localStorage.setItem(WIDTHS_KEY, JSON.stringify(w)), w))}
-            />
-          )}
-          {(!narrow || readerOnly) && (
-            <main className="flex min-w-0 flex-1 flex-col bg-background">
-              {toolbar}
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <Reader item={current} count={selectedItems.length} onMailto={openMailto} onEditDraft={(item) => void run('open-draft', [item])} onUnsubscribe={setLeaving} />
-              </div>
-            </main>
-          )}
-        </>
       )}
+      {messages.isPending && sources.length > 0 ? (
+        <ListSkeleton />
+      ) : messages.isError ? (
+        <div className="p-6 text-center text-[13px] text-muted-foreground">
+          <p>{messages.error instanceof Error ? messages.error.message : 'Mail couldn’t load this mailbox.'}</p>
+          <button type="button" onClick={() => void messages.refetch()} className="mt-3 text-primary hover:underline">Try Again</button>
+        </div>
+      ) : !items.length ? (
+        <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
+          {sources.length === 0 && boxes.size < accounts.length ? <ListSkeleton /> : query ? 'No messages matched your search.' : effectiveFilter ? `No ${effectiveFilter === 'unread' ? 'unread' : 'starred'} messages.` : 'Nothing here.'}
+        </div>
+      ) : (
+        <MessageList
+          items={items}
+          selected={chosen}
+          cursor={cursor}
+          recipients={recipients}
+          boxesFor={boxesOf}
+          hasMore={!!messages.hasNextPage}
+          loadingMore={messages.isFetchingNextPage}
+          onLoadMore={() => {
+            if (!messages.isFetchingNextPage) void messages.fetchNextPage();
+          }}
+          onClickRow={onClickRow}
+          onKeyDown={onListKey}
+          onPick={(pick, item) => pickFor(pick, targetsFor(item))}
+          targetsFor={targetsFor}
+          restoreScroll={() => {
+            const top = restoreScroll.current;
+            restoreScroll.current = 0;
+            return top;
+          }}
+          onScroll={onListScroll}
+        />
+      )}
+    </section>
+  );
+
+  return (
+    <div className="relative flex h-full flex-col text-foreground">
+      {header}
+      <div className="flex min-h-0 flex-1">
+        {showSidebar && !noAccounts && (
+          <>
+            <aside className="flex shrink-0 flex-col" style={{ width: sidebarWidth }}>
+              <div className="shrink-0 px-2 pt-1 pb-3">
+                <button
+                  type="button"
+                  onClick={() => newMessage(defaultAccount)}
+                  className="flex h-12 items-center gap-3 rounded-2xl bg-primary/15 pr-6 pl-4 text-sm font-medium outline-none hover:bg-primary/20 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  <SquarePen className="size-4.5" strokeWidth={1.75} /> Compose
+                </button>
+              </div>
+              <Sidebar
+                accounts={accounts}
+                boxes={boxes}
+                errors={errors}
+                selection={selection}
+                onSelect={setSelection}
+                onDropMessages={onDropMessages}
+                onRefresh={refresh}
+                onAccountSettings={(accountId) => setDialog({ kind: 'settings', accountId })}
+                onAddAccount={() => setDialog({ kind: 'setup' })}
+              />
+            </aside>
+            <Splitter
+              label="Resize sidebar"
+              onDrag={(dx) => setSidebarWidth((w) => Math.min(360, Math.max(180, w + dx)))}
+              onDone={() => setSidebarWidth((w) => (localStorage.setItem(WIDTHS_KEY, JSON.stringify({ sidebar: w })), w))}
+            />
+          </>
+        )}
+
+        <main className={cn('flex min-w-0 flex-1 flex-col overflow-hidden bg-background', showSidebar && !noAccounts && 'mr-2 mb-2 rounded-2xl', !showSidebar && 'border-t border-border/60')}>
+          {noAccounts ? (
+            <Welcome onAdd={() => setDialog({ kind: 'setup' })} />
+          ) : selection.kind === 'subscriptions' ? (
+            <Subscriptions accounts={accounts} onShowMail={showListMail} />
+          ) : current ? (
+            <>
+              {readerBar}
+              <div
+                ref={readerRef}
+                tabIndex={-1}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && !e.defaultPrevented) backToList();
+                }}
+                className="min-h-0 flex-1 overflow-y-auto outline-none"
+              >
+                <Reader
+                  key={current.key}
+                  item={current}
+                  me={me}
+                  menu={messageMenu([current], boxesOf(current.accountId), READER_PICKS)}
+                  onPick={(pick) => pickFor(pick, [current])}
+                  onMailto={openMailto}
+                  onUnsubscribe={setLeaving}
+                />
+              </div>
+            </>
+          ) : (
+            list
+          )}
+        </main>
+      </div>
 
       {dialog?.kind === 'setup' && (
         <AccountSetup
@@ -732,4 +827,3 @@ export function Viewer() {
     </div>
   );
 }
-

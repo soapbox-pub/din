@@ -1,30 +1,45 @@
-import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent } from 'react';
-import { Archive, Flag, FlagOff, Folder, Forward, Mail, MailMinus, MailOpen, OctagonAlert, Paperclip, Reply, ReplyAll, Trash2, Inbox, Pencil } from 'lucide-react';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { Archive, Mail, MailOpen, Paperclip, Star, Trash2 } from 'lucide-react';
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import type { MailboxInfo } from '@/lib/mail';
 import type { Item } from './api';
-import type { MessageAction } from './actions';
 import { addressLine, displayName, listDate } from './format';
-import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS } from './mailboxes';
+import { MAIL_DRAG } from './mailboxes';
+import { messageMenu, type MenuPick } from './menu';
+import { ContextEntries } from './MenuEntries';
+
+function RowButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground"
+    >
+      {children}
+    </button>
+  );
+}
 
 const MessageRow = ({
   item,
   selected,
+  cursor,
   recipients,
+  onPick,
   className,
   ...props
-}: ComponentProps<'div'> & { item: Item; selected: boolean; recipients: boolean }) => {
-  const who = recipients ? addressLine(item.to) || 'No Recipients' : displayName(item.from[0]) || 'Unknown Sender';
+}: ComponentProps<'div'> & { item: Item; selected: boolean; cursor: boolean; recipients: boolean; onPick: (pick: MenuPick) => void }) => {
+  const who = item.draft && !recipients ? 'Draft' : recipients ? addressLine(item.to) || 'No Recipients' : displayName(item.from[0]) || 'Unknown Sender';
+  const unread = !item.seen;
+  const date = listDate(item.date);
   return (
     <div
       role="option"
@@ -32,48 +47,49 @@ const MessageRow = ({
       id={`msg-${item.key}`}
       {...props}
       className={cn(
-        'relative mx-2 flex cursor-default gap-1 rounded-lg py-2.5 pr-3 select-none [content-visibility:auto] [contain-intrinsic-size:auto_84px]',
-        selected ? 'bg-foreground/10' : 'hover:bg-foreground/5',
+        'group relative flex cursor-default items-center gap-1 border-b border-border/50 py-1.5 pr-3 pl-1.5 text-[13px] select-none @2xl:h-10 @2xl:py-0',
+        '[content-visibility:auto] [contain-intrinsic-size:auto_56px] @2xl:[contain-intrinsic-size:auto_40px]',
+        selected ? 'bg-primary/12' : unread ? 'bg-background hover:bg-foreground/[0.04]' : 'bg-foreground/[0.025] hover:bg-foreground/[0.06]',
+        cursor && 'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary',
         className,
       )}
     >
-      <div className="flex w-5 shrink-0 justify-center pt-1.5">
-        {!item.seen && <span aria-label="Unread" className={'size-2.5 rounded-full bg-primary'} />}
-        {item.seen && item.answered && <Reply aria-label="Replied" className={'size-3.5 text-muted-foreground'} />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className={cn('min-w-0 flex-1 truncate text-[13px]', item.seen ? 'font-medium' : 'font-semibold')}>{item.draft && !recipients ? 'Draft' : who}</span>
-          <span className={'shrink-0 text-xs text-muted-foreground tabular-nums'}>{listDate(item.date)}</span>
+      <RowButton label={item.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(item.flagged ? 'unflag' : 'flag')}>
+        <Star className={cn('size-4', item.flagged ? 'fill-amber-400 text-amber-500' : 'opacity-60 group-hover:opacity-100')} strokeWidth={1.75} />
+      </RowButton>
+      <div className="min-w-0 flex-1 pl-1 @2xl:flex @2xl:items-center @2xl:gap-4">
+        <div className="flex items-baseline gap-2 @2xl:w-52 @2xl:shrink-0">
+          <span className={cn('min-w-0 flex-1 truncate', unread ? 'font-semibold' : 'text-foreground/85')}>{who}</span>
+          <span className={cn('shrink-0 text-xs tabular-nums @2xl:hidden', unread ? 'font-semibold' : 'text-muted-foreground')}>{date}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-[13px]">{item.subject || 'No Subject'}</span>
-          {item.hasAttachments && <Paperclip aria-label="Has attachments" className={'size-3.5 shrink-0 text-muted-foreground'} />}
-          {item.flagged && <Flag aria-label="Flagged" className={'size-3.5 shrink-0 fill-orange-500 text-orange-500'} />}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate">
+            <span className={unread ? 'font-semibold' : 'text-foreground/85'}>{item.subject || 'No Subject'}</span>
+            {item.preview && <span className="text-muted-foreground"> — {item.preview}</span>}
+          </span>
+          {item.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
         </div>
-        <p className={'mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted-foreground'}>
-          {item.preview ?? '\u00a0'}
-        </p>
       </div>
-      {!selected && <div aria-hidden className="absolute right-0 bottom-0 left-7 h-px bg-border/70" />}
+      <span className={cn('hidden w-20 shrink-0 text-right text-xs tabular-nums @2xl:block @2xl:group-hover:hidden', unread ? 'font-semibold' : 'text-muted-foreground')}>{date}</span>
+      <div className="hidden shrink-0 items-center group-hover:flex">
+        <RowButton label="Archive" onClick={() => onPick('archive')}><Archive className="size-4" strokeWidth={1.75} /></RowButton>
+        <RowButton label="Delete" onClick={() => onPick('trash')}><Trash2 className="size-4" strokeWidth={1.75} /></RowButton>
+        <RowButton label={unread ? 'Mark as read' : 'Mark as unread'} onClick={() => onPick(unread ? 'read' : 'unread')}>
+          {unread ? <MailOpen className="size-4" strokeWidth={1.75} /> : <Mail className="size-4" strokeWidth={1.75} />}
+        </RowButton>
+      </div>
     </div>
   );
 };
 
 export function ListSkeleton() {
   return (
-    <div className="space-y-1 px-2 pt-1" aria-busy="true" aria-label="Loading messages">
-      {Array.from({ length: 8 }, (_, i) => (
-        <div key={i} className="flex gap-1 py-2.5 pr-3">
-          <div className="w-5" />
-          <div className="flex-1 space-y-2">
-            <div className="flex justify-between gap-4">
-              <div className="h-3.5 w-2/5 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
-              <div className="h-3 w-12 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
-            </div>
-            <div className="h-3.5 w-3/4 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
-            <div className="h-3 w-full animate-pulse rounded bg-foreground/[0.07] motion-reduce:animate-none" />
-          </div>
+    <div className="pt-1" aria-busy="true" aria-label="Loading messages">
+      {Array.from({ length: 10 }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 border-b border-border/50 py-3 pr-3 pl-10">
+          <div className="h-3.5 w-40 shrink-0 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
+          <div className="h-3.5 flex-1 animate-pulse rounded bg-foreground/[0.07] motion-reduce:animate-none" />
+          <div className="h-3 w-12 shrink-0 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
         </div>
       ))}
     </div>
@@ -83,23 +99,24 @@ export function ListSkeleton() {
 export function MessageList({
   items,
   selected,
+  cursor,
   recipients,
   boxesFor,
   hasMore,
   loadingMore,
   onLoadMore,
   onClickRow,
-  onOpenRow,
   onKeyDown,
-  onAction,
-  onMove,
-  onUnsubscribe,
+  onPick,
   targetsFor,
   restoreScroll,
   onScroll,
 }: {
   items: Item[];
+  /** The messages chosen to act on together (Ctrl- and Shift-click). */
   selected: Set<string>;
+  /** The row the keyboard is on. */
+  cursor: string | null;
   /** Sent and Drafts list who mail went to, not who it's from. */
   recipients: boolean;
   boxesFor: (accountId: string) => MailboxInfo[];
@@ -107,12 +124,9 @@ export function MessageList({
   loadingMore: boolean;
   onLoadMore: () => void;
   onClickRow: (e: MouseEvent, item: Item) => void;
-  onOpenRow: (item: Item) => void;
   onKeyDown: (e: KeyboardEvent) => void;
-  onAction: (action: MessageAction, item: Item) => void;
-  onMove: (item: Item, path: string) => void;
-  /** Leave the list a message came from. */
-  onUnsubscribe: (item: Item) => void;
+  /** Something picked on a row: its menu, its star, or its hover buttons. */
+  onPick: (pick: MenuPick, item: Item) => void;
   /** The messages a menu on this row acts on: the selection if the row is in it. */
   targetsFor: (item: Item) => Item[];
   /** Where to scroll to on showing, once: where a window Din reopened was left. */
@@ -143,12 +157,11 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep the selected row in view as the keyboard moves it.
-  const lastSelected = [...selected].at(-1);
+  // Keep the keyboard's row in view as it moves.
   useEffect(() => {
-    if (!lastSelected) return;
-    document.getElementById(`msg-${lastSelected}`)?.scrollIntoView({ block: 'nearest' });
-  }, [lastSelected]);
+    if (!cursor) return;
+    document.getElementById(`msg-${cursor}`)?.scrollIntoView({ block: 'nearest' });
+  }, [cursor]);
 
   return (
     <div
@@ -156,106 +169,34 @@ export function MessageList({
       role="listbox"
       aria-label="Messages"
       aria-multiselectable="true"
-      aria-activedescendant={lastSelected ? `msg-${lastSelected}` : undefined}
+      aria-activedescendant={cursor ? `msg-${cursor}` : undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={onScroll ? (e) => onScroll(e.currentTarget.scrollTop) : undefined}
-      className="min-h-0 flex-1 overflow-y-auto pt-1 pb-2 outline-none"
+      className="@container min-h-0 flex-1 overflow-y-auto pb-2 outline-none"
     >
-      {items.map((item) => {
-        const targets = targetsFor(item);
-        const many = targets.length > 1;
-        const allRead = targets.every((t) => t.seen);
-        const allFlagged = targets.every((t) => t.flagged);
-        const inJunk = boxesFor(item.accountId).find((b) => b.path === item.path)?.special === 'junk';
-        const moveTargets = boxesFor(item.accountId).filter((b) => b.selectable && b.path !== item.path);
-        return (
-          <ContextMenu key={item.key}>
-            <ContextMenuTrigger asChild>
-              <MessageRow
-                item={item}
-                recipients={recipients}
-                selected={selected.has(item.key)}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(MAIL_DRAG, JSON.stringify(targets.map((t) => t.key)));
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onClick={(e) => onClickRow(e, item)}
-                onDoubleClick={() => onOpenRow(item)}
-              />
-            </ContextMenuTrigger>
-            <ContextMenuContent className="w-56">
-              {item.draft && !many && (
-                <>
-                  <ContextMenuItem onSelect={() => onAction('open-draft', item)}>
-                    <Pencil /> Open Draft
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                </>
-              )}
-              <ContextMenuItem disabled={many} onSelect={() => onAction('reply', item)}>
-                <Reply /> Reply
-              </ContextMenuItem>
-              <ContextMenuItem disabled={many} onSelect={() => onAction('reply-all', item)}>
-                <ReplyAll /> Reply All
-              </ContextMenuItem>
-              <ContextMenuItem disabled={many} onSelect={() => onAction('forward', item)}>
-                <Forward /> Forward
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => onAction(allRead ? 'unread' : 'read', item)}>
-                {allRead ? <Mail /> : <MailOpen />} {allRead ? 'Mark as Unread' : 'Mark as Read'}
-              </ContextMenuItem>
-              <ContextMenuItem onSelect={() => onAction(allFlagged ? 'unflag' : 'flag', item)}>
-                {allFlagged ? <FlagOff /> : <Flag />} {allFlagged ? 'Unflag' : 'Flag'}
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => onAction('archive', item)}>
-                <Archive /> Archive
-              </ContextMenuItem>
-              {inJunk ? (
-                <ContextMenuItem onSelect={() => onAction('not-junk', item)}>
-                  <Inbox /> Not Junk
-                </ContextMenuItem>
-              ) : (
-                <ContextMenuItem onSelect={() => onAction('junk', item)}>
-                  <OctagonAlert /> Move to Junk
-                </ContextMenuItem>
-              )}
-              {moveTargets.length > 0 && (
-                <ContextMenuSub>
-                  <ContextMenuSubTrigger className="gap-2">
-                    <Folder /> Move to
-                  </ContextMenuSubTrigger>
-                  <ContextMenuSubContent className="max-h-80 overflow-y-auto">
-                    {moveTargets.map((b) => {
-                      const Icon = b.special ? SPECIAL_ICONS[b.special] : Folder;
-                      return (
-                        <ContextMenuItem key={b.path} onSelect={() => onMove(item, b.path)}>
-                          <Icon /> {mailboxTitle(b)}
-                        </ContextMenuItem>
-                      );
-                    })}
-                  </ContextMenuSubContent>
-                </ContextMenuSub>
-              )}
-              {item.listUnsubscribe && !many && (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => onUnsubscribe(item)}>
-                    <MailMinus /> Unsubscribe…
-                  </ContextMenuItem>
-                </>
-              )}
-              <ContextMenuSeparator />
-              <ContextMenuItem variant="destructive" onSelect={() => onAction('trash', item)}>
-                <Trash2 /> Delete
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        );
-      })}
+      {items.map((item) => (
+        <ContextMenu key={item.key}>
+          <ContextMenuTrigger asChild>
+            <MessageRow
+              item={item}
+              recipients={recipients}
+              selected={selected.has(item.key)}
+              cursor={cursor === item.key}
+              onPick={(pick) => onPick(pick, item)}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(MAIL_DRAG, JSON.stringify(targetsFor(item).map((t) => t.key)));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              onClick={(e) => onClickRow(e, item)}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-56">
+            <RowMenu item={item} targets={targetsFor(item)} boxes={boxesFor(item.accountId)} onPick={onPick} />
+          </ContextMenuContent>
+        </ContextMenu>
+      ))}
       {hasMore && (
         <div ref={sentinel} className="flex h-12 items-center justify-center text-xs text-muted-foreground">
           {loadingMore ? 'Loading…' : ''}
@@ -263,4 +204,9 @@ export function MessageList({
       )}
     </div>
   );
+}
+
+/** Built only when the menu opens, not for every row of the list. */
+function RowMenu({ item, targets, boxes, onPick }: { item: Item; targets: Item[]; boxes: MailboxInfo[]; onPick: (pick: MenuPick, item: Item) => void }) {
+  return <ContextEntries entries={messageMenu(targets, boxes)} onPick={(pick) => onPick(pick, item)} />;
 }

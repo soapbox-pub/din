@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import type { MailAccount, MailboxInfo, SpecialMailbox } from '@/lib/mail';
 import { sameSelection, type Selection } from './api';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS, SPECIAL_NAMES } from './mailboxes';
+import { shortCount } from './format';
 
 /** Special mailboxes first, in a fixed order. */
 const ORDER: SpecialMailbox[] = ['inbox', 'drafts', 'sent', 'junk', 'trash', 'archive', 'all', 'flagged'];
@@ -75,9 +76,9 @@ const Row = ({
       )}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
-      <Icon className={cn('size-4 shrink-0', tone === 'flag' ? 'text-orange-500' : 'text-primary')} strokeWidth={1.75} />
+      <Icon className={cn('size-4 shrink-0', tone === 'flag' ? 'text-amber-500' : 'text-primary')} strokeWidth={1.75} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count ? <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{count.toLocaleString()}</span> : null}
+      {count ? <span className={cn('shrink-0 text-xs tabular-nums', selected ? 'font-semibold' : 'text-muted-foreground')} title={count.toLocaleString()}>{shortCount(count)}</span> : null}
     </button>
   );
 };

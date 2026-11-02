@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DialogButton, Overlay } from '@/shared/dialogs';
-import { useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { UNSUBSCRIBE_METHODS, type MailAccount, type MailSubscription, type UnsubscribeMethod, type UnsubscribeResult } from '@/lib/mail';
 import { useMail, useMessage, useSubscriptions, type Item } from './api';
@@ -176,7 +176,7 @@ function ListSkeleton() {
  * Subscriptions: every mailing list in the inboxes, most mail first, to
  * leave many at once (and clear out their mail).
  */
-export function Subscriptions({ accounts, leading, onShowMail }: { accounts: MailAccount[]; leading?: ReactNode; onShowMail: (s: MailSubscription) => void }) {
+export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[]; onShowMail: (s: MailSubscription) => void }) {
   const din = useDin();
   const mail = useMail();
   const qc = useQueryClient();
@@ -288,8 +288,7 @@ export function Subscriptions({ accounts, leading, onShowMail }: { accounts: Mai
 
   return (
     <section aria-label="Subscriptions" className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <WindowDragRegion className="flex h-13 shrink-0 items-center gap-1 border-b border-border/60 pr-3 pl-3">
-        {leading}
+      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 pr-3 pl-4">
         <div className="min-w-0 flex-1 pl-1 leading-tight">
           <h1 className="truncate text-[15px] font-bold">Subscriptions</h1>
           <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
@@ -316,8 +315,7 @@ export function Subscriptions({ accounts, leading, onShowMail }: { accounts: Mai
         >
           <RefreshCw className={cn('size-4', fetching && 'animate-spin motion-reduce:animate-none')} strokeWidth={1.75} />
         </button>
-        <WindowControls />
-      </WindowDragRegion>
+      </div>
 
       {[...errors].map(([id, error]) => (
         <div key={id} role="alert" className="flex items-center gap-2 border-b border-border/60 bg-destructive/5 px-5 py-2 text-[13px]">

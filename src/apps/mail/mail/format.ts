@@ -20,6 +20,13 @@ export function listDate(ms: number, now = new Date()): string {
   return short.format(d);
 }
 
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+
+/** A count kept short: 14k, not 14,123. */
+export function shortCount(n: number): string {
+  return compact.format(n).toLowerCase();
+}
+
 export function fullDate(ms: number): string {
   return ms ? long.format(new Date(ms)) : '';
 }

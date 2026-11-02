@@ -1,4 +1,4 @@
-import { Archive, FileText, Flag, Inbox, Mails, OctagonAlert, Send, Trash2 } from 'lucide-react';
+import { Archive, FileText, Inbox, Mails, OctagonAlert, Send, Star, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { MailboxInfo, SpecialMailbox } from '@/lib/mail';
 
@@ -13,7 +13,7 @@ export const SPECIAL_ICONS: Record<SpecialMailbox, LucideIcon> = {
   junk: OctagonAlert,
   archive: Archive,
   all: Mails,
-  flagged: Flag,
+  flagged: Star,
 };
 
 export const SPECIAL_NAMES: Record<SpecialMailbox, string> = {
@@ -24,7 +24,7 @@ export const SPECIAL_NAMES: Record<SpecialMailbox, string> = {
   junk: 'Junk',
   archive: 'Archive',
   all: 'All Mail',
-  flagged: 'Flagged',
+  flagged: 'Starred',
 };
 
 /** How a mailbox reads in Mail: special mailboxes by their usual names. */
