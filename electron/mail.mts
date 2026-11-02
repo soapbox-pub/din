@@ -15,7 +15,8 @@
 // Sending is nodemailer over the account's SMTP server, with a copy
 // appended to Sent (except where the server keeps one itself: Gmail,
 // Outlook). Messages are parsed with mailparser, which also turns cid:
-// pictures into data: URLs; the app sanitizes and sandboxes the HTML.
+// pictures into data: URLs; the app sanitizes and sandboxes the HTML. A big
+// message opens without its big attachments, which are fetched when asked for.
 //
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
@@ -63,6 +64,10 @@ const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const PAGE = 50;
 const PREVIEW_BYTES = 2048;
 const PREVIEW_CHARS = 240;
+/** Bigger messages are opened without their big attachments' bodies, fetched when saved. */
+const SKIM_BYTES = 512 * 1024;
+const SMALL_PART_BYTES = 64 * 1024;
+const INLINE_PART_BYTES = 5 * 1024 * 1024;
 
 let deps: Deps;
 let accounts: StoredAccount[] = [];
@@ -407,12 +412,18 @@ setInterval(() => {
   for (const [id, s] of sessions) if (Date.now() - s.lastUse > IDLE_CLOSE_MS) closeSession(id);
 }, 60_000).unref();
 
-/** Run with a mailbox selected (imapflow queues other callers behind the lock). */
-async function inMailbox<T>(a: StoredAccount, mailbox: string, fn: (client: ImapFlow) => Promise<T>, readOnly = false): Promise<T> {
+/**
+ * Run with a mailbox selected (imapflow queues other callers behind the
+ * lock). Always read-write, even to read: imapflow reopens a mailbox to
+ * switch between EXAMINE and SELECT, which on a big one is slow, and
+ * opening an unread message marks it read right away. Reads fetch with
+ * BODY.PEEK, so they never set \Seen themselves.
+ */
+async function inMailbox<T>(a: StoredAccount, mailbox: string, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
   const client = await connection(a);
   let lock;
   try {
-    lock = await client.getMailboxLock(mailbox, { readOnly });
+    lock = await client.getMailboxLock(mailbox);
   } catch (error) {
     throw explain(error);
   }
@@ -674,7 +685,76 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
     });
     out.sort((x, y) => y.date - x.date || y.uid - x.uid);
     return { messages: out, total: uids.length, more: older.length > page.length };
-  }, true);
+  });
+}
+
+async function wholeMessage(client: ImapFlow, uid: number): Promise<Buffer> {
+  const download = await client.download(String(uid), undefined, { uid: true });
+  if (!('content' in download) || !download.content) throw new Error('That message is gone.');
+  const chunks: Buffer[] = [];
+  for await (const chunk of download.content) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks);
+}
+
+/** Whether a big message's part is fetched to open it: its text, inline pictures, anything small. */
+function wanted(n: MessageStructureObject): boolean {
+  const size = n.size ?? 0;
+  if (size <= SMALL_PART_BYTES) return true;
+  const attached = n.disposition === 'attachment';
+  if (n.type.startsWith('text/') && !attached) return true;
+  return !!n.id && !attached && n.type.startsWith('image/') && size <= INLINE_PART_BYTES;
+}
+
+/**
+ * A big message rebuilt from its parts, with the bodies of its big
+ * attachments left out, so opening it doesn't wait on them. Each one left
+ * out keeps its headers, plus X-Din-Part (where to fetch it from when it's
+ * saved) and X-Din-Size. Null when its structure can't be rebuilt.
+ */
+async function skimmedMessage(client: ImapFlow, uid: number, root: MessageStructureObject | undefined): Promise<Buffer | null> {
+  if (!root?.type.startsWith('multipart/')) return null;
+  const isMultipart = (n: MessageStructureObject) => n.type.startsWith('multipart/') && !!n.childNodes?.length;
+  const sections: string[] = [];
+  const plan = (n: MessageStructureObject, top: boolean): boolean => {
+    if (!top) {
+      if (!n.part) return false;
+      sections.push(`${n.part}.MIME`);
+    }
+    if (isMultipart(n)) return !!n.parameters?.boundary && n.childNodes!.every((c) => plan(c, false));
+    if (wanted(n)) sections.push(n.part ?? '1');
+    return true;
+  };
+  if (!isMultipart(root) || !plan(root, true)) return null;
+
+  const m = await client.fetchOne(String(uid), { uid: true, headers: true, bodyParts: sections }, { uid: true });
+  if (!m || !m.headers || !m.bodyParts) return null;
+  const got = m.bodyParts;
+  const out: Buffer[] = [];
+  const headerBlock = (raw: Buffer, extra = '') => Buffer.from(`${raw.toString('latin1').replace(/(\r?\n)+$/, '')}\r\n${extra}\r\n`, 'latin1');
+  const build = (n: MessageStructureObject, headers: Buffer): boolean => {
+    if (isMultipart(n)) {
+      out.push(headerBlock(headers));
+      const boundary = n.parameters!.boundary;
+      for (const c of n.childNodes!) {
+        const h = got.get(`${c.part!.toLowerCase()}.mime`);
+        if (!h) return false;
+        out.push(Buffer.from(`\r\n--${boundary}\r\n`, 'latin1'));
+        if (!build(c, h)) return false;
+      }
+      out.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'latin1'));
+      return true;
+    }
+    const body = got.get(n.part!.toLowerCase());
+    if (body) {
+      out.push(headerBlock(headers), body);
+      return true;
+    }
+    // Base64 in 76-character lines: 57 bytes to every 78.
+    const size = n.encoding === 'base64' ? Math.floor(((n.size ?? 0) * 57) / 78) : n.size ?? 0;
+    out.push(headerBlock(headers, `X-Din-Part: ${n.part}\r\nX-Din-Size: ${size}\r\n`));
+    return true;
+  };
+  return build(root, m.headers) ? Buffer.concat(out) : null;
 }
 
 /** Recently opened messages, parsed. */
@@ -692,16 +772,13 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
     const meta = await client.fetchOne(String(uid), { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true }, { uid: true });
     if (!meta) throw new Error('That message is gone.');
     if ((meta.size ?? 0) > MAX_MESSAGE_BYTES) throw new Error('That message is too big to open here.');
-    const download = await client.download(String(uid), undefined, { uid: true });
-    if (!('content' in download) || !download.content) throw new Error('That message is gone.');
-    const chunks: Buffer[] = [];
-    for await (const chunk of download.content) chunks.push(chunk as Buffer);
-    const mail = await simpleParser(Buffer.concat(chunks));
+    const raw = ((meta.size ?? 0) > SKIM_BYTES && (await skimmedMessage(client, uid, meta.bodyStructure))) || (await wholeMessage(client, uid));
+    const mail = await simpleParser(raw);
     const entry = { summary: summary(meta), mail };
     parsed.set(key, entry);
     while (parsed.size > 24) parsed.delete(parsed.keys().next().value as string);
     return entry;
-  }, true);
+  });
 }
 
 async function message(a: StoredAccount, mailbox: string, uid: number): Promise<MailMessage> {
@@ -723,7 +800,7 @@ async function message(a: StoredAccount, mailbox: string, uid: number): Promise<
       index,
       filename: x.filename || (x.contentType === 'message/rfc822' ? 'Attached message.eml' : `Attachment ${index + 1}`),
       contentType: x.contentType,
-      size: x.size,
+      size: Number(x.headers.get('x-din-size')) || x.size,
       inline: x.related === true && !!x.cid,
     })),
   };
@@ -733,7 +810,18 @@ async function attachment(a: StoredAccount, mailbox: string, uid: number, index:
   const { mail } = await parsedMessage(a, mailbox, uid);
   const x = mail.attachments[index];
   if (!x) throw new Error('That attachment is gone.');
-  return { filename: x.filename || `Attachment ${index + 1}`, contentType: x.contentType, content: new Uint8Array(x.content) };
+  const part = x.headers.get('x-din-part');
+  let content: Uint8Array = x.content;
+  if (typeof part === 'string') {
+    content = await inMailbox(a, mailbox, async (client) => {
+      const download = await client.download(String(uid), part, { uid: true, decodeText: false });
+      if (!('content' in download) || !download.content) throw new Error('That attachment is gone.');
+      const chunks: Buffer[] = [];
+      for await (const chunk of download.content) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
+    });
+  }
+  return { filename: x.filename || `Attachment ${index + 1}`, contentType: x.contentType, content: new Uint8Array(content) };
 }
 
 function uidList(v: unknown): number[] {
