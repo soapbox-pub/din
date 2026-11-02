@@ -140,7 +140,8 @@ export interface DinApp {
   open(appId: string, params?: Record<string, unknown>, files?: DinFileHandle[]): Promise<void>;
   /**
    * Open files in whichever app the desktop has for them (Files' default).
-   * A Windows program (.exe) runs, through Wine.
+   * A Windows program (.exe) runs, through Wine, for an app with `fs`;
+   * others get a DinPermissionError.
    */
   openFiles(files: DinFileHandle[]): Promise<void>;
   /**

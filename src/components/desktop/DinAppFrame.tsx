@@ -504,10 +504,14 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         for (const id of handles) {
           const g = await usableGrant(id);
           const name = basename(g.path);
-          // A Windows program runs, through Wine, instead of opening.
+          // A Windows program runs, through Wine, instead of opening: for an
+          // app with fs alone (Files), which reaches as far anyway. One that
+          // can only write its own folders mustn't make a program and run it.
           const native = getNativeAppsBridge();
-          if (native && g.kind === 'file' && isWindowsProgram(name)) await native.runWindowsProgram(g.path);
-          else live.current.actions.open(appForFile(name), { path: g.path });
+          if (g.kind === 'file' && isWindowsProgram(name)) {
+            need('fs');
+            if (native) await native.runWindowsProgram(g.path);
+          } else live.current.actions.open(appForFile(name), { path: g.path });
         }
       },
       'app.canOpen': ({ appId: target }) => {

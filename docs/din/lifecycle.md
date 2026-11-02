@@ -101,7 +101,9 @@ front to back, `din.app.postToWindow(id, data)` sends one a message, and
 it runs, across its windows opening and closing (Files' undo history).
 
 `openFiles` runs a Windows program (`.exe`) through Wine instead of
-opening it. `din.print.available` says whether there's a print service.
+opening it, for an app with the `fs` permission; any other gets a
+`DinPermissionError`, so an app that can write a folder can't make a
+program there and run it. `din.print.available` says whether there's a print service.
 
 Apps can't open hidden system apps (the Installer) or pass files they
 don't hold.
