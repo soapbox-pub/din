@@ -1,0 +1,13 @@
+{
+  "name": "Quick Share",
+  "description": "Receive files and links from Android phones and tablets on the same Wi-Fi. This computer shows up in their share sheet only while Quick Share is open.",
+  "icons": [{ "src": "/icons/apps/quick-share.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "din": {
+    "permissions": ["quickshare"],
+    "folders": ["~/Downloads"],
+    "window": { "size": { "width": 440, "height": 600 }, "frame": "custom" },
+    "keywords": ["nearby share", "airdrop", "android", "phone", "share", "receive", "send files", "transfer"]
+  }
+}

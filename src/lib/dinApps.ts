@@ -11,7 +11,7 @@ import type { Push } from '@/sdk/protocol';
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
 /** Permissions whose bridges get a port of their own to main (SYSTEM_PERMISSIONS in electron/din-apps.mts). */
-export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd', 'volumes', 'mail', 'phone', 'passwords', 'vms', 'capture'] as const;
+export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'indd', 'volumes', 'mail', 'phone', 'passwords', 'vms', 'capture', 'quickshare'] as const;
 export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
 
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */

@@ -56,6 +56,7 @@ import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
+import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AccountSnapshot, FromDesktop, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
@@ -1072,6 +1073,14 @@ export function installDin(transport: Transport): void {
         c.onChanged = (cb: (take: unknown) => void) => sys.on('capture', 'capture:changed', (t) => cb(t));
         c.onStreamEnded = (cb: (ended: unknown) => void) => sys.on('capture', 'capture:streamEnded', (e) => cb(e));
         system.capture = c as unknown as CaptureBridge;
+      }
+      if (permissions.has('quickshare')) {
+        await sys.ready('quickshare');
+        const q: Record<string, unknown> = {};
+        for (const m of ['state', 'receive', 'stop', 'respond', 'cancel']) q[m] = (...args: unknown[]) => sys.call('quickshare', `quickshare:${m}`, args);
+        q.onChanged = (cb: (state: unknown) => void) => sys.on('quickshare', 'quickshare:changed', (s) => cb(s));
+        q.onTransfer = (cb: (transfer: unknown) => void) => sys.on('quickshare', 'quickshare:transfer', (t) => cb(t));
+        system.quickShare = q as unknown as QuickShareBridge;
       }
     }
 

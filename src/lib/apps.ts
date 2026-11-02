@@ -184,6 +184,8 @@ export const APPS: readonly AppDefinition[] = [
   // params `{ phoneId, threadId }` open a conversation (a notification's
   // click).
   dinApp('messages'),
+  // Receiving from Android devices nearby; visible to them only while it's open.
+  dinApp('quick-share'),
   dinApp('file-browser'),
   dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and

@@ -1,19 +1,21 @@
 /**
- * Quick Share (`window.dinos.quickShare`): Android phones, tablets and
- * Chromebooks on the same network share files and links to this computer
- * from their share sheet, as they do with each other. Run in Electron main
- * by electron/quickshare.mts. Types shared by both sides (main checks every
- * argument itself), and the desktop's getter.
+ * Quick Share (`din.system.quickShare`, for the Quick Share app with the
+ * `quickshare` permission): Android phones, tablets and Chromebooks on the
+ * same network share files and links to this computer from their share
+ * sheet, as they do with each other. Run in Electron main by
+ * electron/quickshare.mts; this computer is visible only while a window has
+ * asked to receive. Types shared by both sides (main checks every argument
+ * itself).
  */
 
 export interface QuickShareState {
-  /** Whether this computer shows up in nearby devices' Quick Share. */
-  enabled: boolean;
-  /** The name it shows up as. */
+  /** Whether a window is receiving. */
+  listening: boolean;
+  /** The name this computer shows up as. */
   name: string;
-  /** Enabled and announced on the network, so devices can see it. */
+  /** Receiving and announced on the network, so devices can see it. */
   visible: boolean;
-  /** Why it isn't visible though it's enabled, in words for the user. */
+  /** Why it isn't visible though it's receiving, in words for the user. */
   error: string | null;
 }
 
@@ -49,35 +51,16 @@ export interface QuickShareTransfer {
 
 export interface QuickShareBridge {
   state(): Promise<QuickShareState>;
-  /** Show up in nearby devices' Quick Share, or stop. */
-  setEnabled(on: boolean): Promise<void>;
+  /**
+   * Be visible to nearby devices until this window closes, reloads or calls
+   * `stop` (or, with more than one window receiving, until the last does).
+   */
+  receive(): Promise<QuickShareState>;
+  stop(): Promise<void>;
   /** Take what a device offered (an `asking` transfer's id), or turn it down. */
   respond(id: string, accept: boolean): Promise<void>;
-  /** Stop a transfer that's arriving. */
+  /** Stop a share that's asking or arriving. */
   cancel(id: string): Promise<void>;
   onChanged(cb: (state: QuickShareState) => void): () => void;
   onTransfer(cb: (transfer: QuickShareTransfer) => void): () => void;
-}
-
-declare global {
-  interface Dinos {
-    /** Present only inside the Electron shell. */
-    quickShare?: QuickShareBridge;
-  }
-}
-
-/** The desktop's Quick Share bridge (Settings → Phone, notifications, `din phone quick-share`), or undefined outside Electron. */
-export function getQuickShareBridge(): QuickShareBridge | undefined {
-  if (typeof window === 'undefined') return undefined;
-  return window.dinos?.quickShare;
-}
-
-/** Whether a link shared over Quick Share is one Din opens. */
-export function isOpenableLink(url: string): boolean {
-  try {
-    const { protocol } = new URL(url);
-    return protocol === 'https:' || protocol === 'http:';
-  } catch {
-    return false;
-  }
 }

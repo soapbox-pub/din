@@ -1,7 +1,10 @@
-// Quick Share (window.dinos.quickShare): Android phones, tablets and
-// Chromebooks on the same network share files and links to this computer
-// from their share sheet, as they share with each other. Settings → Phone
-// turns it on; it's off until then.
+// Quick Share (the Quick Share app, din.system.quickShare): Android phones,
+// tablets and Chromebooks on the same network share files and links to this
+// computer from their share sheet, as they share with each other. This
+// computer is visible only while a Quick Share window is open, as with
+// AirDrop's window or Android's Receive screen: the app calls `receive`, and
+// closing its last window withdraws the announcement, closes the port and
+// ends any share still going.
 //
 // Quick Share (once Nearby Share) runs on Google's Nearby Connections, which
 // isn't published; this follows NearDrop's and rquickshare's reading of it,
@@ -17,12 +20,12 @@
 //   encrypted with AES-256-CBC and signed with HMAC-SHA256, in keys derived
 //   from the handshake, which also gives a 4-digit PIN both screens show.
 // - Sharing: the phone offers files or a piece of text (Introduction). The
-//   desktop asks the user, with the PIN, whether to take it: anyone on the
+//   app asks the user, with the PIN, whether to take it: anyone on the
 //   network could be sending, since only Google's own devices can prove
 //   they're "yours" or a contact's. Accepted files are written straight into
 //   ~/Downloads, under a name of their own (`photo (1).jpg` beside
 //   `photo.jpg`); one that doesn't arrive whole is deleted. Text arrives as a
-//   .txt file, and a link is handed to the desktop to offer to open.
+//   .txt file, and a link is handed to the app to offer to open.
 //
 // The phone may offer to move to Wi-Fi Direct or a hotspot for speed; that's
 // ignored, so everything stays on the network both are on.
@@ -35,7 +38,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, webContents } from 'electron';
 import { DBusConnection, DBusError, type Message } from './dbus.mts';
 import { claim, freeBytes, safeFileName } from './received-files.mts';
 import { Writer, big, bytes, decode, int, message, messages, str, type Fields } from './protobuf.mts';
@@ -92,7 +95,8 @@ type Deps = {
 };
 
 let deps: Deps;
-let enabled = false;
+/** The windows receiving, by WebContents id, each with what stops following it. */
+const leases = new Map<number, () => void>();
 let server: net.Server | null = null;
 let listeningPort = 0;
 let avahiBus: DBusConnection | null = null;
@@ -246,10 +250,6 @@ class Connection {
     socket.on('error', () => this.lost());
     socket.on('close', () => this.lost());
     this.wait(HANDSHAKE_MS, () => this.fail(new ProtocolError('handshake timed out')));
-  }
-
-  get asking(): boolean {
-    return this.sharing === 'asking';
   }
 
   // --- Framing -------------------------------------------------------------
@@ -601,10 +601,14 @@ class Connection {
     this.emit(true);
   }
 
+  /** Stop the share, or the connection if it hasn't offered anything yet. */
   cancel(): void {
-    if (this.sharing !== 'receiving' && this.sharing !== 'asking') return;
-    this.sendSharing(sharingFrame(SHARING.cancel));
-    this.finish('cancelled');
+    if (this.sharing === 'receiving' || this.sharing === 'asking') {
+      this.sendSharing(sharingFrame(SHARING.cancel));
+      this.finish('cancelled');
+    } else {
+      this.close();
+    }
   }
 
   private fileChunk(file: IncomingFile, offset: number, body: Buffer, last: boolean): void {
@@ -754,35 +758,18 @@ function cleanTitle(title: string): string {
 // ---------------------------------------------------------------------------
 
 function state(): QuickShareState {
-  return { enabled, name: deviceName(), visible: enabled && advertised && server !== null, error: enabled ? error : null };
+  const listening = leases.size > 0;
+  return { listening, name: deviceName(), visible: listening && advertised && server !== null, error: listening ? error : null };
 }
 
 function changed(): void {
   deps.sendToShell('quickshare:changed', state());
 }
 
-function settingsFile(): string {
-  return path.join(app.getPath('userData'), 'quickshare.json');
-}
-
-function loadEnabled(): boolean {
-  try {
-    return (JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) as { enabled?: unknown }).enabled === true;
-  } catch {
-    return false;
-  }
-}
-
-function saveEnabled(): void {
-  const file = settingsFile();
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify({ enabled }));
-  fs.renameSync(`${file}.tmp`, file);
-}
-
 function listen(port: number): Promise<net.Server> {
   return new Promise((resolve, reject) => {
     const s = net.createServer((socket) => {
-      if (!enabled || connections.size >= MAX_CONNECTIONS) {
+      if (leases.size === 0 || connections.size >= MAX_CONNECTIONS) {
         socket.destroy();
         return;
       }
@@ -841,7 +828,7 @@ async function systemBus(): Promise<DBusConnection> {
 }
 
 function scheduleRetry(): void {
-  if (!enabled || retry) return;
+  if (leases.size === 0 || retry) return;
   retry = setTimeout(() => {
     retry = null;
     void apply();
@@ -892,18 +879,19 @@ async function withdraw(): Promise<void> {
   await avahiBus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Reset' }).catch(() => {});
 }
 
-/** Bring the server and the announcement in line with `enabled`; `again` announces anew. */
+/** Bring the server and the announcement in line with whether a window is receiving; `again` announces anew. */
 function apply(again = false): Promise<void> {
   applying = applying.then(async () => {
-    if (!enabled) {
+    if (leases.size === 0) {
       clearTimeout(retry ?? undefined);
       retry = null;
       await withdraw();
-      await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
+      // Stops listening now; connections still open are ended just below.
+      server?.close();
       server = null;
       error = null;
-      // Shares still asking go with it; ones arriving finish.
-      for (const connection of [...connections.values()]) if (connection.asking) connection.respond(false);
+      // Closing the last window that receives ends every share, asking or arriving.
+      for (const connection of [...connections.values()]) connection.cancel();
       changed();
       return;
     }
@@ -935,11 +923,34 @@ function apply(again = false): Promise<void> {
   return applying;
 }
 
-async function setEnabled(on: boolean): Promise<void> {
-  if (on === enabled) return;
-  enabled = on;
-  saveEnabled();
-  await apply();
+/**
+ * Be visible for as long as this window (an app's, or the desktop) is
+ * there: until it closes, reloads or goes elsewhere, or calls stop.
+ */
+function receive(sender: { id: number }): Promise<QuickShareState> {
+  if (!leases.has(sender.id)) {
+    const contents = webContents.fromId(sender.id);
+    if (!contents || contents.isDestroyed()) throw new Error('No such window.');
+    const end = () => release(sender.id);
+    const navigated = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
+      if (details.isMainFrame && !details.isSameDocument) end();
+    };
+    contents.once('destroyed', end);
+    contents.on('did-start-navigation', navigated);
+    leases.set(sender.id, () => {
+      contents.off('destroyed', end);
+      contents.off('did-start-navigation', navigated);
+    });
+  }
+  return apply().then(state);
+}
+
+function release(id: number): Promise<void> {
+  const drop = leases.get(id);
+  if (!drop) return applying;
+  drop();
+  leases.delete(id);
+  return apply();
 }
 
 function transferArg(id: unknown): Connection {
@@ -950,17 +961,15 @@ function transferArg(id: unknown): Connection {
 
 export function registerQuickShareHandlers(options: Deps): void {
   deps = options;
-  const handle = (channel: string, fn: (...args: unknown[]) => unknown) => {
+  const handle = (channel: string, fn: (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       options.assertShellSender(event);
-      return fn(...args);
+      return fn(event, ...args);
     });
   };
   handle('quickshare:state', () => state());
-  handle('quickshare:setEnabled', (on) => setEnabled(on === true));
-  handle('quickshare:respond', (id, accept) => transferArg(id).respond(accept === true));
-  handle('quickshare:cancel', (id) => transferArg(id).cancel());
-
-  enabled = loadEnabled();
-  if (enabled) void apply();
+  handle('quickshare:receive', (event) => receive(event.sender));
+  handle('quickshare:stop', (event) => release(event.sender.id));
+  handle('quickshare:respond', (_event, id, accept) => transferArg(id).respond(accept === true));
+  handle('quickshare:cancel', (_event, id) => transferArg(id).cancel());
 }

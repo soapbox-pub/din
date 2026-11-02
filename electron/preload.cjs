@@ -1708,24 +1708,6 @@ expose('phone', {
   onReceive: (callback) => listen('phone:receive', callback),
 });
 
-// Quick Share (window.dinos.quickShare), backed by electron/quickshare.mts:
-// files and links nearby Android devices share to this computer, for
-// Settings → Phone, notifications and `din phone quick-share`. Types in
-// src/lib/quickShare.ts.
-expose('quickShare', {
-  state: () => ipcRenderer.invoke('quickshare:state'),
-  /** @param {boolean} on */
-  setEnabled: (on) => ipcRenderer.invoke('quickshare:setEnabled', on),
-  /** @param {string} id @param {boolean} accept */
-  respond: (id, accept) => ipcRenderer.invoke('quickshare:respond', id, accept),
-  /** @param {string} id */
-  cancel: (id) => ipcRenderer.invoke('quickshare:cancel', id),
-  /** @param {(state: unknown) => void} callback */
-  onChanged: (callback) => listen('quickshare:changed', callback),
-  /** @param {(transfer: unknown) => void} callback */
-  onTransfer: (callback) => listen('quickshare:transfer', callback),
-});
-
 // Virtual machines (window.dinos.vms), backed by electron/vms.mts, for the
 // `din vms` commands; the Virtual Machines app has them, and machines'
 // screens, through its bridge port. Types in src/lib/vms.ts.

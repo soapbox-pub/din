@@ -20,7 +20,6 @@ import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
 import { PhoneHost } from './PhoneHost';
-import { QuickShareHost } from './QuickShareHost';
 import { GuestInputHost } from './GuestInputHost';
 import { CursorEffectsLayer } from './CursorEffectsLayer';
 import { DinDragOverlay } from './DinDragOverlay';
@@ -252,7 +251,6 @@ function DesktopSession() {
                     <CommandHost />
                     <SystemNotificationsHost />
                     <PhoneHost />
-                    <QuickShareHost />
                     <GuestInputHost />
                     <CursorEffectsLayer />
                     <DinDragOverlay />

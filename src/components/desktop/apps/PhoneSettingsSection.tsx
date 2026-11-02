@@ -7,6 +7,7 @@ import {
   MessageCircle,
   RefreshCw,
   Settings2,
+  Share2,
   Smartphone,
   Trash2,
   Plus,
@@ -45,10 +46,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { usePhoneActions, usePhoneState } from '@/hooks/usePhone';
-import { useQuickShareState, useSetQuickShareEnabled } from '@/hooks/useQuickShare';
 import { useToast } from '@/hooks/useToast';
 import { describePhone, getPhoneDesktopBridge, type PhoneDevice } from '@/lib/phone';
-import { getQuickShareBridge } from '@/lib/quickShare';
 import { cleanPhoneError } from '@/shared/phone';
 import { PhoneSetupWizard } from './PhoneSetupWizard';
 
@@ -60,7 +59,7 @@ import { PhoneSetupWizard } from './PhoneSetupWizard';
  * opens the page. Add a phone walks through pairing one in this same pane
  * (PhoneSetupWizard). Launched with `{ add: true, nonce }` (Messages' Set Up
  * a Phone), it starts there. Quick Share, for any Android device on the same
- * network, is at the bottom (QuickShareGroup).
+ * network, is its own app; the bottom of the page opens it (QuickShareGroup).
  */
 export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
   const bridge = getPhoneDesktopBridge();
@@ -214,43 +213,32 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
         </div>
       )}
 
-      {bridge && <QuickShareGroup />}
+      <QuickShareGroup onOpen={() => open('quick-share')} />
 
       {forgetDialog}
     </section>
   );
 }
 
-/** Whether nearby Android devices can share to this computer over the network (electron/quickshare.mts). */
-function QuickShareGroup() {
-  const state = useQuickShareState();
-  const setEnabled = useSetQuickShareEnabled();
-  const { toast } = useToast();
-  if (!getQuickShareBridge()) return null;
-  const data = state.data;
-  const enabled = (setEnabled.isPending ? setEnabled.variables : data?.enabled) ?? false;
+/** Quick Share has its own window, visible to nearby devices only while it's open (electron/quickshare.mts). */
+function QuickShareGroup({ onOpen }: { onOpen: () => void }) {
   return (
     <div className="flex flex-col gap-2">
       <SubHeading>Quick Share</SubHeading>
       <DetailsGroup>
-        <ToggleRow
-          label="Receive with Quick Share"
-          description={
-            data?.enabled && data.visible
-              ? `Android phones and tablets on this Wi-Fi see this computer as “${data.name}” when they share. You’re asked before anything arrives.`
-              : 'Let Android phones and tablets on the same Wi-Fi share files and links here from their share sheet. You’re asked before anything arrives.'
-          }
-          checked={enabled}
-          disabled={!data}
-          onChange={(on) =>
-            setEnabled.mutate(on, {
-              onError: (error) =>
-                toast({ title: 'Couldn’t change Quick Share', description: cleanPhoneError(error), variant: 'destructive' }),
-            })
-          }
-        />
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <span className="min-w-0">
+            <span className="block text-sm text-foreground">Receive from Android</span>
+            <span className="block text-xs text-muted-foreground">
+              Phones and tablets on the same Wi-Fi can share files and links here while Quick Share is open.
+            </span>
+          </span>
+          <Button variant="outline" size="sm" onClick={onOpen}>
+            <Share2 className="size-4" aria-hidden />
+            Open Quick Share
+          </Button>
+        </div>
       </DetailsGroup>
-      {data?.enabled && data.error && <DetailsError>{data.error}</DetailsError>}
     </div>
   );
 }
