@@ -29,6 +29,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { app, ipcMain, safeStorage, screen, webContents, type BrowserWindow } from 'electron';
+import { pointerArrow } from './cursor.mts';
 import { findRecorder, lastError, recorderArgs, RENDER_NODE } from './screen-recorder.mts';
 
 /** How long wf-recorder gets to show its first frame before it's taken as recording anyway. */
@@ -1067,6 +1068,14 @@ export function registerCaptureHandlers(opts: Options): void {
   ipcMain.handle('capture:pointer', (event) => {
     assertShellSender(event);
     return pointer();
+  });
+
+  // The pointer's arrow, and the primary display's height it's drawn against.
+  ipcMain.handle('capture:pointerImage', async (event) => {
+    assertShellSender(event);
+    const arrow = await pointerArrow();
+    const area = primary ?? screen.getPrimaryDisplay().bounds;
+    return arrow ? { ...arrow, displayHeight: area.height } : null;
   });
 
   // The desktop's report of the pointer, in CSS pixels of its window.

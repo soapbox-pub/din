@@ -221,6 +221,35 @@ export function Studio() {
   useEffect(() => mixer.setMic(mic.stream), [mixer, mic.stream]);
   useEffect(() => mixer.setSystem(sys.stream), [mixer, sys.stream]);
 
+  // The pointer's own arrow, as the cursor theme draws it, read again with each capture of the screen.
+  useEffect(() => {
+    if (!capture || !scr.stream) return;
+    let cancelled = false;
+    capture.pointerImage().then(
+      async (arrow) => {
+        if (!arrow) return;
+        const pixels = new Uint8ClampedArray(arrow.rgba.length);
+        pixels.set(arrow.rgba);
+        const source = await createImageBitmap(new ImageData(pixels, arrow.width, arrow.height));
+        if (cancelled) return;
+        // The theme's image is drawn `size` pixels big on the display.
+        const k = arrow.size / Math.max(arrow.width, arrow.height, 1);
+        compositor.setPointerImage({
+          source,
+          width: arrow.width * k,
+          height: arrow.height * k,
+          hotX: arrow.hotX * k,
+          hotY: arrow.hotY * k,
+          displayHeight: arrow.displayHeight,
+        });
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [capture, compositor, scr.stream]);
+
   // The pointer, polled on the compositor's own clock so it keeps up while Studio is minimized.
   useEffect(() => {
     if (!capture || !scr.stream) {

@@ -17,12 +17,12 @@ let frame = 0;
 
 function report(): void {
   frame = 0;
-  if (last && performance.now() < reportingUntil) getCaptureBridge()?.pointerAt(last.x, last.y);
+  if (last && performance.now() < reportingUntil) getCaptureBridge()?.pointerAt?.(last.x, last.y);
 }
 
 export function installCapturePointer(): void {
   const bridge = getCaptureBridge();
-  if (!bridge) return;
+  if (!bridge?.onReportPointer) return;
   window.addEventListener(
     'pointermove',
     (e) => {

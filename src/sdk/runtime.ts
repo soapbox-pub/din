@@ -1068,7 +1068,7 @@ export function installDin(transport: Transport): void {
         await sys.ready('capture');
         const c: Record<string, unknown> = {};
         for (const m of [
-          'status', 'pointer', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+          'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
           'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
         ]) {
           c[m] = (...args: unknown[]) => sys.call('capture', `capture:${m}`, args);

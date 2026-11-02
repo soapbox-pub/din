@@ -273,6 +273,16 @@ const PREVIEW_ROLES: { role: string; names: string[] }[] = [
   { role: 'nwse-resize', names: ['nwse-resize', 'size_fdiag', 'bottom_right_corner'] },
 ];
 
+/**
+ * The pointer's arrow as the theme draws it at the current size, and that
+ * size (logical pixels), for Studio to draw into its picture.
+ */
+export async function pointerArrow(): Promise<(CursorPreview & { size: number }) | null> {
+  const { theme, size } = await current();
+  const arrow = (await previews(theme, size)).find((p) => p.role === 'default');
+  return arrow ? { ...arrow, size } : null;
+}
+
 async function previews(id: string, size: number): Promise<CursorPreview[]> {
   const dir = await cursorsDir(id);
   if (!dir) return [];

@@ -147,10 +147,26 @@ export interface StreamEnded {
   error: string | null;
 }
 
+export interface PointerImage {
+  width: number;
+  height: number;
+  hotX: number;
+  hotY: number;
+  rgba: Uint8Array;
+  size: number;
+  displayHeight: number;
+}
+
 export interface CaptureBridge {
   status(): Promise<CaptureStatus>;
   /** Where the pointer is on the primary display, as fractions of it. */
   pointer(): Promise<{ x: number; y: number }>;
+  /**
+   * The pointer's arrow from the cursor theme, as straight RGBA, `size`
+   * logical pixels big on a primary display `displayHeight` tall; null where
+   * there's no theme to read.
+   */
+  pointerImage(): Promise<PointerImage | null>;
   /** The takes, newest first. */
   takes(): Promise<TakeInfo[]>;
   take(path: string): Promise<TakeInfo | null>;
@@ -171,10 +187,10 @@ export interface CaptureBridge {
   streamStart(id: string): Promise<LiveStatus>;
   streamWrite(data: Uint8Array): void;
   streamStop(): Promise<void>;
-  /** Tell main where the pointer is, in CSS pixels of the desktop (src/lib/capturePointer.ts). */
-  pointerAt(x: number, y: number): void;
-  /** Main wants to know where the pointer is for a while (Studio's drawing it). */
-  onReportPointer(callback: () => void): () => void;
+  /** The desktop's alone: tell main where the pointer is, in CSS pixels of the desktop (src/lib/capturePointer.ts). */
+  pointerAt?(x: number, y: number): void;
+  /** The desktop's alone: main wants to know where the pointer is for a while (Studio's drawing it). */
+  onReportPointer?(callback: () => void): () => void;
   onState(callback: (state: CaptureState) => void): () => void;
   /** A take changed (or `removed`). */
   onChanged(callback: (take: TakeInfo | { path: string; removed: true }) => void): () => void;

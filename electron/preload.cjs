@@ -3561,7 +3561,7 @@ expose('screenRecorder', {
 /** @type {Record<string, (...args: unknown[]) => Promise<unknown>>} */
 const capture = {};
 for (const method of [
-  'status', 'pointer', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+  'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
   'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
 ]) {
   capture[method] = (...args) => ipcRenderer.invoke(`capture:${method}`, ...args);

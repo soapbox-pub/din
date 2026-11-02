@@ -19,6 +19,16 @@ const HAZE_MS = 250;
 const IDLE_MS = 1000;
 
 /** Chromium has it on windows too; TypeScript's DOM types have it only in workers. */
+/** The pointer's arrow, its size and hotspot in pixels of a display `displayHeight` tall. */
+export interface StudioPointerImage {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  hotX: number;
+  hotY: number;
+  displayHeight: number;
+}
+
 type TrackProcessor = new (init: { track: MediaStreamTrack }) => { readable: ReadableStream<VideoFrame> };
 const TrackProcessor = (globalThis as unknown as { MediaStreamTrackProcessor: TrackProcessor }).MediaStreamTrackProcessor;
 
@@ -134,6 +144,13 @@ export class Compositor {
     this.screenCrop = crop;
     this.dirty = true;
   }
+
+  /** The pointer's own arrow, as the cursor theme draws it; null for a plain one. */
+  setPointerImage(image: StudioPointerImage | null): void {
+    this.pointerImage = image;
+  }
+
+  private pointerImage: StudioPointerImage | null = null;
 
   setPointer(pointer: { x: number; y: number } | null): void {
     if (pointer?.x === this.pointer?.x && pointer?.y === this.pointer?.y) return;
@@ -308,6 +325,13 @@ export class Compositor {
     const { ctx } = this;
     const x = screen.x + p.x * screen.width;
     const y = screen.y + p.y * screen.height;
+    const image = this.pointerImage;
+    if (image) {
+      // As big against the screen's picture as it is against the display.
+      const k = screen.height / image.displayHeight;
+      ctx.drawImage(image.source, x - image.hotX * k, y - image.hotY * k, image.width * k, image.height * k);
+      return;
+    }
     const s = Math.max(0.6, screen.height / 1000) * 1.3;
     ctx.save();
     ctx.translate(x, y);
