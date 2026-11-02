@@ -36,7 +36,7 @@ import { EventEditor } from './calendar/EventEditor';
 import { eventLink, type EventAction, type Shown } from './calendar/menu';
 import { MonthView } from './calendar/MonthView';
 import { blankDraft, defaultSlot, draftOf, useNow, ViewContext, type ViewActions } from './calendar/model';
-import { useCalendarData, usePubkey, usePublish } from './calendar/nostr';
+import { useCalendarData, usePubkey, usePublish, writeRelays } from './calendar/nostr';
 import { Sidebar } from './calendar/Sidebar';
 import { INVITED, MINE, sourceOf, sourcesOf, useSourcePrefs, type Source } from './calendar/sources';
 import { TimeGrid } from './calendar/TimeGrid';
@@ -223,7 +223,7 @@ export function Calendar() {
           setSelected(null);
           return setEditor({ draft: { ...draftOf(s.e, s.mine ? calendarOf(s.e) : null), participants: s.mine ? s.e.participants : [] }, editing: null });
         case 'copy-link':
-          void navigator.clipboard.writeText(eventLink(s.e, din.account.relays.filter((r) => r.write).map((r) => r.url)));
+          void navigator.clipboard.writeText(eventLink(s.e, writeRelays()));
           return toast('Link copied');
         case 'copy-details': {
           const text = [s.e.title, describeWhen(s.e, locale), ...s.e.locations, s.e.description.trim()].filter(Boolean).join('\n');
@@ -238,7 +238,7 @@ export function Calendar() {
         }
       }
     },
-    [calendar, din, run],
+    [calendar, run],
   );
 
   const create = useCallback((start: number, end: number, allDay: boolean) => {

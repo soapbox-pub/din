@@ -98,12 +98,6 @@ export interface FileData {
   bytes: ArrayBuffer;
 }
 
-export interface AccountSnapshot {
-  pubkey: string | null;
-  relays: { url: string; read: boolean; write: boolean }[];
-  blossom: string[];
-}
-
 /** The desktop's first message: everything the app reads synchronously. */
 export interface Hello {
   type: 'hello';
@@ -113,7 +107,6 @@ export interface Hello {
   state: WindowState;
   frameStyle: FrameStyle;
   theme: ThemeSnapshot;
-  account: AccountSnapshot;
   permissions: Permission[];
   /**
    * localStorage entries the app kept on the desktop's origin before it
@@ -267,7 +260,6 @@ export type Push =
   | { type: 'state'; state: WindowState }
   | { type: 'frameStyle'; style: FrameStyle }
   | { type: 'theme'; theme: ThemeSnapshot }
-  | { type: 'account'; account: AccountSnapshot }
   | { type: 'launch'; launch: Omit<LaunchContext, 'files'> & { files: HandleData[] } }
   | { type: 'menuAction'; id: string }
   | { type: 'closeRequest'; request: number }

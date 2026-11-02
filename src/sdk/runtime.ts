@@ -8,7 +8,7 @@
  * din.system, whose bridges talk to main over ports of their own.
  *
  * The object is there at once; what the desktop tells it (the launch, the
- * window's state, the theme, the account, the permissions) arrives with its
+ * window's state, the theme, the permissions) arrives with its
  * hello, and `din.ready` resolves once it has. Calls made before then wait
  * their turn.
  *
@@ -17,7 +17,6 @@
  */
 import type {
   Din,
-  DinAccount,
   DinApp,
   DinAssistant,
   AssistantSettings,
@@ -56,7 +55,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
-import type { AccountSnapshot, FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
+import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import {
@@ -308,7 +307,6 @@ const NO_STATE: WindowState = {
   id: '', focused: false, visible: true, minimized: false, maximized: false, snapped: null, fullscreen: false,
   bounds: NO_RECT, workArea: NO_RECT,
 };
-const NO_ACCOUNT: AccountSnapshot = { pubkey: null, relays: [], blossom: [] };
 const NO_ASSISTANT: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, model: null };
 
 /** Define window.din, talking to the desktop over this transport. Once per document. */
@@ -807,14 +805,7 @@ export function installDin(transport: Transport): void {
     onChange: (cb) => themes.on(cb),
   };
 
-  // ---- account ----
-  let accountSnapshot: AccountSnapshot = NO_ACCOUNT;
-  const accounts = new Emitter<void>();
-  pushes.on((p) => {
-    if (p.type !== 'account') return;
-    accountSnapshot = p.account;
-    accounts.emit();
-  });
+  // ---- window.nostr ----
   const nostr: Nip07 = {
     getPublicKey: () => request('nostr.getPublicKey'),
     signEvent: async (event: NostrEventTemplate) => (await request('nostr.signEvent', { event })) as SignedNostrEvent,
@@ -826,18 +817,6 @@ export function installDin(transport: Transport): void {
       encrypt: (pubkey, text) => request('nostr.encrypt', { version: 'nip44', pubkey, text }),
       decrypt: (pubkey, text) => request('nostr.decrypt', { version: 'nip44', pubkey, text }),
     },
-  };
-  const account: DinAccount = {
-    get pubkey() {
-      return accountSnapshot.pubkey;
-    },
-    get relays() {
-      return accountSnapshot.relays;
-    },
-    get blossom() {
-      return accountSnapshot.blossom;
-    },
-    onChange: (cb) => accounts.on(cb),
   };
 
   // ---- notifications (the web's own API), permissions ----
@@ -952,7 +931,6 @@ export function installDin(transport: Transport): void {
     drag,
     clipboard,
     theme,
-    account,
     desktop,
     dictation,
     assistant,
@@ -1014,7 +992,6 @@ export function installDin(transport: Transport): void {
     themeSnapshot = hello.theme;
     applyTheme(themeSnapshot, loadedFaces);
     markAccessibility();
-    accountSnapshot = hello.account;
     currentDrag = hello.drag;
     reportDragOver(hello.drag !== null);
     dictationStatus = hello.dictation.status;

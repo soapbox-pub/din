@@ -107,9 +107,7 @@ function size(sizes: string | undefined): number {
 }
 
 export function manifestPermissions(manifest: DinManifest): Permission[] {
-  const list = new Set(manifest.din.permissions ?? []);
-  if (list.has('nostr')) list.add('account');
-  return [...list];
+  return [...new Set(manifest.din.permissions ?? [])];
 }
 
 export function manifestSize(manifest: DinManifest): Size | undefined {

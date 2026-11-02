@@ -56,22 +56,17 @@ keyed by freedesktop icon name (`folder`, `image-x-generic`,
 "Din" theme, which is DinOS's default), and leaves out names the theme doesn't have, so draw your own icon when a
 name is missing. `FileIcon` (`src/shared/FileIcon.tsx`) already does.
 
-## `din.account` (permission `account`)
+## The account: `window.nostr` (permission `nostr`)
 
-```ts
-din.account.pubkey;    // hex, or null when signed out
-din.account.relays;    // NIP-65: [{ url, read, write }]
-din.account.blossom;   // Blossom server URLs
-din.account.onChange(() => reload());
-```
-
-Without the permission, `pubkey` is null and the lists are empty.
-
-### Signing (permission `nostr`)
-
-`window.nostr` is a NIP-07 signer backed by Din's: `getPublicKey`,
-`signEvent`, `nip04` and `nip44`, so Nostrify and other NIP-07 libraries
-work unchanged.
+Who's signed in is NIP-07, as on any Nostr web page: `window.nostr` is a
+signer backed by Din's, with `getPublicKey`, `signEvent`, `nip04` and
+`nip44`, so Nostrify and other NIP-07 libraries work unchanged.
+`getPublicKey()` rejects while nobody is signed in. NIP-07 has no event for
+another account signing in, so ask again when the window comes back to the
+front (React Query's `refetchOnWindowFocus`). The user's relays and media
+servers are their own events, fetched like any other: the newest kind
+10002 (NIP-65) and kind 10063 (Blossom) by their pubkey, from well-known
+relays (Calendar's `src/apps/calendar/calendar/nostr.ts`).
 For built-in apps, whose code is Din's own and reviewed, requests go
 straight to the signed-in user's signer, as they did when the apps lived
 in the desktop. (nsites, when they get `window.din`, will go through

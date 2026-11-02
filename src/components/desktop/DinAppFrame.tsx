@@ -34,7 +34,6 @@ import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSlowLaunch } from '@/hooks/useSlowLaunch';
-import { getEffectiveBlossomServers } from '@/lib/appBlossom';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
@@ -90,7 +89,7 @@ import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
 import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome, WindowState } from '@/sdk/din';
-import type { AccountSnapshot, FromApp, HandleData, Hello, MediaReport, Method, Push, Requests } from '@/sdk/protocol';
+import type { FromApp, HandleData, Hello, MediaReport, Method, Push, Requests } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */
@@ -309,19 +308,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     };
   }, [areas, isTop, visible, windowId, fullscreen]);
   const frameStyle = (accent: string | null): FrameStyle => ({ accent, dark: accent !== null && isDarkThemeColor(accent) });
-  const account = (): AccountSnapshot =>
-    permissions.includes('account')
-      ? {
-          pubkey: user?.pubkey ?? null,
-          relays: config.relayMetadata.relays.map((r) => ({ url: r.url, read: r.read, write: r.write })),
-          blossom: getEffectiveBlossomServers(config.blossomServerMetadata, config.useAppBlossomServers),
-        }
-      : { pubkey: null, relays: [], blossom: [] };
 
   // Everything a request handler reads, current as of the last render.
-  const live = useRef({ win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop });
+  const live = useRef({ win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, openUrl, updateConfig, isTop });
   useLayoutEffect(() => {
-    live.current = { win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, account, openUrl, updateConfig, isTop };
+    live.current = { win, actions, chrome, frame, user, config, picker, windowState, publishTitle, publishIcon, publishAccent, openUrl, updateConfig, isTop };
   });
 
   const push = useCallback((message: Push) => session.current?.port.postMessage(message), []);
@@ -1161,7 +1152,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       state: l.windowState(l.win),
       frameStyle: frameStyle(l.win?.accent ?? null),
       theme: themeSnapshot(),
-      account: l.account(),
       permissions,
       storage: storageToMigrate(manifest),
       recentFiles: recent,
@@ -1331,10 +1321,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     send();
     return onThemeChange(send);
   }, [push]);
-  const accountJson = JSON.stringify(account());
-  useEffect(() => {
-    push({ type: 'account', account: JSON.parse(accountJson) as AccountSnapshot });
-  }, [accountJson, push]);
   useEffect(() => subscribeDrag(() => push({ type: 'drag', drag: dragInfo(currentDrag()) })), [push]);
   useEffect(() => subscribeFileClipboard(() => {
     const clip = getFileClipboard();

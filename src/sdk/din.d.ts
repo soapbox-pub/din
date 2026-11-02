@@ -57,7 +57,7 @@ export interface Din {
   readonly version: 1;
   /**
    * Resolves once the desktop has said hello: until then the launch, window
-   * state, theme, account and permissions read as empty, and calls queue.
+   * state, theme and permissions read as empty, and calls queue.
    */
   readonly ready: Promise<void>;
   app: DinApp;
@@ -67,7 +67,6 @@ export interface Din {
   drag: DinDrag;
   clipboard: DinClipboard;
   theme: DinTheme;
-  account: DinAccount;
   desktop: DinDesktop;
   dictation: DinDictation;
   assistant: DinAssistant;
@@ -591,18 +590,8 @@ export interface DinTheme {
 }
 
 // ---------------------------------------------------------------------------
-// din.account: who's signed in
+// window.nostr (permission `nostr`)
 // ---------------------------------------------------------------------------
-
-export interface DinAccount {
-  /** Hex pubkey of the signed-in user, or null. Needs `account`. */
-  readonly pubkey: string | null;
-  /** The user's NIP-65 relays. */
-  readonly relays: { url: string; read: boolean; write: boolean }[];
-  /** The user's Blossom servers. */
-  readonly blossom: string[];
-  onChange(cb: () => void): Unsubscribe;
-}
 
 export interface NostrEventTemplate {
   kind: number;
@@ -711,9 +700,11 @@ export interface DinAssistant {
  * theme). docs/din/permissions.md says what each grants.
  */
 export type Permission =
-  /** The user's pubkey, relays and Blossom servers. */
-  | 'account'
-  /** Sign, encrypt and decrypt as the user, through Din's prompts. Implies `account`. */
+  /**
+   * `window.nostr` (NIP-07): the user's pubkey, and signing, encrypting and
+   * decrypting as them, through Din's prompts. Relays and the rest are the
+   * user's own events (kind 10002, 10063).
+   */
   | 'nostr'
   /** The whole filesystem, by path (`din.system.fs`). Files, Text Editor. */
   | 'fs'

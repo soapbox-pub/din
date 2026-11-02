@@ -41,7 +41,7 @@ din.app.ready();
 | `din.menus` | [menus.md](menus.md): the menu bar and menus that leave the window |
 | `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, `din.clipboard` | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
-| `din.theme`, `din.account`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
+| `din.theme`, `window.nostr`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `window.print()`, `din.desktop`, `din.dictation`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.permissions`, `din.system` | [permissions.md](permissions.md) |
 | Service workers, `registration.periodicSync` | [background.md](background.md) |
@@ -61,7 +61,7 @@ first script the `din-apps` Vite plugin puts in each app page. The
 runtime:
 
 - is there at once; what the desktop's `hello` carries (the launch, the
-  window's state, the theme, the account, the permissions) reads as empty
+  window's state, the theme, the permissions) reads as empty
   until `din.ready` resolves, and calls made before then queue;
 - keeps a copy of pushed state and calls `onChange` listeners;
 - applies the theme's tokens to `:root` and keeps them current, so

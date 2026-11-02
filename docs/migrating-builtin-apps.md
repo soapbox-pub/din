@@ -48,7 +48,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useToast()` / `notify()` | `toast(…)` from `@/shared/toast`, drawn in the app's window, or `new Notification()` for one kept in the notification center |
 | `useDesktopBackground().setBackground` | `din.desktop.setWallpaper(handle)` with `wallpaper` |
 | `useOpenUrl()` | `window.open(url)` |
-| `useAppContext().config` (theme, relays) | `din.theme`, `din.account` |
+| `useAppContext().config` (theme, relays) | `din.theme`; the user's kind 10002 through `window.nostr`'s pubkey |
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
 | `registerMediaSource` (now playing) | `navigator.mediaSession` |
 | `registerDictationTarget` | Nothing: dictation reaches a guest's focused field with `insertText`, as for web pages, and that includes xterm's, so Terminal needed no hook. An app's own mic button uses `din.dictation` |

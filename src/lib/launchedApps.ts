@@ -74,8 +74,7 @@ export function parseLaunchRequest(raw: unknown): LaunchRequest | null {
 
 /** Every permission there is, with what granting it means, for the prompt. */
 export const PERMISSION_LABELS: Record<Permission, string> = {
-  account: 'See your public key, relays and media servers',
-  nostr: 'Sign, encrypt and decrypt as you (Din asks each time)',
+  nostr: 'See your public key, and sign, encrypt and decrypt as you (Din asks each time)',
   fs: 'Read, change and delete any of your files',
   pty: 'Run commands in terminals',
   notifications: 'Keep notifications and a Dock badge',

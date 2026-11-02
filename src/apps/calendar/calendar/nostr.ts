@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo } from 'react';
 import { NPool, NRelay1, type NostrEvent } from '@nostrify/nostrify';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Din, Nip07 } from '@/sdk/din';
-import { useDin, useWindowState } from '@/sdk/react';
+import type { Nip07 } from '@/sdk/din';
+import { useWindowState } from '@/sdk/react';
 import { calendarFilters, collectCalendar, coordFilters, parseRsvp, RSVP_KIND, type CalendarData, type EventTemplate, type Rsvp } from '@/shared/calendar';
 
-/** Where to look when the account has no relay list yet. */
+/** Where the account's relay list is looked for, and where to look when it has none. */
 const FALLBACK_RELAYS = ['wss://relay.ditto.pub', 'wss://relay.primal.net', 'wss://relay.damus.io'];
 
 function signer(): Nip07 {
@@ -14,35 +14,91 @@ function signer(): Nip07 {
   return nostr;
 }
 
-function relaysOf(din: Din, mode: 'read' | 'write'): string[] {
-  const urls = din.account.relays.filter((r) => r[mode]).map((r) => r.url);
+interface RelayList {
+  read: string[];
+  write: string[];
+}
+
+/** The account's NIP-65 relays, as last fetched, for the pool's routers. */
+let relayList: RelayList | null = null;
+let relayListOf: string | null = null;
+let relayListLoading: Promise<RelayList> | null = null;
+
+/** The newest kind 10002 the user published, from the well-known relays. */
+function loadRelayList(pubkey: string): Promise<RelayList> {
+  if (relayListOf === pubkey && relayList) return Promise.resolve(relayList);
+  if (relayListOf === pubkey && relayListLoading) return relayListLoading;
+  relayListOf = pubkey;
+  relayList = null;
+  const bootstrap = new NPool({
+    open: (url) => new NRelay1(url),
+    reqRouter: (filters) => new Map(FALLBACK_RELAYS.map((url) => [url, filters])),
+    eventRouter: () => [],
+    eoseTimeout: 1500,
+  });
+  relayListLoading = bootstrap
+    .query([{ kinds: [10002], authors: [pubkey], limit: 1 }], { signal: AbortSignal.timeout(8_000) })
+    .catch(() => [])
+    .then((events) => {
+      const newest = events.sort((a, b) => b.created_at - a.created_at)[0];
+      const list: RelayList = { read: [], write: [] };
+      for (const [name, url, marker] of newest?.tags ?? []) {
+        if (name !== 'r' || !/^wss?:\/\//.test(url ?? '')) continue;
+        if (marker !== 'write') list.read.push(url);
+        if (marker !== 'read') list.write.push(url);
+      }
+      if (relayListOf === pubkey) relayList = list;
+      void bootstrap.close();
+      return list;
+    });
+  return relayListLoading;
+}
+
+async function relaysOf(mode: 'read' | 'write'): Promise<string[]> {
+  const list = relayList ?? (relayListLoading ? await relayListLoading : null);
+  const urls = list?.[mode] ?? [];
   return urls.length ? urls : FALLBACK_RELAYS;
+}
+
+/** The account's write relays, for links to its events. */
+export function writeRelays(): string[] {
+  return relayList?.write ?? [];
 }
 
 let pool: NPool | null = null;
 
-/** The app's own connections, following the account's relays as they change. */
-function poolFor(din: Din): NPool {
+/** The app's own connections, on the account's relays. */
+function poolFor(): NPool {
   pool ??= new NPool({
     open: (url) =>
       new NRelay1(url, {
         auth: (challenge) =>
           signer().signEvent({ kind: 22242, content: '', tags: [['relay', url], ['challenge', challenge]], created_at: Math.floor(Date.now() / 1000) }),
       }),
-    reqRouter: (filters) => new Map(relaysOf(din, 'read').map((url) => [url, filters])),
-    eventRouter: () => relaysOf(din, 'write'),
+    reqRouter: async (filters) => new Map((await relaysOf('read')).map((url) => [url, filters])),
+    eventRouter: () => relaysOf('write'),
     eoseTimeout: 1500,
   });
   return pool;
 }
 
-/** The signed-in user's pubkey, or null, as it changes. */
+/**
+ * The signed-in user's pubkey from `window.nostr`, or null, asked again
+ * when the window comes back to the front (another account may be signed
+ * in by then).
+ */
 export function usePubkey(): string | null {
-  const din = useDin();
-  return useSyncExternalStore(
-    useCallback((cb) => din.account.onChange(cb), [din]),
-    () => din.account.pubkey,
-  );
+  const { data } = useQuery({
+    queryKey: ['pubkey'],
+    staleTime: 0,
+    refetchOnWindowFocus: 'always',
+    queryFn: async () => {
+      const pubkey = await signer().getPublicKey().catch(() => null);
+      if (pubkey) void loadRelayList(pubkey);
+      return pubkey;
+    },
+  });
+  return data ?? null;
 }
 
 const dataKey = (pubkey: string | null) => ['calendar', pubkey] as const;
@@ -53,7 +109,6 @@ const dataKey = (pubkey: string | null) => ['calendar', pubkey] as const;
  * again every few minutes and when the window comes back to the front.
  */
 export function useCalendarData(pubkey: string | null) {
-  const din = useDin();
   const focused = useWindowState((s) => s.focused);
   const query = useQuery({
     queryKey: dataKey(pubkey),
@@ -61,7 +116,7 @@ export function useCalendarData(pubkey: string | null) {
     staleTime: 30_000,
     refetchInterval: 5 * 60_000,
     queryFn: async ({ signal }) => {
-      const nostr = poolFor(din);
+      const nostr = poolFor();
       const timeout = AbortSignal.any([signal, AbortSignal.timeout(12_000)]);
       const raw = await nostr.query(calendarFilters(pubkey!), { signal: timeout });
       // Events in the user's calendars that someone else made.
@@ -86,7 +141,6 @@ export function useCalendarData(pubkey: string | null) {
 
 /** Sign and publish events as the user, in order, adding each to what the calendar shows at once. */
 export function usePublish() {
-  const din = useDin();
   const qc = useQueryClient();
   const pubkey = usePubkey();
   return useMutation({
@@ -94,7 +148,7 @@ export function usePublish() {
       const signed: NostrEvent[] = [];
       for (const t of templates) {
         const event = (await signer().signEvent(t)) as NostrEvent;
-        await poolFor(din).event(event, { signal: AbortSignal.timeout(10_000) });
+        await poolFor().event(event, { signal: AbortSignal.timeout(10_000) });
         signed.push(event);
         qc.setQueryData<NostrEvent[]>(dataKey(pubkey), (old) => [...(old ?? []), event]);
         const rsvp = parseRsvp(event);
@@ -107,13 +161,12 @@ export function usePublish() {
 
 /** Everyone's answers to a calendar event, the newest of each person's. */
 export function useAttendance(coord: string | null) {
-  const din = useDin();
   return useQuery({
     queryKey: ['attendance', coord],
     enabled: !!coord,
     staleTime: 60_000,
     queryFn: async ({ signal }) => {
-      const events = await poolFor(din).query([{ kinds: [RSVP_KIND], '#a': [coord!], limit: 500 }], { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) });
+      const events = await poolFor().query([{ kinds: [RSVP_KIND], '#a': [coord!], limit: 500 }], { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) });
       const out = new Map<string, Rsvp>();
       for (const e of events) {
         const r = parseRsvp(e);
@@ -143,7 +196,6 @@ function safeImage(url: unknown): string | undefined {
 
 /** Names and pictures (kind 0) for people, fetched together. */
 export function useProfiles(pubkeys: readonly string[]): Map<string, Profile> {
-  const din = useDin();
   const key = useMemo(() => [...new Set(pubkeys)].sort(), [pubkeys]);
   const query = useQuery<Map<string, Profile>>({
     queryKey: ['profiles', key],
@@ -151,7 +203,7 @@ export function useProfiles(pubkeys: readonly string[]): Map<string, Profile> {
     staleTime: 10 * 60_000,
     placeholderData: (prev) => prev,
     queryFn: async ({ signal }) => {
-      const events = await poolFor(din).query([{ kinds: [0], authors: key, limit: key.length }], { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) });
+      const events = await poolFor().query([{ kinds: [0], authors: key, limit: key.length }], { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) });
       const out = new Map<string, Profile>();
       const newest = new Map<string, NostrEvent>();
       for (const e of events) if ((newest.get(e.pubkey)?.created_at ?? -1) < e.created_at) newest.set(e.pubkey, e);
