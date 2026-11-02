@@ -28,6 +28,8 @@ mod drm;
 mod edid;
 mod gamma;
 mod input;
+mod magic_mouse;
+mod mouse;
 mod output_management;
 mod render;
 mod screencopy;

@@ -1891,7 +1891,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'alt-released' ||
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area' ||
-        shortcut.action === 'wm'
+        shortcut.action === 'wm' ||
+        shortcut.action === 'history' ||
+        shortcut.action === 'workspace-step'
       ) {
         return;
       }

@@ -77,6 +77,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   brightness: 'brightness',
   sound: 'sound',
   keyboard: 'keyboard',
+  mouse: 'settings',
   printers: 'printers',
   power: 'power',
   password: { not: 'the password and what sudo asks for are only changed by hand' },

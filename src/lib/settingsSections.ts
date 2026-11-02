@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   Link2,
   Monitor,
+  Mouse,
   MousePointer2,
   Palette,
   Printer,
@@ -38,6 +39,7 @@ export type SectionId =
   | 'power'
   | 'sound'
   | 'keyboard'
+  | 'mouse'
   | 'printers'
   | 'datetime'
   | 'accessibility'
@@ -185,6 +187,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Keyboard',
     icon: Keyboard,
     search: ['Keyboard layout', 'The layout everything on this computer types with.', 'language', 'input', 'typing', 'QWERTY', 'Dvorak'],
+  },
+  {
+    id: 'mouse',
+    group: 'Devices',
+    name: 'Mouse',
+    icon: Mouse,
+    search: ['Tracking speed', 'Scrolling speed', 'Scroll direction', 'Natural', 'Traditional', 'Secondary click', 'Middle click', 'Swipe with two fingers', 'Between pages', 'Between workspaces', 'Magic Mouse', 'pointer speed', 'right click', 'left-handed', 'gestures', 'back', 'forward', 'trackpad', 'touchpad', 'scroll wheel'],
   },
   {
     id: 'printers',

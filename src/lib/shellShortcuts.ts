@@ -21,6 +21,9 @@
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
  *                             -> { action: 'screenshot-area' }
+ *   - a mouse's Back/Forward, or a Magic Mouse's swipe (from din-shell)
+ *                             -> { action: 'history', back }
+ *                                or { action: 'workspace-step', step }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L / Alt+D / F6     -> { action: 'focus-address', wcId }
@@ -115,6 +118,19 @@ export type ShellShortcut =
        * main process, since Chromium can't identify its keysym).
        */
       action: 'screenshot-area';
+    }
+  | {
+      /**
+       * A mouse's Back or Forward button, or a Magic Mouse's two-finger
+       * swipe, from din-shell (electron/mouse.mts): for the focused window.
+       */
+      action: 'history';
+      back: boolean;
+    }
+  | {
+      /** A Magic Mouse's two-finger swipe, from din-shell: the workspace beside. */
+      action: 'workspace-step';
+      step: 1 | -1;
     }
   | {
       /** Ctrl+T pressed inside a browser tab: open a new tab. */

@@ -94,6 +94,7 @@ import {
   siteLocationResponse,
 } from './site-locations.mts';
 import { registerCursorHandlers } from './cursor.mts';
+import { registerMouseHandlers } from './mouse.mts';
 import { registerAccessibilityHandlers } from './accessibility.mts';
 import { holdDebugger, releaseDebugger } from './guest-debugger.mts';
 import { registerIconThemeHandlers } from './icon-theme.mts';
@@ -5859,6 +5860,7 @@ app.whenReady().then(() => {
   registerKeyboardHandlers({ assertShellSender });
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
+  registerMouseHandlers({ assertShellSender, sendToShell });
   registerAccessibilityHandlers({ assertShellSender });
   registerIconThemeHandlers({
     assertShellSender,

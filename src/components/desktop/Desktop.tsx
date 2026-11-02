@@ -3,6 +3,7 @@ import { Wallpaper } from './Wallpaper';
 import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
+import { MouseHost } from './MouseHost';
 import { AssistantHost } from './AssistantHost';
 import { DesktopAssistantHost } from './assistant/DesktopAssistantHost';
 import { SecurityOptions } from './SecurityOptions';
@@ -243,6 +244,7 @@ function DesktopSession() {
                     <AdminPromptHost />
                     <ScreenSharePicker />
                     <DesktopHotkeys />
+                    <MouseHost />
                     <AssistantHost />
                     <SecurityOptions />
                     <ScreenshotHost />

@@ -31,6 +31,7 @@ import {
   Minus,
   Monitor,
   Moon,
+  Mouse,
   MoreHorizontal,
   Play,
   Power,
@@ -100,6 +101,7 @@ import {
 } from '@/hooks/useAudio';
 import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
 import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
+import { getMouseBridge } from '@/lib/mouse';
 import { cleanLockError, getLockBridge, type SudoMode } from '@/lib/lock';
 import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
 import { useQuery } from '@tanstack/react-query';
@@ -374,6 +376,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <SoundSection />
     ) : id === 'keyboard' ? (
       <KeyboardSection />
+    ) : id === 'mouse' ? (
+      <MouseSection />
     ) : id === 'printers' ? (
       <PrintersSettingsSection />
     ) : id === 'datetime' ? (
@@ -2486,6 +2490,176 @@ function revealInList(row: HTMLElement | null) {
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Mouse
+// ---------------------------------------------------------------------------
+
+/** The scrolling speeds the slider steps through, 1 as the mouse sends it. */
+const SCROLL_SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+/** A row of choices, one of which is on. */
+function ChoiceRow<T extends string>({
+  label,
+  description,
+  value,
+  choices,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: T;
+  choices: { value: T; name: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+      <p className="text-sm">{label}</p>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={label}>
+        {choices.map((choice) => {
+          const active = choice.value === value;
+          return (
+            <button
+              key={choice.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(choice.value)}
+              className={cn(
+                'rounded-lg border px-3 py-1.5 text-sm',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                active
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              )}
+            >
+              {choice.name}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+/**
+ * Settings → Mouse (window.dinos.mouse): how the pointer and scrolling go,
+ * which din-shell applies to every mouse, and a Magic Mouse's own. Only under
+ * din-shell; elsewhere the desktop Din runs in has its own.
+ */
+function MouseSection() {
+  const { config, updateConfig } = useAppContext();
+  const set = (patch: Partial<AppConfig>) => updateConfig((current) => ({ ...current, ...patch }));
+  const [available, setAvailable] = useState<boolean | null>(() => (getMouseBridge() ? null : false));
+  useEffect(() => {
+    getMouseBridge()?.status().then((s) => setAvailable(s.available), () => setAvailable(false));
+  }, []);
+  const [tracking, setTracking] = useState(config.mouseTrackingSpeed);
+  const [lastTracking, setLastTracking] = useState(config.mouseTrackingSpeed);
+  if (config.mouseTrackingSpeed !== lastTracking) {
+    setLastTracking(config.mouseTrackingSpeed);
+    setTracking(config.mouseTrackingSpeed);
+  }
+  const scrollIndex = Math.max(0, SCROLL_SPEEDS.findIndex((s) => s >= config.mouseScrollSpeed));
+
+  if (available === null) return <SectionShell title="Mouse"><Skeleton className="h-40 w-full" /></SectionShell>;
+  if (!available) {
+    return (
+      <SectionShell title="Mouse">
+        <FallbackCard icon={Mouse}>
+          Din’s mouse settings are for DinOS. Here, the mouse is set up in the settings of the desktop Din runs in.
+        </FallbackCard>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell title="Mouse">
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="mouse-tracking" className="text-sm">Tracking speed</Label>
+          <span className="text-xs text-muted-foreground">{tracking === 0 ? 'Normal' : tracking < 0 ? 'Slower' : 'Faster'}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">Slow</span>
+          <Slider
+            id="mouse-tracking"
+            aria-label="Tracking speed"
+            value={[tracking]}
+            min={-1}
+            max={1}
+            step={0.1}
+            onValueChange={([v]) => setTracking(v)}
+            onValueCommit={([v]) => set({ mouseTrackingSpeed: Math.round(v * 10) / 10 })}
+          />
+          <span className="text-xs text-muted-foreground">Fast</span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="mouse-scroll-speed" className="text-sm">Scrolling speed</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">{SCROLL_SPEEDS[scrollIndex]}×</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">Slow</span>
+          <Slider
+            id="mouse-scroll-speed"
+            aria-label="Scrolling speed"
+            value={[scrollIndex]}
+            min={0}
+            max={SCROLL_SPEEDS.length - 1}
+            step={1}
+            onValueChange={([i]) => set({ mouseScrollSpeed: SCROLL_SPEEDS[i] })}
+          />
+          <span className="text-xs text-muted-foreground">Fast</span>
+        </div>
+      </div>
+      <ChoiceRow
+        label="Scroll direction"
+        description="Natural moves the page along with your finger, as on a phone. Automatic is natural on a touchpad and a Magic Mouse, and a scroll wheel’s way with a wheel."
+        value={config.mouseScrollDirection}
+        choices={[
+          { value: 'auto', name: 'Automatic' },
+          { value: 'natural', name: 'Natural' },
+          { value: 'traditional', name: 'Traditional' },
+        ]}
+        onChange={(mouseScrollDirection) => set({ mouseScrollDirection })}
+      />
+      <ChoiceRow
+        label="Secondary click"
+        description="The click that opens a right-click menu. Left swaps the buttons, for the left hand."
+        value={config.mouseSecondaryClick}
+        choices={[
+          { value: 'right', name: 'Right side' },
+          { value: 'left', name: 'Left side' },
+          { value: 'off', name: 'Off' },
+        ]}
+        onChange={(mouseSecondaryClick) => set({ mouseSecondaryClick })}
+      />
+
+      <SubHeading>Magic Mouse</SubHeading>
+      <ChoiceRow
+        label="Swipe with two fingers"
+        description="Swiping two fingers sideways goes Back and Forward in the Web Browser, or to the workspace beside. One finger scrolls, and a quick flick keeps going."
+        value={config.mouseSwipe}
+        choices={[
+          { value: 'pages', name: 'Between pages' },
+          { value: 'workspaces', name: 'Between workspaces' },
+          { value: 'off', name: 'Off' },
+        ]}
+        onChange={(mouseSwipe) => set({ mouseSwipe })}
+      />
+      <SettingSwitchRow
+        id="mouse-middle-click"
+        label="Middle click"
+        description="Clicking the middle of the mouse is a middle click, which opens links in new tabs and pastes the selection in a terminal. On a Mac it’s a click."
+        checked={config.mouseMiddleClick}
+        onCheckedChange={(mouseMiddleClick) => set({ mouseMiddleClick })}
+      />
+    </SectionShell>
+  );
+}
 
 /**
  * The system's keyboard layout (window.dinos.keyboard), which Din's own windows and

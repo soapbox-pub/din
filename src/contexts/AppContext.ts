@@ -130,6 +130,23 @@ export interface AppConfig {
   /** Whether power mode also shakes the window being typed in. */
   powerModeShake: boolean;
   /**
+   * Which way scrolling moves the page: `natural` with the finger, as on a
+   * phone, `traditional` the way a wheel turns, or `auto`, natural where a
+   * finger slides (a touchpad, a Magic Mouse) and a wheel's way with a wheel.
+   * Settings → Mouse; din-shell applies these (src/lib/mouse.ts).
+   */
+  mouseScrollDirection: 'auto' | 'natural' | 'traditional';
+  /** How fast the pointer goes, -1 to 1, 0 as it comes. */
+  mouseTrackingSpeed: number;
+  /** How far a scroll goes, 0.25 to 4 times as far as it comes. */
+  mouseScrollSpeed: number;
+  /** The secondary click: the right button, the left (swapping them), or none. */
+  mouseSecondaryClick: 'right' | 'left' | 'off';
+  /** A Magic Mouse's middle third clicks the middle button; a Mac has none. */
+  mouseMiddleClick: boolean;
+  /** What two fingers swiped sideways on a Magic Mouse do. */
+  mouseSwipe: 'pages' | 'workspaces' | 'off';
+  /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
    * this device, like wobbly windows.

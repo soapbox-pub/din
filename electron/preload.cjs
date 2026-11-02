@@ -20,6 +20,7 @@
 //   - window.dinos.keyboard: the system's keyboard layout, for Settings
 //   - window.dinos.datetime: the system's time zone and clock, for Settings
 //   - window.dinos.cursor: the pointer's theme and size, for Settings
+//   - window.dinos.mouse: Settings → Mouse, for din-shell
 //   - window.dinos.accessibility: Settings → Accessibility, passed on to Linux apps
 //   - window.dinos.iconTheme: the icon theme, for Settings and Din's icons
 //   - window.dinos.tray: apps' status icons and their menus, for the menu bar
@@ -999,6 +1000,17 @@ expose('accessibility', {
    * @param {{ reduceMotion: boolean, reduceTransparency: boolean, highContrast: boolean }} preferences
    */
   set: (preferences) => ipcRenderer.invoke('accessibility:set', preferences),
+});
+
+// Mouse bridge (window.dinos.mouse), backed by electron/mouse.mts: Settings →
+// Mouse, for din-shell to apply.
+expose('mouse', {
+  /** { available }: whether the settings do anything here (under din-shell). */
+  status: () => ipcRenderer.invoke('mouse:status'),
+  /**
+   * @param {{ scrollDirection: string, trackingSpeed: number, scrollSpeed: number, secondaryClick: string, middleClick: boolean, swipe: string }} settings
+   */
+  set: (settings) => ipcRenderer.invoke('mouse:set', settings),
 });
 
 // Cursor bridge (window.dinos.cursor), backed by the cursor:* handlers in

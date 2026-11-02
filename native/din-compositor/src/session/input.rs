@@ -28,7 +28,7 @@ use smithay::{
 };
 use tracing::warn;
 
-use super::state::State;
+use super::{magic_mouse, state::State};
 
 impl State {
     pub fn process_input(&mut self, event: InputEvent<LibinputInputBackend>) {
@@ -44,6 +44,7 @@ impl State {
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 let serial = SERIAL_COUNTER.next_serial();
                 let state = event.state();
+                let button = self.mouse_button(&event.device(), event.button_code(), state == ButtonState::Pressed);
                 // A click outside a popup, with no grab, goes to Din.
                 if state == ButtonState::Pressed && !pointer.is_grabbed() {
                     if let (Some(keyboard), Some(din)) = (self.seat.get_keyboard(), self.din().and_then(|w| w.toplevel()).map(|t| t.wl_surface().clone())) {
@@ -54,7 +55,7 @@ impl State {
                 }
                 pointer.button(
                     self,
-                    &ButtonEvent { button: event.button_code(), state, serial, time: event.time_msec() },
+                    &ButtonEvent { button, state, serial, time: event.time_msec() },
                 );
                 pointer.frame(self);
             }
@@ -161,7 +162,8 @@ impl State {
                     touch.cancel(self);
                 }
             }
-            InputEvent::DeviceAdded { mut device } => configure_touchpad(&mut device),
+            InputEvent::DeviceAdded { mut device } => self.mouse_device_added(&mut device),
+            InputEvent::DeviceRemoved { device } => self.mouse_device_removed(&device),
             _ => {}
         }
     }
@@ -265,15 +267,20 @@ impl State {
     }
 
     fn on_axis(&mut self, event: <LibinputInputBackend as smithay::backend::input::InputBackend>::PointerAxisEvent) {
+        // A Magic Mouse whose fingers din-shell reads scrolls from those.
+        if magic_mouse::reads_touches(self, &event.device()) {
+            return;
+        }
         let Some(pointer) = self.seat.get_pointer() else { return };
+        let speed = self.mouse.settings.scroll_speed;
         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
         for axis in [Axis::Horizontal, Axis::Vertical] {
-            let v120 = event.amount_v120(axis);
-            let amount = event.amount(axis).unwrap_or_else(|| v120.unwrap_or(0.0) * 15.0 / 120.0);
+            let v120 = event.amount_v120(axis).map(|v| v * speed);
+            let amount = event.amount(axis).map(|a| a * speed).unwrap_or_else(|| v120.unwrap_or(0.0) * 15.0 / 120.0);
             if amount != 0.0 {
                 frame = frame.relative_direction(axis, event.relative_direction(axis)).value(axis, amount);
                 if let Some(v120) = v120 {
-                    frame = frame.v120(axis, v120 as i32);
+                    frame = frame.v120(axis, v120.round() as i32);
                 }
             }
             // libinput ends finger and continuous (trackpoint button) scrolls
@@ -329,21 +336,6 @@ impl State {
             }
         }
         best.map_or(location, |(_, p)| p)
-    }
-}
-
-/// Natural scrolling and tap-to-click on touchpads, as cage set them up:
-/// libinput defaults to neither, and no settings daemon runs to change that.
-/// A touchpad is the device that can tap, so a mouse wheel keeps its direction.
-fn configure_touchpad(device: &mut smithay::reexports::input::Device) {
-    if device.config_tap_finger_count() == 0 {
-        return;
-    }
-    if device.config_tap_set_enabled(true).is_err() {
-        warn!("couldn't turn on tap-to-click for {}", device.name());
-    }
-    if device.config_scroll_has_natural_scroll() && device.config_scroll_set_natural_scroll_enabled(true).is_err() {
-        warn!("couldn't turn on natural scrolling for {}", device.name());
     }
 }
 
