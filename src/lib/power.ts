@@ -19,6 +19,8 @@ export type BatteryStatus =
 export interface BatteryInfo {
   /** Kernel name, e.g. "BAT0". */
   name: string;
+  /** What to call it: "Battery" (or "Battery 2"), or a device's model, e.g. "Magic Mouse". */
+  label: string;
   /** Charge level 0-100, or null if the kernel didn't report one. */
   percent: number | null;
   status: BatteryStatus;
@@ -34,7 +36,10 @@ export interface PowerStatus {
   available: boolean;
   /** Whether external power (AC adapter or USB-PD) is connected. */
   acConnected: boolean;
+  /** The computer's own batteries: all the summary and warnings count. */
   batteries: BatteryInfo[];
+  /** Batteries in devices connected to it (a Bluetooth mouse), by model. */
+  devices: BatteryInfo[];
 }
 
 export interface PowerProfilesStatus {

@@ -1375,6 +1375,17 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
               <BatteryDetailRow key={battery.name} battery={battery} />
             ))}
           </ul>
+
+          {data.devices.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-muted-foreground">Devices</h4>
+              <ul className="flex flex-col gap-2" aria-label="Devices">
+                {data.devices.map((battery) => (
+                  <BatteryDetailRow key={battery.name} battery={battery} />
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -1434,7 +1445,7 @@ function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
             charging={charging}
             className="size-4.5 shrink-0 text-muted-foreground"
           />
-          <span className="truncate text-sm text-foreground">{battery.name}</span>
+          <span className="truncate text-sm text-foreground">{battery.label}</span>
         </div>
         <span className="text-sm tabular-nums text-muted-foreground">
           {battery.percent !== null ? `${battery.percent}%` : '—'}
@@ -1447,7 +1458,7 @@ function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
         aria-valuenow={battery.percent ?? undefined}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${battery.name} charge`}
+        aria-label={`${battery.label} charge`}
       >
         <div
           className={cn('h-full rounded-full', critical ? 'bg-destructive' : 'bg-primary')}

@@ -153,8 +153,19 @@ export function BatteryPopoverBody() {
 
       {/* Per-battery breakdown, only when there's more than one pack. */}
       {data && data.batteries.length > 1 && (
-        <ul className="flex flex-col gap-1 p-1.5" aria-label="Batteries">
+        <ul
+          className={cn('flex flex-col gap-1 p-1.5', data.devices.length > 0 && 'border-b border-border/60')}
+          aria-label="Batteries"
+        >
           {data.batteries.map((battery) => (
+            <BatteryRow key={battery.name} battery={battery} />
+          ))}
+        </ul>
+      )}
+
+      {data && data.devices.length > 0 && (
+        <ul className="flex flex-col gap-1 p-1.5" aria-label="Devices">
+          {data.devices.map((battery) => (
             <BatteryRow key={battery.name} battery={battery} />
           ))}
         </ul>
@@ -177,7 +188,7 @@ export function BatteryPopoverBody() {
   );
 }
 
-/** Compact per-battery row for multi-battery machines. */
+/** Compact row for one battery: a pack of a multi-battery machine, or a device's. */
 function BatteryRow({ battery }: { battery: BatteryInfo }) {
   const charging = battery.status === 'charging';
   return (
@@ -185,9 +196,12 @@ function BatteryRow({ battery }: { battery: BatteryInfo }) {
       <BatteryGlyph
         percent={battery.percent}
         charging={charging}
-        className="size-4.5 shrink-0 text-muted-foreground"
+        className={cn(
+          'size-4.5 shrink-0',
+          isCritical(battery.percent, charging) ? 'text-destructive' : 'text-muted-foreground',
+        )}
       />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{battery.name}</span>
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{battery.label}</span>
       <span className="text-sm tabular-nums text-muted-foreground">
         {battery.percent !== null ? `${battery.percent}%` : '—'}
       </span>

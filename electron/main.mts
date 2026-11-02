@@ -1932,24 +1932,41 @@ function registerPowerHandlers(): void {
     try {
       names = await fsp.readdir(POWER_SUPPLY_DIR);
     } catch {
-      return { available: false, acConnected: false, batteries: [] };
+      return { available: false, acConnected: false, batteries: [], devices: [] };
     }
 
+    // A battery whose scope is Device powers something else (a Bluetooth
+    // mouse's, hid-<address>-battery): it's listed by its model's name, apart
+    // from the computer's own, and never counts toward the computer's charge.
     const batteries = [];
+    const devices = [];
     let acConnected = false;
     for (const name of names.sort()) {
       const dir = path.join(POWER_SUPPLY_DIR, name);
       const type = await readPowerAttr(dir, 'type');
       if (type === 'Battery') {
         if ((await readPowerAttr(dir, 'present')) === '0') continue;
-        batteries.push(await readBattery(dir, name));
+        const battery = await readBattery(dir, name);
+        if ((await readPowerAttr(dir, 'scope')) === 'Device') {
+          devices.push({ ...battery, label: (await readPowerAttr(dir, 'model_name')) || 'Device' });
+        } else {
+          batteries.push(battery);
+        }
       } else if (type === 'Mains' || type === 'USB') {
         // Mains = AC adapter; a USB-C port online means USB-PD is supplying power.
         if ((await readPowerAttr(dir, 'online')) === '1') acConnected = true;
       }
     }
 
-    return { available: batteries.length > 0, acConnected, batteries };
+    return {
+      available: batteries.length > 0,
+      acConnected,
+      batteries: batteries.map((battery, i) => ({
+        ...battery,
+        label: batteries.length > 1 ? `Battery ${i + 1}` : 'Battery',
+      })),
+      devices,
+    };
   });
 
   ipcMain.handle('power:profiles', async (event) => {

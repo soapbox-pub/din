@@ -221,6 +221,7 @@ export const powerArea: Area = {
         data: { ...status, profiles },
         text: [
           status.available && summary ? `battery: ${summary.percent}%${status.acConnected ? ', plugged in' : ''}` : 'battery: none',
+          ...status.devices.map((d) => `${d.label}: ${d.percent ?? '?'}%`),
           profiles.available ? `power mode: ${profiles.active} (of ${profiles.profiles.join(', ')})` : '',
         ].filter(Boolean).join('\n'),
       };
