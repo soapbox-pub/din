@@ -707,6 +707,40 @@ in
   # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
   # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.
   networking.firewall.interfaces.dinqs0.allowedUDPPorts = [ 53 67 ];
+  # Nothing else on it: NetworkManager's shared mode routes a network it
+  # hosts onto the computer's own (forwarding, NAT), and the ports open on
+  # every interface (AirPlay's, mDNS) would be open there too. A table of its
+  # own, ahead of the firewall's, whose drops stand whatever it accepts.
+  systemd.services.din-hotspot-firewall = {
+    description = "Keep Quick Share's hotspot off the computer's network";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "NetworkManager.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.nftables}/bin/nft -f ${pkgs.writeText "din-hotspot.nft" ''
+        table inet din-hotspot
+        delete table inet din-hotspot
+        table inet din-hotspot {
+          chain forward {
+            type filter hook forward priority filter - 1; policy accept;
+            iifname "dinqs0" drop
+            oifname "dinqs0" drop
+          }
+          chain input {
+            type filter hook input priority filter - 1; policy accept;
+            iifname != "dinqs0" accept
+            ct state established,related accept
+            tcp dport 47331 accept
+            udp dport { 53, 67 } accept
+            tcp dport 53 accept
+            drop
+          }
+        }
+      ''}";
+      ExecStop = "${pkgs.nftables}/bin/nft delete table inet din-hotspot";
+    };
+  };
 
   # The user Din runs as. `networkmanager` group membership lets the
   # WiFi settings panel control connections without polkit prompts; `video`

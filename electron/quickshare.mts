@@ -325,6 +325,12 @@ class Connection {
   /** The phone from Settings → Phone it proved to be, whose shares arrive without asking. */
   private trusted: Promise<{ phoneId: string; name: string } | null>;
   private releaseHotspot: (() => void) | null = null;
+  /**
+   * Whether it may be offered the hotspot: one of the user's phones, proven,
+   * or a share the user accepted. Its password lets a device onto the
+   * network, so nothing in Bluetooth range gets it for connecting.
+   */
+  private upgradeAllowed = false;
 
   /** Whether a window is showing this share (so closing the last one ends it). */
   get windowed(): boolean {
@@ -339,8 +345,12 @@ class Connection {
     const peer = this.bluetooth;
     // A paired phone's address alone could be claimed by anything; the link's encryption can't.
     this.trusted = peer?.paired && peer.secured ? fileSender(peer.address).catch(() => null) : Promise.resolve(null);
-    // The faster channel it'll be offered.
-    if (peer) this.releaseHotspot = holdHotspot();
+    // One of the user's phones is offered the faster channel at once.
+    if (peer) {
+      void this.trusted.then((phone) => {
+        if (phone) this.allowUpgrade();
+      });
+    }
     this.listenTo(socket);
     socket.resume();
     this.wait(HANDSHAKE_MS, () => this.fail(new ProtocolError('handshake timed out')));
@@ -363,6 +373,14 @@ class Connection {
     };
     socket.on('error', gone);
     socket.on('close', gone);
+  }
+
+  /** Bring the hotspot up for a Bluetooth peer it may have, and offer it once the channel is encrypted. */
+  private allowUpgrade(): void {
+    if (!this.bluetooth || this.closed || this.upgradeAllowed) return;
+    this.upgradeAllowed = true;
+    this.releaseHotspot ??= holdHotspot();
+    if (this.stage === 'secure') void this.offerUpgrade();
   }
 
   /**
@@ -576,7 +594,7 @@ class Connection {
     this.sendSharing(
       sharingFrame(SHARING.pairedKeyEncryption, 4, new Writer().bytes(1, crypto.randomBytes(72)).bytes(2, crypto.randomBytes(6))),
     );
-    if (this.bluetooth) void this.offerUpgrade();
+    if (this.upgradeAllowed) void this.offerUpgrade();
   }
 
   // --- Encryption ----------------------------------------------------------
@@ -809,6 +827,7 @@ class Connection {
     this.sendSharing(sharingFrame(SHARING.response, 3, new Writer().int(1, RESPONSE.accept)));
     this.wait(IDLE_MS, () => this.finish('failed', `${this.device} stopped sending.`));
     this.emit(true);
+    this.allowUpgrade();
   }
 
   /** Stop the share, or the connection if it hasn't offered anything yet. */
