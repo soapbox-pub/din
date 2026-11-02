@@ -34,7 +34,7 @@ function day(ms: number): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, marking a mailbox read, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -63,6 +63,31 @@ export const mailArea: Area = {
               .join('\n')
           : 'No mailing lists in the inbox',
       };
+    }),
+    command('mail', 'mark-read', 'Mark every message in a mailbox read, as Mail’s Mark All as Read does (asks on screen first)', [
+      { name: 'mailbox', type: 'string', positional: true, optional: true, help: 'Which mailbox, by name or path (default: the inbox)' },
+      ACCOUNT,
+    ], async (args, ctx) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const query = args.optString('mailbox');
+      const targets = [];
+      for (const a of accounts) {
+        const boxes = (await call(mail().mailboxes(a.id))).filter((b) => b.selectable);
+        const box = query ? pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox') : boxes.find((b) => b.special === 'inbox');
+        if (box) targets.push({ account: a, box });
+      }
+      const unseen = targets.reduce((n, t) => n + t.box.unseen, 0);
+      if (!unseen) return { data: { marked: 0 }, text: 'Nothing unread there' };
+      const where = targets.map((t) => (accounts.length > 1 ? `${t.box.name} (${t.account.name})` : t.box.name)).join(', ');
+      const ok = await ctx.confirm({
+        title: `Mark ${unseen.toLocaleString()} ${unseen === 1 ? 'message' : 'messages'} in ${where} as read?`,
+        description: 'They’re marked read on the server too, and there’s no undoing it all at once.',
+        action: 'Mark as Read',
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      let marked = 0;
+      for (const t of targets) marked += await call(mail().markAllRead(t.account.id, t.box.path));
+      return { data: { marked }, text: `Marked ${marked.toLocaleString()} ${marked === 1 ? 'message' : 'messages'} read` };
     }),
     command('mail', 'unsubscribe', 'Unsubscribe from mailing lists, as Subscriptions does (asks on screen first)', [
       { name: 'lists', type: 'string', positional: true, rest: true, help: 'Senders, by name, address or list id (as din mail subscriptions lists them)' },

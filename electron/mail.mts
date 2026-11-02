@@ -1340,6 +1340,19 @@ async function setFlags(a: StoredAccount, mailbox: string, uids: number[], flags
   changed(a.id, mailbox);
 }
 
+/** Mark every message in a mailbox read, in one command; how many were unread. */
+async function markAllRead(a: StoredAccount, mailbox: string): Promise<number> {
+  const count = await inMailbox(a, mailbox, async (client) => {
+    const uids = (await client.search({ seen: false }, { uid: true })) || [];
+    if (uids.length) await client.messageFlagsAdd({ seen: false }, ['\\Seen'], { uid: true });
+    return uids.length;
+  });
+  const store = storeOf(a);
+  store.patchFlags(mailbox, store.allSummaries(mailbox).filter((s) => !s.seen).map((s) => s.uid), { seen: true });
+  changed(a.id, mailbox);
+  return count;
+}
+
 async function move(a: StoredAccount, mailbox: string, uids: number[], to: unknown): Promise<void> {
   let dest: string;
   if (typeof to === 'string') dest = to;
@@ -1845,6 +1858,7 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:setFlags', (id, mailbox, uids, flags) =>
     setFlags(account(id), mailboxArg(mailbox), uidList(uids), (flags ?? {}) as { seen?: unknown; flagged?: unknown }),
   );
+  handle('mail:markAllRead', (id, mailbox) => markAllRead(account(id), mailboxArg(mailbox)));
   handle('mail:move', (id, mailbox, uids, to) => move(account(id), mailboxArg(mailbox), uidList(uids), to));
   handle('mail:remove', (id, mailbox, uids) => remove(account(id), mailboxArg(mailbox), uidList(uids)));
   handle('mail:send', (id, m) => send(account(id), outgoing(m)));

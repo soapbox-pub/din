@@ -1,5 +1,5 @@
 import { useMemo, useState, type ComponentProps, type DragEvent } from 'react';
-import { ChevronRight, Folder, Inbox, MailMinus, RefreshCw, Settings2, TriangleAlert, UserPlus } from 'lucide-react';
+import { ChevronRight, Folder, Inbox, MailCheck, MailMinus, RefreshCw, Settings2, TriangleAlert, UserPlus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
@@ -118,6 +118,7 @@ export function Sidebar({
   onSelect,
   onDropMessages,
   onRefresh,
+  onMarkAllRead,
   onAccountSettings,
   onAddAccount,
 }: {
@@ -128,6 +129,8 @@ export function Sidebar({
   onSelect: (s: Selection) => void;
   onDropMessages: (e: DragEvent, accountId: string, path: string) => void;
   onRefresh: () => void;
+  /** Mark everything in a mailbox (or every inbox) read, asking first. */
+  onMarkAllRead: (s: Selection) => void;
   onAccountSettings: (accountId: string) => void;
   onAddAccount: () => void;
 }) {
@@ -169,9 +172,8 @@ export function Sidebar({
       <Section title="Favorites" open={!closed.has('favorites')} onToggle={() => toggle('favorites')}>
         {favorites.map(({ special, unseen }) => {
           const s: Selection = { kind: 'all', special };
-          return (
+          const row = (
             <Row
-              key={special}
               icon={SPECIAL_ICONS[special]}
               tone={special === 'flagged' ? 'flag' : undefined}
               label={special === 'inbox' && accounts.length > 1 ? 'All Inboxes' : SPECIAL_NAMES[special]}
@@ -179,6 +181,24 @@ export function Sidebar({
               selected={sameSelection(selection, s)}
               onClick={() => onSelect(s)}
             />
+          );
+          if (special !== 'inbox') return <div key={special}>{row}</div>;
+          return (
+            <ContextMenu key={special}>
+              <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => onSelect(s)}>
+                  <Inbox /> Open
+                </ContextMenuItem>
+                <ContextMenuItem disabled={!unseen} onSelect={() => onMarkAllRead(s)}>
+                  <MailCheck /> Mark All as Read
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={onRefresh}>
+                  <RefreshCw /> Get New Mail
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
         <Row
@@ -233,9 +253,15 @@ export function Sidebar({
                     <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
                     <ContextMenuContent>
                       {box.selectable && (
-                        <ContextMenuItem onSelect={() => onSelect(s)}>
-                          <Inbox /> Open
-                        </ContextMenuItem>
+                        <>
+                          <ContextMenuItem onSelect={() => onSelect(s)}>
+                            <Inbox /> Open
+                          </ContextMenuItem>
+                          <ContextMenuItem disabled={!box.unseen} onSelect={() => onMarkAllRead(s)}>
+                            <MailCheck /> Mark All as Read
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                        </>
                       )}
                       {accountMenu(a.id)}
                     </ContextMenuContent>

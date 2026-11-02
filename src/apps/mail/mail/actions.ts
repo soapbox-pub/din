@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
 import type { MailAccount, MailMessage } from '@/lib/mail';
-import { patchItems, patchUnseen, useMail, type Item } from './api';
+import { patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
 
 export type MessageAction =
@@ -133,5 +133,27 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [mail, qc, onRemoved, fail],
   );
 
-  return { run, moveTo, newMessage, compose };
+  /** Every message in these mailboxes read, on the server in one command each. */
+  const markAllRead = useCallback(
+    async (sources: Source[]) => {
+      if (!mail) return;
+      const here = new Set(sources.map((s) => `${s.accountId}\u0000${s.path}`));
+      qc.setQueriesData<InfiniteData<{ items: Item[] }>>({ queryKey: ['mail', 'messages'] }, (data) =>
+        data && {
+          ...data,
+          pages: data.pages.map((page) => ({ ...page, items: page.items.map((i) => (here.has(`${i.accountId}\u0000${i.path}`) ? { ...i, seen: true } : i)) })),
+        },
+      );
+      for (const s of sources) patchUnseen(qc, s.accountId, s.path, -Infinity);
+      try {
+        for (const s of sources) await mail.markAllRead(s.accountId, s.path);
+      } catch (error) {
+        fail('Mail couldn’t mark that read', error);
+      }
+      void qc.invalidateQueries({ queryKey: ['mail'] });
+    },
+    [mail, qc, fail],
+  );
+
+  return { run, moveTo, markAllRead, newMessage, compose };
 }

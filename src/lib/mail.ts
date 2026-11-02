@@ -240,6 +240,8 @@ export interface MailBridge {
   conversation(accountId: string, options: { messageIds: string[]; threadId?: string | null; since?: number }): Promise<ConversationMessage[]>;
   attachment(accountId: string, path: string, uid: number, index: number): Promise<MailAttachment>;
   setFlags(accountId: string, path: string, uids: number[], flags: { seen?: boolean; flagged?: boolean }): Promise<void>;
+  /** Mark every message in a mailbox read; resolves with how many were unread. */
+  markAllRead(accountId: string, path: string): Promise<number>;
   /** Move to a mailbox by path, or to the account's archive, trash or junk. */
   move(accountId: string, path: string, uids: number[], to: string | { special: 'archive' | 'trash' | 'junk' | 'inbox' }): Promise<void>;
   /** To the trash; from the trash, gone for good. */
@@ -284,7 +286,7 @@ export interface MailRead {
  * mail and each inbox's unread count, watched from the moment Din starts,
  * for notifications and Mail's Dock badge.
  */
-export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'subscriptions' | 'unsubscribe'> & {
+export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'subscriptions' | 'unsubscribe'> & {
   /** Each account's unread mail in its inbox, as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;

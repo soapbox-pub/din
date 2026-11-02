@@ -22,6 +22,7 @@ import { messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
 import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
+import { DialogButton, Overlay } from '@/shared/dialogs';
 
 const SELECTION_KEY = 'din:mail:selection';
 const SIDEBAR_KEY = 'din:mail:sidebar';
@@ -295,14 +296,16 @@ export function Viewer() {
   const special = selection.kind === 'all' ? selection.special : selection.kind === 'mailbox' ? box(selection.accountId, selection.path)?.special ?? null : null;
   const recipients = special === 'sent' || special === 'drafts';
 
-  const title =
-    selection.kind === 'subscriptions'
+  const titleOf = (s: Selection) =>
+    s.kind === 'subscriptions'
       ? 'Subscriptions'
-      : selection.kind === 'all'
-        ? selection.special === 'inbox' && accounts.length > 1
+      : s.kind === 'all'
+        ? s.special === 'inbox' && accounts.length > 1
           ? 'All Inboxes'
-          : SPECIAL_NAMES[selection.special]
-        : mailboxTitle(box(selection.accountId, selection.path)) || selection.path;
+          : SPECIAL_NAMES[s.special]
+        : mailboxTitle(box(s.accountId, s.path)) || s.path;
+  const title = titleOf(selection);
+  const unseenIn = (s: Selection) => sourcesOf(s, boxes).reduce((n, src) => n + (box(src.accountId, src.path)?.unseen ?? 0), 0);
 
   useWindowTitle(current ? current.items.at(-1)?.subject || 'No Subject' : title);
 
@@ -338,7 +341,9 @@ export function Viewer() {
     },
     [conversations],
   );
-  const { run, moveTo, newMessage, compose } = useMessageActions(accounts, onRemoved);
+  const { run, moveTo, markAllRead, newMessage, compose } = useMessageActions(accounts, onRemoved);
+  /** The mailbox Mark All as Read is asking about. */
+  const [markingRead, setMarkingRead] = useState<Selection | null>(null);
 
   const pickFor = useCallback(
     (pick: MenuPick, list: Item[]) => {
@@ -567,6 +572,7 @@ export function Viewer() {
         label: 'Mailbox',
         items: [
           { id: 'refresh', label: 'Get All New Mail', accelerator: 'Ctrl+Shift+N' },
+          { id: 'mark-all-read', label: 'Mark All as Read', enabled: selection.kind !== 'subscriptions' && unseenIn(selection) > 0 },
           { type: 'separator' },
           { id: 'subscriptions', label: 'Subscriptions' },
         ],
@@ -600,6 +606,7 @@ export function Viewer() {
         case 'back': return backToList();
         case 'search': return searchInput.current?.focus();
         case 'refresh': return refresh();
+        case 'mark-all-read': return setMarkingRead(selection);
         case 'subscriptions': return setSelection({ kind: 'subscriptions' });
         case 'unsubscribe': return current ? setLeaving(current.latest) : undefined;
         case 'read':
@@ -782,6 +789,7 @@ export function Viewer() {
                 onSelect={setSelection}
                 onDropMessages={onDropMessages}
                 onRefresh={refresh}
+                onMarkAllRead={setMarkingRead}
                 onAccountSettings={(accountId) => setDialog({ kind: 'settings', accountId })}
                 onAddAccount={() => setDialog({ kind: 'setup' })}
               />
@@ -838,6 +846,27 @@ export function Viewer() {
             void qc.invalidateQueries({ queryKey: ['mail', 'mailboxes', a.id] });
           }}
         />
+      )}
+      {markingRead && (
+        <Overlay label="Mark All as Read" onClose={() => setMarkingRead(null)}>
+          <div className="space-y-2 px-5 pt-5 pb-4">
+            <h2 className="text-[15px] font-semibold">Mark {unseenIn(markingRead).toLocaleString()} {unseenIn(markingRead) === 1 ? 'message' : 'messages'} in {titleOf(markingRead)} as read?</h2>
+            <p className="text-[13px] text-muted-foreground">They’re marked read on the server too, and there’s no undoing it all at once.</p>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-3">
+            <DialogButton onClick={() => setMarkingRead(null)}>Cancel</DialogButton>
+            <DialogButton
+              variant="primary"
+              autoFocus
+              onClick={() => {
+                void markAllRead(sourcesOf(markingRead, boxes));
+                setMarkingRead(null);
+              }}
+            >
+              Mark as Read
+            </DialogButton>
+          </div>
+        </Overlay>
       )}
       {leaving && <UnsubscribeDialog item={leaving} onClose={() => setLeaving(null)} />}
       {dialog?.kind === 'settings' && (

@@ -1735,7 +1735,7 @@ expose('phone', {
 // through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'subscriptions', 'unsubscribe', 'unseen']) {
+for (const method of ['accounts', 'mailboxes', 'markAllRead', 'subscriptions', 'unsubscribe', 'unseen']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
 expose('mail', {
