@@ -33,6 +33,8 @@ const NO_ICONS: Record<string, string> = {};
 let desktopIcons: Record<string, string> = NO_ICONS;
 /** The desktop's theme icons that are glyphs to tint (a monochrome theme's), by URL. */
 let desktopGlyphs = new Set<string>();
+/** Installed Linux apps' icons that are glyphs, by URL. */
+let nativeGlyphs = new Set<string>();
 const listeners = new Set<() => void>();
 
 function subscribeDesktop(listener: () => void): () => void {
@@ -77,7 +79,12 @@ export function useThemeIcons(): Record<string, string> {
  * which AppIcon draws on a tile in the colour scheme's colours. Desktop only.
  */
 export function isGlyphIcon(url: string): boolean {
-  return desktopGlyphs.has(url);
+  return desktopGlyphs.has(url) || nativeGlyphs.has(url);
+}
+
+/** Say which installed Linux apps' icons are glyphs, by URL (useNativeApps, before it hands them out). */
+export function setNativeGlyphIcons(urls: string[]): void {
+  nativeGlyphs = new Set(urls);
 }
 
 /** A theme icon, if the theme has one and it's an inline image. */

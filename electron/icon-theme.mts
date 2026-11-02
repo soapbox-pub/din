@@ -430,6 +430,8 @@ function iconDataUrl(file: string): string | null {
 
 /** name -> icon file path, built once per theme. */
 let iconIndex: Map<string, string> = new Map();
+/** The indexed files that are a monochrome theme's glyphs. */
+let glyphFiles: Set<string> = new Set();
 /** In-flight index build, so concurrent callers share one pass. */
 let iconIndexBuild: Promise<Map<string, string>> | null = null;
 /** Bumped when the theme changes, so a build of the old one is dropped. */
@@ -439,6 +441,7 @@ let iconIndexGeneration = 0;
 export function forgetIconIndex(): void {
   iconIndexGeneration += 1;
   iconIndex = new Map();
+  glyphFiles = new Set();
   iconIndexBuild = null;
 }
 
@@ -452,9 +455,10 @@ function buildIconIndex(): Promise<Map<string, string>> {
 async function indexIcons(): Promise<Map<string, string>> {
   const generation = iconIndexGeneration;
   const index = new Map<string, string>();
+  const glyphs = new Set<string>();
 
   /** Record every usable icon in a directory, without overwriting a better hit. */
-  const indexDir = (dir: string): void => {
+  const indexDir = (dir: string, glyph = false): void => {
     let dirents: fs.Dirent[];
     try {
       dirents = fs.readdirSync(dir, { withFileTypes: true });
@@ -466,7 +470,10 @@ async function indexIcons(): Promise<Map<string, string>> {
       const ext = path.extname(dirent.name).toLowerCase();
       if (!ICON_EXTENSIONS.includes(ext)) continue;
       const name = dirent.name.slice(0, -ext.length);
-      if (!index.has(name)) index.set(name, path.join(dir, dirent.name));
+      if (index.has(name)) continue;
+      const file = path.join(dir, dirent.name);
+      index.set(name, file);
+      if (glyph) glyphs.add(file);
     }
   };
 
@@ -474,11 +481,14 @@ async function indexIcons(): Promise<Map<string, string>> {
   // Adwaita before it for the generic ones.
   const chain = [...new Set([...themeChain(await currentIconTheme()), 'Adwaita', 'hicolor'])];
   for (const theme of chain) {
+    const monochrome = themeIndex(theme)?.monochrome ?? false;
     const dirs = themeDirs(theme).sort(
       (a, b) => rankThemeDir(a.dir, CONTEXTS.apps) - rankThemeDir(b.dir, CONTEXTS.apps),
     );
     for (const { dir, roots } of dirs) {
-      for (const root of roots) indexDir(path.join(root, theme, dir.name));
+      // A glyph is only an app's, drawn on a tile; elsewhere it's shown as drawn.
+      const glyph = monochrome && CONTEXTS.apps.includes(dir.context);
+      for (const root of roots) indexDir(path.join(root, theme, dir.name), glyph);
       await breathe();
     }
   }
@@ -486,6 +496,7 @@ async function indexIcons(): Promise<Map<string, string>> {
 
   if (generation !== iconIndexGeneration) return index;
   iconIndex = index;
+  glyphFiles = glyphs;
   iconIndexBuild = null;
   return index;
 }
@@ -495,17 +506,27 @@ async function indexIcons(): Promise<Map<string, string>> {
  * give them, to a data URL, or null.
  */
 export async function resolveIcon(iconName: string | null): Promise<string | null> {
-  if (!iconName) return null;
+  return (await resolveAppIcon(iconName)).icon;
+}
+
+/**
+ * An app's icon, as resolveIcon finds it, and whether it's a monochrome
+ * theme's glyph, for Din to draw on a tile.
+ */
+export async function resolveAppIcon(iconName: string | null): Promise<{ icon: string | null; glyph: boolean }> {
+  if (!iconName) return { icon: null, glyph: false };
   // An absolute path is used as-is, per the spec.
   if (iconName.startsWith('/')) {
-    return fs.existsSync(iconName) ? iconDataUrl(iconName) : null;
+    return { icon: fs.existsSync(iconName) ? iconDataUrl(iconName) : null, glyph: false };
   }
   // Some entries carry a filename ("foo.png") rather than an icon name.
   const bare = ICON_EXTENSIONS.includes(path.extname(iconName).toLowerCase())
     ? iconName.slice(0, -path.extname(iconName).length)
     : iconName;
   const file = (await buildIconIndex()).get(bare);
-  return file ? iconDataUrl(file) : null;
+  if (!file) return { icon: null, glyph: false };
+  const icon = iconDataUrl(file);
+  return { icon, glyph: icon !== null && glyphFiles.has(file) };
 }
 
 // ---------------------------------------------------------------------------

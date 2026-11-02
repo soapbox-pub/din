@@ -35,6 +35,8 @@ export interface NativeApp {
   comment: string | null;
   /** Icon as a data: URL, or null when none could be resolved. */
   icon: string | null;
+  /** Whether the icon is a monochrome theme's glyph, which AppIcon draws on a tile. */
+  iconGlyph?: boolean;
   /** Freedesktop categories, e.g. ["Utility", "Calculator"]. */
   categories: string[];
   /** Extra search terms from the entry's Keywords. */

@@ -5,6 +5,7 @@ import {
   type NativeApp,
   type NativeAppList,
 } from '@/lib/nativeApps';
+import { setNativeGlyphIcons } from '@/shared/themeIcons';
 
 /**
  * TanStack Query hook over the native-app bridge (window.dinos.nativeApps).
@@ -42,7 +43,11 @@ export function useNativeApps(): { apps: NativeApp[]; available: boolean } {
 
   const { data } = useQuery<NativeAppList>({
     queryKey: ['native-apps', 'list'],
-    queryFn: () => requireBridge().list(),
+    queryFn: async () => {
+      const list = await requireBridge().list();
+      setNativeGlyphIcons(list.apps.flatMap((app) => (app.iconGlyph && app.icon ? [app.icon] : [])));
+      return list;
+    },
     enabled: bridge !== undefined,
     // Apps are installed and removed rarely; the main process re-scans on its
     // own schedule, so refetching here would only re-transfer the icons.

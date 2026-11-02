@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
-import { forgetIconIndex, resolveIcon } from './icon-theme.mts';
+import { forgetIconIndex, resolveAppIcon } from './icon-theme.mts';
 import {
   embeddedDisplay,
   embeddedDisplayAvailable,
@@ -48,6 +48,8 @@ export interface NativeApp {
   comment: string | null;
   /** Icon as a data: URL, or null when none could be resolved. */
   icon: string | null;
+  /** Whether the icon is a monochrome theme's glyph, which Din draws on a tile. */
+  iconGlyph: boolean;
   /** Freedesktop categories, e.g. ["Utility", "Calculator"]. */
   categories: string[];
   /** Extra search terms from the entry's Keywords. */
@@ -466,12 +468,14 @@ async function listApps(): Promise<NativeApp[]> {
   const apps: NativeApp[] = [];
   for (const entry of scanned) {
     if (isUninstaller(entry)) continue;
+    const { icon, glyph } = await resolveAppIcon(entry.iconName);
     apps.push({
       id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
       desktopId: entry.id,
       name: entry.name,
       comment: entry.comment,
-      icon: await resolveIcon(entry.iconName),
+      icon,
+      iconGlyph: glyph,
       categories: entry.categories,
       keywords: entry.keywords,
       terminal: entry.terminal,
