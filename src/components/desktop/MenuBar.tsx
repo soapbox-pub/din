@@ -33,6 +33,8 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { useTaskbarEdge } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';
+import { getWindowChrome, TEAR_AWAY_PX } from '@/lib/windowChromes';
+import type { WindowChrome } from '@/contexts/WindowChromeContext';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
 import { BatteryGlyph, BatteryPopoverBody } from '@/components/desktop/BatteryIndicator';
 import { VolumeGlyph, VolumePopoverBody } from '@/components/desktop/VolumeIndicator';
@@ -125,6 +127,7 @@ export function MenuBar() {
   const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);
+  const pull = usePullDown(fullscreen?.id ?? null);
 
   return (
     <header
@@ -133,6 +136,7 @@ export function MenuBar() {
       // arrow keys go along the bar.
       data-focus-area="menu-bar"
       onKeyDown={(e) => moveAmongItems(e, 'button')}
+      {...pull}
       // The accent is sanitized by the window; its tokens keep the bar's
       // contents legible on it, as on the title bar.
       style={accent ? { backgroundColor: accent, ...themeColorTokens(accent) } : undefined}
@@ -179,6 +183,64 @@ export function MenuBar() {
       </div>
     </header>
   );
+}
+
+/** A press on the bar that isn't on one of its controls. */
+function onEmptyBar(e: React.PointerEvent | React.MouseEvent): boolean {
+  const target = e.target as HTMLElement;
+  // Presses in the bar's popovers and menus bubble here through React, but
+  // aren't on the bar.
+  return (
+    e.currentTarget.contains(target) &&
+    !target.closest('button, a, input, textarea, [role="tab"], [role="menuitem"], [data-window-no-drag]')
+  );
+}
+
+/**
+ * The bar stands in for the title bar of the maximized window under it, as
+ * it looks like one: pulling down on its empty space tears the window away,
+ * and double-clicking there restores it. A press does nothing until the
+ * pointer moves, so a click on the bar doesn't focus the window.
+ */
+function usePullDown(windowId: string | null) {
+  const { toggleMaximize } = useWindowActions();
+  const press = useRef<{ windowId: string; pointerId: number; x: number; y: number; chrome: WindowChrome | null } | null>(null);
+
+  const end = (e: React.PointerEvent) => {
+    const p = press.current;
+    if (!p || p.pointerId !== e.pointerId) return;
+    press.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    p.chrome?.gestureEnd();
+  };
+
+  return {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      if (e.button !== 0 || !windowId || press.current || !onEmptyBar(e)) return;
+      press.current = { windowId, pointerId: e.pointerId, x: e.clientX, y: e.clientY, chrome: null };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      const p = press.current;
+      if (!p || p.pointerId !== e.pointerId) return;
+      if (!p.chrome) {
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < TEAR_AWAY_PX) return;
+        const chrome = getWindowChrome(p.windowId);
+        if (!chrome?.beginMove({ clientX: p.x, clientY: p.y })) {
+          press.current = null;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          return;
+        }
+        p.chrome = chrome;
+      }
+      p.chrome.gestureMove(e);
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    onDoubleClick: (e: React.MouseEvent<HTMLElement>) => {
+      if (windowId && onEmptyBar(e)) toggleMaximize(windowId);
+    },
+  };
 }
 
 /**

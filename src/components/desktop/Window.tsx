@@ -27,6 +27,7 @@ import {
 import { isDarkThemeColor, normalizeThemeColor, themeColorTokens } from '@/lib/themeColor';
 import { useSuperHeld } from '@/lib/superKey';
 import { beginWindowGesture, endWindowGesture } from '@/lib/windowGestures';
+import { registerWindowChrome, TEAR_AWAY_PX } from '@/lib/windowChromes';
 import {
   createModel,
   grabModel,
@@ -193,11 +194,10 @@ function topLimit(areas: WorkArea[], x: number, y: number): number {
 }
 
 /**
- * Dragging a maximized window's title bar farther than this tears it away:
- * the window un-maximizes under the cursor and the drag continues. Small
- * enough to feel immediate, large enough that a sloppy click doesn't tear.
+ * The least a torn-away window's top sits above the pointer: half its title
+ * bar, for a grab that began above the window (in the menu bar).
  */
-const TEAR_AWAY_PX = 8;
+const TEAR_AWAY_MIN_GRAB_Y = 18;
 
 /** Gap between the snap preview and the edges of the area it previews. */
 const SNAP_HINT_INSET = 6;
@@ -1277,18 +1277,20 @@ export const Window = memo(function Window({
           ? Math.min(Math.max((s.px - s.wsLeft - prevRect.x) / prevRect.width, 0), 1)
           : 0.5;
         const x = Math.round(px - width * fraction);
-        // Keep the grab point's offset within the title bar.
-        const y = Math.max(
-          topLimit(areas, px, py),
-          prevRect.y + (e.clientY - s.py),
-        );
+        // Keep the grab point's offset within the title bar; a grab above the
+        // window (the menu bar's) lands on the title bar instead.
+        const grabY = Math.max(s.py - s.wsTop - prevRect.y, TEAR_AWAY_MIN_GRAB_Y);
+        const wanted = py - grabY;
+        const y = Math.max(topLimit(areas, px, py), wanted);
         s.tearAway = null;
         s.wx = x;
         s.wy = y;
         s.x = x;
         s.y = y;
         s.px = e.clientX;
-        s.py = e.clientY;
+        // Held at the top for now, the window follows once the pointer is
+        // that far into it.
+        s.py = e.clientY + (y - wanted);
         // Write the restored geometry directly so this frame is already
         // correct; the state commit below re-renders with the same values.
         el.style.left = `${x}px`;
@@ -1641,6 +1643,7 @@ export const Window = memo(function Window({
     }),
     [],
   );
+  useEffect(() => registerWindowChrome(win.id, chrome), [win.id, chrome]);
 
   // An app uninstalled while its window is open renders nothing.
   if (!app) return null;
