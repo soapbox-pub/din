@@ -7,24 +7,22 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  * release's assets (kind 3063), of which an extension's is a .crx
  * (`application/x-chrome-extension`).
  *
- * NIP-82 marks what kind of software an app is only on its assets, which are
- * regular events, one per file per version, so there's no asking relays for
- * just the newest extension of each app. about:extensions instead keeps
- * everything its authors (Din's publishers, the people the user follows, and
- * the user) publish under NIP-82 in IndexedDB: their apps and releases,
- * which are small, and their .crx assets (relays filter assets by `#m`, so
- * no APK is ever downloaded), plus the deletions that cover them. It opens
- * on what's on disk, then syncs in the background: each author is asked for
- * everything once, then only for what's newer than when they were last
- * synced. What arrives is merged in, never swapped for the whole: the newest
- * app and release per address win, and a deletion removes what it covers and
- * keeps out anything older that arrives later.
+ * All three carry the platform `["f", "chromium"]` (a Chromium-based
+ * browser, which is what runs a .crx; Din's addition to NIP-82's platform
+ * identifiers), so relays hand over only extensions with `#f`.
+ * about:extensions keeps what its authors (Din's publishers, the people the
+ * user follows, and the user) publish that way in IndexedDB, plus the
+ * deletions that cover it. It opens on what's on disk, then syncs in the
+ * background: each author is asked for everything once, then only for
+ * what's newer than when they were last synced. What arrives is merged in,
+ * never swapped for the whole: the newest app and release per address win,
+ * and a deletion removes what it covers and keeps out anything older that
+ * arrives later.
  *
- * An app is listed when its newest release on the `main` channel (by
- * `created_at`, which NIP-82 makes the release date) that has a .crx asset
- * on disk is found, or when the app itself says it ships a .crx with an `m`
- * tag, which Din publishes (and has proposed for NIP-82); such an app's
- * release is fetched when it's opened or got.
+ * An app is listed when it has the platform; its newest release on the
+ * `main` channel (by `created_at`, which NIP-82 makes the release date) with
+ * a .crx asset on disk is what Get installs, and is fetched when it's opened
+ * or got if none is on disk yet.
  */
 
 export const APP_KIND = 32267;
@@ -32,18 +30,8 @@ export const RELEASE_KIND = 30063;
 export const ASSET_KIND = 3063;
 export const CRX_MIME = 'application/x-chrome-extension';
 
-/**
- * The platforms a Chrome extension runs on, which NIP-82 requires listing in
- * `f`: every desktop that Chrome runs on.
- */
-export const CHROME_PLATFORMS = [
-  'linux-x86_64',
-  'linux-aarch64',
-  'darwin-arm64',
-  'darwin-x86_64',
-  'windows-x86_64',
-  'windows-aarch64',
-];
+/** The NIP-82 platform (`f`) of what a Chromium-based browser runs: Chrome extensions. */
+export const CHROMIUM_PLATFORM = 'chromium';
 
 const DELETION_KIND = 5;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -434,8 +422,7 @@ export type CatalogQuery = (filters: NostrFilter[], signal?: AbortSignal) => Pro
 
 function catalogFilters(authors: string[]): NostrFilter[] {
   return [
-    { kinds: [APP_KIND, RELEASE_KIND], authors },
-    { kinds: [ASSET_KIND], authors, '#m': [CRX_MIME] },
+    { kinds: [APP_KIND, RELEASE_KIND, ASSET_KIND], authors, '#f': [CHROMIUM_PLATFORM] },
     { kinds: [DELETION_KIND], authors, '#k': [String(APP_KIND), String(RELEASE_KIND), String(ASSET_KIND)] },
   ];
 }
@@ -536,7 +523,6 @@ function originOf(url: string): string | null {
 function build(app: NostrEvent): ExtensionPackage | null {
   const identifier = tagValue(app, 'd');
   if (!identifier) return null;
-  const crxApp = tagValues(app, 'm').includes(CRX_MIME);
   let release: ReleaseRecord | undefined;
   let asset: AssetRecord | undefined;
   const candidates = [...releases.values()]
@@ -550,7 +536,7 @@ function build(app: NostrEvent): ExtensionPackage | null {
       break;
     }
   }
-  if (!asset && !crxApp) return null;
+  if (!tagValues(app, 'f').includes(CHROMIUM_PLATFORM)) return null;
 
   const icon = tagValue(app, 'icon');
   const content = app.content.trim();

@@ -5,7 +5,7 @@ import { getCrxBridge } from '@/lib/crx';
 import {
   APP_KIND,
   ASSET_KIND,
-  CHROME_PLATFORMS,
+  CHROMIUM_PLATFORM,
   CRX_MIME,
   RELEASE_KIND,
   extensionReleases,
@@ -480,7 +480,7 @@ export async function publishBrowserExtension(id: string, details: PublishDetail
   // Kept before anything's uploaded: the key is the extension's id from now on.
   if (extension.newKey) deps.extensionKeys?.set(d, extension.newKey);
   const version = extension.version || '0';
-  const platforms = CHROME_PLATFORMS.map((platform) => ['f', platform]);
+  const platforms = [['f', CHROMIUM_PLATFORM]];
 
   deps.progress?.('Uploading its icon', 10);
   const image = extension.icon
@@ -521,7 +521,6 @@ export async function publishBrowserExtension(id: string, details: PublishDetail
     ['d', d],
     ['name', details.title],
     ...platforms,
-    ['m', CRX_MIME],
     ...(summary ? [['summary', summary]] : []),
     ...(image ? [['icon', image]] : []),
     ['alt', `Browser extension: ${details.title}`],

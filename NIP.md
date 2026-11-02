@@ -194,11 +194,13 @@ release's asset (kind 3063), a Chrome extension package (`.crx`, version 3,
 `application/x-chrome-extension`) on the publisher's Blossom servers. Din
 follows the draft, and adds:
 
-- **`m` tags on the application**, one per MIME type of the assets it
-  ships, so `{"kinds": [32267], "#m": ["application/x-chrome-extension"]}`
-  finds extensions without fetching assets. Din has proposed this for
-  NIP-82. Only a change in those types updates the application; a new
-  version is a new release and asset.
+- **The platform `chromium`** (`["f", "chromium"]`): a Chromium-based
+  browser, which is what runs a `.crx`, in place of the operating systems
+  and architectures NIP-82's platform identifiers list. Like `wasm32`, it
+  names a runtime, and NIP-82 already takes `min_platform_version` on a
+  `.crx` to be the Chrome version. It's on the application, release and
+  asset, so `{"kinds": [32267], "#f": ["chromium"]}` finds extensions and
+  nothing else, one event each.
 - **`permission` and `host` tags on the asset**: the API permissions its
   manifest asks for, and the sites it can read and change (from
   `host_permissions`, the match patterns in `permissions`, and content
@@ -207,7 +209,7 @@ follows the draft, and adds:
 
 | Event | Din's tags |
 |---|---|
-| 32267 | `d` (the `d` it was installed under, its Web Store id, or its name made a slug), `name`, `f` for every desktop Chrome runs on (`linux-x86_64`, `linux-aarch64`, `darwin-arm64`, `darwin-x86_64`, `windows-x86_64`, `windows-aarch64`), `["m", "application/x-chrome-extension"]`, `summary`, `icon` (the biggest icon its manifest names), `alt`; content is its description |
+| 32267 | `d` (the `d` it was installed under, its Web Store id, or its name made a slug), `name`, `["f", "chromium"]`, `summary`, `icon` (the biggest icon its manifest names), `alt`; content is its description |
 | 30063 | `i`, `version` (the manifest's), `d` (`<i>@<version>`), `["c", "main"]`, the same `f`, `e` (the asset) |
 | 3063 | `i`, `x`, `version`, `m`, the same `f`, `url`, `size`, `filename`, `min_platform_version` (the manifest's `minimum_chrome_version`), `permission`, `host`, `alt` |
 
@@ -221,16 +223,14 @@ from any of the user's computers.
 
 **Finding them.** `about:extensions`, an internal page of the browser, lists
 the extensions Din's publishers, the people the user follows, and the user
-publish. NIP-82 marks an app as an extension only on its assets, regular
-events with one per file per version, so Din keeps all of those authors'
-apps and releases, their `.crx` assets (asked for with `#m`), and deletions
-(kind 5 with `["k", "32267"]`, `"30063"` or `"3063"`) in IndexedDB. The page
+publish. Din keeps those authors' applications, releases and assets with
+`["f", "chromium"]`, and their deletions (kind 5 with `["k", "32267"]`,
+`"30063"` or `"3063"`), in IndexedDB. The page
 draws from that at once, then syncs: an author new to it is asked for
 everything, the rest for what's newer than their last sync, and what comes
-back is merged in. An app is listed when its newest `main` release (by
-`created_at`, which NIP-82 makes the release date) with a `.crx` asset is
-known, or when it carries the `m` tag, in which case its newest releases are
-fetched when it's opened or got. A `nostr:` link to an app the page knows to
+back is merged in. Get installs an app's newest `main` release (by
+`created_at`, which NIP-82 makes the release date) with a `.crx` asset,
+fetching its newest releases first when none is on disk. A `nostr:` link to an app the page knows to
 be an extension opens its page there.
 
 **Installing.** Get downloads the package from the asset's servers, the
