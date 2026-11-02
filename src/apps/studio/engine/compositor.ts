@@ -144,13 +144,13 @@ export class Compositor {
   setScreen(track: MediaStreamTrack | null): void {
     if (this.screen?.track === track) return;
     this.screen?.stop();
-    this.screen = track ? new FrameSource(track) : null;
+    this.screen = track?.readyState === 'live' ? new FrameSource(track) : null;
   }
 
   setCamera(track: MediaStreamTrack | null): void {
     if (this.camera?.track === track) return;
     this.camera?.stop();
-    this.camera = track ? new FrameSource(track) : null;
+    this.camera = track?.readyState === 'live' ? new FrameSource(track) : null;
   }
 
   get hasScreen(): boolean {

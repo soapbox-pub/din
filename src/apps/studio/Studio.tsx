@@ -133,7 +133,18 @@ export function Studio() {
   // ---- what's captured ----
   // While recording or live, nothing that was on is turned off: its track is being recorded.
   const [held, setHeld] = useState({ camera: false, screen: false });
-  const active = visible || busy;
+  // Hidden for a moment (a window over it, a look at another workspace), what's captured keeps
+  // running: starting the camera and the screen again takes seconds.
+  const [cold, setCold] = useState(!visible);
+  useEffect(() => {
+    if (visible) return;
+    const timer = setTimeout(() => setCold(true), 30_000);
+    return () => {
+      clearTimeout(timer);
+      setCold(false);
+    };
+  }, [visible]);
+  const active = visible || !cold || busy;
   const wantsCamera = settings.cameraOn && settings.scene !== 'screen';
   const wantsScreen = settings.scene !== 'camera';
   const cameraOn = active && (wantsCamera || (busy && held.camera));

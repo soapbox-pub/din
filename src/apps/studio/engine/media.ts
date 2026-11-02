@@ -87,6 +87,8 @@ export function useCapture(key: string | null, open: () => Promise<MediaStream>,
     return () => {
       live = false;
       stopAll(stream);
+      // Its stopped tracks mustn't come back if the same key is asked for again.
+      setState((s) => (s.key === key ? { key: null, stream: null, error: null } : s));
     };
     // `open` is rebuilt every render; `key` says when it asks for something else.
     // eslint-disable-next-line react-hooks/exhaustive-deps
