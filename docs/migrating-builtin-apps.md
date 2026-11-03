@@ -34,7 +34,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useWindowIsTop()`, `useWindowVisible()` | `useWindowFocused()` / `useDocumentVisible()` (`document.hasFocus()`, `document.visibilityState`) |
 | `useWindowManager().windows` | Not available. Ask for what's needed (`screen.availWidth`) |
 | `useWorkAreas()`, `areaFor` | `screen.availLeft`, `availTop`, `availWidth`, `availHeight` |
-| `setCloseGuard(windowId, fn)` | `useCloseGuard(fn)` / `din.window.onCloseRequest(fn)` |
+| `setCloseGuard(windowId, fn)` | `useCloseGuard(fn)` / a `beforeunload` listener that calls `preventDefault()` |
 | `<MenuBarMenus>` | `useMenuBar(menus, onAction)` |
 | `portalContainer()` | The app's own `document.body`; `din.menus.popup` for menus that must leave the window |
 | `useFilePicker().pickFile()` → path → `window.fs.readFile` | `showOpenFilePicker()` → handle → `getFile()` |

@@ -229,23 +229,33 @@ window.resizeTo(1160, 720);                          // Calculator switching to 
 
 ## Closing
 
+Closing the window fires the web's `beforeunload`, as a browser does
+before closing a tab:
+
 ```ts
-din.window.onCloseRequest(() => {
-  if (!dirty) return false;            // let it close
+addEventListener('beforeunload', (e) => {
+  if (!dirty) return;                  // let it close
+  e.preventDefault();                  // keep it open; we're asking
   confirmSave().then((save) => {
     if (save === 'cancel') return;
     if (save === 'save') void saveFile().then(() => window.close());
     else window.close();
   });
-  return true;                         // keep it open; we're asking
 });
 ```
 
-The handler must answer at once (true or false); the asking happens after.
-An app that doesn't answer within five seconds is shown as not responding
-([lifecycle.md](lifecycle.md)). The web's `window.close()` from the app
-itself never asks its own handler; `din.window.requestClose()` closes as the user
-would, through it (`<WindowControls>`' close button does that).
+Cancelling it (`preventDefault()`, a `returnValue`, or an
+`onbeforeunload` that returns a string) keeps the window open, and Din
+shows no dialog of its own: the app asks its question after. The desktop
+asks only while the page has a `beforeunload` listener (or
+`onbeforeunload`), so a window without one closes at once. Listeners must
+answer at once; an app that doesn't within five seconds is shown as not
+responding ([lifecycle.md](lifecycle.md)). The web's `window.close()` from
+the app itself never fires it; `din.window.requestClose()` closes as the
+user would, through it (`<WindowControls>`' close button does that).
+
+A real unload (the app navigating itself, or reloading) fires the
+engine's own `beforeunload` at the same listeners, as on the web.
 
 In React, `useCloseGuard(() => dirty && (askToSave(), true))` from
 `@/sdk/react` installs the handler while mounted.

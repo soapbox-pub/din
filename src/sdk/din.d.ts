@@ -205,6 +205,14 @@ export interface FrameStyle {
  * and `outerHeight` for the window's place and size, frame included; and
  * `screen.availLeft`, `availTop`, `availWidth` and `availHeight` for the
  * work area of its monitor.
+ *
+ * When the user (or the desktop) closes the window, it fires `beforeunload`
+ * first, as a browser does before closing a tab, while the page listens for
+ * one. Cancelling it (`preventDefault()`, or a `returnValue`) keeps the
+ * window open, with no dialog of Din's: the app asks its own question
+ * ("Save changes?") and calls `window.close()` itself if it should go.
+ * Listeners must answer quickly; an app that doesn't is offered for force
+ * quitting.
  */
 export interface DinWindow {
   /** The window's id, unique on this desktop (what `din.app.windows()` lists). */
@@ -243,7 +251,7 @@ export interface DinWindow {
 
   /**
    * Close it as the user would (`<WindowControls>`' close button): through
-   * `onCloseRequest`. The web's `window.close()` closes it without asking.
+   * a `beforeunload`. The web's `window.close()` closes it without asking.
    */
   requestClose(): void;
   /**
@@ -264,13 +272,6 @@ export interface DinWindow {
   tabDragEnd(at: Point): Promise<{ windowId: string; at: Point } | null>;
   /** Another window's tab is dragged over this one (at a point in it), or no longer (null). */
   onTabHover(cb: (at: Point | null) => void): Unsubscribe;
-  /**
-   * Have a say when the user (or the desktop) closes the window. Return true
-   * to keep it open: the app then asks its question ("Save changes?") and
-   * calls `close()` itself if it should go. Must answer quickly; an app that
-   * doesn't is offered for force quitting. One handler; a second replaces it.
-   */
-  onCloseRequest(handler: (() => boolean) | null): void;
 }
 
 // ---------------------------------------------------------------------------

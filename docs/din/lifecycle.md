@@ -154,7 +154,7 @@ don't hold.
 ## Closing
 
 Every way a window closes (its close button, Super+Q, the Dock's Quit)
-goes through the app's `onCloseRequest`, if it set one
+fires the app's `beforeunload`, if it listens for one
 ([window.md](window.md#closing)). The desktop then destroys the webview,
 which ends the process. Logging out, restarting Din and shutting down
 don't ask: Din stops with the windows open, and reopens them when it

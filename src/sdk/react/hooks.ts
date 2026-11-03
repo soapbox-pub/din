@@ -199,11 +199,11 @@ export function useWindowAccent(color: string | null): void {
 }
 
 /**
- * Have a say when the window closes, while mounted: return true to keep it
- * open (and ask), then call window.close() yourself. Null for no guard.
+ * Have a say when the window closes, while mounted (a `beforeunload`
+ * listener): return true to keep it open (and ask), then call
+ * window.close() yourself. Null for no guard.
  */
 export function useCloseGuard(guard: (() => boolean) | null): void {
-  const din = useDin();
   const latest = useRef(guard);
   useLayoutEffect(() => {
     latest.current = guard;
@@ -211,9 +211,12 @@ export function useCloseGuard(guard: (() => boolean) | null): void {
   const on = guard !== null;
   useEffect(() => {
     if (!on) return;
-    din.window.onCloseRequest(() => latest.current?.() ?? false);
-    return () => din.window.onCloseRequest(null);
-  }, [din, on]);
+    const listener = (e: BeforeUnloadEvent) => {
+      if (latest.current?.()) e.preventDefault();
+    };
+    window.addEventListener('beforeunload', listener);
+    return () => window.removeEventListener('beforeunload', listener);
+  }, [on]);
 }
 
 /** The app's menus in Din's menu bar, re-sent when they change, while mounted. */

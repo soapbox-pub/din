@@ -527,7 +527,6 @@ export function installDin(transport: Transport): void {
   const snaps = new Emitter<Snap | null>();
   installWindowState({ state: () => (helloed ? state : null), onChange: (cb) => states.on(cb) });
   const styles = new Emitter<FrameStyle>();
-  let closeHandler: (() => boolean) | null = null;
   const tabHovers = new Emitter<{ x: number; y: number } | null>();
   pushes.on((p) => {
     if (p.type === 'tabHover') tabHovers.emit(p.at);
@@ -553,13 +552,11 @@ export function installDin(transport: Transport): void {
       frameStyle = p.style;
       styles.emit(frameStyle);
     } else if (p.type === 'closeRequest') {
-      let keep = false;
-      try {
-        keep = closeHandler ? closeHandler() === true : false;
-      } catch (e) {
-        console.error('din: onCloseRequest threw:', e);
-      }
-      tell('window.closeAnswer', { request: p.request, keep });
+      // The web's beforeunload: cancelling it keeps the window open, and the app asks.
+      const event = document.createEvent('BeforeUnloadEvent');
+      event.initEvent('beforeunload', false, true);
+      window.dispatchEvent(event);
+      tell('window.closeAnswer', { request: p.request, keep: event.defaultPrevented || !!event.returnValue });
     }
   });
   const point = (e: { clientX: number; clientY: number }) => ({ x: e.clientX, y: e.clientY });
@@ -608,11 +605,6 @@ export function installDin(transport: Transport): void {
     tabDragMove: (at, label) => request('window.tabDragMove', { at, label }),
     tabDragEnd: (at) => request('window.tabDragEnd', { at }),
     onTabHover: (cb) => tabHovers.on(cb),
-    onCloseRequest(handler) {
-      const had = closeHandler !== null;
-      closeHandler = handler;
-      if (had !== (handler !== null)) tell('window.setCloseGuard', { on: handler !== null });
-    },
   };
 
   watchDocumentHead({
@@ -644,8 +636,52 @@ export function installDin(transport: Transport): void {
   define('moveBy', (dx: number, dy: number) => setBounds({ x: now().x + Number(dx), y: now().y + Number(dy) }));
   define('resizeTo', (width: number, height: number) => setBounds({ width: Number(width), height: Number(height) }));
   define('resizeBy', (dw: number, dh: number) => setBounds({ width: now().width + Number(dw), height: now().height + Number(dh) }));
+  // The desktop asks before closing the window (a closeRequest, above) while
+  // the page listens for beforeunload, as a browser asks before closing a tab.
+  const unloadListeners = new Map<unknown, Set<boolean>>();
+  const onbeforeunload = (() => {
+    for (let o: object | null = window; o; o = Object.getPrototypeOf(o)) {
+      const d = Object.getOwnPropertyDescriptor(o, 'onbeforeunload');
+      if (d?.get && d.set) return { get: d.get, set: d.set };
+    }
+    return null;
+  })();
+  let guarded = false;
+  const guard = () => {
+    const on = unloadListeners.size > 0 || onbeforeunload?.get.call(window) != null;
+    if (on !== guarded) tell('window.setCloseGuard', { on: (guarded = on) });
+  };
+  const capture = (options: unknown) => (typeof options === 'boolean' ? options : !!(options as { capture?: boolean } | undefined)?.capture);
+  const addListener = window.addEventListener;
+  const removeListener = window.removeEventListener;
+  define('addEventListener', (type: string, listener: unknown, options?: unknown) => {
+    (addListener as (...a: unknown[]) => void).call(window, type, listener, options);
+    if (type !== 'beforeunload' || !listener) return;
+    const set = unloadListeners.get(listener) ?? new Set();
+    unloadListeners.set(listener, set.add(capture(options)));
+    guard();
+  });
+  define('removeEventListener', (type: string, listener: unknown, options?: unknown) => {
+    (removeListener as (...a: unknown[]) => void).call(window, type, listener, options);
+    const set = type === 'beforeunload' ? unloadListeners.get(listener) : undefined;
+    if (!set) return;
+    set.delete(capture(options));
+    if (!set.size) unloadListeners.delete(listener);
+    guard();
+  });
+  if (onbeforeunload) {
+    Object.defineProperty(window, 'onbeforeunload', {
+      configurable: true,
+      enumerable: true,
+      get: () => onbeforeunload.get.call(window),
+      set: (handler: unknown) => {
+        onbeforeunload.set.call(window, handler);
+        guard();
+      },
+    });
+  }
   // focus() brings the window forward; close() closes it at once, without
-  // consulting its own onCloseRequest.
+  // a beforeunload.
   define('focus', () => tell('window.focus'));
   define('close', () => tell('window.close'));
   // An app's URL (din://<id>/, its launch parameters in the query) launches

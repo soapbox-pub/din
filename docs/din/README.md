@@ -20,10 +20,10 @@ run, the way a browser provides `navigator` (and Din provides
 await din.ready;
 
 document.title = 'Untitled.png';
-din.window.onCloseRequest(() => {
-  if (!dirty) return false;
+addEventListener('beforeunload', (e) => {
+  if (!dirty) return;
+  e.preventDefault();
   askToSave().then((ok) => ok && window.close());
-  return true;
 });
 
 const [file] = await showOpenFilePicker({ types: [{ description: 'Pictures', accept: { 'image/*': ['.png', '.jpg'] } }] });
@@ -91,7 +91,7 @@ For React apps, `src/sdk/react` adds:
 | `useWindowSize()`, `useSnapped()` | `useWindowFrame().win` | `outerWidth` and `outerHeight` (on every step of a resize), and `din.window.snapped` |
 | `useFrameStyle()` | `useWindowFrame().muted/hover` | The title bar's accent and darkness (`frameControlClasses` turns it into classes) |
 | `useWindowTitle(title)`, `useWindowIcon(url)`, `useWindowAccent(color)` | the same | The page's `document.title`, icon link and theme-color, which the window follows, for as long as it's mounted |
-| `useCloseGuard(fn)` | `setCloseGuard` | `din.window.onCloseRequest` for as long as it's mounted |
+| `useCloseGuard(fn)` | `setCloseGuard` | A `beforeunload` listener for as long as it's mounted |
 | `useMenuBar(menus, onAction)` | `<MenuBarMenus>` | A declarative menu bar ([menus.md](menus.md)) |
 | `useDinTheme()` | reading the desktop's CSS | The theme snapshot |
 | `useMediaQuery(query)` | `useTheme()` | Whether a media query matches (`prefers-color-scheme: dark`), re-rendering on change |

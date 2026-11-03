@@ -13,7 +13,7 @@ import {
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
 import { onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
-import { useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useCloseGuard, useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
 import { Compositor } from './engine/compositor';
 import { asFraction, CANVAS, type Bubble, type Layout } from './engine/layout';
@@ -561,17 +561,14 @@ export function Studio() {
   );
 
   // While recording, closing asks first: the take would be cut off.
-  useEffect(() => {
-    if (!busy) {
-      din.window.onCloseRequest(null);
-      return;
-    }
-    din.window.onCloseRequest(() => {
-      setNotice(live ? 'End the stream before closing Studio.' : 'Stop recording before closing Studio.');
-      return true;
-    });
-    return () => din.window.onCloseRequest(null);
-  }, [din, busy, live]);
+  useCloseGuard(
+    busy
+      ? () => {
+          setNotice(live ? 'End the stream before closing Studio.' : 'Stop recording before closing Studio.');
+          return true;
+        }
+      : null,
+  );
 
   // ---- what to show ----
   const openTakeInfo = view ? takes.find((t) => t.path === view.take) ?? null : null;
