@@ -57,6 +57,7 @@ a missing or bad argument).
 | `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
 | `assistant` | OpenCode, the agent behind the Assistant, as Settings → Assistant: its status, checking for and installing a newer release (restarting its server, which stops what the agent is doing), restarting it, and Claude for it (`claude`, `connect-claude`: installing Claude Code, signing it in and connecting it) |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
+| `features` | DinOS's optional features, as Settings → Optional Features: list them, install one or all (saying how the download is getting on), remove one (asks on screen first) |
 | `update`, `firmware` | DinOS updates and firmware, as Settings → About |
 
 The system's own settings (the time zone, the keyboard layout) are their
@@ -70,7 +71,7 @@ down (`din power restart|off`), restarting Din (`din update restart`),
 installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
-(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`) and forgetting a phone with its messages (`din phone forget`) put the question on
+(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings. `din update erase`

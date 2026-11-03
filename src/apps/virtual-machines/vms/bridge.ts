@@ -43,6 +43,8 @@ export function useVmsStatus() {
     queryFn: () => bridge!.status(),
     enabled: !!bridge,
     staleTime: Infinity,
+    // Until they can run: QEMU may be being installed in Settings.
+    refetchInterval: (query) => (query.state.data && !query.state.data.available ? 3000 : false),
   });
 }
 

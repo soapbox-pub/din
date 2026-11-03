@@ -131,6 +131,7 @@ import { answerFileChooser, cancelFileChoosers, registerFileChooserPortal } from
 import { isInstalling, registerInstallerHandlers } from './installer.mts';
 import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
+import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
 import { cleanUpPrinting, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
@@ -6051,6 +6052,7 @@ app.whenReady().then(() => {
   registerInstallerHandlers({ assertShellSender, sendToShell });
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
+  registerFeaturesHandlers({ assertShellSender, sendToShell });
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
   registerPrintingHandlers({
     assertShellSender,

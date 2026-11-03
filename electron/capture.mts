@@ -758,7 +758,11 @@ function transcribe(folder: string): Promise<void> {
   const job = (async () => {
     const tools = whisper();
     const tool = ffmpeg();
-    if (!tools || !tool) throw new Error('Transcription isn’t available here');
+    if (!tools || !tool) {
+      throw new Error(process.env.DIN_FEATURES && !tools
+        ? 'Transcripts need Dictation & transcripts, an optional feature: install it in Settings → Optional Features'
+        : 'Transcription isn’t available here');
+    }
     const take = await readTake(folder);
     const mic = take?.tracks?.mic;
     if (!mic?.file) throw new Error('This take has no microphone');

@@ -6,6 +6,7 @@ import { contactsArea } from './contacts';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { extensionsArea } from './extensions';
+import { featuresArea } from './features';
 import { cursorsArea, iconsArea, skinsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
@@ -57,6 +58,7 @@ export const AREAS: readonly Area[] = [
   vmsArea,
   assistantArea,
   nostrArea,
+  featuresArea,
   updateArea,
   firmwareArea,
   lockArea,
@@ -92,6 +94,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   datetime: 'datetime',
   background: 'background',
   accessibility: 'settings',
+  features: 'features',
   about: 'update',
   developers: { not: 'debugging the desktop itself' },
 };

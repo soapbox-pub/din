@@ -230,6 +230,7 @@ import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSec
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
+import { OptionalFeaturesSection } from '@/components/desktop/apps/OptionalFeaturesSection';
 import { PhoneSettingsSection } from '@/components/desktop/apps/PhoneSettingsSection';
 import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSection';
 import { EraseSection } from '@/components/desktop/apps/EraseSection';
@@ -261,7 +262,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * (wpctl/PipeWire), including outputs on a sound card's inactive profile.
  * Keyboard picks the layout native Linux apps type with
  * through `window.dinos.keyboard`. Printers lists the printers CUPS can reach, sets
- * the default, and shows the queue (PrintersSettingsSection). Date & Time sets the time zone and clock
+ * the default, and shows the queue (PrintersSettingsSection). Optional Features installs and removes the
+ * parts of DinOS kept off the disk until wanted, like Wine and QEMU (OptionalFeaturesSection). Date & Time sets the time zone and clock
  * through `window.dinos.datetime`, and how Din's clocks show the time. Password changes the computer's one password
  * (disk, lock screen, Nostr keys) through `window.dinos.lock`. Nostr & Storage manages Din's encrypted app-data
  * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
@@ -391,6 +393,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <MouseSection />
     ) : id === 'printers' ? (
       <PrintersSettingsSection />
+    ) : id === 'features' ? (
+      <OptionalFeaturesSection />
     ) : id === 'datetime' ? (
       <DateTimeSection />
     ) : id === 'accessibility' ? (

@@ -183,6 +183,7 @@ function status(): VmsStatus {
   return {
     available: missing.length === 0,
     missing,
+    optionalFeature: (!t.qemu || !t.qemuImg) && Boolean(process.env.DIN_FEATURES),
     secureBoot: !!t.firmware?.varsMs,
     tpm: !!t.swtpm,
     dir: VMS_DIR,

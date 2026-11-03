@@ -117,6 +117,8 @@ export interface VmsStatus {
   available: boolean;
   /** What's missing, as the user should hear it ("QEMU", "KVM", …). */
   missing: string[];
+  /** QEMU is missing, and DinOS has it as an optional feature (Settings → Optional Features). */
+  optionalFeature: boolean;
   /** UEFI firmware with Microsoft's Secure Boot keys was found. */
   secureBoot: boolean;
   /** swtpm was found. */

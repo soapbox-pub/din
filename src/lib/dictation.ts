@@ -19,7 +19,11 @@
  * their element with registerDictationTarget.
  */
 import { getAudioBridge } from '@/lib/audio';
+import { getFeaturesBridge } from '@/lib/features';
 import { guestId, isGuestElement } from '@/platform/guest';
+
+/** Why dictation can't start on DinOS before its optional feature is installed. */
+export const DICTATION_NEEDS_FEATURE = 'Dictation needs Dictation & transcripts, in Settings → Optional Features';
 
 export interface DictationBridge {
   available(): Promise<boolean>;
@@ -349,7 +353,7 @@ export async function startDictation(target: DictationTarget, options: { held?: 
   const ok = await api.available().catch(() => false);
   if (session !== current) return;
   if (!ok) {
-    fail('Dictation isn’t available here');
+    fail(getFeaturesBridge() ? DICTATION_NEEDS_FEATURE : 'Dictation isn’t available here');
     return;
   }
   await unmuteFor(current);

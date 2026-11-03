@@ -17,6 +17,7 @@ import {
   Monitor,
   Mouse,
   MousePointer2,
+  PackagePlus,
   Palette,
   Printer,
   RefreshCw,
@@ -58,6 +59,7 @@ export type SectionId =
   | 'desktop'
   | 'dock'
   | 'developers'
+  | 'features'
   | 'about';
 
 export type SectionGroup = 'Connections' | 'Appearance' | 'Personal' | 'Devices' | 'Account' | 'System';
@@ -252,6 +254,16 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Date & Time',
     icon: Clock,
     search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone'],
+  },
+  {
+    id: 'features',
+    group: 'System',
+    name: 'Optional Features',
+    icon: PackagePlus,
+    search: [
+      'Install All', 'Install', 'Remove', 'Windows apps', 'Virtual machines', 'Dictation & transcripts', 'Web view for Linux apps', 'Linux containers',
+      'Wine', 'QEMU', 'Whisper', 'WebKitGTK', 'Tauri', 'Podman', 'Docker', 'distrobox', 'add-ons', 'components', 'download', 'disk space', 'storage', 'packages',
+    ],
   },
   {
     id: 'about',

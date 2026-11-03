@@ -709,6 +709,29 @@ run_local() {
   stage
 }
 
+# The optional features the user installed (Settings → Optional Features,
+# electron/features.mts), each a link in FEATURES_DIR, brought up to what
+# system $1 has: built as the user, as Din builds them, so the links stay
+# the user's and nothing here acts on a path in their home as root. A
+# feature that doesn't build (offline, say) isn't the update's to fail:
+# it keeps working as it was, and Din tries again when it next starts.
+FEATURES_DIR=$FORK_HOME/.local/state/din/features
+update_features() {
+  local manifest=$1/etc/dinos/features.json link id drv out
+  [[ -f $manifest && -d $FEATURES_DIR ]] || return 0
+  for link in "$FEATURES_DIR"/*; do
+    [[ -L $link ]] || continue
+    id=${link##*/}
+    drv=$(jq -r --arg id "$id" '.[$id].drv // empty' "$manifest")
+    out=$(jq -r --arg id "$id" '.[$id].out // empty' "$manifest")
+    [[ -n $drv && -n $out && $(readlink "$link") != "$out" ]] || continue
+    echo "Updating the optional feature $id"
+    runuser -u "$FORK_USER" -- env HOME="$FORK_HOME" \
+      nix build --out-link "$link" "$drv^out" </dev/null ||
+      echo "Couldn't update the optional feature $id" >&2
+  done
+}
+
 # Build the checked-out commit, `target`, and make it the next boot's.
 stage() {
   local installable="$SRC/os#nixosConfigurations.$SYSTEM_NAME.config.system.build.toplevel"
@@ -720,6 +743,7 @@ stage() {
   [[ $(revision_of "$built") == "$target" ]] || fail "${what^} didn't build as itself."
 
   set_step install
+  update_features "$built"
   nix-env --profile "$PROFILE" --set "$built"
   rm -f "$RESULT"
   "$built/bin/switch-to-configuration" boot ||

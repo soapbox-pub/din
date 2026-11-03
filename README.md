@@ -416,8 +416,9 @@ need no help: the Start-menu shortcuts they create become desktop entries,
 which appear in the launcher as soon as the install finishes (Uninstall
 shortcuts are left out). See `electron/windows-apps.mts`.
 
-DinOS ships Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
-and Gecko). Elsewhere Din uses the system's `wine`, or `$DIN_WINE`.
+On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
+and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
+the system's `wine`, or `$DIN_WINE`.
 
 ### AirPlay
 
@@ -542,7 +543,8 @@ PipeWire. Snapshots are qcow2's own: taken while running, they keep memory
 too and come back running.
 
 DinOS passes QEMU, swtpm and OVMF to Din as `DIN_QEMU`, `DIN_QEMU_IMG`,
-`DIN_SWTPM` and `DIN_OVMF`; elsewhere Din looks on PATH and in the usual
+`DIN_SWTPM` and `DIN_OVMF`, which are there once the Virtual machines
+optional feature is installed (below); elsewhere Din looks on PATH and in the usual
 OVMF folders (`/usr/share/OVMF`, `/usr/share/edk2/ovmf`, …), and needs
 `/dev/kvm` to be read-writable by the user.
 
@@ -593,9 +595,10 @@ keys). Holding Super+A opens the assistant's prompt listening, and the
 prompt's mic button dictates into it. The shell records the microphone
 (`src/lib/dictation.ts`) and whisper.cpp's server turns it into text on the
 GPU (`electron/dictation.mts`), started on first use and stopped after a few
-idle minutes. DinOS ships the server and Whisper large-v3-turbo (about
-550 MB) and names them in `$DIN_WHISPER_SERVER` and `$DIN_WHISPER_MODEL`;
-elsewhere, set both to dictate.
+idle minutes. On DinOS the server and Whisper large-v3-turbo (about
+550 MB) are the Dictation & transcripts optional feature (below), named in
+`$DIN_WHISPER_SERVER` and `$DIN_WHISPER_MODEL`; elsewhere, set both to
+dictate.
 
 ### Tiling and workspaces
 
@@ -610,6 +613,33 @@ The window manager (`src/hooks/useWindows.ts`) keeps the tiling trees, and
 While tiling is on, or a workspace other than 1 is in use, the menu bar shows
 the workspaces and a switch to turn tiling off. Keys pressed inside web pages
 reach the shell through the host's `wm` shortcut (`electron/main.mts`).
+
+### Optional features
+
+Some of DinOS takes a lot of space and only some people use it, so it isn't
+on the disk until someone installs it, in Settings → Optional Features or
+with `din features`: Windows apps (Wine), Virtual machines (QEMU, swtpm,
+OVMF), Dictation & transcripts (whisper.cpp and its model), a web view for
+Linux apps (WebKitGTK, on nix-ld's library path) and Linux containers
+(Podman, `docker`, distrobox). Together they're over 2 GB the disk image
+doesn't carry.
+
+Each is a package from the system's nixpkgs, listed in `dinFeatures` in
+`os/configuration.nix`. The system has only its derivation, in
+`/etc/dinos/features.json` with the path it builds; installing one builds
+that as the user through the Nix daemon (`electron/features.mts`), which
+downloads it from the binary cache, into `~/.local/state/din/features/<id>`,
+a GC root. Everything that uses it looks there (the launcher's PATH and
+`DIN_*` variables), so it works as soon as it's installed. Removing one
+deletes the link and whatever only it used. A system update builds the new
+versions of installed ones before switching (`os/din-update.sh`), and Din
+updates any it couldn't soon after it starts. A computer updated from a
+DinOS that had them all built in keeps them all: the first time Din starts
+with optional features there, it installs every one, from what's still in
+the store.
+
+A new optional feature is an entry in `dinFeatures` with a title,
+description, size and package, whose users look for it under its link.
 
 ### Updating npm dependencies
 

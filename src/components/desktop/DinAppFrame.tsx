@@ -47,6 +47,7 @@ import { fileClipboardInfo, getFileClipboard, setFileClipboard, subscribeFileCli
 import { registerMediaSource, type MediaSource } from '@/lib/nowPlaying';
 import {
   cancelDictation,
+  DICTATION_NEEDS_FEATURE,
   finishDictation,
   getDictationState,
   hasDictationBridge,
@@ -206,7 +207,7 @@ const NAMED_FOLDERS: Record<string, string> = {
 function speechError(message: string | null): SpeechErrorCode {
   if (message === 'Didn’t hear anything') return 'no-speech';
   if (message === 'Couldn’t use the microphone') return 'audio-capture';
-  if (message === 'Dictation isn’t available here') return 'service-not-allowed';
+  if (message === 'Dictation isn’t available here' || message === DICTATION_NEEDS_FEATURE) return 'service-not-allowed';
   return 'network';
 }
 

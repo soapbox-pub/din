@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, Expand, Keyboard, Loader2, MoreHorizontal, Pause, Play, Plus, Power } from 'lucide-react';
+import { AlertTriangle, Camera, Expand, Keyboard, Loader2, Monitor, MoreHorizontal, Pause, Play, Plus, Power } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,6 +87,18 @@ export function VirtualMachines() {
     body = <p className="m-auto max-w-sm p-8 text-center text-sm text-muted-foreground">Virtual Machines works in Din’s desktop app.</p>;
   } else if (!status) {
     body = <Skeleton className="m-auto h-24 w-72 rounded-xl" />;
+  } else if (!status.available && status.optionalFeature) {
+    body = (
+      <div className="m-auto max-w-md space-y-3 p-8 text-center">
+        <Monitor className="mx-auto size-10 text-muted-foreground" aria-hidden />
+        <h1 className="text-lg font-semibold">Install Virtual machines to use this app</h1>
+        <p className="text-sm text-muted-foreground">
+          QEMU, which runs the machines, is an optional feature of DinOS, about 470 MB. Install it in Settings →
+          Optional Features, and this window is ready as soon as it’s done.
+        </p>
+        <Button onClick={() => void window.open(appLink('settings', { section: 'features' }))}>Open Optional Features</Button>
+      </div>
+    );
   } else if (!status.available) {
     body = (
       <div className="m-auto max-w-md space-y-3 p-8 text-center">

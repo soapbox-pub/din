@@ -63,6 +63,11 @@ export function wineBinary(): string | null {
   return process.env.DIN_WINE || which('wine') || which('wine64');
 }
 
+/** Why Windows programs can't open: on DinOS, Wine is an optional feature. */
+const NO_WINE = process.env.DIN_FEATURES
+  ? 'Windows programs need Windows apps, an optional feature: install it in Settings → Optional Features'
+  : 'Windows programs need Wine, which isn’t installed';
+
 /** The wineserver beside a Wine loader (it isn't always on PATH). */
 function wineserverBinary(wine: string): string {
   const sibling = path.join(path.dirname(fs.realpathSync(wine)), 'wineserver');
@@ -185,7 +190,7 @@ export function ensurePrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
 
 async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
   const wine = wineBinary();
-  if (!wine) throw new Error('Windows programs need Wine, which isn’t installed');
+  if (!wine) throw new Error(NO_WINE);
   const prefix = winePrefix();
   const marker = path.join(prefix, '.din-version');
 
@@ -239,7 +244,7 @@ export async function windowsProgramCommand(
 ): Promise<{ argv: string[]; env: Record<string, string> }> {
   await ensurePrefix(baseEnv);
   const wine = wineBinary();
-  if (!wine) throw new Error('Windows programs need Wine, which isn’t installed');
+  if (!wine) throw new Error(NO_WINE);
   return {
     argv: [wine, 'start', '/unix', file],
     env: { ...wineEnvironment(), WINEPREFIX: winePrefix() },

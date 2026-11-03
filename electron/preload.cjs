@@ -43,6 +43,8 @@
 //   - window.dinos.mail: the mail accounts' mailing lists and labels, for `din mail`
 //   - window.dinos.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
+//   - window.dinos.features: DinOS's optional features (Wine, QEMU, Whisper, ...),
+//     installed and removed from Settings and `din features`
 //   - window.dinos.indd: InDesign documents read into IDML, for Publisher
 //   - window.dinos.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
@@ -1522,6 +1524,39 @@ expose('bluetooth', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('bluetooth:changed', handler);
     return () => ipcRenderer.removeListener('bluetooth:changed', handler);
+  },
+});
+
+// Optional features bridge (window.dinos.features), backed by
+// electron/features.mts: the parts of DinOS installed only when wanted.
+expose('features', {
+  /** Each feature, whether it's installed, and what's being done to it. */
+  state: () => ipcRenderer.invoke('features:state'),
+  /**
+   * Install a feature; resolves when it's installed.
+   * @param {string} id
+   */
+  install: (id) => ipcRenderer.invoke('features:install', id),
+  /** Install every feature that isn't; resolves when they're all done. */
+  installAll: () => ipcRenderer.invoke('features:installAll'),
+  /**
+   * Remove a feature and delete what only it used.
+   * @param {string} id
+   */
+  remove: (id) => ipcRenderer.invoke('features:remove', id),
+  /**
+   * Called with the whole state whenever it changes.
+   * @param {(state: unknown) => void} callback
+   * @returns {() => void} unsubscribe
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('features:changed', handler);
+    return () => ipcRenderer.removeListener('features:changed', handler);
   },
 });
 

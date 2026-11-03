@@ -164,24 +164,107 @@ let
     '';
   };
 
-  # Dictation's speech recognizer (electron/dictation.mts): whisper.cpp's
-  # server, on the GPU through Vulkan, and Whisper large-v3-turbo quantized to
-  # about 550 MB. The server is only started when someone dictates.
-  whisper = pkgs.whisper-cpp-vulkan.override { withSDL = false; };
-  whisper-model = pkgs.fetchurl {
-    url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
-    hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
-  };
-
   # The local UDP ports AirPlay receivers send timing and sound control to,
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
 
-  # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
-  # runs 32- and 64-bit programs without 32-bit host libraries. The Full
-  # variant is the one that embeds the Wine Mono and Gecko installers (.NET
-  # and the HTML engine), so a new prefix gets them with no download prompt.
-  wine = pkgs.wineWow64Packages.stableFull;
+  # Optional features: parts of the system that aren't in it until someone
+  # turns them on, in Settings → Optional Features or with `din features`
+  # (electron/features.mts). Each is a package from the system's own nixpkgs,
+  # pinned like the rest, but only its derivation is in the system, not what
+  # it builds: installing one builds it as the user, through the Nix daemon,
+  # which downloads it from the binary cache (the Whisper model from Hugging
+  # Face), into ~/.local/state/din/features/<id>, a link that keeps it from
+  # being collected. Everything that uses one finds it through that link
+  # (the launcher's PATH and DIN_* variables, below, and nix-ld's library
+  # path), so it works the moment it's installed, and is simply missing
+  # until then. System updates bring installed ones up to date
+  # (os/din-update.sh). Together they're over 2 GB the disk image doesn't
+  # carry. `size` is what installing one takes, about, for Settings to show.
+  featuresDir = "/home/din/.local/state/din/features";
+  dinFeatures = {
+    # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
+    # runs 32- and 64-bit programs without 32-bit host libraries. The Full
+    # variant is the one that embeds the Wine Mono and Gecko installers (.NET
+    # and the HTML engine), so a new prefix gets them with no download prompt.
+    windows = {
+      title = "Windows apps";
+      description = "Wine, which runs Windows programs like apps of their own.";
+      size = 850;
+      package = pkgs.wineWow64Packages.stableFull;
+    };
+    # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
+    # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
+    vms = {
+      title = "Virtual machines";
+      description = "QEMU, for the Virtual Machines app: Windows, macOS and Linux in a window.";
+      size = 470;
+      package = pkgs.symlinkJoin {
+        name = "din-feature-vms";
+        paths = [ pkgs.qemu_kvm pkgs.swtpm ];
+        postBuild = "ln -s ${pkgs.OVMFFull.fd}/FV $out/share/ovmf";
+      };
+    };
+    # Dictation's speech recognizer (electron/dictation.mts), and Studio's
+    # transcripts (electron/capture.mts): whisper.cpp on the GPU through
+    # Vulkan, and Whisper large-v3-turbo quantized to about 550 MB.
+    dictation = {
+      title = "Dictation & transcripts";
+      description = "Whisper, which turns speech into text on this computer, for dictation and Studio’s captions.";
+      size = 630;
+      package = pkgs.symlinkJoin {
+        name = "din-feature-dictation";
+        paths = [ pkgs.whisper-cpp-vulkan ];
+        postBuild = ''
+          mkdir -p $out/share/whisper
+          ln -s ${pkgs.fetchurl {
+            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
+            hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
+          }} $out/share/whisper/model.bin
+        '';
+      };
+    };
+    # WebKitGTK, the system webview Tauri, wry and other GTK webview apps
+    # load instead of bundling a browser engine, on nix-ld's library path
+    # (below).
+    webkit = {
+      title = "Web view for Linux apps";
+      description = "WebKitGTK, which downloaded Linux apps built with Tauri and other GTK web views need.";
+      size = 200;
+      package = pkgs.symlinkJoin {
+        name = "din-feature-webkit";
+        paths = [ pkgs.webkitgtk_4_1 pkgs.libsoup_3 ];
+      };
+    };
+    # Rootless Podman (also answering to `docker`) and distrobox, a full
+    # Ubuntu, Fedora or Arch userland with its own package manager, sharing
+    # $HOME. The system keeps their configuration (virtualisation.containers,
+    # below); this is the programs.
+    containers = {
+      title = "Linux containers";
+      description = "Podman, Docker’s command and distrobox, for other Linux systems’ software in containers.";
+      size = 200;
+      package = pkgs.symlinkJoin {
+        name = "din-feature-containers";
+        paths = [ config.virtualisation.podman.package pkgs.distrobox ];
+        postBuild = "ln -s podman $out/bin/docker";
+      };
+    };
+  };
+  # What Settings and the updater read: each feature's derivation (with its
+  # context, so the .drv files are in the system) and the path it builds
+  # (without, so what it builds isn't).
+  featuresManifest = pkgs.writeText "din-features.json" (builtins.toJSON (lib.mapAttrs
+    (id: f: {
+      inherit (f) title description;
+      size = f.size * 1000 * 1000;
+      drv = builtins.unsafeDiscardOutputDependency f.package.drvPath;
+      out = builtins.unsafeDiscardStringContext f.package.outPath;
+    })
+    dinFeatures));
+  # Their programs, for PATH: whatever isn't installed is a folder that
+  # isn't there.
+  featuresPath = lib.concatMapStringsSep ":" (id: "${featuresDir}/${id}/bin") (lib.attrNames dinFeatures);
 
   # The privileged half of the Installer app, which copies a live USB boot
   # onto the computer's own disk (see the script, and electron/installer.mts).
@@ -433,8 +516,7 @@ let
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
-  # pointer's theme and size (electron/cursor.mts), Wine for Windows
-  # programs, bsdtar (libarchive), 7-Zip (the free build, without unRAR),
+  # pointer's theme and size (electron/cursor.mts), bsdtar (libarchive), 7-Zip (the free build, without unRAR),
   # unar plus gzip/xz/bzip2/zstd for the Files app's archives, and
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
@@ -442,9 +524,10 @@ let
   # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
   # Tor's, the WiFi reset's and Quick Share's hotspot's helpers, and for checking the password
-  # Din takes for sudo (electron/askpass.mts).
+  # Din takes for sudo (electron/askpass.mts). Last, the optional features'
+  # programs (Wine's, for Windows programs' Start-menu entries).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${wine}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH:${featuresPath}
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -475,17 +558,20 @@ let
     # carries its live streams to RTMP, and whisper.cpp's command-line tool
     # transcribes the takes, with dictation's model.
     export DIN_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
-    export DIN_WHISPER_CLI=${whisper}/bin/whisper-cli
-    export DIN_WHISPER_SERVER=${whisper}/bin/whisper-server
-    export DIN_WHISPER_MODEL=${whisper-model}
+    export DIN_WHISPER_CLI=${featuresDir}/dictation/bin/whisper-cli
+    export DIN_WHISPER_SERVER=${featuresDir}/dictation/bin/whisper-server
+    export DIN_WHISPER_MODEL=${featuresDir}/dictation/share/whisper/model.bin
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
-    export DIN_QEMU=${pkgs.qemu_kvm}/bin/qemu-system-x86_64
-    export DIN_QEMU_IMG=${pkgs.qemu_kvm}/bin/qemu-img
-    export DIN_SWTPM=${pkgs.swtpm}/bin/swtpm
-    export DIN_OVMF=${pkgs.OVMFFull.fd}/FV
+    export DIN_QEMU=${featuresDir}/vms/bin/qemu-system-x86_64
+    export DIN_QEMU_IMG=${featuresDir}/vms/bin/qemu-img
+    export DIN_SWTPM=${featuresDir}/vms/bin/swtpm
+    export DIN_OVMF=${featuresDir}/vms/share/ovmf
+    # Optional features (above, and electron/features.mts).
+    export DIN_FEATURES=/etc/dinos/features.json
+    export DIN_FEATURES_DIR=${featuresDir}
     # Din is the whole desktop: the session's services (the desktop portal's
     # file chooser) open their windows on its embedded display
     # (electron/native-display.mts).
@@ -1222,9 +1308,9 @@ in
   # binaries link against. envfs fills /bin and /usr/bin from PATH so
   # `#!/bin/bash` scripts run. AppImages launch directly via binfmt.
   #
-  # WebKitGTK is the system webview: Tauri, wry and other GTK webview apps
-  # load it from the system instead of bundling a browser engine. It adds
-  # about 190 MiB on top of what the system already has.
+  # WebKitGTK, the system webview Tauri, wry and other GTK webview apps load
+  # instead of bundling a browser engine, is an optional feature (above),
+  # after the rest on the library path once it's installed.
   programs.nix-ld = {
     enable = true;
     libraries = with pkgs; [
@@ -1235,9 +1321,10 @@ in
       libx11 libxcb libxext libxfixes libxrandr libxrender libxi libxcursor
       libxcomposite libxdamage libxtst libxscrnsaver libxshmfence libxkbfile
       alsa-lib libpulseaudio pipewire SDL2
-      webkitgtk_4_1 libsoup_3
     ];
   };
+  environment.sessionVariables.NIX_LD_LIBRARY_PATH =
+    lib.mkForce "/run/current-system/sw/share/nix-ld/lib:${featuresDir}/webkit/lib";
   services.envfs.enable = true;
   programs.appimage = {
     enable = true;
@@ -1334,13 +1421,12 @@ in
   };
 
   # What install scripts and a developer's first hour assume is present.
-  # distrobox is the escape hatch for anything else: a full Ubuntu/Fedora/Arch
-  # userland with its own package manager, sharing $HOME, in rootless podman
-  # (also answering to `docker`). ngit brings git-remote-nostr, so git takes
+  # Linux containers (distrobox and Podman, an optional feature above) are the
+  # escape hatch for anything else. ngit brings git-remote-nostr, so git takes
   # nostr:// remotes, Din's own among them.
   # din-update is there for DIN_UPDATER, above. FFmpeg is how the Assistant
   # edits Studio's takes (os/opencode/skills/studio).
-  environment.systemPackages = with pkgs; [ git ngit unzip distrobox din-keyring din-cli din-updater ffmpeg ]
+  environment.systemPackages = with pkgs; [ git ngit unzip din-keyring din-cli din-updater ffmpeg ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [
@@ -1393,9 +1479,15 @@ in
         NoDisplay=true
       '')
     ];
-  virtualisation.podman = {
+  # Podman's configuration, as virtualisation.podman would make it, for the
+  # Linux containers feature's Podman (above), which is rootless: no root
+  # service, socket or podman group.
+  virtualisation.containers = {
     enable = true;
-    dockerCompat = true;
+    containersConf.settings.network = {
+      network_backend = "netavark";
+      firewall_driver = lib.mkIf config.networking.nftables.enable "nftables";
+    };
   };
 
   # OpenCode, the agent behind Din's Assistant (electron/assistant.mts), is
@@ -1405,14 +1497,17 @@ in
   # started. Claude Code, which the Assistant installs for its Claude
   # provider (electron/claude-code.mts), is the user's own in ~/.local/bin,
   # so `claude` works there too.
+  # The optional features' programs come last.
   environment.extraInit = ''
-    export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+    export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH:${featuresPath}"
   '';
   # Its skills for every session on the computer, from OpenCode's system
   # directory: making apps and widgets, and changing DinOS. They point at
   # Din's docs and API types, which come along in /etc/din.
   environment.etc."opencode/skills".source = ./opencode/skills;
   environment.etc."din/docs".source = din-root + "/docs";
+  # The optional features Settings offers (above, and electron/features.mts).
+  environment.etc."dinos/features.json".source = featuresManifest;
   environment.etc."din/din.d.ts".source = din-root + "/src/sdk/din.d.ts";
   environment.etc."din/napplet.ts".source = din-root + "/src/widgets/shared/napplet.ts";
 
