@@ -289,8 +289,13 @@ const DISPLAY_STATE = /^\s*(not\s+)?\(\s*display-state\s*:\s*(fullscreen|maximiz
  * Until the hello, each answers as the page's own.
  */
 export function installWindowState(host: WindowStateHost): void {
-  const get = (target: object, name: string, value: () => unknown) =>
+  // Electron defines some of these on a webview's document itself, and not
+  // configurably (visibilityState and hidden); those stay Electron's.
+  const get = (target: object, name: string, value: () => unknown): boolean => {
+    if (Object.getOwnPropertyDescriptor(target, name)?.configurable === false) return false;
     Object.defineProperty(target, name, { get: value, configurable: true, enumerable: true });
+    return true;
+  };
   const native = (target: object, name: string): (() => unknown) => {
     for (let o: object | null = target; o; o = Object.getPrototypeOf(o)) {
       const getter = Object.getOwnPropertyDescriptor(o, name)?.get;
@@ -349,19 +354,20 @@ export function installWindowState(host: WindowStateHost): void {
   const ownVisibility = native(document, 'visibilityState');
   let shown = true;
   const visibility = (): DocumentVisibilityState => (shown && ownVisibility() !== 'hidden' ? 'visible' : 'hidden');
-  get(document, 'visibilityState', visibility);
-  get(document, 'hidden', () => visibility() === 'hidden');
+  const ownsVisibility = get(document, 'visibilityState', visibility) && get(document, 'hidden', () => visibility() === 'hidden');
   let lastVisibility = visibility();
-  document.addEventListener(
-    'visibilitychange',
-    (e) => {
-      if (!e.isTrusted) return;
-      const now = visibility();
-      if (now === lastVisibility) e.stopImmediatePropagation();
-      lastVisibility = now;
-    },
-    true,
-  );
+  if (ownsVisibility) {
+    document.addEventListener(
+      'visibilitychange',
+      (e) => {
+        if (!e.isTrusted) return;
+        const now = visibility();
+        if (now === lastVisibility) e.stopImmediatePropagation();
+        lastVisibility = now;
+      },
+      true,
+    );
+  }
 
   // Display state.
   const displayState = () => {
@@ -430,7 +436,7 @@ export function installWindowState(host: WindowStateHost): void {
     if (wasFocused !== null && wasFocused !== focused) window.dispatchEvent(new FocusEvent(focused ? 'focus' : 'blur'));
     shown = s.visible;
     const now = visibility();
-    if (now !== lastVisibility) {
+    if (ownsVisibility && now !== lastVisibility) {
       lastVisibility = now;
       document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
     }
