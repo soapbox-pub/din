@@ -1,6 +1,6 @@
 /** React hooks over window.din (docs/din/README.md). */
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
-import type { Din, DragInfo, FrameStyle, Menu, Snap, ThemeSnapshot } from '@/sdk/din';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { Din, DragInfo, FrameStyle, Menu, Permission, Snap, ThemeSnapshot } from '@/sdk/din';
 
 export const DinContext = createContext<Din | null>(null);
 
@@ -15,6 +15,29 @@ export function useDin(): Din {
 /** The connected window.din, or null outside a DinProvider (code shared with the desktop). */
 export function useDinOptional(): Din | null {
   return useContext(DinContext);
+}
+
+/**
+ * What `navigator.permissions.query` says of a permission (one of Din's, or
+ * a web name one grants): null until it has answered.
+ */
+export function usePermission(name: Permission): PermissionState | null {
+  const [state, setState] = useState<PermissionState | null>(null);
+  useEffect(() => {
+    let live = true;
+    navigator.permissions.query({ name }).then(
+      (status) => {
+        if (live) setState(status.state);
+      },
+      () => {
+        if (live) setState('denied');
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [name]);
+  return state;
 }
 
 /** Whether the window is the one keyboard input goes to: `document.hasFocus()`, as it changes. */

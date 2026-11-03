@@ -43,7 +43,7 @@ din.app.ready();
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
 | `din.theme`, `window.nostr`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `window.print()`, `din.desktop`, `SpeechRecognition`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
-| `din.permissions`, `din.system` | [permissions.md](permissions.md) |
+| `navigator.permissions.query`, `din.system` | [permissions.md](permissions.md) |
 | Service workers, `registration.periodicSync` | [background.md](background.md) |
 | The manifest | [manifest.md](manifest.md) |
 

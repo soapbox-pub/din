@@ -25,7 +25,6 @@ import type {
   DinDrag,
   DinFiles,
   DinMenus,
-  DinPermissions,
   DinSystem,
   DinTheme,
   DinWindow,
@@ -62,6 +61,7 @@ import {
   installFileSystemObserver,
   installLaunchQueue,
   installDroppedFiles,
+  installPermissionsQuery,
   installSpeechRecognition,
   installStoredHandles,
   installSavedState,
@@ -848,7 +848,7 @@ export function installDin(transport: Transport): void {
     },
   };
 
-  // ---- notifications (the web's own API), permissions ----
+  // ---- notifications and permissions (the web's own APIs) ----
   installNotifications({
     permission: () => (h ? (permissions.has('notifications') ? 'granted' : 'denied') : 'default'),
     ready,
@@ -863,7 +863,7 @@ export function installDin(transport: Transport): void {
       if (p.type === 'notification') cb(p.id, p.event, p.action);
     }),
   });
-  const permissionsApi: DinPermissions = { has: (p) => permissions.has(p) };
+  installPermissionsQuery({ ready, has: (p) => permissions.has(p) });
 
   // ---- media session, wallpaper, dictation ----
   const mediaActions = new Emitter<MediaAction>();
@@ -950,7 +950,6 @@ export function installDin(transport: Transport): void {
     theme,
     desktop,
     assistant,
-    permissions: permissionsApi,
     system,
   };
   Object.defineProperty(window, 'din', { value: din, configurable: false, writable: false, enumerable: true });

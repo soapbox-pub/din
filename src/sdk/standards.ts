@@ -13,6 +13,7 @@
  * - Launch Handling's `launchQueue` hears each launch's files.
  * - Focus, visibility, `display-state`, `screenX` and the rest answer for
  *   the page's own window on the desktop.
+ * - `navigator.permissions.query` answers what the app was granted.
  *
  * Part of the runtime's bundle, so nothing here may have side effects on
  * import.
@@ -21,6 +22,7 @@ import type {
   DirectoryPickerOptions,
   LaunchParams,
   OpenFilePickerOptions,
+  Permission,
   PickerOptions,
   SaveFilePickerOptions,
   Unsubscribe,
@@ -1165,4 +1167,63 @@ export function installStoredHandles(host: StoredHandlesHost): void {
   };
   read(IDBRequest.prototype, 'result');
   read(IDBCursorWithValue.prototype, 'value');
+}
+
+// ---------------------------------------------------------------------------
+// The Permissions API
+// ---------------------------------------------------------------------------
+
+/** Every permission a manifest can ask for, which `navigator.permissions.query` takes by name. */
+const DIN_PERMISSIONS: Record<Permission, true> = {
+  nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
+  assistant: true, indd: true, volumes: true, mail: true, phone: true, passwords: true, vms: true,
+  capture: true, quickshare: true, 'file-folders': true,
+};
+
+/** The web's permission names whose powers a Din permission grants. */
+const WEB_PERMISSIONS: Record<string, Permission> = {
+  'periodic-background-sync': 'background',
+  camera: 'capture',
+  microphone: 'capture',
+  'display-capture': 'capture',
+};
+
+export interface PermissionsHost {
+  /** Resolves once the desktop has said what the app was granted. */
+  ready: Promise<void>;
+  has(permission: Permission): boolean;
+}
+
+/**
+ * The Permissions API's `navigator.permissions.query`, answering from the
+ * app's grants: for each of Din's permissions by its own name (`fs`,
+ * `cursor`), and for the web's names that one of them grants
+ * (`notifications`, `periodic-background-sync`, `camera`, `microphone`,
+ * `display-capture`). A grant is the manifest's, so the state is `granted`
+ * or `denied`, never `prompt`, and doesn't change while the page lives.
+ * Other names go to the browser.
+ */
+export function installPermissionsQuery(host: PermissionsHost): void {
+  const permissions = navigator.permissions as Permissions | undefined;
+  if (!permissions) return;
+  const query = permissions.query.bind(permissions);
+  const Status = (globalThis as { PermissionStatus?: { prototype: object } }).PermissionStatus;
+  Object.defineProperty(permissions, 'query', {
+    configurable: true,
+    writable: true,
+    value: async (descriptor: { name: string }) => {
+      const name = String(descriptor?.name);
+      const din = Object.hasOwn(DIN_PERMISSIONS, name) ? (name as Permission) : WEB_PERMISSIONS[name];
+      if (!din) return query(descriptor as PermissionDescriptor);
+      await host.ready;
+      const status = new EventTarget();
+      if (Status) Object.setPrototypeOf(status, Status.prototype);
+      Object.defineProperties(status, {
+        name: { value: name, enumerable: true },
+        state: { value: host.has(din) ? 'granted' : 'denied', enumerable: true },
+        onchange: { value: null, writable: true, enumerable: true },
+      });
+      return status as PermissionStatus;
+    },
+  });
 }

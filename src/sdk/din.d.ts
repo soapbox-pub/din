@@ -69,7 +69,6 @@ export interface Din {
   theme: DinTheme;
   desktop: DinDesktop;
   assistant: DinAssistant;
-  permissions: DinPermissions;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
 }
@@ -661,7 +660,7 @@ export interface DinAssistant {
 }
 
 // ---------------------------------------------------------------------------
-// din.permissions and din.system
+// Permissions and din.system
 // ---------------------------------------------------------------------------
 
 /**
@@ -732,9 +731,17 @@ export type Permission =
    */
   | 'file-folders';
 
-export interface DinPermissions {
-  /** Whether the manifest asked for it and the desktop granted it. */
-  has(permission: Permission): boolean;
+declare global {
+  interface Permissions {
+    /**
+     * The Permissions API, answering from the app's grants for each of Din's
+     * permissions by name (`{ name: 'cursor' }`), and for the web's names one
+     * of them grants (`notifications`, `periodic-background-sync`, `camera`,
+     * `microphone`, `display-capture`): `granted` when the manifest asked for
+     * it and the desktop granted it, else `denied`, never `prompt`.
+     */
+    query(permissionDesc: { name: Permission }): Promise<PermissionStatus>;
+  }
 }
 
 /**

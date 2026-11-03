@@ -45,8 +45,14 @@ When nsites get `window.din`, the user approves the list at install.
 A manifest's `din.folders` scopes `din.system.fs` to fixed folders instead
 (Media Player's music, videos and skins). Neither reaches anything else.
 
-Check at runtime with `din.permissions.has('fs')`. Calling something
-without its permission rejects with `DinPermissionError`.
+Check at runtime with the web's Permissions API, which takes Din's names
+as well as its own: `(await navigator.permissions.query({ name: 'fs' })).state`
+is `granted` or `denied` (never `prompt`: the manifest decided), and the
+web's names a permission grants answer the same way: `notifications`,
+`periodic-background-sync` for `background`, and `camera`, `microphone`
+and `display-capture` for `capture`. `usePermission('fs')` from
+`@/sdk/react` is the same for a component. Calling something without its
+permission rejects with `DinPermissionError`.
 
 ## `din.system`
 

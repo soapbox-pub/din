@@ -167,7 +167,7 @@ only from those folders.
 - **`folders`** (manifest): fixed folders, made if missing: Media Player's
   `~/Music`, `~/Videos` and skins folder.
 
-`din.permissions.has('fs')` is false for these; `din.system.fs` is there.
+`navigator.permissions.query({ name: 'fs' })` says `denied` for these; `din.system.fs` is there.
 
 ### Paths nothing granted
 

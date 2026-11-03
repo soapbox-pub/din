@@ -9,7 +9,7 @@ import { printFile } from '@/shared/print';
 import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
-import { useDin, useWindowIcon, useWindowTitle } from '@/sdk/react';
+import { useDin, usePermission, useWindowIcon, useWindowTitle } from '@/sdk/react';
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { onLaunchFiles, windowLaunchFiles } from '@/shared/fileHandles';
 
@@ -103,7 +103,7 @@ export function Preview() {
     }
   }, [din, path, dir, queryClient]);
 
-  const canUseCursor = din.permissions.has('cursor');
+  const canUseCursor = usePermission('cursor') === 'granted';
   const installCursor = useCallback(async () => {
     if (!path) return;
     await din.desktop.setCursor(await din.files.fromPath(path));
