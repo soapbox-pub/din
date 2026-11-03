@@ -1010,6 +1010,7 @@ function Conversation({
                       running && inBackground.length < tasks.length && !background.isPending ? toBackground : undefined
                     }
                     onFork={onFork}
+                    workElsewhere={running && inBackground.length > 0}
                   />
                   {revert && undone > 0 && (
                     <UndoneNotice count={undone} files={revert.files ?? []} busy={redo.isPending} onRedo={redoAll} />
@@ -1034,7 +1035,10 @@ function Conversation({
         )}
       </div>
       <div className="mx-auto w-full max-w-3xl space-y-3 px-4 pb-2 @2xl/assistant:px-6">
-        <BackgroundTasks tasks={inBackground} stopping={stopping} onOpen={onOpenSession} onStop={stopTask} />
+        <BackgroundTasks
+          tasks={inBackground}
+          working={running ? (messages ?? []) : undefined}
+          stopping={stopping} onOpen={onOpenSession} onStop={stopTask} />
         {permissions.map((request) => (
           <PermissionCard key={request.id} request={request} />
         ))}

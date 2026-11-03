@@ -119,6 +119,61 @@ function stillRunning(step: Step, tasks: ReadonlySet<string>): boolean {
   return id !== undefined && tasks.has(id);
 }
 
+function compacting(message: SessionMessage): boolean {
+  return message.type === 'compaction' && message.status === 'running';
+}
+
+/** The turn a prompt opens before the agent has written anything. */
+function emptyTurn(prompt: UserMessage): TurnEntry {
+  return { kind: 'turn', id: `turn:${prompt.id}`, start: prompt.time.created, items: [] };
+}
+
+/**
+ * "Working · 7s · Running npm test…", for the conversation the agent is
+ * working on: what its last turn's working line says, then `children`.
+ * `fallback` while it compacts, which says so itself.
+ */
+export function CurrentWork({
+  messages,
+  fallback,
+  children,
+}: {
+  messages: SessionMessage[];
+  fallback: ReactNode;
+  children?: ReactNode;
+}) {
+  const status = currentWork(messages, useNow(true));
+  if (!status) return fallback;
+  return (
+    <span className="min-w-0 truncate">
+      <span className={SHIMMER}>{status}</span>
+      {children}
+    </span>
+  );
+}
+
+function currentWork(messages: SessionMessage[], now: number): string | undefined {
+  const entries = group(messages);
+  const last = entries[entries.length - 1];
+  if (last?.kind === 'turn') return workingLabel(last, now);
+  if (last?.kind === 'user') return workingLabel(emptyTurn(last.message), now);
+  return last && compacting(last.message) ? undefined : 'Working…';
+}
+
+/** Whether the trailing group of steps is still going, for the line to narrate it. */
+function stepsLive(steps: Step[]): boolean {
+  const last = steps[steps.length - 1];
+  return steps.some(toolRunning) || (last?.type === 'reasoning' && !last.time?.completed);
+}
+
+function workingLabel(turn: TurnEntry, now: number): string {
+  const list = blocks(turn.items);
+  const tail = list[list.length - 1];
+  const tailSteps = tail?.kind === 'steps' ? tail.steps : [];
+  const step = stepsLive(tailSteps) ? activeLabel(tailSteps) : tail?.kind === 'text' ? 'Writing…' : 'Thinking…';
+  return `Working · ${duration(Math.max(0, now - turn.start))} · ${step}`;
+}
+
 /** A conversation's messages, oldest first. */
 export const Transcript = memo(function Transcript({
   messages,
@@ -129,6 +184,7 @@ export const Transcript = memo(function Transcript({
   onCancelQueued,
   onSendNow,
   onFork,
+  workElsewhere = false,
 }: {
   messages: SessionMessage[];
   /** Messages sent while it works that the agent hasn't taken yet. */
@@ -150,6 +206,11 @@ export const Transcript = memo(function Transcript({
   onSendNow?: () => void;
   /** Fork the conversation from before one of the user's messages. */
   onFork?: (message: UserMessage) => void;
+  /**
+   * What it's doing shows outside the transcript (`currentWork`), so the
+   * turn it's working on leaves out its working line.
+   */
+  workElsewhere?: boolean;
 }) {
   const entries = group(messages);
   const last = entries[entries.length - 1];
@@ -174,6 +235,7 @@ export const Transcript = memo(function Transcript({
                 turn={entry}
                 working={running && entry === last}
                 latest={entry === last}
+                workElsewhere={workElsewhere}
                 home={home}
               />
             </li>
@@ -182,17 +244,12 @@ export const Transcript = memo(function Transcript({
         const note = <Note message={entry.message} home={home} />;
         return note ? <li key={entry.message.id}>{note}</li> : null;
       })}
-      {running && last?.kind === 'user' && (
+      {running && last?.kind === 'user' && !workElsewhere && (
         <li key={`turn:${last.message.id}`} className="group/turn">
-          <Turn
-            turn={{ kind: 'turn', id: `turn:${last.message.id}`, start: last.message.time.created, items: [] }}
-            working
-            latest
-            home={home}
-          />
+          <Turn turn={emptyTurn(last.message)} working latest home={home} />
         </li>
       )}
-      {running && last?.kind === 'note' && !(last.message.type === 'compaction' && last.message.status === 'running') && (
+      {running && !workElsewhere && last?.kind === 'note' && !compacting(last.message) && (
         <li>
           <Working />
         </li>
@@ -393,11 +450,14 @@ function Turn({
   turn,
   working,
   latest,
+  workElsewhere = false,
   home,
 }: {
   turn: TurnEntry;
   working: boolean;
   latest: boolean;
+  /** Leave out the working line while it works: it shows elsewhere. */
+  workElsewhere?: boolean;
   home?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -407,10 +467,8 @@ function Turn({
   const lastMessage = assistants[assistants.length - 1];
   const list = blocks(turn.items);
   const tail = list[list.length - 1];
-  const tailSteps = tail?.kind === 'steps' ? tail.steps : [];
-  const lastStep = tailSteps[tailSteps.length - 1];
   // The trailing group narrates the work while a step in it is still going.
-  const live = working && (tailSteps.some(toolRunning) || (lastStep?.type === 'reasoning' && !lastStep.time?.completed));
+  const live = working && tail?.kind === 'steps' && stepsLive(tail.steps);
 
   // The reply is the prose after the last step; everything before it is the work.
   let cut = -1;
@@ -424,12 +482,10 @@ function Turn({
 
   const outcome = turn.idle?.outcome ?? (lastMessage?.error ? 'failed' : 'succeeded');
   const end = turn.idle?.time.created ?? Math.max(turn.start, ...assistants.map((m) => m.time.completed ?? m.time.created));
-  const elapsed = duration(Math.max(0, (working ? now : end) - turn.start));
+  const elapsed = duration(Math.max(0, end - turn.start));
   let label: string;
-  if (working) {
-    const step = live ? activeLabel(tailSteps) : tail?.kind === 'text' ? 'Writing…' : 'Thinking…';
-    label = `Working · ${elapsed} · ${step}`;
-  } else if (outcome === 'interrupted') label = `Stopped after ${elapsed}`;
+  if (working) label = workingLabel(turn, now);
+  else if (outcome === 'interrupted') label = `Stopped after ${elapsed}`;
   else if (outcome === 'failed') label = `Failed after ${elapsed}`;
   else label = `Worked for ${elapsed}`;
   // What it left running keeps the line spinning after the turn is over.
@@ -455,7 +511,7 @@ function Turn({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {work.length > 0 ? (
+      {working && workElsewhere ? null : work.length > 0 ? (
         <Collapsible open={open} onOpenChange={setOpen}>
           <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
             {summary}

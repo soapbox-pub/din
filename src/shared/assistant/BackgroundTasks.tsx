@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Bot, ChevronRight, Copy, Loader2, MessageSquare, Square, SquareTerminal } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { CurrentWork } from '@/shared/assistant/Transcript';
 import type { BackgroundTask } from '@/hooks/useAssistant';
+import type { SessionMessage } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** "12s", "5m", "1h 5m": how long a task has run, to the minute past the first. */
@@ -30,14 +32,19 @@ const ICON_BUTTON =
  * Above the composer: "2 background tasks running", for the commands and
  * subagents the agent left running after its turn (or while it carries on),
  * opening into a list of them to open or stop. Nothing when there are none.
+ * While the agent works it's the working line too ("Working · 7s · Running…
+ * · 2 in the background"), which the transcript then leaves out.
  */
 export function BackgroundTasks({
   tasks,
+  working,
   stopping,
   onOpen,
   onStop,
 }: {
   tasks: BackgroundTask[];
+  /** The conversation, while the agent works on it. */
+  working?: SessionMessage[];
   /** The tasks being stopped. */
   stopping: ReadonlySet<string>;
   /** Open a subagent's conversation. */
@@ -46,12 +53,22 @@ export function BackgroundTasks({
 }) {
   const [open, setOpen] = useState(false);
   if (tasks.length === 0) return null;
-  const count = tasks.length === 1 ? '1 background task' : `${tasks.length} background tasks`;
+  const count = (
+    <span role="status" className="min-w-0 truncate">
+      {tasks.length === 1 ? '1 background task' : `${tasks.length} background tasks`} running…
+    </span>
+  );
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <CollapsibleTrigger className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
-        <span role="status">{count} running…</span>
+        {working ? (
+          <CurrentWork messages={working} fallback={count}>
+            {` · ${tasks.length} in the background`}
+          </CurrentWork>
+        ) : (
+          count
+        )}
         <ChevronRight className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')} aria-hidden />
       </CollapsibleTrigger>
       <CollapsibleContent>
