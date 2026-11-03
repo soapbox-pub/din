@@ -11,7 +11,7 @@ import { passphraseProblem } from '@/lib/installer';
 import { layoutKey } from '@/lib/keyboard';
 import { cleanLockError } from '@/lib/lock';
 import { cn } from '@/lib/utils';
-import { ScreenLayer } from './MonitorsProvider';
+import { Wallpaper } from './Wallpaper';
 
 type Step = 'welcome' | 'password' | 'saving';
 
@@ -20,9 +20,9 @@ type Step = 'welcome' | 'password' | 'saving';
  * it has a password (os/din-erase.sh, window.dinos.erase). The keyboard
  * layout comes first, since the password is typed at the boot screen with
  * it, then the password, which din-password sets everywhere the computer's
- * is kept. It looks like the boot screen it follows: the same background,
- * a large heading, the same fields, and Din's logo in the same place at the
- * foot, where BootVeil hands over.
+ * is kept. It looks like the boot screen it follows: the wallpaper (Din's
+ * own, on an erased computer), dimmed, a large heading, the same fields,
+ * and Din's logo in the same place at the foot, where BootVeil hands over.
  */
 export function Setup({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState<Step>('welcome');
@@ -43,10 +43,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <>
-      <ScreenLayer aria-hidden className="bg-[#0b0f14]" />
+    <Wallpaper backdrop={<div aria-hidden className="pointer-events-none absolute inset-0 bg-black/55" />}>
       <main
-        className="fixed inset-0 overflow-y-auto bg-[radial-gradient(ellipse_at_top,rgba(148,163,184,0.12),transparent_60%)] text-white [container-type:size]"
+        className="fixed inset-0 overflow-y-auto text-white [container-type:size]"
         aria-labelledby="setup-title"
       >
         <div className="mx-auto flex min-h-full w-full max-w-lg flex-col items-center justify-center gap-8 px-6 pb-32 pt-16">
@@ -66,7 +65,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
           className="pointer-events-none absolute bottom-[3.7cqh] left-1/2 h-[2.59cqh] -translate-x-1/2 opacity-85"
         />
       </main>
-    </>
+    </Wallpaper>
   );
 }
 
