@@ -7,7 +7,6 @@ import {
   MessageCircle,
   RefreshCw,
   Settings2,
-  Share2,
   Smartphone,
   Trash2,
   Plus,
@@ -58,8 +57,7 @@ import { PhoneSetupWizard } from './PhoneSetupWizard';
  * where it's disconnected; any other connects with a click, and its gear
  * opens the page. Add a phone walks through pairing one in this same pane
  * (PhoneSetupWizard). Launched with `{ add: true, nonce }` (Messages' Set Up
- * a Phone), it starts there. Quick Share, for any Android device on the same
- * network, is its own app; a button at the bottom of the page opens it.
+ * a Phone), it starts there.
  */
 export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
   const bridge = getPhoneDesktopBridge();
@@ -212,17 +210,6 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
           <p className="text-xs text-muted-foreground">Messages are kept on this computer only.</p>
         </div>
       )}
-
-      {/* Quick Share has its own window, visible to nearby devices only while it's open (electron/quickshare.mts). */}
-      <Button
-        variant="outline"
-        className="self-start"
-        title="Android phones and tablets nearby can share files and links here while Quick Share is open"
-        onClick={() => open('quick-share')}
-      >
-        <Share2 className="size-4" aria-hidden />
-        Receive with Quick Share
-      </Button>
 
       {forgetDialog}
     </section>

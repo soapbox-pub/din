@@ -39,7 +39,6 @@ export interface BluetoothPeer {
 type Connected = (socket: net.Socket, peer: BluetoothPeer) => void;
 
 let onConnection: Connected = (socket) => socket.destroy();
-let onAdvertising: () => void = () => {};
 let helper: ChildProcess | null = null;
 let server: net.Server | null = null;
 let directory: string | null = null;
@@ -48,7 +47,6 @@ let token = '';
 let adapterAddress: string | null = null;
 /** What to advertise, from the adapter's address; null for nothing. */
 let advertisement: ((address: string) => Buffer) | null = null;
-let advertising = false;
 let retry: NodeJS.Timeout | null = null;
 const sockets = new Set<net.Socket>();
 /** The last thing the helper said went wrong, so it's logged once. */
@@ -56,12 +54,6 @@ let lastError = '';
 
 function wanted(): boolean {
   return advertisement !== null || sockets.size > 0;
-}
-
-function setAdvertising(on: boolean): void {
-  if (advertising === on) return;
-  advertising = on;
-  onAdvertising();
 }
 
 function tell(message: unknown): void {
@@ -150,7 +142,7 @@ async function start(): Promise<void> {
     while ((end = lines.indexOf('\n')) >= 0) {
       const line = lines.slice(0, end);
       lines = lines.slice(end + 1);
-      let message: { ready?: { address?: unknown }; advertising?: unknown };
+      let message: { ready?: { address?: unknown } };
       try {
         message = JSON.parse(line);
       } catch {
@@ -160,8 +152,6 @@ async function start(): Promise<void> {
         adapterAddress = message.ready.address;
         lastError = '';
         sendAdvertisement();
-      } else if (typeof message.advertising === 'boolean') {
-        setAdvertising(message.advertising);
       }
     }
   });
@@ -177,7 +167,6 @@ async function start(): Promise<void> {
     if (helper !== child) return;
     helper = null;
     adapterAddress = null;
-    setAdvertising(false);
     const why = errors.trim().split('\n').pop() ?? '';
     if (why && why !== lastError) console.warn(`quickshare: the Bluetooth helper stopped: ${why}`);
     lastError = why;
@@ -193,7 +182,6 @@ function stop(): void {
   const child = helper;
   helper = null;
   adapterAddress = null;
-  setAdvertising(false);
   child?.stdin?.end();
   if (child) setTimeout(() => child.kill(), 3000).unref();
   server?.close();
@@ -202,10 +190,9 @@ function stop(): void {
   directory = null;
 }
 
-/** Where connections go, and who hears when advertising starts or stops; quickshare.mts. */
-export function onBluetooth(connected: Connected, advertisingChanged: () => void): void {
+/** Where connections go; quickshare.mts. */
+export function onBluetooth(connected: Connected): void {
   onConnection = connected;
-  onAdvertising = advertisingChanged;
 }
 
 /**
@@ -221,11 +208,6 @@ export function advertiseOverBluetooth(build: ((address: string) => Buffer) | nu
     sendAdvertisement();
     if (!wanted()) stop();
   }
-}
-
-/** Whether phones nearby can see this computer over Bluetooth now. */
-export function advertisingOverBluetooth(): boolean {
-  return advertising;
 }
 
 /** Bluetooth turned on, or BlueZ started again: try now rather than at the next retry. */

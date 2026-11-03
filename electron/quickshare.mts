@@ -1,30 +1,21 @@
-// Quick Share (the Quick Share app, din.system.quickShare): Android phones,
-// tablets and Chromebooks share files and links to this computer from their
-// share sheet, as they share with each other. This computer is visible while
-// a Quick Share window is open, as with AirDrop's window or Android's Receive
-// screen: the app calls `receive`, and closing its last window withdraws the
-// announcements, closes the port and ends the shares it was showing.
-//
-// It's also visible for a little while when one of the user's own phones
-// opens its share sheet: while a phone from Settings → Phone with "Receive
-// files" on is connected over Bluetooth (phone.mts, connectedFilePhones),
-// an LE scan listens for the beacon Quick Share sends then (service data
-// 0xFE2C, "fast initiation"), and hearing it makes this computer visible
-// over Bluetooth for NEARBY_MS more (not on the network, where a share can't
-// say which phone it's from).
+// Quick Share (window.dinos.quickShare): the user's Android phones share
+// files and links to this computer from their share sheet, as they share
+// with each other. Nothing needs turning on: while a phone from Settings →
+// Phone with "Receive files" on is connected over Bluetooth (phone.mts,
+// connectedFilePhones), an LE scan listens for the beacon Quick Share sends
+// when its share sheet opens (service data 0xFE2C, "fast initiation"), and
+// hearing it makes this computer visible over Bluetooth for NEARBY_MS (not
+// on the network, where a share can't say which phone it's from).
 //
 // Quick Share (once Nearby Share) runs on Google's Nearby Connections, which
 // isn't published; this follows NearDrop's and rquickshare's reading of it,
 // Google's open-source Nearby code, and the field numbers in its .proto
 // files. No server is involved.
 //
-// - Discovery: on the network, this computer announces itself over mDNS
-//   through Avahi (service _FC9F5ED42C8A._tcp, an endpoint id in the
-//   service's name and its name and device type in the TXT record), and
-//   listens on PORT, which DinOS's firewall lets in. Over Bluetooth, it sends
-//   the LE advertisement Android receivers send (bleAdvertisement), which
-//   carries its Bluetooth address (quickshare-bluetooth.mts).
-// - Connection: the phone connects, over TCP or Bluetooth RFCOMM, and asks
+// - Discovery: this computer sends the LE advertisement Android receivers
+//   send (bleAdvertisement), which carries its Bluetooth address
+//   (quickshare-bluetooth.mts).
+// - Connection: the phone connects over Bluetooth RFCOMM, and asks
 //   to (ConnectionRequest), then the two run a UKEY2 handshake (ECDH on
 //   P-256). Everything after it is encrypted with AES-256-CBC and signed with
 //   HMAC-SHA256, in keys derived from the handshake, which also gives a
@@ -32,7 +23,8 @@
 // - Moving to Wi-Fi: Bluetooth manages tens of KB/s, so a phone that
 //   connected over it is offered a Wi-Fi hotspot this computer hosts
 //   (quickshare-hotspot.mts; Android phones leave their own Wi-Fi while the
-//   share sheet is open). It joins it, connects to PORT there and says it's
+//   share sheet is open). It joins it, connects to PORT there (which DinOS's
+//   firewall lets in) and says it's
 //   the same phone (ClientIntroduction), then both sides finish with
 //   Bluetooth and carry on over Wi-Fi, with the same keys. Without a hotspot
 //   the share stays on Bluetooth. While a share that came over Bluetooth
@@ -40,11 +32,11 @@
 //   card's Bluetooth shares its 2.4 GHz radio with Wi-Fi, and slows it.
 // - Sharing: the phone offers files or a piece of text (Introduction).
 //   Anyone could be sending, since only Google's own devices can prove
-//   they're "yours" or a contact's, so the user is asked, with the PIN: in
-//   the app, or in a notification from the desktop when no window is open
-//   (`background`). Not for a phone from Settings → Phone with "Receive
-//   files" on, connected over Bluetooth on a link with the pairing's key:
-//   that proves which phone it is, so its share arrives without asking.
+//   they're "yours" or a contact's, so the user is asked, with the PIN, in a
+//   notification from the desktop. Not for a phone from Settings → Phone
+//   with "Receive files" on, connected over Bluetooth on a link with the
+//   pairing's key: that proves which phone it is, so its share arrives
+//   without asking.
 //   Accepted files are written straight into ~/Downloads, under a name of
 //   their own (`photo (1).jpg` beside `photo.jpg`); one that doesn't arrive
 //   whole is deleted. Text arrives as a .txt file, and a link is offered to
@@ -58,13 +50,12 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { app, ipcMain, webContents } from 'electron';
+import { app, ipcMain } from 'electron';
 import { onBluetoothChanged } from './bluetooth.mts';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
 import { connectedFilePhones, fileSender, onPhonesChanged } from './phone.mts';
 import {
   advertiseOverBluetooth,
-  advertisingOverBluetooth,
   bluetoothMayWork,
   onBluetooth,
   quitBluetooth,
@@ -73,17 +64,13 @@ import {
 import { holdHotspot, hotspot, quitHotspot } from './quickshare-hotspot.mts';
 import { claim, freeBytes, safeFileName } from './received-files.mts';
 import { Writer, big, bytes, decode, int, message, messages, str, type Fields } from './protobuf.mts';
-import type { QuickShareDeviceType, QuickShareState, QuickShareTransfer } from '../src/lib/quickShare.ts';
+import type { QuickShareDeviceType, QuickShareTransfer } from '../src/lib/quickShare.ts';
 
-/** The port Quick Share listens on; os/configuration.nix opens it in the firewall. */
+/** The port phones moving over to the hotspot connect to; os/configuration.nix opens it in the firewall. */
 const PORT = 47331;
-const SERVICE_TYPE = '_FC9F5ED42C8A._tcp';
 /** The first three bytes of SHA-256("NearbySharing"), Quick Share's service id in Nearby's announcements. */
 const SERVICE_HASH = Buffer.from([0xfc, 0x9f, 0x5e]);
 const SYSTEM_BUS = process.env.DBUS_SYSTEM_BUS_ADDRESS || 'unix:path=/run/dbus/system_bus_socket';
-const AVAHI = 'org.freedesktop.Avahi';
-const AVAHI_SERVER = 'org.freedesktop.Avahi.Server';
-const AVAHI_GROUP = 'org.freedesktop.Avahi.EntryGroup';
 
 /** The largest frame, or bytes payload, a device may send. */
 const MAX_FRAME = 5 * 1024 * 1024;
@@ -111,8 +98,6 @@ const NEARBY_RSSI = -75;
 const BLUEZ = 'org.bluez';
 const ADAPTER = 'org.bluez.Adapter1';
 const DEVICE = 'org.bluez.Device1';
-/** How long to wait before trying Avahi again when it isn't there. */
-const RETRY_MS = 10_000;
 
 // Nearby Connections' OfflineFrame (offline_wire_formats.proto).
 const FRAME = { connectionRequest: 1, connectionResponse: 2, payloadTransfer: 3, bandwidthUpgrade: 4, keepAlive: 5, disconnection: 6 } as const;
@@ -142,8 +127,6 @@ type Deps = {
 };
 
 let deps: Deps;
-/** The windows receiving, by WebContents id, each with what stops following it. */
-const leases = new Map<number, () => void>();
 /** Until when a phone's share sheet keeps this computer visible (ms), and its timer. */
 let nearbyUntil = 0;
 let nearbyTimer: NodeJS.Timeout | null = null;
@@ -156,18 +139,13 @@ let unwatchScan: (() => void) | null = null;
 let checkingPhones: Promise<void> = Promise.resolve();
 let server: net.Server | null = null;
 let listeningPort = 0;
-let avahiBus: DBusConnection | null = null;
-let group: string | null = null;
-let unwatchGroup: (() => void) | null = null;
-let advertised = false;
-let error: string | null = null;
-let retry: NodeJS.Timeout | null = null;
+let systemBusConnection: DBusConnection | null = null;
 /** Start and stop one at a time, in order. */
 let applying: Promise<void> = Promise.resolve();
 const connections = new Map<string, Connection>();
 let nextTransfer = 1;
-/** Four letters and digits naming this computer to devices; a new one if another device has it. */
-let endpointId = randomEndpointId();
+/** Four letters and digits naming this computer to devices. */
+const endpointId = randomEndpointId();
 
 // ---------------------------------------------------------------------------
 // Frames
@@ -323,7 +301,7 @@ class Connection {
   private closed = false;
   /** The DISCONNECTION frame has been sent. */
   private saidGoodbye = false;
-  /** Where it connected from over Bluetooth, or null over the network. */
+  /** Where it connected from over Bluetooth, or null for a faster channel over the hotspot. */
   readonly bluetooth: BluetoothPeer | null;
   /** Only a phone's faster channel for another connection, so nothing but its introduction. */
   private readonly upgradeOnly: boolean;
@@ -336,11 +314,6 @@ class Connection {
    * network, so nothing in Bluetooth range gets it for connecting.
    */
   private upgradeAllowed = false;
-
-  /** Whether a window is showing this share (so closing the last one ends it). */
-  get windowed(): boolean {
-    return this.transfer !== null && !this.transfer.background;
-  }
 
   constructor(socket: net.Socket, options: { bluetooth?: BluetoothPeer; upgradeOnly?: boolean } = {}) {
     this.id = `quickshare-${nextTransfer++}`;
@@ -756,8 +729,6 @@ class Connection {
       transferred: 0,
       total: 0,
       error: null,
-      // No window to show it in: the desktop asks.
-      background: leases.size === 0,
     };
     const unsupported = (why: string) => {
       this.sendSharing(sharingFrame(SHARING.response, 3, new Writer().int(1, RESPONSE.unsupported)));
@@ -1003,31 +974,17 @@ function cleanTitle(title: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Being visible: the server, the mDNS announcement and the Bluetooth one
+// Being visible: the Bluetooth announcement, and the server for the hotspot
 // ---------------------------------------------------------------------------
 
-/** Whether a window is receiving, so this computer is visible on the network. */
-function receiving(): boolean {
-  return leases.size > 0;
-}
-
-/** Whether this computer should be visible over Bluetooth: a window is receiving, or a phone's share sheet is open. */
+/** Whether this computer should be visible over Bluetooth: one of the user's phones opened its share sheet. */
 function listening(): boolean {
-  return receiving() || nearbyUntil > Date.now();
+  return nearbyUntil > Date.now();
 }
 
-/** Whether the server should be up: devices may connect over the network, or phones move over to the hotspot. */
+/** Whether the server should be up: a phone may connect, or phones move over to the hotspot. */
 function serving(): boolean {
-  return listening() || [...connections.values()].some((c) => c.bluetooth);
-}
-
-function state(): QuickShareState {
-  const visible = (advertised && server !== null) || advertisingOverBluetooth();
-  return { listening: receiving(), name: deviceName(), visible: listening() && visible, error: receiving() ? error : null };
-}
-
-function changed(): void {
-  deps.sendToShell('quickshare:changed', state());
+  return listening() || bluetoothBusy();
 }
 
 function track(connection: Connection): void {
@@ -1037,13 +994,8 @@ function track(connection: Connection): void {
 function listen(port: number): Promise<net.Server> {
   return new Promise((resolve, reject) => {
     const s = net.createServer((socket) => {
-      if (connections.size >= MAX_CONNECTIONS) {
-        socket.destroy();
-        return;
-      }
-      if (receiving()) return track(new Connection(socket));
-      // Not visible on the network: only a phone moving over from Bluetooth, to the hotspot.
-      if (![...connections.values()].some((c) => c.upgrade === 'offered')) {
+      // Only a phone moving over from Bluetooth, to the hotspot.
+      if (connections.size >= MAX_CONNECTIONS || ![...connections.values()].some((c) => c.upgrade === 'offered')) {
         socket.destroy();
         return;
       }
@@ -1058,195 +1010,57 @@ function listen(port: number): Promise<net.Server> {
   });
 }
 
-function avahiError(e: unknown): string {
-  if (e instanceof DBusError) {
-    if (e.type === 'org.freedesktop.DBus.Error.ServiceUnknown' || e.type === 'org.freedesktop.DBus.Error.NameHasNoOwner') {
-      return 'This computer can’t announce itself on the network: Avahi isn’t running.';
-    }
-    if (e.type === 'org.freedesktop.Avahi.NotPermittedError') {
-      return 'This computer can’t announce itself on the network: Avahi doesn’t allow publishing.';
-    }
-  }
-  return `This computer can’t announce itself on the network: ${e instanceof Error ? e.message : String(e)}`;
-}
-
 async function systemBus(): Promise<DBusConnection> {
-  if (avahiBus) return avahiBus;
+  if (systemBusConnection) return systemBusConnection;
   const bus = await DBusConnection.connect(SYSTEM_BUS);
   if (!bus) throw new Error('there’s no system bus.');
-  avahiBus = bus;
+  systemBusConnection = bus;
   bus.onClose = () => {
-    if (avahiBus !== bus) return;
-    avahiBus = null;
-    group = null;
-    unwatchGroup = null;
-    advertised = false;
+    if (systemBusConnection !== bus) return;
+    systemBusConnection = null;
     scanning = null;
     unwatchScan = null;
-    changed();
-    scheduleRetry();
     checkPhones();
   };
-  // Avahi starting again (or for the first time) takes everything published with it.
+  // BlueZ starting again ends every search; start ours afresh.
   bus.subscribe({ sender: 'org.freedesktop.DBus', interface: 'org.freedesktop.DBus', member: 'NameOwnerChanged' }, (m: Message) => {
-    if (m.body[0] === BLUEZ) {
-      // BlueZ starting again ends every search; start ours afresh.
-      unwatchScan?.();
-      unwatchScan = null;
-      scanning = null;
-      checkPhones();
-      return;
-    }
-    if (m.body[0] !== AVAHI) return;
-    unwatchGroup?.();
-    unwatchGroup = null;
-    group = null;
-    advertised = false;
-    if (m.body[2]) void apply();
-    else {
-      error = avahiError(new DBusError('org.freedesktop.DBus.Error.ServiceUnknown', ''));
-      changed();
-    }
+    if (m.body[0] !== BLUEZ) return;
+    unwatchScan?.();
+    unwatchScan = null;
+    scanning = null;
+    checkPhones();
   });
   return bus;
 }
 
-function scheduleRetry(): void {
-  if (!receiving() || retry) return;
-  retry = setTimeout(() => {
-    retry = null;
-    void apply();
-  }, RETRY_MS);
-}
-
-async function publish(): Promise<void> {
-  const bus = await systemBus();
-  if (!group) {
-    const [created] = await bus.call({ destination: AVAHI, path: '/', interface: AVAHI_SERVER, member: 'EntryGroupNew' });
-    group = String(created);
-    const path = group;
-    unwatchGroup = bus.subscribe({ path, interface: AVAHI_GROUP, member: 'StateChanged' }, (m: Message) => {
-      const groupState = Number(m.body[0]);
-      if (groupState === 2) {
-        advertised = true;
-        error = null;
-        changed();
-      } else if (groupState === 3) {
-        // Another device took this name: take another.
-        endpointId = randomEndpointId();
-        advertised = false;
-        void apply(true);
-      } else if (groupState === 4) {
-        advertised = false;
-        error = avahiError(new Error(String(m.body[1] || 'it failed.')));
-        changed();
-      }
-    });
-  }
-  const name = Buffer.concat([Buffer.from([0x23]), endpointId, SERVICE_HASH, Buffer.from([0, 0])]).toString('base64url');
-  const txt = [Buffer.from(`n=${endpointInfo().toString('base64url')}`)];
-  await bus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Reset' });
-  await bus.call({
-    destination: AVAHI,
-    path: group,
-    interface: AVAHI_GROUP,
-    member: 'AddService',
-    signature: 'iiussssqaay',
-    body: [-1, -1, 0, name, SERVICE_TYPE, '', '', listeningPort, txt],
-  });
-  await bus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Commit' });
-}
-
-async function withdraw(): Promise<void> {
-  advertised = false;
-  if (!avahiBus || !group) return;
-  await avahiBus.call({ destination: AVAHI, path: group, interface: AVAHI_GROUP, member: 'Reset' }).catch(() => {});
-}
-
 /**
- * Bring the server and the announcements in line with whether a window is
- * receiving, a phone's share sheet is open, and shares over Bluetooth may
- * move to the hotspot; `again` announces anew.
+ * Bring the server and the Bluetooth announcement in line with whether a
+ * phone's share sheet is open, and shares over Bluetooth may move to the
+ * hotspot.
  */
-function apply(again = false): Promise<void> {
+function apply(): Promise<void> {
   applying = applying.then(async () => {
     // Not while a share over Bluetooth goes on, which it would slow.
     advertiseOverBluetooth(listening() && !bluetoothBusy() ? bleAdvertisement : null);
-    if (!receiving()) {
-      clearTimeout(retry ?? undefined);
-      retry = null;
-      await withdraw();
-      error = null;
-    }
     if (!serving()) {
       // Stops listening for new devices; shares already connected go on.
       server?.close();
       server = null;
-      changed();
       return;
     }
+    if (server) return;
     try {
-      if (!server) {
-        server = await listen(PORT).catch((e: NodeJS.ErrnoException) => {
-          if (e.code !== 'EADDRINUSE') throw e;
-          console.warn(`quickshare: port ${PORT} is taken; using another, which a firewall may block`);
-          return listen(0);
-        });
-        listeningPort = (server.address() as net.AddressInfo).port;
-      }
+      server = await listen(PORT).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== 'EADDRINUSE') throw e;
+        console.warn(`quickshare: port ${PORT} is taken; using another, which a firewall may block`);
+        return listen(0);
+      });
+      listeningPort = (server.address() as net.AddressInfo).port;
     } catch (e) {
-      error = `Couldn’t listen for devices: ${e instanceof Error ? e.message : String(e)}`;
-      changed();
-      return;
+      console.warn('quickshare: couldn’t listen for phones moving to the hotspot', e);
     }
-    if (!receiving()) {
-      changed();
-      return;
-    }
-    if (advertised && group && !again) return;
-    try {
-      await publish();
-    } catch (e) {
-      console.warn('quickshare: announcing failed', e);
-      advertised = false;
-      error = avahiError(e);
-      scheduleRetry();
-    }
-    changed();
   });
   return applying;
-}
-
-/**
- * Be visible for as long as this window (an app's, or the desktop) is
- * there: until it closes, reloads or goes elsewhere, or calls stop.
- */
-function receive(sender: { id: number }): Promise<QuickShareState> {
-  if (!leases.has(sender.id)) {
-    const contents = webContents.fromId(sender.id);
-    if (!contents || contents.isDestroyed()) throw new Error('No such window.');
-    const end = () => release(sender.id);
-    const navigated = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
-      if (details.isMainFrame && !details.isSameDocument) end();
-    };
-    contents.once('destroyed', end);
-    contents.on('did-start-navigation', navigated);
-    leases.set(sender.id, () => {
-      contents.off('destroyed', end);
-      contents.off('did-start-navigation', navigated);
-    });
-  }
-  return apply().then(state);
-}
-
-function release(id: number): Promise<void> {
-  const drop = leases.get(id);
-  if (!drop) return applying;
-  drop();
-  leases.delete(id);
-  // Closing the last window ends the shares it was showing, asking or arriving.
-  if (leases.size === 0) for (const connection of [...connections.values()]) if (connection.windowed) connection.cancel();
-  return apply();
 }
 
 // ---------------------------------------------------------------------------
@@ -1341,7 +1155,7 @@ async function stopScan(): Promise<void> {
   scanning = null;
   unwatchScan?.();
   unwatchScan = null;
-  if (adapter && avahiBus) await avahiBus.call({ destination: BLUEZ, path: adapter, interface: ADAPTER, member: 'StopDiscovery' }).catch(() => {});
+  if (adapter && systemBusConnection) await systemBusConnection.call({ destination: BLUEZ, path: adapter, interface: ADAPTER, member: 'StopDiscovery' }).catch(() => {});
 }
 
 let checkTimer: NodeJS.Timeout | null = null;
@@ -1382,13 +1196,10 @@ export function registerQuickShareHandlers(options: Deps): void {
       return fn(event, ...args);
     });
   };
-  handle('quickshare:state', () => state());
-  handle('quickshare:receive', (event) => receive(event.sender));
-  handle('quickshare:stop', (event) => release(event.sender.id));
   handle('quickshare:respond', (_event, id, accept) => transferArg(id).respond(accept === true));
   handle('quickshare:cancel', (_event, id) => transferArg(id).cancel());
 
-  onBluetooth(bluetoothConnected, changed);
+  onBluetooth(bluetoothConnected);
   onPhonesChanged(checkPhones);
   // A phone connecting or going, Bluetooth turned on or off, BlueZ starting again.
   onBluetoothChanged(() => {

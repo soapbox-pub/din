@@ -1,5 +1,5 @@
-// Saving files other devices send (phone-receive.mts over Bluetooth,
-// quickshare.mts over the network) into Downloads, under names of their own.
+// Saving files other devices send (phone-receive.mts and quickshare.mts)
+// into Downloads, under names of their own.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.

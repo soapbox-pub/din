@@ -1374,7 +1374,7 @@ export function installStoredHandles(host: StoredHandlesHost): void {
 const DIN_PERMISSIONS: Record<Permission, true> = {
   nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
   assistant: true, 'assistant-sudo': true, indd: true, volumes: true, mail: true, phone: true, passwords: true, vms: true,
-  capture: true, quickshare: true, 'file-folders': true,
+  capture: true, 'file-folders': true,
 };
 
 /** The web's permission names whose powers a Din permission grants. */

@@ -30,7 +30,6 @@ import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
-import type { QuickShareBridge } from '@/lib/quickShare';
 import type { VmsBridge } from '@/lib/vms';
 import type { CaptureBridge } from '@/lib/capture';
 
@@ -753,13 +752,6 @@ export type Permission =
    */
   | 'capture'
   /**
-   * Receiving with Quick Share (`din.system.quickShare`): this computer is
-   * visible to Android devices on the network and over Bluetooth while the
-   * app has asked to receive, and the app accepts or declines what they
-   * offer. Quick Share.
-   */
-  | 'quickshare'
-  /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
    * Preview (stepping through a folder, archives), Publisher (linked
@@ -805,7 +797,6 @@ export interface DinSystem {
   passwords?: PasswordsBridge;
   vms?: VmsBridge;
   capture?: CaptureBridge;
-  quickShare?: QuickShareBridge;
 }
 
 // ---------------------------------------------------------------------------

@@ -197,8 +197,6 @@ export const APPS: readonly AppDefinition[] = [
   // beside them. Launch params
   // `{ date: 'YYYY-MM-DD', view }` show a day; the menu bar's clock opens it.
   dinApp('calendar'),
-  // Receiving from Android devices nearby; visible to them only while it's open.
-  dinApp('quick-share'),
   dinApp('file-browser'),
   dinApp('terminal'),
   // Plain text and code, VS Code style: a folder, tabs, quick open and

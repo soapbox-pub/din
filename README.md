@@ -736,18 +736,11 @@ files — `git add` new source files before `npm run os:build`.
   share for its progress and then Open or Show in Files. Other devices are
   turned away; "Receive files" on the phone's page (`din phone
   receive-files`) turns it off.
-- Android phones and tablets can share files, text and links with Quick
-  Share (`electron/quickshare.mts`) while the Quick Share app is open
-  (Settings → Phone opens it, as does `din phone quick-share`). Only then
-  does Din announce itself on the network over mDNS through Avahi and listen
-  on TCP 47331 (open in the firewall), and send the Bluetooth LE
-  advertisement Android receivers send; closing the window stops them. No
-  server is involved. Anyone could be sending, so each share asks in the
-  window first, with the code the sender's screen shows, then shows its
-  progress there and lands in Downloads.
-- A phone added in Settings → Phone with "Receive files" on doesn't need the
-  window: while it's connected over Bluetooth, Din listens for the beacon its
-  share sheet sends, and advertises over Bluetooth for 90 seconds after. The
+- A phone added in Settings → Phone with "Receive files" on can share
+  files, text and links with Quick Share (`electron/quickshare.mts`), with
+  nothing to turn on: while it's connected over Bluetooth, Din listens for
+  the beacon its share sheet sends, and sends the Bluetooth LE advertisement
+  Android receivers send for 90 seconds after. No server is involved. The
   phone connects over Bluetooth (RFCOMM, through `electron/quickshare-bt.py`,
   since Node can't take the socket BlueZ hands over), on a link encrypted
   with the pairing's key, which proves which phone it is, so its share

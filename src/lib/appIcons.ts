@@ -34,7 +34,6 @@ export const THEMED_APP_ICONS: Record<string, string[]> = {
   '/icons/apps/preview-photo.png': ['image-viewer', 'org.gnome.Loupe', 'eog'],
   '/icons/apps/preview-video.png': ['multimedia-video-player', 'org.gnome.Totem', 'totem'],
   '/icons/apps/publisher.png': ['scribus', 'libreoffice-draw'],
-  '/icons/apps/quick-share.png': ['din-quick-share'],
   '/icons/apps/screenshot.png': ['applets-screenshooter', 'org.gnome.Screenshot'],
   '/icons/apps/settings.png': ['preferences-system', 'org.gnome.Settings'],
   '/icons/apps/slides.png': ['libreoffice-impress', 'x-office-presentation'],

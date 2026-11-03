@@ -1820,10 +1820,8 @@ expose('mail', {
 });
 
 // Quick Share (window.dinos.quickShare), backed by electron/quickshare.mts:
-// the desktop answers shares that arrive with no Quick Share window open (a
-// phone's share sheet made this computer visible), in a notification. The
-// Quick Share app has the rest through its bridge port. Types in
-// src/lib/quickShare.ts.
+// the desktop answers shares from the user's phones in a notification. Types
+// in src/lib/quickShare.ts.
 expose('quickShare', {
   /** @param {string} id @param {boolean} accept */
   respond: (id, accept) => ipcRenderer.invoke('quickshare:respond', id, accept),

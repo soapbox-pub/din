@@ -18,10 +18,9 @@ function isOpenableLink(url: string): boolean {
 }
 
 /**
- * Quick Shares that arrive with no Quick Share window open
- * (electron/quickshare.mts: one of the user's phones opened its share sheet,
- * which made this computer visible over Bluetooth), as one notification per
- * share; the window shows its own. First it asks, with the code the sender's
+ * Quick Shares (electron/quickshare.mts: one of the user's phones opened its
+ * share sheet, which made this computer visible over Bluetooth), as one
+ * notification per share. First it asks, with the code the sender's
  * screen shows too, unless the share is from one of the user's own phones
  * (main accepts that one itself): anything nearby could be sending, so
  * nothing else arrives until the user accepts, and only the user can (not
@@ -39,7 +38,7 @@ export function QuickShareHost() {
   useEffect(() => {
     const quickShare = getQuickShareDesktopBridge();
     if (!quickShare) return;
-    const source = { appId: 'quick-share', name: 'Quick Share', icon: Share2 };
+    const source = { name: 'Quick Share', icon: Share2 };
     const key = (id: string) => `quick-share:${id}`;
 
     const what = (t: QuickShareTransfer): string => {
@@ -135,7 +134,6 @@ export function QuickShareHost() {
     /** Shares whose progress is on screen. */
     const shown = new Set<string>();
     return quickShare.onTransfer((t) => {
-      if (!t.background) return;
       if (t.status === 'asking') return ask(t);
       if (t.status === 'receiving') {
         if (shown.has(t.id)) updateNotificationByKey(key(t.id), progress(t));

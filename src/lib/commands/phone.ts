@@ -5,9 +5,9 @@ import { call, command, need, pick } from './util';
 
 /**
  * `din phone`: the phones in Settings → Phone and their texts, as Messages
- * shows them (electron/phone.mts), and whether they can send files here; `quick-share` opens the
- * Quick Share window, where accepting what's shared is on screen only. Sending a text asks on
- * screen first: it can't be taken back. Pairing a phone is Bluetooth's (`din bluetooth pair`).
+ * shows them (electron/phone.mts), and whether they can send files here (over Bluetooth, or with
+ * Quick Share while connected). Sending a text asks on screen first: it can't be taken back.
+ * Pairing a phone is Bluetooth's (`din bluetooth pair`).
  */
 
 const phone = () => need(getPhoneDesktopBridge(), 'Phones');
@@ -36,7 +36,7 @@ function time(ms: number): string {
 
 export const phoneArea: Area = {
   name: 'phone',
-  summary: 'Phones and their text messages: list, read, send; Quick Share',
+  summary: 'Phones and their text messages: list, read, send',
   commands: [
     command('phone', 'list', 'The phones, and whether each is connected', [], async () => {
       const state = await call(phone().state());
@@ -123,10 +123,6 @@ export const phoneArea: Area = {
       if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
       await call(phone().setReceiveFiles(p.id, state === 'on'));
       return { text: `Receiving files from ${p.name} is ${state}` };
-    }),
-    command('phone', 'quick-share', 'Open Quick Share, so Android devices nearby can share files and links here while it’s open', [], async (_args, ctx) => {
-      ctx.actions.open('quick-share');
-      return { text: 'Quick Share is open; accepting what’s shared is on screen' };
     }),
     command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },

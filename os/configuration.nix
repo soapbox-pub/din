@@ -802,20 +802,13 @@ in
     rm -f $out/share/applications/cups.desktop
   '';
   services.ipp-usb.enable = true;
-  # Avahi also announces Quick Share (electron/quickshare.mts) while its
-  # window is open, so Android devices on the network can share here;
-  # that needs publishing, and this computer's own name published (as
-  # dinos.local) for them to find it at. Its port is let in below.
   services.avahi = {
     enable = true;
     nssmdns4 = true;
-    publish = {
-      enable = true;
-      userServices = true;
-    };
   };
-  # Quick Share's port (PORT in electron/quickshare.mts). Nothing listens
-  # on it unless Quick Share's window is open, or its hotspot is up.
+  # Quick Share's port (PORT in electron/quickshare.mts), for a phone
+  # sharing over Bluetooth that moves to the hotspot. Nothing listens on it
+  # unless one of the user's phones has opened its share sheet.
   networking.firewall.allowedTCPPorts = [ 47331 ];
   # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
   # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.

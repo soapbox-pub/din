@@ -90,7 +90,6 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   passwords: 'See and change all your saved passwords',
   vms: 'Run virtual machines, with any of your files as their disks',
   capture: 'Use the camera, the microphone and the screen, and go live',
-  quickshare: 'Make this computer visible to Android devices nearby, and take files they share',
   'file-folders': 'Reach the folders of files you give it',
 };
 

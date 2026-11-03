@@ -99,7 +99,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Connections',
     name: 'Phone',
     icon: Smartphone,
-    search: ['Connected phones', 'My phones', 'Phone details', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Quick Share', 'Receive with Quick Share', 'Nearby Share', 'share files', 'AirDrop', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
+    search: ['Connected phones', 'My phones', 'Phone details', 'Add a phone', 'Show Notifications', 'Sync Contacts', 'Allow access to messages', 'Quick Share', 'Nearby Share', 'share files', 'AirDrop', 'Bluetooth', 'Messages', 'texts', 'SMS', 'iMessage', 'Phone Link', 'Android', 'iPhone', 'mobile', 'cell'],
   },
   {
     id: 'themes',

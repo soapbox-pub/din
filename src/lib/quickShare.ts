@@ -1,25 +1,12 @@
 /**
- * Quick Share (`din.system.quickShare`, for the Quick Share app with the
- * `quickshare` permission): Android phones, tablets and Chromebooks nearby
- * share files and links to this computer from their share sheet, over the
- * network or Bluetooth, as they do with each other. Run in Electron main by
- * electron/quickshare.mts; this computer is visible while a window has asked
- * to receive, and over Bluetooth for a little while after one of the user's
- * connected phones opens its share sheet. Types shared by both sides (main
- * checks every argument itself), and the desktop's getter: it shows shares
- * no window is showing.
+ * Quick Share (`window.dinos.quickShare`): the user's connected Android
+ * phones share files and links to this computer from their share sheet, as
+ * they do with each other. Run in Electron main by electron/quickshare.mts;
+ * this computer is visible over Bluetooth for a little while after one of
+ * the user's connected phones opens its share sheet, and the desktop shows
+ * each share in a notification (QuickShareHost). Types shared by both sides
+ * (main checks every argument itself), and the desktop's getter.
  */
-
-export interface QuickShareState {
-  /** Whether a window is receiving. */
-  listening: boolean;
-  /** The name this computer shows up as. */
-  name: string;
-  /** Announced on the network or over Bluetooth, so devices can see it (because a window is receiving, or a phone opened its share sheet). */
-  visible: boolean;
-  /** Why it isn't visible though it's receiving, in words for the user. */
-  error: string | null;
-}
 
 export type QuickShareDeviceType = 'phone' | 'tablet' | 'computer' | 'unknown';
 
@@ -49,33 +36,16 @@ export interface QuickShareTransfer {
   total: number;
   /** Why something didn't arrive, in words for the user. */
   error: string | null;
-  /**
-   * It arrived with no Quick Share window open (a phone's share sheet made
-   * this computer visible): the desktop shows it in a notification, and
-   * asks about it there unless it's from one of the user's own phones, and
-   * windows leave it alone.
-   */
-  background: boolean;
 }
 
-export interface QuickShareBridge {
-  state(): Promise<QuickShareState>;
-  /**
-   * Be visible to nearby devices until this window closes, reloads or calls
-   * `stop` (or, with more than one window receiving, until the last does).
-   */
-  receive(): Promise<QuickShareState>;
-  stop(): Promise<void>;
+/** The desktop's part (`window.dinos.quickShare`): answering and stopping shares. */
+export interface QuickShareDesktopBridge {
   /** Take what a device offered (an `asking` transfer's id), or turn it down. */
   respond(id: string, accept: boolean): Promise<void>;
   /** Stop a share that's asking or arriving. */
   cancel(id: string): Promise<void>;
-  onChanged(cb: (state: QuickShareState) => void): () => void;
   onTransfer(cb: (transfer: QuickShareTransfer) => void): () => void;
 }
-
-/** The desktop's part (`window.dinos.quickShare`): answering and stopping the shares no window is showing. */
-export type QuickShareDesktopBridge = Pick<QuickShareBridge, 'respond' | 'cancel' | 'onTransfer'>;
 
 declare global {
   interface Dinos {
