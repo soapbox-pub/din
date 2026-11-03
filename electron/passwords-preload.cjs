@@ -156,13 +156,34 @@ if (/^https?:$/.test(location.protocol)) {
     ipcRenderer.send('passwords:submitted', { username, password: password.value });
   };
 
+  /** Whether the field lost the keyboard with the whole page, not to another field in it. */
+  let pageBlurred = false;
+
   document.addEventListener('focusin', (event) => {
     if (!event.isTrusted || filling) return;
+    // The page getting the keyboard back (after a click on the suggestions) isn't the user going into the field.
+    if (pageBlurred && event.target === current) {
+      pageBlurred = false;
+      return;
+    }
+    pageBlurred = false;
     if (loginKind(event.target)) report(/** @type {HTMLInputElement} */ (event.target));
   }, true);
 
+  // A click on the desktop's suggestions takes the keyboard from the page
+  // before the click lands, so a field left focused in a page that lost focus
+  // only says so, and main decides whether the suggestions stay.
   document.addEventListener('focusout', (event) => {
-    if (event.target === current) hide();
+    if (event.target !== current) return;
+    const field = current;
+    setTimeout(() => {
+      if (document.activeElement === field && !document.hasFocus()) {
+        pageBlurred = true;
+        if (shown) ipcRenderer.send('passwords:page-blur');
+      } else if (field === current) {
+        hide();
+      }
+    });
   }, true);
 
   // A click in the field it's already in brings the suggestions back.

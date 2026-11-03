@@ -104,14 +104,44 @@ export function PasswordAutofillHost() {
       if (row === 'unlock') {
         void bridge.choose(s.requestId, { type: 'dismiss' });
         open('passwords');
-      } else if (row === 'generated') {
+        return;
+      }
+      if (row === 'generated') {
         void bridge.choose(s.requestId, { type: 'generated' });
       } else if (row.startsWith('login:')) {
         void bridge.choose(s.requestId, { type: 'login', id: row.slice('login:'.length) });
       }
+      // A click here took the keyboard from the page: give it back to the field.
+      findGuest(s.wcId)?.focus();
     },
     [bridge, open],
   );
+
+  const hover = useCallback(
+    (index: number) => {
+      const s = suggestionRef.current;
+      highlightedRef.current = index;
+      setHighlighted(index);
+      // So the page's Enter picks it too.
+      if (bridge && s) void bridge.highlight(s.requestId, true);
+    },
+    [bridge],
+  );
+
+  // A click on the desktop anywhere but the suggestions closes them (the
+  // page's own clicks close them from its side).
+  const listRef = useRef<HTMLDivElement>(null);
+  const requestId = suggestion?.requestId;
+  useEffect(() => {
+    if (!bridge || requestId === undefined) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target instanceof Node && listRef.current?.contains(e.target)) return;
+      setSuggestion((s) => (s?.requestId === requestId ? null : s));
+      void bridge.choose(requestId, { type: 'dismiss' });
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [bridge, requestId]);
 
   const rowsKey = rows.join('\n');
   useEffect(() => {
@@ -148,7 +178,8 @@ export function PasswordAutofillHost() {
           box={box}
           rows={rows}
           highlighted={highlighted}
-          onHover={setHighlighted}
+          listRef={listRef}
+          onHover={hover}
           onPick={pick}
           onManage={() => {
             void bridge.choose(suggestion.requestId, { type: 'dismiss' });
@@ -177,6 +208,7 @@ function SuggestionList({
   box,
   rows,
   highlighted,
+  listRef,
   onHover,
   onPick,
   onManage,
@@ -185,11 +217,11 @@ function SuggestionList({
   box: Box;
   rows: string[];
   highlighted: number;
+  listRef: React.RefObject<HTMLDivElement | null>;
   onHover: (index: number) => void;
   onPick: (row: string) => void;
   onManage: () => void;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => setHeight(listRef.current?.offsetHeight ?? 0), [rows.length]);
 

@@ -1450,6 +1450,15 @@ export function registerPasswordsHandlers(opts: Options): void {
   ipcMain.on('passwords:blur', (event) => {
     if (suggestion && sameFrame(event.senderFrame, suggestion.frame)) hideSuggestions();
   });
+  // The page lost the keyboard: to the desktop, which may be the click on
+  // the suggestions (it closes them itself on a click anywhere else), or to
+  // something else, which closes them.
+  ipcMain.on('passwords:page-blur', (event) => {
+    const s = suggestion;
+    if (!s || !sameFrame(event.senderFrame, s.frame)) return;
+    const focused = webContents.getFocusedWebContents();
+    if (!focused || focused !== s.contents.hostWebContents) hideSuggestions();
+  });
   ipcMain.on('passwords:key', (event, key: unknown) => {
     const s = suggestion;
     if (!s || !sameFrame(event.senderFrame, s.frame)) return;
