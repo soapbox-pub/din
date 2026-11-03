@@ -336,7 +336,7 @@ export interface DinMenus {
  * `FileSystemDirectoryHandle`, backed by the desktop: picked
  * (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`, which
  * open Din's pickers), launched with (`launchQueue`), dropped
- * (a drop's `getAsFileSystemHandle()`), pasted (`din.clipboard.readFiles`) or restored
+ * (a drop's `getAsFileSystemHandle()`), pasted (a paste's, or `din.clipboard.readFiles`) or restored
  * (read back from IndexedDB). A handle is a capability: having one is what lets
  * the app read or write that file and nothing else. Handles last as long as
  * the page, and can be kept in IndexedDB like the web's, to open again
@@ -449,8 +449,12 @@ declare global {
     readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
   }
   interface DataTransferItem {
-    /** File System Access: a handle to a dropped file, or null for anything else. */
+    /** File System Access: a handle to a dropped or pasted file, or null for anything else. */
     getAsFileSystemHandle(): Promise<FileSystemHandle | null>;
+  }
+  interface DataTransferItemList {
+    /** Din's, in a `copy` or `cut` event: put the file behind a handle Din granted on Din's clipboard. */
+    add(handle: FileSystemHandle): DataTransferItem | null;
   }
   class FileSystemObserver {
     constructor(callback: (records: FileSystemChangeRecord[], observer: FileSystemObserver) => void);
@@ -502,16 +506,26 @@ export interface DinDrag {
 // ---------------------------------------------------------------------------
 
 /**
- * When files come onto Din's clipboard or go, `navigator.clipboard` fires
- * the Clipboard API draft's `clipboardchange`, its `types` holding `Files`
- * while some are there (for enabling Paste).
+ * Files cut, copied and pasted are the web's clipboard events'. A `paste`
+ * while files are on Din's clipboard has a `file` item for each in its
+ * `clipboardData.items` (and `Files` in its `types`), whose
+ * `getAsFileSystemHandle()` resolves with a handle granted to the app, as a
+ * drop's does. In a `copy` or `cut`, `clipboardData.items.add(handle)` (or
+ * a `File` read from one) puts the file on Din's clipboard, cut or copied
+ * as the event was. When files come onto Din's clipboard or go,
+ * `navigator.clipboard` fires the Clipboard API draft's `clipboardchange`,
+ * its `types` holding `Files` while some are there (for enabling Paste).
+ *
+ * These are for what the events can't do: a Paste or Copy chosen from a
+ * menu or a toolbar, which fires no event, and knowing whether the files
+ * were cut.
  */
 export interface DinClipboard {
   /**
-   * Files on Din's clipboard, as Cut or Copy left them. Text and images use
-   * navigator.clipboard. Without `fs`, only on a paste: within a few seconds
-   * of a key or click in the focused window, or a pick from its menus;
-   * otherwise it rejects with `NotAllowedError`.
+   * Files on Din's clipboard, as Cut or Copy left them, and whether they
+   * were cut. Text and images use navigator.clipboard. Without `fs`, only on
+   * a paste: within a few seconds of a key or click in the focused window,
+   * or a pick from its menus; otherwise it rejects with `NotAllowedError`.
    */
   readFiles(): Promise<{ files: FileSystemHandle[]; cut: boolean } | null>;
   writeFiles(files: FileSystemHandle[], cut: boolean): void;

@@ -11,6 +11,7 @@
  *   pickers, its handles backed by the desktop's grants, and
  *   `FileSystemObserver` hears when something else changes them.
  * - Launch Handling's `launchQueue` hears each launch's files.
+ * - Drops, and the `copy`, `cut` and `paste` events, carry Din's handles.
  * - Focus, visibility, `display-state`, `screenX` and the rest answer for
  *   the page's own window on the desktop.
  * - `navigator.permissions.query` answers what the app was granted.
@@ -479,6 +480,8 @@ const notAllowed = (what: string) => new DOMException(`${what} isn't allowed her
 
 /** The grants behind the web handles. */
 const grants = new WeakMap<object, Grant>();
+/** The grants behind the Files read from them. */
+const readFiles = new WeakMap<File, Grant>();
 
 /** The grant behind a handle from the runtime, or null for anything else. */
 export function grantOf(handle: unknown): Grant | null {
@@ -594,8 +597,10 @@ class Handle {
 }
 
 class WebFileHandle extends Handle {
-  getFile(): Promise<File> {
-    return this.grant.getFile();
+  async getFile(): Promise<File> {
+    const file = await this.grant.getFile();
+    readFiles.set(file, this.grant);
+    return file;
   }
   async createWritable(options?: { keepExistingData?: boolean }): Promise<ReturnType<typeof writableStream>> {
     if (!this.grant.writable) throw notAllowed('Writing to this file');
@@ -846,6 +851,48 @@ export function installSavedState(save: (state: unknown) => void): (state: unkno
 /** The MIME type a Din drag carries its token under (DRAG_MIME in src/sdk/index.ts). */
 const DRAG_TYPE = 'application/x-din-drag';
 
+/** A `file` item standing for one of Din's files, its bytes reached through the handle. */
+function handleItem(handle: () => Promise<FileSystemHandle | null>): DataTransferItem {
+  return Object.create(DataTransferItem.prototype, {
+    kind: { value: 'file', enumerable: true },
+    type: { value: '', enumerable: true },
+    getAsFile: { value: () => null },
+    getAsString: { value: () => {} },
+    getAsFileSystemHandle: { value: handle },
+    webkitGetAsEntry: { value: () => null },
+  }) as DataTransferItem;
+}
+
+/**
+ * A DataTransfer that is `dt` with `extra` items after its own (and `Files`
+ * in its `types`, unless `keepTypes`), whose `items.add` tries `add` first.
+ */
+function withItems(
+  dt: DataTransfer,
+  extra: DataTransferItem[],
+  options: { keepTypes?: boolean; add?: (data: unknown) => DataTransferItem | undefined } = {},
+): DataTransfer {
+  const own = dt.items;
+  const ownAdd = own.add.bind(own) as (...args: unknown[]) => DataTransferItem | null;
+  const items = [...Array.from(own), ...extra];
+  const list = Object.setPrototypeOf(items, DataTransferItemList.prototype) as DataTransferItemList;
+  Object.defineProperties(list, {
+    add: { value: (...args: unknown[]) => options.add?.(args[0]) ?? ownAdd(...args) },
+    remove: { value: own.remove.bind(own) },
+    clear: { value: own.clear.bind(own) },
+  });
+  const types = options.keepTypes || extra.length === 0 || dt.types.includes('Files') ? dt.types : Object.freeze([...dt.types, 'Files']);
+  return new Proxy(dt, {
+    get(target, key) {
+      if (key === 'items') return list;
+      if (key === 'types') return types;
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set: (target, key, value) => Reflect.set(target, key, value, target),
+  });
+}
+
 export interface DroppedFilesHost {
   /** The drag going on, as the desktop said. */
   drag(): { kind: 'files'; count: number } | null;
@@ -875,35 +922,67 @@ export function installDroppedFiles(host: DroppedFilesHost): void {
       const operation = effect === 'move' || effect === 'link' ? effect : 'copy';
       let taken: Promise<FileSystemHandle[]> | null = null;
       const take = () => (taken ??= host.accept(token, operation));
-      const fileItem = (index: number) =>
-        Object.create(DataTransferItem.prototype, {
-          kind: { value: 'file', enumerable: true },
-          type: { value: '', enumerable: true },
-          getAsFile: { value: () => null },
-          getAsString: { value: () => {} },
-          getAsFileSystemHandle: { value: () => take().then((list) => list[index] ?? null) },
-          webkitGetAsEntry: { value: () => null },
-        }) as DataTransferItem;
-      const own = dt.items;
-      const items = [...Array.from(own), ...Array.from({ length: drag.count }, (_, i) => fileItem(i))];
-      const list = Object.setPrototypeOf(items, DataTransferItemList.prototype) as DataTransferItemList;
-      Object.defineProperties(list, {
-        add: { value: own.add.bind(own) },
-        remove: { value: own.remove.bind(own) },
-        clear: { value: own.clear.bind(own) },
-      });
-      const transfer = new Proxy(dt, {
-        get(target, key) {
-          if (key === 'items') return list;
-          const value: unknown = Reflect.get(target, key, target);
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-        set: (target, key, value) => Reflect.set(target, key, value, target),
-      });
+      const extra = Array.from({ length: drag.count }, (_, i) => handleItem(() => take().then((list) => list[i] ?? null)));
+      const transfer = withItems(dt, extra, { keepTypes: true });
       Object.defineProperty(e, 'dataTransfer', { value: transfer, configurable: true });
     },
     true,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Files cut, copied and pasted
+// ---------------------------------------------------------------------------
+
+export interface ClipboardFilesHost {
+  /** How many files are on Din's clipboard (0 for none), as the desktop last said. */
+  count(): number;
+  /** Handles to them, granted for this paste. */
+  read(): Promise<FileSystemHandle[]>;
+  /** Put the files behind these grants on Din's clipboard, cut or copied. */
+  write(files: Grant[], cut: boolean): void;
+}
+
+/**
+ * Files on Din's clipboard, through the web's clipboard events. A `paste`
+ * while some are there finds a `file` item for each in its `clipboardData`
+ * (and `Files` in its `types`), whose `getAsFileSystemHandle()` resolves
+ * with a handle to it, as a drop's does; nothing is granted until one is
+ * asked for. In a `copy` or `cut`, `clipboardData.items.add()` takes one of
+ * Din's handles (a folder too), or a `File` read from one, and puts the
+ * file on Din's clipboard, cut or copied as the event was. Both run in the
+ * capture phase on the window, before the page's own listeners.
+ */
+export function installClipboardFiles(host: ClipboardFilesHost): void {
+  window.addEventListener(
+    'paste',
+    (e) => {
+      const dt = e.clipboardData;
+      const count = host.count();
+      if (!dt || count === 0) return;
+      let taken: Promise<FileSystemHandle[]> | null = null;
+      const take = () => (taken ??= host.read());
+      const extra = Array.from({ length: count }, (_, i) => handleItem(() => take().then((list) => list[i] ?? null)));
+      Object.defineProperty(e, 'clipboardData', { value: withItems(dt, extra), configurable: true });
+    },
+    true,
+  );
+  const onCopy = (e: ClipboardEvent) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const put: Grant[] = [];
+    const add = (data: unknown) => {
+      const grant = grantOf(data) ?? (data instanceof File ? (readFiles.get(data) ?? null) : null);
+      if (!grant) return undefined;
+      put.push(grant);
+      host.write([...put], e.type === 'cut');
+      const handle = toWebHandle(grant) as unknown as FileSystemHandle;
+      return handleItem(() => Promise.resolve(handle));
+    };
+    Object.defineProperty(e, 'clipboardData', { value: withItems(dt, [], { add }), configurable: true });
+  };
+  window.addEventListener('copy', onCopy, true);
+  window.addEventListener('cut', onCopy, true);
 }
 
 // ---------------------------------------------------------------------------

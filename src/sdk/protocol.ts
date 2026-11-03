@@ -162,6 +162,8 @@ export interface Hello {
   unstoredHandles: StoredHandle[];
   /** The drag going on, if one is. */
   drag: DragInfo | null;
+  /** The files on Din's clipboard, if any are (as the `clipboardFiles` push says after). */
+  clipboardFiles: { count: number; cut: boolean } | null;
   /** Whether this computer can take dictation (the runtime's SpeechRecognition). */
   dictation: { available: boolean };
   /** Din's assistant settings, for apps with the assistant permission. */

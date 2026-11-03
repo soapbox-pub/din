@@ -39,7 +39,7 @@ din.app.ready();
 | `din.app` | [lifecycle.md](lifecycle.md): launch params, opening other apps, `ready` |
 | `din.window` | [window.md](window.md): title, chrome, custom headers, transparency, shape, moving |
 | `din.menus` | [menus.md](menus.md): the menu bar and menus that leave the window |
-| `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, `din.clipboard` | [files.md](files.md) |
+| `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, files cut, copied and pasted | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
 | `din.theme`, `window.nostr`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `window.print()`, `din.desktop`, `SpeechRecognition`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
@@ -136,8 +136,9 @@ its own header (Assistant, Settings) should move over by changing imports.
 - **Its own menus and dialogs inside the window**: Radix menus and
   dialogs work, clipped to the window. Use `din.menus.popup` only for a
   menu that has to escape the window (a small window's right-click menu).
-- **Text and images on the clipboard**: `navigator.clipboard`. Only files
-  go through `din.clipboard`.
+- **The clipboard**: `navigator.clipboard` for text and images, and the
+  `copy`, `cut` and `paste` events for files too. Only a menu's Copy or
+  Paste of files goes through `din.clipboard`.
 - **Fullscreen**: `element.requestFullscreen()`; the desktop fits it to
   the monitor.
 - **Network**: `fetch` to the web, under the app's CSP.

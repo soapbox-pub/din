@@ -30,3 +30,8 @@ export function setFileClipboard(next: FileClipboard | null): void {
 export function getFileClipboard(): FileClipboard | null {
   return clipboard;
 }
+
+/** What an app sees of it before a paste: how many files, and whether they were cut. */
+export function fileClipboardInfo(): { count: number; cut: boolean } | null {
+  return clipboard ? { count: clipboard.paths.length, cut: clipboard.op === 'cut' && !clipboard.readOnly } : null;
+}

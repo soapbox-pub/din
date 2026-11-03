@@ -60,6 +60,7 @@ import {
   installFilePickers,
   installFileSystemObserver,
   installLaunchQueue,
+  installClipboardFiles,
   installDroppedFiles,
   installPermissionsQuery,
   installSpeechRecognition,
@@ -818,21 +819,32 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- clipboard ----
+  let clipboardFiles = 0;
   // The Clipboard API draft's clipboardchange, when files come or go.
   pushes.on((p) => {
-    if (p.type !== 'clipboardFiles' || !navigator.clipboard) return;
+    if (p.type !== 'clipboardFiles') return;
+    clipboardFiles = p.has?.count ?? 0;
+    if (!navigator.clipboard) return;
     const event = new Event('clipboardchange');
     Object.defineProperty(event, 'types', { value: Object.freeze(p.has ? ['Files'] : []), enumerable: true });
     navigator.clipboard.dispatchEvent(event);
   });
+  const readClipboard = async () => {
+    const r = await request('clipboard.readFiles');
+    return r ? { files: r.files.map(wrap), cut: r.cut } : null;
+  };
+  const writeClipboard = (handles: Promise<string[] | undefined>, cut: boolean) => {
+    void handles.then((ids) => tell('clipboard.writeFiles', { handles: ids ?? [], cut }), (e: unknown) => console.warn('din: clipboard.writeFiles:', e));
+  };
+  // The web's copy, cut and paste events, carrying handles.
+  installClipboardFiles({
+    count: () => clipboardFiles,
+    read: async () => (await readClipboard())?.files ?? [],
+    write: (list, cut) => writeClipboard(Promise.all(list.map((g) => g.id())), cut),
+  });
   const clipboard: DinClipboard = {
-    readFiles: async () => {
-      const r = await request('clipboard.readFiles');
-      return r ? { files: r.files.map(wrap), cut: r.cut } : null;
-    },
-    writeFiles: (list, cut) => {
-      void idsOf(list).then((handles) => tell('clipboard.writeFiles', { handles: handles ?? [], cut }), (e: unknown) => console.warn('din: clipboard.writeFiles:', e));
-    },
+    readFiles: readClipboard,
+    writeFiles: (list, cut) => writeClipboard(idsOf(list), cut),
   };
 
   // ---- theme ----
@@ -1035,6 +1047,7 @@ export function installDin(transport: Transport): void {
     applyTheme(hello.theme, loadedFaces);
     markAccessibility();
     currentDrag = hello.drag;
+    clipboardFiles = hello.clipboardFiles?.count ?? 0;
     reportDragOver(hello.drag !== null);
     assistantSettings = hello.assistant ?? NO_ASSISTANT;
     assistantUnread = hello.assistantUnread;

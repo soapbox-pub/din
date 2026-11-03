@@ -43,7 +43,7 @@ import { setWindowBadge } from '@/lib/appBadges';
 import { powerModeOn, subscribePowerMode, typed } from '@/lib/powerMode';
 import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
-import { getFileClipboard, setFileClipboard, subscribeFileClipboard } from '@/lib/fileClipboard';
+import { fileClipboardInfo, getFileClipboard, setFileClipboard, subscribeFileClipboard } from '@/lib/fileClipboard';
 import { registerMediaSource, type MediaSource } from '@/lib/nowPlaying';
 import {
   cancelDictation,
@@ -1172,6 +1172,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         writable,
       })),
       drag: dragInfo(currentDrag()),
+      clipboardFiles: fileClipboardInfo(),
       dictation: { available: hasDictationBridge() },
       powerMode: powerModeOn(),
       fsUrlBase,
@@ -1342,8 +1343,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   }, [push]);
   useEffect(() => subscribeDrag(() => push({ type: 'drag', drag: dragInfo(currentDrag()) })), [push]);
   useEffect(() => subscribeFileClipboard(() => {
-    const clip = getFileClipboard();
-    push({ type: 'clipboardFiles', has: clip ? { count: clip.paths.length, cut: clip.op === 'cut' } : null });
+    push({ type: 'clipboardFiles', has: fileClipboardInfo() });
   }), [push]);
   // A watched file changed or went away.
   useEffect(() => {

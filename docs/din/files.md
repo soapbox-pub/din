@@ -15,7 +15,7 @@ folder) that the user handed it:
 - dropped on the app ([drag-and-drop.md](drag-and-drop.md));
 - launched with: opened from Files, Open With, dropped on its Dock tile
   (`launchQueue`, [lifecycle.md](lifecycle.md));
-- pasted from Din's clipboard (`din.clipboard.readFiles`);
+- pasted from Din's clipboard (a `paste` event's items, or `din.clipboard.readFiles`);
 - read back from IndexedDB, where the app kept it ([Recent files](#recent-files)).
 
 ```ts
@@ -119,12 +119,34 @@ the app's own list under the same key.
 ## The file clipboard
 
 Text and images use `navigator.clipboard`, as on the web. Files use Din's
-own clipboard, which Files, Media Player and native apps share:
+own clipboard, which Files, Media Player and native apps share, through
+the web's clipboard events (`installClipboardFiles` in
+`src/sdk/standards.ts`, in the capture phase before the page's own
+listeners):
+
+```ts
+document.addEventListener('copy', (e) => {           // Ctrl+C, or a 'cut' for Ctrl+X
+  for (const handle of selected) e.clipboardData?.items.add(handle);
+  e.preventDefault();
+});
+document.addEventListener('paste', async (e) => {    // Ctrl+V
+  const items = [...(e.clipboardData?.items ?? [])].filter((item) => item.kind === 'file');
+  paste(await Promise.all(items.map((item) => item.getAsFileSystemHandle())));
+});
+navigator.clipboard.addEventListener('clipboardchange', (e) => setCanPaste(e.types.includes('Files')));
+```
+
+A paste while files are on Din's clipboard has a `file` item for each,
+and `Files` in its `types`; nothing is granted until a handle is asked
+for. `items.add` in a `copy` or `cut` takes one of Din's handles (a folder
+too) or a `File` read from one, and puts the file on Din's clipboard as
+the event says. A Copy or Paste chosen from a menu fires no event, and an
+app that wants to know whether the files were cut needs more than a
+handle, so `din.clipboard` stays for those:
 
 ```ts
 din.clipboard.writeFiles(selected, /* cut */ false);
-navigator.clipboard.addEventListener('clipboardchange', (e) => setCanPaste(e.types.includes('Files')));
-const pasted = await din.clipboard.readFiles();   // handles, granted on read
+const pasted = await din.clipboard.readFiles();   // { files, cut }, granted on read
 ```
 
 Cut is a hint for the app that pastes: Files moves; an app without `fs`
@@ -133,8 +155,9 @@ gets copies (it can't delete the originals).
 The clipboard holds files the user meant for wherever they paste, so an
 app without `fs` reads it only on a paste: its window must be focused, and
 the user must have pressed a key or clicked in it (main watches the
-guest's input) or picked from its menus in the last few seconds. Otherwise
-`readFiles` rejects with `NotAllowedError`. The Clipboard API draft's
+guest's input) or picked from its menus in the last few seconds, which a
+`paste` event always is. Otherwise `readFiles`, and a paste's
+`getAsFileSystemHandle()`, reject with `NotAllowedError`. The Clipboard API draft's
 `clipboardchange` event on `navigator.clipboard` says when files come or
 go, its `types` holding `Files` while some are there; an app with `fs`
 reads them at any time to know what's there to start with.
