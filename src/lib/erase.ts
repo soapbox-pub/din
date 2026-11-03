@@ -18,7 +18,7 @@ export interface EraseStatus {
 
 export interface EraseBridge {
   status(): Promise<EraseStatus>;
-  /** Erase the computer. It restarts; this resolves only if it can't. */
+  /** Erase the computer now; then it restarts. This resolves only if it can't. */
   start(password?: string): Promise<void>;
   /** Whether the computer was erased and needs its password from Setup. */
   setupNeeded(): Promise<boolean>;

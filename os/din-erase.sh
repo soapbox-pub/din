@@ -3,8 +3,8 @@
 # Erasing puts the computer back as the Installer left it, running official
 # DinOS: no files, accounts, apps, saved networks or settings, and on an
 # encrypted disk no password, which the Setup screen asks for before the
-# desktop starts (din-password setup). Nothing that runs from home can stay
-# running while home goes, so it's done over a restart:
+# desktop starts (din-password setup). It's done at once, with nothing of
+# the user's running, and then the computer restarts:
 #
 #   din-erase status
 #       JSON: whether this computer can be erased (`available`, or the
@@ -18,25 +18,29 @@
 #       repository's main branch, as last fetched, with no changes of the
 #       user's, since their source (~/DinOS) is about to go and no update
 #       could follow it. Takes every other system out of the boot menu,
-#       adds a key on the boot partition (SETUP_KEY) to the disk, so the
-#       restart doesn't ask for the password, then does `mark`.
+#       then does `mark`'s work without reading the password again.
 #   din-erase mark
-#       Mark the disk to be erased (MARK) and restart. Root's alone, without
-#       start's checks, for tests.
+#       The password on stdin, where there is one; root's alone, without
+#       start's checks, for tests. Adds a key on the boot partition
+#       (SETUP_KEY) to the disk, which the initrd opens it with from then on
+#       without asking, marks the disk to be erased (MARK), and isolates
+#       din-erase.target: everything but the system's own base stops, Din
+#       and the user's session with it, and din-erase.service does `run`.
+#   din-erase run
+#       The erasing, as din-erase.service, with only the boot screen showing
+#       "Erasing…": an empty home in place of the old one, the system's own
+#       record of the user emptied (wipe_system), the disk's other keys
+#       gone, so only SETUP_KEY opens it, `din`'s password gone, and the
+#       boot screen's things. Then the computer restarts, into Setup.
 #   din-erase finish
-#       din-erase-finish.service, at the boot after `mark`, once the initrd
-#       has put an empty home in place of the old one and emptied the
-#       system's own record of the user (dinos-erase, configuration.nix),
-#       and before anything that reads what it emptied starts. On an
-#       encrypted disk, the setup key, which the initrd unlocked the disk
-#       with (or, if start couldn't add it, a new one added with the
-#       passphrase typed at the boot screen), becomes the only way in until
-#       Setup sets the new password: the old password's keyslot and any
-#       other (keyslots, tokens) go. `din` loses its password, the boot
-#       screen its wallpaper and layout, and the old home is deleted.
+#       din-erase-finish.service, at a boot that finds MARK: one that
+#       stopped partway, say with the power cut. The initrd has already put
+#       an empty home in place of the old one (dinos-erase,
+#       configuration.nix); this does the rest of `run` before anything that
+#       reads what it empties starts.
 #
-# A boot that stops partway leaves MARK, and the next one does it all again.
-
+# MARK goes only once everything's done, so whatever stops an erase, the
+# next boot finishes it.
 MARK=/var/lib/dinos/erase
 SETUP_MARK=/var/lib/din/setup
 SETUP_KEY=/boot/din/setup.key
@@ -115,17 +119,31 @@ status() {
      encrypted: $encrypted, password: $password, official: $official}'
 }
 
-mark() {
+mark_and_erase() {
+  local password=$1 part
+  part=$(luks_partition)
+  if [[ -n $part ]]; then
+    [[ -n $password ]] || die "The disk's password is needed to erase it."
+    printf '%s' "$password" | add_setup_key "$part" ||
+      die "The disk didn't take its setup key; nothing was erased."
+  fi
   mkdir -p "$(dirname "$MARK")"
   echo erase >"$MARK"
   sync
-  systemctl reboot
+  # Not waited for: it stops whatever ran this.
+  systemctl isolate --no-block din-erase.target
+}
+
+mark() {
+  local password=""
+  IFS= read -r password || true
+  mark_and_erase "$password"
 }
 
 start() {
   is_live && die "DinOS running from a USB stick isn't erased; it starts fresh without its files on another computer."
   is_btrfs_install || die "This DinOS was installed before your files were kept apart from the system. Reinstall it from a USB stick, erasing the disk, to start over."
-  local password="" part
+  local password=""
   if has_password; then
     IFS= read -r password || true
     printf '%s\n' "$password" | din-password check || exit 1
@@ -139,14 +157,7 @@ start() {
   nix-env --profile "$PROFILE" --delete-generations old >/dev/null
   "$(readlink -f "$PROFILE")/bin/switch-to-configuration" boot </dev/null >&2 ||
     die "Couldn't set up the boot menu."
-  # So the restart that erases doesn't ask for the password: the key left
-  # behind opens nothing but what's about to be erased.
-  part=$(luks_partition)
-  if [[ -n $part && -n $password ]]; then
-    printf '%s' "$password" | add_setup_key "$part" ||
-      die "The disk didn't take its setup key; nothing was erased."
-  fi
-  mark
+  mark_and_erase "$password"
 }
 
 # The keyslot key file $1 opens on partition $2.
@@ -155,34 +166,26 @@ slot_of() {
     sed -n 's/^Key slot \([0-9]*\) unlocked.*/\1/p' | head -n1
 }
 
-# A new SETUP_KEY on partition $1, added with the passphrase on stdin: one of
-# several, apart by NULs, as systemd leaves them in root's keyring.
+# A new SETUP_KEY on partition $1, added with the passphrase on stdin.
 add_setup_key() {
   local part=$1 passphrase
+  IFS= read -r -d '' passphrase || true
   mkdir -p "$(dirname "$SETUP_KEY")"
   head -c 64 /dev/urandom >"$SETUP_KEY.tmp"
   sync "$SETUP_KEY.tmp"
   mv -f "$SETUP_KEY.tmp" "$SETUP_KEY"
-  while IFS= read -r -d '' passphrase || [[ -n $passphrase ]]; do
-    if printf '%s' "$passphrase" | cryptsetup luksAddKey --batch-mode --key-file=- "$part" "$SETUP_KEY" 2>/dev/null; then
-      return 0
-    fi
-  done
+  if printf '%s' "$passphrase" | cryptsetup luksAddKey --batch-mode --key-file=- "$part" "$SETUP_KEY" 2>/dev/null; then
+    sync
+    return 0
+  fi
   rm -f "$SETUP_KEY"
   return 1
 }
 
-# The disk's keys: only SETUP_KEY opens it once this is done. `start` added
-# it; failing that, the passphrase comes from the boot screen, which left it
-# in root's keyring (as for nostrd-unlock).
+# The disk's keys: only SETUP_KEY, which `mark` added, opens it once this
+# is done.
 forget_disk_password() {
-  local part=$1 id slot other token
-  if [[ ! -s $SETUP_KEY ]] || [[ -z $(slot_of "$SETUP_KEY" "$part") ]]; then
-    id=$(keyctl search @u user cryptsetup 2>/dev/null) ||
-      die "The disk's passphrase wasn't typed at this boot, so its keys can't be changed."
-    keyctl pipe "$id" | add_setup_key "$part" ||
-      die "The passphrase typed at this boot doesn't open the disk."
-  fi
+  local part=$1 slot other token
   slot=$(slot_of "$SETUP_KEY" "$part")
   [[ -n $slot ]] || die "The setup key doesn't open the disk."
   for other in $(cryptsetup luksDump --dump-json-metadata "$part" | jq -r '.keyslots | keys[]'); do
@@ -192,18 +195,99 @@ forget_disk_password() {
   for token in $(cryptsetup luksDump --dump-json-metadata "$part" | jq -r '.tokens | keys[]'); do
     cryptsetup token remove --token-id "$token" "$part"
   done
-  if id=$(keyctl search @u user cryptsetup 2>/dev/null); then
-    keyctl unlink "$id" @u >/dev/null
-  fi
-  mkdir -p "$(dirname "$SETUP_MARK")"
-  touch "$SETUP_MARK"
 }
 
-finish() {
+gone() {
+  rm -rf "$1" || echo "Couldn't erase $1" >&2
+}
+
+# Everything in directory $1, hidden files too.
+empty() {
+  local f
+  for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    if [[ -e $f || -L $f ]]; then gone "$f"; fi
+  done
+}
+
+# The system's own record of the user: everything in /var/lib but NixOS's
+# ids, the hibernation swap file and the updater's checkout; logs, caches,
+# root's home, saved networks, sudo rules of the user's, and the machine's
+# identity (made fresh at the next boot, as for a new install, with SSH's
+# host keys). The time zone stays, and the system with it.
+wipe_system() {
+  local f
+  # The journal moves to /run until the restart, so none of it is kept.
+  journalctl --relinquish-var 2>/dev/null || true
+  for f in /var/lib/*; do
+    case ${f##*/} in
+      nixos | swap | dinos) ;;
+      *) gone "$f" ;;
+    esac
+  done
+  for f in /var/lib/dinos/*; do
+    case ${f##*/} in
+      src | result | erase) ;;
+      *) gone "$f" ;;
+    esac
+  done
+  for f in /var/log/*; do
+    if [[ $f == /var/log/journal ]]; then empty "$f"; else gone "$f"; fi
+  done
+  empty /var/cache
+  empty /var/tmp
+  empty /tmp
+  empty /root
+  empty /etc/NetworkManager/system-connections
+  empty /etc/sudoers.d
+  for f in /etc/ssh/ssh_host_*; do
+    if [[ -e $f ]]; then gone "$f"; fi
+  done
+  if [[ -f /etc/machine-id && ! -L /etc/machine-id ]]; then
+    : >/etc/machine-id
+  fi
+}
+
+# An empty home in place of the old one, which is deleted.
+replace_home() {
+  local root
+  root=$(findmnt -nvo SOURCE /)
+  mkdir -p "$TOP"
+  mountpoint -q "$TOP" || mount -o subvolid=5 "$root" "$TOP"
+  if [[ ! -d $TOP/@home.new ]]; then
+    btrfs subvolume create "$TOP/@home.new" >/dev/null
+    btrfs property set "$TOP/@home.new" compression zstd
+  fi
+  if [[ -d $TOP/@home ]]; then
+    mv "$TOP/@home" "$TOP/@home.erased.$(date +%s%N)"
+  fi
+  mv "$TOP/@home.new" "$TOP/@home"
+}
+
+# The old homes replace_home or the initrd set aside. Btrfs frees their
+# space in the background.
+delete_old_homes() {
+  local old
+  mkdir -p "$TOP"
+  mountpoint -q "$TOP" || mount -o subvolid=5 "$(findmnt -nvo SOURCE /)" "$TOP"
+  for old in "$TOP"/@home.erased.*; do
+    [[ -d $old ]] || continue
+    btrfs subvolume delete -R "$old" >/dev/null ||
+      die "Couldn't delete the old home; the next boot tries again."
+  done
+  umount "$TOP"
+  rmdir "$TOP"
+}
+
+# All of erasing but home itself, the same at `run` and at a boot that
+# finishes one.
+erase_rest() {
   local part old
+  wipe_system
   part=$(luks_partition)
   if [[ -n $part ]]; then
     forget_disk_password "$part"
+    mkdir -p "$(dirname "$SETUP_MARK")"
+    touch "$SETUP_MARK"
   fi
   usermod -p '!' "$USER_NAME"
   # What the boot screen showed of the user's, but for the setup key.
@@ -212,23 +296,40 @@ finish() {
       [[ $old == "$SETUP_KEY" ]] || rm -rf "$old"
     done
   fi
-  # The old homes the initrd set aside. Btrfs frees their space in the
-  # background.
-  mkdir -p "$TOP"
-  mount -o subvolid=5 "$(findmnt -nvo SOURCE /)" "$TOP"
-  for old in "$TOP"/@home.erased.*; do
-    [[ -d $old ]] && btrfs subvolume delete -R "$old" >/dev/null
-  done
-  umount "$TOP"
-  rmdir "$TOP"
+  delete_old_homes
   rm -f "$MARK"
   sync
+}
+
+# The boot screen, saying what's happening, where Din was.
+show_erasing() {
+  plymouth quit 2>/dev/null || true
+  plymouthd --mode=shutdown --tty=tty1 --kernel-command-line="quiet splash plymouth.ignore-serial-consoles" || return 0
+  plymouth show-splash || true
+  plymouth display-message --text="din-status:Erasing…" || true
+}
+
+run() {
+  [[ -e $MARK ]] || die "Nothing is marked to be erased."
+  # Whatever the isolate left of the user's.
+  pkill -KILL -u "$USER_NAME" 2>/dev/null || true
+  show_erasing
+  replace_home
+  # The old home has to be unmounted to be deleted; if something still
+  # holds it, the next boot deletes it.
+  umount -R /home 2>/dev/null || umount -l /home || true
+  erase_rest
+}
+
+finish() {
+  erase_rest
 }
 
 case "${1:-}" in
   status) status ;;
   start) start ;;
   mark) mark ;;
+  run) run ;;
   finish) finish ;;
-  *) die "usage: din-erase status | start | mark | finish" ;;
+  *) die "usage: din-erase status | start | mark | run | finish" ;;
 esac

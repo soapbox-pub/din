@@ -20,7 +20,7 @@ import { DEFAULT_UPDATE_BRANCH, DEFAULT_UPDATE_URL, getUpdaterBridge, type Updat
 
 /**
  * Settings → About's Erase All Content and Settings (window.dinos.erase):
- * the computer back to official DinOS as it was installed, over a restart
+ * the computer back to official DinOS as it was installed, then a restart
  * (os/din-erase.sh). `request` changes to open the dialog, as
  * `din update erase` does.
  */
@@ -271,7 +271,7 @@ function EraseDialog({
             <DialogHeader className="items-center gap-2 text-center sm:text-center">
               <DialogTitle>Erase this computer?</DialogTitle>
               <DialogDescription className="text-center">
-                It restarts and starts like new. This can’t be undone.
+                Everything is erased now, then it restarts like new. This can’t be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="sm:justify-center">
@@ -280,7 +280,7 @@ function EraseDialog({
               </Button>
               <Button type="button" variant="destructive" disabled={erasing} onClick={erase}>
                 {erasing && <Loader2 className="motion-safe:animate-spin" aria-hidden />}
-                {erasing ? 'Restarting…' : 'Erase'}
+                {erasing ? 'Erasing…' : 'Erase'}
               </Button>
             </DialogFooter>
           </div>

@@ -4,10 +4,11 @@ let
   inherit (pkgs) lib;
 in
 
-# Erasing an encrypted install (os/din-erase.sh): the boot after it's marked
-# empties home and the system's record of the user and leaves the disk
-# opening with a setup key, so the next boot doesn't ask; Setup's password
-# (din-password setup) then replaces that key. Installed by the Installer
+# Erasing an encrypted install (os/din-erase.sh): it empties home and the
+# system's record of the user at once and restarts, leaving the disk opening
+# with a setup key, so the next boot doesn't ask; one cut short is finished
+# at the next boot; Setup's password (din-password setup) then replaces the
+# key. Installed by the Installer
 # from the test machine's own image, plugged in as a USB stick, as in
 # tests/install.nix.
 # `nix build ./os#checks.x86_64-linux.erase`
@@ -97,12 +98,12 @@ pkgs.testers.runNixOSTest {
         machine.fail(f"printf 'wrong-one\\n' | {helper('din-erase')} start")
         machine.succeed("test -e /home/din/mine")
 
-    with subtest("the next boot erases it"):
-        # What `din-erase mark` does, without start's checks or its restart.
-        machine.succeed("echo erase > /var/lib/dinos/erase")
+    with subtest("erasing empties it, then restarts without asking"):
         machine_id = machine.succeed("cat /etc/machine-id").strip()
-        boot(live=False, passphrase="hunter22")
-        machine.wait_for_unit("din-erase-finish.service")
+        # What start does once it's checked the password and the system.
+        machine.succeed(f"printf 'hunter22\\n' | {helper('din-erase')} mark")
+        machine.wait_for_shutdown()
+        boot(live=False)
         for path in [
             "/home/din/mine", "/var/lib/bluetooth/paired", "/root/mine",
             "/etc/NetworkManager/system-connections/home.nmconnection",
@@ -119,6 +120,13 @@ pkgs.testers.runNixOSTest {
         subvols = machine.succeed("btrfs subvolume list -o /mnt/top | awk '{ print $NF }' | sort").split()
         assert subvols == ["@", "@home"], subvols
         machine.succeed("umount /mnt/top")
+
+    with subtest("an erase cut short is finished at the next boot"):
+        machine.succeed("echo again > /home/din/again", "echo erase > /var/lib/dinos/erase")
+        boot(live=False)
+        machine.wait_for_unit("din-erase-finish.service")
+        machine.fail("test -e /home/din/again", "test -e /var/lib/dinos/erase")
+        machine.succeed("test -e /var/lib/din/setup")
 
     with subtest("it starts without asking, until Setup sets its password"):
         boot(live=False)

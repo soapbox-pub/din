@@ -320,14 +320,14 @@ let
     '';
   };
 
-  # Erases the computer, over a restart, back to official DinOS with no
-  # files, settings or password (see the script, dinos-erase and
-  # din-erase-finish below, and electron/erase.mts).
+  # Erases the computer back to official DinOS with no files, settings or
+  # password, then restarts it (see the script, din-erase.target below, and
+  # electron/erase.mts).
   din-eraser = pkgs.writeShellApplication {
     name = "din-erase";
     runtimeInputs = with pkgs; [
-      coreutils util-linux gawk gnused jq git cryptsetup keyutils btrfs-progs shadow systemd
-      config.nix.package
+      coreutils util-linux gawk gnused jq git cryptsetup btrfs-progs shadow procps
+      config.systemd.package config.nix.package config.boot.plymouth.package
     ] ++ [ din-password ];
     text = builtins.readFile ./din-erase.sh;
   };
@@ -1572,10 +1572,10 @@ in
   # boot partition can replace the initrd too, so this trusts it no less;
   # it still only takes values that look right.
   #
-  # On a computer just erased (os/din-erase.sh), the disk's key is there too
+  # On a computer erased (os/din-erase.sh), the disk's key is there too
   # until Setup sets its password, and goes where systemd-cryptsetup looks
-  # for one before it asks: the disk opens without asking, and holds nothing
-  # yet worth a password.
+  # for one before it asks: the disk opens without asking. By then nothing
+  # of the user's is left on it, or what is goes before anything starts.
   boot.initrd.systemd.services.dinos-boot-screen = {
     description = "Prepare DinOS's boot screen";
     unitConfig.DefaultDependencies = false;
@@ -1930,17 +1930,38 @@ in
       fi
     '';
   };
-  # Erasing the computer (os/din-erase.sh), at the boot after Settings →
-  # About asked for it, while nothing runs from the disk: a new, empty home
-  # takes the old one's place, which is set aside for din-erase-finish to
-  # delete, and the system's own record of the user goes: everything in
-  # /var/lib but NixOS's ids, the hibernation swap file and the updater's
-  # checkout; logs, caches, root's home, saved networks, sudo rules of the
-  # user's, and the machine's identity (made fresh, as for a new install,
-  # with SSH's host keys). The time zone stays, and the system with it.
-  # Before home is mounted, so this boot's own home is the empty one.
-  boot.initrd.systemd.services.dinos-erase = {
+  # Erasing the computer (os/din-erase.sh). Settings → About isolates
+  # din-erase.target, which stops everything but the system's own base, Din
+  # and the user's session with it, and erases with nothing of the user's
+  # running; then the computer restarts.
+  systemd.targets.din-erase = {
+    description = "Erase DinOS";
+    requires = [ "sysinit.target" "din-erase.service" ];
+    after = [ "sysinit.target" "din-erase.service" ];
+    unitConfig.AllowIsolate = true;
+  };
+  systemd.services.din-erase = {
     description = "Erase DinOS's files and settings";
+    after = [ "sysinit.target" ];
+    unitConfig = {
+      DefaultDependencies = false;
+      ConditionPathExists = "/var/lib/dinos/erase";
+      # Into Setup when it's done, and when it isn't, into the boot that
+      # finishes it (din-erase-finish).
+      SuccessAction = "reboot";
+      FailureAction = "reboot";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${din-eraser}/bin/din-erase run";
+    };
+  };
+  # An erase that stopped partway, say with the power cut, is finished at
+  # the next boot, before anything has started: here, before home is
+  # mounted, a new, empty home takes the old one's place, which is set
+  # aside for din-erase-finish to delete with the rest.
+  boot.initrd.systemd.services.dinos-erase = {
+    description = "Erase DinOS's home";
     unitConfig = {
       DefaultDependencies = false;
       ConditionPathExists = "/sysroot/var/lib/dinos/erase";
@@ -1971,53 +1992,15 @@ in
       fi
       mv $top/@home.new $top/@home
       umount $top
-
-      gone() {
-        rm -rf "$1" || echo "Couldn't erase $1"
-      }
-      empty() {
-        for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do
-          if [ -e "$f" ] || [ -L "$f" ]; then gone "$f"; fi
-        done
-      }
-      s=/sysroot
-      for f in $s/var/lib/*; do
-        case ''${f##*/} in
-          nixos | swap | dinos) ;;
-          *) gone "$f" ;;
-        esac
-      done
-      for f in $s/var/lib/dinos/*; do
-        case ''${f##*/} in
-          src | result | erase) ;;
-          *) gone "$f" ;;
-        esac
-      done
-      for f in $s/var/log/*; do
-        if [ "$f" = $s/var/log/journal ]; then empty "$f"; else gone "$f"; fi
-      done
-      empty $s/var/cache
-      empty $s/var/tmp
-      empty $s/tmp
-      empty $s/root
-      empty $s/etc/NetworkManager/system-connections
-      empty $s/etc/sudoers.d
-      for f in $s/etc/ssh/ssh_host_*; do
-        if [ -e "$f" ]; then gone "$f"; fi
-      done
-      if [ -f $s/etc/machine-id ] && [ ! -L $s/etc/machine-id ]; then
-        : >$s/etc/machine-id
-      fi
-      sync
     '';
   };
-  # The rest, once the system's up: the disk's keys, `din`'s password, the
-  # boot screen's things, and the old home.
+  # The rest, once the system's up and before anything that reads what it
+  # empties starts.
   systemd.services.din-erase-finish = {
     description = "Finish erasing DinOS";
     wantedBy = [ "sysinit.target" ];
     before = [ "sysinit.target" ];
-    after = [ "local-fs.target" "boot.mount" ];
+    after = [ "local-fs.target" "boot.mount" "systemd-journald.service" ];
     unitConfig = {
       DefaultDependencies = false;
       ConditionPathExists = "/var/lib/dinos/erase";
@@ -2026,9 +2009,6 @@ in
       Type = "oneshot";
       RemainAfterExit = true;
       ExecStart = "${din-eraser}/bin/din-erase finish";
-      # See nostrd-unlock: reading the cached passphrase takes root's user
-      # keyring.
-      KeyringMode = "shared";
     };
   };
 

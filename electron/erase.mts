@@ -2,8 +2,8 @@
 // Data and the Setup screen after it).
 //
 // Erasing is os/din-erase.sh's (DIN_ERASE): it checks the password and that
-// the computer will start official DinOS, then restarts it, and the boot
-// that follows empties it. An erased computer with an encrypted disk has no
+// the computer will start official DinOS, then stops Din and erases the
+// computer, and restarts it. An erased computer with an encrypted disk has no
 // password until Setup, which Din shows in place of the desktop while
 // /var/lib/din/setup is there, gives it one through din-password's `setup`
 // (DIN_PASSWORD), which only works then. Both run through sudo without
@@ -79,7 +79,7 @@ export function registerEraseHandlers(options: {
     return JSON.parse(stdout) as EraseStatus;
   });
 
-  // Resolves only if it fails: otherwise the computer is restarting.
+  // Resolves only if it fails: otherwise Din is stopping, for the erase.
   ipcMain.handle('erase:start', async (event, password: unknown) => {
     assertShellSender(event);
     if (!HELPER) throw new Error('Erasing is for DinOS');

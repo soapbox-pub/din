@@ -202,6 +202,14 @@ fun display_normal()
 fun display_message(message)
 {
   message = String(message);
+  # What the computer is doing, in the clock's place: "Erasing…" while
+  # os/din-erase.sh erases it.
+  if (message.SubString(0, 11) == "din-status:")
+  {
+    center(clock.sprite, text(message.SubString(11, message.Length()), 1, "Semi-Bold", 48), clock_y + px(24));
+    clock.target = 1;
+    return;
+  }
   if (message.SubString(0, 10) != "din-clock:")
     return;
   rest = String(message.SubString(10, message.Length()));
