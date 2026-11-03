@@ -145,6 +145,15 @@ system in `@new`, never mounts `@home`, carries over saved Wi-Fi, Bluetooth
 pairings, the Nostr account keys, and the machine's identity, and only swaps
 the new system in once it's complete.
 
+**Set up for someone else** (`din-install install <disk> oem`, `din installer
+install`) erases the disk and leaves it as if DinOS had been installed there
+and then erased (below), the way a computer comes from the shop: nothing of
+the live session's (home is empty, and the rest goes by the same list
+`din-erase` uses, `os/din-pristine.sh`), no password, and the disk encrypted
+under a new random key on the boot partition, which opens it without asking
+until the first start's Setup replaces it with its owner's password. Unlike
+erasing in place, nothing anyone had is left on the disk.
+
 Systems installed before Btrfs have an LVM volume group, `dinos`, in its
 place, with ext4 `root` and `home` volumes; they still boot, and reinstalling
 one keeps that layout (formatting `root`, never mounting `home`). Moving one
@@ -198,8 +207,9 @@ finished at the next boot, before anything has started (the initrd's
 Setup (`src/components/desktop/Setup.tsx`) in place of the desktop until
 there's a password again: the keyboard layout, then the password, which
 `din-password setup` sets everywhere, replacing the key. Deleted files aren't
-overwritten, so the dialog points to a reinstall that erases the disk before
-giving the computer away. `nix build ./os#checks.x86_64-linux.erase`.
+overwritten, and an encrypted disk keeps its volume key, so whoever has the
+key can read them; the dialog points to the Installer's Set up for someone
+else for giving the computer away. `nix build ./os#checks.x86_64-linux.erase`.
 
 The boot is quiet: no boot menu (hold Space to get it), no log lines, just
 Plymouth drawing Din's boot screen (`os/boot-screen/din.script`). On an

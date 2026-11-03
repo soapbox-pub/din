@@ -1427,9 +1427,9 @@ expose('installer', {
   /**
    * Start installing. Progress arrives through onProgress.
    * @param {string} disk
-   * @param {'wipe' | 'free' | 'keep'} mode
+   * @param {'wipe' | 'free' | 'keep' | 'oem'} mode
    * @param {string | null} passphrase Encrypts the disk under it (for
-   *   `keep`, unlocks it), or null.
+   *   `keep`, unlocks it), or null (always, for `oem`).
    */
   install: (disk, mode, passphrase) =>
     ipcRenderer.invoke('installer:install', disk, mode, passphrase),

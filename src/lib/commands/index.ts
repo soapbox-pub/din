@@ -7,6 +7,7 @@ import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { extensionsArea } from './extensions';
 import { featuresArea } from './features';
+import { installerArea } from './installer';
 import { cursorsArea, iconsArea, skinsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
 import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, specOf } from './parse';
@@ -60,6 +61,7 @@ export const AREAS: readonly Area[] = [
   nostrArea,
   featuresArea,
   updateArea,
+  installerArea,
   firmwareArea,
   lockArea,
 ];

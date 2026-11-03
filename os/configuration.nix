@@ -275,7 +275,7 @@ let
       btrfs-progs efibootmgr systemd cryptsetup lvm2 openssl
       config.services.nostrd.package
     ];
-    text = builtins.readFile ./din-install.sh;
+    text = builtins.readFile ./din-pristine.sh + builtins.readFile ./din-install.sh;
   };
 
   # The privileged half of system updates, which builds Din's source and
@@ -415,7 +415,7 @@ let
       coreutils util-linux gawk gnused jq git cryptsetup btrfs-progs shadow procps
       config.systemd.package config.nix.package config.boot.plymouth.package
     ] ++ [ din-password ];
-    text = builtins.readFile ./din-erase.sh;
+    text = builtins.readFile ./din-pristine.sh + builtins.readFile ./din-erase.sh;
   };
 
   # sudo's askpass helper: asks for the password in Din when sudo has no

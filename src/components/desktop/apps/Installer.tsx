@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   Check,
   CircleAlert,
+  Gift,
   HardDrive,
   Loader2,
   Lock,
+  Power,
   RotateCw,
   Usb,
 } from 'lucide-react';
@@ -29,6 +31,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useInstallerStatus, useInstallState } from '@/hooks/useInstaller';
+import { cleanPowerError, getPowerBridge } from '@/lib/power';
 import {
   cleanInstallerError,
   formatDiskSize,
@@ -120,7 +123,8 @@ function InstallSetup() {
               computer’s own disk, so it starts faster and works without the stick.
             </p>
             <p className="text-sm text-muted-foreground">
-              Your account, saved Wi-Fi networks, and files from this session come with you.
+              Your account, saved Wi-Fi networks, and files from this session come with you,
+              unless you’re setting it up for someone else.
             </p>
           </div>
           <Button size="lg" onClick={() => setStage('disk')}>
@@ -222,17 +226,18 @@ function InstallSetup() {
 
   const existing = disk.existingInstall;
   const keep = mode === 'keep';
+  const oem = mode === 'oem';
   const alongside = alongsideProblem(disk, requiredBytes);
   const tooSmall = disk.sizeBytes < requiredBytes;
   const empty = disk.partitions.length === 0;
-  const erasing = mode === 'wipe' && !empty;
+  const erasing = (mode === 'wipe' || oem) && !empty;
   // A reinstall asks for the passphrase the disk already has, once.
   const unlocking = keep && existing?.encrypted === true;
   const passphraseIssue = passphrase ? passphraseProblem(passphrase) : null;
   const mismatch = repeat.length > 0 && repeat !== passphrase;
   const ready = keep
     ? !unlocking || passphrase.length > 0
-    : !encrypt || (passphraseProblem(passphrase) === null && repeat === passphrase);
+    : oem || !encrypt || (passphraseProblem(passphrase) === null && repeat === passphrase);
 
   const selectMode = (next: InstallMode) => {
     if ((next === 'keep') !== keep) {
@@ -245,7 +250,7 @@ function InstallSetup() {
   const start = async () => {
     setConfirming(false);
     setError(null);
-    const secret = keep ? (unlocking ? passphrase : null) : encrypt ? passphrase : null;
+    const secret = keep ? (unlocking ? passphrase : null) : oem ? null : encrypt ? passphrase : null;
     try {
       await getInstallerBridge()?.install(disk.path, mode, secret);
     } catch (e) {
@@ -253,7 +258,11 @@ function InstallSetup() {
     }
   };
 
-  const action = keep ? 'Reinstall' : erasing ? 'Erase and install' : 'Install';
+  const action = keep
+    ? 'Reinstall'
+    : oem
+      ? erasing ? 'Erase and set up' : 'Set up'
+      : erasing ? 'Erase and install' : 'Install';
 
   return (
     <Frame
@@ -305,6 +314,18 @@ function InstallSetup() {
             }
           />
         )}
+        <Choice
+          selected={oem}
+          disabled={tooSmall}
+          onSelect={() => selectMode('oem')}
+          icon={<Gift className="size-5" aria-hidden />}
+          title="Set up for someone else"
+          description={
+            tooSmall
+              ? `This disk is too small: DinOS needs ${formatDiskSize(requiredBytes)}.`
+              : `${empty ? 'DinOS takes the whole disk' : 'Everything on the disk is deleted'}, and nothing from this session goes with it: no account, Wi-Fi networks, or files. The first time it starts, it asks its new owner for a keyboard layout and a password.`
+          }
+        />
       </div>
 
       {unlocking && (
@@ -334,7 +355,18 @@ function InstallSetup() {
         </section>
       )}
 
-      {!keep && (
+      {oem && (
+        <section className="flex items-start gap-3 rounded-xl border border-border/60 bg-background/40 p-4">
+          <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+          <p className="text-xs text-muted-foreground">
+            The disk is encrypted with a key of its own, which opens it until its owner chooses a
+            password. That password then encrypts it, and is asked for every time the computer
+            starts.
+          </p>
+        </section>
+      )}
+
+      {!keep && !oem && (
         <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
           <div className="flex items-start gap-3">
             <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
@@ -400,7 +432,13 @@ function InstallSetup() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {keep ? 'Reinstall DinOS?' : erasing ? `Erase ${diskName(disk)}?` : 'Install DinOS?'}
+              {keep
+                ? 'Reinstall DinOS?'
+                : erasing
+                  ? `Erase ${diskName(disk)}?`
+                  : oem
+                    ? 'Set up DinOS for someone else?'
+                    : 'Install DinOS?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {keep
@@ -410,7 +448,9 @@ function InstallSetup() {
                   : mode === 'free'
                     ? `DinOS will be installed in the free space on ${diskName(disk)}. Nothing already on it is changed.`
                     : `DinOS will be installed on ${diskName(disk)}.`}
-              {!keep && encrypt && ' It will be encrypted, and asks for your passphrase each time it starts.'}
+              {oem
+                ? ' DinOS is left ready for its new owner, with nothing from this session.'
+                : !keep && encrypt && ' It will be encrypted, and asks for your passphrase each time it starts.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -442,6 +482,10 @@ function InstallProgress({ state }: { state: InstallState }) {
   const [rebootError, setRebootError] = useState<string | null>(null);
   const [rebooting, setRebooting] = useState(false);
   const current = state.step ? STEPS.findIndex((s) => s.id === state.step) : -1;
+
+  if (state.phase === 'done' && state.mode === 'oem') {
+    return <SetUpForSomeoneElse />;
+  }
 
   if (state.phase === 'done') {
     return (
@@ -559,6 +603,49 @@ function InstallProgress({ state }: { state: InstallState }) {
           This takes a few minutes. Keep the USB stick plugged in.
         </p>
       )}
+    </Frame>
+  );
+}
+
+/** Done setting up for someone else: shut down, to hand the computer over. */
+function SetUpForSomeoneElse() {
+  const [error, setError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  return (
+    <Frame>
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
+        <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Gift className="size-8" aria-hidden />
+        </div>
+        <div className="max-w-md space-y-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Ready for its new owner
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Shut down, and remove the USB stick when the screen goes dark. The next time
+            the computer starts, DinOS asks whoever starts it for a keyboard layout and a
+            password, and they sign in from there.
+          </p>
+        </div>
+        <Button
+          size="lg"
+          disabled={stopping}
+          onClick={() => {
+            setStopping(true);
+            setError(null);
+            getPowerBridge()
+              ?.powerOff()
+              .catch((e: unknown) => {
+                setStopping(false);
+                setError(cleanPowerError(e));
+              });
+          }}
+        >
+          {stopping ? <Loader2 className="size-4 motion-safe:animate-spin" /> : <Power className="size-4" />}
+          Shut down
+        </Button>
+        {error && <ErrorNote>{error}</ErrorNote>}
+      </div>
     </Frame>
   );
 }

@@ -7,13 +7,18 @@
 #   din-install status
 #       JSON: whether this is a live boot, the space an install needs, and
 #       the disks it could go on.
-#   din-install install <disk> wipe|free|keep [encrypt]
+#   din-install install <disk> wipe|free|keep|oem [encrypt]
 #       Install onto <disk>: `wipe` erases it, `free` goes into its largest
 #       stretch of unpartitioned space (next to Windows, say), and `keep`
 #       replaces the DinOS already on it, leaving its home alone.
 #       With `encrypt`, a passphrase is read from stdin: for a new install the
 #       system partition is LUKS2 under it, asked for at every boot, and for
-#       `keep` it unlocks the existing one. Reports on stdout as it goes -
+#       `keep` it unlocks the existing one. `oem` erases the disk and sets
+#       it up for someone else: as if installed and then erased
+#       (os/din-erase.sh), with nothing of the live session's, encrypted
+#       under a new random key on the boot partition (SETUP_KEY) that opens
+#       it without asking until Setup, at the first start, takes its owner's
+#       password in its place (din-password setup). Reports on stdout as it goes -
 #       `step <name>` and `progress <percent>` lines - and exits non-zero with
 #       the reason on stderr if it can't.
 #
@@ -70,6 +75,10 @@ KEEP_PATHS=(
   var/lib/nixos
   etc/machine-id
 )
+# An `oem` install's key, as os/din-erase.sh leaves an erased disk's, and
+# the mark that has Din show Setup until the computer has a password.
+SETUP_KEY=din/setup.key
+SETUP_MARK=var/lib/din/setup
 
 die() {
   echo "$*" >&2
@@ -246,7 +255,11 @@ source_esp=""
 old_root=""
 crypt_open=""
 vg_devices=""
+key_file=""
 cleanup() {
+  if [[ -n $key_file ]]; then
+    rm -f "$key_file"
+  fi
   if [[ -n $target ]]; then
     umount -R "$target" 2>/dev/null || true
     rmdir "$target" 2>/dev/null || true
@@ -272,11 +285,17 @@ cleanup() {
 }
 
 # Open the system partition's encryption, when it has some, setting `dev` to
-# the device the filesystem (or LVM) lives on.
+# the device the filesystem (or LVM) lives on: with `key_file` when there
+# is one, else the passphrase.
 open_system() {
   local part=$1 passphrase=$2
   dev=$part
-  if [[ -n $passphrase ]]; then
+  if [[ -n $key_file ]]; then
+    cryptsetup open --key-file="$key_file" "$part" "$CRYPT_NAME" ||
+      die "The disk's new key doesn't unlock it."
+    crypt_open=1
+    dev=/dev/mapper/$CRYPT_NAME
+  elif [[ -n $passphrase ]]; then
     # printf is a builtin: the passphrase never shows up in a command line.
     printf '%s' "$passphrase" | cryptsetup open --key-file=- "$part" "$CRYPT_NAME" ||
       die "That passphrase doesn't unlock the disk."
@@ -339,13 +358,35 @@ protect_nostrd() {
   chown -R nostrd:nostrd "$dir"
 }
 
+# Leave the new root at $1, and its boot partition at $1/boot, as an erased
+# computer's (os/din-erase.sh): nothing of the live session's, no password,
+# Setup to come, and the disk's key where the initrd finds it.
+make_pristine() {
+  local root=$1 shadow=$1/etc/shadow
+  pristine_system "$root"
+  pristine_boot "$root/boot/$(dirname "$SETUP_KEY")"
+  mkdir -p "$root/boot/$(dirname "$SETUP_KEY")"
+  cp "$key_file" "$root/boot/$SETUP_KEY"
+  awk -F: -v OFS=: '$1 == "din" { $2 = "!" } { print }' "$shadow" >"$shadow.din-install"
+  chown --reference="$shadow" "$shadow.din-install"
+  chmod --reference="$shadow" "$shadow.din-install"
+  mv "$shadow.din-install" "$shadow"
+  mkdir -p "$(dirname "$root/$SETUP_MARK")"
+  touch "$root/$SETUP_MARK"
+}
+
 install() {
-  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" dev stash="" layout=btrfs
+  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" dev stash="" layout=btrfs oem=""
   boot=$(boot_disk)
   is_live "$boot" || die "DinOS can only be installed while running from a USB stick."
   grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk DinOS can be installed on."
-  [[ $mode == wipe || $mode == free || $mode == keep ]] || die "Unknown install mode: $mode"
-  if [[ $encrypt == encrypt ]]; then
+  [[ $mode == wipe || $mode == free || $mode == keep || $mode == oem ]] || die "Unknown install mode: $mode"
+  if [[ $mode == oem ]]; then
+    [[ $encrypt != encrypt ]] || die "Setting up for someone else makes its own key; it takes no passphrase."
+    # Partitioned as `wipe`, then made pristine.
+    oem=1
+    mode=wipe
+  elif [[ $encrypt == encrypt ]]; then
     passphrase=$(cat)
     [[ -n $passphrase ]] || die "Encrypting the disk needs a passphrase."
   fi
@@ -442,7 +483,11 @@ install() {
     mkfs.ext4 -q -F -L nixos "/dev/mapper/$VG-root"
   else
     if [[ $mode != keep ]]; then
-      if [[ -n $passphrase ]]; then
+      if [[ -n $oem ]]; then
+        key_file=$(mktemp /run/din-install-key.XXXXXX)
+        head -c 64 /dev/urandom >"$key_file"
+        cryptsetup luksFormat -q --type luks2 --label DinOS --key-file="$key_file" "$part"
+      elif [[ -n $passphrase ]]; then
         printf '%s' "$passphrase" |
           cryptsetup luksFormat -q --type luks2 --label DinOS --key-file=- "$part"
       fi
@@ -481,7 +526,7 @@ install() {
     --exclude='/var/tmp/*' --exclude='/var/cache/*' --exclude='/var/log/journal/*'
     --exclude='/home/*/.cache/*' --exclude='/home/.nix-build/*' --exclude='/lost+found'
   )
-  [[ $mode != keep ]] || excludes+=(--exclude='/home/*')
+  [[ $mode != keep && -z $oem ]] || excludes+=(--exclude='/home/*')
   # Btrfs's own properties, the compression above all, are the new
   # filesystem's: rsync leaves the ones files inherit in place.
   excludes+=(--filter='-x btrfs.*')
@@ -542,6 +587,9 @@ install() {
     set_din_password "$target" "$passphrase"
     protect_nostrd "$target" "$passphrase"
   fi
+  if [[ -n $oem ]]; then
+    make_pristine "$target"
+  fi
 
   # Put DinOS first in the firmware's boot order. Firmware also boots the
   # ESP's removable path on its own, so a refusal here isn't fatal.
@@ -575,8 +623,8 @@ install() {
 case "${1:-}" in
   status) status ;;
   install)
-    [[ $# == 3 || ($# == 4 && $4 == encrypt) ]] || die "usage: din-install install <disk> wipe|free|keep [encrypt]"
+    [[ $# == 3 || ($# == 4 && $4 == encrypt) ]] || die "usage: din-install install <disk> wipe|free|keep|oem [encrypt]"
     install "$2" "$3" "${4:-}"
     ;;
-  *) die "usage: din-install status | install <disk> wipe|free|keep [encrypt]" ;;
+  *) die "usage: din-install status | install <disk> wipe|free|keep|oem [encrypt]" ;;
 esac

@@ -27,10 +27,14 @@ const HELPER = process.env.DIN_INSTALLER;
 
 type Step = 'partition' | 'format' | 'copy' | 'boot';
 
-/** Erase the disk, use its free space, or replace the DinOS on it but keep its files. */
-type Mode = 'wipe' | 'free' | 'keep';
+/**
+ * Erase the disk, use its free space, replace the DinOS on it but keep its
+ * files, or erase it and set it up for someone else (encrypted under a key
+ * of its own, until Setup takes their password).
+ */
+type Mode = 'wipe' | 'free' | 'keep' | 'oem';
 
-const MODES: readonly string[] = ['wipe', 'free', 'keep'];
+const MODES: readonly string[] = ['wipe', 'free', 'keep', 'oem'];
 
 interface InstallState {
   phase: 'idle' | 'running' | 'done' | 'failed';
@@ -106,10 +110,10 @@ export function registerInstallerHandlers(options: {
   });
 
   const start = (helper: string, disk: string, mode: Mode) => {
-    const encrypted = passphrase !== null;
+    const encrypted = passphrase !== null || mode === 'oem';
     update({ phase: 'running', disk, mode, encrypted, step: null, percent: 0, error: null });
     const args = ['-n', helper, 'install', disk, mode];
-    if (encrypted) args.push('encrypt');
+    if (passphrase !== null) args.push('encrypt');
     const child = spawn('sudo', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin.on('error', () => {
       // The helper exited before reading it; its stderr says why.
@@ -153,6 +157,9 @@ export function registerInstallerHandlers(options: {
     if (typeof mode !== 'string' || !MODES.includes(mode)) throw new Error('Unknown install mode');
     if (newPassphrase !== null && !isValidPassphrase(newPassphrase)) {
       throw new Error('Not a usable passphrase');
+    }
+    if (mode === 'oem' && newPassphrase !== null) {
+      throw new Error('Setting up for someone else takes no passphrase');
     }
     // A USB disk plugged in to install onto was mounted when it went in.
     await releaseDisk(disk);

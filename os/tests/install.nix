@@ -48,7 +48,8 @@ in
 # The Installer's disk work, from a live USB stick onto a computer's disk,
 # each install then booted from that disk: a new install is Btrfs, a
 # reinstall keeps home and the machine's own settings, and a disk installed
-# before Btrfs still boots with today's initrd and can still be reinstalled.
+# before Btrfs still boots with today's initrd and can still be reinstalled,
+# and one set up for someone else starts as an erased computer does.
 # The live system is the test machine's own image, plugged in over USB.
 # `nix build ./os#checks.x86_64-linux.install`
 pkgs.testers.runNixOSTest {
@@ -199,5 +200,33 @@ pkgs.testers.runNixOSTest {
         assert fs("/") == "ext4 /dev/mapper/dinos-root", fs("/")
         assert machine.succeed("cat /home/din/legacy").strip() == "legacy"
         assert machine.succeed("cat /var/lib/bluetooth/kept").strip() == "paired"
+
+    with subtest("setting up for someone else leaves nothing of the live session's"):
+        boot(live=True)
+        machine.succeed(
+            "echo live > /home/din/from-live",
+            "mkdir -p /var/lib/bluetooth && echo paired > /var/lib/bluetooth/live",
+            "mkdir -p /etc/NetworkManager/system-connections && echo cafe > /etc/NetworkManager/system-connections/cafe.nmconnection",
+            "mkdir -p /boot/din && echo png > /boot/din/wallpaper.png",
+        )
+        install("oem")
+        assert machine.succeed("blkid -o value -s TYPE /dev/vda2").strip() == "crypto_LUKS"
+
+    with subtest("it starts without asking, into Setup, until Setup sets its password"):
+        boot(live=False)
+        assert fs("/").startswith("btrfs /dev/mapper/root"), fs("/")
+        for path in [
+            "/home/din/from-live", "/var/lib/bluetooth/live",
+            "/etc/NetworkManager/system-connections/cafe.nmconnection",
+            "/boot/din/wallpaper.png",
+        ]:
+            machine.fail(f"test -e {path}")
+        machine.succeed("test -d /home/din", "test -e /var/lib/din/setup", "test -s /boot/din/setup.key")
+        assert machine.succeed("awk -F: '$1 == \"din\" { print $2 }' /etc/shadow").strip() == "!"
+        setup = machine.succeed("grep -o '/nix/store/[^ ,]*/bin/din-password' /etc/sudoers | head -1").strip()
+        machine.succeed(f"printf 'battery-staple\\n' | {setup} setup")
+        machine.fail("test -e /var/lib/din/setup", "test -e /boot/din/setup.key")
+        machine.succeed("printf battery-staple | cryptsetup open --test-passphrase --key-file=- /dev/vda2")
+        boot(live=False, passphrase="battery-staple")
   '';
 }

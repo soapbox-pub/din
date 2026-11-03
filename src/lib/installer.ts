@@ -49,8 +49,12 @@ export type InstallerStatus =
       disks: InstallerDisk[];
     };
 
-/** Erase the disk, use its free space, or replace the DinOS on it but keep its files. */
-export type InstallMode = 'wipe' | 'free' | 'keep';
+/**
+ * Erase the disk, use its free space, replace the DinOS on it but keep its
+ * files, or erase it and set it up for someone else: as if DinOS had been
+ * installed and then erased, so its first start asks for a password.
+ */
+export type InstallMode = 'wipe' | 'free' | 'keep' | 'oem';
 
 export type InstallStep = 'partition' | 'format' | 'copy' | 'boot';
 
@@ -71,7 +75,7 @@ export interface InstallerBridge {
   state(): Promise<InstallState>;
   /**
    * Encrypts the disk under `passphrase`, unless it's null. For `keep`, it's
-   * the passphrase the disk is already encrypted under.
+   * the passphrase the disk is already encrypted under; `oem` takes none.
    */
   install(disk: string, mode: InstallMode, passphrase: string | null): Promise<void>;
   /** Run the failed install again, with the same choices. */

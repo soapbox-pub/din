@@ -196,7 +196,8 @@ function EraseDialog({
             )}
 
             <p className="text-center text-xs text-muted-foreground">
-              Giving it away? Reinstalling from a USB stick erases the disk completely.
+              Giving it away? Erasing leaves deleted files on the disk. Start DinOS from a USB
+              stick and choose Set up for someone else instead: it erases the disk completely.
             </p>
 
             <DialogFooter>

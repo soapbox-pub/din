@@ -59,6 +59,7 @@ a missing or bad argument).
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
 | `features` | DinOS's optional features, as Settings → Optional Features: list them, install one or all (saying how the download is getting on), remove one (asks on screen first) |
 | `update`, `firmware` | DinOS updates and firmware, as Settings → About |
+| `installer` | The Installer, on DinOS running from a USB stick: the disks it could go on, and installing on one (asks on screen first), by default setting it up for someone else (`--mode oem`); encrypting with a passphrase is only done in the Installer |
 
 The system's own settings (the time zone, the keyboard layout) are their
 areas' commands rather than `settings` keys, since they act on the system.
@@ -68,7 +69,7 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware, deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
+installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
 (`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on

@@ -197,54 +197,11 @@ forget_disk_password() {
   done
 }
 
-gone() {
-  rm -rf "$1" || echo "Couldn't erase $1" >&2
-}
-
-# Everything in directory $1, hidden files too.
-empty() {
-  local f
-  for f in "$1"/* "$1"/.[!.]* "$1"/..?*; do
-    if [[ -e $f || -L $f ]]; then gone "$f"; fi
-  done
-}
-
-# The system's own record of the user: everything in /var/lib but NixOS's
-# ids, the hibernation swap file and the updater's checkout; logs, caches,
-# root's home, saved networks, sudo rules of the user's, and the machine's
-# identity (made fresh at the next boot, as for a new install, with SSH's
-# host keys). The time zone stays, and the system with it.
+# The system's own record of the user (os/din-pristine.sh's pristine_system).
 wipe_system() {
-  local f
   # The journal moves to /run until the restart, so none of it is kept.
   journalctl --relinquish-var 2>/dev/null || true
-  for f in /var/lib/*; do
-    case ${f##*/} in
-      nixos | swap | dinos) ;;
-      *) gone "$f" ;;
-    esac
-  done
-  for f in /var/lib/dinos/*; do
-    case ${f##*/} in
-      src | result | erase) ;;
-      *) gone "$f" ;;
-    esac
-  done
-  for f in /var/log/*; do
-    if [[ $f == /var/log/journal ]]; then empty "$f"; else gone "$f"; fi
-  done
-  empty /var/cache
-  empty /var/tmp
-  empty /tmp
-  empty /root
-  empty /etc/NetworkManager/system-connections
-  empty /etc/sudoers.d
-  for f in /etc/ssh/ssh_host_*; do
-    if [[ -e $f ]]; then gone "$f"; fi
-  done
-  if [[ -f /etc/machine-id && ! -L /etc/machine-id ]]; then
-    : >/etc/machine-id
-  fi
+  pristine_system ""
 }
 
 # An empty home in place of the old one, which is deleted.
@@ -281,7 +238,7 @@ delete_old_homes() {
 # All of erasing but home itself, the same at `run` and at a boot that
 # finishes one.
 erase_rest() {
-  local part old
+  local part
   wipe_system
   part=$(luks_partition)
   if [[ -n $part ]]; then
@@ -290,12 +247,7 @@ erase_rest() {
     touch "$SETUP_MARK"
   fi
   usermod -p '!' "$USER_NAME"
-  # What the boot screen showed of the user's, but for the setup key.
-  if [[ -d $(dirname "$SETUP_KEY") ]]; then
-    for old in "$(dirname "$SETUP_KEY")"/*; do
-      [[ $old == "$SETUP_KEY" ]] || rm -rf "$old"
-    done
-  fi
+  pristine_boot "$(dirname "$SETUP_KEY")"
   delete_old_homes
   rm -f "$MARK"
   sync
