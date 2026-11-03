@@ -775,6 +775,8 @@ interface DisplayOutput {
   current: { width: number; height: number; refresh: number } | null;
   position: { x: number; y: number };
   modes: DisplayMode[];
+  /** Millimetres, where the display says (its EDID). */
+  physicalSize?: { width: number; height: number };
   /** The AirPlay receiver this display is, for the ones deckmon adds. */
   airplay?: string;
 }
@@ -806,6 +808,7 @@ function parseXrandr(stdout: string): DisplayOutput[] {
     );
     if (head) {
       const on = Boolean(head[4]);
+      const mm = line.match(/\s(\d+)mm x (\d+)mm/);
       current = {
         name: head[1],
         connected: head[2] === 'connected',
@@ -814,6 +817,7 @@ function parseXrandr(stdout: string): DisplayOutput[] {
         current: on ? { width: Number(head[4]), height: Number(head[5]), refresh: 0 } : null,
         position: on ? { x: Number(head[6]), y: Number(head[7]) } : { x: 0, y: 0 },
         modes: [],
+        ...(mm && { physicalSize: { width: Number(mm[1]), height: Number(mm[2]) } }),
       };
       outputs.push(current);
       continue;
@@ -844,6 +848,7 @@ interface WlrHead {
   name?: unknown;
   enabled?: unknown;
   position?: { x?: unknown; y?: unknown };
+  physical_size?: { width?: unknown; height?: unknown };
   modes?: { width?: unknown; height?: unknown; refresh?: unknown; current?: unknown; preferred?: unknown }[];
 }
 
@@ -863,6 +868,8 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
     }));
     const enabled = head.enabled === true;
     const now = enabled ? modes.find((m) => m.current) : undefined;
+    const mmWidth = Number(head.physical_size?.width) || 0;
+    const mmHeight = Number(head.physical_size?.height) || 0;
     return [{
       name: head.name,
       connected: true,
@@ -873,6 +880,7 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
         ? { x: Number(head.position?.x) || 0, y: Number(head.position?.y) || 0 }
         : { x: 0, y: 0 },
       modes,
+      ...(mmWidth > 0 && mmHeight > 0 && { physicalSize: { width: mmWidth, height: mmHeight } }),
     }];
   });
 }

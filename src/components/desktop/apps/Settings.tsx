@@ -702,6 +702,12 @@ function clampZoom(percent: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(percent)));
 }
 
+/** The config without a zoom of the user's, so the display's own applies. */
+function automaticZoom(config: Partial<AppConfig>): Partial<AppConfig> {
+  const { zoomLevel: _, ...rest } = config;
+  return rest;
+}
+
 /**
  * Interface zoom - DPI-style scaling of the whole desktop through Chromium
  * page zoom (window.dinos.zoom preload bridge). Lives in AppConfig (persisted
@@ -712,11 +718,17 @@ function clampZoom(percent: number): number {
 function DisplayZoomControl({
   available,
   value,
+  automatic,
   onChange,
+  onAutomatic,
 }: {
   available: boolean;
   value: number;
+  /** Whether VALUE is the display's own, the user having set none. */
+  automatic: boolean;
   onChange: (percent: number) => void;
+  /** Go back to the display's own zoom. */
+  onAutomatic: () => void;
 }) {
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
@@ -727,7 +739,8 @@ function DisplayZoomControl({
             Zoom
           </Label>
           <p className="text-xs text-muted-foreground">
-            Scale everything on the desktop up or down.
+            Scale everything on the desktop up or down. Automatic suits the
+            main display's sharpness.
           </p>
         </div>
       </div>
@@ -742,8 +755,9 @@ function DisplayZoomControl({
           >
             <Minus className="size-4" />
           </Button>
-          <span className="w-16 text-center text-sm tabular-nums font-medium">
-            {value}%
+          <span className="flex w-24 flex-col items-center text-center">
+            <span className="text-sm tabular-nums font-medium">{value}%</span>
+            {automatic && <span className="text-xs text-muted-foreground">Automatic</span>}
           </span>
           <Button
             variant="outline"
@@ -754,6 +768,11 @@ function DisplayZoomControl({
           >
             <Plus className="size-4" />
           </Button>
+          {!automatic && (
+            <Button variant="ghost" size="sm" onClick={onAutomatic}>
+              Use automatic
+            </Button>
+          )}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
@@ -778,7 +797,7 @@ function DisplaySection() {
   const bridge = getDisplayBridge();
   const status = useDisplayStatus();
   const apply = useApplyDisplayLayout();
-  const { config, updateConfig } = useAppContext();
+  const { config, updateConfig, zoomAutomatic } = useAppContext();
 
   const outputs = status.data?.available ? status.data.outputs : undefined;
   const baseline = useMemo(() => (outputs ? draftFromOutputs(outputs) : []), [outputs]);
@@ -923,7 +942,9 @@ function DisplaySection() {
       <DisplayZoomControl
         available={getZoomBridge() !== undefined}
         value={config.zoomLevel}
+        automatic={zoomAutomatic}
         onChange={setZoom}
+        onAutomatic={() => updateConfig(automaticZoom)}
       />
       {arrangement}
       <AirPlayDisplays />
@@ -3471,7 +3492,7 @@ function EffectsSection({ windowId }: { windowId: string }) {
  * reach its apps with the theme and, on DinOS, Linux apps through GSettings.
  */
 function AccessibilitySection() {
-  const { config, updateConfig } = useAppContext();
+  const { config, updateConfig, zoomAutomatic } = useAppContext();
   const set = (patch: Partial<AppConfig>) => updateConfig((current) => ({ ...current, ...patch }));
   const textSize = clampTextSize(config.textSize);
   // Zoom, colour filters and the keyboard aids are din-shell's.
@@ -3540,7 +3561,9 @@ function AccessibilitySection() {
       <DisplayZoomControl
         available={getZoomBridge() !== undefined}
         value={config.zoomLevel}
+        automatic={zoomAutomatic}
         onChange={(percent) => set({ zoomLevel: clampZoom(percent) })}
+        onAutomatic={() => updateConfig(automaticZoom)}
       />
 
       {screen ? (

@@ -41,6 +41,8 @@ export interface DisplayOutput {
   position: { x: number; y: number };
   /** Available modes, as the display tool reports them. */
   modes: DisplayMode[];
+  /** Its size in millimetres, where the display reports one. */
+  physicalSize?: { width: number; height: number };
   /** The AirPlay receiver this display is (one added to extend the desktop). */
   airplay?: string;
 }

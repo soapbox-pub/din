@@ -190,7 +190,8 @@ export interface AppConfig {
    * Interface zoom level, as a percentage (100 = native size). Applied via
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole
    * desktop); has no effect in a plain browser, where the browser's own zoom
-   * applies. Device-specific, so it is kept local and never synced.
+   * applies. Device-specific, so it is kept local and never synced. Unset,
+   * it's the primary display's automatic zoom (src/lib/autoZoom.ts).
    */
   zoomLevel: number;
   /**
@@ -241,6 +242,8 @@ export interface AppContextType {
   config: AppConfig;
   /** Update configuration using a callback that receives current config and returns new config */
   updateConfig: (updater: (currentConfig: Partial<AppConfig>) => Partial<AppConfig>) => void;
+  /** Whether `config.zoomLevel` is the display's automatic zoom, the user having set none. */
+  zoomAutomatic: boolean;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);

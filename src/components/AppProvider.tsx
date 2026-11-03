@@ -1,8 +1,11 @@
-import { ReactNode, useCallback, useEffect, useMemo } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme } from '@/contexts/AppContext';
 import { AppConfigSchema } from '@/lib/appConfigSchema';
 import { getZoomBridge } from '@/lib/zoom';
+import { autoZoomForOutputs } from '@/lib/autoZoom';
+import { getDisplayBridge } from '@/lib/display';
+import { getMonitorsBridge } from '@/lib/monitors';
 import { applyAccessibility, getAccessibilityBridge } from '@/lib/accessibility';
 import { setConfiguredTheme } from '@/lib/rootScheme';
 
@@ -45,14 +48,21 @@ export function AppProvider(props: AppProviderProps) {
   // Memoized so context consumers (every desktop window reads the config)
   // only re-render when the config actually changes, not whenever an
   // ancestor re-renders this provider.
+  // Zoom the user hasn't set is the display's own (src/lib/autoZoom.ts).
+  const autoZoom = useAutoZoom();
+  const zoomAutomatic = rawConfig.zoomLevel === undefined;
   const config = useMemo(
-    () => ({ ...defaultConfig, ...rawConfig }),
-    [defaultConfig, rawConfig],
+    () => ({
+      ...defaultConfig,
+      ...(autoZoom !== null && { zoomLevel: autoZoom }),
+      ...rawConfig,
+    }),
+    [defaultConfig, autoZoom, rawConfig],
   );
 
   const appContextValue: AppContextType = useMemo(
-    () => ({ config, updateConfig }),
-    [config, updateConfig],
+    () => ({ config, updateConfig, zoomAutomatic }),
+    [config, updateConfig, zoomAutomatic],
   );
 
   // Apply theme effects to document
@@ -83,6 +93,43 @@ function useApplyZoom(zoomLevel: number) {
   useEffect(() => {
     getZoomBridge()?.set(zoomLevel / 100);
   }, [zoomLevel]);
+}
+
+const AUTO_ZOOM_KEY = 'din:auto-zoom';
+
+/**
+ * The zoom for the primary display's pixel density, or null outside the
+ * Electron shell or where its displays can't be read. Read again whenever the
+ * displays change (one plugged in, the lid shut, a new resolution), and kept
+ * from the last run so the desktop starts at it rather than jumping to it.
+ */
+function useAutoZoom(): number | null {
+  const [zoom, setZoom] = useState<number | null>(() => {
+    if (!getDisplayBridge()) return null;
+    const saved = Number(localStorage.getItem(AUTO_ZOOM_KEY));
+    return saved > 0 ? saved : null;
+  });
+  useEffect(() => {
+    const display = getDisplayBridge();
+    if (!display) return;
+    let stale = false;
+    const read = () => {
+      display.status().then((status) => {
+        if (stale || !status.available) return;
+        const next = autoZoomForOutputs(status.outputs);
+        if (next === null) return;
+        localStorage.setItem(AUTO_ZOOM_KEY, String(next));
+        setZoom(next);
+      }, () => {});
+    };
+    read();
+    const off = getMonitorsBridge()?.onChange(read);
+    return () => {
+      stale = true;
+      off?.();
+    };
+  }, []);
+  return zoom;
 }
 
 /**
