@@ -337,18 +337,15 @@ function Row({
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left',
-        active ? 'bg-primary text-primary-foreground' : 'hover:bg-foreground/10',
+        active ? 'bg-foreground/10' : 'hover:bg-foreground/5',
       )}
     >
-      <span
-        aria-hidden
-        className={cn('grid size-8 shrink-0 place-items-center rounded-lg', active ? 'bg-primary-foreground/15' : 'bg-primary/10 text-primary')}
-      >
+      <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
         {icon}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{title}</span>
-        <span className={cn('block truncate text-xs', mono && 'font-mono', active ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+        <span className={cn('block truncate text-xs text-muted-foreground', mono && 'font-mono')}>
           {subtitle}
         </span>
       </span>
