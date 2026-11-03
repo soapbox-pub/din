@@ -8,6 +8,7 @@ import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHea
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type DockEdge, type GenieRect, type GenieTarget } from '@/lib/genie';
+import { startMenuBarHandoff } from '@/lib/menuBarHandoff';
 import { effectsFor, resolveEffect, runWindowEffect, type EffectEvent, type WindowEffect } from '@/lib/effects';
 import { onEffectPreview } from '@/lib/effects/preview';
 import { getScreenshotBridge } from '@/lib/screenshot';
@@ -934,14 +935,37 @@ export const Window = memo(function Window({
       return;
     }
 
+    // Maximizing into the menu bar's color, or restoring out of it: the bar
+    // follows the window's left and right edges and fills (or empties) with
+    // its progress, so its color arrives with the window rather than ahead
+    // of it. The bar decides whether this window is the one it shows.
+    const maximizing = win.maximized;
+    const bar = prev.maximized !== maximizing ? startMenuBarHandoff(win.id, maximizing) : null;
+    const origin = bar ? (el.offsetParent?.getBoundingClientRect().left ?? 0) : 0;
+
     beginGesture();
-    animCancel.current = animateFlip(el, from, to, () => {
-      animCancel.current = null;
-      el.style.transform = '';
-      el.style.transformOrigin = '';
-      endGesture();
-    });
-  }, [win.maximized, win.snapped, win.minimized, win.away, tiledKey, beginGesture, endGesture, stopWobble]);
+    const cancel = animateFlip(
+      el,
+      from,
+      to,
+      () => {
+        animCancel.current = null;
+        el.style.transform = '';
+        el.style.transformOrigin = '';
+        bar?.end();
+        endGesture();
+      },
+      bar
+        ? (r, p) => bar.frame({ left: origin + r.x, right: origin + r.x + r.width, fill: maximizing ? p : 1 - p })
+        : undefined,
+    );
+    animCancel.current = bar
+      ? () => {
+          cancel();
+          bar.end();
+        }
+      : cancel;
+  }, [win.id, win.maximized, win.snapped, win.minimized, win.away, tiledKey, beginGesture, endGesture, stopWobble]);
 
   // A window going off to another workspace takes keyboard focus with it,
   // or typing would go on into a window nobody can see.

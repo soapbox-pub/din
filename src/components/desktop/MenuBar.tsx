@@ -1,6 +1,6 @@
 import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff } from 'lucide-react';
 import { WifiXIcon } from '@/components/icons/WifiXIcon';
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarShape } from '@/lib/avatarShape';
@@ -34,6 +34,7 @@ import { AppIcon } from '@/components/desktop/AppIcon';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { useTaskbarEdge } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';
+import { onMenuBarHandoffFrame, useMenuBarHandoff } from '@/lib/menuBarHandoff';
 import { getWindowChrome, TEAR_AWAY_PX } from '@/lib/windowChromes';
 import type { WindowChrome } from '@/contexts/WindowChromeContext';
 import { WifiPopoverBody, WifiSignalIcon } from '@/components/desktop/WifiIndicator';
@@ -107,7 +108,8 @@ import { APP_MIME } from '@/components/desktop/icons/wallpaper';
  * window's title bar - its app's accent, or the default translucent chrome -
  * so the two read as one seamless strip. A frameless window draws its own
  * title bar, whose color isn't known, so above one the bar turns solid:
- * white in light mode, black in dark mode.
+ * white in light mode, black in dark mode. A window maximizing brings its
+ * color up into the bar as it grows, and takes it back down as it restores.
  */
 export function MenuBar() {
   // Subscribes to window state (needed for the fullscreen scrim), so this
@@ -117,15 +119,29 @@ export function MenuBar() {
   // Only a window maximized beneath it - on the primary monitor - counts,
   // and of several, the one on top.
   const primaryId = primaryArea(useWorkAreas()).id;
-  const fullscreen = windows.reduce<(typeof windows)[number] | null>(
-    (top, w) =>
-      w.maximized && isShown(w) && (w.monitor === null || w.monitor === primaryId) &&
-      (!top || w.z > top.z)
-        ? w
-        : top,
-    null,
-  );
-  const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
+  const onPrimary = (w: BarWindow) => w.monitor === null || w.monitor === primaryId;
+  const topMaximized = (except?: string) =>
+    windows.reduce<BarWindow | null>(
+      (top, w) => (w.id !== except && w.maximized && isShown(w) && onPrimary(w) && (!top || w.z > top.z) ? w : top),
+      null,
+    );
+  const fullscreen = topMaximized();
+  // While the bar's window animates in or out (src/lib/menuBarHandoff.ts),
+  // the bar looks as it does without it, and the window's color grows over
+  // that (or shrinks away) along with the window.
+  const handoff = useMenuBarHandoff();
+  const mover = handoff ? windows.find((w) => w.id === handoff.windowId) : undefined;
+  let under = fullscreen;
+  let arriving: BarWindow | null = null;
+  if (handoff && mover && isShown(mover) && onPrimary(mover)) {
+    if (handoff.maximizing && fullscreen?.id === mover.id) {
+      under = topMaximized(mover.id);
+      arriving = mover;
+    } else if (!handoff.maximizing && !mover.maximized && (!fullscreen || mover.z > fullscreen.z)) {
+      arriving = mover;
+    }
+  }
+  const accent = under && !under.frameless ? under.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);
   const pull = usePullDown(fullscreen?.id ?? null);
@@ -150,16 +166,10 @@ export function MenuBar() {
         // bar must change with the title bar under it, in the same frame.
         // Hover highlights still fade.
         'relative z-20 grid h-9 cursor-default select-none grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 tracking-tight [&_button]:transition-[background-color,box-shadow,opacity]',
-        !fullscreen
-          ? 'bg-gradient-to-b from-background/60 via-background/25 to-transparent'
-          : fullscreen.frameless
-            ? 'bg-white dark:bg-black'
-            : !accent &&
-              // The window's default chrome, layer for layer: its frosted
-              // card body under the title bar's background wash.
-              'bg-card/90 backdrop-blur-xl before:absolute before:inset-0 before:-z-10 before:bg-background/80',
+        !under ? 'bg-gradient-to-b from-background/60 via-background/25 to-transparent' : titleBarSurface(under),
       )}
     >
+      {arriving && <HandoffFill win={arriving} />}
       <div className="flex min-w-0 items-center gap-1.5">
         <AppsMenu />
         <FocusedAppName appId={focused?.appId ?? null} />
@@ -185,6 +195,57 @@ export function MenuBar() {
     </header>
   );
 }
+
+type BarWindow = ReturnType<typeof useWindowManager>['windows'][number];
+
+/**
+ * The bar's surface over a maximized window, besides an accent (which is
+ * an inline background color): solid above a frameless window, whose title
+ * bar's color isn't known, and otherwise the window's default chrome, layer
+ * for layer: its frosted card body under the title bar's background wash.
+ */
+function titleBarSurface(w: BarWindow): string | false {
+  if (w.frameless) return 'bg-white dark:bg-black';
+  return !w.accent && 'bg-card/90 backdrop-blur-xl before:absolute before:inset-0 before:-z-10 before:bg-background/80';
+}
+
+/**
+ * The color of a window maximizing into the bar, or restoring out of it,
+ * clipped each frame to the window's painted width and grown up from the
+ * bar's bottom edge as far as the animation has got, so the window seems to
+ * reach the top of the screen as it lands. Its corners round off like the
+ * window's until it's all the way in.
+ */
+function HandoffFill({ win }: { win: BarWindow }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(
+    () =>
+      onMenuBarHandoffFrame((f) => {
+        const el = ref.current;
+        const bar = el?.parentElement?.getBoundingClientRect();
+        if (!el || !bar) return;
+        const fill = Math.min(1, Math.max(0, f.fill));
+        const left = Math.max(0, f.left - bar.left);
+        const right = Math.max(0, bar.right - f.right);
+        const round = HANDOFF_RADIUS_PX * (1 - fill);
+        el.style.clipPath = `inset(${bar.height * (1 - fill)}px ${right}px 0 ${left}px round ${round}px ${round}px 0 0)`;
+      }),
+    [],
+  );
+  const accent = !win.frameless ? win.accent : null;
+  return (
+    <div
+      ref={ref}
+      aria-hidden
+      // Hidden until its first frame, which is normally already there.
+      style={{ clipPath: 'inset(100% 0 0 0)', ...(accent ? { backgroundColor: accent } : undefined) }}
+      className={cn('pointer-events-none absolute inset-0 -z-10 isolate', titleBarSurface(win))}
+    />
+  );
+}
+
+/** A floating window's corner radius (rounded-xl), for HandoffFill. */
+const HANDOFF_RADIUS_PX = 12;
 
 /** A press on the bar that isn't on one of its controls. */
 function onEmptyBar(e: React.PointerEvent | React.MouseEvent): boolean {

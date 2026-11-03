@@ -288,13 +288,16 @@ const FLIP_DURATION_MS = 250;
  * plays a compositor-only translate+scale that starts at `from` and eases
  * (cubic ease-out, decelerating into place) to identity. Same contract as
  * animateGenie: first frame painted synchronously, `onDone` owns cleanup and
- * never fires on cancel; returns a cancel function.
+ * never fires on cancel; returns a cancel function. `onFrame`, if given, gets
+ * each frame's painted rect (in the same coordinates as `from` and `to`) and
+ * eased progress, from the first frame to the last.
  */
 export function animateFlip(
   el: HTMLElement,
   from: GenieRect,
   to: GenieRect,
   onDone: () => void,
+  onFrame?: (rect: GenieRect, progress: number) => void,
 ): () => void {
   el.style.transformOrigin = '0 0';
   let raf = 0;
@@ -308,6 +311,15 @@ export function animateFlip(
     const sx = lerp(from.width / to.width, 1, p);
     const sy = lerp(from.height / to.height, 1, p);
     el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sx}, ${sy})`;
+    onFrame?.(
+      {
+        x: lerp(from.x, to.x, p),
+        y: lerp(from.y, to.y, p),
+        width: lerp(from.width, to.width, p),
+        height: lerp(from.height, to.height, p),
+      },
+      p,
+    );
     if (t < 1) {
       raf = requestAnimationFrame(frame);
     } else {
