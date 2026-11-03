@@ -3178,6 +3178,30 @@ function undimCapture(image: Electron.NativeImage): Electron.NativeImage {
   });
 }
 
+/**
+ * Place a capture of `captured` where it sits in `whole` (both in DIPs), on
+ * a transparent image the size of `whole` at the capture's resolution.
+ */
+function padCapture(
+  image: Electron.NativeImage,
+  captured: Electron.Rectangle,
+  whole: Electron.Rectangle,
+): Electron.NativeImage {
+  const size = image.getSize();
+  const ratio = size.width / captured.width;
+  const outW = Math.round(whole.width * ratio);
+  const outH = Math.round(whole.height * ratio);
+  const dx = Math.round((captured.x - whole.x) * ratio);
+  const dy = Math.round((captured.y - whole.y) * ratio);
+  const src = image.toBitmap();
+  const out = Buffer.alloc(outW * outH * 4);
+  const rowW = Math.min(size.width, outW - dx);
+  for (let row = 0; row < size.height && dy + row < outH; row++) {
+    src.copy(out, ((dy + row) * outW + dx) * 4, row * size.width * 4, (row * size.width + rowW) * 4);
+  }
+  return nativeImage.createFromBitmap(out, { width: outW, height: outH });
+}
+
 
 /**
  * Brightness, volume and playback media keys (mic-mute is read from evdev; see
@@ -3278,7 +3302,9 @@ function registerScreenshotHandlers(): void {
   // bitmap and warps that cheap <img> instead (see src/components/desktop/
   // Window.tsx). The rect is in the window's DIPs (the preload converts from
   // zoomed CSS pixels) relative to the shell content's top-left;
-  // capturePage returns it at device resolution. Asked for a
+  // capturePage returns it at device resolution. A window partly off the
+  // screen comes back the size of the whole rect, its hidden part
+  // transparent, so the effect lines it up with the window. Asked for a
   // smaller `scale` (cursor effects' water wants the whole screen, fast), it
   // comes back shrunk and as a JPEG, which is far quicker to encode.
   ipcMain.handle('screenshot:captureRegion', async (event, rect, options) => {
@@ -3287,19 +3313,26 @@ function registerScreenshotHandlers(): void {
       throw new Error('Shell window unavailable');
     }
     const [contentW, contentH] = shellWindow.getContentSize();
-    const clamp = (value: unknown, lo: number, hi: number): number => {
+    const num = (value: unknown): number => {
       const n = Math.round(Number(value));
       if (!Number.isFinite(n)) throw new Error('Invalid capture region');
-      return Math.max(lo, Math.min(hi, n));
+      return n;
     };
-    const x = clamp(rect?.x, 0, contentW);
-    const y = clamp(rect?.y, 0, contentH);
-    const width = clamp(rect?.width, 1, contentW - x);
-    const height = clamp(rect?.height, 1, contentH - y);
+    const asked = { x: num(rect?.x), y: num(rect?.y), width: Math.max(1, num(rect?.width)), height: Math.max(1, num(rect?.height)) };
+    const x = Math.max(0, Math.min(contentW - 1, asked.x));
+    const y = Math.max(0, Math.min(contentH - 1, asked.y));
+    const width = Math.max(1, Math.min(contentW, asked.x + asked.width) - x);
+    const height = Math.max(1, Math.min(contentH, asked.y + asked.height) - y);
     let image = undimCapture(await shellWindow.webContents.capturePage({ x, y, width, height }));
     let size = image.getSize();
     if (size.width === 0 || size.height === 0) {
       throw new Error('Captured an empty image');
+    }
+    const clipped = x !== asked.x || y !== asked.y || width !== asked.width || height !== asked.height;
+    // Not for a rect much bigger than the screen, which can't be a window.
+    if (clipped && asked.width * asked.height <= 4 * contentW * contentH) {
+      image = padCapture(image, { x, y, width, height }, asked);
+      size = image.getSize();
     }
     const scale = Number(options?.scale);
     if (Number.isFinite(scale) && scale >= 0.1 && scale < 1) {
