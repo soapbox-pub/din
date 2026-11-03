@@ -13,63 +13,16 @@ export function DinProvider({ din, children }: { din: Din; children: ReactNode }
 }
 
 const MAXIMIZED = '(display-state: maximized)';
-const INTERACTIVE = 'button, input, textarea, select, a[href], [role="tab"], [data-window-no-drag]';
-const FIELD = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
 
 /**
- * A stretch of title bar in a `custom` frame: pressing its empty space moves
- * the window, double-clicking maximizes it and right-clicking opens Din's
- * window menu. Buttons, tabs, fields and `[data-window-no-drag]` inside keep
- * their own clicks, and fields their native menu.
+ * A stretch of title bar in a `custom` frame: CSS `app-region: drag`, so
+ * pressing its empty space moves the window, double-clicking maximizes it
+ * and right-clicking opens Din's window menu (the runtime does each).
+ * Buttons, tabs, fields and `[data-window-no-drag]` inside keep their own
+ * clicks, and fields their native menu.
  */
-export function WindowDragRegion({ className, children, onPointerDown, onDoubleClick, onContextMenu, ...props }: ComponentProps<'div'>) {
-  const din = useDin();
-  return (
-    <div
-      {...props}
-      data-din-region="drag"
-      onPointerDown={(e) => {
-        onPointerDown?.(e);
-        if (e.defaultPrevented || e.button !== 0) return;
-        if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
-        if (!e.currentTarget.contains(e.target as Node)) return;
-        e.preventDefault();
-        // The move is handed to the desktop only once the pointer has moved
-        // a little: the desktop then takes the whole gesture, and a click or
-        // double-click would never come back here.
-        const down = e.nativeEvent;
-        const move = (m: PointerEvent) => {
-          if (Math.hypot(m.clientX - down.clientX, m.clientY - down.clientY) < 3) return;
-          stop();
-          din.window.beginMove(down);
-        };
-        const stop = () => {
-          window.removeEventListener('pointermove', move);
-          window.removeEventListener('pointerup', stop);
-          window.removeEventListener('pointercancel', stop);
-        };
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', stop);
-        window.addEventListener('pointercancel', stop);
-      }}
-      onDoubleClick={(e) => {
-        onDoubleClick?.(e);
-        if (e.defaultPrevented || !e.currentTarget.contains(e.target as Node)) return;
-        if ((e.target as HTMLElement).closest(`${INTERACTIVE}, ${FIELD}`)) return;
-        void (matchMedia(MAXIMIZED).matches ? window.restore() : window.maximize());
-      }}
-      onContextMenu={(e) => {
-        onContextMenu?.(e);
-        if (e.defaultPrevented || !e.currentTarget.contains(e.target as Node)) return;
-        if ((e.target as HTMLElement).closest(FIELD)) return;
-        e.preventDefault();
-        din.window.showWindowMenu({ x: e.clientX, y: e.clientY });
-      }}
-      className={cn('touch-none select-none', className)}
-    >
-      {children}
-    </div>
-  );
+export function WindowDragRegion({ className, ...props }: ComponentProps<'div'>) {
+  return <div {...props} className={cn('touch-none select-none [app-region:drag]', className)} />;
 }
 
 /** Minimize, maximize and close, in the title bar's colors. */

@@ -599,11 +599,56 @@ export function installDin(transport: Transport): void {
     beginMove: (e) => gesture(e, request('window.beginMove', { at: point(e) })),
     beginResize: (edge, e) => gesture(e, request('window.beginResize', { edge, at: point(e) })),
     requestClose: () => tell('window.requestClose'),
-    showWindowMenu: (at) => tell('window.menu', { at }),
     tabDragMove: (at, label) => request('window.tabDragMove', { at, label }),
     tabDragEnd: (at) => request('window.tabDragEnd', { at }),
     onTabHover: (cb) => tabHovers.on(cb),
   };
+
+  // CSS `app-region: drag`, from the Window Controls Overlay draft, is the
+  // window's title bar: pressing it moves the window, double-clicking
+  // maximizes it and right-clicking opens Din's window menu. Controls and
+  // fields inside it, and anything `app-region: no-drag`, keep their own
+  // clicks. Each runs after the page's own listeners, which can cancel it.
+  const KEEPS_CLICKS = 'button, input, textarea, select, a[href], [role="tab"], [contenteditable]:not([contenteditable="false"]), [data-window-no-drag]';
+  const dragRegion = (target: EventTarget | null): boolean => {
+    for (let el = target instanceof Element ? target : null; el; el = el.parentElement) {
+      if (el.matches(KEEPS_CLICKS)) return false;
+      const style = getComputedStyle(el);
+      const region = style.getPropertyValue('app-region') || style.getPropertyValue('-webkit-app-region');
+      if (region === 'drag') return true;
+      if (region === 'no-drag') return false;
+    }
+    return false;
+  };
+  window.addEventListener('pointerdown', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || !e.isPrimary || !dragRegion(e.target)) return;
+    e.preventDefault();
+    // The move is handed to the desktop only once the pointer has moved a
+    // little: the desktop then takes the whole gesture, and a click or
+    // double-click would never come back here.
+    const move = (m: PointerEvent) => {
+      if (m.pointerId !== e.pointerId || Math.hypot(m.clientX - e.clientX, m.clientY - e.clientY) < 3) return;
+      stop();
+      void win.beginMove(e);
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  });
+  window.addEventListener('dblclick', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || !dragRegion(e.target)) return;
+    void request(state.maximized ? 'window.restore' : 'window.maximize');
+  });
+  window.addEventListener('contextmenu', (e) => {
+    if (e.defaultPrevented || !dragRegion(e.target)) return;
+    e.preventDefault();
+    tell('window.menu', { at: point(e) });
+  });
 
   watchDocumentHead({
     title: (title) => tell('window.setTitle', { title }),

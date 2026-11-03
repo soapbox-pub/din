@@ -217,6 +217,14 @@ export interface FrameStyle {
  * `screen.availLeft`, `availTop`, `availWidth` and `availHeight` for the
  * work area of its monitor.
  *
+ * The app's title bar, in a `custom` or `none` frame, is CSS
+ * `app-region: drag` (from the Window Controls Overlay draft), as
+ * `<WindowDragRegion>` sets: pressing it and moving the pointer moves the
+ * window, double-clicking maximizes or restores it, and right-clicking
+ * opens Din's window menu. Buttons, links, fields, tabs and anything
+ * `app-region: no-drag` (or `[data-window-no-drag]`) inside keep their own
+ * clicks, and the page's own listeners can cancel each first.
+ *
  * When the user (or the desktop) closes the window, it fires `beforeunload`
  * first, as a browser does before closing a tab, while the page listens for
  * one. Cancelling it (`preventDefault()`, or a `returnValue`) keeps the
@@ -251,7 +259,8 @@ export interface DinWindow {
 
   /**
    * Start moving the window from a pointerdown inside the app (what
-   * `<WindowDragRegion>` does). The desktop follows the pointer until it's
+   * `app-region: drag` does, for a drag that turns into a move partway, as
+   * a window's only tab does). The desktop follows the pointer until it's
    * released, with the same snapping, tear-off and wobble as the title bar.
    * Resolves when it's released (the app never sees that release itself),
    * or at once if the window can't move now.
@@ -265,12 +274,6 @@ export interface DinWindow {
    * a `beforeunload`. The web's `window.close()` closes it without asking.
    */
   requestClose(): void;
-  /**
-   * Din's window menu (Minimize, Maximize, tiling, workspaces, Close) at a
-   * point in the window: what right-clicking a title bar opens.
-   * `<WindowDragRegion>` does this itself.
-   */
-  showWindowMenu(at: Point): void;
   /**
    * A tab being dragged off this window's tab strip, at a point in this
    * window (the strip keeps the pointer captured). The desktop shows its

@@ -85,7 +85,7 @@ For React apps, `src/sdk/react` adds:
 | Piece | Replaces | Does |
 |---|---|---|
 | `<DinProvider din>` / `useDin()` | `useWindowActions`, the window contexts | The connected `din`, anywhere in the tree |
-| `<WindowDragRegion>` | the same, from `WindowHeader.tsx` | A stretch of header that moves the window, maximizes on double-click, opens the window menu on right-click |
+| `<WindowDragRegion>` | the same, from `WindowHeader.tsx` | A stretch of header (`app-region: drag`) that moves the window, maximizes on double-click, opens the window menu on right-click |
 | `<WindowControls>` | the same | Minimize, maximize, close, in the title bar's colors |
 | `useWindowFocused()`, `useDocumentVisible()` | `useWindowIsTop`, `useWindowVisible` | `document.hasFocus()` and `document.visibilityState`, re-rendering on change ([window.md](window.md#state)) |
 | `useWindowSize()`, `useSnapped()` | `useWindowFrame().win` | `outerWidth` and `outerHeight` (on every step of a resize), and `din.window.snapped` |

@@ -131,15 +131,18 @@ function Header() {
 }
 ```
 
-- **`<WindowDragRegion>`**: dragging its empty space moves the window
+- **`<WindowDragRegion>`**: a `div` with CSS `app-region: drag`, from the
+  Window Controls Overlay draft, which is what makes a title bar in any
+  page, React or not (`touch-action: none` and `user-select: none` suit
+  it too). The runtime answers for it, since the engine doesn't inside a
+  webview: dragging its empty space moves the window
   (`din.window.beginMove`, once the pointer has moved 3 px, so clicks and
   double-clicks still reach the app: the desktop takes over the whole
-  gesture once it has it); double-click maximizes; right-click opens
-  Din's window menu (`din.menus.popup` with the window's items). Presses
-  on `button`, `input`, `textarea`, `[role="tab"]` and
-  `[data-window-no-drag]` are the app's, as in Din's title bar today. Plain
-  HTML can opt in with `data-din-region="drag"`; the SDK handles it the
-  same way. CSS `app-region: drag` does nothing inside a webview.
+  gesture once it has it); double-click maximizes or restores; right-click
+  opens Din's window menu. Presses on buttons, links, fields, `[role="tab"]`,
+  `[data-window-no-drag]` and anything `app-region: no-drag` are the app's,
+  as in Din's title bar. Each runs after the page's own listeners, and a
+  listener that cancels the event (`preventDefault()`) keeps it.
 - **`<WindowControls>`**: minimize, maximize/restore and close, colored
   from `din.window.frameStyle` (the accent, and whether it's dark).
   Close goes through the window's close request like any other close.
@@ -262,6 +265,7 @@ In React, `useCloseGuard(() => dirty && (askToSave(), true))` from
 
 ## The window menu
 
-`din.window.showWindowMenu({ x, y })` opens Din's window menu (Minimize,
-Maximize, tiling, workspaces, displays, Close) at a point in the window,
-drawn by the desktop. `<WindowDragRegion>` does it on right-click.
+Right-clicking a stretch of `app-region: drag` opens Din's window menu
+(Minimize, Maximize, tiling, workspaces, displays, Close) where it was
+clicked, drawn by the desktop, unless the page's own `contextmenu`
+listener cancelled it.

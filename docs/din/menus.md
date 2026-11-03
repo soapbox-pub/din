@@ -82,7 +82,8 @@ their native one.
 
 ## The window menu
 
-Right-clicking a `<WindowDragRegion>` opens Din's window menu (Minimize,
+Right-clicking a title bar the app draws (anything `app-region: drag`, as
+`<WindowDragRegion>` is) opens Din's window menu (Minimize,
 Maximize, tiling, Move to Workspace, Move to Display, Close), drawn by the
 desktop.
 The app doesn't build it.
