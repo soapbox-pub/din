@@ -2502,11 +2502,22 @@ expose('screenshot', {
    * Capture just one window's on-screen rectangle (CSS pixels, relative to
    * the shell content's top-left), for the genie minimize/restore animation.
    * Resolves to { dataUrl, width, height } (PNG at device resolution, or a
-   * JPEG shrunk by `options.scale`).
+   * JPEG shrunk by `options.scale`). capturePage takes the window's own
+   * pixels, which the interface zoom makes smaller than CSS pixels, so the
+   * rect is converted here.
    * @param {{ x: number, y: number, width: number, height: number }} rect
    * @param {{ scale?: number }} [options]
    */
-  captureRegion: (rect, options) => ipcRenderer.invoke('screenshot:captureRegion', rect, options),
+  captureRegion: (rect, options) => {
+    const zoom = webFrame.getZoomFactor();
+    const scaled = {
+      x: rect.x * zoom,
+      y: rect.y * zoom,
+      width: rect.width * zoom,
+      height: rect.height * zoom,
+    };
+    return ipcRenderer.invoke('screenshot:captureRegion', scaled, options);
+  },
 
   /**
    * Put a PNG capture on the system clipboard.

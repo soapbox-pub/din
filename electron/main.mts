@@ -3276,8 +3276,9 @@ function registerScreenshotHandlers(): void {
   // projective transform can't be a compositor-only op (the guest surface
   // re-rasterizes every frame), so the renderer snapshots the window to a
   // bitmap and warps that cheap <img> instead (see src/components/desktop/
-  // Window.tsx). The rect is in CSS pixels relative to the shell content's
-  // top-left; capturePage returns it at device resolution. Asked for a
+  // Window.tsx). The rect is in the window's DIPs (the preload converts from
+  // zoomed CSS pixels) relative to the shell content's top-left;
+  // capturePage returns it at device resolution. Asked for a
   // smaller `scale` (cursor effects' water wants the whole screen, fast), it
   // comes back shrunk and as a JPEG, which is far quicker to encode.
   ipcMain.handle('screenshot:captureRegion', async (event, rect, options) => {
