@@ -148,6 +148,15 @@ is_live() {
     [[ $(lsblk -dno TRAN "/dev/$disk") == usb ]]
 }
 
+# Whether din-update.service is running. A oneshot is `activating` for its
+# whole run, which `systemctl is-active` doesn't count as active.
+running() {
+  case $(systemctl is-active "$UNIT" 2>/dev/null || true) in
+    active | activating | deactivating | reloading) return 0 ;;
+  esac
+  return 1
+}
+
 src_git() {
   git -C "$SRC" "$@"
 }
@@ -300,12 +309,13 @@ status() {
     staged=$(revision_of "$PROFILE")
   fi
   [[ -e $AUTO_OFF ]] && auto=false
-  systemctl is-active -q "$UNIT" && active=true
+  running && active=true
   load_state
   # A run that was stopped (the computer turned off, say) never finished.
+  # That's nothing for the user to act on: the next one starts over.
   if ! $active && [[ $phase == checking || $phase == updating ]]; then
-    phase=failed
-    error="The last update stopped before it finished."
+    phase=idle
+    error=""
     reason=""
   fi
   find_custom
@@ -368,7 +378,7 @@ needs_for() {
 # $1 is what was asked: `start`, or `replace`.
 start() {
   is_live && die "A live system isn't updated. Install DinOS to get updates."
-  if systemctl is-active -q "$UNIT"; then
+  if running; then
     [[ ${1:-start} == start ]] && return
     die "An update is running. Try again when it finishes."
   fi
@@ -407,7 +417,7 @@ build_local() {
   local commit=$1 next
   is_live && die "A live system isn't updated."
   [[ $commit =~ ^[0-9a-f]{40}$ ]] || die "usage: din-update local <commit>"
-  systemctl is-active -q "$UNIT" && die "An update is running. Try again when it finishes."
+  running && die "An update is running. Try again when it finishes."
   echo "local $commit" >"$REQUEST"
   # A oneshot: this waits for the run, whose failure is in STATE.
   systemctl start "$UNIT" 2>/dev/null || true
