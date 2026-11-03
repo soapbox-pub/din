@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SlidersHorizontal, SquarePen, Undo2 } from 'lucide-react';
+import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
@@ -18,7 +18,7 @@ import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { Composer, type ComposerHandle, type SlashCommand } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
-import { AddProviderDialog, ManageProvidersDialog } from '@/shared/assistant/Providers';
+import { PROVIDER_WINDOW_APP_ID, providerWindowParams } from '@/shared/assistant/providerWindow';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
 import { ForkDialog, type UserMessage } from '@/shared/assistant/ForkDialog';
@@ -287,9 +287,8 @@ function AssistantWindow() {
   // The conversation a tab's Delete is asking about.
   const [deleting, setDeleting] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  // Add provider (/connect, the menu) and Manage providers, over the window.
-  const [providers, setProviders] = useState<'add' | 'manage' | null>(null);
-  const addProvider = () => setProviders('add');
+  // Add provider (/connect, the menu), in the desktop's provider window.
+  const addProvider = () => host.openApp(PROVIDER_WINDOW_APP_ID, providerWindowParams());
   const searchRef = useRef<HTMLInputElement>(null);
   const conversationRef = useRef<ConversationHandle>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
@@ -567,7 +566,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
-        menu={<AssistantMenu onAddProvider={addProvider} onManageProviders={() => setProviders('manage')} />}
+        menu={<AssistantMenu onAddProvider={addProvider} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -687,14 +686,12 @@ function AssistantWindow() {
         onOpenChange={(open) => !open && setDeleting(null)}
         onDeleted={() => deleting && removeSessions(new Set([deleting]))}
       />
-      <AddProviderDialog open={providers === 'add'} onOpenChange={(open) => !open && setProviders(null)} />
-      <ManageProvidersDialog open={providers === 'manage'} onOpenChange={(open) => !open && setProviders(null)} />
     </div>
   );
 }
 
-/** The app's menu, in the list's title bar: providers, and Settings → Assistant for the rest. */
-function AssistantMenu({ onAddProvider, onManageProviders }: { onAddProvider: () => void; onManageProviders: () => void }) {
+/** The app’s menu, in the list’s title bar: Add Provider, and Settings → Assistant (providers among it) for the rest. */
+function AssistantMenu({ onAddProvider }: { onAddProvider: () => void }) {
   const { openApp } = useAssistantHost();
   return (
     <DropdownMenu>
@@ -706,9 +703,6 @@ function AssistantMenu({ onAddProvider, onManageProviders }: { onAddProvider: ()
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem onSelect={onAddProvider}>
           <Plus aria-hidden /> Add Provider…
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onManageProviders}>
-          <SlidersHorizontal aria-hidden /> Manage Providers…
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openApp('settings', { section: 'assistant' })}>

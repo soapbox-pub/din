@@ -10,7 +10,6 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -33,6 +32,7 @@ import {
   type ClaudeSetupState,
 } from '@/shared/assistant/claudeSetup';
 import { useAssistantHost } from '@/shared/assistant/host';
+import { PROVIDER_WINDOW_APP_ID, providerWindowParams } from '@/shared/assistant/providerWindow';
 import { cn } from '@/lib/utils';
 
 /** Each provider's base URL, from its models, for its icon. */
@@ -84,20 +84,18 @@ const KEY_PAGES: Record<string, string> = {
 
 /**
  * The AI providers OpenCode is connected to, with controls to add one,
- * replace one's key (or sign in again), and remove one. Providers are
- * OpenCode's own (its credential store), so ones added from a Terminal show
- * up here and the other way round.
+ * replace one's key (or sign in again), and remove one, the first two in
+ * the provider window (providerWindow.ts). Providers are OpenCode's own
+ * (its credential store), so ones added from a Terminal show up here and
+ * the other way round.
  */
 export function ProviderList({ description = true }: { description?: boolean }) {
   const ready = useAssistantReady();
   const { data: integrations, isLoading } = useAssistantIntegrations();
   const baseURLs = useProviderBaseURLs();
   const refresh = useRefreshProviders();
-  const { notify } = useAssistantHost();
-  const [dialog, setDialog] = useState<{ open: boolean; integration: IntegrationInfo | null }>({
-    open: false,
-    integration: null,
-  });
+  const { notify, openApp } = useAssistantHost();
+  const openProvider = (provider: string | null) => openApp(PROVIDER_WINDOW_APP_ID, providerWindowParams(provider));
   const remove = useMutation({
     mutationFn: (ids: string[]) => Promise.all(ids.map((id) => assistantApi.removeCredential(id))),
     onSuccess: refresh,
@@ -117,7 +115,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" disabled={!ready} onClick={() => setDialog({ open: true, integration: null })}>
+        <Button variant="outline" size="sm" disabled={!ready} onClick={() => openProvider(null)}>
           <Plus className="size-3.5" aria-hidden /> Add provider
         </Button>
       </div>
@@ -163,7 +161,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
                   className="size-8 text-muted-foreground hover:text-foreground"
                   aria-label={`Edit ${name}`}
                   title={problem ? 'Fix it' : 'Replace the key, or sign in again'}
-                  onClick={() => setDialog({ open: true, integration })}
+                  onClick={() => openProvider(integration.id)}
                 >
                   <Pencil className="size-4" aria-hidden />
                 </Button>
@@ -185,89 +183,76 @@ export function ProviderList({ description = true }: { description?: boolean }) 
           })}
         </ul>
       )}
-
-      <AddProviderDialog
-        open={dialog.open}
-        initial={dialog.integration}
-        onOpenChange={(open) => setDialog((current) => ({ ...current, open }))}
-      />
     </div>
   );
 }
 
-/** The provider list in a dialog, for the model picker's "Manage providers". */
-export function ManageProvidersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Manage providers</DialogTitle>
-          <DialogDescription>The services whose models the assistant may use. OpenCode’s free models need none.</DialogDescription>
-        </DialogHeader>
-        <ProviderList description={false} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 /**
- * Pick a provider to connect (Claude and OpenRouter first, the rest under
- * Other providers), or (given `initial`) reconnect that one.
+ * The provider window's content: pick a provider to connect (Claude and
+ * OpenRouter first, the rest under Other providers), or (given `provider`)
+ * reconnect that one. `onTitle` hears the window's title as it changes;
+ * `onDone` is called once it's connected.
  */
-export function AddProviderDialog({
-  open,
-  initial = null,
-  onOpenChange,
+export function AddProvider({
+  provider = null,
+  onDone,
+  onTitle,
 }: {
-  open: boolean;
-  initial?: IntegrationInfo | null;
-  onOpenChange: (open: boolean) => void;
+  provider?: string | null;
+  onDone: () => void;
+  onTitle?: (title: string) => void;
 }) {
-  const { data: integrations } = useAssistantIntegrations(open);
-  const [picked, setPicked] = useState<IntegrationInfo | null>(initial);
+  const { data: integrations } = useAssistantIntegrations();
+  const [pickedID, setPickedID] = useState<string | null>(provider);
   const [browsing, setBrowsing] = useState(false);
-  const [opened, setOpened] = useState({ open, initial });
-  if (opened.open !== open || opened.initial !== initial) {
-    setOpened({ open, initial });
-    if (open) {
-      setPicked(initial);
-      setBrowsing(false);
-    }
-  }
+  const picked = (pickedID && integrations?.find((i) => i.id === pickedID)) || null;
   const editing = picked !== null && picked.connections.length > 0;
   const name = picked ? providerName(picked.id, picked.name) : '';
-  const back = picked && !initial ? () => setPicked(null) : browsing && !picked ? () => setBrowsing(false) : null;
+  const back = pickedID && !provider ? () => setPickedID(null) : browsing && !pickedID ? () => setBrowsing(false) : null;
+  const title = picked
+    ? editing && picked.id !== CLAUDE_PROVIDER
+      ? `Edit ${name}`
+      : name
+    : browsing
+      ? 'Other Providers'
+      : 'Add an AI Provider';
+  const onTitleRef = useRef(onTitle);
+  useEffect(() => {
+    onTitleRef.current = onTitle;
+  });
+  useEffect(() => onTitleRef.current?.(title), [title]);
+  const pick = (integration: IntegrationInfo) => setPickedID(integration.id);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md">
-        <DialogHeader className="border-b border-border/60 p-4">
-          <DialogTitle className="flex items-center gap-2">
-            {back && (
-              <Button variant="ghost" size="icon" className="-ml-2 size-7" aria-label="Back" onClick={back}>
-                <ArrowLeft className="size-4" aria-hidden />
-              </Button>
-            )}
-            {picked && <ProviderIcon providerID={picked.id} size={20} className="text-foreground/80" />}
-            {picked ? (editing && picked.id !== CLAUDE_PROVIDER ? `Edit ${name}` : name) : browsing ? 'Other providers' : 'Add an AI provider'}
-          </DialogTitle>
-          <DialogDescription>
-            {picked
-              ? picked.id === CLAUDE_PROVIDER
-                ? 'Your Claude plan, through Claude Code on this computer. Din sets it all up.'
-                : editing
-                  ? 'Replace its API key, or sign in again.'
-                  : 'Connect it with an API key, or sign in.'
-              : browsing
-                ? 'Every service OpenCode can use.'
-                : 'Choose the service whose models the assistant uses.'}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="shrink-0 space-y-1 border-b border-border/60 p-4">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          {back && (
+            <Button variant="ghost" size="icon" className="-ml-2 size-7" aria-label="Back" onClick={back}>
+              <ArrowLeft className="size-4" aria-hidden />
+            </Button>
+          )}
+          {picked && <ProviderIcon providerID={picked.id} size={20} className="text-foreground/80" />}
+          {pickedID && !integrations ? <Skeleton className="h-6 w-32" /> : title}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {picked
+            ? picked.id === CLAUDE_PROVIDER
+              ? 'Your Claude plan, through Claude Code on this computer. Din sets it all up.'
+              : editing
+                ? 'Replace its API key, or sign in again.'
+                : 'Connect it with an API key, or sign in.'
+            : browsing
+              ? 'Every service OpenCode can use.'
+              : 'Choose the service whose models the assistant uses.'}
+        </p>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {picked ? (
           picked.id === CLAUDE_PROVIDER ? (
-            <ClaudeSetup key={picked.id} onDone={() => onOpenChange(false)} />
+            <ClaudeSetup key={picked.id} onDone={onDone} />
           ) : (
-            <ConnectProvider key={picked.id} integration={picked} onDone={() => onOpenChange(false)} />
+            <ConnectProvider key={picked.id} integration={picked} onDone={onDone} />
           )
         ) : !integrations ? (
           <div className="space-y-3 p-4">
@@ -275,12 +260,12 @@ export function AddProviderDialog({
             <Skeleton className="h-16 w-full rounded-xl" />
           </div>
         ) : browsing ? (
-          <AllProviders integrations={integrations} onPick={setPicked} />
+          <AllProviders integrations={integrations} onPick={pick} />
         ) : (
-          <FeaturedProviders integrations={integrations} onPick={setPicked} onOther={() => setBrowsing(true)} />
+          <FeaturedProviders integrations={integrations} onPick={pick} onOther={() => setBrowsing(true)} />
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
@@ -375,13 +360,12 @@ function AllProviders({ integrations, onPick }: { integrations: IntegrationInfo[
 /**
  * Claude, set up for the user from start to end (claudeSetup.ts): Claude
  * Code installed if it isn't, signed in to their Claude plan in the browser
- * if it isn't, and OpenCode connected to it. Closing the dialog leaves it
- * going, in the provider list; where the dialog would cover the sign-in
- * page (the desktop's), it closes itself for it.
+ * if it isn't, and OpenCode connected to it. Closing the window leaves it
+ * going, in the provider list.
  */
 function ClaudeSetup({ onDone }: { onDone: () => void }) {
   const refresh = useRefreshProviders();
-  const { notify, openUrl, dialogsOverWindows } = useAssistantHost();
+  const { notify, openUrl } = useAssistantHost();
   const state = useClaudeSetup();
   const hooks = useRef({ refresh, notify, openUrl, onDone });
   useEffect(() => {
@@ -398,10 +382,10 @@ function ClaudeSetup({ onDone }: { onDone: () => void }) {
     });
   }, []);
 
-  // Done (or stopped), or signing in under a dialog that would cover the page.
+  // Done, or stopped.
   const [started, setStarted] = useState(false);
   if (state.step !== 'idle' && !started) setStarted(true);
-  const leave = (started && state.step === 'idle') || (dialogsOverWindows && state.step === 'signing-in');
+  const leave = started && state.step === 'idle';
   useEffect(() => {
     if (leave) hooks.current.onDone();
   }, [leave]);
@@ -409,7 +393,7 @@ function ClaudeSetup({ onDone }: { onDone: () => void }) {
   return <ClaudeSetupSteps state={state} />;
 }
 
-/** Claude being set up, outside the dialog that started it: in the provider list. */
+/** Claude being set up, outside the window that started it: in the provider list. */
 function ClaudeSetupCard() {
   const state = useClaudeSetup();
   if (state.step === 'idle') return null;
@@ -634,7 +618,7 @@ function ConnectProvider({ integration, onDone }: { integration: IntegrationInfo
   useEffect(() => {
     finishRef.current = finish;
   });
-  // Finishing closes the dialog, and this with it.
+  // Finishing closes the window, and this with it.
   useEffect(() => {
     if (outcome === 'complete') void finishRef.current();
   }, [outcome]);

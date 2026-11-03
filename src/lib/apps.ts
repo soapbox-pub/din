@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
+import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
@@ -21,6 +22,9 @@ const WebPopup = lazy(() =>
 );
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
+);
+const ProviderWindow = lazy(() =>
+  import('@/components/desktop/apps/ProviderWindow').then((m) => ({ default: m.ProviderWindow })),
 );
 const Screenshot = lazy(() =>
   import('@/components/desktop/apps/Screenshot').then((m) => ({ default: m.Screenshot })),
@@ -267,6 +271,21 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 960, height: 680 },
     keywords: ['preferences', 'control panel', 'system settings', 'options'],
     singleInstance: true,
+  },
+  {
+    // Adding an AI provider for the assistant, or reconnecting one, beside
+    // Settings rather than over it. Hidden from the launcher; opened from
+    // Settings → Assistant, the Assistant and the model picker with
+    // providerWindowParams().
+    id: PROVIDER_WINDOW_APP_ID,
+    name: 'AI Provider',
+    icon: '/icons/apps/settings.png',
+    component: ProviderWindow,
+    defaultSize: { width: 480, height: 560 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'settings',
   },
   {
     // What's running and what it costs, and ending what won't quit.

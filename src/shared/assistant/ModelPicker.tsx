@@ -11,7 +11,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ManageProvidersDialog } from '@/shared/assistant/Providers';
+import { useAssistantHost } from '@/shared/assistant/host';
 import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { useAssistantIntegrations } from '@/hooks/useAssistant';
 import { modelKey, providerName as displayName, type ModelInfo, type ModelRef } from '@/lib/assistant';
@@ -23,7 +23,7 @@ const PER_PROVIDER = 12;
 /**
  * Which model a conversation uses: the connected providers' models, newest
  * first, searchable by name or id, each with its provider's icon and a
- * rough price. "Manage providers" at the bottom adds, edits and removes them.
+ * rough price. "Manage providers" at the bottom opens Settings → Assistant, where they are.
  */
 export function ModelPicker({
   models,
@@ -42,7 +42,7 @@ export function ModelPicker({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [managing, setManaging] = useState(false);
+  const { openApp } = useAssistantHost();
   const [search, setSearch] = useState('');
   const { data: integrations } = useAssistantIntegrations();
   const selectedKey = value ? modelKey(value) : null;
@@ -150,7 +150,7 @@ export function ModelPicker({
                   forceMount
                   onSelect={() => {
                     setOpen(false);
-                    setManaging(true);
+                    openApp('settings', { section: 'assistant' });
                   }}
                   className="cursor-pointer gap-2"
                 >
@@ -162,7 +162,6 @@ export function ModelPicker({
           </Command>
         </PopoverContent>
       </Popover>
-      <ManageProvidersDialog open={managing} onOpenChange={setManaging} />
     </>
   );
 }

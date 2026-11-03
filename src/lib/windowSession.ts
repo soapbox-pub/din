@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { SNAP_ZONES, type SnapSplit, type SnapZone } from '@/lib/monitors';
 import type { TileNode } from '@/lib/tiling';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
+import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 
 /**
  * The windows Din had open, kept on this device so the next start reopens
@@ -32,7 +33,7 @@ export const MAX_WINDOW_STATE_BYTES = 512 * 1024;
  * with Din (a page's DevTools or pop-up, an unrecognized native window) or
  * are one-off tools.
  */
-const NOT_RESTORED = new Set(['devtools', WEB_POPUP_APP_ID, 'installer', 'native-window', 'screenshot']);
+const NOT_RESTORED = new Set(['devtools', WEB_POPUP_APP_ID, 'installer', 'native-window', 'screenshot', PROVIDER_WINDOW_APP_ID]);
 
 /**
  * Launch params that only mean something to the run that set them: a native

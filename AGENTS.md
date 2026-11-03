@@ -130,6 +130,14 @@ Designs should be polished and production-ready. Concrete rules:
 - **Reusable components**: consistent variants and feedback states (`hover`, `focus-visible`, `active`, `disabled`, `aria-invalid`). Use `cn()` for conditional classes and `class-variance-authority` for variants (copy an existing `ui/` component as a template).
 - **Custom over generic**: avoid template-looking headers — combine layered visuals, subtle motion, and brand colors. Generate custom images with available tools before reaching for stock.
 
+### Windows, Not Dialogs
+
+Din is a desktop with real windows; use them. **A modal dialog is for a quick question that has to be answered before anything else happens** — confirming a delete, naming a file, a password prompt — and little else. Anything bigger — a flow with steps or a list to browse, a form to fill in, something that waits on another window (signing in in the browser) or that the user may want to keep open while they look elsewhere — **opens a window of its own**, not a dialog. A desktop dialog covers every window on the screen and blocks the whole desktop; one in an app blocks its window. Either way the user can't move it aside, look something up, or copy from another app.
+
+- From the desktop's own UI (Settings, System Monitor, …): add a hidden app in `src/lib/apps.ts` with `dockAs` its parent (and `singleInstance` with an `at` nonce in its params when reopening it should restart it, as `src/shared/assistant/providerWindow.ts` does), opened with `useWindowActions().open(id, params)`; add it to `NOT_RESTORED` in `src/lib/windowSession.ts` if it shouldn't come back after a restart. An app opens the same window with `window.open(appLink(id, params))`.
+- In an app: a new window of the app itself (`window.open(appLink(null, params))`), with the windows talking over a `BroadcastChannel` (`docs/din/lifecycle.md`).
+- Settings, or any app, may have more than one window when that's what the task needs.
+
 ### Right-Click Menus
 
 Din is a desktop, and desktop users right-click. **Don't neglect the context menu.** Anything a user can act on (list rows, sidebar entries, cards, tiles, tabs, files, conversations, items in a playlist or history) should open a right-click menu with the same actions its ⋯ button, toolbar, or hover buttons offer. If you add a ⋯ (`MoreHorizontal`) menu or hover-only actions to an item, add the matching right-click menu in the same change, and when building a new list or app, look for the places a user would right-click and give them something there.
