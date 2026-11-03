@@ -115,8 +115,8 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* The days, and their all-day events. */}
-      <div className="border-b border-border/60">
+      {/* The days, and their all-day events, with room kept where the grid below has its scrollbar so the columns line up. */}
+      <div className="overflow-hidden border-b border-border/60 [scrollbar-gutter:stable]">
         <div className="grid" style={cols}>
           <div />
           {days.map((d) => {
@@ -179,7 +179,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
       </div>
 
       {/* Hour by hour. */}
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" onScroll={(e) => (lastScroll = e.currentTarget.scrollTop)}>
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" onScroll={(e) => (lastScroll = e.currentTarget.scrollTop)}>
         <div className="relative grid" style={{ ...cols, height: 24 * HOUR_PX }}>
           <div className="relative" aria-hidden>
             {Array.from({ length: 23 }, (_, h) => (
