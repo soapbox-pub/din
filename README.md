@@ -634,13 +634,21 @@ files — `git add` new source files before `npm run os:build`.
   pairing, connecting and forgetting devices. Prompts a pairing needs (a code
   to compare or type) appear on the desktop. Headsets show up in the Sound
   panel through WirePlumber once connected.
-- Calendar keeps the signed-in account's events on its Nostr relays as
-  NIP-52 calendar events (`src/shared/calendar.ts`), so any NIP-52 client
-  sees the same calendar: day, week and month views, all-day and timed
-  events, invitations by npub with Going / Maybe / Not Going answers, and
-  the account's calendars (kind 31924) as the sidebar's colored lists.
-  Nostr calendar events are public. The menu bar's clock opens it, and
-  `din calendar` lists, adds, answers and deletes events.
+- Calendar keeps events only on this computer, as a private desktop
+  calendar does: a folder per calendar in `~/.local/share/din/calendar`,
+  one iCalendar (.ics) file per event, with the calendar's name and colour
+  in `displayname` and `color` beside them (`src/shared/localCalendar.ts`,
+  `src/shared/ical.ts`), the vdir layout vdirsyncer can sync with a CalDAV
+  server later. Day, week and month views, all-day and timed events, and
+  calendars of the user's own (Personal to start). The **Nostr calendar**
+  is separate and public: off until the user turns it on (the bottom of
+  the sidebar, or View → Nostr Calendar), it shows the account's NIP-52
+  events (`src/shared/calendar.ts`) and invitations by npub with Going /
+  Maybe / Not Going answers, and is marked Public wherever it shows. An
+  event goes to Nostr only when the user picks the Nostr calendar for it,
+  under a warning that it will be public. The menu bar's clock opens it,
+  and `din calendar` lists, adds, answers and deletes events, and manages
+  the calendars.
 - Contacts is the address book, kept only on this computer: one vCard per
   person in `~/.local/share/din/contacts` (`src/shared/contacts.ts`,
   `src/shared/vcard.ts`), the vdir layout vdirsyncer and khard use, with

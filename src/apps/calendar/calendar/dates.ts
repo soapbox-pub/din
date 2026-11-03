@@ -1,5 +1,3 @@
-import type { CalendarEvent } from '@/shared/calendar';
-
 export type View = 'day' | 'week' | 'month';
 
 export const locale = navigator.language;
@@ -112,8 +110,8 @@ export function withTime(date: Date, value: string): Date {
 }
 
 /** How a time-based event sits in a day column. */
-export interface Placed {
-  event: CalendarEvent;
+export interface Placed<T> {
+  event: T;
   /** Minutes from the day's midnight. */
   top: number;
   height: number;
@@ -123,7 +121,7 @@ export interface Placed {
 }
 
 /** Lay out a day's timed events in side-by-side columns where they overlap. */
-export function layoutDay(events: readonly CalendarEvent[], day: Date): Placed[] {
+export function layoutDay<T extends { start: number; end: number }>(events: readonly T[], day: Date): Placed<T>[] {
   const dayStart = startOfDay(day).getTime();
   const dayEnd = addDays(startOfDay(day), 1).getTime();
   const items = events
@@ -134,7 +132,7 @@ export function layoutDay(events: readonly CalendarEvent[], day: Date): Placed[]
     })
     .sort((a, b) => a.start - b.start || b.end - a.end);
 
-  const out: Placed[] = [];
+  const out: Placed<T>[] = [];
   let cluster: { item: (typeof items)[number]; column: number }[] = [];
   let clusterEnd = -Infinity;
   const flush = () => {

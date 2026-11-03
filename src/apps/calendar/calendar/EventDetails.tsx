@@ -1,5 +1,5 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
-import { Clock, Hash, Link as LinkIcon, MapPin, MoreHorizontal, Pencil, Trash2, Users } from 'lucide-react';
+import { CalendarDays, Clock, Globe, Hash, Link as LinkIcon, Lock, MapPin, MoreHorizontal, Pencil, Repeat, Trash2, Users } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { describeWhen, RSVP_STATUSES, type RsvpStatus } from '@/shared/calendar';
@@ -61,16 +61,17 @@ function Row({ icon: Icon, children, label }: { icon: typeof Clock; children: Re
 const STATUS_TEXT: Record<RsvpStatus, string> = { accepted: 'going', tentative: 'maybe', declined: 'not going' };
 
 /** An event's details, in the popover over it. */
-export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey: string; onAction: (a: EventAction) => void }) {
+export function EventDetails({ shown, calendarTitle, pubkey, onAction }: { shown: Shown; calendarTitle: string; pubkey: string | null; onAction: (a: EventAction) => void }) {
   const { e } = shown;
-  const attendance = useAttendance(e.coord);
+  const nostr = shown.kind === 'nostr' ? shown.e : null;
+  const attendance = useAttendance(nostr?.coord ?? null);
   const answers = attendance.data;
   const people = useMemo(() => {
-    const invited = e.participants.map((p) => p.pubkey);
-    const others = [...(answers?.keys() ?? [])].filter((pk) => !invited.includes(pk) && pk !== e.pubkey);
+    const invited = nostr?.participants.map((p) => p.pubkey) ?? [];
+    const others = [...(answers?.keys() ?? [])].filter((pk) => !invited.includes(pk) && pk !== nostr?.pubkey);
     return { invited, others };
-  }, [e, answers]);
-  const profiles = useProfiles(useMemo(() => [e.pubkey, ...people.invited, ...people.others], [e.pubkey, people]));
+  }, [nostr, answers]);
+  const profiles = useProfiles(useMemo(() => (nostr ? [nostr.pubkey, ...people.invited, ...people.others] : []), [nostr, people]));
   const counts = useMemo(() => {
     const c = { accepted: 0, tentative: 0, declined: 0 };
     for (const r of answers?.values() ?? []) c[r.status]++;
@@ -81,7 +82,7 @@ export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey
   const zoned = otherZone
     ? new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone: otherZone, timeZoneName: 'short' }).format(e.start)
     : null;
-  const others = [...people.invited, ...people.others].filter((pk) => pk !== e.pubkey);
+  const others = [...people.invited, ...people.others].filter((pk) => pk !== nostr?.pubkey);
 
   return (
     <div className="flex max-h-[min(36rem,80vh)] flex-col" style={{ '--ev': shown.color } as React.CSSProperties}>
@@ -89,7 +90,7 @@ export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey
         <span className="mt-1.5 size-3 shrink-0 rounded-full bg-(--ev)" aria-hidden />
         <div className="min-w-0 flex-1">
           <h2 className="text-lg leading-snug font-semibold break-words">{e.title}</h2>
-          {e.summary && <p className="mt-0.5 text-sm text-muted-foreground">{e.summary}</p>}
+          {nostr?.summary && <p className="mt-0.5 text-sm text-muted-foreground">{nostr.summary}</p>}
         </div>
         <div className="-mt-1 -mr-2 flex shrink-0">
           {shown.mine && (
@@ -119,6 +120,18 @@ export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey
         <Row icon={Clock} label="When">
           <p>{describeWhen(e, locale)}</p>
           {zoned && <p className="text-xs text-muted-foreground">{zoned} where it was made ({otherZone?.replace(/_/g, ' ')})</p>}
+          {shown.kind === 'local' && shown.e.repeats && (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Repeat className="size-3" aria-hidden /> It repeats; only its first time shows here for now.
+            </p>
+          )}
+        </Row>
+        <Row icon={CalendarDays} label="Calendar">
+          <p>{calendarTitle}</p>
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            {nostr ? <Globe className="size-3" aria-hidden /> : <Lock className="size-3" aria-hidden />}
+            {nostr ? 'Public, on Nostr: anyone can see it' : 'Private, on this computer'}
+          </p>
         </Row>
         {e.locations.length > 0 && (
           <Row icon={MapPin} label="Where">
@@ -156,16 +169,17 @@ export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey
           </Row>
         )}
 
+        {nostr && (
         <Row icon={Users} label="People">
           <ul className="space-y-1.5">
             <li className="flex items-center gap-2">
-              <Avatar pubkey={e.pubkey} profile={profiles.get(e.pubkey)} className="size-6" />
-              <span className="min-w-0 flex-1 truncate">{e.pubkey === pubkey ? 'You' : nameOf(e.pubkey, profiles.get(e.pubkey))}</span>
+              <Avatar pubkey={nostr.pubkey} profile={profiles.get(nostr.pubkey)} className="size-6" />
+              <span className="min-w-0 flex-1 truncate">{nostr.pubkey === pubkey ? 'You' : nameOf(nostr.pubkey, profiles.get(nostr.pubkey))}</span>
               <span className="text-xs text-muted-foreground">organizer</span>
             </li>
             {others.map((pk) => {
               const answer = answers?.get(pk);
-              const role = e.participants.find((p) => p.pubkey === pk)?.role;
+              const role = nostr.participants.find((p) => p.pubkey === pk)?.role;
               return (
                 <li key={pk} className="flex items-center gap-2">
                   <Avatar pubkey={pk} profile={profiles.get(pk)} className="size-6" />
@@ -183,9 +197,10 @@ export function EventDetails({ shown, pubkey, onAction }: { shown: Shown; pubkey
             </p>
           )}
         </Row>
+        )}
       </div>
 
-      {!shown.mine && (
+      {nostr && !shown.mine && (
         <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3">
           <span className="mr-auto text-sm text-muted-foreground">Going?</span>
           {RSVP_STATUSES.map((status) => {

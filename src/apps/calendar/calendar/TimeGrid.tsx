@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactP
 import { CalendarPlus } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import { addDays, formatHour, formatTime, isWeekend, layoutDay, locale, sameDay, startOfDay, weekdayName } from './dates';
+import { addDays, formatHour, formatTime, isWeekend, layoutDay, locale, sameDay, startOfDay, weekdayName, type Placed } from './dates';
 import { EventItem } from './EventItem';
 import { useViewActions } from './model';
 import type { Shown } from './menu';
@@ -65,8 +65,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
         const from = d.getTime();
         const to = addDays(d, 1).getTime();
         const list = timed.filter((s) => s.e.start < to && (s.e.end > from || (s.e.end === s.e.start && s.e.start >= from)));
-        const byCoord = new Map(list.map((s) => [s.e.coord, s]));
-        return layoutDay(list.map((s) => s.e), d).map((p) => ({ ...p, shown: byCoord.get(p.event.coord)! }));
+        return layoutDay(list.map((s) => ({ start: s.e.start, end: s.e.end, shown: s })), d).map((p) => ({ ...p, shown: p.event.shown }));
       }),
     [days, timed],
   );
@@ -165,7 +164,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
               .filter((l) => l.lane < shownLanes)
               .map((l) => (
                 <EventItem
-                  key={l.shown.e.coord}
+                  key={l.shown.key}
                   shown={l.shown}
                   label={`${l.shown.e.title}, all day`}
                   className="absolute flex h-5 items-center truncate rounded-sm bg-[color-mix(in_oklab,var(--ev)_32%,transparent)] px-1.5 text-xs font-medium data-[selected]:bg-(--ev) data-[selected]:text-white"
@@ -213,7 +212,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
                     }}
                   >
                     {placed[i].map((p) => (
-                      <TimedEvent key={p.shown.e.coord} placed={p} compact={!single && days.length > 3} />
+                      <TimedEvent key={p.shown.key} placed={p} compact={!single && days.length > 3} />
                     ))}
                     {drag?.day === i && (
                       <div
@@ -253,7 +252,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
   );
 }
 
-function TimedEvent({ placed, compact }: { placed: ReturnType<typeof layoutDay>[number] & { shown: Shown }; compact: boolean }) {
+function TimedEvent({ placed, compact }: { placed: Omit<Placed<unknown>, 'event'> & { shown: Shown }; compact: boolean }) {
   const { shown, top, height, column, columns } = placed;
   const { e } = shown;
   const short = height < 40;

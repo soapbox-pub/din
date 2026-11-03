@@ -188,7 +188,9 @@ export const APPS: readonly AppDefinition[] = [
   // phones' contacts beside it. Files opens .vcf here (to import); launch
   // params `{ contact: uid }` show someone.
   dinApp('contacts'),
-  // NIP-52 events and invitations by day, week or month. Launch params
+  // Events by day, week or month, kept as .ics files in
+  // ~/.local/share/din/calendar; the public Nostr calendar (NIP-52) only
+  // if the user turns it on. Launch params
   // `{ date: 'YYYY-MM-DD', view }` show a day; the menu bar's clock opens it.
   dinApp('calendar'),
   // Receiving from Android devices nearby; visible to them only while it's open.

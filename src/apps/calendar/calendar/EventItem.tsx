@@ -11,13 +11,13 @@ import { answerClasses, colorStyle, tentativeStyle, useViewActions } from './mod
  */
 export function EventItem({ shown, className, style, children, label }: { shown: Shown; className?: string; style?: CSSProperties; children: ReactNode; label: string }) {
   const actions = useViewActions();
-  const selected = actions.selected === shown.e.coord;
+  const selected = actions.selected === shown.key;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
           type="button"
-          data-event={shown.e.coord}
+          data-event={shown.key}
           data-selected={selected || undefined}
           aria-label={label}
           aria-haspopup="dialog"
@@ -44,7 +44,7 @@ export function EventItem({ shown, className, style, children, label }: { shown:
       <ContextMenuContent className="w-52">
         <ContextEntries
           entries={eventMenu(shown)}
-          onPick={(a) => actions.act(shown, a, document.querySelector<HTMLElement>(`[data-event="${CSS.escape(shown.e.coord)}"]`) ?? undefined)}
+          onPick={(a) => actions.act(shown, a, document.querySelector<HTMLElement>(`[data-event="${CSS.escape(shown.key)}"]`) ?? undefined)}
         />
       </ContextMenuContent>
     </ContextMenu>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, PanelLeft, Plus, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Globe, Loader2, PanelLeft, Plus, RefreshCw } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,10 +23,9 @@ import {
   isoDate,
   parseIsoDate,
   rsvpTemplate,
-  type CalendarEvent,
-  type EventDraft,
   type EventTemplate,
 } from '@/shared/calendar';
+import { createCalendar, deleteCalendar, deleteLocalEvent, renameCalendar, saveLocalEvent, setCalendarColor, setNostrCalendar } from '@/shared/localCalendar';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { toast } from '@/shared/toast';
 import { locale, rangeOf, startOfDay, step, titleOf, type View } from './calendar/dates';
@@ -34,15 +33,18 @@ import { EventDetails } from './calendar/EventDetails';
 import { EventEditor } from './calendar/EventEditor';
 import { eventLink, type EventAction, type Shown } from './calendar/menu';
 import { MonthView } from './calendar/MonthView';
-import { blankDraft, defaultSlot, draftOf, useNow, ViewContext, type ViewActions } from './calendar/model';
+import { blankDraft, defaultSlot, draftOf, useNow, ViewContext, type Draft, type ViewActions } from './calendar/model';
+import { useLocalCalendars, useLocalChange } from './calendar/local';
 import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCalendarData, usePubkey, usePublish, writeRelays } from './calendar/nostr';
 import { Sidebar } from './calendar/Sidebar';
-import { INVITED, MINE, sourceOf, sourcesOf, useSourcePrefs, type Source } from './calendar/sources';
+import { CALENDAR_COLORS, localSource, NOSTR, sourcesOf, useSourcePrefs, type Source, type SourceId } from './calendar/sources';
 import { TimeGrid } from './calendar/TimeGrid';
 
 const VIEW_KEY = 'din:calendar:view';
 const SIDEBAR_KEY = 'din:calendar:sidebar';
+/** The calendar on this computer new events go in, the last one picked. */
+const TARGET_KEY = 'din:calendar:target';
 const SIDEBAR_MIN_WIDTH = 820;
 const VIEWS: { id: View; label: string; accelerator: string }[] = [
   { id: 'day', label: 'Day', accelerator: 'Ctrl+1' },
@@ -74,17 +76,27 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-type Editor = { draft: EventDraft; editing: CalendarEvent | null };
+type Editor = { draft: Draft; editing: Shown | null };
+
+function storedTarget(): SourceId {
+  return localStorage.getItem(TARGET_KEY) ?? localSource('personal');
+}
 
 /**
- * Calendar: the user's NIP-52 calendar events and the ones they're invited
- * to, by day, week or month. Launch params `{ date: 'YYYY-MM-DD', view }`
- * show a day; `new` (the New Event shortcut's) starts one.
+ * Calendar: the user's events, by day, week or month. They're kept on this
+ * computer, in calendars of .ics files (src/shared/localCalendar.ts); the
+ * public Nostr calendar (NIP-52: the user's public events, and invitations
+ * from people on Nostr) is separate, off until the user turns it on, and
+ * marked public wherever it shows. Launch params `{ date: 'YYYY-MM-DD',
+ * view }` show a day; `new` (the New Event shortcut's) starts one.
  */
 export function Calendar() {
+  const local = useLocalCalendars();
+  const change = useLocalChange();
+  const nostrOn = local.data?.settings.nostr ?? false;
   const pubkey = usePubkey();
-  const data = useCalendarData(pubkey);
-  const calendar = data.calendar;
+  const data = useCalendarData(pubkey, nostrOn);
+  const calendar = nostrOn ? data.calendar : null;
   const publish = usePublish();
   const prefs = useSourcePrefs();
   const now = useNow();
@@ -96,15 +108,16 @@ export function Calendar() {
     return isView(v) ? v : 'week';
   });
   const [date, setDate] = useState<Date>(() => (saved ? parseIsoDate(saved.date) : targetOf(windowLaunch()).date) ?? new Date());
-  const [selected, setSelected] = useState<{ coord: string; rect: DOMRect } | null>(null);
+  const [selected, setSelected] = useState<{ key: string; rect: DOMRect } | null>(null);
   const [editor, setEditor] = useState<Editor | null>(() => {
     if (!('new' in windowLaunch().params) || wasReopened()) return null;
     const [start, end] = defaultSlot(new Date());
-    return { draft: blankDraft(start, end, false, null), editing: null };
+    return { draft: blankDraft(start, end, false, storedTarget()), editing: null };
   });
   const [deleting, setDeleting] = useState<Shown | null>(null);
   const [naming, setNaming] = useState<{ source: Source | null; title: string } | null>(null);
   const [deletingCalendar, setDeletingCalendar] = useState<Source | null>(null);
+  const [enablingNostr, setEnablingNostr] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const sidebarFits = useMediaQuery(`(min-width: ${SIDEBAR_MIN_WIDTH}px)`);
   const showSidebar = sidebarOpen && sidebarFits;
@@ -116,31 +129,41 @@ export function Calendar() {
 
   useEffect(() => saveState({ view, date: isoDate(date) } satisfies Saved), [view, date]);
 
-  const sources = useMemo(() => sourcesOf(calendar, prefs.colors), [calendar, prefs.colors]);
+  const sources = useMemo(() => sourcesOf(local.data?.calendars ?? [], nostrOn, prefs.colors), [local.data, nostrOn, prefs.colors]);
+  const localSources = useMemo(() => sources.filter((s) => s.local), [sources]);
+  /** Where a new event goes: the calendar on this computer last picked. Never Nostr unless the user picks it. */
+  const defaultTarget = useCallback((): SourceId => {
+    const stored = storedTarget();
+    return localSources.some((s) => s.id === stored) ? stored : localSources[0]?.id ?? stored;
+  }, [localSources]);
 
   // Every event, with the colour of where it's from and the user's answer.
-  const all = useMemo<(Shown & { source: string })[]>(() => {
-    if (!calendar || !pubkey) return [];
+  const all = useMemo<Shown[]>(() => {
     const color = new Map(sources.map((s) => [s.id, s.color]));
-    return [...calendar.events.values()].map((e) => {
-      const source = sourceOf(e, calendar, pubkey);
-      return { e, source, color: color.get(source) ?? color.get(MINE)!, mine: e.pubkey === pubkey, rsvp: calendar.rsvps.get(e.coord)?.status ?? null };
+    const out: Shown[] = (local.data?.events ?? []).map((e) => {
+      const source = localSource(e.calendar);
+      return { kind: 'local', e, key: `local:${e.calendar}/${e.uid}`, source, color: color.get(source) ?? CALENDAR_COLORS[0], mine: true, rsvp: null };
     });
-  }, [calendar, pubkey, sources]);
+    if (calendar && pubkey) {
+      for (const e of calendar.events.values()) {
+        out.push({ kind: 'nostr', e, key: e.coord, source: NOSTR, color: color.get(NOSTR) ?? CALENDAR_COLORS[0], mine: e.pubkey === pubkey, rsvp: calendar.rsvps.get(e.coord)?.status ?? null });
+      }
+    }
+    return out;
+  }, [local.data, calendar, pubkey, sources]);
   const visible = useMemo(() => all.filter((s) => !prefs.hidden.has(s.source)), [all, prefs.hidden]);
 
   const range = useMemo(() => rangeOf(view, date), [view, date]);
   const inRange = useMemo(() => {
-    const byCoord = new Map(visible.map((s) => [s.e.coord, s]));
-    return eventsBetween(visible.map((s) => s.e), range.from, range.to).map((e) => byCoord.get(e.coord)!);
+    return eventsBetween(visible.map((s) => ({ start: s.e.start, end: s.e.end, allDay: s.e.allDay, title: s.e.title, s })), range.from, range.to).map((x) => x.s);
   }, [visible, range]);
 
   const awaiting = useMemo(
-    () => all.filter((s) => s.source === INVITED && !s.rsvp && s.e.end >= now).sort((a, b) => a.e.start - b.e.start),
+    () => all.filter((s) => s.kind === 'nostr' && !s.mine && !s.rsvp && s.e.end >= now).sort((a, b) => a.e.start - b.e.start),
     [all, now],
   );
 
-  const selectedShown = selected ? all.find((s) => s.e.coord === selected.coord) ?? null : null;
+  const selectedShown = selected ? all.find((s) => s.key === selected.key) ?? null : null;
 
   useWindowTitle(titleOf(view, date));
 
@@ -151,7 +174,7 @@ export function Calendar() {
     if (t.view) setView(t.view);
     if ('new' in launch.params) {
       const [start, end] = defaultSlot(t.date ?? new Date());
-      setEditor({ draft: blankDraft(start, end, false, null), editing: null });
+      setEditor({ draft: blankDraft(start, end, false, defaultTarget()), editing: null });
     }
   });
 
@@ -183,41 +206,69 @@ export function Calendar() {
     [calendar],
   );
 
+  const nostrListOf = useCallback(
+    (s: Shown) => (s.kind === 'nostr' ? calendar?.calendars.find((c) => c.members.includes(s.e.coord))?.coord ?? null : null),
+    [calendar],
+  );
+
+  /** Ask relays to delete a Nostr event, and take it out of the user's NIP-52 calendars. */
+  const unpublish = (s: Shown & { kind: 'nostr' }, failure: string) => run([deletionTemplate(s.e), ...membershipChanges(s.e.coord, null, null)], failure);
+
   const save = async ({ draft, editing }: Editor) => {
-    if (!pubkey) return;
-    const template = eventTemplate(draft, editing);
-    const d = template.tags.find((t) => t[0] === 'd')![1];
-    const coord = coordOf(template.kind, pubkey, d);
-    const templates = [template];
-    // An event that became all-day (or stopped being) is a new kind, at a new address.
-    if (editing && editing.coord !== coord) templates.push(deletionTemplate(editing));
-    templates.push(...membershipChanges(editing?.coord ?? null, coord, draft.calendar));
-    if (await run(templates, editing ? 'Couldn’t save the event' : 'Couldn’t add the event')) {
-      setEditor(null);
-      setDate(new Date(draft.start));
-      toast(editing ? 'Event saved' : 'Event added', { body: describeWhen({ allDay: draft.allDay, start: draft.start, end: draft.end }, locale) });
+    const failure = editing ? 'Couldn’t save the event' : 'Couldn’t add the event';
+    if (draft.target === NOSTR) {
+      if (!pubkey) return;
+      const previous = editing?.kind === 'nostr' ? editing.e : null;
+      const template = eventTemplate(draft, previous);
+      const d = template.tags.find((t) => t[0] === 'd')![1];
+      const coord = coordOf(template.kind, pubkey, d);
+      const templates = [template];
+      // An event that became all-day (or stopped being) is a new kind, at a new address.
+      if (previous && previous.coord !== coord) templates.push(deletionTemplate(previous));
+      templates.push(...membershipChanges(previous?.coord ?? null, coord, draft.calendar));
+      if (!(await run(templates, failure))) return;
+      // Moved from this computer onto Nostr: it's kept there now.
+      if (editing?.kind === 'local') await change((fs) => deleteLocalEvent(fs, editing.e), 'Couldn’t remove the copy on this computer');
+    } else {
+      const target = localSources.find((s) => s.id === draft.target)?.local;
+      if (!target) return;
+      const saved = await change((fs) => saveLocalEvent(fs, target, draft, editing?.kind === 'local' ? editing.e : null), failure);
+      if (!saved) return;
+      localStorage.setItem(TARGET_KEY, draft.target);
+      if (editing?.kind === 'nostr') await unpublish(editing, 'Couldn’t delete the public copy');
     }
+    setEditor(null);
+    setDate(new Date(draft.start));
+    toast(draft.target === NOSTR && editing?.kind !== 'nostr' ? 'Event published' : editing ? 'Event saved' : 'Event added', {
+      body: describeWhen({ allDay: draft.allDay, start: draft.start, end: draft.end }, locale),
+    });
   };
 
   const remove = async (s: Shown) => {
     setSelected(null);
-    if (await run([deletionTemplate(s.e), ...membershipChanges(s.e.coord, null, null)], 'Couldn’t delete the event')) toast('Event deleted');
+    if (s.kind === 'local') {
+      if ((await change((fs) => deleteLocalEvent(fs, s.e).then(() => true), 'Couldn’t delete the event')) !== undefined) toast('Event deleted');
+    } else if (await unpublish(s, 'Couldn’t delete the event')) toast('Event deleted');
   };
 
   const act = useCallback(
     (s: Shown, action: EventAction, anchor?: HTMLElement) => {
-      const calendarOf = (e: CalendarEvent) => calendar?.calendars.find((c) => c.members.includes(e.coord))?.coord ?? null;
       switch (action) {
         case 'open':
-          if (anchor) setSelected({ coord: s.e.coord, rect: anchor.getBoundingClientRect() });
+          if (anchor) setSelected({ key: s.key, rect: anchor.getBoundingClientRect() });
           return;
         case 'edit':
+          if (!s.mine) return;
           setSelected(null);
-          return setEditor({ draft: draftOf(s.e, calendarOf(s.e)), editing: s.e });
-        case 'duplicate':
+          return setEditor({ draft: draftOf(s, nostrListOf(s)), editing: s });
+        case 'duplicate': {
           setSelected(null);
-          return setEditor({ draft: { ...draftOf(s.e, s.mine ? calendarOf(s.e) : null), participants: s.mine ? s.e.participants : [] }, editing: null });
+          const draft = draftOf(s, s.mine ? nostrListOf(s) : null);
+          // A copy of someone else's event is the user's own, on this computer.
+          return setEditor({ draft: s.mine ? draft : { ...draft, participants: [], target: defaultTarget() }, editing: null });
+        }
         case 'copy-link':
+          if (s.kind !== 'nostr') return;
           void navigator.clipboard.writeText(eventLink(s.e, writeRelays()));
           return toast('Link copied');
         case 'copy-details': {
@@ -226,25 +277,27 @@ export function Calendar() {
           return toast('Details copied');
         }
         case 'delete':
-          return setDeleting(s);
+          if (s.mine) setDeleting(s);
+          return;
         default: {
+          if (s.kind !== 'nostr' || s.mine) return;
           const status = action.slice('rsvp:'.length) as 'accepted' | 'tentative' | 'declined';
           void run([rsvpTemplate(s.e, status, calendar?.rsvps.get(s.e.coord))], 'Couldn’t send your answer');
         }
       }
     },
-    [calendar, run],
+    [calendar, run, nostrListOf, defaultTarget],
   );
 
   const create = useCallback((start: number, end: number, allDay: boolean) => {
     setSelected(null);
-    setEditor({ draft: blankDraft(start, end, allDay, null), editing: null });
-  }, []);
+    setEditor({ draft: blankDraft(start, end, allDay, defaultTarget()), editing: null });
+  }, [defaultTarget]);
 
   const viewActions = useMemo<ViewActions>(
     () => ({
-      selected: selected?.coord ?? null,
-      select: (s, el) => setSelected((cur) => (cur?.coord === s.e.coord ? null : { coord: s.e.coord, rect: el.getBoundingClientRect() })),
+      selected: selected?.key ?? null,
+      select: (s, el) => setSelected((cur) => (cur?.key === s.key ? null : { key: s.key, rect: el.getBoundingClientRect() })),
       act,
       create,
       showDay: (d) => {
@@ -264,27 +317,51 @@ export function Calendar() {
     setSelected(null);
     setDate(new Date());
   };
-  const refresh = () => void data.refetch();
+  const refresh = () => {
+    void local.refetch();
+    if (nostrOn && pubkey) void data.refetch();
+  };
 
   const saveCalendar = async () => {
     if (!naming) return;
     const title = naming.title.trim();
     if (!title) return;
-    const c = naming.source?.calendar;
-    if (await run([calendarTemplate(title, c?.members ?? [], c)], c ? 'Couldn’t rename the calendar' : 'Couldn’t make the calendar')) setNaming(null);
+    const c = naming.source?.local;
+    const color = CALENDAR_COLORS[localSources.length % CALENDAR_COLORS.length];
+    const done = await change(
+      (fs) => (c ? renameCalendar(fs, c, title).then(() => c.id) : createCalendar(fs, title, color).then((made) => made.id)),
+      c ? 'Couldn’t rename the calendar' : 'Couldn’t make the calendar',
+    );
+    if (done !== undefined) setNaming(null);
   };
 
-  const deleteCalendar = async (s: Source) => {
-    if (s.calendar && (await run([deletionTemplate(s.calendar)], 'Couldn’t delete the calendar'))) toast(`${s.title} deleted`, { body: 'Its events are in My Events now.' });
+  const removeCalendar = async (s: Source) => {
+    const c = s.local;
+    if (!c) return;
+    if ((await change((fs) => deleteCalendar(fs, c).then(() => true), 'Couldn’t delete the calendar')) !== undefined) toast(`${s.title} deleted`);
   };
+
+  const setColor = (id: SourceId, color: string) => {
+    const c = sources.find((s) => s.id === id)?.local;
+    if (c) void change((fs) => setCalendarColor(fs, c, color), 'Couldn’t change the colour');
+    else prefs.setColor(id, color);
+  };
+
+  const setNostr = async (on: boolean) => {
+    setEnablingNostr(false);
+    if ((await change((fs) => setNostrCalendar(fs, on).then(() => true), on ? 'Couldn’t turn the Nostr calendar on' : 'Couldn’t turn the Nostr calendar off')) === undefined) return;
+    if (!on) toast('Nostr calendar off', { body: 'Its events aren’t deleted: they stay public on Nostr, and show again when you turn it back on.' });
+  };
+
+  const eventsIn = (s: Source | null) => (s ? all.filter((x) => x.source === s.id).length : 0);
 
   useMenuBar(
     [
       {
         label: 'File',
         items: [
-          { id: 'new', label: 'New Event', accelerator: 'Ctrl+N', enabled: !!pubkey },
-          { id: 'new-calendar', label: 'New Calendar…', accelerator: 'Ctrl+Shift+N', enabled: !!pubkey },
+          { id: 'new', label: 'New Event', accelerator: 'Ctrl+N', enabled: localSources.length > 0 },
+          { id: 'new-calendar', label: 'New Calendar…', accelerator: 'Ctrl+Shift+N', enabled: !!local.data },
         ],
       },
       {
@@ -292,11 +369,11 @@ export function Calendar() {
         items: [
           { id: 'edit', label: 'Edit…', accelerator: 'Ctrl+E', enabled: !!selectedShown?.mine },
           { id: 'duplicate', label: 'Duplicate', enabled: !!selectedShown },
-          { id: 'copy-link', label: 'Copy Link', enabled: !!selectedShown },
+          { id: 'copy-link', label: 'Copy Link', enabled: selectedShown?.kind === 'nostr' },
           { type: 'separator' },
-          { id: 'rsvp:accepted', label: 'Going', enabled: !!selectedShown && !selectedShown.mine },
-          { id: 'rsvp:tentative', label: 'Maybe', enabled: !!selectedShown && !selectedShown.mine },
-          { id: 'rsvp:declined', label: 'Not Going', enabled: !!selectedShown && !selectedShown.mine },
+          { id: 'rsvp:accepted', label: 'Going', enabled: selectedShown?.kind === 'nostr' && !selectedShown.mine },
+          { id: 'rsvp:tentative', label: 'Maybe', enabled: selectedShown?.kind === 'nostr' && !selectedShown.mine },
+          { id: 'rsvp:declined', label: 'Not Going', enabled: selectedShown?.kind === 'nostr' && !selectedShown.mine },
           { type: 'separator' },
           { id: 'delete', label: 'Delete…', accelerator: 'Delete', notInFields: true, enabled: !!selectedShown?.mine, destructive: true },
         ],
@@ -311,7 +388,8 @@ export function Calendar() {
           { id: 'next', label: 'Next', accelerator: 'Ctrl+Right', notInFields: true },
           { type: 'separator' as const },
           { id: 'sidebar', label: showSidebar ? 'Hide Sidebar' : 'Show Sidebar', enabled: sidebarFits },
-          { id: 'refresh', label: 'Refresh', accelerator: 'Ctrl+R', enabled: !!pubkey },
+          { id: 'nostr', type: 'checkbox' as const, label: 'Nostr Calendar (Public)', checked: nostrOn, enabled: !!local.data },
+          { id: 'refresh', label: 'Refresh', accelerator: 'Ctrl+R' },
         ],
       },
     ],
@@ -324,6 +402,7 @@ export function Calendar() {
         case 'prev': return go(-1);
         case 'next': return go(1);
         case 'refresh': return refresh();
+        case 'nostr': return nostrOn ? void setNostr(false) : setEnablingNostr(true);
         case 'sidebar': {
           localStorage.setItem(SIDEBAR_KEY, showSidebar ? 'hidden' : 'shown');
           return setSidebarOpen(!showSidebar);
@@ -333,23 +412,6 @@ export function Calendar() {
       }
     },
   );
-
-  if (!pubkey) {
-    return (
-      <div className="flex h-full flex-col bg-background text-foreground">
-        <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end px-3">
-          <WindowControls />
-        </WindowDragRegion>
-        <div className="grid flex-1 place-items-center p-8">
-          <div className="flex max-w-sm flex-col items-center text-center">
-            <img src="/icons/apps/calendar.png" alt="" className="mb-4 size-28 drop-shadow-md" />
-            <h1 className="font-[family-name:var(--font-title)] text-2xl font-semibold">Calendar</h1>
-            <p className="mt-2 text-[15px] text-muted-foreground">Sign in to Din to keep your events and answer invitations. They’re kept on your Nostr relays, so they follow you to any calendar app.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <ViewContext.Provider value={viewActions}>
@@ -374,18 +436,19 @@ export function Calendar() {
               onToggle={(id, on) => prefs.setHidden(id, !on)}
               onShowOnly={(id) => prefs.showOnly(id, sources.map((s) => s.id))}
               onShowAll={prefs.showAll}
-              onColor={prefs.setColor}
+              onColor={setColor}
               onNewCalendar={() => setNaming({ source: null, title: '' })}
               onRename={(s) => setNaming({ source: s, title: s.title })}
               onDeleteCalendar={setDeletingCalendar}
+              onNostr={(on) => (on ? setEnablingNostr(true) : void setNostr(false))}
               awaiting={awaiting}
               onOpen={(s) => {
                 setDate(new Date(s.e.start));
                 setSelected(null);
                 // Open its details once the view has drawn it.
                 requestAnimationFrame(() => {
-                  const el = document.querySelector<HTMLElement>(`[data-event="${CSS.escape(s.e.coord)}"]`);
-                  if (el) setSelected({ coord: s.e.coord, rect: el.getBoundingClientRect() });
+                  const el = document.querySelector<HTMLElement>(`[data-event="${CSS.escape(s.key)}"]`);
+                  if (el) setSelected({ key: s.key, rect: el.getBoundingClientRect() });
                 });
               }}
             />
@@ -413,11 +476,15 @@ export function Calendar() {
               <ChevronRight className="size-4.5" />
             </ToolButton>
             <h2 className="ml-1 min-w-0 flex-1 truncate text-[17px] font-semibold" aria-live="polite">{titleOf(view, date)}</h2>
-            {data.isFetching ? (
+            {local.isFetching || (nostrOn && data.isFetching) ? (
               <Loader2 className="size-4 text-muted-foreground motion-safe:animate-spin" aria-label="Loading" />
-            ) : data.isError ? (
+            ) : local.isError ? (
               <button type="button" onClick={refresh} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring/60">
-                <RefreshCw className="size-3.5" /> Couldn’t reach your relays
+                <RefreshCw className="size-3.5" /> Couldn’t read your calendars
+              </button>
+            ) : nostrOn && data.isError ? (
+              <button type="button" onClick={refresh} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring/60">
+                <RefreshCw className="size-3.5" /> Couldn’t reach your Nostr relays
               </button>
             ) : null}
             <div role="radiogroup" aria-label="View" className="flex rounded-lg bg-foreground/[0.06] p-0.5">
@@ -457,7 +524,15 @@ export function Calendar() {
             </PopoverAnchor>
           )}
           <PopoverContent side="right" align="start" collisionPadding={12} className="w-[24rem] max-w-[calc(100vw-1.5rem)] overflow-hidden p-0" onOpenAutoFocus={(e) => e.preventDefault()}>
-            {selectedShown && <EventDetails key={selectedShown.e.coord} shown={selectedShown} pubkey={pubkey} onAction={(a) => act(selectedShown, a)} />}
+            {selectedShown && (
+              <EventDetails
+                key={selectedShown.key}
+                shown={selectedShown}
+                calendarTitle={sources.find((s) => s.id === selectedShown.source)?.title ?? ''}
+                pubkey={pubkey}
+                onAction={(a) => act(selectedShown, a)}
+              />
+            )}
           </PopoverContent>
         </Popover>
 
@@ -465,7 +540,9 @@ export function Calendar() {
           <EventEditor
             initial={editor.draft}
             editing={editor.editing}
-            calendars={calendar?.calendars ?? []}
+            sources={sources}
+            canPublish={!!pubkey}
+            nostrLists={calendar?.calendars ?? []}
             saving={publish.isPending}
             onSave={(draft) => void save({ draft, editing: editor.editing })}
             onClose={() => setEditor(null)}
@@ -482,6 +559,7 @@ export function Calendar() {
               className="space-y-4 p-5"
             >
               <h2 className="text-base font-semibold">{naming.source ? 'Rename Calendar' : 'New Calendar'}</h2>
+              {!naming.source && <p className="text-sm text-muted-foreground">Kept on this computer, like your other calendars. Nothing in it is shared.</p>}
               <input
                 autoFocus
                 aria-label="Calendar name"
@@ -492,7 +570,7 @@ export function Calendar() {
               />
               <div className="flex justify-end gap-2">
                 <DialogButton onClick={() => setNaming(null)}>Cancel</DialogButton>
-                <DialogButton type="submit" variant="primary" disabled={!naming.title.trim() || publish.isPending}>
+                <DialogButton type="submit" variant="primary" disabled={!naming.title.trim()}>
                   {naming.source ? 'Rename' : 'Make Calendar'}
                 </DialogButton>
               </div>
@@ -505,7 +583,9 @@ export function Calendar() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete “{deleting?.e.title}”?</AlertDialogTitle>
               <AlertDialogDescription>
-                Your relays are asked to delete it{deleting?.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.
+                {deleting?.kind === 'nostr'
+                  ? `It’s public on Nostr: your relays are asked to delete it${deleting.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.`
+                  : 'It’s deleted from this computer.'}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -521,13 +601,35 @@ export function Calendar() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete the calendar “{deletingCalendar?.title}”?</AlertDialogTitle>
-              <AlertDialogDescription>Its events aren’t deleted: yours go back to My Events, and other people’s stop showing here.</AlertDialogDescription>
+              <AlertDialogDescription>
+                {eventsIn(deletingCalendar) ? `Its ${eventsIn(deletingCalendar) === 1 ? 'event is' : `${eventsIn(deletingCalendar)} events are`} deleted from this computer too.` : 'It has no events.'}
+              </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={() => deletingCalendar && void deleteCalendar(deletingCalendar)}>
+              <AlertDialogAction variant="destructive" onClick={() => deletingCalendar && void removeCalendar(deletingCalendar)}>
                 Delete Calendar
               </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog open={enablingNostr} onOpenChange={setEnablingNostr}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Globe className="size-5" aria-hidden /> Turn on the Nostr calendar?
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>The Nostr calendar is public. It shows the events you’ve published on Nostr and invitations from people there, and it’s fetched from your Nostr relays.</p>
+                  <p>Anything you put in it is published for anyone to see. Your other calendars stay private, on this computer, and nothing moves between them unless you move it.</p>
+                  {!pubkey && <p className="font-medium">Sign in to Din to see it.</p>}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void setNostr(true)}>Turn On</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

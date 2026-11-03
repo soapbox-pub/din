@@ -2,16 +2,23 @@ import { Check, CircleHelp, Copy, CopyPlus, ExternalLink, Link, Pencil, Trash2, 
 import type { LucideIcon } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { CalendarEvent, RsvpStatus } from '@/shared/calendar';
+import type { LocalEvent } from '@/shared/localCalendar';
+import type { SourceId } from './sources';
 
-/** A calendar event as the views draw it. */
-export interface Shown {
-  e: CalendarEvent;
+/**
+ * An event as the views draw it: one kept on this computer, or one from
+ * the public Nostr calendar.
+ */
+export type Shown = ({ kind: 'local'; e: LocalEvent } | { kind: 'nostr'; e: CalendarEvent }) & {
+  /** Unique across both: `local:<calendar>/<uid>`, or the Nostr event's coordinate. */
+  key: string;
+  source: SourceId;
   color: string;
-  /** The user made it. */
+  /** The user can change it: theirs on Nostr, or on this computer. */
   mine: boolean;
-  /** The user's answer, for someone else's event. */
+  /** The user's answer, for someone else's Nostr event. */
   rsvp: RsvpStatus | null;
-}
+};
 
 export type EventAction = 'open' | 'edit' | 'duplicate' | 'copy-link' | 'copy-details' | 'rsvp:accepted' | 'rsvp:tentative' | 'rsvp:declined' | 'delete';
 
@@ -29,10 +36,10 @@ const separator: MenuEntry = { kind: 'separator' };
 export function eventMenu(s: Shown, skip: ReadonlySet<EventAction> = new Set()): MenuEntry[] {
   const groups: MenuEntry[][] = [
     [item('open', 'Show Details', ExternalLink), ...(s.mine ? [item('edit', 'Edit…', Pencil)] : [])],
-    s.mine
+    s.kind === 'local' || s.mine
       ? []
       : (['accepted', 'tentative', 'declined'] as const).map((status) => item(`rsvp:${status}`, RSVP_LABELS[status], RSVP_ICONS[status], { checked: s.rsvp === status })),
-    [item('duplicate', 'Duplicate', CopyPlus), item('copy-link', 'Copy Link', Link), item('copy-details', 'Copy Details', Copy)],
+    [item('duplicate', 'Duplicate', CopyPlus), ...(s.kind === 'nostr' ? [item('copy-link', 'Copy Link', Link)] : []), item('copy-details', 'Copy Details', Copy)],
     s.mine ? [item('delete', 'Delete…', Trash2, { destructive: true })] : [],
   ];
   const kept = groups.map((g) => g.filter((e) => e.kind !== 'item' || !skip.has(e.action))).filter((g) => g.length);

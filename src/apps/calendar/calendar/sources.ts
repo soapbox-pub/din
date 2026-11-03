@@ -1,10 +1,16 @@
 import { useCallback, useState } from 'react';
-import type { CalendarData, CalendarEvent, CalendarList } from '@/shared/calendar';
+import type { LocalCalendar } from '@/shared/localCalendar';
 
-/** Where an event shows up in the sidebar: one of the user's calendars, their other events, or invitations. */
+/**
+ * Where an event shows up in the sidebar: one of the calendars on this
+ * computer (`local:<folder>`), or the separate, public Nostr calendar.
+ */
 export type SourceId = string;
-export const MINE: SourceId = 'mine';
-export const INVITED: SourceId = 'invited';
+export const NOSTR: SourceId = 'nostr';
+
+export function localSource(id: string): SourceId {
+  return `local:${id}`;
+}
 
 export const COLORS = [
   { name: 'Blue', value: '#2f7cf6' },
@@ -19,14 +25,18 @@ export const COLORS = [
   { name: 'Gray', value: '#8b8d98' },
 ] as const;
 
-/** New calendars' colours: not the blue and purple of My Events and Invitations. */
-const CALENDAR_COLORS = [COLORS[1], COLORS[2], COLORS[3], COLORS[4], COLORS[5], COLORS[7]].map((c) => c.value);
+/** New calendars' colours, in turn. */
+export const CALENDAR_COLORS = [COLORS[0], COLORS[1], COLORS[4], COLORS[2], COLORS[5], COLORS[7], COLORS[3]].map((c) => c.value);
+
+/** The Nostr calendar's colour until the user picks one. */
+const NOSTR_COLOR = COLORS[6].value;
 
 export interface Source {
   id: SourceId;
   title: string;
   color: string;
-  calendar?: CalendarList;
+  /** On this computer. */
+  local?: LocalCalendar;
 }
 
 const PREFS_KEY = 'din:calendar:sources';
@@ -65,25 +75,10 @@ export function useSourcePrefs() {
   return { hidden: new Set(prefs.hidden), colors: prefs.colors, setHidden, showOnly, showAll, setColor };
 }
 
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-/** The sidebar's list: the user's calendars, then their other events, then invitations. */
-export function sourcesOf(data: CalendarData | null, colors: Record<SourceId, string>): Source[] {
-  const calendars = data?.calendars ?? [];
+/** The sidebar's list: the calendars on this computer, then, if it's on, the Nostr one. */
+export function sourcesOf(calendars: readonly LocalCalendar[], nostr: boolean, colors: Record<SourceId, string>): Source[] {
   return [
-    ...calendars.map((c) => ({ id: c.coord, title: c.title, calendar: c, color: colors[c.coord] ?? CALENDAR_COLORS[hash(c.d) % CALENDAR_COLORS.length] })),
-    { id: MINE, title: 'My Events', color: colors[MINE] ?? COLORS[0].value },
-    { id: INVITED, title: 'Invitations', color: colors[INVITED] ?? COLORS[6].value },
+    ...calendars.map((c) => ({ id: localSource(c.id), title: c.title, color: c.color, local: c })),
+    ...(nostr ? [{ id: NOSTR, title: 'Nostr', color: colors[NOSTR] ?? NOSTR_COLOR }] : []),
   ];
-}
-
-/** Which source an event belongs to. */
-export function sourceOf(event: CalendarEvent, data: CalendarData, pubkey: string): SourceId {
-  const calendar = data.calendars.find((c) => c.members.includes(event.coord));
-  if (calendar) return calendar.coord;
-  return event.pubkey === pubkey ? MINE : INVITED;
 }

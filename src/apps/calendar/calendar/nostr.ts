@@ -92,11 +92,7 @@ export function usePubkey(): string | null {
     queryKey: ['pubkey'],
     staleTime: 0,
     refetchOnWindowFocus: 'always',
-    queryFn: async () => {
-      const pubkey = await signer().getPublicKey().catch(() => null);
-      if (pubkey) void loadRelayList(pubkey);
-      return pubkey;
-    },
+    queryFn: () => signer().getPublicKey().catch(() => null),
   });
   return data ?? null;
 }
@@ -104,18 +100,21 @@ export function usePubkey(): string | null {
 const dataKey = (pubkey: string | null) => ['calendar', pubkey] as const;
 
 /**
- * Everything the calendar shows for the user: their events, invitations,
- * calendars (with other people's events in them) and answers. Fetched
- * again every few minutes and when the window comes back to the front.
+ * Everything the Nostr calendar shows for the user: their public events,
+ * invitations, NIP-52 calendars (with other people's events in them) and
+ * answers. Nothing is asked of relays unless the user turned the Nostr
+ * calendar on. Fetched again every few minutes and when the window comes
+ * back to the front.
  */
-export function useCalendarData(pubkey: string | null) {
+export function useCalendarData(pubkey: string | null, on: boolean) {
   const focused = useWindowFocused();
   const query = useQuery({
     queryKey: dataKey(pubkey),
-    enabled: !!pubkey,
+    enabled: !!pubkey && on,
     staleTime: 30_000,
     refetchInterval: 5 * 60_000,
     queryFn: async ({ signal }) => {
+      await loadRelayList(pubkey!);
       const nostr = poolFor();
       const timeout = AbortSignal.any([signal, AbortSignal.timeout(12_000)]);
       const raw = await nostr.query(calendarFilters(pubkey!), { signal: timeout });
@@ -131,20 +130,21 @@ export function useCalendarData(pubkey: string | null) {
   });
   const { refetch, dataUpdatedAt } = query;
   useEffect(() => {
-    if (focused && pubkey && dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > 30_000) void refetch();
+    if (focused && pubkey && on && dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > 30_000) void refetch();
     // Only on coming to the front, not each time the data arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, pubkey, refetch]);
+  }, [focused, pubkey, on, refetch]);
   const data = useMemo<CalendarData | null>(() => (query.data && pubkey ? collectCalendar(query.data, pubkey) : null), [query.data, pubkey]);
   return { ...query, calendar: data };
 }
 
-/** Sign and publish events as the user, in order, adding each to what the calendar shows at once. */
+/** Sign and publish events as the user to their relays, in order, adding each to what the Nostr calendar shows at once. */
 export function usePublish() {
   const qc = useQueryClient();
   const pubkey = usePubkey();
   return useMutation({
     mutationFn: async (templates: EventTemplate[]) => {
+      if (pubkey) await loadRelayList(pubkey);
       const signed: NostrEvent[] = [];
       for (const t of templates) {
         const event = (await signer().signEvent(t)) as NostrEvent;

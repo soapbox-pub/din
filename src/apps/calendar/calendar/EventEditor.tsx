@@ -1,13 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { Globe, Loader2, MapPin, UserPlus, X } from 'lucide-react';
+import { Globe, Loader2, Lock, MapPin, TriangleAlert, UserPlus, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { HEX64, isoDate, parseIsoDate, type CalendarEvent, type CalendarList, type EventDraft, type Participant } from '@/shared/calendar';
+import { HEX64, isoDate, parseIsoDate, type CalendarList, type Participant } from '@/shared/calendar';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { addDays, startOfDay, timeInput, TIME_ZONE, withTime } from './dates';
 import { useProfiles } from './nostr';
-import { nameOf } from './model';
+import { nameOf, type Draft } from './model';
+import type { Shown } from './menu';
+import { NOSTR, type Source } from './sources';
 import { Avatar } from './Person';
 
 const HOUR = 3_600_000;
@@ -33,24 +35,35 @@ const field = 'h-9 w-full rounded-md border border-input bg-background px-2.5 te
 export function EventEditor({
   initial,
   editing,
-  calendars,
+  sources,
+  canPublish,
+  nostrLists,
   saving,
   onSave,
   onClose,
 }: {
-  initial: EventDraft;
+  initial: Draft;
   /** The event being changed; null for a new one. */
-  editing: CalendarEvent | null;
-  calendars: CalendarList[];
+  editing: Shown | null;
+  /** The calendars it can go in: those on this computer, and Nostr if it's on. */
+  sources: Source[];
+  /** Someone is signed in to publish to Nostr as. */
+  canPublish: boolean;
+  /** The user's NIP-52 calendars, for a Nostr event. */
+  nostrLists: CalendarList[];
   saving: boolean;
-  onSave: (draft: EventDraft) => void;
+  onSave: (draft: Draft) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const isPublic = draft.target === NOSTR;
+  const leavingNostr = editing?.kind === 'nostr' && !isPublic;
+  const local = sources.filter((s) => s.local);
+  const nostr = sources.find((s) => s.id === NOSTR);
   const [invite, setInvite] = useState('');
   const [inviteError, setInviteError] = useState(false);
   const profiles = useProfiles(useMemo(() => draft.participants.map((p) => p.pubkey), [draft.participants]));
-  const set = (patch: Partial<EventDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const startDay = startOfDay(draft.start);
   // An all-day event's end is the day after its last; the field shows the last.
@@ -108,10 +121,10 @@ export function EventEditor({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (invalid || saving) return;
-    onSave({ ...draft, title: draft.title.trim() || 'New Event', tzid: draft.allDay ? undefined : TIME_ZONE });
+    onSave({ ...draft, title: draft.title.trim() || 'New Event', tzid: draft.allDay ? undefined : TIME_ZONE, participants: isPublic ? draft.participants : [], calendar: isPublic ? draft.calendar : null });
   };
 
-  const zoneChanged = editing && !editing.allDay && editing.tzid && editing.tzid !== TIME_ZONE;
+  const zoneChanged = editing && !editing.e.allDay && editing.e.tzid && editing.e.tzid !== TIME_ZONE;
 
   return (
     <Overlay label={editing ? 'Edit event' : 'New event'} onClose={onClose} className="max-w-lg">
@@ -142,17 +155,48 @@ export function EventEditor({
             {invalid && <p className="text-xs text-destructive">It has to end after it starts.</p>}
             {zoneChanged && (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Globe className="size-3.5" /> Made in {editing.tzid?.replace(/_/g, ' ')}; saving puts it in {TIME_ZONE.replace(/_/g, ' ')}, at the same moment.
+                <Globe className="size-3.5" /> Made in {editing.e.tzid?.replace(/_/g, ' ')}; saving puts it in {TIME_ZONE.replace(/_/g, ' ')}, at the same moment.
               </p>
             )}
           </div>
 
-          {calendars.length > 0 && (
+          <label className="flex items-center gap-3 text-sm">
+            <span className="w-16 shrink-0 text-muted-foreground">Calendar</span>
+            <select aria-label="Calendar" value={draft.target} onChange={(e) => set({ target: e.target.value })} className={field}>
+              <optgroup label="On this computer">
+                {local.map((c) => (
+                  <option key={c.id} value={c.id}>{c.title}</option>
+                ))}
+              </optgroup>
+              {nostr && (
+                <optgroup label="Public">
+                  <option value={NOSTR} disabled={!canPublish}>{canPublish ? 'Nostr (public)' : 'Nostr (public): sign in to Din first'}</option>
+                </optgroup>
+              )}
+            </select>
+          </label>
+
+          {isPublic && (
+            <div role="note" className="flex gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <Globe className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
+              <p>
+                <span className="font-semibold">This event will be public.</span> It’s published to your Nostr relays, where anyone can see it, its notes and who’s invited. Deleting it later asks relays to remove it, but copies may stay.
+              </p>
+            </div>
+          )}
+          {leavingNostr && (
+            <div role="note" className="flex gap-2.5 rounded-lg bg-foreground/[0.05] p-3 text-sm">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <p>It’s kept on this computer from now on, and your relays are asked to delete the public copy. Copies elsewhere may stay.</p>
+            </div>
+          )}
+
+          {isPublic && nostrLists.length > 0 && (
             <label className="flex items-center gap-3 text-sm">
-              <span className="w-16 shrink-0 text-muted-foreground">Calendar</span>
+              <span className="w-16 shrink-0 text-muted-foreground">Nostr list</span>
               <select value={draft.calendar ?? ''} onChange={(e) => set({ calendar: e.target.value || null })} className={field}>
                 <option value="">None</option>
-                {calendars.map((c) => (
+                {nostrLists.map((c) => (
                   <option key={c.coord} value={c.coord}>{c.title}</option>
                 ))}
               </select>
@@ -170,51 +214,53 @@ export function EventEditor({
             />
           </label>
 
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <UserPlus className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  aria-label="Invite people by npub"
-                  placeholder="Invite people: npub1…"
-                  value={invite}
-                  aria-invalid={inviteError || undefined}
-                  onChange={(e) => {
-                    setInvite(e.target.value);
-                    setInviteError(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addInvite();
-                    }
-                  }}
-                  onBlur={() => invite.trim() && addInvite()}
-                  className={cn(field, 'pl-8')}
-                />
+          {isPublic && (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <UserPlus className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    aria-label="Invite people by npub"
+                    placeholder="Invite people: npub1…"
+                    value={invite}
+                    aria-invalid={inviteError || undefined}
+                    onChange={(e) => {
+                      setInvite(e.target.value);
+                      setInviteError(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addInvite();
+                      }
+                    }}
+                    onBlur={() => invite.trim() && addInvite()}
+                    className={cn(field, 'pl-8')}
+                  />
+                </div>
+                <DialogButton onClick={addInvite} disabled={!invite.trim()} className="h-9">Add</DialogButton>
               </div>
-              <DialogButton onClick={addInvite} disabled={!invite.trim()} className="h-9">Add</DialogButton>
+              {inviteError && <p className="text-xs text-destructive">That isn’t an npub or a public key.</p>}
+              {draft.participants.length > 0 && (
+                <ul className="flex flex-wrap gap-1.5" aria-label="Invited">
+                  {draft.participants.map((p) => (
+                    <li key={p.pubkey} className="flex items-center gap-1.5 rounded-full bg-foreground/[0.06] py-0.5 pr-1 pl-0.5 text-sm">
+                      <Avatar pubkey={p.pubkey} profile={profiles.get(p.pubkey)} className="size-6" />
+                      <span className="max-w-40 truncate">{nameOf(p.pubkey, profiles.get(p.pubkey))}</span>
+                      <button
+                        type="button"
+                        aria-label={`Don’t invite ${nameOf(p.pubkey, profiles.get(p.pubkey))}`}
+                        onClick={() => set({ participants: draft.participants.filter((x) => x.pubkey !== p.pubkey) })}
+                        className="grid size-5 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {inviteError && <p className="text-xs text-destructive">That isn’t an npub or a public key.</p>}
-            {draft.participants.length > 0 && (
-              <ul className="flex flex-wrap gap-1.5" aria-label="Invited">
-                {draft.participants.map((p) => (
-                  <li key={p.pubkey} className="flex items-center gap-1.5 rounded-full bg-foreground/[0.06] py-0.5 pr-1 pl-0.5 text-sm">
-                    <Avatar pubkey={p.pubkey} profile={profiles.get(p.pubkey)} className="size-6" />
-                    <span className="max-w-40 truncate">{nameOf(p.pubkey, profiles.get(p.pubkey))}</span>
-                    <button
-                      type="button"
-                      aria-label={`Don’t invite ${nameOf(p.pubkey, profiles.get(p.pubkey))}`}
-                      onClick={() => set({ participants: draft.participants.filter((x) => x.pubkey !== p.pubkey) })}
-                      className="grid size-5 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          )}
 
           <textarea
             aria-label="Notes"
@@ -226,11 +272,14 @@ export function EventEditor({
           />
         </div>
         <div className="flex items-center gap-2 border-t border-border/60 px-5 py-3">
-          <p className="mr-auto text-xs text-muted-foreground">Calendar events on Nostr are public.</p>
+          <p className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+            {isPublic ? <Globe className="size-3.5" aria-hidden /> : <Lock className="size-3.5" aria-hidden />}
+            {isPublic ? 'Public, on Nostr' : 'Private, on this computer'}
+          </p>
           <DialogButton onClick={onClose}>Cancel</DialogButton>
           <DialogButton type="submit" variant="primary" disabled={invalid || saving} className="inline-flex items-center gap-1.5">
             {saving && <Loader2 className="size-3.5 motion-safe:animate-spin" />}
-            {editing ? 'Save' : 'Add Event'}
+            {isPublic && !(editing?.kind === 'nostr') ? 'Publish Event' : editing ? 'Save' : 'Add Event'}
           </DialogButton>
         </div>
       </form>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Eye, Palette, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, Eye, EyeOff, Globe, Palette, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import { Calendar as MiniMonth } from '@/components/ui/calendar';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
@@ -7,7 +7,7 @@ import { describeWhen } from '@/shared/calendar';
 import { FIRST_DAY, locale } from './dates';
 import { colorStyle } from './model';
 import type { Shown } from './menu';
-import { COLORS, type Source, type SourceId } from './sources';
+import { COLORS, NOSTR, type Source, type SourceId } from './sources';
 
 export function Sidebar({
   date,
@@ -22,6 +22,7 @@ export function Sidebar({
   onNewCalendar,
   onRename,
   onDeleteCalendar,
+  onNostr,
   awaiting,
   onOpen,
 }: {
@@ -37,6 +38,8 @@ export function Sidebar({
   onNewCalendar: () => void;
   onRename: (s: Source) => void;
   onDeleteCalendar: (s: Source) => void;
+  /** Turn it on (which asks first) or off. */
+  onNostr: (on: boolean) => void;
   /** Invitations to come that the user hasn't answered. */
   awaiting: Shown[];
   onOpen: (s: Shown) => void;
@@ -48,6 +51,8 @@ export function Sidebar({
     setShownMonth(date);
     setMonth(date);
   }
+
+  const nostr = sources.find((s) => s.id === NOSTR);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -77,75 +82,85 @@ export function Sidebar({
           </button>
         </div>
         <ul className="space-y-px">
-          {sources.map((s) => {
-            const on = !hidden.has(s.id);
-            return (
-              <ContextMenu key={s.id}>
-                <ContextMenuTrigger asChild>
-                  <li>
-                    <label className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2 text-sm hover:bg-foreground/[0.05]">
-                      <input type="checkbox" checked={on} onChange={(e) => onToggle(s.id, e.target.checked)} className="peer sr-only" />
-                      <span
-                        aria-hidden
-                        style={colorStyle(s.color)}
-                        className={cn(
-                          'grid size-4 shrink-0 place-items-center rounded-[5px] border-2 border-(--ev) peer-focus-visible:ring-2 peer-focus-visible:ring-ring/60',
-                          on && 'bg-(--ev)',
-                        )}
-                      >
-                        {on && <Check className="size-3 text-white" strokeWidth={3} />}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                    </label>
-                  </li>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-52">
-                  <ContextMenuItem onSelect={() => onShowOnly(s.id)}>
-                    <Eye /> Show Only This
-                  </ContextMenuItem>
-                  <ContextMenuItem onSelect={onShowAll}>
-                    <Eye /> Show All
+          {sources.filter((s) => s.local).map((s) => (
+            <SourceRow
+              key={s.id}
+              source={s}
+              on={!hidden.has(s.id)}
+              onToggle={onToggle}
+              onShowOnly={onShowOnly}
+              onShowAll={onShowAll}
+              onColor={onColor}
+              extra={
+                <>
+                  <ContextMenuItem onSelect={() => onRename(s)}>
+                    <Pencil /> Rename…
                   </ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger className="gap-2">
-                      <Palette className="size-4 text-muted-foreground" /> Color
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-40">
-                      {COLORS.map((c) => (
-                        <ContextMenuItem key={c.value} onSelect={() => onColor(s.id, c.value)}>
-                          <span className="size-3 rounded-full" style={{ backgroundColor: c.value }} aria-hidden /> {c.name}
-                          {c.value === s.color && <Check className="ml-auto" aria-label="(current)" />}
-                        </ContextMenuItem>
-                      ))}
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  {s.calendar && (
-                    <>
-                      <ContextMenuItem onSelect={() => onRename(s)}>
-                        <Pencil /> Rename…
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem variant="destructive" onSelect={() => onDeleteCalendar(s)}>
-                        <Trash2 /> Delete Calendar…
-                      </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>
-            );
-          })}
+                  <ContextMenuItem variant="destructive" disabled={sources.filter((x) => x.local).length < 2} onSelect={() => onDeleteCalendar(s)}>
+                    <Trash2 /> Delete Calendar…
+                  </ContextMenuItem>
+                </>
+              }
+            />
+          ))}
         </ul>
+
+        {/* Nostr: a calendar of its own, kept apart, and public. */}
+        <div className="mx-2 mt-2 border-t border-border/60 pt-2">
+          {nostr ? (
+            <ul>
+              <SourceRow
+                source={nostr}
+                on={!hidden.has(NOSTR)}
+                onToggle={onToggle}
+                onShowOnly={onShowOnly}
+                onShowAll={onShowAll}
+                onColor={onColor}
+                badge
+                extra={
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => onNostr(false)}>
+                      <Power /> Turn Off Nostr Calendar
+                    </ContextMenuItem>
+                  </>
+                }
+              />
+            </ul>
+          ) : (
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onNostr(true)}
+                  className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground outline-none hover:bg-foreground/[0.05] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+                >
+                  <Globe className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block">Nostr calendar: off</span>
+                    <span className="block text-xs">Public events and invitations. Turn on…</span>
+                  </span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-52">
+                <ContextMenuItem onSelect={() => onNostr(true)}>
+                  <Power /> Turn On Nostr Calendar…
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+          )}
+        </div>
       </section>
 
       {awaiting.length > 0 && (
         <section aria-labelledby="awaiting-heading" className="px-2 pt-4 pb-3">
           <h2 id="awaiting-heading" className="px-2 pb-1 text-xs font-semibold text-muted-foreground">
-            Waiting for your answer
+            Nostr invitations waiting for your answer
           </h2>
           <ul className="space-y-px">
             {awaiting.slice(0, 8).map((s) => (
-              <li key={s.e.coord}>
+              <li key={s.key}>
                 <button
                   type="button"
                   onClick={() => onOpen(s)}
@@ -164,5 +179,79 @@ export function Sidebar({
         </section>
       )}
     </div>
+  );
+}
+
+function SourceRow({
+  source: s,
+  on,
+  onToggle,
+  onShowOnly,
+  onShowAll,
+  onColor,
+  badge,
+  extra,
+}: {
+  source: Source;
+  on: boolean;
+  onToggle: (id: SourceId, shown: boolean) => void;
+  onShowOnly: (id: SourceId) => void;
+  onShowAll: () => void;
+  onColor: (id: SourceId, color: string) => void;
+  /** Mark it public (the Nostr calendar). */
+  badge?: boolean;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li>
+          <label className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2 text-sm hover:bg-foreground/[0.05]">
+            <input type="checkbox" checked={on} onChange={(e) => onToggle(s.id, e.target.checked)} className="peer sr-only" />
+            <span
+              aria-hidden
+              style={colorStyle(s.color)}
+              className={cn(
+                'grid size-4 shrink-0 place-items-center rounded-[5px] border-2 border-(--ev) peer-focus-visible:ring-2 peer-focus-visible:ring-ring/60',
+                on && 'bg-(--ev)',
+              )}
+            >
+              {on && <Check className="size-3 text-white" strokeWidth={3} />}
+            </span>
+            {badge && <Globe className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+            <span className="min-w-0 flex-1 truncate">{s.title}</span>
+            {badge && (
+              <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-[11px] font-semibold text-amber-700 dark:text-amber-300">Public</span>
+            )}
+          </label>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onSelect={() => onShowOnly(s.id)}>
+          <Eye /> Show Only This
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onShowAll}>
+          <Eye /> Show All
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onToggle(s.id, !on)}>
+          {on ? <EyeOff /> : <Eye />} {on ? 'Hide' : 'Show'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuSub>
+          <ContextMenuSubTrigger className="gap-2">
+            <Palette className="size-4 text-muted-foreground" /> Color
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-40">
+            {COLORS.map((c) => (
+              <ContextMenuItem key={c.value} onSelect={() => onColor(s.id, c.value)}>
+                <span className="size-3 rounded-full" style={{ backgroundColor: c.value }} aria-hidden /> {c.name}
+                {c.value === s.color && <Check className="ml-auto" aria-label="(current)" />}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        {extra}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

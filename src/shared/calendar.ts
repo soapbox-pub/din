@@ -358,8 +358,8 @@ export function collectCalendar(raw: readonly NostrEvent[], pubkey: string): Cal
 }
 
 /** The calendar events that touch [from, to), soonest first. */
-export function eventsBetween(events: Iterable<CalendarEvent>, from: number, to: number): CalendarEvent[] {
-  const out: CalendarEvent[] = [];
+export function eventsBetween<T extends Pick<CalendarEvent, 'start' | 'end' | 'allDay' | 'title'>>(events: Iterable<T>, from: number, to: number): T[] {
+  const out: T[] = [];
   for (const e of events) {
     if (e.start < to && (e.end > from || (e.end === e.start && e.start >= from))) out.push(e);
   }

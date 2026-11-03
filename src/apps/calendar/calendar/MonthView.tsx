@@ -121,7 +121,7 @@ export function MonthView({ date, events, today }: { date: Date; events: Shown[]
                     </button>
                   </div>
                   {list.slice(0, fits).map((s) => (
-                    <MonthChip key={s.e.coord} shown={s} day={d} />
+                    <MonthChip key={s.key} shown={s} day={d} />
                   ))}
                   {hidden > 0 && (
                     <button

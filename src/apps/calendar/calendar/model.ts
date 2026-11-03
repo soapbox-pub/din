@@ -1,12 +1,20 @@
 import { createContext, useContext, useEffect, useState, type CSSProperties } from 'react';
 import { nip19 } from 'nostr-tools';
-import type { CalendarEvent, EventDraft } from '@/shared/calendar';
+import type { EventDraft } from '@/shared/calendar';
 import { TIME_ZONE } from './dates';
 import type { EventAction, Shown } from './menu';
 import type { Profile } from './nostr';
+import type { SourceId } from './sources';
+
+/** What the editor fills in: an event, and the calendar it goes in. */
+export interface Draft extends EventDraft {
+  /** A calendar on this computer (`local:<folder>`), or `nostr`, which publishes it. */
+  target: SourceId;
+}
 
 /** A draft from an event, to change it (or, without its identity, to copy it). */
-export function draftOf(e: CalendarEvent, calendar: string | null): EventDraft {
+export function draftOf(s: Shown, nostrList: string | null): Draft {
+  const e = s.e;
   return {
     title: e.title,
     description: e.description,
@@ -15,15 +23,16 @@ export function draftOf(e: CalendarEvent, calendar: string | null): EventDraft {
     end: e.allDay ? e.end : Math.max(e.end, e.start),
     tzid: e.tzid,
     locations: e.locations,
-    participants: e.participants,
+    participants: s.kind === 'nostr' ? s.e.participants : [],
     hashtags: e.hashtags,
     links: e.links,
-    calendar,
+    calendar: nostrList,
+    target: s.source,
   };
 }
 
-export function blankDraft(start: number, end: number, allDay: boolean, calendar: string | null): EventDraft {
-  return { title: '', description: '', allDay, start, end, tzid: TIME_ZONE, locations: [], participants: [], hashtags: [], links: [], calendar };
+export function blankDraft(start: number, end: number, allDay: boolean, target: SourceId): Draft {
+  return { title: '', description: '', allDay, start, end, tzid: TIME_ZONE, locations: [], participants: [], hashtags: [], links: [], calendar: null, target };
 }
 
 /** What the views can ask of the window around them. */
@@ -53,7 +62,7 @@ export function colorStyle(color: string, extra?: CSSProperties): CSSProperties 
 
 /** How an invitation not yet answered, or answered maybe or no, looks different. */
 export function answerClasses(s: Shown): string {
-  if (s.mine) return '';
+  if (s.kind === 'local' || s.mine) return '';
   if (s.rsvp === 'declined') return 'opacity-55 line-through decoration-foreground/40';
   if (s.rsvp === null) return 'outline outline-1 -outline-offset-1 outline-dashed outline-(--ev)';
   return '';

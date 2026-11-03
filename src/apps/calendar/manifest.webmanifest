@@ -1,6 +1,6 @@
 {
   "name": "Calendar",
-  "description": "Your events and invitations, kept on Nostr.",
+  "description": "Your events, kept privately on this computer, with an optional public calendar on Nostr.",
   "icons": [{ "src": "/icons/apps/calendar.png", "sizes": "512x512", "type": "image/png" }],
   "start_url": "/",
   "launch_handler": { "client_mode": "focus-existing" },
@@ -9,7 +9,8 @@
   ],
   "din": {
     "permissions": ["nostr"],
+    "folders": ["~/.local/share/din/calendar"],
     "window": { "size": { "width": 1120, "height": 760 }, "frame": "custom" },
-    "keywords": ["events", "schedule", "agenda", "meetings", "appointments", "invitations", "rsvp", "dates", "nip-52"]
+    "keywords": ["events", "ics", "icalendar", "vdir", "schedule", "agenda", "meetings", "appointments", "invitations", "rsvp", "dates", "nip-52"]
   }
 }
