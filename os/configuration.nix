@@ -181,6 +181,9 @@ let
   # until then. System updates bring installed ones up to date
   # (os/din-update.sh). Together they're over 2 GB the disk image doesn't
   # carry. `size` is what installing one takes, about, for Settings to show.
+  # `default` ones come with the computer all the same: Din downloads them
+  # in the background once it's installed (never from a live USB stick),
+  # until the user removes one.
   featuresDir = "/home/din/.local/state/din/features";
   dinFeatures = {
     # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
@@ -212,6 +215,7 @@ let
       title = "Dictation & transcripts";
       description = "Whisper, which turns speech into text on this computer, for dictation and Studio’s captions.";
       size = 630;
+      default = true;
       package = pkgs.symlinkJoin {
         name = "din-feature-dictation";
         paths = [ pkgs.whisper-cpp-vulkan ];
@@ -258,6 +262,7 @@ let
     (id: f: {
       inherit (f) title description;
       size = f.size * 1000 * 1000;
+      default = f.default or false;
       drv = builtins.unsafeDiscardOutputDependency f.package.drvPath;
       out = builtins.unsafeDiscardStringContext f.package.outPath;
     })

@@ -24,6 +24,41 @@ import { guestId, isGuestElement } from '@/platform/guest';
 
 /** Why dictation can't start on DinOS before its optional feature is installed. */
 export const DICTATION_NEEDS_FEATURE = 'Dictation needs Dictation & transcripts, in Settings → Optional Features';
+const DICTATION_DOWNLOADING = 'Dictation hasn’t finished downloading';
+const DICTATION_WAITING = 'Dictation downloads when this computer is online';
+const DICTATION_LIVE = 'Dictation comes with DinOS once it’s installed, or install it now in Settings → Optional Features';
+
+/** Whether dictation stopped for not being on this computer (yet), for SpeechRecognition's error code. */
+export function isDictationMissing(message: string | null): boolean {
+  if (!message) return false;
+  return (
+    message === 'Dictation isn’t available here' ||
+    message === DICTATION_NEEDS_FEATURE ||
+    message === DICTATION_WAITING ||
+    message === DICTATION_LIVE ||
+    message.startsWith(DICTATION_DOWNLOADING)
+  );
+}
+
+/**
+ * Why dictation isn't here, from its optional feature: on its way (it comes
+ * with the computer), waiting for a connection, held back on a live USB
+ * stick, or removed.
+ */
+async function missingReason(): Promise<string> {
+  const features = getFeaturesBridge();
+  if (!features) return 'Dictation isn’t available here';
+  const state = await features.state().catch(() => null);
+  const feature = state?.features.find((f) => f.id === 'dictation');
+  if (!state || !feature) return DICTATION_NEEDS_FEATURE;
+  if (feature.busy?.action === 'install') {
+    const progress = feature.busy.progress;
+    return progress !== null ? `${DICTATION_DOWNLOADING} (${Math.round(progress * 100)}%)` : DICTATION_DOWNLOADING;
+  }
+  if (!feature.wanted) return DICTATION_NEEDS_FEATURE;
+  if (state.live) return DICTATION_LIVE;
+  return feature.error ? DICTATION_WAITING : DICTATION_DOWNLOADING;
+}
 
 export interface DictationBridge {
   available(): Promise<boolean>;
@@ -353,7 +388,8 @@ export async function startDictation(target: DictationTarget, options: { held?: 
   const ok = await api.available().catch(() => false);
   if (session !== current) return;
   if (!ok) {
-    fail(getFeaturesBridge() ? DICTATION_NEEDS_FEATURE : 'Dictation isn’t available here');
+    const reason = await missingReason();
+    if (session === current) fail(reason);
     return;
   }
   await unmuteFor(current);

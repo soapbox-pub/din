@@ -11,14 +11,14 @@ import { call, command, need, pick } from './util';
 const features = () => need(getFeaturesBridge(), 'Optional features');
 const FEATURE: Param = { name: 'feature', type: 'string', positional: true, help: 'The feature, by id or name (din features list)' };
 
-async function list(): Promise<FeatureState[]> {
+async function list(): Promise<{ live: boolean; features: FeatureState[] }> {
   const state = await call(features().state());
   if (!state.available) throw new CommandError('This computer has no optional features');
-  return state.features;
+  return state;
 }
 
 async function feature(query: string): Promise<FeatureState> {
-  return pick(await list(), query, (f) => [f.id, f.title], 'feature');
+  return pick((await list()).features, query, (f) => [f.id, f.title], 'feature');
 }
 
 export const featuresArea: Area = {
@@ -26,8 +26,8 @@ export const featuresArea: Area = {
   summary: 'Optional features: Wine, QEMU, Whisper and more, installed when wanted',
   commands: [
     command('features', 'list', 'Each optional feature, and whether it’s installed', [], async () => {
-      const all = await list();
-      return { data: all, text: all.map((f) => `${f.id}\t${f.title}\t${describeFeature(f)}`).join('\n') };
+      const { live, features: all } = await list();
+      return { data: all, text: all.map((f) => `${f.id}\t${f.title}\t${describeFeature(f, live)}`).join('\n') };
     }),
     command('features', 'install', 'Install a feature, or every one with “all”', [FEATURE], async (args, ctx) => {
       const query = args.string('feature');
@@ -51,8 +51,13 @@ export const featuresArea: Area = {
         stop();
       }
     }),
-    command('features', 'remove', 'Remove a feature and free its space', [FEATURE], async (args, ctx) => {
+    command('features', 'remove', 'Remove a feature and free its space, or keep one from downloading', [FEATURE], async (args, ctx) => {
       const f = await feature(args.string('feature'));
+      if (!f.installed && f.wanted) {
+        // Comes with the computer and hasn't downloaded: nothing to lose.
+        await call(features().remove(f.id));
+        return { text: `${f.title} won’t download` };
+      }
       if (!f.installed) return { text: `${f.title} isn’t installed` };
       const ok = await ctx.confirm({
         title: `Remove ${f.title}?`,

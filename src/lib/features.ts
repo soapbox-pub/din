@@ -22,6 +22,12 @@ export interface FeatureState {
   installed: boolean;
   /** Installed, and this system's version of it (not one from before an update). */
   current: boolean;
+  /**
+   * Installed, or on its way: the user installed it, or it comes with the
+   * computer (dictation) and they haven't removed it. Wanted and not
+   * installed, it downloads in the background, except from a live USB stick.
+   */
+  wanted: boolean;
   busy: { action: FeatureAction; phase: FeaturePhase; progress: number | null } | null;
   /** Why its last action failed, until the next one. */
   error: string | null;
@@ -30,6 +36,8 @@ export interface FeatureState {
 export interface FeaturesState {
   /** False off DinOS, where there's nothing to install this way. */
   available: boolean;
+  /** Running from a live USB stick, where wanted features don't download by themselves. */
+  live: boolean;
   features: FeatureState[];
 }
 
@@ -85,7 +93,7 @@ export function removalConsequence(feature: Pick<FeatureState, 'id' | 'title'>):
 }
 
 /** What a feature is doing, or whether it's there, in a few words. */
-export function describeFeature(feature: FeatureState): string {
+export function describeFeature(feature: FeatureState, live = false): string {
   const busy = feature.busy;
   if (busy) {
     if (busy.phase === 'waiting') return busy.action === 'remove' ? 'Waiting to remove…' : 'Waiting to install…';
@@ -96,5 +104,10 @@ export function describeFeature(feature: FeatureState): string {
   }
   if (feature.installed && !feature.current) return 'Installed · an update is waiting';
   if (feature.installed) return 'Installed';
-  return `Not installed · about ${formatFeatureSize(feature.size)}`;
+  const size = `about ${formatFeatureSize(feature.size)}`;
+  if (feature.wanted) {
+    if (live) return `Downloads once DinOS is installed · ${size}`;
+    return feature.error ? `Downloads when it can · ${size}` : `Downloads in the background · ${size}`;
+  }
+  return `Not installed · ${size}`;
 }

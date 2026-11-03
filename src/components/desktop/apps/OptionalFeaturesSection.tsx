@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AppWindow, Boxes, Download, EllipsisVertical, Globe, Loader2, Mic, Monitor, PackagePlus, Trash2, TriangleAlert } from 'lucide-react';
+import { AppWindow, Ban, Boxes, Download, EllipsisVertical, Globe, Loader2, Mic, Monitor, PackagePlus, Trash2, TriangleAlert } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +63,10 @@ export function OptionalFeaturesSection() {
   const remove = (feature: FeatureState) => {
     bridge?.remove(feature.id).catch(failed(`Couldn’t remove ${feature.title}`));
   };
+  // One that comes with the computer and hasn't downloaded: nothing to lose, so no question.
+  const decline = (feature: FeatureState) => {
+    bridge?.remove(feature.id).catch(failed(`Couldn’t change ${feature.title}`));
+  };
 
   return (
     <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
@@ -77,7 +81,8 @@ export function OptionalFeaturesSection() {
       </header>
       <p className="text-sm text-muted-foreground">
         Parts of DinOS that take a lot of space, kept off the disk until you want them. Each downloads from the
-        internet when you install it, and comes back to the size it was when you remove it.
+        internet when you install it, and comes back to the size it was when you remove it. Dictation comes with
+        DinOS, and downloads in the background once it’s installed.
       </p>
 
       {!bridge ? (
@@ -105,8 +110,9 @@ export function OptionalFeaturesSection() {
             <FeatureRow
               key={feature.id}
               feature={feature}
+              live={features.data?.live ?? false}
               onInstall={() => install(feature)}
-              onRemove={() => setRemoving(feature)}
+              onRemove={() => (feature.installed ? setRemoving(feature) : decline(feature))}
             />
           ))}
         </ul>
@@ -138,7 +144,17 @@ export function OptionalFeaturesSection() {
   );
 }
 
-function FeatureRow({ feature, onInstall, onRemove }: { feature: FeatureState; onInstall: () => void; onRemove: () => void }) {
+function FeatureRow({
+  feature,
+  live,
+  onInstall,
+  onRemove,
+}: {
+  feature: FeatureState;
+  live: boolean;
+  onInstall: () => void;
+  onRemove: () => void;
+}) {
   const Icon = ICONS[feature.id] ?? PackagePlus;
   const busy = feature.busy;
   const progress = busy && busy.phase !== 'waiting' && busy.progress !== null ? busy.progress : null;
@@ -165,7 +181,7 @@ function FeatureRow({ feature, onInstall, onRemove }: { feature: FeatureState; o
               <span className="text-sm font-medium text-foreground">{feature.title}</span>
               <span className="text-xs text-muted-foreground">{feature.description}</span>
               <span className="text-xs text-muted-foreground" aria-live="polite">
-                {describeFeature(feature)}
+                {describeFeature(feature, live)}
               </span>
               {busy && busy.action === 'install' && (
                 <Progress
@@ -183,17 +199,25 @@ function FeatureRow({ feature, onInstall, onRemove }: { feature: FeatureState; o
             </div>
             {busy ? (
               <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-            ) : feature.installed ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label={`More for ${feature.title}`}>
-                    <EllipsisVertical className="size-4" aria-hidden />
+            ) : feature.installed || feature.wanted ? (
+              <div className="flex shrink-0 items-center gap-1">
+                {!feature.installed && (
+                  <Button variant="outline" size="sm" onClick={onInstall}>
+                    <Download className="size-4" aria-hidden />
+                    Download Now
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <FeatureMenuItems feature={feature} Item={DropdownMenuItem} onInstall={onInstall} onRemove={onRemove} />
-                </DropdownMenuContent>
-              </DropdownMenu>
+                )}
+                  <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label={`More for ${feature.title}`}>
+                      <EllipsisVertical className="size-4" aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <FeatureMenuItems feature={feature} Item={DropdownMenuItem} onInstall={onInstall} onRemove={onRemove} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ) : (
               <Button variant="outline" size="sm" onClick={onInstall}>
                 <Download className="size-4" aria-hidden />
@@ -228,7 +252,13 @@ function FeatureMenuItems({
       {(!feature.installed || !feature.current) && (
         <Item disabled={busy} onSelect={onInstall}>
           <Download aria-hidden />
-          {feature.installed ? 'Update Now' : 'Install'}
+          {feature.installed ? 'Update Now' : feature.wanted ? 'Download Now' : 'Install'}
+        </Item>
+      )}
+      {!feature.installed && feature.wanted && (
+        <Item disabled={busy} onSelect={onRemove}>
+          <Ban aria-hidden />
+          Don’t Download
         </Item>
       )}
       {feature.installed && (

@@ -1540,7 +1540,8 @@ expose('features', {
   /** Install every feature that isn't; resolves when they're all done. */
   installAll: () => ipcRenderer.invoke('features:installAll'),
   /**
-   * Remove a feature and delete what only it used.
+   * Remove a feature and delete what only it used, and don't want it any
+   * more: one that comes with the computer and hasn't downloaded won't.
    * @param {string} id
    */
   remove: (id) => ipcRenderer.invoke('features:remove', id),

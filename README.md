@@ -657,8 +657,21 @@ DinOS that had them all built in keeps them all: the first time Din starts
 with optional features there, it installs every one, from what's still in
 the store.
 
+Dictation is `default`: it comes with the computer all the same, without
+the disk image carrying it. Din keeps which features the user wants in
+`~/.local/state/din/feature-choices.json`, and a default one counts as
+wanted until they remove it, so a new or erased computer downloads it in
+the background soon after Din first starts, and an install that a restart
+or a lost connection cut short carries on the next time Din starts or the
+computer is online (it tries every few minutes). Nothing downloads by
+itself from a live USB stick (`/run/din/live`); the computer it's installed
+onto does. A computer set up before defaults existed, whose features
+folder was already there, treats a default feature it doesn't have as
+removed.
+
 A new optional feature is an entry in `dinFeatures` with a title,
-description, size and package, whose users look for it under its link.
+description, size and package (and `default = true` if it comes with the
+computer), whose users look for it under its link.
 
 ### Updating npm dependencies
 

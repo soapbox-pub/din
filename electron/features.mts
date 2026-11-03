@@ -12,6 +12,15 @@
 // the link is there. Removing one takes the link away and deletes what only
 // it used.
 //
+// Some come with the computer (`default` in the manifest: dictation): they're
+// wanted until the user removes one, and download in the background, as if
+// they'd been installed just before the computer restarted. Every choice -
+// installing, removing, or a default nobody changed - is kept in CHOICES, so
+// an install that a restart or a lost connection cut short picks up again
+// the next time Din starts or the computer is online. Nothing downloads by
+// itself from a live USB stick (/run/din/live): the stick is slow and small,
+// and the computer it's installed onto downloads them instead.
+//
 // A system update builds the new versions of installed features before it
 // switches (os/din-update.sh); one it couldn't (offline, say) keeps working
 // as it was, and is brought up to date here soon after Din starts. A
@@ -24,10 +33,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 
 const MANIFEST = process.env.DIN_FEATURES;
 const DIR = process.env.DIN_FEATURES_DIR;
+/** Which features the user wants, next to DIR (not in it: the updater reads every link there). */
+const CHOICES = DIR ? path.join(path.dirname(DIR), 'feature-choices.json') : null;
+/** A live USB boot, where nothing downloads by itself (os/configuration.nix's dinos-live). */
+const LIVE = fs.existsSync('/run/din/live');
+/** How often wanted features that aren't there yet are tried again. */
+const RETRY_MS = 5 * 60_000;
 
 /** The order Settings lists them in; any others follow by id. */
 const ORDER = ['windows', 'vms', 'dictation', 'containers', 'webkit'];
@@ -38,9 +53,13 @@ interface ManifestEntry {
   title: string;
   description: string;
   size: number;
+  /** Comes with the computer: wanted until removed. */
+  default: boolean;
   drv: string;
   out: string;
 }
+
+type Choice = 'wanted' | 'declined';
 
 export type FeatureAction = 'install' | 'remove';
 /** What an action is doing now: waiting its turn, fetching, building, or deleting. */
@@ -56,6 +75,12 @@ export interface FeatureState {
   installed: boolean;
   /** Installed, and the version this system has (not one from before an update). */
   current: boolean;
+  /**
+   * Installed, or on its way: the user installed it, or it comes with the
+   * computer and they haven't removed it. One that's wanted and not
+   * installed downloads in the background (except on a live USB stick).
+   */
+  wanted: boolean;
   busy: { action: FeatureAction; phase: FeaturePhase; progress: number | null } | null;
   /** Why its last action failed, until the next one. */
   error: string | null;
@@ -64,6 +89,8 @@ export interface FeatureState {
 export interface FeaturesState {
   /** False off DinOS, where there's nothing to install this way. */
   available: boolean;
+  /** Running from a live USB stick, where wanted features don't download by themselves. */
+  live: boolean;
   features: FeatureState[];
 }
 
@@ -93,6 +120,7 @@ function readManifest(): Record<string, ManifestEntry> {
       title: typeof v.title === 'string' ? v.title : id,
       description: typeof v.description === 'string' ? v.description : '',
       size: typeof v.size === 'number' ? v.size : 0,
+      default: v.default === true,
       drv: v.drv,
       out: v.out,
     };
@@ -115,6 +143,41 @@ function installedPath(id: string): string | null {
   }
 }
 
+function readChoices(): Record<string, Choice> {
+  if (!CHOICES) return {};
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(CHOICES, 'utf8'));
+    const choices: Record<string, Choice> = {};
+    if (raw && typeof raw === 'object') {
+      for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (value === 'wanted' || value === 'declined') choices[id] = value;
+      }
+    }
+    return choices;
+  } catch {
+    return {};
+  }
+}
+
+function writeChoices(choices: Record<string, Choice>): void {
+  if (!CHOICES) return;
+  fs.mkdirSync(path.dirname(CHOICES), { recursive: true });
+  const temp = `${CHOICES}.tmp`;
+  fs.writeFileSync(temp, `${JSON.stringify(choices, null, 2)}\n`);
+  fs.renameSync(temp, CHOICES);
+}
+
+function choose(id: string, choice: Choice): void {
+  writeChoices({ ...readChoices(), [id]: choice });
+}
+
+/** Whether a feature is wanted: as the user chose, or by its link and default. */
+function isWanted(id: string, entry: ManifestEntry, choices: Record<string, Choice>, installed: boolean): boolean {
+  const choice = choices[id];
+  if (choice) return choice === 'wanted';
+  return installed || entry.default;
+}
+
 function byOrder(a: string, b: string): number {
   const ia = ORDER.indexOf(a);
   const ib = ORDER.indexOf(b);
@@ -125,8 +188,10 @@ function byOrder(a: string, b: string): number {
 function state(): FeaturesState {
   const manifest = readManifest();
   const ids = Object.keys(manifest).sort(byOrder);
+  const choices = readChoices();
   return {
     available: Boolean(DIR) && ids.length > 0,
+    live: LIVE,
     features: ids.map((id) => {
       const entry = manifest[id];
       const target = DIR ? installedPath(id) : null;
@@ -137,6 +202,7 @@ function state(): FeaturesState {
         size: entry.size,
         installed: target !== null,
         current: target === entry.out,
+        wanted: isWanted(id, entry, choices, target !== null),
         busy: busy.get(id) ?? null,
         error: errors.get(id) ?? null,
       };
@@ -313,7 +379,15 @@ function enqueue(id: string, action: FeatureAction, work: () => Promise<void>): 
 
 /** Install a feature, or bring an installed one up to this system's version. */
 export function install(id: unknown): Promise<void> {
-  const [key, entry] = entryFor(id);
+  const [key] = entryFor(id);
+  // Chosen before it downloads, so a restart halfway doesn't forget it.
+  choose(key, 'wanted');
+  return fetchFeature(key);
+}
+
+/** Build a feature to this system's version, if it isn't already. */
+function fetchFeature(key: string): Promise<void> {
+  const [, entry] = entryFor(key);
   if (installedPath(key) === entry.out) return Promise.resolve();
   return enqueue(key, 'install', () => build(key, entry));
 }
@@ -326,10 +400,19 @@ export async function installAll(): Promise<void> {
   if (failed > 0) throw new Error(failed === 1 ? 'One feature couldn’t be installed' : `${failed} features couldn’t be installed`);
 }
 
+/**
+ * Remove a feature, and don't want it any more: one that comes with the
+ * computer and hasn't downloaded yet won't.
+ */
 export function remove(id: unknown): Promise<void> {
   const [key] = entryFor(id);
+  if (busy.get(key)?.action === 'install') return Promise.reject(new Error('Wait for it to finish installing'));
+  choose(key, 'declined');
   const target = installedPath(key);
-  if (target === null) return Promise.resolve();
+  if (target === null) {
+    notify(true);
+    return Promise.resolve();
+  }
   return enqueue(key, 'remove', async () => {
     fs.rmSync(linkOf(key), { force: true });
     notify(true);
@@ -365,11 +448,36 @@ function migrate(): void {
   }
 }
 
-/** Installed features from before a system update, brought up to date. */
-function refreshOutdated(): void {
+/**
+ * The first time Din starts knowing which features come with the computer:
+ * on one that was already set up (its features folder is there), a default
+ * feature that isn't installed may have been removed before removing was
+ * remembered, so it stays removed. A new computer, or one just erased, has
+ * no folder yet and gets them. A live stick records nothing, so the
+ * computer it's installed onto decides for itself.
+ */
+function settleChoices(): void {
+  if (!CHOICES || !DIR || LIVE || fs.existsSync(CHOICES)) return;
+  const choices: Record<string, Choice> = {};
+  if (fs.existsSync(DIR)) {
+    for (const [id, entry] of Object.entries(readManifest())) {
+      if (entry.default && installedPath(id) === null) choices[id] = 'declined';
+    }
+  }
+  writeChoices(choices);
+}
+
+/**
+ * Bring every wanted feature to this system's version: ones that come with
+ * the computer and haven't downloaded, installs a restart cut short, and
+ * installed ones from before a system update. Not from a live stick, and not
+ * while offline; a failure waits for the next try.
+ */
+function fetchWanted(): void {
+  if (LIVE || !net.isOnline()) return;
   for (const f of state().features) {
-    if (f.installed && !f.current && !f.busy) {
-      install(f.id).catch((error: unknown) => console.warn(`[features] couldn't update ${f.id}:`, error));
+    if (f.wanted && !f.current && !f.busy) {
+      fetchFeature(f.id).catch((error: unknown) => console.warn(`[features] couldn't install ${f.id}:`, error));
     }
   }
 }
@@ -400,8 +508,11 @@ export function registerFeaturesHandlers(options: {
 
   if (DIR && Object.keys(readManifest()).length > 0) {
     setTimeout(() => {
-      migrate();
-      refreshOutdated();
+      // Before migrate, which makes the folder settleChoices goes by.
+      settleChoices();
+      if (!LIVE) migrate();
+      fetchWanted();
+      setInterval(fetchWanted, RETRY_MS).unref();
     }, 30_000).unref();
   }
 }
