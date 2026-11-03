@@ -31,12 +31,16 @@ export function useSystemCursorThemes() {
   });
 }
 
-/** A few of a theme's cursors (arrow, hand, I-beam, resize) as data URLs. */
+/**
+ * A few of a theme's cursors (arrow, hand, I-beam, resize) as data URLs,
+ * drawn sharp for 32 CSS pixels on this screen and zoom.
+ */
 export function useSystemCursorPreview(id: string) {
+  const size = Math.max(48, Math.ceil(32 * (window.devicePixelRatio || 1)));
   return useQuery<{ role: string; src: string }[]>({
-    queryKey: ['cursor', 'preview', id],
+    queryKey: ['cursor', 'preview', id, size],
     queryFn: async () =>
-      (await requireBridge().preview(id, 48)).map((preview) => ({
+      (await requireBridge().preview(id, size)).map((preview) => ({
         role: preview.role,
         src: previewToDataUrl(preview),
       })),
