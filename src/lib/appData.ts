@@ -23,6 +23,18 @@ export function appDataDTag(key: string): string {
   return `${APP_DATA_NAMESPACE}.${key}`;
 }
 
+/** Whether a `d` tag is one of Din's own: only Din writes these. */
+export function isAppDataDTag(d: string | undefined): boolean {
+  return d?.startsWith(`${APP_DATA_NAMESPACE}.`) ?? false;
+}
+
+/**
+ * How far ahead of this device's clock an event may be dated. A record
+ * dated past it is refused: last-write-wins would let it beat every write
+ * the user makes after it.
+ */
+export const MAX_CLOCK_SKEW_SECONDS = 10 * 60;
+
 /**
  * Keys Din used to sync but now keeps local-only. Their old events are
  * deleted from the user's relays (NIP-09) once per account.

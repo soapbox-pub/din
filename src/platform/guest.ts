@@ -39,7 +39,7 @@ interface WebviewElement extends HTMLElement {
   canGoForward(): boolean;
   getURL(): string;
   getWebContentsId(): number;
-  executeJavaScript(code: string): Promise<unknown>;
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
   insertCSS(css: string): Promise<string>;
 }
 
@@ -160,6 +160,17 @@ export const guest = {
   },
   /** Run script in the page. Only for Din's own probes of web pages (icons, selection, size). */
   executeJavaScript: (el: GuestElement, code: string) => engine(el).executeJavaScript(code),
+  /**
+   * Put the page in full screen, or take it out (F11). Run as a user gesture,
+   * which Blink asks of requestFullscreen: the key arrived in the shell.
+   */
+  toggleFullscreen: (el: GuestElement) =>
+    engine(el)
+      .executeJavaScript(
+        '(document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}); void 0',
+        true,
+      )
+      .catch(() => {}),
   /** Add a style sheet to the page's current document. Only Din's own styles, never page-supplied ones. */
   insertCSS: (el: GuestElement, css: string) => engine(el).insertCSS(css),
 };

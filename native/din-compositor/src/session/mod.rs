@@ -23,11 +23,18 @@
 //! Settings → Accessibility's zoom, colour filters and keyboard aids are
 //! the compositor's, so they reach every app (accessibility.rs).
 //!
+//! A native app in full screen (a game) skips Din's window: Din's embedded
+//! compositor hands its frames here, drawn over Din's window on their monitor
+//! and paced by its refresh (direct.rs). On a display that can vary its
+//! refresh (FreeSync, Adaptive-Sync), it does while a game is on it: each of
+//! the game's frames goes to the screen as soon as it's done.
+//!
 //! The Wayland socket is `din-shell` in XDG_RUNTIME_DIR. The compositor exits
 //! when Din does, with its exit status.
 
 mod accessibility;
 mod cursor;
+mod direct;
 mod drm;
 mod edid;
 mod gamma;
@@ -61,6 +68,10 @@ use state::{ClientState, State};
 /// nothing that guesses wayland-0 opens a window in place of Din.
 pub const SOCKET: &str = "din-shell";
 
+/// How far behind on its events a client may fall before it's cut off: a
+/// few seconds of a fast mouse. The buffer only grows to it as needed.
+const CLIENT_BUFFER: usize = 16 << 20;
+
 /// Runs the screen until the program in ARGS (after an optional `--`) exits,
 /// and returns its exit status.
 pub fn run(args: &[String]) -> i32 {
@@ -91,6 +102,10 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     let display: Display<State> = Display::new().expect("wayland display");
+    // Din reads its Wayland events on Node's thread, which a busy moment
+    // keeps from them; past the default 4 KiB unread, Din was cut off, and
+    // the session with it.
+    display.handle().set_default_max_buffer_size(CLIENT_BUFFER);
     let mut state = match State::new(&display, event_loop.handle(), event_loop.get_signal()) {
         Ok(state) => state,
         Err(err) => {
@@ -125,19 +140,45 @@ pub fn run(args: &[String]) -> i32 {
     event_loop
         .handle()
         .insert_source(socket, |stream, _, state| {
-            if let Err(err) = state.dh.insert_client(stream, Arc::new(ClientState::default())) {
-                warn!("adding a client: {err}");
+            match state.dh.insert_client(stream, Arc::new(ClientState::default())) {
+                Ok(client) => {
+                    if let (Ok(credentials), Some(data)) = (client.get_credentials(&state.dh), client.get_data::<ClientState>()) {
+                        let _ = data.pid.set(credentials.pid);
+                    }
+                }
+                Err(err) => warn!("adding a client: {err}"),
             }
         })
         .expect("socket source");
 
-    let mut child = match Command::new(&program[0]).args(&program[1..]).env("WAYLAND_DISPLAY", SOCKET).spawn() {
+    // Full-screen games' frames, from Din's embedded compositor (direct.rs).
+    let direct_socket = match state.direct.listener() {
+        Ok(listener) => {
+            event_loop
+                .handle()
+                .insert_source(Generic::new(listener, Interest::READ, Mode::Level), |_, _, state| {
+                    state.direct_accept();
+                    Ok(PostAction::Continue)
+                })
+                .expect("direct socket source");
+            Some(state.direct.path.clone())
+        }
+        Err(_) => None,
+    };
+
+    let mut command = Command::new(&program[0]);
+    command.args(&program[1..]).env("WAYLAND_DISPLAY", SOCKET);
+    if let Some(path) = &direct_socket {
+        command.env("DIN_DIRECT_SOCKET", path);
+    }
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) => {
             error!("starting {}: {err}", program[0]);
             return 1;
         }
     };
+    state.din_pid = child.id();
     info!("started {} on {SOCKET}", program[0]);
 
     let name = program[0].clone();

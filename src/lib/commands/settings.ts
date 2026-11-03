@@ -91,6 +91,7 @@ const SETTINGS: Setting[] = [
   { key: 'accessibility.sticky-keys', field: 'stickyKeys', help: 'Modifiers pressed on their own stay down for the next key (DinOS)', param: bool },
   { key: 'accessibility.slow-keys', field: 'slowKeys', help: 'Keys only count once held a moment (DinOS)', param: bool },
   { key: 'accessibility.bounce-keys', field: 'bounceKeys', help: 'A key pressed again just after it came up is ignored (DinOS)', param: bool },
+  { key: 'power.game-performance', field: 'gamePerformance', help: 'Performance power mode while a game is in full screen', param: bool },
   { key: 'datetime.clock-format', field: 'clockFormat', help: '12- or 24-hour time, or the locale’s', param: { type: 'string', choices: ['auto', '12', '24'] } },
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },
   { key: 'datetime.show-seconds', field: 'clockShowSeconds', help: 'The menu bar shows seconds', param: bool },

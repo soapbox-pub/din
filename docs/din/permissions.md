@@ -32,6 +32,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |
 | `cursor` | `din.desktop.setCursor`: install a cursor theme and make it the pointer | Preview |
 | `assistant` | `din.system.assistant`: the Assistant's OpenCode service. Only the Assistant reaches all of it; any other app talks only to conversations it started, in `~/.cache/din/<id>-assistant/`, hears only their events, and can't answer sudo | Assistant, CAD |
+| `assistant-sudo` | `din.system.assistant`'s `passwords`, `answerPassword` and `approve`: answering sudo when a conversation's command asks. An app with `assistant` alone hears no requests and can't answer one. Built-in apps only: an app from a folder or the `din` command can't ask for it | Assistant |
 | `indd` | `din.system.indd`: InDesign conversion | Publisher |
 | `volumes` | `din.system.volumes`: removable disks and phones plugged in by USB, mounting, unlocking and ejecting | Files |
 | `mail` | `din.system.mail`: the user's IMAP and SMTP accounts (`src/lib/mail.ts`), run in main by `electron/mail.mts`. Passwords stay in main, sealed with the keyring; the app never sees them. Mail already seen is kept in `userData/mail/<account>.db`, so it reads offline. Conversations are put together from the server's thread id (Gmail's X-GM-THRID, OBJECTID's THREADID) or each message's Message-ID, In-Reply-To and References, and `conversation` finds the rest of one in the inbox, Sent and Archive (All Mail on Gmail). Senders' pictures are looked up in main (`electron/mail-avatars.mts`), only for senders whose DKIM passed, from their domain's NIP-05 profile or BIMI logo, never Gravatar, and kept for weeks; Settings can turn it off. Subscriptions reads the inbox's List-Unsubscribe headers and leaves lists: a one-click POST from main only to public https hosts, or an email from the account. Main watches each inbox from the moment Din starts, and the desktop announces new mail (`MailHost`) and puts the unread count on Mail's tile, Mail open or not | Mail |
@@ -72,7 +73,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `capture`, `quickshare`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `capture`, `quickshare`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main

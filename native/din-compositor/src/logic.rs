@@ -30,6 +30,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size, Transform},
     wayland::{
         compositor::with_states,
+        dmabuf::get_dmabuf,
         selection::data_device::{SourceMetadata, set_data_device_selection, start_dnd},
         shell::xdg::XdgToplevelSurfaceData,
     },
@@ -38,6 +39,7 @@ use smithay::{
 use crate::{
     canvas::{Canvas, Patch},
     clipboard::{Contents, URI_LIST},
+    direct::{DirectChannel, Reply},
     state::{KeyboardFocus, Popup, PopupShell, State, Toplevel},
     xwayland::window_type_name,
 };
@@ -160,6 +162,23 @@ impl State {
         }
     }
 
+    /// Whether an X window maps already in full screen: one of its own
+    /// (no Din title bar) exactly covering a monitor. Games set
+    /// _NET_WM_STATE before mapping, which smithay doesn't read.
+    fn covers_monitor(&self, t: &Toplevel, size: Size<i32, Logical>) -> bool {
+        let Some(x11) = t.x11() else { return false };
+        x11.is_decorated() && !x11.is_override_redirect() && self.is_monitor(Rectangle::new(x11.geometry().loc, size))
+    }
+
+    /// Whether RECT is exactly one of Din's monitors (the whole screen,
+    /// before the shell has named them).
+    pub fn is_monitor(&self, rect: Rectangle<i32, Logical>) -> bool {
+        if self.monitors.is_empty() {
+            return rect == Rectangle::from_size(self.screen);
+        }
+        self.monitors.contains(&rect)
+    }
+
     /// Announce newly mapped windows and report title/size changes.
     fn announce(&mut self) {
         let mut messages = Vec::new();
@@ -170,9 +189,11 @@ impl State {
             }
             let Description { title, class, pid, kind, acked, csd } = self.describe(&self.toplevels[index], &surface);
             let geometry = self.toplevels[index].window.geometry();
+            let covers_monitor = self.covers_monitor(&self.toplevels[index], geometry.size);
             let t = &mut self.toplevels[index];
             if !t.announced {
                 t.announced = true;
+                let fullscreen = std::mem::take(&mut t.wants_fullscreen) || covers_monitor;
                 t.title = title.clone();
                 t.csd = csd;
                 t.opaque = crate::gpu::fully_opaque(&surface);
@@ -193,6 +214,7 @@ impl State {
                     "transientFor": Value::Null,
                     "csd": csd,
                     "opaque": t.opaque,
+                    "fullscreen": fullscreen,
                 }));
                 self.enter_output(&surface);
                 continue;
@@ -259,6 +281,8 @@ impl State {
     pub fn flush(&mut self) {
         self.announce();
         self.report_pointer_lock();
+        // Paced by the screen, not by Din's acks.
+        self.flush_direct();
         // With no renderer to draw for, damage just accumulates; apps wait
         // on their frame callbacks meanwhile, which is right for an unseen
         // window.
@@ -331,7 +355,7 @@ impl State {
         let (Some(gpu), Some(buffers)) = (gpu.as_mut(), buffers.as_mut()) else { return };
         let windows = toplevels
             .iter_mut()
-            .filter(|t| t.announced && t.dirty)
+            .filter(|t| t.announced && t.dirty && !t.direct_active)
             .map(|t| {
                 let geometry = t.window.geometry();
                 (t.id, t.wl_surface(), geometry, t.opaque, &mut t.dirty, &mut t.target, &mut t.shown)
@@ -400,6 +424,187 @@ impl State {
         self.in_flight = self.in_flight.saturating_sub(1);
         self.passthrough.acked();
         for surface in std::mem::take(&mut self.awaiting_frame) {
+            if surface.is_alive() {
+                self.frame_done(&surface);
+            }
+        }
+    }
+
+    /// Din put window ID in full screen, at the rect in MESSAGE (in Din's
+    /// window's logical pixels), or took it out (no rect): its frames go to
+    /// the screen's compositor meanwhile, where they can (direct.rs).
+    fn set_direct(&mut self, id: u32, message: &Value) {
+        let n = |key: &str| message.get(key).and_then(Value::as_f64).filter(|v| v.is_finite()).map(|v| v.round() as i32);
+        let rect = match (n("x"), n("y"), n("width"), n("height")) {
+            (Some(x), Some(y), Some(w), Some(h)) if (1..=16384).contains(&w) && (1..=16384).contains(&h) => {
+                Some(Rectangle::new((x, y).into(), (w, h).into()))
+            }
+            _ => None,
+        };
+        match rect {
+            Some(rect) => {
+                if self.direct_window.is_some_and(|(current, _)| current != id) {
+                    self.stop_direct();
+                }
+                self.direct_window = Some((id, rect));
+                if let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) {
+                    t.dirty = true;
+                    t.direct_refused = false;
+                }
+            }
+            None if self.direct_window.is_some_and(|(current, _)| current == id) => self.stop_direct(),
+            None => {}
+        }
+    }
+
+    /// The window in full screen goes back to Din.
+    pub fn stop_direct(&mut self) {
+        let Some((id, _)) = self.direct_window.take() else { return };
+        if let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) {
+            // Din's canvas holds the frame from before: it gets the current one.
+            t.dirty |= t.direct_active;
+            t.direct_active = false;
+            t.direct_frames.clear();
+        }
+        if let Some(direct) = self.direct.as_mut() {
+            direct.hide();
+        }
+        self.direct_frames_done();
+    }
+
+    /// The window in full screen, to the screen's compositor, if it can go
+    /// (a lone GPU buffer of its size, with none of its menus open): one
+    /// frame at a time, each once the one before is on screen.
+    fn flush_direct(&mut self) {
+        let Some((id, rect)) = self.direct_window else { return };
+        if self.direct.as_ref().is_some_and(DirectChannel::stalled) {
+            eprintln!("din-compositor: a frame didn't reach the screen in time; Din shows the window");
+            self.refuse_direct();
+            return;
+        }
+        let menus_open = self.popups.iter().any(|p| p.announced);
+        let State { toplevels, gpu, direct, direct_waiting, .. } = self;
+        let (Some(gpu), Some(channel)) = (gpu.as_mut(), direct.as_mut()) else { return };
+        let Some(t) = toplevels.iter_mut().find(|t| t.id == id && t.announced) else { return };
+        if !t.dirty || channel.in_flight {
+            return;
+        }
+        let Some(surface) = t.wl_surface() else { return };
+        let lone = (!menus_open && !t.direct_refused)
+            .then(|| crate::gpu::lone_buffer(&surface, t.window.geometry()))
+            .flatten()
+            .and_then(|buffer| get_dmabuf(&buffer).ok().cloned().map(|dmabuf| (buffer, dmabuf)));
+        let Some((buffer, dmabuf)) = lone else {
+            // Din shows it, from this frame on.
+            if t.direct_active {
+                t.direct_active = false;
+                t.direct_frames.clear();
+                channel.hide();
+            }
+            return;
+        };
+        let buffer_id = channel.buffer_id(&buffer, &dmabuf, || gpu.allocate_id());
+        channel.show(buffer_id, rect);
+        t.dirty = false;
+        if !t.direct_active {
+            t.direct_active = true;
+            // Din's last frame of it goes back to the app now: Din may not
+            // ack anything for a while.
+            t.shown = None;
+        }
+        t.direct_frames.push_back((buffer_id, buffer));
+        direct_waiting.push(surface);
+    }
+
+    /// What the screen's compositor said. False once it's gone.
+    pub fn direct_replies(&mut self) -> bool {
+        let Some(replies) = self.direct.as_mut().and_then(|direct| direct.replies()) else {
+            self.stop_direct();
+            self.direct = None;
+            return false;
+        };
+        let window = self.direct_window.map(|(id, _)| id);
+        for reply in replies {
+            match reply {
+                // The app draws its next frame while this one waits for the
+                // refresh (see session/direct.rs).
+                Reply::Latched => {
+                    if let Some(direct) = self.direct.as_mut() {
+                        direct.in_flight = false;
+                    }
+                    self.direct_frames_done();
+                }
+                Reply::Presented(buffer) => {
+                    if let Some(t) = self.toplevels.iter_mut().find(|t| Some(t.id) == window) {
+                        if let Some(at) = t.direct_frames.iter().position(|(id, _)| *id == buffer) {
+                            t.direct_frames.drain(..at);
+                        }
+                    }
+                }
+                Reply::Rejected(buffer) => {
+                    eprintln!("din-compositor: the screen's compositor can't show this window's buffers; Din shows it");
+                    if let Some(direct) = self.direct.as_mut() {
+                        direct.forget(buffer);
+                    }
+                    self.refuse_direct();
+                }
+                Reply::Motion(dx, dy) => self.locked_motion(dx, dy),
+                Reply::Button(button, down) => self.locked_button(button, down),
+                Reply::Axis { h, h120, v, v120 } => self.locked_axis((h, h120), (v, v120)),
+            }
+        }
+        true
+    }
+
+    /// A button straight from the mouse during mouse-look (session/direct.rs),
+    /// as a Linux input code, where the pointer is.
+    fn locked_button(&mut self, button: u32, down: bool) {
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        let event = ButtonEvent {
+            serial: SERIAL_COUNTER.next_serial(),
+            time: self.now_ms(),
+            button,
+            state: if down { ButtonState::Pressed } else { ButtonState::Released },
+        };
+        pointer.button(self, &event);
+        pointer.frame(self);
+    }
+
+    /// A wheel's turn straight from the mouse during mouse-look.
+    fn locked_axis(&mut self, horizontal: (f64, Option<f64>), vertical: (f64, Option<f64>)) {
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        let mut frame = AxisFrame::new(self.now_ms()).source(AxisSource::Wheel);
+        for (axis, (amount, v120)) in [(Axis::Horizontal, horizontal), (Axis::Vertical, vertical)] {
+            if amount != 0.0 {
+                frame = frame.value(axis, amount);
+                if let Some(v120) = v120 {
+                    frame = frame.v120(axis, v120 as i32);
+                }
+            }
+        }
+        pointer.axis(self, frame);
+        pointer.frame(self);
+    }
+
+    /// The window in full screen goes back to Din until it next goes into
+    /// full screen.
+    fn refuse_direct(&mut self) {
+        if let Some(direct) = self.direct.as_mut() {
+            direct.hide();
+        }
+        let window = self.direct_window.map(|(id, _)| id);
+        if let Some(t) = self.toplevels.iter_mut().find(|t| Some(t.id) == window) {
+            t.direct_refused = true;
+            t.direct_active = false;
+            t.direct_frames.clear();
+            t.dirty = true;
+        }
+        self.direct_frames_done();
+    }
+
+    /// Apps whose frame is on screen (or went elsewhere) may draw again.
+    fn direct_frames_done(&mut self) {
+        for surface in std::mem::take(&mut self.direct_waiting) {
             if surface.is_alive() {
                 self.frame_done(&surface);
             }
@@ -531,6 +736,12 @@ impl State {
                 toplevel.send_pending_configure();
             }
         }
+        // An app that minimized itself while its Din window stayed up (a
+        // game that lost focus for a moment) is restored as it gets it back.
+        let focused = self.focused;
+        if self.toplevels.iter().any(|t| t.id == focused && t.needs_restore) {
+            self.restore_x11(focused);
+        }
         self.restore_keyboard_focus();
     }
 
@@ -586,6 +797,32 @@ impl State {
         });
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
+        }
+    }
+
+    /// The shell minimized a window or restored it. An X window minimized in
+    /// full screen sees itself restored with it.
+    fn set_minimized(&mut self, id: u32, minimized: bool) {
+        let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) else { return };
+        let Some(x11) = t.x11().cloned() else { return };
+        if minimized {
+            t.needs_restore |= x11.is_fullscreen();
+            let _ = x11.set_suspended(true);
+        } else {
+            self.restore_x11(id);
+        }
+    }
+
+    /// An X window minimized in full screen, or by the app itself (a game
+    /// losing focus), is shown again: unmapped and mapped, as KDE and GNOME
+    /// do, the only thing Wine takes for its window coming back.
+    fn restore_x11(&mut self, id: u32) {
+        let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) else { return };
+        let Some(x11) = t.x11().cloned() else { return };
+        let _ = x11.set_suspended(false);
+        if std::mem::take(&mut t.needs_restore) {
+            let _ = x11.set_mapped(false);
+            let _ = x11.set_mapped(true);
         }
     }
 
@@ -711,7 +948,10 @@ impl State {
     }
 
     fn button(&mut self, id: u32, x: f64, y: f64, button: u32, down: bool) {
-        let hit = self.motion(id, x, y, None);
+        // Locked (a game's mouse-look), a click is where the pointer is: the
+        // shell's position for it is stale, and moving there throws the view.
+        let locked = self.seat.get_pointer().is_some_and(|p| self.constrain(p.current_location()).is_none());
+        let hit = locked || self.motion(id, x, y, None);
         // A click on the shield outside every popup closes the open menus.
         if id == 0 && !hit {
             if down {
@@ -837,6 +1077,7 @@ impl State {
             });
         }
         let union = rects.iter().skip(1).fold(rects[0], |union, rect| union.merge(*rect));
+        self.monitors = rects;
         self.screen = (union.loc.x + union.size.w, union.loc.y + union.size.h).into();
     }
 
@@ -931,7 +1172,9 @@ impl State {
             ),
             "focus" => self.set_focus(id),
             "state" => self.set_maximized(id, message["maximized"] == true),
+            "minimized" => self.set_minimized(id, message["minimized"] == true),
             "fullscreen" => self.set_fullscreen(id, message["fullscreen"] == true),
+            "direct" => self.set_direct(id, message),
             "close" => self.close(id),
             "motion" => {
                 let delta = message.get("dx").is_some().then(|| (num("dx"), num("dy")));

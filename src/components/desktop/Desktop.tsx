@@ -57,6 +57,7 @@ import { VolumesHost } from './VolumesHost';
 import { PrintHost } from './PrintHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
 import { WindowSessionHost } from './WindowSessionHost';
+import { GamePerformanceHost } from './GamePerformanceHost';
 import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
@@ -270,6 +271,7 @@ function DesktopSession() {
                     <VolumesHost />
                     <PrintHost />
                     <PageFullscreenHost />
+                    <GamePerformanceHost />
                     <BootScreenSync />
                     <WindowSessionHost />
                     <Announcer />

@@ -313,6 +313,7 @@ impl State {
             dnd_icon: self.dnd_icon.as_ref(),
             // Screenshots and recordings are of the screen as it is, unmagnified.
             zoom: 1.0,
+            direct: self.direct.element(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, info.cursor);
         let mut tracker = OutputDamageTracker::new(info.size, scale, transform);

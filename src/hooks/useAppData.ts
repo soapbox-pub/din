@@ -6,6 +6,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
   APP_DATA_KIND,
+  MAX_CLOCK_SKEW_SECONDS,
   aggregateSyncState,
   appDataCacheKey,
   appDataDTag,
@@ -57,10 +58,13 @@ function readCache<T>(
       const parsed: unknown = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null && 'value' in parsed) {
         const record = parsed as { value: unknown; updatedAt?: unknown };
-        return {
-          value: schema.parse(record.value),
-          updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : 0,
-        };
+        const updatedAt = typeof record.updatedAt === 'number' ? record.updatedAt : 0;
+        // Only a record from the future (adopted before Din refused those)
+        // is dated ahead of now; it isn't the user's.
+        if (updatedAt > Math.floor(Date.now() / 1000) + MAX_CLOCK_SKEW_SECONDS) {
+          throw new Error('dated in the future');
+        }
+        return { value: schema.parse(record.value), updatedAt };
       }
     }
   } catch (error) {
@@ -203,8 +207,14 @@ export function useAppData<T>(
         [{ kinds: [APP_DATA_KIND], authors: [user.pubkey], '#d': [dTag], limit: 1 }],
         { signal },
       );
-      const event = events[0];
-      if (!event) return null;
+      // The user's own, and not from the future: last-write-wins would let a
+      // record dated ahead beat every write after it (a revoke in Settings).
+      const latest = Math.floor(Date.now() / 1000) + MAX_CLOCK_SKEW_SECONDS;
+      const event = events.find((e) => e.pubkey === user.pubkey && e.created_at <= latest);
+      if (!event) {
+        if (events.some((e) => e.pubkey === user.pubkey)) console.warn(`Ignoring app data ${dTag} dated in the future`);
+        return null;
+      }
 
       try {
         const plaintext = await user.signer.nip44.decrypt(user.pubkey, event.content);

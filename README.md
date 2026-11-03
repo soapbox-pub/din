@@ -97,8 +97,10 @@ compositor on the screen running Electron, but from a copy of a build in
 `~/.local/share/din/session`, never the checkout, so a broken edit can't keep
 you from logging in. sudo asks for the password once, to install
 `/usr/share/wayland-sessions/din.desktop`, the `/usr/local/bin/din-session`
-it runs, and, on Ubuntu 24.04 and later, an AppArmor profile that lets
-Electron's sandbox start. If Din fails three times running just after
+it runs, on Ubuntu 24.04 and later an AppArmor profile that lets
+Electron's sandbox start, and with LightDM a setting that keeps sessions on VT
+7 and up, away from the console login prompts that would otherwise read what's
+typed in Din (Fedora's LightDM starts at VT 1). If Din fails three times running just after
 logging in, the login screen goes back to your old desktop. In the session,
 the account menu has **Log out**. DinOS-only parts (updates, the Installer,
 the lock screen, nostrd) stay off. `scripts/session.mjs` has the details.

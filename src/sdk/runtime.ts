@@ -275,11 +275,19 @@ function fsBridge(t: NonNullable<Transport['system']>): FsBridge {
   return bridge as unknown as FsBridge;
 }
 
-function assistantBridge(t: NonNullable<Transport['system']>): AssistantBridge {
+function assistantBridge(t: NonNullable<Transport['system']>, sudo: boolean): AssistantBridge {
   const bridge: Record<string, unknown> = {};
-  for (const m of ['status', 'setEnabled', 'install', 'restart', 'checkUpdate', 'upgrade', 'recentModels', 'request', 'passwords', 'answerPassword', 'approve']) {
+  for (const m of ['status', 'setEnabled', 'install', 'restart', 'checkUpdate', 'upgrade', 'recentModels', 'request']) {
     bridge[m] = (...args: unknown[]) => t.call('assistant', `assistant:${m}`, args);
   }
+  // sudo's requests are answered only with assistant-sudo; without it there
+  // are none to show.
+  for (const m of ['answerPassword', 'approve']) {
+    bridge[m] = sudo
+      ? (...args: unknown[]) => t.call('assistant-sudo', `assistant:${m}`, args)
+      : () => Promise.reject(new DinPermissionError('assistant-sudo'));
+  }
+  bridge.passwords = sudo ? () => t.call('assistant-sudo', 'assistant:passwords', []) : () => Promise.resolve([]);
   bridge.onStatus = (cb: (status: unknown) => void) => t.on('assistant', 'assistant:status', (s) => cb(s));
   bridge.onEvent = (cb: (event: unknown) => void) => t.on('assistant', 'assistant:event', (e) => cb(e));
   return bridge as unknown as AssistantBridge;
@@ -1121,7 +1129,9 @@ export function installDin(transport: Transport): void {
       }
       if (permissions.has('assistant')) {
         await sys.ready('assistant');
-        system.assistant = assistantBridge(sys);
+        const sudo = permissions.has('assistant-sudo');
+        if (sudo) await sys.ready('assistant-sudo');
+        system.assistant = assistantBridge(sys, sudo);
       }
       if (permissions.has('volumes')) {
         await sys.ready('volumes');

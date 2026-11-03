@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 import { ipcMain, MessageChannelMain, net, session } from 'electron';
 
 export const WIDGET_SCHEME = 'widget';
@@ -251,16 +251,25 @@ export function registerWidgets(opts: Options, preloadPath: string): void {
   });
 }
 
+/**
+ * The machine's own addresses and its network's: never for a widget. An IPv6
+ * address carrying an IPv4 one (::ffff:7f00:1, as URL writes ::ffff:127.0.0.1)
+ * is checked as that IPv4 address; the IPv4-compatible and NAT64 forms are
+ * refused whole.
+ */
+const PRIVATE_ADDRESSES = new BlockList();
+for (const [network, prefix] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.168.0.0', 16], ['224.0.0.0', 3],
+] as const) PRIVATE_ADDRESSES.addSubnet(network, prefix, 'ipv4');
+for (const [network, prefix] of [
+  ['::', 96], ['64:ff9b::', 96], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
+] as const) PRIVATE_ADDRESSES.addSubnet(network, prefix, 'ipv6');
+
 /** Whether an address is the machine's own or its network's: never for a widget. */
 function isPrivateAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const [a, b] = address.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || a >= 224;
-  }
-  const lower = address.toLowerCase();
-  if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7));
-  return lower === '::' || lower === '::1' || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith('ff');
+  const family = isIP(address);
+  return family === 0 || PRIVATE_ADDRESSES.check(address, family === 4 ? 'ipv4' : 'ipv6');
 }
 
 async function checkPublicHost(url: URL): Promise<void> {

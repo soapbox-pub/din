@@ -18,6 +18,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tungstenite = "0.27"
 wayland-scanner = "0.31"
+# Smithay's own, for the setting that raises how much a client may fall behind.
+wayland-server = { version = "0.31", default-features = false, features = ["libwayland_1_23"] }
 xcursor = "0.3"
 
 [profile.release]

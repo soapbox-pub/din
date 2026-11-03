@@ -19,7 +19,7 @@
 
 import { keepAccelerated } from '@/lib/cpuCanvas';
 import { getFileClipboard, setFileClipboard } from '@/lib/fileClipboard';
-import type { Monitor, Rect } from '@/lib/monitors';
+import { getMonitorsBridge, type Monitor, type Rect } from '@/lib/monitors';
 import { noteNativeFrame, noteNativeInput } from '@/lib/nativeLatency';
 
 /** One X window as the shell knows it. */
@@ -46,6 +46,11 @@ export interface NativeSurface {
    * left off, and the window positions itself.
    */
   csd: boolean;
+  /**
+   * The app wants full screen and its Din window hasn't taken it up yet: a
+   * game mapping in full screen, or asking before its window was up.
+   */
+  wantsFullscreen: boolean;
   canvas: HTMLCanvasElement;
 }
 
@@ -93,6 +98,8 @@ interface WindowInfo {
   csd?: boolean;
   /** Nothing shows through the window: its canvas can be opaque. */
   opaque?: boolean;
+  /** It maps in full screen, or asked for it before it was announced. */
+  fullscreen?: boolean;
 }
 
 interface FrameUpdate {
@@ -306,6 +313,7 @@ function onMessage(message: WorkerMessage): void {
         wmClass: message.wmClass,
         transientFor: message.transientFor,
         csd: message.csd === true,
+        wantsFullscreen: message.fullscreen === true || existing?.wantsFullscreen === true,
         canvas: existing?.canvas ?? createCanvas(message.width, message.height, message.opaque === true),
       };
       resizeCanvas(surface.canvas, surface.width, surface.height);
@@ -379,7 +387,10 @@ function onMessage(message: WorkerMessage): void {
     }
     case 'fullscreen': {
       const surface = surfaces.get(message.id);
-      if (surface && !surface.popup) emit({ type: 'fullscreen', surface, fullscreen: message.fullscreen === true });
+      if (!surface || surface.popup) return;
+      // Held for a Din window that isn't up yet; the one that is takes it.
+      surface.wantsFullscreen = message.fullscreen === true;
+      emit({ type: 'fullscreen', surface, fullscreen: message.fullscreen === true });
       return;
     }
     case 'pointer-lock': {
@@ -575,9 +586,33 @@ export function setNativeMaximized(id: number, maximized: boolean): void {
   send({ type: 'state', id, maximized });
 }
 
+/**
+ * Tell the compositor Din minimized a window or restored it: a game
+ * minimized in full screen sees itself restored with it.
+ */
+export function setNativeMinimized(id: number, minimized: boolean): void {
+  send({ type: 'minimized', id, minimized });
+}
+
 /** Tell the app whether its window is in full screen. */
 export function setNativeFullscreen(id: number, fullscreen: boolean): void {
   send({ type: 'fullscreen', id, fullscreen });
+}
+
+/**
+ * Hand a window in full screen, on top, to the screen's compositor, which
+ * in Din's session shows its frames itself (native/din-compositor/src/
+ * session/direct.rs) rather than through its canvas here: RECT is where, in
+ * viewport CSS pixels, or null to take it back. Elsewhere it changes nothing.
+ */
+export function setNativeDirect(id: number, rect: Rect | null): void {
+  if (!rect) {
+    send({ type: 'direct', id });
+    return;
+  }
+  // The compositor's are Din's window's logical pixels.
+  const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
+  send({ type: 'direct', id, x: rect.x * zoom, y: rect.y * zoom, width: rect.width * zoom, height: rect.height * zoom });
 }
 
 export function raiseNativeWindow(id: number): void {

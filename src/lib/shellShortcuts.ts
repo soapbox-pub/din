@@ -41,6 +41,7 @@
  *   - Ctrl+Shift+W            -> { action: 'close-window', wcId }
  *   - Ctrl+Shift+Delete       -> { action: 'clear-data', wcId }
  *   - Ctrl+= / Ctrl+- / Ctrl+0 -> { action: 'zoom-in' | 'zoom-out' | 'zoom-reset', wcId }
+ *   - F11 in a browser tab    -> { action: 'fullscreen', wcId }
  *
  * Tab-scoped shortcuts carry the guest's WebContents id so only the browser
  * window owning that tab acts (mirrors the devtools command routing).
@@ -197,7 +198,8 @@ export type ShellShortcut =
        * Window and page keys pressed inside a browser tab: Ctrl+Shift+T
        * (reopen a closed tab), Ctrl+N / Ctrl+Shift+N (new normal / private
        * window), Ctrl+Shift+W (close the window), Ctrl+Shift+Delete (clear
-       * browsing data), and Ctrl+= / Ctrl+- / Ctrl+0 (page zoom).
+       * browsing data), Ctrl+= / Ctrl+- / Ctrl+0 (page zoom), and F11 (the
+       * page in full screen).
        */
       action:
         | 'reopen-tab'
@@ -207,7 +209,8 @@ export type ShellShortcut =
         | 'clear-data'
         | 'zoom-in'
         | 'zoom-out'
-        | 'zoom-reset';
+        | 'zoom-reset'
+        | 'fullscreen';
       wcId: number;
     };
 

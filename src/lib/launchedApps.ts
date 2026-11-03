@@ -82,6 +82,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   wallpaper: 'Change the desktop wallpaper',
   cursor: 'Install cursors and change the pointer',
   assistant: 'Use the Assistant',
+  'assistant-sudo': 'Approve administrator commands for the Assistant',
   indd: 'Convert InDesign documents',
   volumes: 'Mount and eject disks',
   mail: 'Read and send email from your mail accounts',
@@ -92,6 +93,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   quickshare: 'Make this computer visible to Android devices nearby, and take files they share',
   'file-folders': 'Reach the folders of files you give it',
 };
+
+/** Permissions only a built-in app's reviewed manifest gets, never one the user is asked about. */
+const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo']);
 
 const FRAMES: readonly FrameMode[] = ['standard', 'custom', 'none'];
 
@@ -120,7 +124,7 @@ export function sanitizeManifest(raw: unknown, fallbackName: string): DinManifes
   const dimension = (v: unknown, min: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(Math.min(Math.max(v, min), 4096)) : null);
   const width = dimension(size.width, 200);
   const height = dimension(size.height, 120);
-  const known = Object.keys(PERMISSION_LABELS) as Permission[];
+  const known = (Object.keys(PERMISSION_LABELS) as Permission[]).filter((p) => !BUILT_IN_ONLY.has(p));
   const icon = Array.isArray(m.icons)
     ? m.icons.find((i): i is { src: string } => isObject(i) && typeof i.src === 'string' && /^data:image\/[a-z0-9.+-]+[;,]/i.test(i.src))
     : undefined;

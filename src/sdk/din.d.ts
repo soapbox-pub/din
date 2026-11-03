@@ -727,6 +727,12 @@ export type Permission =
    * any app but the Assistant reaches only conversations it started.
    */
   | 'assistant'
+  /**
+   * Answering sudo's password and approval requests in a conversation
+   * (`din.system.assistant`'s `passwords`, `answerPassword`, `approve`).
+   * Built-in apps only. Assistant.
+   */
+  | 'assistant-sudo'
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'
   /** Removable disks: list, mount, unlock, eject (`din.system.volumes`). Files. */

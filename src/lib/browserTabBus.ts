@@ -145,7 +145,8 @@ export interface BrowserHotkey {
     | 'clear-data'
     | 'zoom-in'
     | 'zoom-out'
-    | 'zoom-reset';
+    | 'zoom-reset'
+    | 'fullscreen';
   /** Direction for 'cycle-tab' (Ctrl+Shift+Tab). */
   backward?: boolean;
   /** Pressed digit for 'goto-tab' (1-9; 9 = last tab). */

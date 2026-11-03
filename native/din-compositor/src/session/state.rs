@@ -1,7 +1,7 @@
 //! The session's state, and the protocol handlers that aren't about windows
 //! (shell.rs) or the wlroots extras (their own modules).
 
-use std::os::fd::OwnedFd;
+use std::{os::fd::OwnedFd, sync::OnceLock};
 
 use smithay::{
     backend::{
@@ -53,7 +53,9 @@ use smithay::{
     },
 };
 
-use super::{accessibility, cursor, drm, gamma, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
+use tracing::{info, warn};
+
+use super::{accessibility, cursor, direct, drm, gamma, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
 
 /// CLOCK_MONOTONIC, the clock presentation times are in.
 const CLOCK_MONOTONIC: u32 = 1;
@@ -61,11 +63,23 @@ const CLOCK_MONOTONIC: u32 = 1;
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Its process, for the log when it goes.
+    pub pid: OnceLock<i32>,
 }
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+
+    /// Logged, as losing Din's connection takes the whole session with it.
+    /// "Closed" is either the client hanging up or this side giving up on
+    /// it (events it didn't read past the buffer's limit, see mod.rs).
+    fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        let pid = self.pid.get().copied().unwrap_or(0);
+        match reason {
+            DisconnectReason::ConnectionClosed => info!("client {pid}: connection closed"),
+            DisconnectReason::ProtocolError(err) => warn!("client {pid}: disconnected for a protocol error: {err}"),
+        }
+    }
 }
 
 /// A drag's icon, drawn under the pointer, OFFSET from its hotspot.
@@ -124,6 +138,10 @@ pub struct State {
     pub output_management: output_management::OutputManagement,
     pub screencopy: screencopy::Screencopy,
     pub gamma: gamma::GammaControl,
+    /// A full-screen game's frames, shown over Din's window (direct.rs).
+    pub direct: direct::Direct,
+    /// The session program's process: Din.
+    pub din_pid: u32,
 }
 
 impl State {
@@ -221,6 +239,8 @@ impl State {
             output_management,
             screencopy,
             gamma,
+            direct: direct::Direct::bind(),
+            din_pid: 0,
         };
 
         let formats = state.backend.renderer.shm_formats();
@@ -320,6 +340,10 @@ impl SeatHandler for State {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<State>, image: CursorImageStatus) {
+        // Its commits so far weren't uploaded: it wasn't the cursor yet.
+        if let CursorImageStatus::Surface(surface) = &image {
+            self.import_pointer_image(surface);
+        }
         self.cursor_status = image;
         self.redraw_pointer_later();
     }
@@ -390,6 +414,8 @@ impl PointerConstraintsHandler for State {
                     constraint.activate();
                 }
             });
+            // A locked pointer isn't drawn (drm.rs, pointer_locked).
+            self.redraw_pointer_later();
         }
     }
 

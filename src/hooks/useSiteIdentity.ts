@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useNsiteIdentity } from '@/hooks/useNsiteIcon';
+import { appIdOfOrigin } from '@/lib/dinApps';
 import { parseCanonicalNsiteHost } from '@/lib/nsite';
 import { canonicalHostOfUrl } from '@/lib/nsiteApps';
 import { originLabel } from '@/lib/signerLabels';
@@ -17,8 +18,8 @@ export interface SiteIdentity {
 }
 
 /**
- * What to call an origin and draw it as: the installed app it belongs to, as
- * the launcher shows it; an nsite as its own files name it (its host is a key
+ * What to call an origin and draw it as: the installed app (or Din app) it
+ * belongs to, as the launcher shows it; an nsite as its own files name it (its host is a key
  * nobody can read); and any other website by its host.
  */
 export function useSiteIdentity(origin: string): SiteIdentity {
@@ -27,7 +28,7 @@ export function useSiteIdentity(origin: string): SiteIdentity {
   const stored = useNsiteIdentity(nsiteHost);
   const publisher = useNsitePublisher(nsiteHost);
 
-  const appId = findAppIdForUrl(`${origin}/`);
+  const appId = appIdOfOrigin(origin) ?? findAppIdForUrl(`${origin}/`);
   const app = appId ? getApp(appId) : undefined;
   if (app) return { name: app.name, icon: app.icon, nsite: Boolean(nsiteHost), publisher };
 

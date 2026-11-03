@@ -52,6 +52,9 @@ impl State {
                 self.move_pointer(location, event.time_msec());
             }
             InputEvent::PointerButton { event } => {
+                if self.direct_takes_pointer() {
+                    return self.direct_button(event.button_code(), event.state() == ButtonState::Pressed);
+                }
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 let serial = SERIAL_COUNTER.next_serial();
                 let state = event.state();
@@ -239,6 +242,10 @@ impl State {
     }
 
     fn on_pointer_motion(&mut self, event: <LibinputInputBackend as smithay::backend::input::InputBackend>::PointerMotionEvent) {
+        if self.direct_takes_pointer() {
+            let delta = event.delta_unaccel();
+            return self.direct_motion(delta.x, delta.y);
+        }
         let Some(pointer) = self.seat.get_pointer() else { return };
         let location = pointer.current_location();
         let under = self.surface_under(location);
@@ -318,6 +325,13 @@ impl State {
         if magic_mouse::reads_touches(self, &event.device()) {
             return;
         }
+        if self.direct_takes_pointer() {
+            let amount = |axis| {
+                let v120 = event.amount_v120(axis);
+                (event.amount(axis).unwrap_or_else(|| v120.unwrap_or(0.0) * 15.0 / 120.0), v120)
+            };
+            return self.direct_axis(amount(Axis::Horizontal), amount(Axis::Vertical));
+        }
         let Some(pointer) = self.seat.get_pointer() else { return };
         let speed = self.mouse.settings.scroll_speed;
         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
@@ -341,17 +355,26 @@ impl State {
         pointer.frame(self);
     }
 
-    /// Where a touch lands: on the built-in panel, or else the first display.
+    /// Where a touch lands: on the display udev's WL_OUTPUT names for the
+    /// touchscreen, else on an external display for a USB one (it's in a
+    /// monitor) and the built-in panel for any other, else the first display.
     ///
     /// Kept within the panel's last row and column: a finger on the bottom or
     /// right edge reports a hair short of the panel's size, which Smithay's
     /// input-region test rounds onto the pixel past it, outside Din's window,
     /// and the whole touch went nowhere.
     fn touch_location<E: AbsolutePositionEvent<LibinputInputBackend>>(&self, event: &E) -> Option<Point<f64, Logical>> {
-        let output = self
-            .space
-            .outputs()
-            .find(|o| o.name().starts_with("eDP") || o.name().starts_with("DSI") || o.name().starts_with("LVDS"))
+        let device = event.device();
+        let built_in = |o: &&smithay::output::Output| {
+            o.name().starts_with("eDP") || o.name().starts_with("DSI") || o.name().starts_with("LVDS")
+        };
+        // SAFETY: the udev device is only read here, never kept.
+        let usb = unsafe { device.udev_device() }
+            .is_some_and(|d| d.property_value("ID_BUS").is_some_and(|bus| bus == "usb"));
+        let output = device
+            .output_name()
+            .and_then(|name| self.space.outputs().find(|o| o.name() == name))
+            .or_else(|| if usb { self.space.outputs().find(|o| !built_in(o)) } else { self.space.outputs().find(built_in) })
             .or_else(|| self.space.outputs().next())?;
         let geometry = self.space.output_geometry(output)?;
         let location = geometry.loc.to_f64() + event.position_transformed(geometry.size);

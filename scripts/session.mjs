@@ -40,6 +40,9 @@
  *   /etc/apparmor.d/din-session              only where AppArmor keeps apps out of user
  *                                            namespaces (Ubuntu 24.04 on), which Chromium's
  *                                            sandbox needs
+ *   /etc/lightdm/lightdm.conf.d/50-din-session.conf
+ *                                            only with LightDM: sessions on VT 7 and up,
+ *                                            clear of the console's login prompts
  *
  * The session is Din's compositor (native/din-compositor) on the screen
  * running Din, as on DinOS, through the seat the display manager gives it.
@@ -62,6 +65,7 @@ const RELEASES = path.join(SESSION, "releases");
 const WRAPPER = "/usr/local/bin/din-session";
 const DESKTOP_FILE = "/usr/share/wayland-sessions/din.desktop";
 const APPARMOR_PROFILE = "/etc/apparmor.d/din-session";
+const LIGHTDM_CONFIG = "/etc/lightdm/lightdm.conf.d/50-din-session.conf";
 /** The session's name, as display managers and AccountsService know it. */
 const SESSION_NAME = "din";
 
@@ -292,6 +296,9 @@ export DIN_DESKTOP_SESSION=1
 export DIN_SESSION_RELEASE="$release"
 export DIN_COMPOSITOR="$here/bin/din-compositor"
 export DIN_FD_ADDON="$here/lib/libdin_fd.so"
+# Full-screen games straight to the screen (the compositor's session/
+# direct.rs), while it's being tried out: on with a file named direct here.
+[ -e "$session/direct" ] && export DIN_DIRECT=1
 ${profile ? `# A profiling build: the shell's measurements and the compositor's stats go to
 # stderr, and from there to the journal.
 export DIN_PROFILE=1 DIN_COMPOSITOR_STATS=1
@@ -502,6 +509,20 @@ profile din-session "${electron}" flags=(unconfined) {
 `;
 }
 
+/**
+ * Where LightDM is the login screen, it runs sessions from VT 7 up. Fedora's
+ * starts at VT 1, putting the session on a VT logind starts a console login
+ * prompt on, which then read what was typed in Din.
+ */
+function lightdmConfig() {
+  return `# Installed by Din's scripts/session.mjs: sessions on VT 7 and up (LightDM's
+# own default), clear of the VTs logind starts console login prompts on,
+# which would otherwise read what's typed in the session.
+[LightDM]
+minimum-vt=7
+`;
+}
+
 /** The files the login screen needs, by where they go. */
 function systemFiles() {
   const files = [
@@ -509,6 +530,7 @@ function systemFiles() {
     { target: DESKTOP_FILE, mode: "644", content: desktopEntry() },
   ];
   if (appArmorRestrictsUserns()) files.push({ target: APPARMOR_PROFILE, mode: "644", content: appArmorProfile() });
+  if (fs.existsSync("/etc/lightdm")) files.push({ target: LIGHTDM_CONFIG, mode: "644", content: lightdmConfig() });
   return files;
 }
 
@@ -566,7 +588,7 @@ async function removeSystemFiles() {
   command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${APPARMOR_PROFILE} 2>/dev/null
   rm -f ${APPARMOR_PROFILE}
 fi
-rm -f ${WRAPPER} ${DESKTOP_FILE}`,
+rm -f ${WRAPPER} ${DESKTOP_FILE} ${LIGHTDM_CONFIG}`,
     [],
   );
 }

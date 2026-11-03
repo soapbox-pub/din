@@ -29,7 +29,7 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
         drm::{
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType, VrrSupport,
             compositor::FrameFlags,
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
@@ -74,6 +74,7 @@ use smithay::{
     utils::{DeviceFd, Logical, Monotonic, Point, Time, Transform},
     wayland::{
         dmabuf::{DmabufFeedback, DmabufFeedbackBuilder},
+        pointer_constraints::{PointerConstraint, with_pointer_constraint},
         presentation::Refresh,
     },
 };
@@ -166,6 +167,11 @@ pub struct Screen {
     estimated_vblank: Option<RegistrationToken>,
     last_vblank: Option<Duration>,
     refresh: Duration,
+    /// Whether the display can vary its refresh (FreeSync, Adaptive-Sync)
+    /// without a modeset, and whether it's doing so now: only while a game
+    /// is on it (direct.rs).
+    vrr: bool,
+    vrr_active: bool,
 }
 
 enum Target {
@@ -228,6 +234,13 @@ impl Head {
     pub fn crtc(&self) -> Option<crtc::Handle> {
         match self.kind {
             Kind::Drm { crtc, .. } => Some(crtc),
+            Kind::Virtual => None,
+        }
+    }
+
+    fn kind_connector(&self) -> Option<connector::Handle> {
+        match self.kind {
+            Kind::Drm { connector, .. } => Some(connector),
             Kind::Virtual => None,
         }
     }
@@ -730,6 +743,12 @@ impl State {
             };
             // A virtual display's refreshes count from when it's on.
             let last_vblank = matches!(target, Target::Virtual { .. }).then_some(now);
+            let vrr = match (&target, head.kind_connector()) {
+                (Target::Drm(surface), Some(connector)) => {
+                    surface.with_compositor(|c| c.vrr_supported(connector)).ok() == Some(VrrSupport::Supported)
+                }
+                _ => false,
+            };
             head.global = Some(output.create_global::<State>(&self.dh));
             head.screen = Some(Screen {
                 target,
@@ -738,8 +757,10 @@ impl State {
                 estimated_vblank: None,
                 last_vblank,
                 refresh: mode_refresh(&head.mode),
+                vrr,
+                vrr_active: false,
             });
-            info!("{} is on", head.name);
+            info!("{} is on{}", head.name, if vrr { ", with variable refresh for games" } else { "" });
         }
         let position = head.position;
         // Which formats it can scan out may have changed with the mode.
@@ -796,6 +817,9 @@ impl State {
             Redraw::Flipping { again } => *again = true,
             Redraw::Idle => {
                 let delay = match &screen.target {
+                    // The display waits for the frame: it goes as soon as
+                    // it's there.
+                    Target::Drm(_) if screen.vrr_active => Duration::ZERO,
                     Target::Drm(_) => screen
                         .next_vblank(now)
                         .map_or(Duration::ZERO, |next| next.saturating_sub(max_render_time).saturating_sub(now)),
@@ -843,7 +867,18 @@ impl State {
 
     /// Whether there's a pointer to draw: Din is up, with a mouse or touchpad.
     pub fn pointer_visible(&self) -> bool {
-        self.space.elements().next().is_some() && self.pointer_devices > 0
+        self.space.elements().next().is_some() && self.pointer_devices > 0 && !self.pointer_locked()
+    }
+
+    /// Whether Din holds the pointer locked (a game's mouse-look), in which
+    /// case there's no pointer to see: it would only sit frozen where the
+    /// lock began, over the game, until it ended.
+    pub fn pointer_locked(&self) -> bool {
+        let Some(pointer) = self.seat.get_pointer() else { return false };
+        let Some((surface, _)) = self.surface_under(pointer.current_location()) else { return false };
+        with_pointer_constraint(&surface, &pointer, |constraint| {
+            constraint.is_some_and(|c| c.is_active() && matches!(&*c, PointerConstraint::Locked(_)))
+        })
     }
 
     fn render(&mut self, id: u64) {
@@ -860,6 +895,19 @@ impl State {
         let output = head.output.clone();
         let Some(area) = self.space.output_geometry(&output) else { return };
         let scale = output.current_scale().fractional_scale();
+        let wants_vrr = screen.vrr && self.direct.element().is_some_and(|(_, rect)| rect.overlaps(area));
+        if let (Target::Drm(surface), true) = (&screen.target, wants_vrr != screen.vrr_active) {
+            match surface.with_compositor(|c| c.use_vrr(wants_vrr)) {
+                Ok(()) => {
+                    screen.vrr_active = wants_vrr;
+                    info!("{}: variable refresh {}", head.name, if wants_vrr { "on" } else { "off" });
+                }
+                Err(err) => {
+                    warn!("{}: variable refresh: {err}", head.name);
+                    screen.vrr = false;
+                }
+            }
+        }
         // A pointer growing or shrinking on this display wants the next frame too.
         let growing = self.shake.step(self.clock.now().into()) && pointer.is_some_and(|p| area.to_f64().contains(p));
         let mut scene = Scene {
@@ -870,6 +918,7 @@ impl State {
             magnify: self.shake.scale(),
             dnd_icon: self.dnd_icon.as_ref(),
             zoom: self.accessibility.zoom,
+            direct: self.direct.element(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, true);
         let now: Duration = self.clock.now().into();
@@ -936,6 +985,7 @@ impl State {
         if let Some(feedback) = feedback {
             send_dmabuf_feedback(&self.space, &output, &states, &feedback);
         }
+        self.direct_rendered(area);
         self.after_render(id, damaged);
     }
 
@@ -947,6 +997,7 @@ impl State {
         screen.redraw = Redraw::Idle;
         let output = head.output.clone();
         self.send_frames(&output);
+        self.direct_refreshed(&output);
         if again {
             self.queue_redraw(id);
         }
@@ -960,6 +1011,7 @@ impl State {
         screen.last_vblank = Some(at);
         let output = head.output.clone();
         self.send_frames(&output);
+        self.direct_refreshed(&output);
     }
 
     fn on_vblank(&mut self, crtc: crtc::Handle, metadata: &mut Option<DrmEventMetadata>) {
@@ -992,6 +1044,7 @@ impl State {
         let id = head.id;
         let output = head.output.clone();
         self.send_frames(&output);
+        self.direct_refreshed(&output);
         if again {
             self.queue_redraw(id);
         }
@@ -1001,9 +1054,16 @@ impl State {
     fn send_frames(&self, output: &Output) {
         let now = self.clock.now();
         let throttle = Some(Duration::from_secs(1));
+        // Under a game covering every display, Din's window is unseen: it
+        // hears once a second, as anything off screen.
+        let hidden = self.direct_covers_everything();
         for window in self.space.elements() {
             if self.space.outputs_for_element(window).contains(output) {
-                window.send_frame(output, now, throttle, surface_primary_scanout_output);
+                if hidden {
+                    window.send_frame(output, now, throttle, |_, _| None);
+                } else {
+                    window.send_frame(output, now, throttle, surface_primary_scanout_output);
+                }
             }
         }
         if let CursorImageStatus::Surface(surface) = &self.cursor_status {

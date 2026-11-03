@@ -58,7 +58,9 @@ import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
 import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
 import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
+import { askSignerForApp } from '@/lib/appSigner';
 import {
+  appOrigin,
   appUrl,
   launchUrl,
   linkedAppId,
@@ -1020,23 +1022,28 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!signer) throw new Error('Nobody is signed in');
         return signer.getPublicKey();
       },
-      'nostr.signEvent': async ({ event }) => {
+      // Asked about, and remembered, as window.nostr's are (NostrBridgeHost).
+      'nostr.signEvent': ({ event }) => {
         need('nostr');
-        const signer = live.current.user?.signer;
-        if (!signer) throw new Error('Nobody is signed in');
-        return signer.signEvent(event as Parameters<typeof signer.signEvent>[0]);
+        return askSignerForApp({ method: 'signEvent', params: { event }, origin: appOrigin(appId), wcId: session.current?.webContentsId ?? null });
       },
       'nostr.encrypt': async ({ version, pubkey, text }) => {
         need('nostr');
-        const cipher = live.current.user?.signer[version];
-        if (!cipher) throw new Error(`The signer can't do ${version}`);
-        return cipher.encrypt(pubkey, text);
+        return String(await askSignerForApp({
+          method: `${version}.encrypt`,
+          params: { pubkey, plaintext: text },
+          origin: appOrigin(appId),
+          wcId: session.current?.webContentsId ?? null,
+        }));
       },
       'nostr.decrypt': async ({ version, pubkey, text }) => {
         need('nostr');
-        const cipher = live.current.user?.signer[version];
-        if (!cipher) throw new Error(`The signer can't do ${version}`);
-        return cipher.decrypt(pubkey, text);
+        return String(await askSignerForApp({
+          method: `${version}.decrypt`,
+          params: { pubkey, ciphertext: text },
+          origin: appOrigin(appId),
+          wcId: session.current?.webContentsId ?? null,
+        }));
       },
     };
   });

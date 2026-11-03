@@ -1373,7 +1373,7 @@ export function installStoredHandles(host: StoredHandlesHost): void {
 /** Every permission a manifest can ask for, which `navigator.permissions.query` takes by name. */
 const DIN_PERMISSIONS: Record<Permission, true> = {
   nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
-  assistant: true, indd: true, volumes: true, mail: true, phone: true, passwords: true, vms: true,
+  assistant: true, 'assistant-sudo': true, indd: true, volumes: true, mail: true, phone: true, passwords: true, vms: true,
   capture: true, quickshare: true, 'file-folders': true,
 };
 

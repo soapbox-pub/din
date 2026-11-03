@@ -97,6 +97,12 @@ export interface AppConfig {
    */
   wobblyWindows: boolean;
   /**
+   * When true (default), the computer runs in the performance power mode
+   * while a game is in full screen, and goes back to the mode it was in
+   * after (GamePerformanceHost.tsx).
+   */
+  gamePerformance: boolean;
+  /**
    * The effect a window minimizes with, and plays backwards to restore: an
    * id from src/lib/effects, `random` or `none`. Kept as a plain string so
    * a choice this version doesn't know falls back rather than failing to
