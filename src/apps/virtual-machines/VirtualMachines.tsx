@@ -16,9 +16,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/compon
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { cleanFsError, parentPath } from '@/lib/fs';
 import { cleanVmsError, type VmInfo, type VmInstallerId, type VmsBridge, type VmsStatus } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
-import { useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { formatBytes, formatMemory, isOn, OS_LABELS, STATE_LABELS, useBridge, usePickDiscImage, useVms, useVmsStatus } from './vms/bridge';
 import { Console, type ConsoleHandle } from './vms/Console';
@@ -106,6 +107,7 @@ export function VirtualMachines() {
 }
 
 function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) {
+  const din = useDin();
   const { data: vms = [], isLoading } = useVms();
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SELECTED_KEY));
   const [scale, setScale] = useState(() => localStorage.getItem(SCALE_KEY) !== 'false');
@@ -182,14 +184,18 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         case 'settings':
           return setSettingsFor(id);
         case 'showInFiles':
-          return void window.open(appLink('file-browser', { path: target.dir }));
+          // Files opens at a folder it's handed, not one named in its params.
+          return void din.files.fromPath(parentPath(target.dir)).then(
+            (folder) => din.app.launch(appLink('file-browser', { select: target.id }), [folder]),
+            (err: unknown) => toast('Virtual Machines couldn’t show that in Files', { body: cleanFsError(err), destructive: true }),
+          );
         case 'delete':
           return setDeleting(target);
         case 'cancelInstall':
           return setCancelling(target);
       }
     },
-    [bridge, busy],
+    [bridge, busy, din],
   );
 
   const install = useCallback(
