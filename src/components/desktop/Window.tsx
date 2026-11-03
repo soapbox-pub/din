@@ -8,7 +8,6 @@ import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHea
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type DockEdge, type GenieRect, type GenieTarget } from '@/lib/genie';
-import { startMenuBarHandoff } from '@/lib/menuBarHandoff';
 import { effectsFor, resolveEffect, runWindowEffect, type EffectEvent, type WindowEffect } from '@/lib/effects';
 import { onEffectPreview } from '@/lib/effects/preview';
 import { getScreenshotBridge } from '@/lib/screenshot';
@@ -52,6 +51,7 @@ import {
   areaNear,
   EVEN_SPLIT,
   hasNeighbor,
+  primaryArea,
   snapRect,
   zoneRow,
   zoneSide,
@@ -242,6 +242,46 @@ interface PlayedEffect {
  */
 const DEPARTING_Z = 1_000_000;
 
+/**
+ * The menu bar's height (its h-9). A window maximized on the monitor the bar
+ * is on paints a strip of its title bar's color this tall above itself,
+ * behind the transparent bar, so the bar takes the window's color by being
+ * part of the window: every animation of the window - maximizing, restoring,
+ * minimizing, closing - takes the strip with it, and of several maximized
+ * windows the stack order decides whose shows.
+ */
+const BAR_STRIP_PX = 36;
+
+/**
+ * A snapshot of a window with its bar strip on top: the snapshot's top row
+ * (the title bar's color, above its icon and title) stretched up `strip`
+ * px, for the effects, which play a bitmap rather than the window. The
+ * snapshot as is without a strip.
+ */
+function withStrip(image: HTMLImageElement, strip: number, width: number): HTMLImageElement | HTMLCanvasElement {
+  if (!strip || !width || !image.naturalWidth) return image;
+  const scale = image.naturalWidth / width;
+  const stripPx = Math.round(strip * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight + stripPx;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return image;
+  ctx.drawImage(image, 0, 0, image.naturalWidth, 1, 0, 0, image.naturalWidth, stripPx);
+  ctx.drawImage(image, 0, stripPx);
+  return canvas;
+}
+
+/** How tall a window's bar strip is now: 0 when it isn't shown. */
+function stripHeightOf(strip: HTMLElement | null): number {
+  return strip?.offsetHeight ?? 0;
+}
+
+/** A window's rect with its bar strip, `strip` px tall, added above it. */
+function withStripRect(rect: GenieRect, strip: number): GenieRect {
+  return strip ? { ...rect, y: rect.y - strip, height: rect.height + strip } : rect;
+}
+
 function newSeed(): number {
   return Math.floor(Math.random() * 0xffffffff);
 }
@@ -429,6 +469,14 @@ export const Window = memo(function Window({
     areasRef.current = areas;
   });
   const sectionRef = useRef<HTMLElement>(null);
+  // The strip of the window's title bar color behind the menu bar
+  // (BAR_STRIP_PX), shown while it's maximized on the monitor the bar is on.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const onBar = config.desktopLayout !== 'taskbar' && (win.monitor === null || win.monitor === primaryArea(areas).id);
+  const onBarRef = useRef(onBar);
+  useLayoutEffect(() => {
+    onBarRef.current = onBar;
+  });
   // A page in full screen is on top of everything, whatever the windows say
   // (its window was moved under another, off a monitor that went away).
   // Hidden, it would leave Blink holding the desktop inert behind it.
@@ -798,11 +846,12 @@ export const Window = memo(function Window({
         settleZ();
       };
 
+      const strip = stripHeightOf(stripRef.current);
       const effectCancel = runWindowEffect(
         parent,
-        snapshot,
+        withStrip(snapshot, strip, winRect.width),
         effect,
-        winRect,
+        withStripRect(winRect, strip),
         target,
         minimizing ? 'out' : 'in',
         effectZ,
@@ -935,13 +984,19 @@ export const Window = memo(function Window({
       return;
     }
 
-    // Maximizing into the menu bar's color, or restoring out of it: the bar
-    // follows the window's left and right edges and fills (or empties) with
-    // its progress, so its color arrives with the window rather than ahead
-    // of it. The bar decides whether this window is the one it shows.
+    // Maximizing under the menu bar, or restoring from under it: the strip
+    // the window paints behind the bar grows from nothing as it maximizes
+    // (shrinks away as it restores), so the window's top edge travels all
+    // the way to the top of the screen. It's inside the section, scaled with
+    // it, so its height is divided by the scale to come out right.
     const maximizing = win.maximized;
-    const bar = prev.maximized !== maximizing ? startMenuBarHandoff(win.id, maximizing) : null;
-    const origin = bar ? (el.offsetParent?.getBoundingClientRect().left ?? 0) : 0;
+    const strip = prev.maximized !== maximizing && onBarRef.current ? stripRef.current : null;
+    const stripTo = strip ? BAR_STRIP_PX : 0;
+    const clearStrip = () => {
+      strip?.style.removeProperty('display');
+      strip?.style.removeProperty('height');
+    };
+    if (strip) strip.style.display = 'block';
 
     beginGesture();
     const cancel = animateFlip(
@@ -952,17 +1007,20 @@ export const Window = memo(function Window({
         animCancel.current = null;
         el.style.transform = '';
         el.style.transformOrigin = '';
-        bar?.end();
+        clearStrip();
         endGesture();
       },
-      bar
-        ? (r, p) => bar.frame({ left: origin + r.x, right: origin + r.x + r.width, fill: maximizing ? p : 1 - p })
+      strip
+        ? (r, p) => {
+            const shown = stripTo * (maximizing ? p : 1 - p);
+            strip.style.height = `${shown / (r.height / to.height)}px`;
+          }
         : undefined,
     );
-    animCancel.current = bar
+    animCancel.current = strip
       ? () => {
           cancel();
-          bar.end();
+          clearStrip();
         }
       : cancel;
   }, [win.id, win.maximized, win.snapped, win.minimized, win.away, tiledKey, beginGesture, endGesture, stopWobble]);
@@ -1043,8 +1101,17 @@ export const Window = memo(function Window({
     capture
       .then((snapshot) => {
         if (cancelled) return;
-        const played = runWindowEffect(parent, snapshot, effect, winRect, null, 'out', DEPARTING_Z + win.z, newSeed(), () =>
-          destroy(win.id),
+        const strip = stripHeightOf(stripRef.current);
+        const played = runWindowEffect(
+          parent,
+          withStrip(snapshot, strip, winRect.width),
+          effect,
+          withStripRect(winRect, strip),
+          null,
+          'out',
+          DEPARTING_Z + win.z,
+          newSeed(),
+          () => destroy(win.id),
         );
         if (played) el.style.visibility = 'hidden';
         else destroy(win.id);
@@ -1102,13 +1169,16 @@ export const Window = memo(function Window({
           show();
         };
         capture
-          .then((snapshot) => {
+          .then((shot) => {
             if (cancelled) return;
-            current = runWindowEffect(parent, snapshot, effect, winRect, target, 'out', win.z, seed, () => {
+            const strip = stripHeightOf(stripRef.current);
+            const snapshot = withStrip(shot, strip, winRect.width);
+            const rect = withStripRect(winRect, strip);
+            current = runWindowEffect(parent, snapshot, effect, rect, target, 'out', win.z, seed, () => {
               // Gone for a beat, then back.
               const timer = window.setTimeout(() => {
                 if (cancelled) return;
-                current = runWindowEffect(parent, snapshot, effect, winRect, target, 'in', win.z, seed, done);
+                current = runWindowEffect(parent, snapshot, effect, rect, target, 'in', win.z, seed, done);
                 if (!current) done();
               }, 300);
               current = () => window.clearTimeout(timer);
@@ -1832,6 +1902,20 @@ export const Window = memo(function Window({
         !flush && !frameless && isTop && win.tiled && 'ring-2 ring-primary/80',
       )}
     >
+      {/* The window's color behind the menu bar while it's maximized under
+          it (BAR_STRIP_PX): its frosted chrome, its accent, or for a window
+          that draws its own title bar, solid white or black. The maximize
+          animation grows it from nothing (inline styles, the FLIP effect's). */}
+      <div
+        ref={stripRef}
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-x-0 bottom-full h-9',
+          !(onBar && win.maximized) && 'hidden',
+          frameless ? 'bg-white dark:bg-black' : !accent && 'bg-card/90 bg-linear-to-b from-background/80 to-background/80',
+        )}
+        style={accent && !frameless ? { backgroundColor: accent } : undefined}
+      />
       <WindowFrameContext.Provider value={frame}>
       {!frameless && !ownsHeader && (
         <WindowDragRegion

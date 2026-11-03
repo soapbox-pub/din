@@ -461,11 +461,12 @@ export function createEffectRenderer(
  * The first frame is painted synchronously, `onDone` fires once when the
  * timeline completes (never on cancel), and the returned function cancels.
  * Returns null, having drawn nothing, when WebGL can't be used - the caller
- * falls back.
+ * falls back. A window reaching above `parent` (a maximized window's strip
+ * behind the menu bar) gets a canvas reaching up as far.
  */
 export function runWindowEffect(
   parent: HTMLElement,
-  image: HTMLImageElement,
+  image: HTMLImageElement | HTMLCanvasElement,
   effect: WindowEffect,
   win: GenieRect,
   target: GenieTarget | null,
@@ -474,20 +475,23 @@ export function runWindowEffect(
   seed: number,
   onDone: () => void,
 ): (() => void) | null {
+  const above = Math.max(0, Math.ceil(-win.y));
   const viewW = parent.clientWidth;
-  const viewH = parent.clientHeight;
+  const viewH = parent.clientHeight + above;
 
   const canvas = document.createElement('canvas');
   canvas.style.position = 'absolute';
   canvas.style.left = '0';
-  canvas.style.top = '0';
+  canvas.style.top = `${-above}px`;
   canvas.style.width = `${viewW}px`;
   canvas.style.height = `${viewH}px`;
   canvas.style.pointerEvents = 'none';
   canvas.style.zIndex = String(zIndex);
 
   const view = { width: viewW, height: viewH };
-  const renderer = createEffectRenderer(canvas, image, effect, view, window.devicePixelRatio || 1, win, target, seed);
+  const shifted = above ? { ...win, y: win.y + above } : win;
+  const aim = above && target ? { ...target, y: target.y + above } : target;
+  const renderer = createEffectRenderer(canvas, image, effect, view, window.devicePixelRatio || 1, shifted, aim, seed);
   if (!renderer) return null;
   const { draw, release } = renderer;
 
