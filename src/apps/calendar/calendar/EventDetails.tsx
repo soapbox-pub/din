@@ -1,5 +1,5 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
-import { CalendarDays, Clock, Globe, Hash, Link as LinkIcon, Lock, MapPin, MoreHorizontal, Pencil, Repeat, Trash2, Users } from 'lucide-react';
+import { CalendarDays, Clock, Hash, Link as LinkIcon, MapPin, MoreHorizontal, Pencil, Repeat, Trash2, Users } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { describeWhen, RSVP_STATUSES, type RsvpStatus } from '@/shared/calendar';
@@ -127,10 +127,11 @@ export function EventDetails({ shown, calendarTitle, pubkey, onAction }: { shown
           )}
         </Row>
         <Row icon={CalendarDays} label="Calendar">
-          <p>{calendarTitle}</p>
-          <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            {nostr ? <Globe className="size-3" aria-hidden /> : <Lock className="size-3" aria-hidden />}
-            {nostr ? 'Public, on Nostr: anyone can see it' : 'Private, on this computer'}
+          <p className="flex items-center gap-2">
+            {calendarTitle}
+            {nostr && (
+              <span className="rounded-full bg-[color-mix(in_oklab,var(--ev)_16%,transparent)] px-1.5 py-px text-[11px] font-medium text-[color-mix(in_oklab,var(--ev)_65%,var(--foreground))]">Public</span>
+            )}
           </p>
         </Row>
         {e.locations.length > 0 && (

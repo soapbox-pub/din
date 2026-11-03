@@ -40,11 +40,11 @@ import { call, command, need, pick } from './util';
  * `din calendar`: the calendars Calendar keeps on this computer, one .ics
  * file per event in ~/.local/share/din/calendar (src/shared/localCalendar.ts,
  * which Calendar calls too), and the separate, public Nostr calendar
- * (NIP-52, src/shared/calendar.ts) when the user has turned it on: what's
+ * (NIP-52, src/shared/calendar.ts) unless the user hid it: what's
  * coming up, adding an event, answering an invitation, deleting an event
  * (asks on screen first), the calendars themselves, and opening Calendar
- * on a day. Nothing goes to Nostr unless `--calendar nostr` says so, and
- * that asks on screen first.
+ * on a day. An event goes to Nostr only with `--calendar nostr`, which
+ * asks on screen first.
  */
 
 const DAY_MS = 86_400_000;
@@ -68,9 +68,9 @@ async function loadNostr(ctx: CommandContext): Promise<{ pubkey: string; data: C
   return { pubkey, data: collectCalendar(raw, pubkey) };
 }
 
-/** The Nostr calendar, if the user turned it on; an error saying how otherwise. */
+/** The Nostr calendar, unless the user hid it; an error saying how to show it otherwise. */
 async function nostrOrFail(ctx: CommandContext, local: LocalCalendars) {
-  if (!local.settings.nostr) throw new CommandError('The Nostr calendar is off. It’s public; turn it on with: din calendar nostr on');
+  if (!local.settings.nostr) throw new CommandError('The Nostr calendar is hidden; show it with: din calendar nostr on');
   return loadNostr(ctx);
 }
 
@@ -169,9 +169,9 @@ const ANSWER_TEXT: Record<RsvpStatus, string> = { accepted: 'going', tentative: 
 
 export const calendarArea: Area = {
   name: 'calendar',
-  summary: 'Your calendars, kept on this computer, and the public Nostr calendar if it’s on: what’s coming up, add an event, answer invitations, delete; calendars; open Calendar',
+  summary: 'Your calendars, kept on this computer, and the public Nostr calendar: what’s coming up, add an event, answer invitations, delete; calendars; open Calendar',
   commands: [
-    command('calendar', 'list', 'Events coming up, from every calendar shown (Nostr’s too, if it’s on)', [
+    command('calendar', 'list', 'Events coming up, from every calendar (Nostr’s too, unless it’s hidden)', [
       { name: 'days', type: 'integer', optional: true, min: 1, max: 366, help: 'How many days ahead (default: 14)' },
       { name: 'from', type: 'string', optional: true, help: 'The first day, YYYY-MM-DD (default: today)' },
       { name: 'calendar', type: 'string', optional: true, help: 'Only this calendar, by name (or nostr)' },
@@ -253,7 +253,7 @@ export const calendarArea: Area = {
       const participants = (args.optString('invite') ?? '').split(',').filter((s) => s.trim()).map(participant);
       const ok = await ctx.confirm({
         title: `Publish “${title}” on Nostr?`,
-        description: `${when}. It’s public: anyone can see it${participants.length ? ', and who’s invited' : ''}, and deleting it later may not remove every copy.`,
+        description: `${when}. Anyone on Nostr can see it${participants.length ? ', and who’s invited' : ''}.`,
         action: 'Publish',
       });
       if (!ok) throw new CommandError('You didn’t allow it');
@@ -294,7 +294,7 @@ export const calendarArea: Area = {
         description:
           found.kind === 'local'
             ? `${describeWhen(found.e)}, in ${found.calendar.title}. It’s deleted from this computer.`
-            : `${describeWhen(found.e)}. It’s public on Nostr: your relays are asked to delete it${found.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.`,
+            : `${describeWhen(found.e)}, on Nostr. Your relays are asked to delete it${found.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.`,
         action: 'Delete',
         destructive: true,
       });
@@ -309,7 +309,7 @@ export const calendarArea: Area = {
       }
       return { text: `Deleted “${found.e.title}”` };
     }),
-    command('calendar', 'calendars', 'Your calendars: those on this computer, and whether the public Nostr calendar is on', [], async () => {
+    command('calendar', 'calendars', 'Your calendars: those on this computer, and whether the public Nostr calendar shows', [], async () => {
       const local = await call(loadLocalCalendars(fsOf()));
       const counts = new Map<string, number>();
       for (const e of local.events) counts.set(e.calendar, (counts.get(e.calendar) ?? 0) + 1);
@@ -321,7 +321,7 @@ export const calendarArea: Area = {
         data,
         text: [
           ...local.calendars.map((c) => `${c.title}  ${counts.get(c.id) ?? 0} event${counts.get(c.id) === 1 ? '' : 's'}, on this computer`),
-          `Nostr  public, ${local.settings.nostr ? 'on' : 'off'}`,
+          `Nostr  public${local.settings.nostr ? '' : ', hidden'}`,
         ].join('\n'),
       };
     }),
@@ -372,12 +372,12 @@ export const calendarArea: Area = {
       await call(deleteCalendar(fs, calendar));
       return { text: `Deleted ${calendar.title}` };
     }),
-    command('calendar', 'nostr', 'Turn the public Nostr calendar on or off (only shows or hides it: nothing is published or deleted)', [
+    command('calendar', 'nostr', 'Show or hide the public Nostr calendar (nothing is published or deleted)', [
       { name: 'state', type: 'string', positional: true, choices: ['on', 'off'], help: 'on or off' },
     ], async (args) => {
       const on = args.string('state') === 'on';
       await call(setNostrCalendar(fsOf(), on));
-      return { text: on ? 'The Nostr calendar is on. It’s public: what you add to it, anyone can see.' : 'The Nostr calendar is off. Its events stay public on Nostr.' };
+      return { text: on ? 'The Nostr calendar shows in Calendar' : 'The Nostr calendar is hidden; its events stay on Nostr' };
     }),
     command('calendar', 'open', 'Open Calendar, on a day if given', [
       { name: 'date', type: 'string', positional: true, optional: true, help: 'The day, YYYY-MM-DD' },

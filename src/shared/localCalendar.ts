@@ -9,7 +9,7 @@ import { parseICalendar, removeEvent, serializeICalendar, type ICalEvent } from 
  * vdirsyncer calls a vdir, so a sync tool can keep it in step with a
  * CalDAV server (Nextcloud and the like) and other apps can read it.
  * Nothing here leaves the computer. `settings.json` says whether the
- * separate, public Nostr calendar is on. Calendar reaches the folder
+ * public Nostr calendar shows beside them (it does unless turned off). Calendar reaches the folder
  * through its scoped `din.system.fs`, `din calendar` through the
  * desktop's; both call these.
  */
@@ -38,7 +38,7 @@ export interface LocalEvent extends ICalEvent {
 }
 
 export interface CalendarSettings {
-  /** The public Nostr calendar is shown, and can be added to. Off unless the user turns it on. */
+  /** The public Nostr calendar shows, and can be added to. On unless the user turned it off. */
   nostr: boolean;
 }
 
@@ -81,13 +81,13 @@ function titleFromId(id: string): string {
 async function readSettings(fs: CalendarFs, root: string): Promise<CalendarSettings> {
   try {
     const value = JSON.parse((await readOptional(fs, `${root}/${SETTINGS_FILE}`)) ?? '{}') as Partial<CalendarSettings>;
-    return { nostr: value.nostr === true };
+    return { nostr: value.nostr !== false };
   } catch {
-    return { nostr: false };
+    return { nostr: true };
   }
 }
 
-/** Turn the public Nostr calendar on or off (it only shows and hides it; nothing is published or deleted). */
+/** Show or hide the public Nostr calendar (nothing is published or deleted). */
 export async function setNostrCalendar(fs: CalendarFs, on: boolean): Promise<void> {
   const root = await calendarRoot(fs);
   await fs.mkdir(root);

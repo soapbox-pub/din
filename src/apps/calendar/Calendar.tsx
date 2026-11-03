@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Globe, Loader2, PanelLeft, Plus, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, PanelLeft, Plus, RefreshCw } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,8 +86,8 @@ function storedTarget(): SourceId {
  * Calendar: the user's events, by day, week or month. They're kept on this
  * computer, in calendars of .ics files (src/shared/localCalendar.ts); the
  * public Nostr calendar (NIP-52: the user's public events, and invitations
- * from people on Nostr) is separate, off until the user turns it on, and
- * marked public wherever it shows. Launch params `{ date: 'YYYY-MM-DD',
+ * from people on Nostr) sits beside them, marked Public, and an event goes
+ * there only when the user picks it. Launch params `{ date: 'YYYY-MM-DD',
  * view }` show a day; `new` (the New Event shortcut's) starts one.
  */
 export function Calendar() {
@@ -117,7 +117,6 @@ export function Calendar() {
   const [deleting, setDeleting] = useState<Shown | null>(null);
   const [naming, setNaming] = useState<{ source: Source | null; title: string } | null>(null);
   const [deletingCalendar, setDeletingCalendar] = useState<Source | null>(null);
-  const [enablingNostr, setEnablingNostr] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const sidebarFits = useMediaQuery(`(min-width: ${SIDEBAR_MIN_WIDTH}px)`);
   const showSidebar = sidebarOpen && sidebarFits;
@@ -347,11 +346,7 @@ export function Calendar() {
     else prefs.setColor(id, color);
   };
 
-  const setNostr = async (on: boolean) => {
-    setEnablingNostr(false);
-    if ((await change((fs) => setNostrCalendar(fs, on).then(() => true), on ? 'Couldn’t turn the Nostr calendar on' : 'Couldn’t turn the Nostr calendar off')) === undefined) return;
-    if (!on) toast('Nostr calendar off', { body: 'Its events aren’t deleted: they stay public on Nostr, and show again when you turn it back on.' });
-  };
+  const setNostr = (on: boolean) => void change((fs) => setNostrCalendar(fs, on), on ? 'Couldn’t show the Nostr calendar' : 'Couldn’t hide the Nostr calendar');
 
   const eventsIn = (s: Source | null) => (s ? all.filter((x) => x.source === s.id).length : 0);
 
@@ -388,7 +383,7 @@ export function Calendar() {
           { id: 'next', label: 'Next', accelerator: 'Ctrl+Right', notInFields: true },
           { type: 'separator' as const },
           { id: 'sidebar', label: showSidebar ? 'Hide Sidebar' : 'Show Sidebar', enabled: sidebarFits },
-          { id: 'nostr', type: 'checkbox' as const, label: 'Nostr Calendar (Public)', checked: nostrOn, enabled: !!local.data },
+          { id: 'nostr', type: 'checkbox' as const, label: 'Nostr Calendar', checked: nostrOn, enabled: !!local.data },
           { id: 'refresh', label: 'Refresh', accelerator: 'Ctrl+R' },
         ],
       },
@@ -402,7 +397,7 @@ export function Calendar() {
         case 'prev': return go(-1);
         case 'next': return go(1);
         case 'refresh': return refresh();
-        case 'nostr': return nostrOn ? void setNostr(false) : setEnablingNostr(true);
+        case 'nostr': return setNostr(!nostrOn);
         case 'sidebar': {
           localStorage.setItem(SIDEBAR_KEY, showSidebar ? 'hidden' : 'shown');
           return setSidebarOpen(!showSidebar);
@@ -440,7 +435,6 @@ export function Calendar() {
               onNewCalendar={() => setNaming({ source: null, title: '' })}
               onRename={(s) => setNaming({ source: s, title: s.title })}
               onDeleteCalendar={setDeletingCalendar}
-              onNostr={(on) => (on ? setEnablingNostr(true) : void setNostr(false))}
               awaiting={awaiting}
               onOpen={(s) => {
                 setDate(new Date(s.e.start));
@@ -584,7 +578,7 @@ export function Calendar() {
               <AlertDialogTitle>Delete “{deleting?.e.title}”?</AlertDialogTitle>
               <AlertDialogDescription>
                 {deleting?.kind === 'nostr'
-                  ? `It’s public on Nostr: your relays are asked to delete it${deleting.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.`
+                  ? `Your relays are asked to delete it${deleting.e.participants.length ? ', and the people you invited see it go' : ''}. Copies elsewhere may stay.`
                   : 'It’s deleted from this computer.'}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -610,26 +604,6 @@ export function Calendar() {
               <AlertDialogAction variant="destructive" onClick={() => deletingCalendar && void removeCalendar(deletingCalendar)}>
                 Delete Calendar
               </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-        <AlertDialog open={enablingNostr} onOpenChange={setEnablingNostr}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <Globe className="size-5" aria-hidden /> Turn on the Nostr calendar?
-              </AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div className="space-y-2">
-                  <p>The Nostr calendar is public. It shows the events you’ve published on Nostr and invitations from people there, and it’s fetched from your Nostr relays.</p>
-                  <p>Anything you put in it is published for anyone to see. Your other calendars stay private, on this computer, and nothing moves between them unless you move it.</p>
-                  {!pubkey && <p className="font-medium">Sign in to Din to see it.</p>}
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void setNostr(true)}>Turn On</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

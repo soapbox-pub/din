@@ -640,13 +640,11 @@ files — `git add` new source files before `npm run os:build`.
   in `displayname` and `color` beside them (`src/shared/localCalendar.ts`,
   `src/shared/ical.ts`), the vdir layout vdirsyncer can sync with a CalDAV
   server later. Day, week and month views, all-day and timed events, and
-  calendars of the user's own (Personal to start). The **Nostr calendar**
-  is separate and public: off until the user turns it on (the bottom of
-  the sidebar, or View → Nostr Calendar), it shows the account's NIP-52
-  events (`src/shared/calendar.ts`) and invitations by npub with Going /
-  Maybe / Not Going answers, and is marked Public wherever it shows. An
-  event goes to Nostr only when the user picks the Nostr calendar for it,
-  under a warning that it will be public. The menu bar's clock opens it,
+  calendars of the user's own (Personal to start). Beside them is the
+  **Nostr calendar**, marked Public: the account's NIP-52 events
+  (`src/shared/calendar.ts`) and invitations by npub with Going / Maybe /
+  Not Going answers (View → Nostr Calendar hides it). An event goes to
+  Nostr only when the user picks the Nostr calendar for it. The menu bar's clock opens it,
   and `din calendar` lists, adds, answers and deletes events, and manages
   the calendars.
 - Contacts is the address book, kept only on this computer: one vCard per

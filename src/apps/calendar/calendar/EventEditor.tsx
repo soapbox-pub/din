@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { Globe, Loader2, Lock, MapPin, TriangleAlert, UserPlus, X } from 'lucide-react';
+import { Globe, Loader2, MapPin, UserPlus, X } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
@@ -170,26 +170,16 @@ export function EventEditor({
               </optgroup>
               {nostr && (
                 <optgroup label="Public">
-                  <option value={NOSTR} disabled={!canPublish}>{canPublish ? 'Nostr (public)' : 'Nostr (public): sign in to Din first'}</option>
+                  <option value={NOSTR} disabled={!canPublish}>{canPublish ? 'Nostr (public)' : 'Nostr (public): sign in to use it'}</option>
                 </optgroup>
               )}
             </select>
           </label>
 
           {isPublic && (
-            <div role="note" className="flex gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-              <Globe className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
-              <p>
-                <span className="font-semibold">This event will be public.</span> It’s published to your Nostr relays, where anyone can see it, its notes and who’s invited. Deleting it later asks relays to remove it, but copies may stay.
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground">Shared on Nostr for anyone to find. Invite people by npub, and they can answer from any Nostr calendar app.</p>
           )}
-          {leavingNostr && (
-            <div role="note" className="flex gap-2.5 rounded-lg bg-foreground/[0.05] p-3 text-sm">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <p>It’s kept on this computer from now on, and your relays are asked to delete the public copy. Copies elsewhere may stay.</p>
-            </div>
-          )}
+          {leavingNostr && <p className="text-sm text-muted-foreground">Moving it here takes it off Nostr.</p>}
 
           {isPublic && nostrLists.length > 0 && (
             <label className="flex items-center gap-3 text-sm">
@@ -272,10 +262,7 @@ export function EventEditor({
           />
         </div>
         <div className="flex items-center gap-2 border-t border-border/60 px-5 py-3">
-          <p className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-            {isPublic ? <Globe className="size-3.5" aria-hidden /> : <Lock className="size-3.5" aria-hidden />}
-            {isPublic ? 'Public, on Nostr' : 'Private, on this computer'}
-          </p>
+          <span className="mr-auto" />
           <DialogButton onClick={onClose}>Cancel</DialogButton>
           <DialogButton type="submit" variant="primary" disabled={invalid || saving} className="inline-flex items-center gap-1.5">
             {saving && <Loader2 className="size-3.5 motion-safe:animate-spin" />}

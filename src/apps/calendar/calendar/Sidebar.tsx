@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Eye, EyeOff, Globe, Palette, Pencil, Plus, Power, Trash2 } from 'lucide-react';
+import { Check, Eye, EyeOff, Palette, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Calendar as MiniMonth } from '@/components/ui/calendar';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
@@ -22,7 +22,6 @@ export function Sidebar({
   onNewCalendar,
   onRename,
   onDeleteCalendar,
-  onNostr,
   awaiting,
   onOpen,
 }: {
@@ -38,8 +37,6 @@ export function Sidebar({
   onNewCalendar: () => void;
   onRename: (s: Source) => void;
   onDeleteCalendar: (s: Source) => void;
-  /** Turn it on (which asks first) or off. */
-  onNostr: (on: boolean) => void;
   /** Invitations to come that the user hasn't answered. */
   awaiting: Shown[];
   onOpen: (s: Shown) => void;
@@ -104,59 +101,16 @@ export function Sidebar({
               }
             />
           ))}
-        </ul>
-
-        {/* Nostr: a calendar of its own, kept apart, and public. */}
-        <div className="mx-2 mt-2 border-t border-border/60 pt-2">
-          {nostr ? (
-            <ul>
-              <SourceRow
-                source={nostr}
-                on={!hidden.has(NOSTR)}
-                onToggle={onToggle}
-                onShowOnly={onShowOnly}
-                onShowAll={onShowAll}
-                onColor={onColor}
-                badge
-                extra={
-                  <>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onSelect={() => onNostr(false)}>
-                      <Power /> Turn Off Nostr Calendar
-                    </ContextMenuItem>
-                  </>
-                }
-              />
-            </ul>
-          ) : (
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => onNostr(true)}
-                  className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground outline-none hover:bg-foreground/[0.05] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                >
-                  <Globe className="mt-0.5 size-4 shrink-0" aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="block">Nostr calendar: off</span>
-                    <span className="block text-xs">Public events and invitations. Turn on…</span>
-                  </span>
-                </button>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="w-52">
-                <ContextMenuItem onSelect={() => onNostr(true)}>
-                  <Power /> Turn On Nostr Calendar…
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
+          {nostr && (
+            <SourceRow source={nostr} on={!hidden.has(NOSTR)} onToggle={onToggle} onShowOnly={onShowOnly} onShowAll={onShowAll} onColor={onColor} badge />
           )}
-        </div>
+        </ul>
       </section>
 
       {awaiting.length > 0 && (
         <section aria-labelledby="awaiting-heading" className="px-2 pt-4 pb-3">
           <h2 id="awaiting-heading" className="px-2 pb-1 text-xs font-semibold text-muted-foreground">
-            Nostr invitations waiting for your answer
+            Waiting for your answer
           </h2>
           <ul className="space-y-px">
             {awaiting.slice(0, 8).map((s) => (
@@ -218,10 +172,9 @@ function SourceRow({
             >
               {on && <Check className="size-3 text-white" strokeWidth={3} />}
             </span>
-            {badge && <Globe className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
             <span className="min-w-0 flex-1 truncate">{s.title}</span>
             {badge && (
-              <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-[11px] font-semibold text-amber-700 dark:text-amber-300">Public</span>
+              <span style={colorStyle(s.color)} className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--ev)_16%,transparent)] px-1.5 py-px text-[11px] font-medium text-[color-mix(in_oklab,var(--ev)_65%,var(--foreground))]">Public</span>
             )}
           </label>
         </li>
