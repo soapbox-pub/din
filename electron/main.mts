@@ -3559,6 +3559,13 @@ const GEOLOCATION_PRELOAD = path.join(import.meta.dirname, 'geolocation-preload.
 const PERMISSIONS_PRELOAD = path.join(import.meta.dirname, 'permissions-preload.cjs');
 
 /**
+ * Absolute path to the session preload that gives window.chrome the `app`
+ * object Chrome has, without which Google's sign-in refuses the browser as
+ * not secure. Every page gets it, in every frame.
+ */
+const CHROME_APP_PRELOAD = path.join(import.meta.dirname, 'chrome-app-preload.cjs');
+
+/**
  * Absolute path to the session preload that sends web pages' print() to
  * Din's print dialog (see electron/printing.mts). Every page gets it, in
  * every frame.
@@ -5852,6 +5859,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-notifications', type: 'frame', filePath: NOTIFICATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-geolocation', type: 'frame', filePath: GEOLOCATION_PRELOAD });
     s.registerPreloadScript({ id: 'din-permissions', type: 'frame', filePath: PERMISSIONS_PRELOAD });
+    s.registerPreloadScript({ id: 'din-chrome-app', type: 'frame', filePath: CHROME_APP_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
     s.registerPreloadScript({ id: 'din-eyedropper', type: 'frame', filePath: EYEDROPPER_PRELOAD });
