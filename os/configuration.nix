@@ -965,15 +965,17 @@ in
     '';
   };
 
-  # gpg, for signing commits. The passphrase prompt is a Qt window, which
-  # opens on Din's desktop like any native app; a terminal prompt would never
-  # reach anyone when git runs without a terminal, as coding agents do.
+  # gpg, for signing commits. The passphrase prompt is GNOME's (gcr's
+  # prompter, which the keyring brings), a GTK window that opens on Din's
+  # desktop like any native app; a terminal prompt would never reach anyone
+  # when git runs without a terminal, as coding agents do. Not Qt's: that
+  # took Qt 6, some 290 MB, for this one window.
   # Keys whose passphrase is the computer's password don't ask at all: like
   # the keyring, they're unlocked at boot with the boot screen's passphrase
   # (os/din-gpg.py), and stay unlocked until gpg-agent stops.
   programs.gnupg.agent = {
     enable = true;
-    pinentryPackage = pkgs.pinentry-qt;
+    pinentryPackage = pkgs.pinentry-gnome3;
     settings.allow-preset-passphrase = "";
     # gpg-agent forgets every passphrase this long after it's cached, preset
     # ones too: by default two hours, after which signing asked again. There's
@@ -1240,6 +1242,15 @@ in
   programs.appimage = {
     enable = true;
     binfmt = true;
+    # The AppImage environment's locales are the system's (i18n), not glibc's
+    # full set: that's another 220 MiB of every language there is.
+    package = pkgs.appimage-run.override {
+      buildFHSEnv = pkgs.buildFHSEnv.override {
+        callPackage = fn: args: pkgs.callPackage fn (args // {
+          pkgs = pkgs // { glibcLocales = config.i18n.glibcLocales; };
+        });
+      };
+    };
   };
 
   # The Nix way works too: `nix run nixpkgs#foo`, `nix profile install ...`.
