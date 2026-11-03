@@ -5748,12 +5748,16 @@ function registerDevtoolsHandlers(): void {
     devtoolsBridge.close(targetWcId);
   });
 
-  // Reveal the element at page coordinates (context-menu "Inspect").
+  // Reveal the element at a point (context-menu "Inspect"), given in window
+  // pixels from the tab's top-left: the page's CSS pixels are those over the
+  // tab's own zoom.
   ipcMain.handle('devtools:inspect', (event, targetWcId, x, y) => {
     assertShellSender(event);
     if (typeof targetWcId !== 'number') return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    devtoolsBridge.inspect(targetWcId, Math.round(x), Math.round(y));
+    const target = webContents.fromId(targetWcId);
+    const zoom = target && !target.isDestroyed() ? target.getZoomFactor() : 1;
+    devtoolsBridge.inspect(targetWcId, Math.round(x / zoom), Math.round(y / zoom));
   });
 
   // Apply or clear device/responsive emulation on a tab.

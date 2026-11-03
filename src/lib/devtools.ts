@@ -25,7 +25,10 @@ export type DevtoolsCommand =
       wcId: number;
     }
   | {
-      /** Context-menu "Inspect": open devtools and highlight (x, y). */
+      /**
+       * Context-menu "Inspect": open devtools and highlight (x, y), in the
+       * shell window's pixels (the desktop's CSS pixels times the zoom).
+       */
       type: 'inspect';
       wcId: number;
       x: number;
@@ -56,7 +59,10 @@ export interface DevtoolsBridge {
   open(targetWcId: number, hostWcId: number): Promise<void>;
   /** Close a tab's devtools. */
   close(targetWcId: number): Promise<void>;
-  /** Highlight the element at page coordinates in the tab's open devtools. */
+  /**
+   * Highlight the element at (x, y) in the tab's open devtools: in the shell
+   * window's pixels, measured from the tab's top-left.
+   */
   inspect(targetWcId: number, x: number, y: number): Promise<void>;
   /**
    * Apply device/responsive emulation to a tab, or clear it with `null`.

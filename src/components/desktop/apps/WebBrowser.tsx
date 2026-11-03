@@ -55,6 +55,8 @@ import {
 import { getCrxBridge, isAllowedTabUrl } from '@/lib/crx';
 import { getUserscriptsBridge, isUserscriptUrl } from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
+import { getMonitorsBridge } from '@/lib/monitors';
+import { findGuest } from '@/platform/guest';
 import {
   getBrowserBridge,
   type BrowserBridge,
@@ -1411,15 +1413,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'toggle':
           toggleDevtools(tab.id);
           break;
-        case 'inspect':
+        case 'inspect': {
           setActiveId(tab.id);
+          // From the tab's top-left, measured now: opening the pane moves it.
+          const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
+          const rect = findGuest(command.wcId)?.getBoundingClientRect();
+          const at = { x: command.x - (rect?.left ?? 0) * zoom, y: command.y - (rect?.top ?? 0) * zoom };
           if (tab.dock !== 'closed' && tab.wcId !== null) {
-            devtools.inspect(tab.wcId, command.x, command.y).catch(() => {});
+            devtools.inspect(tab.wcId, at.x, at.y).catch(() => {});
           } else {
-            pendingInspect.current.set(tab.id, { x: command.x, y: command.y });
+            pendingInspect.current.set(tab.id, at);
             setDock(tab.id, lastDock.current);
           }
           break;
+        }
         case 'closed':
           // Devtools closed from the other side (frontend close button, tab
           // died) - or an echo of our own close; either way, reconcile. Not
