@@ -1,4 +1,5 @@
-import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff, WifiZero } from 'lucide-react';
+import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff } from 'lucide-react';
+import { WifiXIcon } from '@/components/icons/WifiXIcon';
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -799,7 +800,7 @@ export const WifiMenuItem = memo(function WifiMenuItem() {
           title={label}
           className={cn(
             'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
-            ethernet || connected ? 'text-foreground/90' : 'text-muted-foreground',
+            radioEnabled || ethernet ? 'text-foreground/90' : 'text-muted-foreground',
           )}
         >
           {ethernet ? (
@@ -809,7 +810,7 @@ export const WifiMenuItem = memo(function WifiMenuItem() {
           ) : connected ? (
             <WifiSignalIcon signal={current.signal} className="size-4.5" />
           ) : (
-            <WifiZero className="size-4.5" />
+            <WifiXIcon className="size-4.5" />
           )}
         </Button>
       </PopoverTrigger>
