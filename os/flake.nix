@@ -137,7 +137,7 @@
 
       checks.${system} =
         let
-          test = file: import file {
+          args = {
             pkgs = nixpkgs.legacyPackages.${system};
             modules = [
               nostrd.nixosModules.default
@@ -149,12 +149,15 @@
             inherit din deckmon;
             ngit = ngit.packages.${system}.default;
           };
+          test = file: import file args;
         in
         {
           accounts = test ./tests/accounts.nix;
           airplay-display = test ./tests/airplay-display.nix;
           boot-screen = test ./tests/boot-screen.nix;
           firmware = test ./tests/firmware.nix;
+          # Boots the test machine's own disk image, as a USB stick.
+          install = import ./tests/install.nix (args // { inherit makeImage; });
           lock = test ./tests/lock.nix;
         };
     };

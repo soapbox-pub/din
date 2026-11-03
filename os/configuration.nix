@@ -189,7 +189,8 @@ let
     name = "din-install";
     runtimeInputs = with pkgs; [
       coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
-      efibootmgr systemd cryptsetup lvm2 openssl config.services.nostrd.package
+      btrfs-progs efibootmgr systemd cryptsetup lvm2 openssl
+      config.services.nostrd.package
     ];
     text = builtins.readFile ./din-install.sh;
   };
@@ -1229,10 +1230,11 @@ in
   # password.
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
-  # Root is a fixed-size volume on an installed system (os/din-install.sh), so
-  # the Nix store mustn't grow without end: old systems leave the boot menu
-  # after five (each initrd carries the GPUs' firmware, and the ESP is
-  # 512MB), and what's unused for a month goes. Updates also drop systems
+  # Root shares the disk with home (os/din-install.sh), or on systems
+  # installed before Btrfs is a fixed-size volume, so the Nix store mustn't
+  # grow without end: old systems leave the boot menu after five (each initrd
+  # carries the GPUs' firmware, and the ESP is 512MB), and what's unused for
+  # a month goes. Updates also drop systems
   # beyond the boot menu's from the profile (os/din-update.sh).
   nix.gc = {
     automatic = true;
@@ -1240,11 +1242,12 @@ in
     options = "--delete-older-than 30d";
   };
   boot.loader.systemd-boot.configurationLimit = 5;
-  # Builds do their work in the home volume, which has the rest of the disk,
-  # rather than on root: a disk image needs as much scratch space again as
-  # the image, and root also holds the hibernation swap file, as big as
-  # memory. Only what a build produces goes into the store on root. Off the
-  # home volume (the live stick) it's the same filesystem either way.
+  # Builds do their work in home rather than on root: on systems installed
+  # before Btrfs, home is the volume with the rest of the disk, and a disk
+  # image needs as much scratch space again as the image, while root also
+  # holds the hibernation swap file, as big as memory. Only what a build
+  # produces goes into the store on root. Elsewhere it's the same space
+  # either way.
   nix.settings.build-dir = "/home/.nix-build";
   systemd.tmpfiles.settings."10-nix-build-dir"."/home/.nix-build".d = {
     mode = "0700";
@@ -1685,7 +1688,7 @@ in
     description = "Set up hibernation on an encrypted disk";
     wantedBy = [ "multi-user.target" ];
     after = [ "local-fs.target" ];
-    path = with pkgs; [ coreutils util-linux gawk gnugrep config.systemd.package ];
+    path = with pkgs; [ coreutils util-linux gawk gnugrep btrfs-progs config.systemd.package ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -1713,10 +1716,22 @@ in
           rm -f "$dropin"
           exit 0
         fi
-        mkdir -p -m 0700 "$(dirname "$swap")"
-        fallocate -l "$size" "$swap"
+        dir=$(dirname "$swap")
+        if [ "$(findmnt -no FSTYPE /)" = btrfs ]; then
+          # Its own subvolume, so a snapshot of root leaves it out, and
+          # without copy-on-write, which swap can't have.
+          if ! btrfs subvolume show "$dir" >/dev/null 2>&1; then
+            rm -rf "$dir"
+            btrfs subvolume create "$dir" >/dev/null
+          fi
+          chmod 0700 "$dir"
+          btrfs filesystem mkswapfile --size "$size" "$swap" >/dev/null
+        else
+          mkdir -p -m 0700 "$dir"
+          fallocate -l "$size" "$swap"
+          mkswap -q "$swap"
+        fi
         chmod 0600 "$swap"
-        mkswap -q "$swap"
       fi
       # Lowest priority: it's there for hibernating, not to swap to.
       swapon --priority=-2 "$swap" 2>/dev/null || swapon --show=NAME --noheadings | grep -qx "$swap"
@@ -1776,13 +1791,18 @@ in
   # device becomes gpt-auto-root. A plain root never asks or waits.
   #
   # An installed system's root partition (see os/din-install.sh) holds, under
-  # any encryption, LVM: a `dinos` volume group with `root` and `home`
-  # volumes, so the system can be reinstalled without touching anyone's
-  # files. The group is made with autoactivation off, so neither LVM's own
-  # rules nor anything else brings it up; the rules below activate it only
-  # when it's in the boot disk's root partition. A DinOS disk that's merely
-  # plugged in - the computer's own, under a live stick - is left alone, and
-  # two such disks never trip over their shared group name.
+  # any encryption, Btrfs, whose default subvolume is the system and `@home`
+  # home, so the system can be reinstalled without touching anyone's files.
+  # That's mounted the way the live stick's ext4 is; nothing below is about
+  # it but mounting home.
+  #
+  # Systems installed before Btrfs have LVM there instead: a `dinos` volume
+  # group with `root` and `home` volumes, both ext4. The group is made with
+  # autoactivation off, so neither LVM's own rules nor anything else brings
+  # it up; the rules below activate it only when it's in the boot disk's root
+  # partition. A DinOS disk that's merely plugged in - the computer's own,
+  # under a live stick - is left alone, and two such disks never trip over
+  # their shared group name.
   #
   # A device only becomes gpt-auto-root once blkid has said what's on it, and
   # never when that's LVM. systemd's own 90-image-dissect.rules, which the
@@ -1825,16 +1845,14 @@ in
       ExecStart = "/bin/lvm vgchange --activate y --devices /dev/%i dinos";
     };
   };
-  # /home is mounted here rather than through fileSystems: the live stick and
-  # systems installed before the split have no home volume, and must boot as
-  # they always have, while an installed system that has one must never come
-  # up on an empty /home - if it can't be mounted, booting stops.
+  # /home is mounted here rather than through fileSystems: it's a subvolume
+  # of root's Btrfs, or on older systems a volume of its own, while the live
+  # stick and systems installed before the split have no home apart, and
+  # must boot as they always have. An installed system that has one must
+  # never come up on an empty /home - if it can't be mounted, booting stops.
   boot.initrd.systemd.services.dinos-home = {
-    description = "Mount DinOS's home volume";
-    unitConfig = {
-      DefaultDependencies = false;
-      ConditionPathExists = "/dev/mapper/dinos-home";
-    };
+    description = "Mount DinOS's home";
+    unitConfig.DefaultDependencies = false;
     after = [ "initrd-root-device.target" "sysroot.mount" ];
     requires = [ "sysroot.mount" ];
     before = [ "initrd-fs.target" ];
@@ -1845,16 +1863,26 @@ in
     };
     # e2fsck exits 1 for errors it fixed; 4 and up is trouble.
     script = ''
-      e2fsck -p /dev/mapper/dinos-home || [ $? -lt 4 ]
-      mount -t ext4 /dev/mapper/dinos-home /sysroot/home
+      while read -r src dir type rest; do
+        if [ "$dir" = /sysroot ]; then root=$src root_type=$type; fi
+      done </proc/self/mounts
+      if [ -e /dev/mapper/dinos-home ]; then
+        e2fsck -p /dev/mapper/dinos-home || [ $? -lt 4 ]
+        mount -t ext4 /dev/mapper/dinos-home /sysroot/home
+      elif [ "$root_type" = btrfs ]; then
+        mount -t btrfs -o subvol=@home "$root" /sysroot/home
+      fi
     '';
   };
   # Waiting for root also waits out the passphrase prompt, so it has no time
   # limit: systemd's default 90 seconds dropped a computer left at the prompt
-  # into emergency mode.
+  # into emergency mode. It's Btrfs on an installed system and ext4 on the
+  # live stick and systems installed before Btrfs.
+  boot.initrd.supportedFilesystems = { btrfs = true; ext4 = true; };
+  boot.supportedFilesystems.btrfs = true;
   fileSystems."/" = {
     device = "/dev/gpt-auto-root";
-    fsType = "ext4";
+    fsType = "auto";
     options = [ "x-systemd.device-timeout=0" ];
   };
   fileSystems."/boot" = {

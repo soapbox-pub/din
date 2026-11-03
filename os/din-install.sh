@@ -10,7 +10,7 @@
 #   din-install install <disk> wipe|free|keep [encrypt]
 #       Install onto <disk>: `wipe` erases it, `free` goes into its largest
 #       stretch of unpartitioned space (next to Windows, say), and `keep`
-#       replaces the DinOS already on it, leaving its home volume alone.
+#       replaces the DinOS already on it, leaving its home alone.
 #       With `encrypt`, a passphrase is read from stdin: for a new install the
 #       system partition is LUKS2 under it, asked for at every boot, and for
 #       `keep` it unlocks the existing one. Reports on stdout as it goes -
@@ -18,12 +18,20 @@
 #       the reason on stderr if it can't.
 #
 # Every install has the same layout: an ESP, and a system partition holding
-# (under the encryption, if any) an LVM volume group `dinos` with a `root`
-# volume for the system and a `home` volume taking the rest. A reinstall
-# formats root and leaves home as it is. The group has autoactivation off:
-# DinOS's initrd brings it up only on the disk it booted from (see
-# configuration.nix), and every LVM command here is confined with --devices,
-# so a second DinOS disk in the same computer never gets confused for it.
+# (under the encryption, if any) a Btrfs filesystem with an `@` subvolume
+# for the system, its default, and `@home` for home, sharing the disk's
+# space between them. Both are compressed with zstd, set as a property that
+# new files inherit, so it needs no mount options. A reinstall builds a new
+# system in `@new` beside the old one and swaps it in once it's complete,
+# leaving `@home` as it is: until then the old system still boots.
+#
+# Installs from before Btrfs have, in place of the filesystem, an LVM volume
+# group `dinos` with an ext4 `root` volume for the system and an ext4 `home`
+# volume taking the rest; a reinstall of one formats root and leaves home.
+# The group has autoactivation off: DinOS's initrd brings it up only on the
+# disk it booted from (see configuration.nix), and every LVM command here is
+# confined with --devices, so a second DinOS disk in the same computer never
+# gets confused for it.
 #
 # The installed system is a file-level copy of the live one: the same Nix
 # store, the same boot entries, and the session (sign-in, saved WiFi) the user
@@ -37,19 +45,17 @@ ROOT_TYPE=4f68bce3-e8cd-4db1-96e7-fbcaf984b709 # Linux root (x86-64)
 # The system partition's LUKS mapping while installing. Not `root`: udev
 # would take that for this system's own root (see configuration.nix).
 CRYPT_NAME=dinos-install
+FS_LABEL=DinOS
 VG=dinos
 ESP_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 ESP_LABEL="DinOS boot"
 MIB=$((1024 * 1024))
 GIB=$((1024 * MIB))
 ESP_BYTES=$((512 * MIB))
-# The smallest disk (or free stretch) DinOS goes on, enough for the smallest
-# root plus a home worth having. Sold as "128 GB", a drive holds ~119 GiB.
-MIN_INSTALL_BYTES=$((100 * GIB))
-# Root gets a quarter of the space within these bounds; home gets the rest.
-# With old systems collected (configuration.nix), 128 GiB is room to spare.
-ROOT_MIN_BYTES=$((48 * GIB))
-ROOT_MAX_BYTES=$((128 * GIB))
+# The smallest disk (or free stretch) DinOS goes on: the system, the old ones
+# kept for the boot menu (configuration.nix), and files worth having. Sold as
+# "64 GB", a drive holds ~59 GiB.
+MIN_INSTALL_BYTES=$((56 * GIB))
 # Room for apps and system updates beyond the live system's own footprint.
 HEADROOM_BYTES=$((8 * GIB))
 # What a reinstall carries over from the old root, besides home: saved WiFi,
@@ -144,18 +150,19 @@ largest_free_bytes() {
 
 # The DinOS install on a disk that a reinstall can keep the files of, as
 # "partition plain|encrypted", or nothing. That's the disk's first root
-# partition (the one auto-discovery would boot) holding the `dinos` group -
-# which, encrypted, can only be told once it's unlocked. A DinOS installed
-# before home had its own volume is ext4 straight on the partition, and
-# doesn't count.
+# partition (the one auto-discovery would boot) holding DinOS's Btrfs or the
+# `dinos` group - which, encrypted, can only be told once it's unlocked. A
+# DinOS installed before home had its own volume is ext4 straight on the
+# partition, and doesn't count.
 dinos_install() {
-  local part fstype
-  read -r part fstype < <(lsblk -Jpo NAME,PARTTYPE,FSTYPE "$1" | jq -r --arg t "$ROOT_TYPE" '
+  local part fstype label
+  read -r part fstype label < <(lsblk -Jpo NAME,PARTTYPE,FSTYPE,LABEL "$1" | jq -r --arg t "$ROOT_TYPE" '
     [.blockdevices[0].children // [] | .[] | select((.parttype // "" | ascii_downcase) == $t)]
-    | first // empty | "\(.name) \(.fstype // "")"') || true
+    | first // empty | "\(.name) \(.fstype // "-") \(.label // "-")"') || true
   [[ -n ${part:-} ]] || return 0
   case $fstype in
     crypto_LUKS) echo "$part encrypted" ;;
+    btrfs) [[ $label != "$FS_LABEL" ]] || echo "$part plain" ;;
     LVM2_member)
       if [[ $(lvm pvs --devices "$part" --noheadings -o vg_name 2>/dev/null | tr -d ' ') == "$VG" ]]; then
         echo "$part plain"
@@ -234,6 +241,7 @@ release_disk() {
 }
 
 target=""
+top=""
 source_esp=""
 old_root=""
 crypt_open=""
@@ -247,6 +255,10 @@ cleanup() {
     umount "$old_root" 2>/dev/null || true
     rmdir "$old_root" 2>/dev/null || true
   fi
+  if [[ -n $top ]]; then
+    umount "$top" 2>/dev/null || true
+    rmdir "$top" 2>/dev/null || true
+  fi
   if [[ -n $vg_devices ]]; then
     lvm vgchange -q --activate n --devices "$vg_devices" "$VG" >/dev/null 2>&1 || true
   fi
@@ -259,22 +271,29 @@ cleanup() {
   fi
 }
 
-# Open the system partition's encryption, when it has some, setting `pv` to
-# the device LVM lives on.
+# Open the system partition's encryption, when it has some, setting `dev` to
+# the device the filesystem (or LVM) lives on.
 open_system() {
   local part=$1 passphrase=$2
-  pv=$part
+  dev=$part
   if [[ -n $passphrase ]]; then
     # printf is a builtin: the passphrase never shows up in a command line.
     printf '%s' "$passphrase" | cryptsetup open --key-file=- "$part" "$CRYPT_NAME" ||
       die "That passphrase doesn't unlock the disk."
     crypt_open=1
-    pv=/dev/mapper/$CRYPT_NAME
+    dev=/dev/mapper/$CRYPT_NAME
   fi
+}
+
+# Mount the Btrfs filesystem's top level, where its subvolumes are, at `top`.
+mount_top() {
+  top=$(mktemp -d /run/din-install-top.XXXXXX)
+  mount -o subvolid=5 "$1" "$top"
 }
 
 # Copy what a reinstall keeps from the old root into a stash under /run, once
 # per install: a retry after the old root was already formatted reuses it.
+# The old root is mounted from device $2 with options $3.
 stash_old_root() {
   local stash=$1 path
   [[ -d $stash ]] && return
@@ -282,7 +301,7 @@ stash_old_root() {
   mkdir -p "$(dirname "$stash")"
   mkdir -m 700 "$stash.partial"
   old_root=$(mktemp -d /run/din-install-old.XXXXXX)
-  if mount -o ro /dev/mapper/$VG-root "$old_root" 2>/dev/null; then
+  if mount -o "ro${3:+,$3}" "$2" "$old_root" 2>/dev/null; then
     for path in "${KEEP_PATHS[@]}"; do
       [[ -e $old_root/$path ]] || continue
       mkdir -p "$stash.partial/$(dirname "$path")"
@@ -321,7 +340,7 @@ protect_nostrd() {
 }
 
 install() {
-  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" pv stash=""
+  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" dev stash="" layout=btrfs
   boot=$(boot_disk)
   is_live "$boot" || die "DinOS can only be installed while running from a USB stick."
   grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk DinOS can be installed on."
@@ -343,7 +362,7 @@ install() {
   step partition
   udevadm settle
   release_disk "$disk"
-  # This group's volumes are about to be made or opened by name.
+  # An old install's volumes are about to be opened by name.
   [[ ! -e /dev/mapper/$VG-root && ! -e /dev/mapper/$VG-home ]] ||
     die "Another disk's DinOS is open. Restart and try again."
   if [[ $mode == keep ]]; then
@@ -359,14 +378,27 @@ install() {
     esp=$(dinos_esp "$disk")
     [[ -b $esp ]] || die "Couldn't find DinOS's boot partition on $disk."
     open_system "$part" "$passphrase"
-    [[ $(lvm pvs --devices "$pv" --noheadings -o vg_name 2>/dev/null | tr -d ' ') == "$VG" ]] ||
-      die "This DinOS was installed before your files were kept apart from the system, so they can't be kept. Erase the disk to reinstall."
-    lvm vgchange -q --activate y --devices "$pv" "$VG" >/dev/null
-    vg_devices=$pv
-    [[ -b /dev/mapper/$VG-root && -b /dev/mapper/$VG-home ]] ||
-      die "DinOS's volumes on $disk aren't all there."
     stash=/run/din-install-keep/$(lsblk -no PARTUUID "$part")
-    stash_old_root "$stash"
+    case $(blkid -p -o value -s TYPE "$dev") in
+      btrfs)
+        mount_top "$dev"
+        # An earlier attempt that stopped while swapping systems.
+        [[ -d $top/@ || ! -d $top/@old ]] || mv "$top/@old" "$top/@"
+        [[ -d $top/@ && -d $top/@home ]] || die "DinOS's subvolumes on $disk aren't all there."
+        stash_old_root "$stash" "$dev" subvol=@
+        ;;
+      LVM2_member)
+        [[ $(lvm pvs --devices "$dev" --noheadings -o vg_name 2>/dev/null | tr -d ' ') == "$VG" ]] ||
+          die "DinOS's volumes on $disk aren't all there."
+        layout=lvm
+        lvm vgchange -q --activate y --devices "$dev" "$VG" >/dev/null
+        vg_devices=$dev
+        [[ -b /dev/mapper/$VG-root && -b /dev/mapper/$VG-home ]] ||
+          die "DinOS's volumes on $disk aren't all there."
+        stash_old_root "$stash" "/dev/mapper/$VG-root"
+        ;;
+      *) die "This DinOS was installed before your files were kept apart from the system, so they can't be kept. Erase the disk to reinstall." ;;
+    esac
   elif [[ $mode == wipe ]]; then
     (( $(jq '.sizeBytes' <<<"$json") >= required )) || die "$disk is too small for DinOS."
     wipefs -aq "$disk"
@@ -406,36 +438,37 @@ install() {
   fi
 
   step format
-  mkfs.vfat -F 32 -n DINOS "$esp" >/dev/null
-  if [[ $mode == keep ]]; then
+  if [[ $layout == lvm ]]; then
     mkfs.ext4 -q -F -L nixos "/dev/mapper/$VG-root"
   else
-    if [[ -n $passphrase ]]; then
-      printf '%s' "$passphrase" |
-        cryptsetup luksFormat -q --type luks2 --label DinOS --key-file=- "$part"
+    if [[ $mode != keep ]]; then
+      if [[ -n $passphrase ]]; then
+        printf '%s' "$passphrase" |
+          cryptsetup luksFormat -q --type luks2 --label DinOS --key-file=- "$part"
+      fi
+      open_system "$part" "$passphrase"
+      mkfs.btrfs -q -f -L "$FS_LABEL" "$dev"
+      mount_top "$dev"
+      btrfs subvolume create "$top/@home" >/dev/null
+      btrfs property set "$top/@home" compression zstd
     fi
-    open_system "$part" "$passphrase"
-    lvm pvcreate -q -y --devices "$pv" "$pv" >/dev/null
-    lvm vgcreate -q --devices "$pv" --setautoactivation n "$VG" "$pv" >/dev/null
-    vg_devices=$pv
-    local vg_bytes root_bytes
-    vg_bytes=$(lvm vgs --devices "$pv" --noheadings --units b --nosuffix -o vg_size "$VG" | tr -d ' ')
-    root_bytes=$((vg_bytes / 4))
-    (( root_bytes >= ROOT_MIN_BYTES )) || root_bytes=$ROOT_MIN_BYTES
-    (( root_bytes <= ROOT_MAX_BYTES )) || root_bytes=$ROOT_MAX_BYTES
-    (( root_bytes >= $(used_bytes) + HEADROOM_BYTES )) || die "$disk is too small for DinOS."
-    lvm lvcreate -q -y --devices "$pv" -n root -L "$((root_bytes / MIB))m" "$VG" >/dev/null
-    lvm lvcreate -q -y --devices "$pv" -n home -l 100%FREE "$VG" >/dev/null
-    mkfs.ext4 -q -F -L nixos "/dev/mapper/$VG-root"
-    mkfs.ext4 -q -F -L home "/dev/mapper/$VG-home"
+    # What's left of an earlier attempt.
+    [[ ! -d $top/@new ]] || btrfs subvolume delete -R "$top/@new" >/dev/null
+    btrfs subvolume create "$top/@new" >/dev/null
+    btrfs property set "$top/@new" compression zstd
   fi
 
   target=$(mktemp -d /run/din-install.XXXXXX)
-  mount "/dev/mapper/$VG-root" "$target"
+  if [[ $layout == lvm ]]; then
+    mount "/dev/mapper/$VG-root" "$target"
+  else
+    mount -o subvol=@new "$dev" "$target"
+  fi
   mkdir "$target/boot" "$target/home"
-  mount -o umask=0077 "$esp" "$target/boot"
   # A reinstall never mounts home: nothing below can touch it.
-  [[ $mode == keep ]] || mount "/dev/mapper/$VG-home" "$target/home"
+  if [[ $mode != keep ]]; then
+    mount -o subvol=@home "$dev" "$target/home"
+  fi
 
   step copy
   local excludes=(
@@ -445,6 +478,9 @@ install() {
     --exclude='/home/*/.cache/*' --exclude='/home/.nix-build/*' --exclude='/lost+found'
   )
   [[ $mode != keep ]] || excludes+=(--exclude='/home/*')
+  # Btrfs's own properties, the compression above all, are the new
+  # filesystem's: rsync leaves the ones files inherit in place.
+  excludes+=(--filter='-x btrfs.*')
   # rsync's overall progress, as whole percents.
   set +e
   rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 "${excludes[@]}" / "$target/" |
@@ -455,6 +491,10 @@ install() {
   [[ $rc == 0 || $rc == 24 ]] || die "Copying the system failed (rsync exit $rc)."
 
   step boot
+  # Only formatted now, so a reinstall that fails before this leaves the old
+  # system as it was.
+  mkfs.vfat -F 32 -n DINOS "$esp" >/dev/null
+  mount -o umask=0077 "$esp" "$target/boot"
   # The live ESP is usually mounted at /boot already, which rules out a
   # second, read-only mount of it.
   local live_esp esp_dir
@@ -509,8 +549,19 @@ install() {
   fi
 
   sync
+  if [[ $layout == btrfs ]]; then
+    umount -R "$target"
+    # The new system replaces the old one, if any, and becomes the default:
+    # what the initrd mounts as root.
+    [[ ! -d $top/@ ]] || mv "$top/@" "$top/@old"
+    mv "$top/@new" "$top/@"
+    btrfs subvolume set-default "$top/@"
+    [[ ! -d $top/@old ]] || btrfs subvolume delete -R "$top/@old" >/dev/null
+    sync
+  fi
   cleanup
   target=""
+  top=""
   vg_devices=""
   crypt_open=""
   source_esp=""

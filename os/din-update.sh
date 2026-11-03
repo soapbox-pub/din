@@ -88,7 +88,7 @@
 #
 # Before it builds, a run makes sure there's room: the store on root has to
 # take what the build adds, and the build directory (nix.settings.build-dir,
-# on the home volume) its scratch space. It collects garbage if there isn't,
+# in /home) its scratch space. It collects garbage if there isn't,
 # and gives up with the reason if that's not enough. After staging, systems
 # beyond the boot menu's (configuration.nix) leave the profile, so their
 # store paths can go at the next collection.

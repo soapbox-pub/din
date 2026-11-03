@@ -134,15 +134,25 @@ installed disk are copies of each other, nothing is mounted by label: the
 initrd finds root by GPT auto-discovery on the disk the boot loader ran from.
 
 Every install has the same layout, with no choices offered: an ESP and one
-system partition (optionally LUKS-encrypted) holding an LVM volume group,
-`dinos`, with an ext4 `root` volume — a quarter of the space, between 48 and
-128 GiB — and an ext4 `home` volume taking the rest. Disks under 100 GiB are
-refused. Run on a disk that already has DinOS, the Installer offers to
-**reinstall and keep your files**: it formats `root`, never mounts `home`, and
-carries over saved Wi-Fi, Bluetooth pairings, the Nostr account keys, and the
-machine's identity. The group is created with LVM autoactivation off; only the
-initrd activates it, and only on the disk it booted from, so a DinOS disk
-attached to another DinOS machine (or under a live stick) is left alone.
+system partition (optionally LUKS-encrypted) holding a Btrfs filesystem with
+an `@` subvolume for the system (the default, which the initrd mounts as
+root) and `@home` for home, sharing the disk's space and compressed with
+zstd. Disks under 56 GiB are refused. Run on a disk that already has DinOS,
+the Installer offers to **reinstall and keep your files**: it builds the new
+system in `@new`, never mounts `@home`, carries over saved Wi-Fi, Bluetooth
+pairings, the Nostr account keys, and the machine's identity, and only swaps
+the new system in once it's complete.
+
+Systems installed before Btrfs have an LVM volume group, `dinos`, in its
+place, with ext4 `root` and `home` volumes; they still boot, and reinstalling
+one keeps that layout (formatting `root`, never mounting `home`). Moving one
+to Btrfs means copying home off and erasing the disk. The group is created
+with LVM autoactivation off; only the initrd activates it, and only on the
+disk it booted from, so a DinOS disk attached to another DinOS machine (or
+under a live stick) is left alone. `nix build ./os#checks.x86_64-linux.install`
+installs from the image over USB in a VM and boots each result: a new
+install, a reinstall, and a disk installed before Btrfs, before and after
+reinstalling it.
 
 One password runs the computer. Encrypting the disk sets its passphrase as
 `din`'s password too, and as the password of **nostrd**, the signer daemon that holds the Nostr account
