@@ -107,6 +107,39 @@ export interface MessageSummary {
   references?: string[];
   /** The account's server says DKIM passed for the From domain; undefined for summaries kept from before Mail looked. */
   senderVerified?: boolean;
+  /**
+   * Its labels, by `MailLabel.id`: Gmail's (leaving out the system ones,
+   * and the label of the mailbox it was read from), or its IMAP keywords
+   * elsewhere; undefined for summaries kept from before Mail looked.
+   */
+  labels?: string[];
+}
+
+/** The colors a label can have; one is picked from its id until it's given one. */
+export const LABEL_COLORS = ['gray', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink'] as const;
+export type LabelColor = (typeof LABEL_COLORS)[number];
+
+/**
+ * How an account keeps labels: Gmail's own (each one a mailbox, which a
+ * message can be in several of); IMAP keywords (RFC 9051), as Thunderbird's
+ * tags are, on servers that take new ones; or not at all.
+ */
+export type LabelKind = 'gmail' | 'keywords' | 'none';
+
+export interface MailLabel {
+  /** What's kept on the message: Gmail's label (its mailbox's path), or the IMAP keyword. */
+  id: string;
+  name: string;
+  /** Kept by Din, on this computer: neither IMAP nor Gmail's IMAP gives label colors. */
+  color: LabelColor | null;
+  /** Gmail's mailbox of the label's mail, or null for a keyword (searched for in every mailbox). */
+  path: string | null;
+}
+
+export interface MailLabels {
+  kind: LabelKind;
+  /** By name. */
+  labels: MailLabel[];
 }
 
 /** A message of a conversation, with the mailbox it's in. */
@@ -231,7 +264,8 @@ export interface MailBridge {
   updateAccount(id: string, patch: MailAccountPatch): Promise<MailAccount>;
   removeAccount(id: string): Promise<void>;
   mailboxes(accountId: string): Promise<MailboxInfo[]>;
-  messages(accountId: string, path: string, options?: { before?: number; limit?: number; query?: string; filter?: MessageFilter }): Promise<MessagePage>;
+  /** A page of a mailbox's messages, newest first; `label` keeps those with that keyword (not Gmail's labels, which are mailboxes). */
+  messages(accountId: string, path: string, options?: { before?: number; limit?: number; query?: string; filter?: MessageFilter; label?: string }): Promise<MessagePage>;
   message(accountId: string, path: string, uid: number): Promise<MailMessage>;
   /**
    * The rest of a conversation, from the inbox, Sent and Archive (All Mail
@@ -242,6 +276,16 @@ export interface MailBridge {
   conversation(accountId: string, options: { messageIds: string[]; threadId?: string | null; since?: number }): Promise<ConversationMessage[]>;
   attachment(accountId: string, path: string, uid: number, index: number): Promise<MailAttachment>;
   setFlags(accountId: string, path: string, uids: number[], flags: { seen?: boolean; flagged?: boolean }): Promise<void>;
+  /** The account's labels, and how it keeps them. */
+  labels(accountId: string): Promise<MailLabels>;
+  /** A new label: a Gmail label, or a keyword that's on no message yet. */
+  createLabel(accountId: string, label: { name: string; color?: LabelColor | null }): Promise<MailLabel>;
+  /** Rename a label (on Gmail, on the server; a keyword stays, and only its name here changes) or change its color. */
+  updateLabel(accountId: string, id: string, patch: { name?: string; color?: LabelColor | null }): Promise<MailLabel>;
+  /** Take a label off every message that has it, in every mailbox, and forget it. The messages stay. */
+  deleteLabel(accountId: string, id: string): Promise<void>;
+  /** Put labels on messages (`add`) and take others off (`remove`), by `MailLabel.id`. */
+  setLabels(accountId: string, path: string, uids: number[], change: { add?: string[]; remove?: string[] }): Promise<void>;
   /**
    * A sender's picture (a data: URL) from their domain's NIP-05 profile or
    * BIMI logo, or null; ask only for senders with `senderVerified`.
@@ -293,11 +337,11 @@ export interface MailRead {
 }
 
 /**
- * What the desktop has of it: the mailing lists, for `din mail`; and new
+ * What the desktop has of it: the mailing lists and labels, for `din mail`; and new
  * mail and each inbox's unread count, watched from the moment Din starts,
  * for notifications and Mail's Dock badge.
  */
-export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe'> & {
+export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel'> & {
   /** Each account's unread mail in its inbox, as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;

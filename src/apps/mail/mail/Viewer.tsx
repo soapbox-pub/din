@@ -1,29 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, RefreshCw, Search, SquarePen, Star, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, RefreshCw, Search, SquarePen, Star, Tag, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { appLink, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
-import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
+import type { MailAccount, MailboxInfo, MailLabel, MailLabels, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
-import { sourcesOf, useAccounts, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
-import { useMessageActions } from './actions';
+import { keywordOf, sourcesOf, useAccounts, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
+import { useLabelActions, useMessageActions } from './actions';
+import { labelsOfItems } from './labels';
+import { DeleteLabelDialog, LabelEditor } from './LabelDialogs';
 import { blankSeed, parseAddresses } from './format';
 import { rememberAddresses } from './contacts';
-import { Sidebar } from './Sidebar';
+import { Sidebar, type LabelPick } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
 import { ListSkeleton, MessageList, SelectBox } from './MessageList';
 import { Reader } from './Reader';
-import { messageMenu, type MenuPick } from './menu';
+import { labelEntries, messageMenu, type MenuEntry, type MenuPick } from './menu';
 import { DropdownEntries } from './MenuEntries';
 import { groupConversations, type Conversation } from './conversations';
-import { messageTarget, savedViewer, type SavedWindow } from './restore';
+import { isSelection, messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
 import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
 import { DialogButton, Overlay } from '@/shared/dialogs';
+import { toast } from '@/shared/toast';
 
 const SELECTION_KEY = 'din:mail:selection';
 const SIDEBAR_KEY = 'din:mail:sidebar';
@@ -39,8 +42,8 @@ const READER_PICKS = new Set<MenuPick>(['reply', 'flag', 'unflag']);
 
 function loadSelection(): Selection {
   try {
-    const s = JSON.parse(localStorage.getItem(SELECTION_KEY) ?? 'null') as Selection | null;
-    if (s && (s.kind === 'all' || s.kind === 'subscriptions' || (s.kind === 'mailbox' && typeof s.accountId === 'string' && typeof s.path === 'string'))) return s;
+    const s: unknown = JSON.parse(localStorage.getItem(SELECTION_KEY) ?? 'null');
+    if (isSelection(s)) return s;
   } catch {
     // The default below.
   }
@@ -126,6 +129,23 @@ function MoreMenu({ entries, onPick }: { entries: ReturnType<typeof messageMenu>
   );
 }
 
+/** The Label as button: the account's labels, to put on these messages or take off. */
+function LabelMenu({ entries, onPick }: { entries: MenuEntry[]; onPick: (pick: MenuPick) => void }) {
+  if (!entries.length) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ToolButton label="Label as">
+          <Tag className="size-4.5" strokeWidth={1.75} />
+        </ToolButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-96 w-56 overflow-y-auto">
+        <DropdownEntries entries={entries} onPick={onPick} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Welcome({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="grid flex-1 place-items-center p-8">
@@ -149,6 +169,7 @@ export function Viewer() {
   const accounts = useMemo<MailAccount[]>(() => accountsQuery.data ?? [], [accountsQuery.data]);
   const me = useMemo(() => new Set(accounts.map((a) => a.email.toLowerCase())), [accounts]);
   const { boxes, errors } = useMailboxes(accounts);
+  const labels = useLabels(accounts);
   useLiveUpdates();
 
   // A window Din reopened comes back as it was left; one opened for a
@@ -202,11 +223,14 @@ export function Viewer() {
     localStorage.setItem(SIDEBAR_KEY, open ? 'shown' : 'hidden');
   }, []);
 
-  // A mailbox whose account went away falls back to the inboxes.
-  const selection = useMemo<Selection>(
-    () => (chosenMailbox.kind === 'mailbox' && accountsQuery.data && !accounts.some((a) => a.id === chosenMailbox.accountId) ? { kind: 'all', special: 'inbox' } : chosenMailbox),
-    [chosenMailbox, accounts, accountsQuery.data],
-  );
+  // A mailbox or label whose account went away, or a label deleted, falls back to the inboxes.
+  const selection = useMemo<Selection>(() => {
+    const c = chosenMailbox;
+    if ((c.kind === 'mailbox' || c.kind === 'label') && accountsQuery.data && !accounts.some((a) => a.id === c.accountId)) return { kind: 'all', special: 'inbox' };
+    const info = c.kind === 'label' ? labels.get(c.accountId) : undefined;
+    if (c.kind === 'label' && info && !info.labels.some((l) => l.id === c.id)) return { kind: 'all', special: 'inbox' };
+    return c;
+  }, [chosenMailbox, accounts, accountsQuery.data, labels]);
 
   // Searching waits for a pause in typing.
   useEffect(() => {
@@ -214,9 +238,10 @@ export function Viewer() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const sources = useMemo(() => sourcesOf(selection, boxes), [selection, boxes]);
+  const sources = useMemo(() => sourcesOf(selection, boxes, labels), [selection, boxes, labels]);
+  const keyword = keywordOf(selection, labels);
   const effectiveFilter: MessageFilter = selection.kind === 'all' && selection.special === 'flagged' ? 'flagged' : filter;
-  const messages = useMessages(sources, effectiveFilter, query);
+  const messages = useMessages(sources, effectiveFilter, query, keyword);
   const items = useMemo(() => {
     const seen = new Set<string>();
     const out: Item[] = [];
@@ -292,8 +317,11 @@ export function Viewer() {
   );
 
   const box = (accountId: string, path: string): MailboxInfo | undefined => boxes.get(accountId)?.find((b) => b.path === path);
+  const labelOf = (accountId: string, id: string): MailLabel | undefined => labels.get(accountId)?.labels.find((l) => l.id === id);
+  const labelsFor = useCallback((accountId: string): MailLabels | undefined => labels.get(accountId), [labels]);
   const special = selection.kind === 'all' ? selection.special : selection.kind === 'mailbox' ? box(selection.accountId, selection.path)?.special ?? null : null;
   const recipients = special === 'sent' || special === 'drafts';
+  const viewingLabel = selection.kind === 'label' ? selection.id : null;
 
   const titleOf = (s: Selection) =>
     s.kind === 'subscriptions'
@@ -302,9 +330,12 @@ export function Viewer() {
         ? s.special === 'inbox' && accounts.length > 1
           ? 'All Inboxes'
           : SPECIAL_NAMES[s.special]
-        : mailboxTitle(box(s.accountId, s.path)) || s.path;
+        : s.kind === 'label'
+          ? labelOf(s.accountId, s.id)?.name ?? 'Label'
+          : mailboxTitle(box(s.accountId, s.path)) || s.path;
   const title = titleOf(selection);
-  const unseenIn = (s: Selection) => sourcesOf(s, boxes).reduce((n, src) => n + (box(src.accountId, src.path)?.unseen ?? 0), 0);
+  // A keyword's mail is spread over the mailboxes, whose counts aren't its.
+  const unseenIn = (s: Selection) => (keywordOf(s, labels) ? 0 : sourcesOf(s, boxes, labels).reduce((n, src) => n + (box(src.accountId, src.path)?.unseen ?? 0), 0));
 
   useWindowTitle(current ? current.items.at(-1)?.subject || 'No Subject' : title);
 
@@ -336,20 +367,27 @@ export function Viewer() {
     },
     [conversations],
   );
-  const { run, moveTo, markAllRead, newMessage, compose } = useMessageActions(accounts, onRemoved);
+  const { run, moveTo, setLabel, markAllRead, newMessage, compose } = useMessageActions(accounts, onRemoved);
+  const labelActions = useLabelActions();
   /** The mailbox Mark All as Read is asking about. */
   const [markingRead, setMarkingRead] = useState<Selection | null>(null);
+  /** A label being made (to put on `apply`), edited or deleted. */
+  const [labelDialog, setLabelDialog] = useState<
+    { kind: 'new'; accountId: string; apply: Item[] } | { kind: 'edit'; accountId: string; label: MailLabel } | { kind: 'delete'; accountId: string; label: MailLabel } | null
+  >(null);
 
   const pickFor = useCallback(
     (pick: MenuPick, list: Item[]) => {
       if (!list.length) return;
+      if (typeof pick === 'object' && 'label' in pick) return void setLabel(list, pick.label, pick.on, viewingLabel === pick.label);
       if (typeof pick === 'object') return void moveTo(list, list[0].accountId, pick.move);
+      if (pick === 'new-label') return setLabelDialog({ kind: 'new', accountId: list[0].accountId, apply: list });
       if (pick === 'unsubscribe') return setLeaving(list[0]);
       // An open conversation marked unread goes back to the list, as it would be read again otherwise.
       if (pick === 'unread' && current && list.some((i) => current.items.some((c) => c.key === i.key))) setOpened(null);
       void run(pick, list);
     },
-    [moveTo, run, current],
+    [moveTo, run, setLabel, current, viewingLabel],
   );
 
   const currentMessage = useMessage(current?.latest ?? null);
@@ -518,12 +556,39 @@ export function Viewer() {
     void moveTo(moving, accountId, path);
   };
 
+  const onDropOnLabel = (e: DragEvent, accountId: string, id: string) => {
+    e.preventDefault();
+    let keys: string[] = [];
+    try {
+      keys = JSON.parse(e.dataTransfer.getData(MAIL_DRAG)) as string[];
+    } catch {
+      return;
+    }
+    const labelling = items.filter((i) => keys.includes(i.key) && i.accountId === accountId);
+    void setLabel(labelling, id, true);
+  };
+
+  const onLabel = (accountId: string, label: MailLabel, pick: Exclude<LabelPick, 'open'>) => {
+    if (pick === 'edit') return setLabelDialog({ kind: 'edit', accountId, label });
+    if (pick === 'delete') return setLabelDialog({ kind: 'delete', accountId, label });
+    void labelActions.update(accountId, label.id, { color: pick.color }).catch((error: unknown) => {
+      toast('Mail couldn’t change the label', { body: error instanceof Error ? error.message : String(error), destructive: true });
+    });
+  };
+
+  const canLabel = (id: string) => {
+    const kind = labels.get(id)?.kind;
+    return !!kind && kind !== 'none';
+  };
+
   const refresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ['mail', 'mailboxes'] });
     void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
   }, [qc]);
 
-  const defaultAccount = selection.kind === 'mailbox' ? selection.accountId : current?.latest.accountId ?? accounts[0]?.id ?? null;
+  const defaultAccount = selection.kind === 'mailbox' || selection.kind === 'label' ? selection.accountId : current?.latest.accountId ?? accounts[0]?.id ?? null;
+  /** Where Mailbox › New Label… makes one: the account shown, else the first that can keep labels. */
+  const newLabelAccount = defaultAccount && canLabel(defaultAccount) ? defaultAccount : accounts.find((a) => canLabel(a.id))?.id ?? null;
   const has = targets.length > 0;
   const allFlagged = has && targetConversations.every((c) => c.flagged);
   const allRead = has && targetConversations.every((c) => !c.unread);
@@ -551,7 +616,11 @@ export function Viewer() {
       id: `account:${a.id}`,
       label: a.name,
       type: 'submenu',
-      items: (boxes.get(a.id) ?? []).filter((b) => b.selectable).map((b) => ({ id: `box:${a.id}\u0000${b.path}`, label: mailboxTitle(b) })),
+      items: [
+        ...(boxes.get(a.id) ?? []).filter((b) => b.selectable && !labels.get(a.id)?.labels.some((l) => l.path === b.path)).map((b) => ({ id: `box:${a.id}\u0000${b.path}`, label: mailboxTitle(b) })),
+        ...(labels.get(a.id)?.labels.length ? [{ type: 'separator' } as const] : []),
+        ...(labels.get(a.id)?.labels ?? []).map((l) => ({ id: `label:${a.id}\u0000${l.id}`, label: l.name })),
+      ],
     }));
     const subscriptions: MenuItem = { id: 'subscriptions', label: 'Subscriptions', type: 'radio', group: 'mailbox', checked: selection.kind === 'subscriptions' };
     const choice = await din.menus.popup([...favorites, subscriptions, { type: 'separator' }, ...perAccount], { x: r.left, y: r.bottom + 4 });
@@ -561,6 +630,9 @@ export function Viewer() {
     else if (choice.startsWith('box:')) {
       const [accountId, path] = choice.slice(4).split('\u0000');
       setSelection({ kind: 'mailbox', accountId, path });
+    } else if (choice.startsWith('label:')) {
+      const [accountId, id] = choice.slice(6).split('\u0000');
+      setSelection({ kind: 'label', accountId, id });
     }
   };
 
@@ -591,6 +663,8 @@ export function Viewer() {
         items: [
           { id: 'refresh', label: 'Get All New Mail', accelerator: 'Ctrl+Shift+N' },
           { id: 'mark-all-read', label: 'Mark All as Read', enabled: selection.kind !== 'subscriptions' && unseenIn(selection) > 0 },
+          { type: 'separator' },
+          { id: 'new-label', label: 'New Label…', enabled: !!newLabelAccount },
           { type: 'separator' },
           { id: 'subscriptions', label: 'Subscriptions' },
         ],
@@ -626,6 +700,7 @@ export function Viewer() {
         case 'refresh': return refresh();
         case 'mark-all-read': return setMarkingRead(selection);
         case 'subscriptions': return setSelection({ kind: 'subscriptions' });
+        case 'new-label': return newLabelAccount ? setLabelDialog({ kind: 'new', accountId: newLabelAccount, apply: [] }) : undefined;
         case 'unsubscribe': return current ? setLeaving(current.latest) : undefined;
         case 'read':
         case 'unread':
@@ -715,7 +790,8 @@ export function Viewer() {
       <ToolButton label="Archive" onClick={() => pickFor('archive', current.items)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Delete" onClick={() => pickFor('trash', current.items)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current.latest])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), TOOLBAR_PICKS, true)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
+      <LabelMenu entries={labelEntries(current.items, labelsFor(current.latest.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
+      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), labelsFor(current.latest.accountId), TOOLBAR_PICKS, true)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
     </ActionBar>
   );
 
@@ -746,7 +822,10 @@ export function Viewer() {
       <ToolButton label={allFlagged ? 'Remove star' : 'Star'} onClick={() => pickFor(allFlagged ? 'unflag' : 'flag', pickTargets(allFlagged ? 'unflag' : 'flag', chosenConversations))}>
         <Star className={cn('size-4.5', allFlagged && 'fill-amber-400 text-amber-500')} strokeWidth={1.75} />
       </ToolButton>
-      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), SELECTION_PICKS, chosenConversations.length === 1)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
+      {selectedItems.every((i) => i.accountId === first.accountId) && (
+        <LabelMenu entries={labelEntries(selectedItems, labelsFor(first.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
+      )}
+      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), labelsFor(first.accountId), SELECTION_PICKS, chosenConversations.length === 1)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
     </ActionBar>
   ));
 
@@ -769,7 +848,17 @@ export function Viewer() {
         </div>
       ) : !conversations.length ? (
         <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-          {sources.length === 0 && boxes.size < accounts.length ? <ListSkeleton /> : query ? 'No messages matched your search.' : effectiveFilter ? `No ${effectiveFilter === 'unread' ? 'unread' : 'starred'} messages.` : 'Nothing here.'}
+          {sources.length === 0 && (boxes.size < accounts.length || (selection.kind === 'label' && !labels.has(selection.accountId))) ? (
+            <ListSkeleton />
+          ) : query ? (
+            'No messages matched your search.'
+          ) : effectiveFilter ? (
+            `No ${effectiveFilter === 'unread' ? 'unread' : 'starred'} messages.`
+          ) : selection.kind === 'label' ? (
+            'No messages have this label. Add it from a message’s Label as menu, or drag messages onto it.'
+          ) : (
+            'Nothing here.'
+          )}
         </div>
       ) : (
         <MessageList
@@ -778,6 +867,8 @@ export function Viewer() {
           cursor={cursor}
           recipients={recipients}
           boxesFor={boxesOf}
+          labelsFor={labelsFor}
+          hideLabel={viewingLabel}
           hasMore={!!messages.hasNextPage}
           loadingMore={messages.isFetchingNextPage}
           onLoadMore={() => {
@@ -826,6 +917,10 @@ export function Viewer() {
                 onMarkAllRead={setMarkingRead}
                 onAccountSettings={(accountId) => setDialog({ kind: 'settings', accountId })}
                 onAddAccount={() => setDialog({ kind: 'setup' })}
+                labels={labels}
+                onLabel={onLabel}
+                onNewLabel={(accountId) => setLabelDialog({ kind: 'new', accountId, apply: [] })}
+                onDropOnLabel={onDropOnLabel}
               />
             </aside>
             <Splitter
@@ -856,8 +951,10 @@ export function Viewer() {
                   key={opened?.key}
                   items={current.items}
                   me={me}
-                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), READER_PICKS)}
+                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), labelsFor(item.accountId), READER_PICKS)}
                   onPick={(pick, item) => pickFor(pick, [item])}
+                  labels={labelsOfItems(current.items, labelsFor(current.latest.accountId))}
+                  onRemoveLabel={(id) => pickFor({ label: id, on: false }, current.items)}
                   onRead={(list) => void run('read', list)}
                   onMailto={openMailto}
                   onUnsubscribe={setLeaving}
@@ -893,7 +990,7 @@ export function Viewer() {
               variant="primary"
               autoFocus
               onClick={() => {
-                void markAllRead(sourcesOf(markingRead, boxes));
+                void markAllRead(sourcesOf(markingRead, boxes, labels));
                 setMarkingRead(null);
               }}
             >
@@ -903,6 +1000,38 @@ export function Viewer() {
         </Overlay>
       )}
       {leaving && <UnsubscribeDialog item={leaving} onClose={() => setLeaving(null)} />}
+      {(labelDialog?.kind === 'new' || labelDialog?.kind === 'edit') && (
+        <LabelEditor
+          label={labelDialog.kind === 'edit' ? labelDialog.label : undefined}
+          kind={labels.get(labelDialog.accountId)?.kind ?? 'keywords'}
+          onClose={() => setLabelDialog(null)}
+          onSave={async (name, color) => {
+            const { accountId } = labelDialog;
+            if (labelDialog.kind === 'new') {
+              const made = await labelActions.create(accountId, name, color);
+              if (labelDialog.apply.length) void setLabel(labelDialog.apply, made.id, true);
+              return;
+            }
+            const was = labelDialog.label;
+            const saved = await labelActions.update(accountId, was.id, { name, color });
+            // A Gmail label renamed has a new id: its path.
+            if (saved.id !== was.id && selection.kind === 'label' && selection.accountId === accountId && selection.id === was.id) setSelection({ kind: 'label', accountId, id: saved.id });
+          }}
+        />
+      )}
+      {labelDialog?.kind === 'delete' && (
+        <DeleteLabelDialog
+          label={labelDialog.label}
+          kind={labels.get(labelDialog.accountId)?.kind ?? 'keywords'}
+          onClose={() => setLabelDialog(null)}
+          onDelete={() => {
+            const { accountId, label } = labelDialog;
+            void labelActions.remove(accountId, label.id).catch((error: unknown) => {
+              toast('Mail couldn’t delete the label', { body: error instanceof Error ? error.message : String(error), destructive: true });
+            });
+          }}
+        />
+      )}
       {dialog?.kind === 'settings' && (
         <AccountSettings accounts={accounts} initial={dialog.accountId} onClose={() => setDialog(null)} onAdd={() => setDialog({ kind: 'setup' })} />
       )}

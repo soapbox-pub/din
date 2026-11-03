@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { toast } from '@/shared/toast';
-import type { MailAccount, MailMessage } from '@/lib/mail';
-import { patchItems, patchUnseen, useMail, type Item, type Source } from './api';
+import type { LabelColor, MailAccount, MailLabel, MailLabels, MailMessage } from '@/lib/mail';
+import { labelsKey, mailboxesKey, patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
 import { appLink } from '@/shared/launch';
 
@@ -133,6 +133,30 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [mail, qc, onRemoved, fail],
   );
 
+  /**
+   * Put a label on messages or take it off. `leaving`: they're shown for
+   * that label, so taking it off takes them out of the list.
+   */
+  const setLabel = useCallback(
+    async (items: Item[], id: string, on: boolean, leaving = false) => {
+      if (!mail || !items.length) return;
+      const keys = new Set(items.map((i) => i.key));
+      if (!on && leaving) {
+        onRemoved(keys);
+        patchItems(qc, keys, null);
+      } else {
+        patchItems(qc, keys, (m) => ({ labels: on ? [...new Set([...(m.labels ?? []), id])].sort() : (m.labels ?? []).filter((l) => l !== id) }));
+      }
+      try {
+        for (const g of byMailbox(items).values()) await mail.setLabels(g.accountId, g.path, g.uids, on ? { add: [id] } : { remove: [id] });
+      } catch (error) {
+        fail(on ? 'Mail couldn’t add the label' : 'Mail couldn’t take the label off', error);
+        void qc.invalidateQueries({ queryKey: ['mail'] });
+      }
+    },
+    [mail, qc, onRemoved, fail],
+  );
+
   /** Every message in these mailboxes read, on the server in one command each. */
   const markAllRead = useCallback(
     async (sources: Source[]) => {
@@ -155,5 +179,59 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [mail, qc, fail],
   );
 
-  return { run, moveTo, markAllRead, newMessage, compose };
+  return { run, moveTo, setLabel, markAllRead, newMessage, compose };
+}
+
+/**
+ * Making, renaming, recoloring and deleting an account's labels, for the
+ * sidebar's menus and the label dialog. Each rejects with what went wrong.
+ */
+export function useLabelActions() {
+  const mail = useMail();
+  const qc = useQueryClient();
+
+  const refresh = useCallback(
+    (accountId: string, messages = false) => {
+      void qc.invalidateQueries({ queryKey: labelsKey(accountId) });
+      // Gmail's labels are mailboxes.
+      void qc.invalidateQueries({ queryKey: mailboxesKey(accountId) });
+      if (messages) void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
+    },
+    [qc],
+  );
+
+  const create = useCallback(
+    async (accountId: string, name: string, color: LabelColor | null): Promise<MailLabel> => {
+      const label = await mail!.createLabel(accountId, { name, color });
+      qc.setQueryData<MailLabels>(labelsKey(accountId), (info) => info && { ...info, labels: [...info.labels, label].sort((x, y) => x.name.localeCompare(y.name)) });
+      refresh(accountId);
+      return label;
+    },
+    [mail, qc, refresh],
+  );
+
+  const update = useCallback(
+    async (accountId: string, id: string, patch: { name?: string; color?: LabelColor | null }): Promise<MailLabel> => {
+      const label = await mail!.updateLabel(accountId, id, patch);
+      qc.setQueryData<MailLabels>(labelsKey(accountId), (info) => info && { ...info, labels: info.labels.map((l) => (l.id === id ? label : l)).sort((x, y) => x.name.localeCompare(y.name)) });
+      // A Gmail label renamed is a mailbox renamed, and every message's label with it.
+      refresh(accountId, label.id !== id);
+      return label;
+    },
+    [mail, qc, refresh],
+  );
+
+  const remove = useCallback(
+    async (accountId: string, id: string): Promise<void> => {
+      qc.setQueryData<MailLabels>(labelsKey(accountId), (info) => info && { ...info, labels: info.labels.filter((l) => l.id !== id) });
+      try {
+        await mail!.deleteLabel(accountId, id);
+      } finally {
+        refresh(accountId, true);
+      }
+    },
+    [mail, qc, refresh],
+  );
+
+  return { create, update, remove };
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
-import type { MailAccount, MailBridge, MailboxInfo, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
+import type { MailAccount, MailBridge, MailboxInfo, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
   return useDin().system.mail ?? null;
@@ -24,14 +24,16 @@ export function itemKey(accountId: string, path: string, uid: number): string {
   return `${accountId}\u0000${path}\u0000${uid}`;
 }
 
-/** What the sidebar has selected: a mailbox, one of the Favorites across every account, or Subscriptions. */
+/** What the sidebar has selected: a mailbox, a label, one of the Favorites across every account, or Subscriptions. */
 export type Selection =
   | { kind: 'mailbox'; accountId: string; path: string }
+  | { kind: 'label'; accountId: string; id: string }
   | { kind: 'all'; special: SpecialMailbox }
   | { kind: 'subscriptions' };
 
 export function sameSelection(a: Selection, b: Selection): boolean {
   if (a.kind === 'mailbox' && b.kind === 'mailbox') return a.accountId === b.accountId && a.path === b.path;
+  if (a.kind === 'label' && b.kind === 'label') return a.accountId === b.accountId && a.id === b.id;
   if (a.kind === 'all' && b.kind === 'all') return a.special === b.special;
   return a.kind === 'subscriptions' && b.kind === 'subscriptions';
 }
@@ -90,10 +92,53 @@ export function useMailboxes(accounts: MailAccount[]): Mailboxes {
   });
 }
 
-/** The mailboxes a selection reads from. */
-export function sourcesOf(selection: Selection, boxes: Map<string, MailboxInfo[]>): Source[] {
+export function labelsKey(accountId: string) {
+  return ['mail', 'labels', accountId] as const;
+}
+
+/** Each account's labels, from whichever have arrived. */
+export function useLabels(accounts: MailAccount[]): Map<string, MailLabels> {
+  const mail = useMail();
+  const combine = useCallback(
+    (results: UseQueryResult<MailLabels>[]) => {
+      const out = new Map<string, MailLabels>();
+      results.forEach((r, i) => {
+        const id = accounts[i]?.id;
+        if (id && r.data) out.set(id, r.data);
+      });
+      return out;
+    },
+    [accounts],
+  );
+  return useQueries({
+    queries: accounts.map((a) => ({
+      queryKey: labelsKey(a.id),
+      queryFn: () => mail!.labels(a.id),
+      enabled: !!mail,
+      staleTime: 60_000,
+      retry: 1,
+    })),
+    combine,
+  });
+}
+
+/**
+ * The mailboxes a selection reads from. A Gmail label is its own mailbox;
+ * a keyword is looked for in All Mail where there is one, else in every
+ * mailbox but the Trash and Junk.
+ */
+export function sourcesOf(selection: Selection, boxes: Map<string, MailboxInfo[]>, labels: Map<string, MailLabels>): Source[] {
   if (selection.kind === 'mailbox') return [{ accountId: selection.accountId, path: selection.path }];
   if (selection.kind === 'subscriptions') return [];
+  if (selection.kind === 'label') {
+    const { accountId } = selection;
+    const label = labels.get(accountId)?.labels.find((l) => l.id === selection.id);
+    if (!label) return [];
+    if (label.path) return [{ accountId, path: label.path }];
+    const list = (boxes.get(accountId) ?? []).filter((b) => b.selectable);
+    const all = list.find((b) => b.special === 'all');
+    return (all ? [all] : list.filter((b) => b.special !== 'trash' && b.special !== 'junk')).map((b) => ({ accountId, path: b.path }));
+  }
   const out: Source[] = [];
   for (const [accountId, list] of boxes) {
     const special = selection.special === 'flagged' ? 'inbox' : selection.special;
@@ -101,6 +146,13 @@ export function sourcesOf(selection: Selection, boxes: Map<string, MailboxInfo[]
     if (box) out.push({ accountId, path: box.path });
   }
   return out;
+}
+
+/** The keyword a selection's mailboxes are searched for, or null (a Gmail label is a mailbox of its own). */
+export function keywordOf(selection: Selection, labels: Map<string, MailLabels>): string | null {
+  if (selection.kind !== 'label') return null;
+  const label = labels.get(selection.accountId)?.labels.find((l) => l.id === selection.id);
+  return label && !label.path ? label.id : null;
 }
 
 type Cursor = Record<string, number | null>;
@@ -116,15 +168,15 @@ function sourceKey(s: Source): string {
   return `${s.accountId}\u0000${s.path}`;
 }
 
-export function messagesKey(sources: Source[], filter: MessageFilter, query: string) {
-  return ['mail', 'messages', sources.map(sourceKey).sort().join('\u0001'), filter, query] as const;
+export function messagesKey(sources: Source[], filter: MessageFilter, query: string, keyword: string | null) {
+  return ['mail', 'messages', sources.map(sourceKey).sort().join('\u0001'), filter, query, keyword] as const;
 }
 
-/** The newest messages of every source, merged by date, then older ones page by page. */
-export function useMessages(sources: Source[], filter: MessageFilter, query: string) {
+/** The newest messages of every source (with `keyword`, those that have it), merged by date, then older ones page by page. */
+export function useMessages(sources: Source[], filter: MessageFilter, query: string, keyword: string | null = null) {
   const mail = useMail();
   return useInfiniteQuery({
-    queryKey: messagesKey(sources, filter, query),
+    queryKey: messagesKey(sources, filter, query, keyword),
     enabled: !!mail && sources.length > 0,
     initialPageParam: null as Cursor | null,
     staleTime: 30_000,
@@ -132,7 +184,7 @@ export function useMessages(sources: Source[], filter: MessageFilter, query: str
       const want = sources.filter((s) => !pageParam || pageParam[sourceKey(s)] != null);
       const results = await Promise.allSettled(
         want.map((s) =>
-          mail!.messages(s.accountId, s.path, { before: pageParam?.[sourceKey(s)] ?? undefined, query: query || undefined, filter }),
+          mail!.messages(s.accountId, s.path, { before: pageParam?.[sourceKey(s)] ?? undefined, query: query || undefined, filter, label: keyword ?? undefined }),
         ),
       );
       const next: Cursor = {};
@@ -209,25 +261,29 @@ export function useConversation(known: Item[] | null) {
   return { items: merged, loading: query.isPending && query.fetchStatus !== 'idle' };
 }
 
-/** Change list items in every cached page (flags read or flagged, items gone). */
-export function patchItems(qc: QueryClient, keys: Set<string>, patch: Partial<MessageSummary> | null): void {
+/**
+ * Change list items in every cached page (flags read or flagged, labels,
+ * items gone), by the same patch for each or one made from each.
+ */
+export function patchItems(qc: QueryClient, keys: Set<string>, patch: Partial<MessageSummary> | ((m: MessageSummary) => Partial<MessageSummary>) | null): void {
+  const apply = <T extends MessageSummary>(m: T): T => (patch === null ? m : { ...m, ...(typeof patch === 'function' ? patch(m) : patch) });
   qc.setQueriesData<InfiniteData<Page>>({ queryKey: ['mail', 'messages'] }, (data) => {
     if (!data) return data;
     return {
       ...data,
       pages: data.pages.map((page) => ({
         ...page,
-        items: patch === null ? page.items.filter((i) => !keys.has(i.key)) : page.items.map((i) => (keys.has(i.key) ? { ...i, ...patch } : i)),
+        items: patch === null ? page.items.filter((i) => !keys.has(i.key)) : page.items.map((i) => (keys.has(i.key) ? apply(i) : i)),
       })),
     };
   });
   qc.setQueriesData<Item[]>({ queryKey: ['mail', 'conversation'] }, (list) =>
-    list && (patch === null ? list.filter((i) => !keys.has(i.key)) : list.map((i) => (keys.has(i.key) ? { ...i, ...patch } : i))),
+    list && (patch === null ? list.filter((i) => !keys.has(i.key)) : list.map((i) => (keys.has(i.key) ? apply(i) : i))),
   );
   if (patch) {
     for (const key of keys) {
       const [accountId, path, uid] = key.split('\u0000');
-      qc.setQueryData<MailMessage>(['mail', 'message', accountId, path, Number(uid)], (m) => (m ? { ...m, ...patch } : m));
+      qc.setQueryData<MailMessage>(['mail', 'message', accountId, path, Number(uid)], (m) => (m ? apply(m) : m));
     }
   }
 }
@@ -287,6 +343,8 @@ export function useLiveUpdates(): void {
     if (!mail) return;
     return mail.onChanged(({ accountId, path }) => {
       void qc.invalidateQueries({ queryKey: mailboxesKey(accountId) });
+      // New keywords on the mail. (Gmail's labels are its mailboxes, listed again when Mail changes them.)
+      if (qc.getQueryData<MailLabels>(labelsKey(accountId))?.kind !== 'gmail') void qc.invalidateQueries({ queryKey: labelsKey(accountId) });
       const needle = `${accountId}\u0000${path}`;
       void qc.invalidateQueries({
         predicate: (q) => q.queryKey[0] === 'mail' && q.queryKey[1] === 'messages' && String(q.queryKey[2]).split('\u0001').includes(needle),

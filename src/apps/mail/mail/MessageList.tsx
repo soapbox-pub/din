@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardE
 import { Archive, Check, Mail, MailOpen, Minus, Paperclip, Star, Trash2 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import type { MailboxInfo } from '@/lib/mail';
+import type { MailboxInfo, MailLabels } from '@/lib/mail';
 import type { Conversation } from './conversations';
+import { labelsOfItems } from './labels';
+import { LabelChip } from './LabelChip';
 import { addressLine, displayName, listDate } from './format';
 import { MAIL_DRAG } from './mailboxes';
 import { Avatar } from './Avatar';
@@ -70,18 +72,34 @@ function people(c: Conversation, recipients: boolean): string {
   return names.map((n) => (n.includes('@') ? n.split('@')[0] : n.split(/\s+/)[0])).join(', ');
 }
 
+/** At most this many labels on a row; the rest are in its menu and the reader. */
+const ROW_LABELS = 3;
+
 const MessageRow = ({
   conversation: c,
   selected,
   cursor,
   recipients,
+  labels,
+  hideLabel,
   onPick,
   onCheck,
   className,
   ...props
-}: ComponentProps<'div'> & { conversation: Conversation; selected: boolean; cursor: boolean; recipients: boolean; onPick: (pick: MenuPick) => void; onCheck: (e: MouseEvent) => void }) => {
+}: ComponentProps<'div'> & {
+  conversation: Conversation;
+  selected: boolean;
+  cursor: boolean;
+  recipients: boolean;
+  labels: MailLabels | undefined;
+  /** The label the list is of, which every row has. */
+  hideLabel: string | null;
+  onPick: (pick: MenuPick) => void;
+  onCheck: (e: MouseEvent) => void;
+}) => {
   const item = c.latest;
   const who = people(c, recipients);
+  const chips = labelsOfItems(c.items, labels).filter((l) => l.id !== hideLabel);
   const unread = c.unread;
   const date = listDate(item.date);
   return (
@@ -112,6 +130,10 @@ const MessageRow = ({
           <span className={cn('shrink-0 text-xs tabular-nums @2xl:hidden', unread ? 'font-semibold' : 'text-muted-foreground')}>{date}</span>
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          {chips.slice(0, ROW_LABELS).map((l) => (
+            <LabelChip key={l.id} label={l} />
+          ))}
+          {chips.length > ROW_LABELS && <span className="shrink-0 text-[11px] text-muted-foreground" title={chips.slice(ROW_LABELS).map((l) => l.name).join(', ')}>+{chips.length - ROW_LABELS}</span>}
           <span className="min-w-0 flex-1 truncate">
             <span className={unread ? 'font-semibold' : 'text-foreground/85'}>{item.subject || 'No Subject'}</span>
             {item.preview && <span className="text-muted-foreground"> — {item.preview}</span>}
@@ -152,6 +174,8 @@ export function MessageList({
   cursor,
   recipients,
   boxesFor,
+  labelsFor,
+  hideLabel,
   hasMore,
   loadingMore,
   onLoadMore,
@@ -171,6 +195,9 @@ export function MessageList({
   /** Sent and Drafts list who mail went to, not who it's from. */
   recipients: boolean;
   boxesFor: (accountId: string) => MailboxInfo[];
+  labelsFor: (accountId: string) => MailLabels | undefined;
+  /** The label the list is of, left off its rows. */
+  hideLabel: string | null;
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
@@ -234,6 +261,8 @@ export function MessageList({
             <MessageRow
               conversation={c}
               recipients={recipients}
+              labels={labelsFor(c.latest.accountId)}
+              hideLabel={hideLabel}
               selected={selected.has(c.key)}
               cursor={cursor === c.key}
               onPick={(pick) => onPick(pick, c)}
@@ -247,7 +276,7 @@ export function MessageList({
             />
           </ContextMenuTrigger>
           <ContextMenuContent className="w-56">
-            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} onPick={onPick} />
+            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} labels={labelsFor(c.latest.accountId)} onPick={onPick} />
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -261,6 +290,6 @@ export function MessageList({
 }
 
 /** Built only when the menu opens, not for every row of the list. */
-function RowMenu({ conversation, targets, boxes, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; onPick: (pick: MenuPick, c: Conversation) => void }) {
-  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, undefined, targets.length === 1)} onPick={(pick) => onPick(pick, conversation)} />;
+function RowMenu({ conversation, targets, boxes, labels, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; labels: MailLabels | undefined; onPick: (pick: MenuPick, c: Conversation) => void }) {
+  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, labels, undefined, targets.length === 1)} onPick={(pick) => onPick(pick, conversation)} />;
 }

@@ -6,7 +6,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/compon
 import { toast } from '@/shared/toast';
 import { pickSaveFile, writeFile } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
-import type { MailAddress, MailAttachmentInfo, MailMessage } from '@/lib/mail';
+import type { MailAddress, MailAttachmentInfo, MailLabel, MailMessage } from '@/lib/mail';
+import { LabelChip } from './LabelChip';
 import { useConversation, useMail, useMessage, type Item } from './api';
 import { displayName, fileSize, formatAddress, fullDate, listDate } from './format';
 import { HtmlBody, TextBody } from './MessageBody';
@@ -359,9 +360,14 @@ export function Reader({
   onRead,
   onMailto,
   onUnsubscribe,
+  labels = [],
+  onRemoveLabel,
 }: {
   /** The conversation's messages the list has. */
   items: Item[];
+  /** The conversation's labels, shown by its subject. */
+  labels?: MailLabel[];
+  onRemoveLabel?: (id: string) => void;
   /** The accounts' own addresses, lowercased, to call "me". */
   me: Set<string>;
   /** A message's ⋯ menu. */
@@ -422,9 +428,16 @@ export function Reader({
 
   return (
     <article className="mx-auto max-w-5xl px-6 pt-4 pb-10" aria-label={subject}>
-      <h1 className="mb-4 flex items-baseline gap-3 pl-13 text-[22px] leading-snug font-normal">
+      <h1 className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 pl-13 text-[22px] leading-snug font-normal">
         <span className="select-text">{subject}</span>
         {items.length > 1 && <span className="text-sm text-muted-foreground tabular-nums">{items.length}</span>}
+        {labels.length > 0 && (
+          <span className="flex flex-wrap items-center gap-1 self-center">
+            {labels.map((l) => (
+              <LabelChip key={l.id} label={l} onRemove={onRemoveLabel ? () => onRemoveLabel(l.id) : undefined} />
+            ))}
+          </span>
+        )}
         {loading && <Loader2 aria-label="Finding the rest of the conversation" className="size-4 shrink-0 animate-spin self-center text-muted-foreground motion-reduce:animate-none" />}
       </h1>
       <div className="divide-y divide-border/60">

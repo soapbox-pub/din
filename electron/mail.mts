@@ -39,6 +39,16 @@
 // RFC 8058's one click, else a message to the list's address, else by
 // giving back the web page the user has to finish on (electron/mail-lists.mts).
 //
+// Labels are IMAP keywords (RFC 9051's flags without a backslash, which
+// Thunderbird's tags are too), on servers that take new ones (\* in
+// PERMANENTFLAGS); on Gmail, which shows only its own, they're Gmail's
+// labels (X-GM-LABELS), each a mailbox a message can be in several of, so
+// they're the same on Gmail's web page and phone app. IMAP has no list of a
+// server's keywords, nor colors for them, so the labels made here, their
+// names and colors are kept with the account, and the keywords found on
+// mail with the stored copy. A keyword label's name can change without
+// rewriting it on every message: the keyword stays, as Thunderbird's do.
+//
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
@@ -56,12 +66,16 @@ import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
 import type {
   ConversationMessage,
+  LabelColor,
+  LabelKind,
   MailAccount,
   MailAccountPatch,
   MailAddress,
   MailArrival,
   MailAttachment,
   MailboxInfo,
+  MailLabel,
+  MailLabels,
   MailMessage,
   MailServer,
   MailSettings,
@@ -85,6 +99,21 @@ interface Deps {
 interface StoredAccount extends MailAccount {
   /** `enc:` + safeStorage ciphertext (base64), or `plain:` where there's no keyring. */
   password: string;
+  /** What Din keeps of the account's labels, by id. */
+  labels?: SavedLabel[];
+}
+
+/** A label's name (keywords only) and color, or a keyword deleted, which a server may go on listing. */
+interface SavedLabel {
+  id: string;
+  name?: string;
+  color?: LabelColor | null;
+  deleted?: boolean;
+}
+
+function isSavedLabel(v: unknown): v is SavedLabel {
+  const l = v as SavedLabel;
+  return typeof v === 'object' && v !== null && typeof l.id === 'string' && (l.name === undefined || typeof l.name === 'string');
 }
 
 const MAX_MESSAGE_BYTES = 50 * 1024 * 1024;
@@ -126,6 +155,7 @@ function load(): void {
     const data: unknown = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
     const list = (data as { accounts?: unknown }).accounts;
     accounts = Array.isArray(list) ? list.filter(isStoredAccount) : [];
+    for (const a of accounts) a.labels = Array.isArray(a.labels) ? a.labels.filter(isSavedLabel) : undefined;
   } catch {
     accounts = [];
   }
@@ -170,7 +200,7 @@ function text(v: unknown, max: number): string {
 }
 
 function publicAccount(a: StoredAccount): MailAccount {
-  const { password: _password, ...rest } = a;
+  const { password: _password, labels: _labels, ...rest } = a;
   return rest;
 }
 
@@ -846,7 +876,7 @@ function byDate(list: MessageSummary[]): MessageSummary[] {
  * all of it. `fallback` (the server can't be reached) settles for what it
  * has, and filters it.
  */
-function storedPage(store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter = null, fallback = false): MessagePage | null {
+function storedPage(store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter = null, fallback = false, label = ''): MessagePage | null {
   const box = store.box(mailbox);
   if (!box) return null;
   if (!fallback) {
@@ -857,8 +887,10 @@ function storedPage(store: MailStore, mailbox: string, before: number | undefine
     if (kept.size < page.length || [...kept.values()].some((k) => stale(k.summary))) return null;
     return { messages: byDate([...kept.values()].map((k) => k.summary)), total: box.uids.length, more: older.length > page.length };
   }
-  const all = store.allSummaries(mailbox, before).filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true));
-  return { messages: byDate(all.slice(0, limit)), total: filter ? all.length : box.uids.length, more: all.length > limit };
+  const all = store
+    .allSummaries(mailbox, before)
+    .filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true) && (!label || !!s.labels?.includes(label)));
+  return { messages: byDate(all.slice(0, limit)), total: filter || label ? all.length : box.uids.length, more: all.length > limit };
 }
 
 /** Fetch and keep the summaries of these messages, with previews for those that have none yet. */
@@ -868,7 +900,10 @@ async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: strin
   for await (const m of client.fetch(uidRanges(uids), { ...SUMMARY_FIELDS }, { uid: true })) {
     fetched.push(m);
   }
-  const changed = store.putSummaries(mailbox, fetched.map(summary));
+  const gmail = isGmail(client);
+  const summaries = fetched.map((m) => summary(m, gmail));
+  if (!gmail) noteKeywords(store, summaries.flatMap((s) => s.labels ?? []));
+  const changed = store.putSummaries(mailbox, summaries);
 
   // Previews, a few KB of each message's text, fetched together for messages whose text is the same part.
   const kept = store.summaries(mailbox, fetched.map((m) => m.uid));
@@ -915,9 +950,9 @@ function sameList(x: number[], y: number[]): boolean {
   return x.length === y.length && x.every((v, i) => v === y[i]);
 }
 
-function flagsOf(flags: Set<string> | undefined): Flags {
-  const f = flags ?? new Set<string>();
-  return { seen: f.has('\\Seen'), flagged: f.has('\\Flagged'), answered: f.has('\\Answered'), draft: f.has('\\Draft') };
+function flagsOf(m: Pick<FetchMessageObject, 'flags' | 'labels'>, gmail: boolean): Flags {
+  const f = m.flags ?? new Set<string>();
+  return { seen: f.has('\\Seen'), flagged: f.has('\\Flagged'), answered: f.has('\\Answered'), draft: f.has('\\Draft'), labels: labelsOf(m, gmail) };
 }
 
 /**
@@ -954,15 +989,18 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     store.removeUids(mailbox, stored.filter((u) => !present.has(u)));
     const keep = stored.filter((u) => present.has(u));
 
+    const gmail = noteMailbox(store, client);
     const condstore = client.enabled.has('CONDSTORE') && !!box.highestModseq;
     let modseq = condstore ? box.highestModseq! : null;
     if (keep.length) {
       const since = condstore && prev?.modseq ? BigInt(prev.modseq) : null;
       const range = since !== null ? '1:*' : uidRanges(keep);
       const kept = new Set(keep);
-      for await (const m of client.fetch(range, { uid: true, flags: true }, { uid: true, changedSince: since ?? undefined })) {
+      for await (const m of client.fetch(range, { uid: true, flags: true, labels: true }, { uid: true, changedSince: since ?? undefined })) {
         if (m.modseq && modseq !== null && m.modseq > modseq) modseq = m.modseq;
-        if (kept.has(m.uid) && store.patchFlags(mailbox, [m.uid], flagsOf(m.flags))) dirty = true;
+        const flags = flagsOf(m, gmail);
+        if (!gmail) noteKeywords(store, flags.labels ?? []);
+        if (kept.has(m.uid) && store.patchFlags(mailbox, [m.uid], flags)) dirty = true;
       }
     }
     store.setBox(mailbox, { validity, modseq: modseq?.toString() ?? null, uids, synced: Date.now() });
@@ -1011,7 +1049,7 @@ function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
 }
 
 /** What's fetched for a message's summary. */
-const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references', 'authentication-results', 'received'] };
+const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, labels: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references', 'authentication-results', 'received'] };
 
 /** How many of a long References list are kept, from each end: the root and the latest. */
 const REFERENCES_KEPT = 10;
@@ -1021,9 +1059,9 @@ function messageIds(value: string | undefined): string[] {
   return value?.match(/<[^<>\s]{1,500}>/g) ?? [];
 }
 
-/** Kept from before Mail read what conversations and senders' pictures need: fetched again. */
+/** Kept from before Mail read what conversations, senders' pictures and labels need: fetched again. */
 function stale(s: MessageSummary | undefined): boolean {
-  return !s || !s.references || s.senderVerified === undefined;
+  return !s || !s.references || s.senderVerified === undefined || s.labels === undefined;
 }
 
 function keptReferences(ids: string[]): string[] {
@@ -1034,7 +1072,7 @@ function from0Domain(m: FetchMessageObject): string {
   return m.envelope?.from?.[0]?.address?.split('@').pop()?.toLowerCase() ?? '';
 }
 
-function summary(m: FetchMessageObject): MessageSummary {
+function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
   const date = m.envelope?.date ?? m.internalDate;
   const raw = m.headers?.toString('latin1') ?? '';
   const headers = m.headers ? headerFields(raw) : null;
@@ -1046,7 +1084,7 @@ function summary(m: FetchMessageObject): MessageSummary {
     to: addresses(m.envelope?.to),
     cc: addresses(m.envelope?.cc),
     date: date ? new Date(date).getTime() || 0 : 0,
-    ...flagsOf(m.flags),
+    ...flagsOf(m, gmail),
     hasAttachments: hasAttachments(m.bodyStructure),
     preview: null,
     size: m.size ?? 0,
@@ -1064,10 +1102,10 @@ function summary(m: FetchMessageObject): MessageSummary {
  * server, keeping what comes back. Searches and filters ask the server,
  * and settle for the stored copy when it can't be reached.
  */
-async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter): Promise<MessagePage> {
+async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string): Promise<MessagePage> {
   const store = storeOf(a);
   sessionOf(a.id);
-  if (!query && !filter) {
+  if (!query && !filter && !label) {
     const local = storedPage(store, mailbox, before, limit);
     if (local) {
       if (Date.now() - (store.box(mailbox)?.synced ?? 0) > SYNC_AFTER_MS) scheduleSync(a, mailbox, 0);
@@ -1075,19 +1113,20 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
     }
   }
   try {
-    return await serverPage(a, store, mailbox, before, limit, query, filter);
+    return await serverPage(a, store, mailbox, before, limit, query, filter, label);
   } catch (error) {
-    const local = query ? null : storedPage(store, mailbox, before, limit, filter, true);
+    const local = query ? null : storedPage(store, mailbox, before, limit, filter, true, label);
     if (local) return local;
     throw error;
   }
 }
 
-async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter): Promise<MessagePage> {
+async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string): Promise<MessagePage> {
   return inMailbox(a, mailbox, async (client) => {
     const box = client.mailbox;
     const validity = box ? String(box.uidValidity) : '';
     checkValidity(a, store, mailbox, validity);
+    noteMailbox(store, client);
     let uids: number[] = [];
     if (box && box.exists > 0) {
       const criteria: SearchObject = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true } : { all: true };
@@ -1097,10 +1136,14 @@ async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, b
         else criteria.or = [{ subject: query }, { from: query }, { to: query }, { body: query }];
         delete criteria.all;
       }
+      if (label) {
+        criteria.keyword = label;
+        delete criteria.all;
+      }
       uids = (await client.search(criteria, { uid: true })) || [];
     }
     uids.sort((x, y) => y - x);
-    if (!query && !filter && box) {
+    if (!query && !filter && !label && box) {
       // The whole mailbox's uids: keep them, and forget what's gone. Flags
       // kept from before stay as current as they were (the modseq too), for
       // the next sync to bring up to date.
@@ -1221,7 +1264,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
     if ((meta.size ?? 0) > MAX_MESSAGE_BYTES) throw new Error('That message is too big to open here.');
     const raw = ((meta.size ?? 0) > SKIM_BYTES && (await skimmedMessage(client, uid, meta.bodyStructure))) || (await wholeMessage(client, uid));
     const mail = await simpleParser(raw);
-    const entry = { summary: summary(meta), mail };
+    const entry = { summary: summary(meta, isGmail(client)), mail };
     if (store.box(mailbox)) {
       store.putSummaries(mailbox, [entry.summary]);
       store.putBody(mailbox, uid, raw);
@@ -1398,6 +1441,315 @@ async function remove(a: StoredAccount, mailbox: string, uids: number[]): Promis
   } else {
     await move(a, mailbox, uids, trash);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------
+
+const NO_LABELS = 'This account’s server can’t keep labels.';
+
+function isGmail(client: ImapFlow): boolean {
+  return client.capabilities.has('X-GM-EXT-1');
+}
+
+/** Thunderbird's first five tags, by the names it gives them. */
+const THUNDERBIRD_TAGS: Record<string, string> = { $label1: 'Important', $label2: 'Work', $label3: 'Personal', $label4: 'To Do', $label5: 'Later' };
+
+/**
+ * Whether a keyword is a label someone gave a message, not one a client
+ * keeps for itself: the registry's $ keywords ($Forwarded, $Junk,
+ * $MDNSent, Apple Mail's $MailFlagBit…) and Thunderbird's junk marks.
+ */
+function isLabelKeyword(k: string): boolean {
+  if (k.startsWith('\\')) return false;
+  if (k.toLowerCase() in THUNDERBIRD_TAGS) return true;
+  if (k.startsWith('$')) return false;
+  return !/^(junk|nonjunk|notjunk|forwarded|redirected|old)$/i.test(k);
+}
+
+/** A message's labels: Gmail's own but its system ones (\Inbox, \Starred…), else its label keywords. */
+function labelsOf(m: Pick<FetchMessageObject, 'flags' | 'labels'>, gmail: boolean): string[] {
+  const list = gmail ? [...(m.labels ?? [])].filter((l) => !l.startsWith('\\')) : [...(m.flags ?? [])].filter(isLabelKeyword);
+  return [...new Set(list)].sort();
+}
+
+/** IMAP's modified UTF-7 (RFC 3501 5.1.3), which keeps a keyword's non-ASCII in an atom, as Thunderbird does. */
+function toUtf7(s: string): string {
+  return s.replace(/&/g, '&-').replace(/[^\x20-\x7e]+/g, (run) => {
+    const buf = Buffer.alloc(run.length * 2);
+    for (let i = 0; i < run.length; i++) buf.writeUInt16BE(run.charCodeAt(i), i * 2);
+    return `&${buf.toString('base64').replace(/=+$/, '').replace(/\//g, ',')}-`;
+  });
+}
+
+function fromUtf7(s: string): string {
+  return s.replace(/&([A-Za-z0-9+,]*)-/g, (_, b64: string) => {
+    if (!b64) return '&';
+    const buf = Buffer.from(b64.replace(/,/g, '/'), 'base64');
+    let out = '';
+    for (let i = 0; i + 1 < buf.length; i += 2) out += String.fromCharCode(buf.readUInt16BE(i));
+    return out;
+  });
+}
+
+/** The keyword for a new label's name: an IMAP atom, not one of the $ ones, not taken (keywords ignore case). */
+function keywordFor(name: string, taken: Set<string>): string {
+  let base = toUtf7(name)
+    .replace(/[\s(){%*"\\\]]/g, '_')
+    .slice(0, 200);
+  if (base.startsWith('$')) base = `_${base.slice(1)}`;
+  let k = base;
+  for (let n = 2; taken.has(k.toLowerCase()); n++) k = `${base}_${n}`;
+  return k;
+}
+
+/** What a keyword Din didn't name is called. */
+function keywordName(k: string): string {
+  return THUNDERBIRD_TAGS[k.toLowerCase()] ?? fromUtf7(k);
+}
+
+/** The label keywords found on each account's mail, by its stored copy. */
+const foundKeywords = new WeakMap<MailStore, Set<string>>();
+
+function keywordsOf(store: MailStore): Set<string> {
+  let found = foundKeywords.get(store);
+  if (!found) {
+    try {
+      const kept: unknown = JSON.parse(store.getMeta('keywords') ?? '[]');
+      found = new Set(Array.isArray(kept) ? kept.filter((k): k is string => typeof k === 'string') : []);
+    } catch {
+      found = new Set();
+    }
+    foundKeywords.set(store, found);
+  }
+  return found;
+}
+
+function noteKeywords(store: MailStore, words: Iterable<string>): void {
+  const found = keywordsOf(store);
+  const lower = new Set([...found].map((k) => k.toLowerCase()));
+  let added = false;
+  for (const w of words) {
+    if (!isLabelKeyword(w) || lower.has(w.toLowerCase())) continue;
+    found.add(w);
+    lower.add(w.toLowerCase());
+    added = true;
+  }
+  if (added) store.setMeta('keywords', JSON.stringify([...found]));
+}
+
+/**
+ * Note what a selected mailbox says of labels: Gmail's, or whether the
+ * server takes new keywords (\* in the inbox's PERMANENTFLAGS), and the
+ * keywords its FLAGS list. True on Gmail.
+ */
+function noteMailbox(store: MailStore, client: ImapFlow): boolean {
+  const gmail = isGmail(client);
+  const box = client.mailbox;
+  if (!box) return gmail;
+  const kind: LabelKind | null = gmail ? 'gmail' : isInbox(box.path) ? (box.permanentFlags?.has('\\*') ? 'keywords' : 'none') : null;
+  if (kind && store.getMeta('labelKind') !== kind) store.setMeta('labelKind', kind);
+  if (!gmail) noteKeywords(store, box.flags ?? []);
+  return gmail;
+}
+
+function isLabelKind(v: unknown): v is LabelKind {
+  return v === 'gmail' || v === 'keywords' || v === 'none';
+}
+
+/** How the account keeps labels: as last seen, or from its inbox. */
+async function labelKind(a: StoredAccount): Promise<LabelKind> {
+  const store = storeOf(a);
+  const kept = store.getMeta('labelKind');
+  if (isLabelKind(kept)) return kept;
+  await inMailbox(a, 'INBOX', async (client) => void noteMailbox(store, client));
+  const now = store.getMeta('labelKind');
+  return isLabelKind(now) ? now : 'none';
+}
+
+/** Gmail's labels among its mailboxes: all but the inbox and Gmail's own ([Gmail]/…). */
+function gmailLabelBoxes(boxes: MailboxInfo[]): MailboxInfo[] {
+  const system = boxes.find((b) => b.special === 'all')?.parent || '[Gmail]';
+  return boxes.filter((b) => b.selectable && !b.special && !isInbox(b.path) && b.path !== system && !b.path.startsWith(`${system}${b.delimiter}`));
+}
+
+function savedLabel(a: StoredAccount, id: string): SavedLabel | undefined {
+  return a.labels?.find((l) => l.id.toLowerCase() === id.toLowerCase());
+}
+
+/** Keep (or with `null`, forget) what Din knows of a label. */
+function keepLabel(a: StoredAccount, id: string, patch: Omit<SavedLabel, 'id'> | null): void {
+  const list = (a.labels ??= []);
+  const at = list.findIndex((l) => l.id.toLowerCase() === id.toLowerCase());
+  if (patch === null) {
+    if (at >= 0) list.splice(at, 1);
+  } else {
+    const next: SavedLabel = { id };
+    if (patch.name) next.name = patch.name;
+    if (patch.color) next.color = patch.color;
+    if (patch.deleted) next.deleted = true;
+    if (at >= 0) list[at] = next;
+    else list.push(next);
+  }
+  save();
+}
+
+async function labels(a: StoredAccount): Promise<MailLabels> {
+  const kind = await labelKind(a);
+  const color = (id: string) => savedLabel(a, id)?.color ?? null;
+  let list: MailLabel[] = [];
+  if (kind === 'gmail') {
+    list = gmailLabelBoxes(await mailboxes(a)).map((b) => ({ id: b.path, name: b.path, color: color(b.path), path: b.path }));
+  } else if (kind === 'keywords') {
+    const ids = new Map<string, string>();
+    for (const k of [...(a.labels ?? []).map((l) => l.id), ...keywordsOf(storeOf(a))]) {
+      if (!savedLabel(a, k)?.deleted && !ids.has(k.toLowerCase())) ids.set(k.toLowerCase(), k);
+    }
+    list = [...ids.values()].map((id) => ({ id, name: savedLabel(a, id)?.name || keywordName(id), color: color(id), path: null }));
+  }
+  return { kind, labels: list.sort((x, y) => x.name.localeCompare(y.name)) };
+}
+
+function labelNameArg(v: unknown): string {
+  const name = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+  if (!name) throw new Error('Give the label a name.');
+  if (name.length > 100) throw new Error('That name is too long.');
+  if (name.startsWith('\\')) throw new Error('A label’s name can’t start with \\.');
+  return name;
+}
+
+const COLOR = /^[a-z]{1,16}$/;
+
+function colorArg(v: unknown): LabelColor | null {
+  return typeof v === 'string' && COLOR.test(v) ? (v as LabelColor) : null;
+}
+
+function labelIdArg(v: unknown): string {
+  // Never a system flag: \Deleted isn't a label.
+  if (typeof v !== 'string' || !v || v.length > 300 || v.startsWith('\\') || /[\r\n\0]/.test(v)) throw new Error('No such label');
+  return v;
+}
+
+function labelIdList(v: unknown): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > 50) throw new Error('Bad labels');
+  return [...new Set(v.map(labelIdArg))];
+}
+
+async function createLabel(a: StoredAccount, input: unknown): Promise<MailLabel> {
+  const i = (input ?? {}) as { name?: unknown; color?: unknown };
+  const name = labelNameArg(i.name);
+  const color = colorArg(i.color);
+  const { kind, labels: list } = await labels(a);
+  if (kind === 'none') throw new Error(NO_LABELS);
+  if (list.some((l) => l.name.toLowerCase() === name.toLowerCase())) throw new Error(`There’s already a label called “${name}”.`);
+  if (kind === 'gmail') {
+    const client = await connection(a);
+    const made = await client.mailboxCreate(name).catch((error: unknown) => {
+      throw explain(error);
+    });
+    keepLabel(a, made.path, { color });
+    return { id: made.path, name: made.path, color, path: made.path };
+  }
+  const id = keywordFor(name, new Set(list.map((l) => l.id.toLowerCase())));
+  keepLabel(a, id, { name, color });
+  return { id, name, color, path: null };
+}
+
+async function updateLabel(a: StoredAccount, id: string, patch: unknown): Promise<MailLabel> {
+  const p = (patch ?? {}) as { name?: unknown; color?: unknown };
+  const { kind, labels: list } = await labels(a);
+  const label = list.find((l) => l.id === id);
+  if (!label) throw new Error('That label is gone.');
+  const next = { ...label };
+  if (p.color !== undefined) next.color = colorArg(p.color);
+  if (p.name !== undefined) {
+    const name = labelNameArg(p.name);
+    if (list.some((l) => l.id !== id && l.name.toLowerCase() === name.toLowerCase())) throw new Error(`There’s already a label called “${name}”.`);
+    if (kind === 'gmail' && name !== label.name) {
+      // Gmail renames the label on every message, and the labels inside it.
+      const delimiter = (await mailboxes(a)).find((b) => b.path === label.id)?.delimiter || '/';
+      const client = await connection(a);
+      const moved = await client.mailboxRename(label.id, name).catch((error: unknown) => {
+        throw explain(error);
+      });
+      const store = storeOf(a);
+      for (const l of list) {
+        if (l.id !== label.id && !l.id.startsWith(`${label.id}${delimiter}`)) continue;
+        const to = l.id === label.id ? moved.newPath : `${moved.newPath}${l.id.slice(label.id.length)}`;
+        store.forget(l.id);
+        store.relabel(l.id, to);
+        const kept = savedLabel(a, l.id);
+        keepLabel(a, l.id, null);
+        if (kept?.color) keepLabel(a, to, { color: kept.color });
+      }
+      next.id = next.path = next.name = moved.newPath;
+    } else {
+      next.name = name;
+    }
+  }
+  keepLabel(a, next.id, { name: kind === 'keywords' ? next.name : undefined, color: next.color });
+  return next;
+}
+
+async function deleteLabel(a: StoredAccount, id: string): Promise<void> {
+  const kind = await labelKind(a);
+  const store = storeOf(a);
+  if (kind === 'gmail') {
+    // Gmail takes it off every message, which stay in All Mail.
+    const client = await connection(a);
+    await client.mailboxDelete(id).catch((error: unknown) => {
+      throw explain(error);
+    });
+    store.forget(id);
+    store.relabel(id, null);
+    keepLabel(a, id, null);
+    return;
+  }
+  if (kind !== 'keywords') throw new Error(NO_LABELS);
+  const failed: string[] = [];
+  for (const box of (await mailboxes(a)).filter((b) => b.selectable)) {
+    try {
+      const found = await inMailbox(a, box.path, async (client) => {
+        if (!client.mailbox || !client.mailbox.exists) return false;
+        const uids = (await client.search({ keyword: id }, { uid: true })) || [];
+        if (!uids.length) return false;
+        if (!(await client.messageFlagsRemove(uidRanges(uids), [id], { uid: true, silent: true }))) throw new Error('The server refused');
+        return true;
+      });
+      if (found) changed(a.id, box.path);
+    } catch {
+      failed.push(box.name);
+    }
+  }
+  store.relabel(id, null);
+  // Servers go on listing a keyword in FLAGS once it's been used.
+  keepLabel(a, id, { deleted: true });
+  if (failed.length) throw new Error(`The label is deleted, but it couldn’t be taken off the messages in ${failed.join(', ')}.`);
+}
+
+async function setLabels(a: StoredAccount, mailbox: string, uids: number[], change: unknown): Promise<void> {
+  const c = (change ?? {}) as { add?: unknown; remove?: unknown };
+  const add = labelIdList(c.add);
+  const remove = labelIdList(c.remove).filter((l) => !add.includes(l));
+  if (!add.length && !remove.length) return;
+  let gmail = false;
+  await inMailbox(a, mailbox, async (client) => {
+    gmail = isGmail(client);
+    const range = uidRanges(uids);
+    const options = { uid: true, useLabels: gmail };
+    // imapflow answers a refused STORE, or keywords the mailbox won't take, with false.
+    if (add.length && !(await client.messageFlagsAdd(range, add, options))) throw new Error(gmail ? 'Gmail didn’t add the label.' : 'The server didn’t keep the label.');
+    if (remove.length && !(await client.messageFlagsRemove(range, remove, options))) throw new Error('The server didn’t take the label off.');
+  });
+  const store = storeOf(a);
+  if (!gmail) noteKeywords(store, add);
+  store.patchLabels(mailbox, uids, add, remove);
+  // On Gmail a label is a mailbox: the messages joined or left it.
+  if (gmail && remove.includes(mailbox)) store.removeUids(mailbox, uids);
+  changed(a.id, mailbox);
+  if (gmail) for (const l of [...add, ...remove]) if (l !== mailbox) scheduleSync(a, l, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1807,6 +2159,8 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   if (servers) closeSession(a.id);
   // Another server numbers its messages its own way.
   if (movedServer) {
+    a.labels = undefined;
+    save();
     dropStore(a.id);
     forgetArrivals(a.id);
   }
@@ -1849,11 +2203,12 @@ export function registerMailHandlers(options: Deps): void {
   });
   handle('mail:mailboxes', (id) => mailboxes(account(id)));
   handle('mail:messages', (id, mailbox, opts) => {
-    const o = (opts ?? {}) as { before?: unknown; limit?: unknown; query?: unknown; filter?: unknown };
+    const o = (opts ?? {}) as { before?: unknown; limit?: unknown; query?: unknown; filter?: unknown; label?: unknown };
     const filter = o.filter === 'unread' || o.filter === 'flagged' ? o.filter : null;
     const before = Number.isInteger(o.before) && (o.before as number) > 0 ? (o.before as number) : undefined;
     const limit = Number.isInteger(o.limit) ? Math.min(Math.max(o.limit as number, 1), 200) : PAGE;
-    return messages(account(id), mailboxArg(mailbox), before, limit, text(o.query, 500).trim(), filter);
+    const label = o.label === undefined || o.label === '' ? '' : labelIdArg(o.label);
+    return messages(account(id), mailboxArg(mailbox), before, limit, text(o.query, 500).trim(), filter, label);
   });
   handle('mail:message', (id, mailbox, uid) => {
     if (!Number.isInteger(uid)) throw new Error('Bad uid');
@@ -1873,6 +2228,11 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:setFlags', (id, mailbox, uids, flags) =>
     setFlags(account(id), mailboxArg(mailbox), uidList(uids), (flags ?? {}) as { seen?: unknown; flagged?: unknown }),
   );
+  handle('mail:labels', (id) => labels(account(id)));
+  handle('mail:createLabel', (id, label) => createLabel(account(id), label));
+  handle('mail:updateLabel', (id, labelId, patch) => updateLabel(account(id), labelIdArg(labelId), patch));
+  handle('mail:deleteLabel', (id, labelId) => deleteLabel(account(id), labelIdArg(labelId)));
+  handle('mail:setLabels', (id, mailbox, uids, change) => setLabels(account(id), mailboxArg(mailbox), uidList(uids), change));
   handle('mail:avatar', (address) => {
     if (typeof address !== 'string') throw new Error('No address');
     return avatar(address);

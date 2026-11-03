@@ -65,7 +65,7 @@ const SYSTEM_PERMISSIONS = {
   'assistant-sudo': /^assistant:(passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|unlock|eject)$/,
-  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|markAllRead|avatar|avatarLookups|setAvatarLookups|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
+  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|labels|createLabel|updateLabel|deleteLabel|setLabels|markAllRead|avatar|avatarLookups|setAvatarLookups|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
   passwords: /^passwords:(state|create|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|import|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,

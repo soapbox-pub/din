@@ -1,12 +1,13 @@
-import { getMailDesktopBridge, UNSUBSCRIBE_METHODS, type MailAccount, type MailSubscription } from '@/lib/mail';
+import { getMailDesktopBridge, LABEL_COLORS, UNSUBSCRIBE_METHODS, type LabelColor, type LabelKind, type MailAccount, type MailLabel, type MailSubscription } from '@/lib/mail';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
- * `din mail`: Mail's accounts and the mailing lists in their inboxes, as
- * Mail's Subscriptions shows them (electron/mail.mts), and leaving them.
- * Unsubscribing asks on screen first: it sends mail or requests from the
- * user's account, and can't be taken back.
+ * `din mail`: Mail's accounts, their labels, and the mailing lists in their
+ * inboxes, as Mail's Subscriptions shows them (electron/mail.mts), and
+ * leaving them. Unsubscribing asks on screen first: it sends mail or
+ * requests from the user's account, and can't be taken back; so does
+ * deleting a label, which comes off every message.
  */
 
 const mail = () => need(getMailDesktopBridge(), 'Mail');
@@ -24,6 +25,22 @@ async function subscriptions(accounts: MailAccount[], months: number): Promise<M
   return scans.flatMap((s) => s.subscriptions).sort((x, y) => y.count - x.count || y.last - x.last);
 }
 
+/** One account, by name or address; the only one when there's one. */
+async function oneAccount(query: string | undefined): Promise<MailAccount> {
+  const list = await accountsFor(query);
+  if (list.length > 1) throw new CommandError('Say which account, with --account', 'usage');
+  return list[0];
+}
+
+const LABEL_KINDS: Record<LabelKind, string> = { gmail: 'Gmail’s labels', keywords: 'IMAP keywords', none: 'can’t keep labels' };
+const COLOR: Param = { name: 'color', type: 'string', optional: true, choices: LABEL_COLORS, help: 'Its color, kept on this computer' };
+
+async function labelIn(account: MailAccount, query: string): Promise<MailLabel> {
+  const { kind, labels } = await call(mail().labels(account.id));
+  if (kind === 'none') throw new CommandError(`${account.name}’s server can’t keep labels`);
+  return pick(labels, query, (l) => [l.id, l.name], 'label');
+}
+
 function label(s: MailSubscription): string {
   return s.name ? `${s.name} <${s.address}>` : s.address;
 }
@@ -34,7 +51,7 @@ function day(ms: number): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -99,6 +116,62 @@ export const mailArea: Area = {
       }
       const on = await call(mail().avatarLookups());
       return { data: { lookups: on }, text: on ? 'Mail looks up senders’ pictures' : 'Mail doesn’t look up senders’ pictures' };
+    }),
+    command('mail', 'labels', 'Each account’s labels, as Mail’s sidebar lists them, and how the account keeps them (Gmail’s own labels, or IMAP keywords)', [ACCOUNT], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const all = await Promise.all(accounts.map(async (a) => ({ account: a, ...(await call(mail().labels(a.id))) })));
+      return {
+        data: all.map(({ account, kind, labels }) => ({ accountId: account.id, account: account.name, kind, labels })),
+        text: all
+          .map(({ account, kind, labels }) => {
+            const head = `${account.name} (${LABEL_KINDS[kind]})`;
+            if (kind === 'none') return head;
+            return [head, ...(labels.length ? labels.map((l) => `  ${l.name}${l.color ? `  ${l.color}` : ''}`) : ['  No labels yet'])].join('\n');
+          })
+          .join('\n'),
+      };
+    }),
+    command('mail', 'label-create', 'Make a label, as Mail’s New Label… does (on Gmail, a Gmail label)', [
+      { name: 'name', type: 'string', positional: true, help: 'Its name' },
+      COLOR,
+      ACCOUNT,
+    ], async (args) => {
+      const account = await oneAccount(args.optString('account'));
+      const made = await call(mail().createLabel(account.id, { name: args.string('name'), color: (args.optString('color') as LabelColor | undefined) ?? null }));
+      return { data: made, text: `Made the label ${made.name} in ${account.name}` };
+    }),
+    command('mail', 'label-edit', 'Rename a label or change its color, as Mail’s Edit Label… does (a Gmail label is renamed on Gmail too)', [
+      { name: 'label', type: 'string', positional: true, help: 'Which label, by name' },
+      { name: 'name', type: 'string', optional: true, help: 'Its new name' },
+      COLOR,
+      ACCOUNT,
+    ], async (args) => {
+      const name = args.optString('name');
+      const color = args.optString('color') as LabelColor | undefined;
+      if (name === undefined && color === undefined) throw new CommandError('Give it a --name or a --color', 'usage');
+      const account = await oneAccount(args.optString('account'));
+      const was = await labelIn(account, args.string('label'));
+      const saved = await call(mail().updateLabel(account.id, was.id, { ...(name !== undefined ? { name } : {}), ...(color ? { color } : {}) }));
+      return { data: saved, text: saved.name === was.name ? `${saved.name} is ${saved.color ?? 'its own color'}` : `Renamed ${was.name} to ${saved.name}` };
+    }),
+    command('mail', 'label-delete', 'Delete a label, taking it off every message that has it (asks on screen first); the messages stay', [
+      { name: 'label', type: 'string', positional: true, help: 'Which label, by name' },
+      ACCOUNT,
+    ], async (args, ctx) => {
+      const account = await oneAccount(args.optString('account'));
+      const target = await labelIn(account, args.string('label'));
+      const gmail = !!target.path;
+      const ok = await ctx.confirm({
+        title: `Delete the label “${target.name}”?`,
+        description: gmail
+          ? 'Gmail takes it off every message that has it, on all your devices. The messages themselves stay.'
+          : 'It comes off every message that has it, in every mailbox on the server. The messages themselves stay.',
+        action: 'Delete Label',
+        destructive: true,
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await call(mail().deleteLabel(account.id, target.id));
+      return { data: { deleted: target.id }, text: `Deleted the label ${target.name}` };
     }),
     command('mail', 'unsubscribe', 'Unsubscribe from mailing lists, as Subscriptions does (asks on screen first)', [
       { name: 'lists', type: 'string', positional: true, rest: true, help: 'Senders, by name, address or list id (as din mail subscriptions lists them)' },

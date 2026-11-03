@@ -6,8 +6,8 @@
 //   - the folder list, as last listed;
 //   - for each mailbox, its UIDVALIDITY, the HIGHESTMODSEQ its flags were
 //     last brought up to date at, and every uid in it, newest first;
-//   - the summary (envelope, flags, preview) of each message the list has
-//     shown, by mailbox and uid;
+//   - the summary (envelope, flags, labels, preview) of each message the
+//     list has shown, by mailbox and uid;
 //   - the messages that have been opened, as fetched (a big one without its
 //     big attachments), up to BODY_BYTES in all, the least recently opened
 //     going first;
@@ -55,7 +55,7 @@ export interface ListHeader {
   verified: boolean;
 }
 
-export type Flags = Pick<MessageSummary, 'seen' | 'flagged' | 'answered' | 'draft'>;
+export type Flags = Pick<MessageSummary, 'seen' | 'flagged' | 'answered' | 'draft' | 'labels'>;
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -242,6 +242,37 @@ export class MailStore {
       }
     });
     return changed;
+  }
+
+  /** Put labels on these messages and take others off; true when any changed. */
+  patchLabels(path: string, uids: number[], add: string[], remove: string[]): boolean {
+    let changed = false;
+    const update = this.db.prepare('UPDATE message SET summary = ? WHERE path = ? AND uid = ?');
+    const gone = new Set(remove);
+    this.transaction(() => {
+      for (const [uid, { summary }] of this.summaries(path, uids)) {
+        const labels = [...new Set([...(summary.labels ?? []).filter((l) => !gone.has(l)), ...add])].sort();
+        if (JSON.stringify(labels) === JSON.stringify(summary.labels ?? [])) continue;
+        changed = true;
+        update.run(JSON.stringify({ ...summary, labels }), path, uid);
+      }
+    });
+    return changed;
+  }
+
+  /** A label renamed (`to`) or deleted (null), on every message kept that has it, in any mailbox. */
+  relabel(id: string, to: string | null): void {
+    // LIKE narrows it down (its wildcards only match more); each row is checked.
+    const rows = this.db.prepare('SELECT path, uid, summary FROM message WHERE summary LIKE ?').all(`%${JSON.stringify(id)}%`) as { path: string; uid: number; summary: string }[];
+    const update = this.db.prepare('UPDATE message SET summary = ? WHERE path = ? AND uid = ?');
+    this.transaction(() => {
+      for (const r of rows) {
+        const s = JSON.parse(r.summary) as MessageSummary;
+        if (!s.labels?.includes(id)) continue;
+        const labels = [...new Set(s.labels.flatMap((l) => (l === id ? (to === null ? [] : [to]) : [l])))].sort();
+        update.run(JSON.stringify({ ...s, labels }), r.path, r.uid);
+      }
+    });
   }
 
   /** Messages gone from a mailbox: moved, deleted, expunged. */

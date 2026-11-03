@@ -40,7 +40,7 @@
 //     the menu bar and Settings
 //   - window.dinos.phone: text messages from the user's phones over Bluetooth,
 //     for Settings and notifications
-//   - window.dinos.mail: the mail accounts' mailing lists, for `din mail`
+//   - window.dinos.mail: the mail accounts' mailing lists and labels, for `din mail`
 //   - window.dinos.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
 //   - window.dinos.indd: InDesign documents read into IDML, for Publisher
@@ -1758,12 +1758,12 @@ expose('phone', {
 });
 
 // Mail (window.dinos.mail), backed by electron/mail.mts: the accounts'
-// mailing lists, for the `din mail` commands, and new mail and unread
+// mailing lists and labels, for the `din mail` commands, and new mail and unread
 // counts, for notifications and Mail's Dock badge; Mail has all of it
 // through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'mailboxes', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'unseen']) {
+for (const method of ['accounts', 'mailboxes', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'unseen']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
 expose('mail', {
