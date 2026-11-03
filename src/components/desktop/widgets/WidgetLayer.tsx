@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useAuthor } from '@/hooks/useAuthor';
-import { areaAt } from '@/lib/monitors';
+import { areaAt, getMonitorsBridge } from '@/lib/monitors';
 import { cn } from '@/lib/utils';
 import { areaGrid, cellsFree, cellsRect, clampCells, nearestCells, placedCells, type Cells } from '@/lib/widgetGrid';
 import {
@@ -61,15 +61,14 @@ export function WidgetLayer() {
   useEffect(() => getWidgetsBridge()?.onContextMenu(({ webContentsId, x, y }) => {
     const trigger = triggers.current.get(webContentsId);
     if (!trigger?.isConnected) return;
-    // A webview's menu point is the embedder's (the shell's), not the
-    // guest's; taken as either, whichever lands on the widget.
+    // A webview's menu point is in the shell window's pixels, which the
+    // interface zoom makes larger than the desktop's CSS ones.
+    const zoom = getMonitorsBridge()?.zoomFactor() ?? 1;
     const rect = trigger.getBoundingClientRect();
     const inside = (px: number, py: number) => px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom;
-    const [clientX, clientY] = inside(x, y)
-      ? [x, y]
-      : inside(rect.left + x, rect.top + y)
-        ? [rect.left + x, rect.top + y]
-        : [rect.left + rect.width / 2, rect.top + rect.height / 2];
+    const [clientX, clientY] = inside(x / zoom, y / zoom)
+      ? [x / zoom, y / zoom]
+      : [rect.left + rect.width / 2, rect.top + rect.height / 2];
     trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY }));
   }), []);
 
