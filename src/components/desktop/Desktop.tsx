@@ -44,6 +44,7 @@ import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { PromptHost } from './PromptHost';
 import { AdminPromptHost } from './AdminPrompt';
 import { ScreenSharePicker } from './ScreenShareHost';
+import { EyeDropperHost } from './EyeDropperHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
 import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
@@ -246,6 +247,7 @@ function DesktopSession() {
                     <PromptHost />
                     <AdminPromptHost />
                     <ScreenSharePicker />
+                    <EyeDropperHost />
                     <DesktopHotkeys />
                     <MouseHost />
                     <DeviceBatteryHost />

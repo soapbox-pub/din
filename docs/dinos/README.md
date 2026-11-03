@@ -90,6 +90,7 @@ interface Dinos {
   popups: PopupsBridge;
   devtools: DevtoolsBridge;
   screenShare: ScreenShareBridge;
+  eyeDropper: EyeDropperBridge;
 
   // nsites and napps
   nsiteHost: NsiteHostBridge;
@@ -153,7 +154,7 @@ directly by components.
 | System | `datetime`, `theme`, `systemEvents`, `systemMonitor`, `systemNotifications`, `tray`, `printing` |
 | Native apps | `nativeApps`, `nativeDisplay` |
 | Nostr | `nostrd`, `nostrHost`, `bunkerHost` |
-| The browser | `browser`, `crx`, `userscripts`, `adblock`, `popups`, `devtools`, `screenShare` |
+| The browser | `browser`, `crx`, `userscripts`, `adblock`, `popups`, `devtools`, `screenShare`, `eyeDropper` |
 | nsites and napps | `nsiteHost`, `nsiteStore`, `nappHost`, `webPushHost` |
 | Guest plumbing | `pageFullscreen`, `guestVisibility`, `guestFileDrop`, `guestInput`, `highlightHost`, `filePickerHost`, `promptHost` |
 | The Assistant | `assistant` |

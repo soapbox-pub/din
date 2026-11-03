@@ -92,6 +92,8 @@
 //     extension installs (see PromptHost)
 //   - window.dinos.screenShare: pages asking to share the screen, and the shares
 //     running (see ScreenShareHost.tsx / electron/screen-share.mts)
+//   - window.dinos.eyeDropper: pages picking a color from the screen (see
+//     EyeDropperHost.tsx / electron/eyedropper.mts)
 //   - window.dinos.screenRecorder: recording the screen to a video (see
 //     src/lib/screenRecorder.ts / electron/screen-recorder.mts)
 //   - window.dinos.capture: Studio's takes and live streams (see
@@ -3632,6 +3634,41 @@ expose('screenShare', {
    * @param {string} id
    */
   stop: (id) => ipcRenderer.invoke('screen-share:stop', id),
+});
+
+// Web pages' EyeDropper (window.dinos.eyeDropper), backed by
+// electron/eyedropper.mts. A page's open() arrives as a pick for
+// EyeDropperHost, which answers with the color clicked, or null.
+expose('eyeDropper', {
+  /**
+   * Subscribe to picks. Returns an unsubscribe fn.
+   * @param {(request: unknown) => void} callback
+   */
+  onPick: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, request: unknown) => void} */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('eyedropper:pick', listener);
+    return () => ipcRenderer.removeListener('eyedropper:pick', listener);
+  },
+
+  /**
+   * Subscribe to picks main has called off (the page aborted, navigated or
+   * closed). Returns an unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, d: { requestId: number }) => void} */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('eyedropper:cancel', listener);
+    return () => ipcRenderer.removeListener('eyedropper:cancel', listener);
+  },
+
+  /**
+   * Answer a pick: a color like `#1a2b3c`, or null for cancelled;
+   * `unavailable` when the screen couldn't be captured.
+   * @param {{ requestId: number, color: string | null, unavailable?: boolean }} response
+   */
+  choose: (response) => ipcRenderer.send('eyedropper:choice', response),
 });
 
 // Screen recording (window.dinos.screenRecorder), backed by

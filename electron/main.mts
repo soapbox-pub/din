@@ -149,6 +149,7 @@ import { registerLoginSessionHandlers } from './login-session.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
+import { registerEyeDropperHandlers } from './eyedropper.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
 import { attachSelectionColor, setSelectionColor } from './selection-color.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
@@ -3571,6 +3572,13 @@ const PRINT_PRELOAD = path.join(import.meta.dirname, 'print-preload.cjs');
 const SCREEN_SHARE_PRELOAD = path.join(import.meta.dirname, 'screen-share-preload.cjs');
 
 /**
+ * Absolute path to the session preload that gives web pages Din's
+ * EyeDropper in place of Chromium's, which can't capture the screen under
+ * din-shell (see electron/eyedropper.mts). Every page gets it, in every frame.
+ */
+const EYEDROPPER_PRELOAD = path.join(import.meta.dirname, 'eyedropper-preload.cjs');
+
+/**
  * Absolute path to the session preload that tells Din what a web page is
  * playing, for the volume menu's media controls (see electron/media.mts).
  * Every page gets it, in every frame.
@@ -5845,6 +5853,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-permissions', type: 'frame', filePath: PERMISSIONS_PRELOAD });
     s.registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
     s.registerPreloadScript({ id: 'din-screen-share', type: 'frame', filePath: SCREEN_SHARE_PRELOAD });
+    s.registerPreloadScript({ id: 'din-eyedropper', type: 'frame', filePath: EYEDROPPER_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
     s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
     s.registerPreloadScript({ id: 'din-power-mode', type: 'frame', filePath: POWER_MODE_PRELOAD });
@@ -5859,6 +5868,12 @@ app.whenReady().then(() => {
       shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
     isPrivate: isEphemeralBrowserSession,
     undim: undimCapture,
+  });
+  registerEyeDropperHandlers({
+    isShellSender,
+    sendToShell,
+    isPageGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
   });
   registerMediaHandlers({
     assertShellSender,
