@@ -1210,7 +1210,7 @@ function FileBrowserTab({
       const folders = new Set(
         names.filter((n) => entries[byName.get(n)!]?.kind === 'directory').map((n) => joinPath(cwd, n)),
       );
-      startFilesDrag(e, pathsOf(names), folders, names.length === 1 ? names[0] : `${names.length} items`);
+      startFilesDrag(e, pathsOf(names), folders);
     },
     [cwd, selected, selectedNames, selectOnly, entries, byName, pathsOf],
   );

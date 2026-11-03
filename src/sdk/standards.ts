@@ -11,7 +11,8 @@
  *   pickers, its handles backed by the desktop's grants, and
  *   `FileSystemObserver` hears when something else changes them.
  * - Launch Handling's `launchQueue` hears each launch's files.
- * - Drops, and the `copy`, `cut` and `paste` events, carry Din's handles.
+ * - Drags and drops, and the `copy`, `cut` and `paste` events, carry Din's
+ *   handles.
  * - Focus, visibility, `display-state`, `screenX` and the rest answer for
  *   the page's own window on the desktop.
  * - `navigator.permissions.query` answers what the app was granted.
@@ -845,7 +846,7 @@ export function installSavedState(save: (state: unknown) => void): (state: unkno
 }
 
 // ---------------------------------------------------------------------------
-// Drops of files from other apps
+// Files dragged between apps
 // ---------------------------------------------------------------------------
 
 /** The MIME type a Din drag carries its token under (DRAG_MIME in src/sdk/index.ts). */
@@ -870,7 +871,12 @@ function handleItem(handle: () => Promise<FileSystemHandle | null>): DataTransfe
 function withItems(
   dt: DataTransfer,
   extra: DataTransferItem[],
-  options: { keepTypes?: boolean; add?: (data: unknown) => DataTransferItem | undefined } = {},
+  options: {
+    keepTypes?: boolean;
+    add?: (data: unknown) => DataTransferItem | undefined;
+    /** The DataTransfer's own methods, replaced. */
+    methods?: Partial<Record<'setData' | 'setDragImage', (...args: never[]) => void>>;
+  } = {},
 ): DataTransfer {
   const own = dt.items;
   const ownAdd = own.add.bind(own) as (...args: unknown[]) => DataTransferItem | null;
@@ -881,11 +887,15 @@ function withItems(
     remove: { value: own.remove.bind(own) },
     clear: { value: own.clear.bind(own) },
   });
-  const types = options.keepTypes || extra.length === 0 || dt.types.includes('Files') ? dt.types : Object.freeze([...dt.types, 'Files']);
+  const ownTypes = options.keepTypes || extra.length === 0 || dt.types.includes('Files');
+  const types = ownTypes ? null : Object.freeze([...dt.types, 'Files']);
   return new Proxy(dt, {
     get(target, key) {
       if (key === 'items') return list;
-      if (key === 'types') return types;
+      if (key === 'types') return types ?? target.types;
+      if (typeof key === 'string' && options.methods && Object.hasOwn(options.methods, key)) {
+        return options.methods[key as keyof typeof options.methods];
+      }
       const value: unknown = Reflect.get(target, key, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -924,6 +934,114 @@ export function installDroppedFiles(host: DroppedFilesHost): void {
       const take = () => (taken ??= host.accept(token, operation));
       const extra = Array.from({ length: drag.count }, (_, i) => handleItem(() => take().then((list) => list[i] ?? null)));
       const transfer = withItems(dt, extra, { keepTypes: true });
+      Object.defineProperty(e, 'dataTransfer', { value: transfer, configurable: true });
+    },
+    true,
+  );
+}
+
+/** What dragging files out of the app needs from the desktop. */
+export interface DraggedFilesHost {
+  /** Whether the app reaches files by path (`fs`, or a scoped grant), so a `text/uri-list` of them drags them. */
+  byPath(): boolean;
+  /** Register a drag of these files under its token, with the label the desktop shows under the pointer. */
+  start(token: string, files: { grants: Grant[] } | { paths: string[] }, label: string): Promise<void>;
+  /** The drag ended, as the source's `dragend` said. */
+  finish(token: string, dropEffect: DataTransfer['dropEffect'], at: { x: number; y: number }): void;
+}
+
+/** The paths a `text/uri-list` names, when every URL in it is a local `file:` URL; else null. */
+function filePaths(list: string): string[] | null {
+  const lines = list.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const paths: string[] = [];
+  for (const line of lines) {
+    let url: URL;
+    try {
+      url = new URL(line);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== 'file:' || (url.host !== '' && url.host !== 'localhost')) return null;
+    paths.push(decodeURIComponent(url.pathname));
+  }
+  return paths.length ? paths : null;
+}
+
+/**
+ * Files dragged out of the app, as a `copy` puts them on the clipboard: in
+ * `dragstart`, `dataTransfer.items.add()` takes one of Din's handles (or a
+ * `File` read from one), and in an app that reaches files by path,
+ * `setData('text/uri-list', …)` of `file:` URLs drags those files, as a
+ * native file manager's drag does. Either makes it a drag of files the
+ * desktop brokers: the DataTransfer gets the drag's token, the names as
+ * `text/plain` unless the page set its own, and an empty drag image (one
+ * set in a guest never reaches the screen, so the desktop draws the label:
+ * the name, or "3 items"). Where it went, the source's `dragend` says.
+ */
+export function installDraggedFiles(host: DraggedFilesHost): void {
+  window.addEventListener(
+    'dragstart',
+    (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const grants: Grant[] = [];
+      let paths: string[] = [];
+      let token: string | null = null;
+      let ownText = false;
+      const names = () => (grants.length ? grants.map((g) => g.name) : paths.map((p) => p.slice(p.lastIndexOf('/') + 1) || p));
+      const text = () => {
+        if (!ownText) dt.setData('text/plain', (grants.length ? grants.map((g) => g.name) : paths).join('\n'));
+      };
+      const begin = () => {
+        text();
+        if (token) return;
+        const t = (token = crypto.randomUUID());
+        dt.setData(DRAG_TYPE, t);
+        if (dt.effectAllowed === 'uninitialized') dt.effectAllowed = 'copyMove';
+        const blank = document.createElement('div');
+        blank.style.cssText = 'position:fixed;top:-10px;left:-10px;width:1px;height:1px;opacity:0';
+        document.body.appendChild(blank);
+        dt.setDragImage(blank, 0, 0);
+        requestAnimationFrame(() => blank.remove());
+        // Registered once the page's dragstart listeners have all had their turn.
+        const registered = new Promise((r) => setTimeout(r, 0))
+          .then(() => {
+            const list = names();
+            return host.start(t, grants.length ? { grants } : { paths }, list.length === 1 ? list[0] : `${list.length} items`);
+          })
+          .catch((error: unknown) => console.warn('din: drag:', error));
+        e.target?.addEventListener(
+          'dragend',
+          (end) => {
+            const ev = end as DragEvent;
+            const at = { x: ev.clientX, y: ev.clientY };
+            void registered.then(() => host.finish(t, ev.dataTransfer?.dropEffect ?? 'none', at));
+          },
+          { once: true },
+        );
+      };
+      const add = (data: unknown) => {
+        const grant = grantOf(data) ?? (data instanceof File ? (readFiles.get(data) ?? null) : null);
+        if (!grant) return undefined;
+        grants.push(grant);
+        begin();
+        const handle = toWebHandle(grant) as unknown as FileSystemHandle;
+        return handleItem(() => Promise.resolve(handle));
+      };
+      const setData = (format: string, data: string) => {
+        const type = String(format).toLowerCase();
+        if (type === 'text/plain' || type === 'text') ownText = true;
+        dt.setData(format, data);
+        if (type !== 'text/uri-list' || !host.byPath()) return;
+        const named = filePaths(String(data));
+        if (!named) return;
+        paths = named;
+        begin();
+      };
+      const setDragImage = (image: Element, x: number, y: number) => {
+        if (!token) dt.setDragImage(image, x, y);
+      };
+      const transfer = withItems(dt, [], { keepTypes: true, add, methods: { setData, setDragImage } });
       Object.defineProperty(e, 'dataTransfer', { value: transfer, configurable: true });
     },
     true,

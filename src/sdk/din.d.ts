@@ -453,7 +453,7 @@ declare global {
     getAsFileSystemHandle(): Promise<FileSystemHandle | null>;
   }
   interface DataTransferItemList {
-    /** Din's, in a `copy` or `cut` event: put the file behind a handle Din granted on Din's clipboard. */
+    /** Din's, in a `copy` or `cut` event or a `dragstart`: put the file behind a handle Din granted on Din's clipboard, or drag it. */
     add(handle: FileSystemHandle): DataTransferItem | null;
   }
   class FileSystemObserver {
@@ -479,23 +479,23 @@ export interface DragInfo {
 }
 
 /**
- * Files dropped from other apps are the web's: the drop's `file` items, each
- * with `getAsFileSystemHandle()`. Where a drag of files went, the source's
- * `dragend` says, in its `dropEffect`. Anything else an app drags between
- * its own windows is plain HTML drag and drop, under a type of its own
- * (`dataTransfer.setData('application/x-my-thing', …)`).
+ * Files dragged between apps are the web's. To drag files out, in
+ * `dragstart`, `e.dataTransfer.items.add(handle)` (or a `File` read from
+ * one), as in a `copy`; an app that reaches files by path (`fs`, or
+ * `file-folders` within its folders) can instead
+ * `setData('text/uri-list', …)` their `file:` URLs, as a native file
+ * manager does. Din then brokers the drag: it adds the token, the names as
+ * `text/plain` (unless the page set its own) and the label the desktop
+ * draws under the pointer. Files dropped from other apps are the drop's
+ * `file` items, each with `getAsFileSystemHandle()`. Where a drag of files
+ * went, the source's `dragend` says, in its `dropEffect`. Anything else an
+ * app drags between its own windows is plain HTML drag and drop, under a
+ * type of its own (`dataTransfer.setData('application/x-my-thing', …)`).
+ *
+ * What's left here is what the web can't see: a drag of files going on
+ * elsewhere on the desktop, before it reaches the window.
  */
 export interface DinDrag {
-  /**
-   * Call from `dragstart` to drag files out of the app. Sets the drag's data
-   * (the token, and plain text for other targets) and its drag image.
-   */
-  startFiles(e: DragEvent, files: FileSystemHandle[], label: string): void;
-  /**
-   * The same, by path, for apps with `fs`: no handles to wait for, which a
-   * dragstart can't do.
-   */
-  startPaths(e: DragEvent, paths: string[], label: string): void;
   /** The drag going on anywhere on the desktop, or null. */
   readonly current: DragInfo | null;
   onChange(cb: (drag: DragInfo | null) => void): Unsubscribe;

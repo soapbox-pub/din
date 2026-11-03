@@ -14,7 +14,7 @@ and only then gets a grant to exactly those files.
 
 ```
  Files (source)                desktop                        Paint (target)
- dragstart ─ startFiles(e, handles) ─▶ registers token t, source, files
+ dragstart ─ items.add(handle) ──────▶ registers token t, source, files
                                        pushes DragInfo{files, 2} to all apps (no token)
                                ◀────── (every app sees din.drag.current)
                                                               dragover: current.kind === 'files' → show drop zone
@@ -28,26 +28,39 @@ and only then gets a grant to exactly those files.
 
 ```ts
 row.addEventListener('dragstart', (e) => {
-  din.drag.startFiles(e, selectedHandles, selected.length === 1 ? selected[0].name : `${selected.length} items`);
+  for (const handle of selectedHandles) e.dataTransfer?.items.add(handle);   // as in a copy
 });
 row.addEventListener('dragend', (e) => {
   if (e.dataTransfer?.dropEffect === 'move') refresh();   // the web's: where the drag went
 });
 ```
 
-`startFiles` sets the DataTransfer: the token under
+In `dragstart`, `dataTransfer.items.add()` takes one of Din's handles (a
+folder too) or a `File` read from one, as a `copy` event's does
+(`installDraggedFiles` in `src/sdk/standards.ts`). The first one makes it
+a drag of files: `window.din` puts the token under
 `application/x-din-drag`, the names as `text/plain` for targets that only
-take text, and the label ("3 items") the desktop shows following the
-pointer. A drag image set in a webview guest never reaches the screen, so
-`window.din` makes the engine's image empty and the desktop draws the label
-itself (`DinDragOverlay`): while a drag from an app is on, each app reports
-where it's over it (`drag.over`) and the desktop watches its own surfaces. The
+take text (unless the page set its own), and registers the drag with the
+desktop once the page's `dragstart` listeners have run, labelled with the
+file's name or "3 items". A drag image set in a webview guest never
+reaches the screen, so `window.din` makes the engine's image empty (and
+ignores the page's `setDragImage`) and the desktop draws the label itself
+(`DinDragOverlay`): while a drag from an app is on, each app reports where
+it's over it (`drag.over`) and the desktop watches its own surfaces. The
 DataTransfer has to be filled during `dragstart`, so `window.din` mints the
-token itself (a random UUID, which no other app can guess) and registers
-it with the desktop alongside; the desktop refuses a token already in use.
+token itself (a random UUID, which no other app can guess); the desktop
+refuses a token already in use.
 
-Apps with `fs` can drag by path, `din.drag.startPaths(e, paths, label)`:
-a `dragstart` can't wait for `din.files.fromPath`. Files does.
+Apps that reach files by path (`fs`, or `file-folders` within its folders)
+can drag them as a native file manager does, by their `file:` URLs, since
+a `dragstart` can't wait for handles. Files does:
+
+```ts
+e.dataTransfer.setData('text/uri-list', paths.map((p) => `file://${p.split('/').map(encodeURIComponent).join('/')}`).join('\r\n'));
+```
+
+Every URL in the list must be a local `file:` URL; any other list is left
+as the page's own data.
 
 ## Taking a drop
 
@@ -78,7 +91,8 @@ the drop's `dropEffect` says. `getAsFile()` gives null: read the file
 through its handle. `droppedHandles(e)` in `src/shared/fileHandles.ts`
 does the reading.
 
-- During the drag, `din.drag.current` says what's coming (kind, count,
+- During the drag, `din.drag.current` (the one part of drag and drop the
+  web has no word for) says what's coming (kind, count,
   whether they're all folders, the source app), which is what lets a
   target refuse early: a folder can't be dropped into itself, a sidebar
   favorite must be a folder. Names arrive only with the drop.

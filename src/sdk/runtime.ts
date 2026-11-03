@@ -61,6 +61,7 @@ import {
   installFileSystemObserver,
   installLaunchQueue,
   installClipboardFiles,
+  installDraggedFiles,
   installDroppedFiles,
   installPermissionsQuery,
   installSpeechRecognition,
@@ -89,9 +90,6 @@ export interface Transport {
    */
   framed?: boolean;
 }
-
-/** The MIME type a Din drag carries its token under (DRAG_MIME in src/sdk/index.ts). */
-const DRAG_MIME = 'application/x-din-drag';
 
 class DinPermissionError extends Error {
   readonly permission: string;
@@ -767,33 +765,15 @@ export function installDin(transport: Transport): void {
     if (on) window.addEventListener('dragover', onDragOver, true);
   }
 
-  /** Put a new drag's token on the event, register it, and report the drag's end. */
-  function beginDrag(e: DragEvent, register: (token: string) => Promise<void>, text: string) {
-    // The DataTransfer must be filled now, during dragstart, so the token is
-    // minted here; it's random, so no other app can guess it.
-    const token = crypto.randomUUID();
-    const registered = register(token).catch((error: unknown) => console.warn('din: drag:', error));
-    e.dataTransfer?.setData(DRAG_MIME, token);
-    if (text) e.dataTransfer?.setData('text/plain', text);
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copyMove';
-    // A drag image from a guest doesn't reach the screen, so the desktop
-    // draws the drag's label where the pointer is (reported below); the
-    // engine's own image is made empty so the two can't double up.
-    const blank = document.createElement('div');
-    blank.style.cssText = 'position:fixed;top:-10px;left:-10px;width:1px;height:1px;opacity:0';
-    document.body.appendChild(blank);
-    e.dataTransfer?.setDragImage(blank, 0, 0);
-    requestAnimationFrame(() => blank.remove());
-    e.target?.addEventListener(
-      'dragend',
-      (end) => {
-        const ev = end as DragEvent;
-        const finish = { token, dropEffect: ev.dataTransfer?.dropEffect ?? 'none', at: point(ev) };
-        void registered.then(() => tell('drag.finish', finish));
-      },
-      { once: true },
-    );
-  }
+  // Files dragged out: the web's dragstart, carrying handles or file: URLs.
+  installDraggedFiles({
+    byPath: () => permissions.has('fs') || !!h?.scopedFs,
+    start: async (token, list, label) => {
+      if ('grants' in list) await request('drag.startFiles', { token, handles: await Promise.all(list.grants.map((g) => g.id())), label });
+      else await request('drag.startPaths', { token, paths: list.paths, label });
+    },
+    finish: (token, dropEffect, at) => tell('drag.finish', { token, dropEffect, at }),
+  });
   // A drop of files from another app: the web's file items, whose
   // getAsFileSystemHandle() trades the drag's token for grants to them.
   installDroppedFiles({
@@ -804,14 +784,6 @@ export function installDin(transport: Transport): void {
     },
   });
   const drag: DinDrag = {
-    startFiles(e, list, label) {
-      const handles = idsOf(list);
-      beginDrag(e, async (token) => request('drag.startFiles', { token, handles: (await handles) ?? [], label }), list.map((f) => f.name).join('\n'));
-    },
-    startPaths(e, paths, label) {
-      needFs();
-      beginDrag(e, (token) => request('drag.startPaths', { token, paths, label }), paths.join('\n'));
-    },
     get current() {
       return currentDrag;
     },

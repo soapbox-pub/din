@@ -209,7 +209,7 @@ app's reach, the desktop asks the user, showing the paths and `reason`.
 The desktop doesn't decide what's in reach itself: it asks main
 (`dinos.apps.reaches`), which checks a path as it checks the app's own
 calls on `din.system.fs`, with `..` and symlinks resolved. The same goes
-for `din.files.fromPath` and `din.drag.startPaths` in an app with a scoped
+for `din.files.fromPath` and a drag of `file:` URLs in an app with a scoped
 grant: a path from a read-only folder gives a read-only handle, and a drag
 of one can only be copied.
 

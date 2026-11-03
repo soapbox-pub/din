@@ -1,7 +1,8 @@
 /**
- * Drag and drop of files in and out of a Files window, through the desktop
- * (`din.drag`): between its folders, tabs and sidebar, to other Files
- * windows, and to and from other apps.
+ * Drag and drop of files in and out of a Files window, through the desktop:
+ * between its folders, tabs and sidebar, to other Files windows, and to and
+ * from other apps. A drag out is the files' `file:` URLs, as a native file
+ * manager's is, which Din brokers for an app with `fs`.
  *
  * A drag's data can't be read until the drop, and drop targets want to know
  * sooner (a folder can't take itself, a favorite can only be a folder). A
@@ -32,17 +33,16 @@ export interface DraggedFiles {
   anyFolder: boolean;
 }
 
+/** A file: URL for a path, each segment escaped. */
+const fileUrl = (path: string) => `file://${path.split('/').map(encodeURIComponent).join('/')}`;
+
 /** Start dragging files from this window, to it, other windows or other apps. */
-export function startFilesDrag(e: React.DragEvent, paths: string[], folders: Set<string>, label: string): void {
+export function startFilesDrag(e: React.DragEvent, paths: string[], folders: Set<string>): void {
   local = { paths, folders };
   broadcastDrag({ paths, folders: [...folders] });
-  const din = window.din;
-  if (din) {
-    din.drag.startPaths(e.nativeEvent, paths, label);
-  } else {
-    e.dataTransfer.setData('text/plain', paths.join('\n'));
-    e.dataTransfer.effectAllowed = 'copyMove';
-  }
+  e.dataTransfer.setData('text/uri-list', paths.map(fileUrl).join('\r\n'));
+  e.dataTransfer.setData('text/plain', paths.join('\n'));
+  e.dataTransfer.effectAllowed = 'copyMove';
 }
 
 export function endFilesDrag(): void {
