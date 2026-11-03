@@ -849,11 +849,13 @@ export function Viewer() {
       checked={allChosen ? true : chosenConversations.length ? 'mixed' : false}
       label={chosenConversations.length ? 'Clear selection' : 'Select all'}
       onClick={() => setChosen(chosenConversations.length ? new Set() : new Set(conversations.map((c) => c.key)))}
-      className="mr-1 -ml-0.5"
+      disabled={!conversations.length}
+      className="mr-1 -ml-0.5 disabled:pointer-events-none disabled:opacity-50"
     />
   );
 
-  const selectionBar = !current && conversations.length > 0 && (!chosenConversations.length || !first ? (
+  // Shown while the list loads or is empty too, so the tabs and rows below it don't jump.
+  const selectionBar = !current && (!chosenConversations.length || !first ? (
     <ActionBar>
       {selectAll}
       <ToolButton label="Get new mail" onClick={refresh}><RefreshCw className="size-4.5" strokeWidth={1.75} /></ToolButton>
