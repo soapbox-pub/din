@@ -73,7 +73,18 @@ export interface Din {
   system: DinSystem;
 }
 
+/** One of `navigator.getInstalledRelatedApps()`'s answers (Getting Installed Related Apps). */
+export interface RelatedApplication {
+  platform: string;
+  url?: string;
+  id?: string;
+}
+
 declare global {
+  interface Navigator {
+    /** The manifest's `related_applications` that are installed and can be opened now. */
+    getInstalledRelatedApps(): Promise<RelatedApplication[]>;
+  }
   interface Window {
     /** Defined by Din, before any of the page's scripts run, in every app it hosts (din:// apps, later nsites). */
     din?: Din;
@@ -112,6 +123,12 @@ declare global {
  * restarting, or after the app crashed, `navigation.currentEntry.getState()`
  * has it back by the time `din.ready` resolves. JSON, up to 512 KB (more is
  * dropped, with a warning).
+ *
+ * Whether another app can be opened now is the web's
+ * `navigator.getInstalledRelatedApps()`, for the apps the manifest lists in
+ * `related_applications` as `{ "platform": "webapp", "url":
+ * "din://<id>/manifest.webmanifest" }`: those installed (and, the
+ * Assistant, set up and switched on).
  */
 export interface DinApp {
   /**
@@ -138,11 +155,6 @@ export interface DinApp {
    * others get a DinPermissionError.
    */
   openFiles(files: FileSystemHandle[]): Promise<void>;
-  /**
-   * Whether an app can be opened now: it's installed, and (the Assistant)
-   * set up and switched on.
-   */
-  canOpen(appId: string): Promise<boolean>;
   /**
    * The app's other open windows, front to back. They talk to each other
    * on a BroadcastChannel, which reaches the app's windows and nothing else,
@@ -820,6 +832,8 @@ export interface DinManifest {
    * Only `protocol: "nostr"` counts.
    */
   protocol_handlers?: { protocol: string; url: string; kinds?: number[] }[];
+  /** Apps whose presence `navigator.getInstalledRelatedApps()` may report: `{ platform: 'webapp', url: 'din://<id>/manifest.webmanifest' }`. */
+  related_applications?: RelatedApplication[];
   /** `focus-existing` makes the app single-instance. */
   launch_handler?: { client_mode: 'navigate-new' | 'focus-existing' };
   din: {

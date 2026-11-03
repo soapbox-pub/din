@@ -515,7 +515,6 @@ export function installDin(transport: Transport): void {
       await request('app.open', { ...target, handles: await idsOf(files) });
     },
     openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
-    canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
   };
 
@@ -902,6 +901,7 @@ export function installDin(transport: Transport): void {
     }),
   });
   installPermissionsQuery({ ready, has: (p) => permissions.has(p) });
+  Object.defineProperty(navigator, 'getInstalledRelatedApps', { value: () => request('app.relatedApps'), configurable: true });
 
   // ---- media session, wallpaper, dictation ----
   const mediaActions = new Emitter<MediaAction>();

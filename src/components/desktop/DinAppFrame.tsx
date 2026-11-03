@@ -522,11 +522,16 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           } else live.current.actions.open(appForFile(name), { path: g.path });
         }
       },
-      'app.canOpen': ({ appId: target }) => {
-        if (typeof target !== 'string' || !installed?.getApp(target)) return false;
-        if (target === 'assistant') return getAssistantBridge() !== undefined && live.current.config.assistantEnabled !== false;
-        return true;
-      },
+      // Getting Installed Related Apps: the apps the manifest names as
+      // webapps, by their din:// manifest URLs, that are installed (and,
+      // the Assistant, set up and switched on).
+      'app.relatedApps': () =>
+        (manifest.related_applications ?? []).flatMap((r) => {
+          const target = r?.platform === 'webapp' ? linkedAppId(r.url) : null;
+          if (!target || !installed?.getApp(target)) return [];
+          if (target === 'assistant' && (getAssistantBridge() === undefined || live.current.config.assistantEnabled === false)) return [];
+          return [{ platform: 'webapp', url: String(r.url), ...(typeof r.id === 'string' ? { id: r.id } : {}) }];
+        }),
       // As links open anywhere on the desktop: into an installed app that
       // owns the site, nostr: links to their viewer, else the Web Browser.
       'app.openUrl': ({ url }) => {

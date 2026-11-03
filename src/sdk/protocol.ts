@@ -16,6 +16,7 @@ import type {
   WindowChrome,
   AssistantSettings,
   Edge,
+  RelatedApplication,
 } from '@/sdk/din';
 import type { StoredHandle } from '@/sdk/standards';
 
@@ -188,7 +189,8 @@ export interface Requests {
   'app.open': [{ url: string; self: boolean; handles?: string[] }, void];
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
-  'app.canOpen': [{ appId: string }, boolean];
+  /** The manifest's `related_applications` that can be opened now. */
+  'app.relatedApps': [void, RelatedApplication[]];
   'app.windows': [void, { id: string; title: string }[]];
   'app.saveState': [{ state: unknown }, void];
   'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];

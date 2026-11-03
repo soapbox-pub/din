@@ -12,6 +12,12 @@
   "launch_handler": {
     "client_mode": "navigate-new"
   },
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "din://assistant/manifest.webmanifest"
+    }
+  ],
   "din": {
     "permissions": [
       "fs",

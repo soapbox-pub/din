@@ -51,6 +51,7 @@ when the app is published as an nsite, and Din reads ordinary members
 | `launch_handler.client_mode` | `singleInstance` | `focus-existing`: one window, re-launches go to `launchQueue`'s consumer there |
 | `shortcuts` | `actions` | Dock and launcher jump lists; the launch's `targetURL` is the shortcut's `url` (`"/?new"`), with `din.params` added to its query; `din.id` names it to the Dock |
 | `file_handlers` | `appForFile` | Not read yet. Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
+| `related_applications` | | Apps `navigator.getInstalledRelatedApps()` may say are installed: `{ "platform": "webapp", "url": "din://<id>/manifest.webmanifest" }` ([lifecycle.md](lifecycle.md#opening-other-things)) |
 | `protocol_handlers` | | Which `nostr:` links open here, and which event kinds; see below |
 | `id`, `scope_extensions` | | Which websites' links an installed nsite opens; see below |
 

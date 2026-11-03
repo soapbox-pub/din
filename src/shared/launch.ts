@@ -36,6 +36,17 @@ export function appLink(appId: string | null, params: Record<string, unknown> = 
   return url.href;
 }
 
+/**
+ * Whether an app can be opened now, by `navigator.getInstalledRelatedApps()`:
+ * the app's manifest must list it in `related_applications` as
+ * `{ "platform": "webapp", "url": "din://<id>/manifest.webmanifest" }`.
+ */
+export async function canOpenApp(appId: string): Promise<boolean> {
+  if (typeof navigator.getInstalledRelatedApps !== 'function') return false;
+  const url = `din://${appId}/manifest.webmanifest`;
+  return (await navigator.getInstalledRelatedApps()).some((app) => app.platform === 'webapp' && app.url === url);
+}
+
 /** The launch parameters in a URL's query, as `encodeLaunchParams` put them there. */
 export function decodeLaunchParams(url: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};

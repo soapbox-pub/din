@@ -49,7 +49,7 @@ import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { windowLaunchFiles } from '@/shared/fileHandles';
 import { useDin, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { appLink, windowLaunch } from '@/shared/launch';
+import { appLink, canOpenApp, windowLaunch } from '@/shared/launch';
 import { TabStrip } from '@/shared/TabStrip';
 import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import { dinWindowMove } from '@/shared/dinWindowMove';
@@ -1087,7 +1087,7 @@ function FileBrowserTab({
   useEffect(() => {
     if (!isTop) return;
     let live = true;
-    din.app.canOpen('assistant').then((can) => live && setHasAssistant(can), () => {});
+    canOpenApp('assistant').then((can) => live && setHasAssistant(can), () => {});
     return () => {
       live = false;
     };

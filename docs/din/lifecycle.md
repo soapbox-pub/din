@@ -122,13 +122,24 @@ window.open(appLink(null));                          // a new window of this app
 await din.app.launch(appLink(null), [handle]);      // the same, handed files for its launchQueue
 await din.app.openFiles([handle]);                   // whichever app the desktop has for it
 window.open('https://example.com');                  // as links open anywhere on the desktop
-await din.app.canOpen('assistant');                  // installed (and, the Assistant, switched on)?
+await navigator.getInstalledRelatedApps();          // the related apps installed (and, the Assistant, switched on)
 ```
 
 An app's URL is `din://<id>/` with the launch parameters in its query, as
 the opened app's `targetURL` has them; any URL of the app's own origin
 opens a new window of it. `window.open` can't carry file handles, so
 `din.app.launch(url, files)` takes the same URLs and hands the files on.
+
+Whether another app is there to open is the web's
+`navigator.getInstalledRelatedApps()`, which answers only for the apps the
+manifest lists in `related_applications`, each by its manifest's URL:
+
+```json
+"related_applications": [{ "platform": "webapp", "url": "din://assistant/manifest.webmanifest" }]
+```
+
+Those installed (and, the Assistant, set up and switched on) come back as
+listed. `canOpenApp('assistant')` in `src/shared/launch.ts` asks for one.
 
 The web's `window.open(url)` opens a link into an installed app that owns
 the site, `mailto:` in Mail, `nostr:` in its viewer, and anything else in

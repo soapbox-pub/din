@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
-import { onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
+import { canOpenApp, onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCloseGuard, useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
 import { Compositor } from './engine/compositor';
@@ -124,7 +124,7 @@ export function Studio() {
 
   useEffect(() => {
     let alive = true;
-    din.app.canOpen('assistant').then((can) => alive && setCanAssist(can), () => {});
+    canOpenApp('assistant').then((can) => alive && setCanAssist(can), () => {});
     return () => {
       alive = false;
     };
