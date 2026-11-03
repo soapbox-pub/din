@@ -55,6 +55,22 @@
       # checkout, `dirtyRev` (the commit plus "-dirty") for one with changes.
       revision = { system.configurationRevision = self.rev or self.dirtyRev or null; };
 
+      # `nixpkgs` in Nix's registry is the system's nixpkgs, so `nix run
+      # nixpkgs#foo` gets the same libraries as the system, but fetched when
+      # it's first used rather than carried in the image: the source is
+      # 470 MB of small files.
+      registry = {
+        nixpkgs.flake.setFlakeRegistry = false;
+        nixpkgs.flake.setNixPath = false;
+        nix.nixPath = [ "nixpkgs=flake:nixpkgs" ];
+        nix.registry.nixpkgs.to = {
+          type = "github";
+          owner = "NixOS";
+          repo = "nixpkgs";
+          inherit (nixpkgs) rev narHash;
+        };
+      };
+
       # OpenCode, the agent behind Din's Assistant (electron/assistant.mts),
       # as its v2 installer would put it in ~/.opencode/bin: the npm
       # package's prebuilt binary, run through nix-ld. It's in the image
@@ -104,14 +120,14 @@
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
-        modules = [ nostrd.nixosModules.default electron revision ./configuration.nix ];
+        modules = [ nostrd.nixosModules.default electron revision registry ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
-        modules = [ nostrd.nixosModules.default electron revision ./configuration.nix ./debug.nix ];
+        modules = [ nostrd.nixosModules.default electron revision registry ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
