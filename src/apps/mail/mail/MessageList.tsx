@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Archive, Mail, MailOpen, Paperclip, Star, Trash2 } from 'lucide-react';
+import { Archive, Check, Mail, MailOpen, Minus, Paperclip, Star, Trash2 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import type { MailboxInfo } from '@/lib/mail';
@@ -29,6 +29,35 @@ function RowButton({ label, onClick, children }: { label: string; onClick: () =>
   );
 }
 
+/** A checkbox for choosing rows: one on each row, and one above the list for all of them. */
+export function SelectBox({ checked, label, onClick, className, ...props }: Omit<ComponentProps<'button'>, 'onClick'> & { checked: boolean | 'mixed'; label: string; onClick: (e: MouseEvent) => void }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      {...props}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(e);
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className={cn('group/box grid size-7 shrink-0 place-items-center rounded-full outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/60', className)}
+    >
+      <span
+        className={cn(
+          'grid size-4 place-items-center rounded-[4px] border',
+          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/40 group-hover/box:border-foreground/70',
+        )}
+      >
+        {checked === 'mixed' ? <Minus className="size-3" strokeWidth={3} /> : checked && <Check className="size-3" strokeWidth={3} />}
+      </span>
+    </button>
+  );
+}
+
 /** Who a conversation is between, as the list shows it: "Sam, Alex" or, with one sender, their whole name. */
 function people(c: Conversation, recipients: boolean): string {
   if (recipients) return addressLine(c.latest.to) || 'No Recipients';
@@ -47,9 +76,10 @@ const MessageRow = ({
   cursor,
   recipients,
   onPick,
+  onCheck,
   className,
   ...props
-}: ComponentProps<'div'> & { conversation: Conversation; selected: boolean; cursor: boolean; recipients: boolean; onPick: (pick: MenuPick) => void }) => {
+}: ComponentProps<'div'> & { conversation: Conversation; selected: boolean; cursor: boolean; recipients: boolean; onPick: (pick: MenuPick) => void; onCheck: (e: MouseEvent) => void }) => {
   const item = c.latest;
   const who = people(c, recipients);
   const unread = c.unread;
@@ -68,6 +98,7 @@ const MessageRow = ({
         className,
       )}
     >
+      <SelectBox checked={selected} label="Select" tabIndex={-1} onClick={onCheck} />
       <RowButton label={c.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(c.flagged ? 'unflag' : 'flag')}>
         <Star className={cn('size-4', c.flagged ? 'fill-amber-400 text-amber-500' : 'opacity-60 group-hover:opacity-100')} strokeWidth={1.75} />
       </RowButton>
@@ -104,7 +135,7 @@ export function ListSkeleton() {
   return (
     <div className="pt-1" aria-busy="true" aria-label="Loading messages">
       {Array.from({ length: 10 }, (_, i) => (
-        <div key={i} className="flex items-center gap-4 border-b border-border/50 py-2 pr-3 pl-10">
+        <div key={i} className="flex items-center gap-4 border-b border-border/50 py-2 pr-3 pl-18">
           <div className="size-8 shrink-0 animate-pulse rounded-full bg-foreground/10 motion-reduce:animate-none" />
           <div className="h-3.5 w-40 shrink-0 animate-pulse rounded bg-foreground/10 motion-reduce:animate-none" />
           <div className="h-3.5 flex-1 animate-pulse rounded bg-foreground/[0.07] motion-reduce:animate-none" />
@@ -125,6 +156,7 @@ export function MessageList({
   loadingMore,
   onLoadMore,
   onClickRow,
+  onCheckRow,
   onKeyDown,
   onPick,
   targetsFor,
@@ -143,6 +175,8 @@ export function MessageList({
   loadingMore: boolean;
   onLoadMore: () => void;
   onClickRow: (e: MouseEvent, c: Conversation) => void;
+  /** A row's checkbox clicked: Shift-click takes in the rows since the last one. */
+  onCheckRow: (e: MouseEvent, c: Conversation) => void;
   onKeyDown: (e: KeyboardEvent) => void;
   /** Something picked on a row: its menu, its star, or its hover buttons. */
   onPick: (pick: MenuPick, c: Conversation) => void;
@@ -203,6 +237,7 @@ export function MessageList({
               selected={selected.has(c.key)}
               cursor={cursor === c.key}
               onPick={(pick) => onPick(pick, c)}
+              onCheck={(e) => onCheckRow(e, c)}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData(MAIL_DRAG, JSON.stringify(targetsFor(c).flatMap((t) => t.items.map((i) => i.key))));

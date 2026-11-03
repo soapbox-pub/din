@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, Search, SquarePen, Star, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, RefreshCw, Search, SquarePen, Star, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -14,7 +14,7 @@ import { blankSeed, parseAddresses } from './format';
 import { rememberAddresses } from './contacts';
 import { Sidebar } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
-import { ListSkeleton, MessageList } from './MessageList';
+import { ListSkeleton, MessageList, SelectBox } from './MessageList';
 import { Reader } from './Reader';
 import { messageMenu, type MenuPick } from './menu';
 import { DropdownEntries } from './MenuEntries';
@@ -435,6 +435,29 @@ export function Viewer() {
     openConversation(c);
   };
 
+  const onCheckRow = (e: MouseEvent, c: Conversation) => {
+    const from = anchor.current;
+    const n = new Set(chosen);
+    if (e.shiftKey && from && from !== c.key) {
+      // The rows between take the state the clicked one goes to.
+      const a = conversations.findIndex((x) => x.key === from);
+      const b = conversations.findIndex((x) => x.key === c.key);
+      const [lo, hi] = a < 0 ? [b, b] : a < b ? [a, b] : [b, a];
+      const on = !chosen.has(c.key);
+      for (const x of conversations.slice(lo, hi + 1)) {
+        if (on) n.add(x.key);
+        else n.delete(x.key);
+      }
+    } else if (n.has(c.key)) {
+      n.delete(c.key);
+    } else {
+      n.add(c.key);
+    }
+    setChosen(n);
+    setCursor(c.key);
+    anchor.current = c.key;
+  };
+
   const onListKey = (e: KeyboardEvent) => {
     const at = conversations.findIndex((c) => c.key === cursor);
     const go = (index: number) => {
@@ -696,9 +719,24 @@ export function Viewer() {
     </ActionBar>
   );
 
-  const selectionBar = !current && chosenConversations.length > 0 && first && (
+  const allChosen = chosenConversations.length > 0 && chosenConversations.length === conversations.length;
+  const selectAll = (
+    <SelectBox
+      checked={allChosen ? true : chosenConversations.length ? 'mixed' : false}
+      label={chosenConversations.length ? 'Clear selection' : 'Select all'}
+      onClick={() => setChosen(chosenConversations.length ? new Set() : new Set(conversations.map((c) => c.key)))}
+      className="mr-1 -ml-0.5"
+    />
+  );
+
+  const selectionBar = !current && conversations.length > 0 && (!chosenConversations.length || !first ? (
     <ActionBar>
-      <ToolButton label="Clear selection" onClick={() => setChosen(new Set())}><X className="size-4.5" strokeWidth={1.75} /></ToolButton>
+      {selectAll}
+      <ToolButton label="Get new mail" onClick={refresh}><RefreshCw className="size-4.5" strokeWidth={1.75} /></ToolButton>
+    </ActionBar>
+  ) : (
+    <ActionBar>
+      {selectAll}
       <span className="mr-2 text-sm font-medium tabular-nums">{chosenConversations.length.toLocaleString()} selected</span>
       <ToolButton label="Archive" onClick={() => pickFor('archive', selectedItems)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Delete" onClick={() => pickFor('trash', selectedItems)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
@@ -710,7 +748,7 @@ export function Viewer() {
       </ToolButton>
       <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), SELECTION_PICKS, chosenConversations.length === 1)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
     </ActionBar>
-  );
+  ));
 
   const list = (
     <section ref={listRef} aria-label={title} className="flex min-h-0 flex-1 flex-col">
@@ -746,6 +784,7 @@ export function Viewer() {
             if (!messages.isFetchingNextPage) void messages.fetchNextPage();
           }}
           onClickRow={onClickRow}
+          onCheckRow={onCheckRow}
           onKeyDown={onListKey}
           onPick={(pick, c) => pickFor(pick, pickTargets(pick, targetsFor(c)))}
           targetsFor={targetsFor}
