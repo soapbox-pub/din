@@ -1844,6 +1844,9 @@ export const Window = memo(function Window({
           ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
         )}
       >
+        {/* What bounces when the desktop's own content is scrolled past its
+            end (OverscrollHost); apps' pages bounce inside their GuestSurface. */}
+        <div data-overscroll-surface="" className="size-full">
         <WindowOwnHeaderContext.Provider value={setOwnHeader}>
         <WindowFocusContext.Provider value={isTop}>
           <WindowTitlebarContext.Provider value={setTitlebar}>
@@ -1869,6 +1872,7 @@ export const Window = memo(function Window({
           </WindowTitlebarContext.Provider>
         </WindowFocusContext.Provider>
         </WindowOwnHeaderContext.Provider>
+        </div>
       </div>
       </WindowFrameContext.Provider>
 

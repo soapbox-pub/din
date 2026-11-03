@@ -3608,6 +3608,14 @@ const PASSWORDS_PRELOAD = path.join(import.meta.dirname, 'passwords-preload.cjs'
 const POWER_MODE_PRELOAD = path.join(import.meta.dirname, 'power-mode-preload.built.cjs');
 
 /**
+ * Absolute path to the session preload that tells the <webview> hosting an
+ * app or a web page when a scroll runs past the end, for the desktop to
+ * bounce it; overscroll-preload.cjs with src/shared/overscroll.ts bundled in
+ * (scripts/build-din-runtime.mjs).
+ */
+const OVERSCROLL_PRELOAD = path.join(import.meta.dirname, 'overscroll-preload.built.cjs');
+
+/**
  * Absolute path to the session preload that gives installed nsites the napp
  * runtime (see electron/napp.mts): window.napp, notifications and periodic
  * sync from the page and the service worker, and window.ENV. Registered on
@@ -5866,6 +5874,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
     s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
     s.registerPreloadScript({ id: 'din-power-mode', type: 'frame', filePath: POWER_MODE_PRELOAD });
+    s.registerPreloadScript({ id: 'din-overscroll', type: 'frame', filePath: OVERSCROLL_PRELOAD });
     allowScreenSharing(s);
   }
   registerScreenShareHandlers({
@@ -5925,6 +5934,8 @@ app.whenReady().then(() => {
   );
   // An app prints as a page does, with the web's print().
   appsSession().registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
+  // And bounces at the end of a scroll as a page does.
+  appsSession().registerPreloadScript({ id: 'din-overscroll', type: 'frame', filePath: OVERSCROLL_PRELOAD });
   appsSession().registerPreloadScript({ id: 'din-app-sw', type: 'frame', filePath: DIN_APP_WORKER_PRELOAD });
   appsSession().registerPreloadScript({ id: 'din-app-sw-worker', type: 'service-worker', filePath: DIN_APP_WORKER_PRELOAD });
   registerWidgets(

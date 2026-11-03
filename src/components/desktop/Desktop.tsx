@@ -26,6 +26,7 @@ import { MailHost } from './MailHost';
 import { PhoneHost } from './PhoneHost';
 import { QuickShareHost } from './QuickShareHost';
 import { GuestInputHost } from './GuestInputHost';
+import { OverscrollHost } from './OverscrollHost';
 import { CursorEffectsLayer } from './CursorEffectsLayer';
 import { DinDragOverlay } from './DinDragOverlay';
 import { Window } from './Window';
@@ -264,6 +265,7 @@ function DesktopSession() {
                     <MailHost />
                     <QuickShareHost />
                     <GuestInputHost />
+                    <OverscrollHost />
                     <CursorEffectsLayer />
                     <DinDragOverlay />
                     <InstallerAutoOpen />
