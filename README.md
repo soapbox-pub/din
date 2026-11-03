@@ -343,10 +343,17 @@ servers whose windows Din composites into its own:
   when the compositor is on the GPU Chromium uses, only linear ones
   otherwise, as with two GPUs). Without one, pixels
   stream to the shell over a token-guarded localhost WebSocket. Either way,
-  apps are paced by the shell's display refresh.
+  apps are paced by the shell's display refresh. Apps draw at the shell's
+  pixel ratio (its zoom, times the screen's scale): the outputs carry it,
+  as a fractional scale (wp_fractional_scale, with wp_viewporter) or a
+  whole buffer scale, and windows reach Din at it, so they're as sharp as
+  Din's own at 200%. A buffer the app drew at that scale is still passed
+  on as it is.
 - **X11** — the compositor's rootless Xwayland, which it manages as the X
   window manager, so X11 apps take the same (GPU) path as Wayland ones and get
-  hardware OpenGL. Where Xwayland isn't installed, or without the compositor,
+  hardware OpenGL. X apps draw at 1, which Din scales up: Xwayland can't tell
+  its clients a scale, and making it run at the screen's pixels would leave
+  every app that doesn't scale itself tiny. Where Xwayland isn't installed, or without the compositor,
   X11 apps fall back to a private Xvfb, managed and composited by
   `electron/native-display-worker.mts` (software rendering).
 

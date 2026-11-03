@@ -14,7 +14,10 @@
  *
  * Coordinates: the X screen is the shell's viewport, in CSS pixels. A popup
  * at root (x, y) is drawn at viewport (x, y); a toplevel's root position is
- * its canvas's viewport position, reported with `setGeometry`.
+ * its canvas's viewport position, reported with `setGeometry`. Pixels are
+ * the exception: a Wayland app draws at the shell's devicePixelRatio, which
+ * the compositor is told with the monitors, so its canvas holds `scale`
+ * pixels per CSS pixel (X apps stay at 1, scaled up here).
  */
 
 import { keepAccelerated } from '@/lib/cpuCanvas';
@@ -51,6 +54,8 @@ export interface NativeSurface {
    * game mapping in full screen, or asking before its window was up.
    */
   wantsFullscreen: boolean;
+  /** The canvas's pixels per CSS pixel: what the app draws at. */
+  scale: number;
   canvas: HTMLCanvasElement;
 }
 
@@ -100,6 +105,8 @@ interface WindowInfo {
   opaque?: boolean;
   /** It maps in full screen, or asked for it before it was announced. */
   fullscreen?: boolean;
+  /** Pixels per CSS pixel; absent (1) from the X server and older compositors. */
+  scale?: number;
 }
 
 interface FrameUpdate {
@@ -116,7 +123,8 @@ type WorkerMessage =
   | ({ type: 'open' | 'popup' } & WindowInfo)
   | { type: 'close'; id: number }
   | { type: 'title'; id: number; title: string }
-  | { type: 'configure'; id: number; x: number; y: number; width: number; height: number }
+  /** `scale` only when it changed. */
+  | { type: 'configure'; id: number; x: number; y: number; width: number; height: number; scale?: number }
   | { type: 'activate'; id: number }
   | { type: 'decoration'; id: number; csd: boolean }
   | { type: 'move'; id: number }
@@ -197,7 +205,7 @@ export function startNativeDisplay(): void {
     port?.close();
     port = event.ports[0];
     port.onmessage = (e: MessageEvent<WorkerMessage>) => onMessage(e.data);
-    if (monitorRects.length > 0) send({ type: 'monitors', monitors: monitorRects });
+    if (monitorRects.length > 0) sendMonitors();
   });
   // GPU frames are drawn by the preload; acking them is what paces the apps.
   window.dinos?.nativeDisplay?.onPresented(() => {
@@ -245,37 +253,58 @@ function ackOnNextFrame(source: string | undefined): void {
   });
 }
 
-function createCanvas(width: number, height: number, opaque: boolean): HTMLCanvasElement {
+/** A scale the compositor reported, or 1. */
+function scaleOf(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0.5 && value <= 4 ? value : 1;
+}
+
+/** A CSS length in canvas pixels at SCALE, rounded as the compositor rounds it. */
+function pixels(length: number, scale: number): number {
+  return Math.max(1, Math.round(Math.max(1, length) * scale));
+}
+
+/** Each canvas's pixels per CSS pixel. */
+const canvasScales = new WeakMap<HTMLCanvasElement, number>();
+
+function createCanvas(width: number, height: number, scale: number, opaque: boolean): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   // GPU-rendered windows are drawn from shared textures every frame.
   keepAccelerated(canvas);
   // An opaque window's frames may be an app's own buffer with no alpha
   // channel (its padding byte must not count), and Chromium needn't blend it.
   if (opaque) canvas.getContext('2d', { alpha: false });
-  canvas.width = Math.max(1, width);
-  canvas.height = Math.max(1, height);
+  canvas.width = pixels(width, scale);
+  canvas.height = pixels(height, scale);
+  canvasScales.set(canvas, scale);
   canvas.style.display = 'block';
-  canvas.style.width = `${canvas.width}px`;
-  canvas.style.height = `${canvas.height}px`;
+  canvas.style.width = `${Math.max(1, width)}px`;
+  canvas.style.height = `${Math.max(1, height)}px`;
   canvas.style.cursor = `var(${NATIVE_CURSOR_VAR}, default)`;
   return canvas;
 }
 
-/** Resize a canvas, keeping its pixels until the next full frame lands. */
-function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number): void {
+/**
+ * Resize a canvas to WIDTH x HEIGHT CSS pixels at SCALE, keeping its pixels
+ * (scaled, if the scale changed) until the next full frame lands.
+ */
+function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number, scale: number): void {
   width = Math.max(1, width);
   height = Math.max(1, height);
-  if (canvas.width === width && canvas.height === height) return;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const backingWidth = pixels(width, scale);
+  const backingHeight = pixels(height, scale);
+  const ratio = scale / (canvasScales.get(canvas) ?? 1);
+  canvasScales.set(canvas, scale);
+  if (canvas.width === backingWidth && canvas.height === backingHeight) return;
   const copy = document.createElement('canvas');
   keepAccelerated(copy);
   copy.width = canvas.width;
   copy.height = canvas.height;
   copy.getContext('2d')?.drawImage(canvas, 0, 0);
-  canvas.width = width;
-  canvas.height = height;
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  canvas.getContext('2d')?.drawImage(copy, 0, 0);
+  canvas.width = backingWidth;
+  canvas.height = backingHeight;
+  canvas.getContext('2d')?.drawImage(copy, 0, 0, copy.width * ratio, copy.height * ratio);
 }
 
 function onMessage(message: WorkerMessage): void {
@@ -314,9 +343,10 @@ function onMessage(message: WorkerMessage): void {
         transientFor: message.transientFor,
         csd: message.csd === true,
         wantsFullscreen: message.fullscreen === true || existing?.wantsFullscreen === true,
-        canvas: existing?.canvas ?? createCanvas(message.width, message.height, message.opaque === true),
+        scale: scaleOf(message.scale),
+        canvas: existing?.canvas ?? createCanvas(message.width, message.height, scaleOf(message.scale), message.opaque === true),
       };
-      resizeCanvas(surface.canvas, surface.width, surface.height);
+      resizeCanvas(surface.canvas, surface.width, surface.height, surface.scale);
       surfaces.set(surface.id, surface);
       for (const early of earlyUpdates.get(surface.id) ?? []) {
         drawUpdate(surface.id, early.x, early.y, early.width, early.height, early.pixels);
@@ -351,7 +381,8 @@ function onMessage(message: WorkerMessage): void {
       surface.y = message.y;
       surface.width = message.width;
       surface.height = message.height;
-      resizeCanvas(surface.canvas, message.width, message.height);
+      if (message.scale !== undefined) surface.scale = scaleOf(message.scale);
+      resizeCanvas(surface.canvas, message.width, message.height, surface.scale);
       emit({ type: 'configure', surface });
       return;
     }
@@ -542,7 +573,7 @@ export function setNativeGeometry(
   surface.y = y;
   surface.width = width;
   surface.height = height;
-  resizeCanvas(surface.canvas, width, height);
+  resizeCanvas(surface.canvas, width, height, surface.scale);
   send({ type: 'geometry', id, x, y, width, height });
 }
 
@@ -552,13 +583,31 @@ let monitorRects: Rect[] = [];
 /**
  * Tell the compositor where Din's monitors are, so apps see each one (a
  * game in full screen fills its monitor) rather than one screen spanning
- * them all.
+ * them all, and how many of the shell's pixels a CSS pixel is (its zoom
+ * and the screen's scale), for Wayland apps to draw at.
  */
 export function setNativeMonitors(monitors: Monitor[]): void {
   monitorRects = [...monitors]
     .sort((a, b) => Number(b.primary) - Number(a.primary))
     .map(({ x, y, width, height }) => ({ x, y, width, height }));
-  send({ type: 'monitors', monitors: monitorRects });
+  sendMonitors();
+}
+
+function sendMonitors(): void {
+  send({ type: 'monitors', monitors: monitorRects, scale: window.devicePixelRatio || 1 });
+  watchPixelRatio();
+}
+
+let pixelRatioQuery: MediaQueryList | null = null;
+
+/**
+ * Tell the compositor again when the pixel ratio changes without the
+ * monitors doing so (a windowed Din moved to a screen of another scale).
+ */
+function watchPixelRatio(): void {
+  pixelRatioQuery?.removeEventListener('change', sendMonitors);
+  pixelRatioQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+  pixelRatioQuery.addEventListener('change', sendMonitors);
 }
 
 /** The toplevel holding Din's keyboard focus (0: none). */

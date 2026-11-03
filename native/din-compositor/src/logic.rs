@@ -40,7 +40,8 @@ use crate::{
     canvas::{Canvas, Patch},
     clipboard::{Contents, URI_LIST},
     direct::{DirectChannel, Reply},
-    state::{KeyboardFocus, Popup, PopupShell, State, Toplevel},
+    gpu::physical_size,
+    state::{KeyboardFocus, Popup, PopupShell, State, Toplevel, is_xwayland},
     xwayland::window_type_name,
 };
 
@@ -86,21 +87,29 @@ fn has_buffer(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }
 
-/// Render `surface` into `canvas` (replaced when the size changed), returning
-/// its changed rectangles.
+/// Render `surface` into `canvas` at SCALE (replaced when the size or scale
+/// changed), returning its changed rectangles.
 fn render(
     renderer: &mut smithay::backend::renderer::pixman::PixmanRenderer,
     canvas: &mut Option<Canvas>,
     surface: &WlSurface,
     geometry: Rectangle<i32, Logical>,
+    scale: f64,
 ) -> Vec<Patch> {
-    let size = (geometry.size.w, geometry.size.h).into();
-    if canvas.as_ref().is_none_or(|c| c.size() != size) {
-        *canvas = Canvas::new(renderer, size);
+    let size = physical_size(geometry.size, scale);
+    if canvas.as_ref().is_none_or(|c| c.size() != size || c.scale() != scale) {
+        *canvas = Canvas::new(renderer, size, scale);
     }
     let Some(canvas) = canvas.as_mut() else { return Vec::new() };
     let _ = import_surface_tree(renderer, surface);
-    canvas.render(renderer, surface, (geometry.loc.x, geometry.loc.y).into())
+    canvas.render(renderer, surface, geometry.loc.to_f64().to_physical(scale).to_i32_round())
+}
+
+/// A monitor's mode: its size in pixels at SCALE, which apps (and
+/// xdg-output) divide by the scale back to its size in viewport pixels.
+fn monitor_mode(rect: &Rectangle<i32, Logical>, scale: f64) -> Mode {
+    let size = physical_size(rect.size, scale);
+    Mode { size: (size.w, size.h).into(), refresh: 60_000 }
 }
 
 impl State {
@@ -190,6 +199,7 @@ impl State {
             let Description { title, class, pid, kind, acked, csd } = self.describe(&self.toplevels[index], &surface);
             let geometry = self.toplevels[index].window.geometry();
             let covers_monitor = self.covers_monitor(&self.toplevels[index], geometry.size);
+            let scale = self.scale_of(&surface);
             let t = &mut self.toplevels[index];
             if !t.announced {
                 t.announced = true;
@@ -215,6 +225,7 @@ impl State {
                     "csd": csd,
                     "opaque": t.opaque,
                     "fullscreen": fullscreen,
+                    "scale": scale,
                 }));
                 self.enter_output(&surface);
                 continue;
@@ -247,6 +258,7 @@ impl State {
                 continue;
             }
             let geometry = self.popups[index].geometry();
+            let scale = self.scale_of(&surface);
             let p = &mut self.popups[index];
             p.announced = true;
             p.dirty = true;
@@ -269,6 +281,7 @@ impl State {
                 "pid": Value::Null,
                 "kind": kind,
                 "transientFor": Value::Null,
+                "scale": scale,
             }));
             self.enter_output(&surface);
         }
@@ -306,11 +319,13 @@ impl State {
         let mut sent = false;
         let mut idle = Vec::new();
         let mut waiting = Vec::new();
+        let scale = self.scale;
         let State { toplevels, popups, renderer, frames, .. } = self;
+        let scale_of = |surface: &WlSurface| if is_xwayland(surface) { 1.0 } else { scale };
         for t in toplevels.iter_mut().filter(|t| t.announced && t.dirty) {
             t.dirty = false;
             let Some(surface) = t.wl_surface() else { continue };
-            let patches = render(renderer, &mut t.canvas, &surface, t.window.geometry());
+            let patches = render(renderer, &mut t.canvas, &surface, t.window.geometry(), scale_of(&surface));
             for patch in &patches {
                 frames.patch(t.id, patch);
             }
@@ -321,7 +336,7 @@ impl State {
             p.dirty = false;
             let Some(surface) = p.wl_surface() else { continue };
             let geometry = p.geometry();
-            let patches = render(renderer, &mut p.canvas, &surface, geometry);
+            let patches = render(renderer, &mut p.canvas, &surface, geometry, scale_of(&surface));
             for patch in &patches {
                 frames.patch(p.id, patch);
             }
@@ -351,6 +366,7 @@ impl State {
         let mut idle = Vec::new();
         let mut waiting = Vec::new();
         let mut pixels = 0usize;
+        let scale = self.scale;
         let State { toplevels, popups, gpu, buffers, frames, passthrough, .. } = self;
         let (Some(gpu), Some(buffers)) = (gpu.as_mut(), buffers.as_mut()) else { return };
         let windows = toplevels
@@ -367,8 +383,9 @@ impl State {
         for (id, surface, geometry, opaque, dirty, target, shown) in windows {
             *dirty = false;
             let Some(surface) = surface else { continue };
+            let scale = if is_xwayland(&surface) { 1.0 } else { scale };
             // The app's own buffer, if it can go as it is.
-            if let Some(buffer) = passthrough.show(gpu, buffers, shown, &surface, geometry, opaque) {
+            if let Some(buffer) = passthrough.show(gpu, buffers, shown, &surface, geometry, scale, opaque) {
                 if let Some(ring) = target.take() {
                     ring.release(buffers);
                 }
@@ -377,9 +394,10 @@ impl State {
                 continue;
             }
             passthrough.stop(shown);
-            match gpu.render(target, &surface, geometry, buffers) {
+            match gpu.render(target, &surface, geometry, scale, buffers) {
                 Some(buffer) => {
-                    pixels += (geometry.size.w * geometry.size.h) as usize;
+                    let size = physical_size(geometry.size, scale);
+                    pixels += (size.w * size.h) as usize;
                     presents.push(json!({ "id": id, "buffer": buffer }));
                     waiting.push(surface);
                 }
@@ -483,6 +501,7 @@ impl State {
             return;
         }
         let menus_open = self.popups.iter().any(|p| p.announced);
+        let scale = self.scale;
         let State { toplevels, gpu, direct, direct_waiting, .. } = self;
         let (Some(gpu), Some(channel)) = (gpu.as_mut(), direct.as_mut()) else { return };
         let Some(t) = toplevels.iter_mut().find(|t| t.id == id && t.announced) else { return };
@@ -490,8 +509,9 @@ impl State {
             return;
         }
         let Some(surface) = t.wl_surface() else { return };
+        let scale = if is_xwayland(&surface) { 1.0 } else { scale };
         let lone = (!menus_open && !t.direct_refused)
-            .then(|| crate::gpu::lone_buffer(&surface, t.window.geometry()))
+            .then(|| crate::gpu::lone_buffer(&surface, t.window.geometry(), scale))
             .flatten()
             .and_then(|buffer| get_dmabuf(&buffer).ok().cloned().map(|dmabuf| (buffer, dmabuf)));
         let Some((buffer, dmabuf)) = lone else {
@@ -690,7 +710,7 @@ impl State {
         });
         let bbox = bbox_from_surface_tree(&surface, (0, 0));
         let mut canvas = None;
-        let patches = render(&mut self.renderer, &mut canvas, &surface, bbox);
+        let patches = render(&mut self.renderer, &mut canvas, &surface, bbox, 1.0);
         if let Some(patch) = patches.first() {
             self.wire.cursor(patch.width, patch.height, hotspot.x - bbox.loc.x, hotspot.y - bbox.loc.y, &patch.rgba);
         }
@@ -1016,11 +1036,15 @@ impl State {
         });
     }
 
-    /// Din's monitors, in viewport pixels, primary first. Each gets an
-    /// output of its own, so apps see the monitors they're on: a game going
-    /// full screen sizes itself to its monitor (from Xwayland's RandR), not
-    /// to the union of them all, which Din would show boxed into one.
+    /// Din's monitors, in viewport pixels, primary first, and the shell's
+    /// pixels per viewport pixel. Each monitor gets an output of its own, so
+    /// apps see the monitors they're on: a game going full screen sizes
+    /// itself to its monitor (from Xwayland's RandR), not to the union of
+    /// them all, which Din would show boxed into one.
     fn set_monitors(&mut self, message: &Value) {
+        let scale = message.get("scale").and_then(Value::as_f64).filter(|s| (0.5..=4.0).contains(s)).unwrap_or(self.scale);
+        let rescaled = scale != self.scale;
+        self.scale = scale;
         let rects: Vec<Rectangle<i32, Logical>> = message["monitors"]
             .as_array()
             .map(|list| {
@@ -1035,15 +1059,15 @@ impl State {
                     .collect()
             })
             .unwrap_or_default();
-        if rects.is_empty() {
-            return;
-        }
+        let rects = if rects.is_empty() { self.monitors.clone() } else { rects };
+        let rects = if rects.is_empty() { vec![Rectangle::from_size(self.screen)] } else { rects };
         let apply = |output: &Output, rect: &Rectangle<i32, Logical>| {
-            let mode = Mode { size: (rect.size.w, rect.size.h).into(), refresh: 60_000 };
-            if output.current_mode() == Some(mode) && output.current_location() == rect.loc {
+            let mode = monitor_mode(rect, scale);
+            let same_scale = output.current_scale().fractional_scale() == scale;
+            if output.current_mode() == Some(mode) && output.current_location() == rect.loc && same_scale {
                 return;
             }
-            output.change_current_state(Some(mode), None, None, Some(rect.loc));
+            output.change_current_state(Some(mode), None, Some(Scale::Fractional(scale)), Some(rect.loc));
             output.set_preferred(mode);
         };
         apply(&self.output, &rects[0]);
@@ -1061,8 +1085,8 @@ impl State {
                     model: "Embedded display".into(),
                 },
             );
-            let mode = Mode { size: (rect.size.w, rect.size.h).into(), refresh: 60_000 };
-            output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some(rect.loc));
+            let mode = monitor_mode(rect, scale);
+            output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Fractional(scale)), Some(rect.loc));
             output.set_preferred(mode);
             let global = output.create_global::<State>(&self.dh);
             self.extra_outputs.push((output, global));
@@ -1079,6 +1103,35 @@ impl State {
         let union = rects.iter().skip(1).fold(rects[0], |union, rect| union.merge(*rect));
         self.monitors = rects;
         self.screen = (union.loc.x + union.size.w, union.loc.y + union.size.h).into();
+        if rescaled {
+            self.rescale();
+        }
+    }
+
+    /// The scale changed: Wayland apps are told, and their windows go to Din
+    /// at it from their next frame, which Din is told to make room for.
+    fn rescale(&mut self) {
+        let mut messages = Vec::new();
+        let toplevels = self.toplevels.iter_mut().map(|t| (t.id, t.announced, t.wl_surface(), t.window.geometry(), t.pos, &mut t.dirty));
+        let popups = self.popups.iter_mut().map(|p| (p.id, p.announced, p.wl_surface(), p.geometry(), p.pos, &mut p.dirty));
+        let mut surfaces = Vec::new();
+        for (id, announced, surface, geometry, pos, dirty) in toplevels.chain(popups) {
+            let Some(surface) = surface.filter(|s| !is_xwayland(s)) else { continue };
+            *dirty = true;
+            if announced {
+                messages.push(json!({
+                    "type": "configure", "id": id, "x": pos.x, "y": pos.y,
+                    "width": geometry.size.w, "height": geometry.size.h, "scale": self.scale,
+                }));
+            }
+            surfaces.push(surface);
+        }
+        for surface in &surfaces {
+            self.tell_scale(surface);
+        }
+        for message in messages {
+            self.wire.json(message);
+        }
     }
 
     /// Switch the keyboard layout. Every client gets the new keymap,

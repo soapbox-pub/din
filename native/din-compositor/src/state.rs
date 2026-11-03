@@ -18,9 +18,9 @@ use smithay::{
         },
     },
     delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
-    delegate_ext_data_control, delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
-    delegate_xwayland_shell,
-    desktop::{PopupKind, PopupManager, Window, utils::bbox_from_surface_tree},
+    delegate_ext_data_control, delegate_fractional_scale, delegate_output, delegate_seat, delegate_shm,
+    delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell, delegate_xwayland_shell,
+    desktop::{PopupKind, PopupManager, Window, utils::{bbox_from_surface_tree, with_surfaces_surface_tree}},
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState, XkbConfig},
@@ -48,8 +48,10 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-            add_blocker, add_pre_commit_hook, get_parent, with_states,
+            add_blocker, add_pre_commit_hook, get_parent, send_surface_state, with_states,
         },
+        fractional_scale::{FractionalScaleHandler, FractionalScaleManagerState, with_fractional_scale},
+        viewporter::ViewporterState,
         dmabuf::get_dmabuf,
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
@@ -311,6 +313,8 @@ pub struct State {
     _output_manager_state: OutputManagerState,
     _decoration_state: XdgDecorationState,
     _cursor_shape_state: CursorShapeManagerState,
+    _fractional_scale_state: FractionalScaleManagerState,
+    _viewporter_state: ViewporterState,
     pub seat: Seat<State>,
     /// The primary monitor, or the whole screen until the shell names them.
     pub output: Output,
@@ -334,6 +338,11 @@ pub struct State {
     pub streaming: bool,
     pub stats: Option<Stats>,
     pub screen: Size<i32, Logical>,
+    /// The shell's pixels per CSS pixel (its zoom, on a hidpi screen its
+    /// scale too): Wayland apps are told to draw at it, and their windows
+    /// go to Din at it. X apps stay at 1, as Xwayland can't tell its
+    /// clients a scale, and the shell scales them up.
+    pub scale: f64,
     /// Din's monitors in root coordinates, once the shell has named them.
     pub monitors: Vec<Rectangle<i32, Logical>>,
     /// The screen's compositor, in Din's session (direct.rs).
@@ -442,6 +451,8 @@ impl State {
             _output_manager_state: output_manager_state,
             _decoration_state: decoration_state,
             _cursor_shape_state: cursor_shape_state,
+            _fractional_scale_state: FractionalScaleManagerState::new::<Self>(dh),
+            _viewporter_state: ViewporterState::new::<Self>(dh),
             seat,
             output,
             extra_outputs: Vec::new(),
@@ -460,6 +471,7 @@ impl State {
             streaming: false,
             stats: Stats::from_env(),
             screen,
+            scale: 1.0,
             monitors: Vec::new(),
             direct: DirectChannel::connect(),
             direct_window: None,
@@ -576,6 +588,31 @@ impl State {
     pub fn now_ms(&self) -> u32 {
         self.start.elapsed().as_millis() as u32
     }
+
+    /// Tell a Wayland app's surface tree the scale to draw at: as a
+    /// fractional scale where the app asks for one, else as a whole buffer
+    /// scale (rounded up; the window is scaled down to fit).
+    pub fn tell_scale(&self, surface: &WlSurface) {
+        if is_xwayland(surface) {
+            return;
+        }
+        let scale = self.scale;
+        with_surfaces_surface_tree(surface, |surface, states| {
+            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
+            send_surface_state(surface, states, scale.ceil() as i32, Transform::Normal);
+        });
+    }
+
+    /// The scale a window's surface goes to Din at: the shell's for a
+    /// Wayland app, 1 for an X one (see `scale`).
+    pub fn scale_of(&self, surface: &WlSurface) -> f64 {
+        if is_xwayland(surface) { 1.0 } else { self.scale }
+    }
+}
+
+/// Whether SURFACE is an X window's, through Xwayland.
+pub fn is_xwayland(surface: &WlSurface) -> bool {
+    surface.client().is_some_and(|client| client.get_data::<XWaylandClientData>().is_some())
 }
 
 /// The topmost surface of a subsurface tree.
@@ -627,6 +664,8 @@ impl CompositorHandler for State {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.popup_manager.commit(surface);
+        // Subsurfaces come and go; each learns the scale on its first commit.
+        self.tell_scale(surface);
         let root = root_surface(surface);
 
         if self.cursor_surface.as_ref() == Some(&root) {
@@ -692,6 +731,8 @@ impl XdgShellHandler for State {
         // Cascade until the shell places it; only popup placement reads this.
         let offset = 40 * (self.toplevels.len() as i32 % 8);
         let pos = (80 + offset, 80 + offset).into();
+        // Before its first buffer, so that one is drawn at the scale.
+        self.tell_scale(surface.wl_surface());
         self.toplevels.push(Toplevel::new(id, Window::new_wayland_window(surface), pos));
     }
 
@@ -707,6 +748,7 @@ impl XdgShellHandler for State {
         surface.with_pending_state(|state| state.geometry = geometry);
         let Some(parent) = surface.get_parent_surface() else { return };
         let origin = self.geometry_origin(&parent);
+        self.tell_scale(surface.wl_surface());
         let kind = PopupKind::Xdg(surface);
         let _ = self.popup_manager.track_popup(kind.clone());
         let id = self.allocate_id();
@@ -976,6 +1018,12 @@ impl ServerDndGrabHandler for State {
 
 impl OutputHandler for State {}
 
+impl FractionalScaleHandler for State {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        self.tell_scale(&surface);
+    }
+}
+
 impl XWaylandShellHandler for State {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
         &mut self.xwayland_shell_state
@@ -994,3 +1042,5 @@ delegate_output!(State);
 delegate_cursor_shape!(State);
 delegate_dmabuf!(State);
 delegate_xwayland_shell!(State);
+delegate_fractional_scale!(State);
+delegate_viewporter!(State);

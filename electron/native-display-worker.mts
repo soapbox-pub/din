@@ -1096,8 +1096,11 @@ type ShellMessage =
   | { type: 'drag-enter'; id: number; x: number; y: number; files: string[] }
   | { type: 'drag-drop'; id: number; x: number; y: number }
   | { type: 'drag-end' }
-  /** Din's monitors in viewport pixels, primary first (Wayland only: this X server has one screen). */
-  | { type: 'monitors'; monitors: { x: number; y: number; width: number; height: number }[] }
+  /**
+   * Din's monitors in viewport pixels, primary first, and the shell's pixels
+   * per viewport pixel (Wayland only: this X server has one screen, at 1).
+   */
+  | { type: 'monitors'; monitors: { x: number; y: number; width: number; height: number }[]; scale?: number }
   /** Din minimized a window or restored it (Wayland only). */
   | { type: 'minimized'; id: number; minimized: boolean }
   /** A window in full screen, to the screen's compositor at a rect, or back (no rect; Wayland only). */

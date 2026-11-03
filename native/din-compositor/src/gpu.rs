@@ -55,6 +55,7 @@ use smithay::{
                 Kind,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
+            buffer_dimensions,
             gles::GlesRenderer,
             utils::{self, import_surface_tree, with_renderer_surface_state},
         },
@@ -147,33 +148,36 @@ impl Gpu {
         })
     }
 
-    /// Composite `surface`'s tree into the window's next buffer. Returns the
-    /// buffer to present, or None when nothing changed.
+    /// Composite `surface`'s tree into the window's next buffer, at SCALE
+    /// pixels per logical one. Returns the buffer to present, or None when
+    /// nothing changed.
     pub fn render(
         &mut self,
         target: &mut Option<Target>,
         surface: &WlSurface,
         geometry: Rectangle<i32, Logical>,
+        scale: f64,
         channel: &mut BufferChannel,
     ) -> Option<u32> {
-        let size: Size<i32, Physical> = (geometry.size.w, geometry.size.h).into();
+        let size = physical_size(geometry.size, scale);
         if size.w <= 0 || size.h <= 0 {
             return None;
         }
-        if target.as_ref().is_none_or(|t| t.size != size) {
+        if target.as_ref().is_none_or(|t| t.size != size || t.scale != scale) {
             if let Some(old) = target.take() {
                 old.release(channel);
             }
-            *target = Some(Target::new(self, size, channel)?);
+            *target = Some(Target::new(self, size, scale, channel)?);
         }
         let target = target.as_mut()?;
 
         let _ = import_surface_tree(&mut self.renderer, surface);
+        let origin = geometry.loc.to_f64().to_physical(scale).to_i32_round::<i32>();
         let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = render_elements_from_surface_tree(
             &mut self.renderer,
             surface,
-            (-geometry.loc.x, -geometry.loc.y),
-            1.0,
+            (-origin.x, -origin.y),
+            scale,
             1.0,
             Kind::Unspecified,
         );
@@ -277,20 +281,30 @@ pub fn fully_opaque(surface: &WlSurface) -> bool {
         .unwrap_or(false)
 }
 
-/// SURFACE's buffer, where it alone is the whole window of GEOMETRY: no
-/// subsurfaces, unscaled and uncropped, so it can be shown as it is.
-pub fn lone_buffer(surface: &WlSurface, geometry: Rectangle<i32, Logical>) -> Option<utils::Buffer> {
+/// A logical size in pixels at SCALE, rounded as the apps round theirs.
+pub fn physical_size(size: Size<i32, Logical>, scale: f64) -> Size<i32, Physical> {
+    size.to_f64().to_physical(scale).to_i32_round()
+}
+
+/// SURFACE's buffer, where it alone is the whole window of GEOMETRY at
+/// SCALE: no subsurfaces, uncropped, and with as many pixels as the window
+/// has at that scale (however the app said so: a buffer scale, or a
+/// viewport), so it can be shown as it is.
+pub fn lone_buffer(surface: &WlSurface, geometry: Rectangle<i32, Logical>, scale: f64) -> Option<utils::Buffer> {
     if !get_children(surface).is_empty() || geometry.loc != (0, 0).into() {
         return None;
     }
     with_renderer_surface_state(surface, |state| {
-        if state.buffer_scale() != 1 || state.buffer_transform() != Transform::Normal {
+        if state.buffer_transform() != Transform::Normal {
             return None;
         }
-        let size = state.buffer_size()?;
+        let logical = state.buffer_size()?;
         let view = state.view()?;
-        let whole = view.src == Rectangle::from_size(size.to_f64()) && view.dst == size;
-        (whole && size == geometry.size).then(|| state.buffer().cloned()).flatten()
+        let whole = view.src == Rectangle::from_size(logical.to_f64()) && view.dst == geometry.size;
+        let buffer = state.buffer()?;
+        let pixels = buffer_dimensions(buffer)?;
+        let wanted = physical_size(geometry.size, scale);
+        (whole && (pixels.w, pixels.h) == (wanted.w, wanted.h)).then(|| buffer.clone())
     })
     .flatten()
 }
@@ -311,10 +325,11 @@ pub struct Passthrough {
 }
 
 impl Passthrough {
-    /// Show SURFACE's buffer itself as a window of GEOMETRY, if it can be:
-    /// a lone surface (no subsurfaces), whose GPU buffer is exactly the
-    /// window, unscaled, in a format Din takes. Returns the buffer's id, or
-    /// None to composite the window as usual.
+    /// Show SURFACE's buffer itself as a window of GEOMETRY at SCALE, if it
+    /// can be: a lone surface (no subsurfaces), whose GPU buffer is exactly
+    /// the window at that scale, in a format Din takes. Returns the buffer's
+    /// id, or None to composite the window as usual.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         gpu: &mut Gpu,
@@ -322,9 +337,10 @@ impl Passthrough {
         shown: &mut Option<Shown>,
         surface: &WlSurface,
         geometry: Rectangle<i32, Logical>,
+        scale: f64,
         opaque: bool,
     ) -> Option<u32> {
-        let buffer = lone_buffer(surface, geometry)?;
+        let buffer = lone_buffer(surface, geometry, scale)?;
         let dmabuf = get_dmabuf(&buffer).ok().filter(|d| gpu.shows(d))?;
         let format = passthrough_format(dmabuf.format().code, opaque)?;
         let id = match self.known.get(&buffer.id()) {
@@ -380,6 +396,7 @@ struct SharedBuffer {
 /// One window's ring of shared buffers.
 pub struct Target {
     size: Size<i32, Physical>,
+    scale: f64,
     buffers: Vec<SharedBuffer>,
     next: usize,
     frame: u64,
@@ -387,7 +404,7 @@ pub struct Target {
 }
 
 impl Target {
-    fn new(gpu: &mut Gpu, size: Size<i32, Physical>, channel: &mut BufferChannel) -> Option<Self> {
+    fn new(gpu: &mut Gpu, size: Size<i32, Physical>, scale: f64, channel: &mut BufferChannel) -> Option<Self> {
         let mut buffers = Vec::with_capacity(RING);
         for _ in 0..RING {
             let bo = gpu
@@ -401,10 +418,11 @@ impl Target {
         }
         Some(Self {
             size,
+            scale,
             buffers,
             next: 0,
             frame: 0,
-            tracker: OutputDamageTracker::new(size, 1.0, Transform::Normal),
+            tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
         })
     }
 

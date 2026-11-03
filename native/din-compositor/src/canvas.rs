@@ -1,8 +1,9 @@
 //! An offscreen render target for one surface tree: a toplevel, a popup, or
 //! the cursor.
 //!
-//! Each canvas is a pixman image sized to the surface's window geometry,
-//! plus a damage tracker. Rendering composites the whole tree (subsurfaces
+//! Each canvas is a pixman image sized to the surface's window geometry at
+//! the scale it's drawn at (the shell's pixels per CSS pixel, for an app
+//! that draws at it), plus a damage tracker. Rendering composites the whole tree (subsurfaces
 //! included) and reports which rectangles actually changed, so only those
 //! pixels travel to the shell.
 
@@ -36,12 +37,13 @@ pub struct Canvas {
     image: Image<'static, 'static>,
     tracker: OutputDamageTracker,
     size: Size<i32, Physical>,
+    scale: f64,
     /// Whether `image` still holds the previous frame (age 1) or is fresh.
     primed: bool,
 }
 
 impl Canvas {
-    pub fn new(renderer: &mut PixmanRenderer, size: Size<i32, Physical>) -> Option<Self> {
+    pub fn new(renderer: &mut PixmanRenderer, size: Size<i32, Physical>, scale: f64) -> Option<Self> {
         if size.w <= 0 || size.h <= 0 {
             return None;
         }
@@ -50,8 +52,9 @@ impl Canvas {
             .ok()?;
         Some(Self {
             image,
-            tracker: OutputDamageTracker::new(size, 1.0, Transform::Normal),
+            tracker: OutputDamageTracker::new(size, scale, Transform::Normal),
             size,
+            scale,
             primed: false,
         })
     }
@@ -60,9 +63,14 @@ impl Canvas {
         self.size
     }
 
-    /// Composite `surface`'s tree, offset so that `origin` (in surface
-    /// coordinates - the window geometry's corner) lands at the canvas's
-    /// top-left. Returns the changed rectangles, or an empty list.
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    /// Composite `surface`'s tree at the canvas's scale, offset so that
+    /// `origin` (the window geometry's corner, in surface coordinates
+    /// scaled) lands at the canvas's top-left. Returns the changed
+    /// rectangles, or an empty list.
     pub fn render(
         &mut self,
         renderer: &mut PixmanRenderer,
@@ -74,7 +82,7 @@ impl Canvas {
                 renderer,
                 surface,
                 (-origin.x, -origin.y),
-                1.0,
+                self.scale,
                 1.0,
                 Kind::Unspecified,
             );
