@@ -822,7 +822,10 @@ function Conversation({
   const work = useAssistantWork(directory ? [directory] : []);
   const tasks = tasksOf(work, sessionID);
   const taskIDs = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
-  const inBackground = useMemo(() => backgroundOnly(tasks, messages), [tasks, messages]);
+  const inBackground = useSettled(
+    useMemo(() => backgroundOnly(tasks, messages), [tasks, messages]),
+    BACKGROUND_SETTLE_MS,
+  );
   const killShell = useKillShell();
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   /** Stop a task, and with a subagent, whatever it left running too. */
@@ -1375,6 +1378,26 @@ function AgentPicker({ value, onChange }: { value: string; onChange: (agent: str
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/**
+ * How long a task must stay out of the transcript's running calls before it
+ * shows as in the background. The list of running commands and the messages
+ * update apart, so a command the agent waits on can look like neither for a
+ * moment as it starts and ends.
+ */
+const BACKGROUND_SETTLE_MS = 1000;
+
+/** Of `tasks`, the ones that have been in them for `ms`. */
+function useSettled<T extends { id: string }>(tasks: T[], ms: number): T[] {
+  const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set());
+  const ids = tasks.map((task) => task.id).join('\n');
+  useEffect(() => {
+    if (!ids) return;
+    const timer = setTimeout(() => setSettled(new Set(ids.split('\n'))), ms);
+    return () => clearTimeout(timer);
+  }, [ids, ms]);
+  return useMemo(() => tasks.filter((task) => settled.has(task.id)), [tasks, settled]);
 }
 
 /** How many recent folders the folder picker offers. */
