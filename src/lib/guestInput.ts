@@ -35,6 +35,13 @@ export type GuestInput =
       meta: boolean;
     })
   | (GuestPoint & {
+      /** The wheel turned over the guest (at most a few times a second). */
+      type: 'wheel';
+      wcId: number;
+      /** Whether Super (Meta) was held. */
+      meta: boolean;
+    })
+  | (GuestPoint & {
       /** A mouse button went down, or came up, in the guest. */
       type: 'down' | 'up';
       wcId: number;

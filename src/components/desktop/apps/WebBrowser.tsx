@@ -628,17 +628,17 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     setActiveId(id);
   }, []);
 
-  // Focus the tab just switched to, after the commit that makes its surface
-  // visible (a hidden <webview> can't take focus). A blank tab focuses the
-  // address bar instead, ready to type.
+  // Focus the tab just switched to (or sent somewhere typed), after the
+  // commit that makes its surface visible (a hidden <webview> can't take
+  // focus). A blank tab focuses the address bar instead, ready to type.
   useEffect(() => {
     if (!focusOnActivate.current) return;
     focusOnActivate.current = false;
-    const tab = tabsRef.current.find((t) => t.id === activeId);
+    const tab = tabs.find((t) => t.id === activeId);
     if (!tab) return;
     if (tab.url === '') focusAddress();
     else if (!isInternalUrl(tab.url)) views.current.get(tab.id)?.focus();
-  }, [activeId, focusAddress]);
+  }, [activeId, tabs, focusAddress]);
 
   /**
    * Open a fresh blank tab and drop the cursor in the empty address bar,
@@ -1537,6 +1537,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         promptUserscriptInstall(resolved);
         return;
       }
+      // Going somewhere typed hands the keyboard to the page, like Chrome,
+      // so the scroll keys work on it rather than in the address bar.
+      if (typed && id === activeIdRef.current) focusOnActivate.current = true;
       // A surface's session is fixed, so going to or from an onion site
       // mounts a new one in the other session, with a history of its own.
       const tor = isOnionUrl(resolved);

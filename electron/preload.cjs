@@ -3065,6 +3065,7 @@ expose('guestInput', {
    * Subscribe to forwarded guest input. Returns an unsubscribe fn. Payloads:
    *   { wcId, type: 'move', x, y, sx?, sy?, meta }
    *   { wcId, type: 'down' | 'up', x, y, sx?, sy?, button, meta }
+   *   { wcId, type: 'wheel', x, y, sx?, sy?, meta }
    * @param {(data: { wcId: number, type: string, x: number, y: number, sx?: number, sy?: number, button?: string, meta: boolean }) => void} callback
    */
   onInput: (callback) => {

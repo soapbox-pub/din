@@ -18,6 +18,9 @@ const BUTTON_MASKS = { left: 1, middle: 4, right: 2 } as const;
  *  - it's also a `focusin`, since a press focuses the page and the <webview>
  *    doesn't reliably say so itself. Windows remember it as their
  *    last-focused element, to give it focus back when raised;
+ *  - a turn of the wheel over a page is a `wheel` on its <webview> (a few
+ *    a second at most), so its window can give the page the keyboard when
+ *    it's being scrolled without it;
  *  - the pointer moving over a page is a `pointermove`, so the Dock's
  *    coordinate-based retraction works over web content too.
  *
@@ -66,6 +69,10 @@ export function GuestInputHost() {
       };
       if (input.type === 'move') {
         el.dispatchEvent(new PointerEvent('pointermove', init));
+        return;
+      }
+      if (input.type === 'wheel') {
+        el.dispatchEvent(new WheelEvent('wheel', init));
         return;
       }
       // Releases are for cursor effects, which listen to the bridge

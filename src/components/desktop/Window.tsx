@@ -59,7 +59,8 @@ import {
   type SnapZone,
   type WorkArea,
 } from '@/lib/monitors';
-import { guestElements, isGuestFullscreen } from '@/platform/guest';
+import { guestElements, isGuestElement, isGuestFullscreen } from '@/platform/guest';
+import { isTextEntry } from '@/shared/caret';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 /**
@@ -1750,6 +1751,18 @@ export const Window = memo(function Window({
       onFocus={(e) => {
         if (e.target instanceof HTMLElement) lastFocused.current = e.target;
         focus(win.id);
+      }}
+      // Scrolling a page doesn't focus it, so the arrow keys, Page Up/Down,
+      // Home and End after a scroll would go to whatever had focus before (a
+      // toolbar button, a tab, nothing). Scrolling the page in the focused
+      // window gives it the keyboard, unless that's in a text field. The
+      // wheel over a <webview> arrives as GuestInputHost's synthetic wheel.
+      onWheel={(e) => {
+        const target = e.target as Element;
+        if (!isTop || !isGuestElement(target)) return;
+        const active = document.activeElement;
+        if (active === target || isTextEntry(active)) return;
+        target.focus({ preventScroll: true });
       }}
       style={geometry}
       onAnimationEnd={(e) => {

@@ -3619,6 +3619,8 @@ function sendToShell(channel: string, payload?: unknown): void {
 
 /** How often, at most, a guest's pointer moves are forwarded to the shell. */
 const GUEST_MOVE_INTERVAL_MS = 16;
+/** How often, at most, a wheel over an unfocused guest is forwarded to the shell. */
+const GUEST_WHEEL_INTERVAL_MS = 250;
 
 /**
  * Pointer input inside a <webview> guest goes to the guest's own document and
@@ -3709,6 +3711,7 @@ function forwardGuestInput(contents: Electron.WebContents): void {
   };
   let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean } | null = null;
   let moveTimer: NodeJS.Timeout | null = null;
+  let wheelAt = -Infinity;
   const flushMove = (): void => {
     if (moveTimer) clearTimeout(moveTimer);
     moveTimer = null;
@@ -3731,6 +3734,15 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     } else if (mouse.type === 'mouseUp') {
       flushMove();
       sendToShell('guest:input', { wcId, type: 'up', x: mouse.x, y: mouse.y, ...inShell(mouse), button: mouse.button ?? 'left', meta });
+    } else if (mouse.type === 'mouseWheel') {
+      // Now and then: a scroll is a burst of these, and the shell only
+      // needs to hear of one (to hand the page the keyboard, if it lacks
+      // it, so scroll keys follow the wheel).
+      const now = Date.now();
+      if (now - wheelAt < GUEST_WHEEL_INTERVAL_MS) return;
+      wheelAt = now;
+      flushMove();
+      sendToShell('guest:input', { wcId, type: 'wheel', x: mouse.x, y: mouse.y, ...inShell(mouse), meta });
     }
   });
   contents.once('destroyed', () => {
