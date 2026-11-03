@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useDin } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import type { MailAccount, MailMessage } from '@/lib/mail';
 import { patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
+import { appLink } from '@/shared/launch';
 
 export type MessageAction =
   | 'reply'
@@ -36,7 +36,6 @@ function byMailbox(items: Item[]): Map<string, { accountId: string; path: string
  * hears which messages left the list (to move the selection on).
  */
 export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set<string>) => void) {
-  const din = useDin();
   const mail = useMail();
   const qc = useQueryClient();
 
@@ -47,7 +46,7 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [],
   );
 
-  const compose = useCallback((seed: ComposeSeed) => void din.app.open('mail', { compose: seed }), [din]);
+  const compose = useCallback((seed: ComposeSeed) => void window.open(appLink('mail', { compose: seed })), []);
 
   const newMessage = useCallback((accountId: string | null) => compose(blankSeed(accountId)), [compose]);
 

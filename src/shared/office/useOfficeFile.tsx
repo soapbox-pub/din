@@ -6,6 +6,7 @@ import { ACCENTS, type OfficeApp } from './accent';
 import { OfficeButton, OfficeDialog, type RecentFile } from './chrome';
 import { fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
+import { appLink } from '@/shared/launch';
 
 /** Bigger files than this aren't read. */
 const MAX_BYTES = 512 * 1024 * 1024;
@@ -244,7 +245,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   const openFile = useCallback(
     (target: FileSystemFileHandle) => {
       if (handle && din.files.path(target) === din.files.path(handle) && !error) return;
-      if (dirtyRef.current || handle) void din.app.openWindow({}, [target]);
+      if (dirtyRef.current || handle) void din.app.launch(appLink(null), [target]);
       else {
         setLoading(true);
         setError(null);
@@ -280,7 +281,7 @@ export function useOfficeFile(opts: OfficeFileOptions) {
   const showRecentInFiles = useCallback(
     async (entry: RecentFile) => {
       const target = await restoreRecent(entry);
-      if (target) void din.app.open('file-browser', {}, [target]);
+      if (target) void din.app.launch(appLink('file-browser'), [target]);
     },
     [din, restoreRecent],
   );
@@ -384,6 +385,6 @@ export function useOfficeFile(opts: OfficeFileOptions) {
     recent,
     requestClose,
     prompt,
-    newWindow: () => void din.app.openWindow(),
+    newWindow: () => void window.open(appLink(null)),
   };
 }

@@ -61,6 +61,7 @@ import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import {
   appUrl,
   launchUrl,
+  linkedAppId,
   DIN_APPS_PARTITION,
   SYSTEM_PERMISSIONS,
   forgetMigratedStorage,
@@ -82,6 +83,7 @@ import {
   hoverTab,
 } from '@/lib/dinApps';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { decodeLaunchParams } from '@/shared/launch';
 import { readStoredModel, setStoredModel, setViewedSession, subscribeStoredModel, followDinSession } from '@/hooks/useAssistant';
 import { setTabDragLabel } from '@/lib/dinDrag';
 import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribeDrag, currentDrag } from '@/lib/dinDrag';
@@ -489,14 +491,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   useLayoutEffect(() => {
     handlers.current = {
       'app.ready': () => setReady(true),
-      'app.open': async ({ appId: requested, params: p, handles }) => {
-        const target = requested === null ? appId : requested;
+      'app.open': async ({ url, self, handles }) => {
+        const target = self === true ? appId : linkedAppId(url);
         // The Installer is the desktop's alone to open.
-        if (typeof target !== 'string' || target === 'installer') return;
+        if (!target || target === 'installer') return;
+        const p = decodeLaunchParams(String(url));
         // Paths in params grant nothing; files travel as handles, which the
         // window manager hands on as paths (and the new window's frame
         // turns back into handles).
-        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, ...clean } = (p ?? {}) as Record<string, unknown>;
+        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, ...clean } = p;
         const grants = await Promise.all((handles ?? []).map(usableGrant));
         const paths = grants.map((g) => g.path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };

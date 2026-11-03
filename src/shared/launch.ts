@@ -25,6 +25,17 @@ export function encodeLaunchParams(url: URL, params: Record<string, unknown>): v
   }
 }
 
+/**
+ * The URL that launches an app with these parameters, for `window.open`
+ * (or `din.app.launch`, to hand it files too): `din://<id>/` with the
+ * parameters in its query. Null for a new window of this app.
+ */
+export function appLink(appId: string | null, params: Record<string, unknown> = {}): string {
+  const url = appId === null ? new URL('/', location.href) : new URL(`din://${appId}/`);
+  encodeLaunchParams(url, params);
+  return url.href;
+}
+
 /** The launch parameters in a URL's query, as `encodeLaunchParams` put them there. */
 export function decodeLaunchParams(url: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};

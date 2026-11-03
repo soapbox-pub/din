@@ -192,7 +192,7 @@ of one can only be copied.
 
 Apps with `fs` reach files by path through `din.system.fs` anyway.
 `din.files.fromPath(path)` gives one of them a handle for a path, to hand
-the file to another app with `din.app.open`. To load a file by path,
+the file to another app with `din.app.launch`. To load a file by path,
 `din.files.pathUrl(path)` costs no round trip, so a folder of thumbnails
 is cheap: when the desktop grants `fs`, main gives the window a URL base
 (`din-file://<token>`) that serves any path but Din's own profile, for as

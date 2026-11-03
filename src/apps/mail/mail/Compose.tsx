@@ -3,7 +3,7 @@ import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Bold, ChevronDown, Italic, List, ListOrdered, Loader2, Paperclip, Quote, Send, Strikethrough, Underline, X } from 'lucide-react';
 import { useDin, useCloseGuard, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { saveState, useOnLaunch } from '@/shared/launch';
+import { appLink, saveState, useOnLaunch } from '@/shared/launch';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { pickFiles } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
@@ -231,7 +231,7 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   // A message to open, sent here (a restored window can't be told from a
   // viewer): it opens in a viewer of its own.
   useOnLaunch(({ params }) => {
-    if (messageTarget(params)) void din.app.open('mail', params);
+    if (messageTarget(params)) void window.open(appLink('mail', params));
   });
 
   const editor = useEditor({

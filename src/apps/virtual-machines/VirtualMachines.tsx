@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { cleanVmsError, type VmInfo, type VmInstallerId, type VmsBridge, type VmsStatus } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
-import { useDin, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { formatBytes, formatMemory, isOn, OS_LABELS, STATE_LABELS, useBridge, usePickDiscImage, useVms, useVmsStatus } from './vms/bridge';
 import { Console, type ConsoleHandle } from './vms/Console';
@@ -31,6 +31,7 @@ import { NewVmDialog } from './vms/NewVmDialog';
 import { SettingsDialog } from './vms/SettingsDialog';
 import { Sidebar, StateDot } from './vms/Sidebar';
 import { SnapshotList, TakeSnapshotDialog } from './vms/Snapshots';
+import { appLink } from '@/shared/launch';
 
 const SELECTED_KEY = 'virtual-machines:selected';
 const SCALE_KEY = 'virtual-machines:scale';
@@ -105,7 +106,6 @@ export function VirtualMachines() {
 }
 
 function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) {
-  const din = useDin();
   const { data: vms = [], isLoading } = useVms();
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SELECTED_KEY));
   const [scale, setScale] = useState(() => localStorage.getItem(SCALE_KEY) !== 'false');
@@ -182,14 +182,14 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         case 'settings':
           return setSettingsFor(id);
         case 'showInFiles':
-          return void din.app.open('file-browser', { path: target.dir });
+          return void window.open(appLink('file-browser', { path: target.dir }));
         case 'delete':
           return setDeleting(target);
         case 'cancelInstall':
           return setCancelling(target);
       }
     },
-    [bridge, busy, din],
+    [bridge, busy],
   );
 
   const install = useCallback(

@@ -136,13 +136,13 @@ app, which fills in only its fields:
 
 ```ts
 const nonce = Date.now();
-await din.app.open('assistant', {
+window.open(appLink('assistant', {
   intent: 'studio.edit',
   directory: take.path,        // the conversation works here
   prompt: 'A vertical clip with captions',
   title: take.title,
   nonce, intentNonce: nonce,   // this launch's own (params merge into the last launch's)
-});
+}));
 ```
 
 The conversation starts at once, with the intent's context ahead of the

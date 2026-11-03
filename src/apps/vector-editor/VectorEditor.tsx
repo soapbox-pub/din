@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { Button, Dialog, NumberField, Select } from '@/shared/photo/chrome';
 import { Panel } from '@/shared/photo/panels';
 import { FOCUS, INPUT } from '@/shared/photo/styles';
@@ -664,7 +664,7 @@ export function VectorEditor() {
     const t = await pick('Open', OPEN_EXTENSIONS);
     if (!t) return;
     if (docRef.current && (dirty || file)) {
-      void din.app.open('vector-editor', {}, [t]);
+      void din.app.launch(appLink('vector-editor'), [t]);
       return;
     }
     setLoading(true);
@@ -3317,7 +3317,7 @@ export function VectorEditor() {
           onCreate={(s) => {
             setDialog(null);
             if (docRef.current) {
-              void din.app.open('vector-editor', { width: s.w, height: s.h, units: s.units, mode: s.mode, artboards: s.artboards, name: s.name });
+              void window.open(appLink('vector-editor', { width: s.w, height: s.h, units: s.units, mode: s.mode, artboards: s.artboards, name: s.name }));
               return;
             }
             startDoc(newDoc(s.w, s.h, s.mode, s.units, s.artboards), s.name || 'Untitled-1', null);

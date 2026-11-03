@@ -3,7 +3,7 @@ import type { Launch } from '@/shared/launch';
 /**
  * What other apps can open the Assistant for, as a launch param:
  *
- *   din.app.open('assistant', { intent: 'studio.edit', directory, prompt, title, nonce, intentNonce: nonce })
+ *   window.open(appLink('assistant', { intent: 'studio.edit', directory, prompt, title, nonce, intentNonce: nonce }))
  *
  * An app sends data, never instructions: what the agent is told about an
  * intent is written here, and an app fills in only its fields. A

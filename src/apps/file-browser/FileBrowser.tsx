@@ -49,7 +49,7 @@ import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { windowLaunchFiles } from '@/shared/fileHandles';
 import { useDin, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { TabStrip } from '@/shared/TabStrip';
 import { adoptedTab, useDinTabTransfer } from '@/shared/dinTabTransfer';
 import { dinWindowMove } from '@/shared/dinWindowMove';
@@ -159,7 +159,7 @@ function isFilesTabTransfer(value: unknown): value is { path: string } {
 /** Open a folder, or files, in a new window of an app. */
 async function openWithPaths(din: Din, appId: string, paths: string[], params: Record<string, unknown> = {}): Promise<void> {
   const handles = await Promise.all(paths.map((p) => din.files.fromPath(p)));
-  await din.app.open(appId, params, handles);
+  await din.app.launch(appLink(appId, params), handles);
 }
 
 /**
@@ -1066,7 +1066,7 @@ function FileBrowserTab({
     });
   }, [din, run, fs, refresh]);
 
-  const openInTerminal = useCallback((path: string) => void din.app.open('terminal', { cwd: path }), [din]);
+  const openInTerminal = useCallback((path: string) => void window.open(appLink('terminal', { cwd: path })), []);
   const print = useCallback((path: string | undefined) => {
     if (!path) return;
     din.files
@@ -1093,8 +1093,8 @@ function FileBrowserTab({
     };
   }, [din, isTop]);
   const openInAssistant = useCallback(
-    (path: string) => void din.app.open('assistant', { directory: path, nonce: Date.now() }),
-    [din],
+    (path: string) => void window.open(appLink('assistant', { directory: path, nonce: Date.now() })),
+    [],
   );
 
   const copyPaths = useCallback((paths: string[]) => {

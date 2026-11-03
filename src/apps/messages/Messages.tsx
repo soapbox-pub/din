@@ -14,8 +14,8 @@ import {
 import { Button } from '@/components/ui/button';
 import type { PhoneConversation, PhoneDevice, PhoneMessage } from '@/lib/phone';
 import { cn } from '@/lib/utils';
-import { useOnLaunch, windowLaunch, type Launch } from '@/shared/launch';
-import { useDin, useDocumentVisible, useMediaQuery, useMenuBar, useWindowFocused, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { appLink, type Launch, useOnLaunch, windowLaunch } from '@/shared/launch';
+import { useDocumentVisible, useMediaQuery, useMenuBar, useWindowFocused, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { cleanPhoneError, formatAddress, phoneDigits } from '@/shared/phone';
 import { useContacts, useConversations, useMessages, usePhone, usePhoneState, usePhoneSync } from './messages/api';
@@ -60,7 +60,6 @@ function sameAddresses(a: string[], b: string[]): boolean {
  * shortcut starts one, and `{ to: [{ name, address }] }` one to them.
  */
 export function Messages() {
-  const din = useDin();
   const phone = usePhone();
   const qc = useQueryClient();
   usePhoneSync();
@@ -178,7 +177,7 @@ export function Messages() {
         case 'delete': return current && setDeleting(current);
         case 'refresh': return refresh();
         case 'search': return document.getElementById('messages-search')?.focus();
-        case 'settings': return void din.app.open('settings', { section: 'phone' });
+        case 'settings': return void window.open(appLink('settings', { section: 'phone' }));
       }
     },
   );
@@ -196,7 +195,7 @@ export function Messages() {
       <Shell>
         <Empty icon={Smartphone} title="Text from your computer">
           Connect your iPhone or Android phone to read and answer its texts here.
-          <Button className="mt-6" onClick={() => void din.app.open('settings', { section: 'phone', add: true, nonce: Date.now() })}>
+          <Button className="mt-6" onClick={() => void window.open(appLink('settings', { section: 'phone', add: true, nonce: Date.now() }))}>
             Set Up a Phone
           </Button>
         </Empty>
@@ -244,7 +243,7 @@ export function Messages() {
               )}
             </div>
           </div>
-          <PhoneStrip phones={phones} onSettings={() => void din.app.open('settings', { section: 'phone' })} />
+          <PhoneStrip phones={phones} onSettings={() => void window.open(appLink('settings', { section: 'phone' }))} />
           <div className="min-h-0 flex-1 overflow-y-auto">
             {!conversations.isPending && filtered.length === 0 ? (
               <p className="px-6 py-10 text-center text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import { useDin } from '@/sdk/react';
 import { formatTime, formatWhen } from '../format';
 import { useFileUrl, type TakeAction } from '../takes';
 import { TakeActionItems } from './TakeActionItems';
+import { appLink } from '@/shared/launch';
 
 const SCENES: Record<TakeInfo['scene'], string> = {
   'screen-camera': 'Screen and camera',
@@ -132,7 +133,7 @@ export function TakeView({
     const text = prompt.trim();
     if (!text) return;
     const nonce = Date.now();
-    void din.app.open('assistant', { intent: 'studio.edit', directory: take.path, prompt: text, title: take.title, nonce, intentNonce: nonce, sessionID: null });
+    void window.open(appLink('assistant', { intent: 'studio.edit', directory: take.path, prompt: text, title: take.title, nonce, intentNonce: nonce, sessionID: null }));
     setSent(true);
     setPrompt('');
   };

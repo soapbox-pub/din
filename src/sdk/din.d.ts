@@ -103,8 +103,11 @@ declare global {
  * launched again or a Dock shortcut is chosen (the window already focused).
  * The launch parameters are the `targetURL`'s query (a string as itself,
  * anything else as JSON; `src/shared/launch.ts` reads them), on the URL of
- * the manifest shortcut that launched it, if one did. What the window saved
- * for Din to reopen it with is its Navigation API state
+ * the manifest shortcut that launched it, if one did. To launch an app,
+ * `window.open` its URL: `din://<id>/` with the parameters in the query
+ * (`appLink(id, params)` in `src/shared/launch.ts` writes it), or this
+ * app's own for a new window of it (`appLink(null, params)`). What the
+ * window saved for Din to reopen it with is its Navigation API state
  * (`navigation.updateCurrentEntry({ state })`): when Din reopens it after
  * restarting, or after the app crashed, `navigation.currentEntry.getState()`
  * has it back by the time `din.ready` resolves. JSON, up to 512 KB (more is
@@ -113,8 +116,9 @@ declare global {
 export interface DinApp {
   /**
    * The app that launched the launch `launchQueue`'s consumer is hearing,
-   * with `din.app.open`, by id, as the desktop saw it (an app can't say it's
-   * another); null when it was the user or the desktop.
+   * with `window.open` or `din.app.launch`, by id, as the desktop saw it
+   * (an app can't say it's another); null when it was the user or the
+   * desktop.
    */
   readonly opener: string | null;
   /**
@@ -123,13 +127,11 @@ export interface DinApp {
    */
   ready(): void;
   /**
-   * Launch another app with launch parameters (its `targetURL`'s query),
-   * and files it holds for the new window to open (they come to its
-   * `launchQueue`).
+   * Launch an app, as `window.open` does for its URL, handing the new
+   * window files the app holds (they come to its `launchQueue`). Rejects
+   * with a TypeError for a URL that isn't an app's.
    */
-  open(appId: string, params?: Record<string, unknown>, files?: FileSystemHandle[]): Promise<void>;
-  /** A new window of this app, as `open` would launch it. */
-  openWindow(params?: Record<string, unknown>, files?: FileSystemHandle[]): Promise<void>;
+  launch(url: string | URL, files: FileSystemHandle[]): Promise<void>;
   /**
    * Open files in whichever app the desktop has for them (Files' default).
    * A Windows program (.exe) runs, through Wine, for an app with `fs`;

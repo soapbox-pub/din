@@ -25,15 +25,15 @@ launchQueue.setConsumer(({ targetURL, files }) => {
 |---|---|
 | `targetURL` | The app's own URL (`din://<id>/`, wherever the page is served from), at the shortcut's `url` when a manifest shortcut launched it, with the launch parameters in its query |
 | `files` | The launch's files, already granted ([files.md](files.md)) |
-| `din.app.opener` | The app that opened it with `din.app.open`, by id, as the desktop saw it; null when the user or the desktop did. An app can't claim to be another, so it's what an app trusts a request by (the Assistant's intents). It's the launch the consumer is hearing's |
+| `din.app.opener` | The app that opened it with `window.open` or `din.app.launch`, by id, as the desktop saw it; null when the user or the desktop did. An app can't claim to be another, so it's what an app trusts a request by (the Assistant's intents). It's the launch the consumer is hearing's |
 
-The launch parameters are what `din.app.open(id, params)` passed, or the
-desktop (`{ width, height }` for Paint's File > New): a string as itself,
+The launch parameters are the query of the URL another app opened
+(`window.open(appLink(id, params))`), or what the desktop passed (`{ width, height }` for Paint's File > New): a string as itself,
 anything else as JSON, and a string that would read as JSON (`"2024"`,
 `"true"`) quoted. `decodeLaunchParams(targetURL)` in `src/shared/launch.ts`
 reads them back as they were. A manifest shortcut's `url` carries its own
 (`"/?new"`), and its `din.params` are added to them. Paths an app puts in
-`din.app.open` params are dropped: files travel as handles. On the
+a launch's params are dropped: files travel as handles. On the
 desktop's side, though, Files and the rest still open apps with
 `{ path }` or `{ paths }` params, which `DinAppFrame` turns into granted
 handles for the launch's files (and leaves out of the query).
@@ -116,12 +116,19 @@ so a simple app needn't think about it.
 ## Opening other things
 
 ```ts
-await din.app.open('paint', { width: 800, height: 600 });   // a new window, or the running one
-await din.app.openWindow({}, [handle]);                      // a new window of this app
-await din.app.openFiles([handle]);                           // whichever app the desktop has for it
-window.open('https://example.com');                          // as links open anywhere on the desktop
-await din.app.canOpen('assistant');                          // installed (and, the Assistant, switched on)?
+window.open('din://paint/?width=800&height=600');   // a new window, or the running one
+window.open(appLink('paint', { width: 800, height: 600 }));   // the same, from src/shared/launch.ts
+window.open(appLink(null));                          // a new window of this app (its own URL)
+await din.app.launch(appLink(null), [handle]);      // the same, handed files for its launchQueue
+await din.app.openFiles([handle]);                   // whichever app the desktop has for it
+window.open('https://example.com');                  // as links open anywhere on the desktop
+await din.app.canOpen('assistant');                  // installed (and, the Assistant, switched on)?
 ```
+
+An app's URL is `din://<id>/` with the launch parameters in its query, as
+the opened app's `targetURL` has them; any URL of the app's own origin
+opens a new window of it. `window.open` can't carry file handles, so
+`din.app.launch(url, files)` takes the same URLs and hands the files on.
 
 The web's `window.open(url)` opens a link into an installed app that owns
 the site, `mailto:` in Mail, `nostr:` in its viewer, and anything else in

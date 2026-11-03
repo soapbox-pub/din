@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
-import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
+import { appLink, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   addGroup,
@@ -276,7 +276,7 @@ export function Contacts() {
     message: canMessage
       ? (address: string) => {
           const name = current ? displayName(current.contact) : '';
-          void din.app.open('messages', { to: [{ name: name || address, address }], nonce: Date.now() });
+          void window.open(appLink('messages', { to: [{ name: name || address, address }], nonce: Date.now() }));
         }
       : undefined,
     email: (address) => void window.open(`mailto:${address}`),
@@ -306,7 +306,7 @@ export function Contacts() {
       case 'message':
         if (one?.contact.phones[0] && canMessage) {
           const address = one.contact.phones[0].value;
-          void din.app.open('messages', { to: [{ name: displayName(one.contact) || address, address }], nonce: Date.now() });
+          void window.open(appLink('messages', { to: [{ name: displayName(one.contact) || address, address }], nonce: Date.now() }));
         }
         return;
       case 'email':

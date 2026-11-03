@@ -2,8 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Editor } from '@tiptap/core';
 import { FilePlus, FileText, FolderOpen } from 'lucide-react';
 import { DropdownMenu as Menu } from 'radix-ui';
-import { useDin } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import '@/shared/office/fonts';
 import { fontStack, stepFontSize } from '@/shared/office/fonts';
 import {
@@ -160,7 +159,6 @@ const caseFns: Record<CaseKind, (s: string) => string> = {
  * a new package and saves from the deck (see slides/odp.ts).
  */
 export function Slides() {
-  const din = useDin();
   const params = windowLaunch().params;
   const initialDesign = typeof params?.design === 'string' ? DESIGNS.find((d) => d.id === params.design) : undefined;
   const [initial] = useState(() => newPresentation(initialDesign));
@@ -1442,7 +1440,7 @@ export function Slides() {
       setHist({ entries: [{ deck: loaded.deck, label: 'New', at: 0 }], index: 0 });
       setCur(0);
       setSel([]);
-    } else void din.app.open(APP_ID, { design: d.id });
+    } else void window.open(appLink(APP_ID, { design: d.id }));
   };
 
 

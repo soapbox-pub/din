@@ -4,7 +4,7 @@ import { cleanFsError } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -1349,7 +1349,7 @@ export function Paint() {
     if (!target) return;
     // Unsaved work stays put; the picture gets a window of its own.
     if (dirty) {
-      void din.app.open('paint', {}, [target]);
+      void din.app.launch(appLink('paint'), [target]);
       return;
     }
     setLoading(true);
@@ -1446,7 +1446,7 @@ export function Paint() {
     if (ctrl && !e.shiftKey && key === 's') void save();
     else if (ctrl && e.shiftKey && key === 's') void saveAs();
     else if (ctrl && !e.shiftKey && key === 'o') void openFile();
-    else if (ctrl && !e.shiftKey && key === 'n') din.app.open('paint');
+    else if (ctrl && !e.shiftKey && key === 'n') window.open(appLink('paint'));
     else if (ctrl && (key === 'w' || key === 'q')) din.window.requestClose();
     else if (typing) handled = false;
     else if (ctrl && !e.shiftKey && key === 'z') undo();
@@ -1530,16 +1530,16 @@ export function Paint() {
         <MenubarMenu>
           <MenubarTrigger><u>F</u>ile</MenubarTrigger>
           <MenubarContent>
-            <MenubarItem shortcut="Ctrl+N" onSelect={() => din.app.open('paint')}>New</MenubarItem>
+            <MenubarItem shortcut="Ctrl+N" onSelect={() => window.open(appLink('paint'))}>New</MenubarItem>
             <MenubarSub>
               <MenubarSubTrigger>New Sprite</MenubarSubTrigger>
               <MenubarSubContent>
                 {[16, 32, 48, 64, 128].map((n) => (
-                  <MenubarItem key={n} onSelect={() => din.app.open('paint', { width: n, height: n, transparent: true, zoom: Math.max(2, Math.floor(384 / n)) })}>
+                  <MenubarItem key={n} onSelect={() => window.open(appLink('paint', { width: n, height: n, transparent: true, zoom: Math.max(2, Math.floor(384 / n)) }))}>
                     {n} × {n}
                   </MenubarItem>
                 ))}
-                <MenubarItem onSelect={() => din.app.open('paint', { width: 320, height: 240, zoom: 2 })}>320 × 240 game screen</MenubarItem>
+                <MenubarItem onSelect={() => window.open(appLink('paint', { width: 320, height: 240, zoom: 2 }))}>320 × 240 game screen</MenubarItem>
               </MenubarSubContent>
             </MenubarSub>
             <MenubarItem shortcut="Ctrl+O" onSelect={() => void openFile()}>Open…</MenubarItem>

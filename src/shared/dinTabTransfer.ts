@@ -3,7 +3,7 @@ import type { DragPoint, TearOff } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import type { TabTransfer } from '@/shared/TabContextMenu';
 import { sessionGet, sessionSet } from '@/shared/appSession';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 
 /**
  * Tabs moving between an app's windows, for a tab strip in an app (the
@@ -178,8 +178,8 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     const place = point
       ? { x: Math.round(bounds.x + point.x - GRAB.x), y: Math.max(0, Math.round(bounds.y + point.y - GRAB.y)) }
       : undefined;
-    await din.app.openWindow({ ...o.params, width: bounds.width, height: bounds.height, [ADOPT_PARAM]: token, ...(place ? { place } : {}) });
-  }, [din]);
+    window.open(appLink(null, { ...o.params, width: bounds.width, height: bounds.height, [ADOPT_PARAM]: token, ...(place ? { place } : {}) }));
+  }, []);
 
   const tearOff = useMemo<TearOff>(() => ({
     enabled: true,

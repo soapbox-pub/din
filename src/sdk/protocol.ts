@@ -179,8 +179,11 @@ export interface Hello {
 /** What an app can ask, by method: the params, and what the reply carries. */
 export interface Requests {
   'app.ready': [void, void];
-  /** `appId` null: a new window of this app. */
-  'app.open': [{ appId: string | null; params?: Record<string, unknown>; handles?: string[] }, void];
+  /**
+   * Launch the app at a URL (`din://<id>/`, its parameters in the query),
+   * or with `self` a new window of this app, with files for its `launchQueue`.
+   */
+  'app.open': [{ url: string; self: boolean; handles?: string[] }, void];
   'app.openFiles': [{ handles: string[] }, void];
   'app.openUrl': [{ url: string }, void];
   'app.canOpen': [{ appId: string }, boolean];

@@ -3,7 +3,7 @@ import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, FilePlus, FolderO
 import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { looksLikePub, readPub } from './publisher/pub';
 import { rasterizeMetafile } from './publisher/pub/raster';
 import { pubToIdml } from './publisher/pub/toIdml';
@@ -861,7 +861,7 @@ export function Publisher() {
     const t = await pick('Open', 'Documents', OPEN_EXTENSIONS);
     if (!t) return;
     if (modelRef.current) {
-      void din.app.open('publisher', {}, [t]);
+      void din.app.launch(appLink('publisher'), [t]);
       return;
     }
     setLoading(true);
@@ -3391,7 +3391,7 @@ export function Publisher() {
             const pk = newDocument(s);
             if (modelRef.current) {
               // A document of its own window, as InDesign opens another tab.
-              void din.app.open('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } });
+              void window.open(appLink('publisher', { newDoc: { ...s, margins: { ...s.margins }, bleed: { ...s.bleed } } }));
               return;
             }
             startDoc(pk, 'Untitled-1', null, null, new Map());

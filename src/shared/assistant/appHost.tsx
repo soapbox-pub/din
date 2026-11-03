@@ -5,6 +5,7 @@ import { useDin } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { useAssistantEventSync } from '@/hooks/useAssistant';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
+import { appLink } from '@/shared/launch';
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
 
@@ -84,16 +85,16 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
       directory: settings.directory,
       colorfulReplies: settings.colorfulReplies,
       setEnabled: (enabled) => din.assistant.setSettings({ enabled }),
-      openApp: (appId, params) => void din.app.open(appId, params),
+      openApp: (appId, params) => void window.open(appLink(appId, params)),
       openUrl: (url) => window.open(url),
       openPath: (path, kind) =>
         void din.files.fromPath(path).then((handle) =>
-          kind === 'directory' ? din.app.open('file-browser', {}, [handle]) : din.app.openFiles([handle]),
+          kind === 'directory' ? din.app.launch(appLink('file-browser'), [handle]) : din.app.openFiles([handle]),
         ),
       showInFolder: (path) =>
         void din.files
           .fromPath(parentOf(path))
-          .then((folder) => din.app.open('file-browser', { select: path.slice(path.lastIndexOf('/') + 1) }, [folder])),
+          .then((folder) => din.app.launch(appLink('file-browser', { select: path.slice(path.lastIndexOf('/') + 1) }), [folder])),
       pickFiles: async ({ title }) => {
         const picked = await pickFiles({ title, multiple: true, mode: 'read' });
         return picked.map((handle) => din.files.path(handle));

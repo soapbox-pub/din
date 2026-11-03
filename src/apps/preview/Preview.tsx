@@ -12,12 +12,13 @@ import type { Din } from '@/sdk';
 import { useDin, usePermission, useWindowIcon, useWindowTitle } from '@/sdk/react';
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { onLaunchFiles, windowLaunchFiles } from '@/shared/fileHandles';
+import { appLink } from '@/shared/launch';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
 
 /** Open an app on a path, as a handle it's granted (paths in params are dropped). */
 async function openWith(din: Din, appId: string, path: string, params: Record<string, unknown> = {}): Promise<void> {
-  await din.app.open(appId, params, [await din.files.fromPath(path)]);
+  await din.app.launch(appLink(appId, params), [await din.files.fromPath(path)]);
 }
 
 /**

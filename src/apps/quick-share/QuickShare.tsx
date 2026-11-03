@@ -18,6 +18,7 @@ import type { QuickShareDeviceType, QuickShareState, QuickShareTransfer } from '
 import { cn } from '@/lib/utils';
 import type { Din } from '@/sdk/din';
 import { useCloseGuard, useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { appLink } from '@/shared/launch';
 
 /**
  * Quick Share: Android phones and tablets nearby share files and links here
@@ -320,7 +321,7 @@ function showInFiles(din: Din, path: string): void {
   const slash = path.lastIndexOf('/');
   void din.files
     .fromPath(path.slice(0, slash) || '/')
-    .then((dir) => din.app.open('file-browser', { select: path.slice(slash + 1) }, [dir]), () => {});
+    .then((dir) => din.app.launch(appLink('file-browser', { select: path.slice(slash + 1) }), [dir]), () => {});
 }
 
 function isWebLink(url: string): boolean {

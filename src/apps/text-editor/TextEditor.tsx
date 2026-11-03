@@ -36,7 +36,7 @@ import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOpti
 import { invalidateListings } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TabStrip } from '@/shared/TabStrip';
@@ -112,7 +112,7 @@ async function startIn(din: Din, dir: string | null | undefined): Promise<FileSy
 /** Show a file (selected in its folder) or a folder in Files. */
 function revealInFiles(din: Din, path: string, select?: string): void {
   void din.files.fromPath(path).then(
-    (dir) => din.app.open('file-browser', select ? { select } : {}, [dir]),
+    (dir) => din.app.launch(appLink('file-browser', select ? { select } : {}), [dir]),
     () => {},
   );
 }
@@ -769,7 +769,7 @@ export function TextEditor() {
       }
     },
     revealInFiles: (path) => revealInFiles(din, parentPath(path), basename(path)),
-    openTerminal: (dir) => void din.app.open('terminal', { cwd: dir }),
+    openTerminal: (dir) => void window.open(appLink('terminal', { cwd: dir })),
     copyText: (text) => void navigator.clipboard?.writeText(text).catch(() => {}),
     status: setStatus,
   }), [openPath, din, stateOf, syncDirty]);
@@ -876,7 +876,7 @@ export function TextEditor() {
     const path = activeTab?.path;
     return [
       { id: 'file.new', title: 'File: New File', shortcut: 'Ctrl+N', run: newFile },
-      { id: 'file.newWindow', title: 'File: New Window', shortcut: 'Ctrl+Shift+N', run: () => void din.app.open('text-editor', { blank: true }) },
+      { id: 'file.newWindow', title: 'File: New Window', shortcut: 'Ctrl+Shift+N', run: () => void window.open(appLink('text-editor', { blank: true })) },
       { id: 'file.open', title: 'File: Open File…', shortcut: 'Ctrl+O', run: () => void openFileDialog() },
       { id: 'file.openFolder', title: 'File: Open Folder…', shortcut: 'Ctrl+K Ctrl+O', run: () => void openFolderDialog() },
       { id: 'file.save', title: 'File: Save', shortcut: 'Ctrl+S', run: () => activeId && void saveTab(activeId) },
@@ -926,13 +926,13 @@ export function TextEditor() {
       ...(folder ? [
         { id: 'folder.close', title: 'File: Close Folder', run: () => { setFolder(null); localStorage.removeItem(WORKSPACE_KEY); } },
         { id: 'folder.refresh', title: 'Explorer: Refresh', run: () => void invalidateListings(queryClient, folder) },
-        { id: 'folder.terminal', title: 'Open Folder in Terminal', run: () => void din.app.open('terminal', { cwd: folder }) },
+        { id: 'folder.terminal', title: 'Open Folder in Terminal', run: () => void window.open(appLink('terminal', { cwd: folder })) },
         { id: 'folder.files', title: 'Reveal Folder in Files', run: () => revealInFiles(din, folder) },
       ] : []),
       ...(path ? [
         { id: 'file.reveal', title: 'Reveal Active File in Files', run: () => revealInFiles(din, parentPath(path), basename(path)) },
         { id: 'file.copyPath', title: 'Copy Path of Active File', run: () => void navigator.clipboard?.writeText(path).catch(() => {}) },
-        { id: 'file.terminal', title: 'Open Containing Folder in Terminal', run: () => void din.app.open('terminal', { cwd: parentPath(path) }) },
+        { id: 'file.terminal', title: 'Open Containing Folder in Terminal', run: () => void window.open(appLink('terminal', { cwd: parentPath(path) })) },
       ] : []),
     ];
   }, [

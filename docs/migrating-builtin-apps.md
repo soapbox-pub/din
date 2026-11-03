@@ -17,7 +17,7 @@ replaced as below. `src/apps/calculator/` is the model.
 |---|---|
 | `AppComponentProps.params` | `launchQueue`'s `targetURL` query (`windowLaunch().params`) |
 | `AppComponentProps.windowId` | `din.window.id` (rarely needed) |
-| `useWindowActions().open(id, params)` | `din.app.open(id, params)` |
+| `useWindowActions().open(id, params)` | `window.open(appLink(id, params))`, or `din.app.launch(appLink(id, params), files)` to hand it files |
 | `open(appForFile(name), { path })` | `din.app.openFiles([handle])` |
 | `useWindowActions().close(windowId)` | `window.close()` |
 | `focus` | `window.focus()` |

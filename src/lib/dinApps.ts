@@ -120,6 +120,20 @@ export function isFileAppId(id: string): boolean {
   return /^file-[a-z2-7]{52}$/.test(id);
 }
 
+/** The app a `din://<id>/` (or `din+file://<host>/`) URL launches, or null for any other URL. */
+export function linkedAppId(url: unknown): string | null {
+  let u: URL;
+  try {
+    u = new URL(String(url));
+  } catch {
+    return null;
+  }
+  if (!u.hostname) return null;
+  if (u.protocol === 'din:') return u.hostname;
+  if (u.protocol === 'din+file:') return `file-${u.hostname}`;
+  return null;
+}
+
 /**
  * A launch's `targetURL`: the app's own URL (`din://<id>/`, wherever the
  * page is served from), at the shortcut's `url` when a shortcut launched it

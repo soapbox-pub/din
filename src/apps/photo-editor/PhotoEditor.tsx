@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes } from '@/lib/fs';
 import { typesFromFilters } from '@/sdk';
 import { useCloseGuard, useDin, useWindowTitle } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { ADJUSTMENT_NAMES, defaultAdjustment, FILTER_NAMES, type FilterSpec } from '@/shared/photo/adjust';
 import { OptionsBar, Toolbar } from '@/shared/photo/bars';
 import { Button, Dialog } from '@/shared/photo/chrome';
@@ -682,7 +682,7 @@ export function PhotoEditor() {
     if (!t) return;
     // Work in progress stays put; the file gets a window of its own.
     if (docRef.current && (dirty || file)) {
-      void din.app.open('photo-editor', {}, [t]);
+      void din.app.launch(appLink('photo-editor'), [t]);
       return;
     }
     setLoading(true);
@@ -2624,7 +2624,7 @@ export function PhotoEditor() {
             const color = b === 'white' ? '#ffffff' : b === 'black' ? '#000000' : b === 'background' ? bg : null;
             if (docRef.current) {
               // A new document gets a window of its own, as in Photoshop's tabs.
-              void din.app.open('photo-editor', { width: w, height: h, background: color ?? 'transparent', name });
+              void window.open(appLink('photo-editor', { width: w, height: h, background: color ?? 'transparent', name }));
               return;
             }
             startDoc(newDoc(w, h, color), name || 'Untitled-1', null);

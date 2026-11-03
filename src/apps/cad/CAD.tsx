@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { cleanFsError, formatBytes, parentPath } from '@/lib/fs';
 import { typesFromFilters, type Din } from '@/sdk';
 import { useCloseGuard, useDin, useWindowAccent, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { windowLaunch } from '@/shared/launch';
+import { appLink, windowLaunch } from '@/shared/launch';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
 import '@fontsource/arimo/400.css';
 import '@fontsource/arimo/700.css';
@@ -840,16 +840,16 @@ function CADWindow() {
     });
     if (!t) return;
     // Work in progress stays put; the drawing gets a window of its own.
-    if (docRef.current && (dirty || file)) void din.app.open('cad', {}, [t]);
+    if (docRef.current && (dirty || file)) void din.app.launch(appLink('cad'), [t]);
     else openHandle(t);
   }, [din, file, dirty, openHandle]);
 
   const newFile = useCallback(
     (metric: boolean) => {
-      if (docRef.current) void din.app.open('cad', { new: metric ? 'metric' : 'imperial' });
+      if (docRef.current) void window.open(appLink('cad', { new: metric ? 'metric' : 'imperial' }));
       else startDoc(newDrawing(metric), `Drawing${++untitled}.dwg`, null);
     },
-    [din, startDoc],
+    [startDoc],
   );
 
   // Closing with unsaved changes asks first.

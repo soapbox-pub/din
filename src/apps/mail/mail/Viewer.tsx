@@ -3,7 +3,7 @@ import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, Sea
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
+import { appLink, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import type { MailAccount, MailboxInfo, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
@@ -593,7 +593,7 @@ export function Viewer() {
     (id) => {
       switch (id) {
         case 'new': return newMessage(defaultAccount);
-        case 'window': return void din.app.open('mail', { viewer: true });
+        case 'window': return void window.open(appLink('mail', { viewer: true }));
         case 'add-account': return setDialog({ kind: 'setup' });
         case 'settings': return setDialog({ kind: 'settings', accountId: null });
         case 'sidebar': return toggleSidebar(!sidebarOpen);

@@ -490,6 +490,17 @@ export function installDin(transport: Transport): void {
     if (p.type === 'launch') launched(p.launch);
   });
   let readied = false;
+  /** An app's URL, as a launch: a din:// app's, or this app's own (a new window of it); null for anything else. */
+  const appTarget = (url: string | URL): { url: string; self: boolean } | null => {
+    let u: URL;
+    try {
+      u = new URL(String(url), location.href);
+    } catch {
+      return null;
+    }
+    const self = u.protocol === location.protocol && u.host === location.host;
+    return self || u.protocol === 'din:' || u.protocol === 'din+file:' ? { url: u.href, self } : null;
+  };
   const app: DinApp = {
     get opener() {
       return opener;
@@ -499,8 +510,11 @@ export function installDin(transport: Transport): void {
       readied = true;
       tell('app.ready');
     },
-    open: async (appId, params, files) => request('app.open', { appId, params, handles: await idsOf(files) }),
-    openWindow: async (params, files) => request('app.open', { appId: null, params, handles: await idsOf(files) }),
+    launch: async (url, files) => {
+      const target = appTarget(url);
+      if (!target) throw new TypeError(`Not an app's URL: ${String(url)}`);
+      await request('app.open', { ...target, handles: await idsOf(files) });
+    },
     openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
     canOpen: (appId) => request('app.canOpen', { appId }),
     windows: () => request('app.windows'),
@@ -635,9 +649,11 @@ export function installDin(transport: Transport): void {
   // consulting its own onCloseRequest.
   define('focus', () => tell('window.focus'));
   define('close', () => tell('window.close'));
-  // Links open as they do anywhere on the desktop: into an installed app
-  // that owns the site, mailto: in Mail, nostr: in its viewer, else the Web
-  // Browser. Like a noopener open, it returns no window.
+  // An app's URL (din://<id>/, its launch parameters in the query) launches
+  // it, and the app's own a new window of it. Other links open as they do
+  // anywhere on the desktop: into an installed app that owns the site,
+  // mailto: in Mail, nostr: in its viewer, else the Web Browser. Like a
+  // noopener open, it returns no window.
   define('open', (url?: string | URL, target?: string) => {
     if (url === undefined || String(url) === '') return null;
     const href = new URL(String(url), location.href).href;
@@ -645,7 +661,9 @@ export function installDin(transport: Transport): void {
       location.assign(href);
       return window;
     }
-    tell('app.openUrl', { url: href });
+    const launch = appTarget(href);
+    if (launch) tell('app.open', launch);
+    else tell('app.openUrl', { url: href });
     return null;
   });
 

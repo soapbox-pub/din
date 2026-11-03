@@ -2,6 +2,7 @@ import type { Din, StartIn } from '@/sdk';
 import { fileTypes, pickFiles as pick, pickFolder, pickSaveFile, type FileTypeFilter } from '@/shared/fileHandles';
 import { parentPath } from '@/lib/fs';
 import { adopt, handleFor } from './grants';
+import { appLink } from '@/shared/launch';
 
 /**
  * The Media Player's few calls to the desktop that aren't the player's own.
@@ -53,7 +54,7 @@ export async function startFolder(path: string, named: Exclude<StartIn, FileSyst
 /** Open Files at a folder, with an item in it selected. */
 export async function showInFiles(dir: string, select?: string): Promise<void> {
   const handle = handleFor(dir) ?? (await din().files.fromPath(dir));
-  await din().app.open('file-browser', select ? { select } : {}, [handle]);
+  await din().app.launch(appLink('file-browser', select ? { select } : {}), [handle]);
 }
 
 /** Open Files on the folder holding a file, with the file selected. */
@@ -68,7 +69,7 @@ export function openUrl(url: string): void {
 
 /** Open the App Store at its Media Player skins. */
 export function findSkins(): void {
-  void din().app.open('app-store', { tab: 'skins' });
+  void window.open(appLink('app-store', { tab: 'skins' }));
 }
 
 /**
@@ -77,5 +78,5 @@ export function findSkins(): void {
  * which the player can't do itself.
  */
 export function publishSkin(path: string): void {
-  void din().app.open('app-store', { publishSkin: path.slice(path.lastIndexOf('/') + 1) });
+  void window.open(appLink('app-store', { publishSkin: path.slice(path.lastIndexOf('/') + 1) }));
 }
