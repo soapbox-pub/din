@@ -1373,9 +1373,11 @@ in
   # the user's own install in ~/.opencode, which updates itself; the disk
   # image comes with it there (os/flake.nix). On PATH,
   # `opencode` in a Terminal attaches to the same background server Din
-  # started.
+  # started. Claude Code, which the Assistant installs for its Claude
+  # provider (electron/claude-code.mts), is the user's own in ~/.local/bin,
+  # so `claude` works there too.
   environment.extraInit = ''
-    export PATH="$HOME/.opencode/bin:$PATH"
+    export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
   '';
   # Its skills for every session on the computer, from OpenCode's system
   # directory: making apps and widgets, and changing DinOS. They point at
