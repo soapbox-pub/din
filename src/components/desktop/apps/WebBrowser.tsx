@@ -3500,6 +3500,21 @@ export function LoadErrorPage({
     if (onion && torReady && !wasReady.current) onRetry();
     wasReady.current = torReady;
   }, [onion, torReady, onRetry]);
+
+  // A page that failed while offline loads once the network is back, after a
+  // moment for DNS to come up with it.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onOnline = () => {
+      clearTimeout(timer);
+      timer = setTimeout(onRetry, 1000);
+    };
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      clearTimeout(timer);
+    };
+  }, [onRetry]);
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
       <div className="w-full max-w-md space-y-5 text-center">
