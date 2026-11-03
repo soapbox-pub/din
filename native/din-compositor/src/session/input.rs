@@ -41,6 +41,9 @@ impl State {
                 self.move_pointer(location, event.time_msec());
             }
             InputEvent::PointerButton { event } => {
+                if self.direct_takes_pointer() {
+                    return self.direct_button(event.button_code(), event.state() == ButtonState::Pressed);
+                }
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 let serial = SERIAL_COUNTER.next_serial();
                 let state = event.state();
@@ -195,6 +198,10 @@ impl State {
     }
 
     fn on_pointer_motion(&mut self, event: <LibinputInputBackend as smithay::backend::input::InputBackend>::PointerMotionEvent) {
+        if self.direct_takes_pointer() {
+            let delta = event.delta_unaccel();
+            return self.direct_motion(delta.x, delta.y);
+        }
         let Some(pointer) = self.seat.get_pointer() else { return };
         let location = pointer.current_location();
         let under = self.surface_under(location);
@@ -264,6 +271,13 @@ impl State {
     }
 
     fn on_axis(&mut self, event: <LibinputInputBackend as smithay::backend::input::InputBackend>::PointerAxisEvent) {
+        if self.direct_takes_pointer() {
+            let amount = |axis| {
+                let v120 = event.amount_v120(axis);
+                (event.amount(axis).unwrap_or_else(|| v120.unwrap_or(0.0) * 15.0 / 120.0), v120)
+            };
+            return self.direct_axis(amount(Axis::Horizontal), amount(Axis::Vertical));
+        }
         let Some(pointer) = self.seat.get_pointer() else { return };
         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
         for axis in [Axis::Horizontal, Axis::Vertical] {

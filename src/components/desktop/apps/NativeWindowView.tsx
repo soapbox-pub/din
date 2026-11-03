@@ -22,10 +22,12 @@ import {
   sendNativePointerUnlock,
   sendNativeRelative,
   sendNativeWheel,
+  setNativeDirect,
   setNativeFocus,
   setNativeFullscreen,
   setNativeGeometry,
   setNativeMaximized,
+  setNativeMinimized,
   subscribeNativeDisplay,
   typeNativeText,
   windowChrome,
@@ -34,7 +36,8 @@ import {
 import { registerDictationTarget } from '@/lib/dictation';
 import { noteNativeInput } from '@/lib/nativeLatency';
 import { useMonitors } from '@/contexts/MonitorsContext';
-import { contains } from '@/lib/monitors';
+import { contains, type Rect } from '@/lib/monitors';
+import { isSteamGame, setGameFullscreen } from '@/lib/gameMode';
 
 /**
  * How often the canvas's screen position is re-reported. Pointer and focus
@@ -83,6 +86,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const fullscreenRef = useRef(false);
   /** Full screen ended because another window came up: it comes back with this one. */
   const resumeFullscreenRef = useRef(false);
+  /** Where the screen's compositor was told to show the app's frames (setNativeDirect). */
+  const directRef = useRef<Rect | null>(null);
   const isTopRef = useRef(isTop);
   useEffect(() => {
     isTopRef.current = isTop;
@@ -130,7 +135,8 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     let height = host.clientHeight;
     // In full screen the box spans the whole page, but only the monitor it
     // was moved onto shows.
-    if (host.matches(':fullscreen')) {
+    const fullscreen = host.matches(':fullscreen');
+    if (fullscreen) {
       const monitor = monitorsRef.current.find((m) => contains(m, rect.left, rect.top));
       if (monitor) {
         width = Math.min(width, monitor.width);
@@ -138,7 +144,23 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       }
     }
     setNativeGeometry(xid, { x: rect.left, y: rect.top, width, height });
+    // In full screen and on top, the screen's compositor shows the app's
+    // frames itself, paced by the display rather than by the desktop.
+    const direct = fullscreen && isTopRef.current ? { x: rect.left, y: rect.top, width, height } : null;
+    if (!sameRect(directRef.current, direct)) {
+      directRef.current = direct;
+      setNativeDirect(xid, direct);
+    }
   }, [xid]);
+
+  /** Whether this is a game in full screen, for the desktop (src/lib/gameMode.ts). */
+  const syncGameMode = useCallback(() => {
+    const host = hostRef.current;
+    const surface = getNativeSurface(xid);
+    const game = isSteamGame(surface?.wmClass ?? []) || lockedRef.current;
+    setGameFullscreen(xid, !!host && host.matches(':fullscreen') && game);
+  }, [xid]);
+  useEffect(() => () => setGameFullscreen(xid, false), [xid]);
 
   // Dictation while this window has the keyboard types into the app.
   useEffect(() => {
@@ -175,20 +197,35 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   }, [xid, syncGeometry]);
 
   /**
-   * Back into the full screen another window took this one out of. Blink
-   * allows it only just after a click or key (the Alt+Tab, the Dock click
-   * that brought the window back); refused, the next click in it tries again.
+   * Back into the full screen another window took this one out of, once
+   * it's on top again; refused, the next click in it tries again.
    */
   const resumeFullscreen = useCallback(() => {
     const host = hostRef.current;
     if (!host || !resumeFullscreenRef.current) return;
-    host.requestFullscreen().then(
-      () => {
-        resumeFullscreenRef.current = false;
-      },
-      () => {},
-    );
-  }, []);
+    void enterFullscreen(host, xid).then((entered) => {
+      if (entered) resumeFullscreenRef.current = false;
+    });
+  }, [xid]);
+
+  /**
+   * The app asked for full screen. Behind another window it waits until
+   * it's back on top, rather than going over the one in front; refused
+   * outright, it fills its monitor instead.
+   */
+  const appWantsFullscreen = useCallback(() => {
+    const host = hostRef.current;
+    if (!host || document.fullscreenElement === host) return;
+    if (!isTopRef.current) {
+      resumeFullscreenRef.current = true;
+      return;
+    }
+    void enterFullscreen(host, xid).then((entered) => {
+      if (entered) return;
+      setNativeFullscreen(xid, false);
+      if (!currentRef.current?.maximized) maximize(windowId);
+    });
+  }, [xid, windowId, maximize]);
 
   // The window on top holds the app's keyboard focus.
   useEffect(() => {
@@ -217,7 +254,12 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       const fullscreen = host.matches(':fullscreen');
       if (fullscreen === fullscreenRef.current) return;
       fullscreenRef.current = fullscreen;
+      // The new size first, then the state: a Wine game that hears it's in
+      // full screen while still window-sized takes itself back out (and,
+      // leaving, one still monitor-sized goes back in).
+      syncGeometry();
       setNativeFullscreen(xid, fullscreen);
+      syncGameMode();
       syncEscapeLock();
       if (fullscreen) host.focus({ preventScroll: true });
       // After PageFullscreenHost has moved the box onto its monitor.
@@ -228,8 +270,15 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
       document.removeEventListener('fullscreenchange', onChange);
       if (document.fullscreenElement === host) void document.exitFullscreen().finally(syncEscapeLock);
     };
-  }, [xid, syncGeometry]);
+  }, [xid, syncGeometry, syncGameMode]);
   useEffect(() => () => setNativeFocus(xid, false), [xid]);
+  useEffect(
+    () => () => {
+      if (directRef.current) setNativeDirect(xid, null);
+      directRef.current = null;
+    },
+    [xid],
+  );
 
   // Title changes, and the app resizing (or moving) itself, drawing its own
   // title bar, or driving the window from it: the Din window follows.
@@ -240,9 +289,10 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         if (event.type === 'title') setTitle(event.surface.title);
         if (event.type === 'pointer-lock') {
           lockedRef.current = event.locked;
+          syncGameMode();
           const host = hostRef.current;
           if (event.locked && host) {
-            void lockPointer(host).then((locked) => {
+            void lockPointer(host, xid).then((locked) => {
               // Refused: the app is told the lock is over.
               if (!locked && lockedRef.current) {
                 lockedRef.current = false;
@@ -294,6 +344,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
         }
         if (event.type === 'minimize') minimize(windowId);
         if (event.type === 'fullscreen') {
+          event.surface.wantsFullscreen = false;
           // The app's own say about full screen wins over coming back to
           // it - but not its echo of being taken out while another window
           // is up.
@@ -301,13 +352,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           const host = hostRef.current;
           const fullscreen = !!host && document.fullscreenElement === host;
           if (event.fullscreen && host && !fullscreen) {
-            // Blink allows it only just after a click or key, which is how
-            // apps ask. One that asks on its own (a game starting in full
-            // screen) fills its monitor instead.
-            host.requestFullscreen().catch(() => {
-              setNativeFullscreen(xid, false);
-              if (!currentRef.current?.maximized) maximize(windowId);
-            });
+            appWantsFullscreen();
           } else if (!event.fullscreen && fullscreen) {
             void document.exitFullscreen();
           } else {
@@ -316,8 +361,17 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
           }
         }
       }),
-    [xid, windowId, resize, setFrameless, placeFor, maximize, minimize, toggleMaximize, chrome],
+    [xid, windowId, resize, setFrameless, placeFor, maximize, minimize, toggleMaximize, chrome, appWantsFullscreen, syncGameMode],
   );
+
+  // Full screen the app wanted before this window was up to hear it (a
+  // game mapping in full screen).
+  useEffect(() => {
+    const surface = getNativeSurface(xid);
+    if (!surface?.wantsFullscreen) return;
+    surface.wantsFullscreen = false;
+    appWantsFullscreen();
+  }, [xid, appWantsFullscreen]);
 
   // The app's own title bar shows whether the window is maximized.
   const maximized = current?.maximized ?? false;
@@ -327,6 +381,15 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     reportedMaximizedRef.current = maximized;
     setNativeMaximized(xid, maximized);
   }, [xid, maximized]);
+
+  // A game minimized in full screen sees itself restored with its window.
+  const minimized = current?.minimized ?? false;
+  const reportedMinimizedRef = useRef(false);
+  useEffect(() => {
+    if (!xid || reportedMinimizedRef.current === minimized) return;
+    reportedMinimizedRef.current = minimized;
+    setNativeMinimized(xid, minimized);
+  }, [xid, minimized]);
 
   /** The gesture the app asked for is over (the button came up). */
   const endGesture = useCallback(() => {
@@ -409,7 +472,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   return (
     <div
       ref={hostRef}
-      data-native-window=""
+      data-native-window={xid}
       tabIndex={0}
       aria-label={title || app?.name}
       className="size-full overflow-hidden bg-background outline-none"
@@ -508,6 +571,24 @@ function forwardMotion(xid: number, host: HTMLElement, event: PointerEvent): voi
   sendNativeMotion(xid, x, y, { dx: event.movementX, dy: event.movementY });
 }
 
+/**
+ * Put a native window's box in full screen. Blink allows that only just
+ * after a click or key; otherwise (a game going full screen as it starts, a
+ * window back on top after another one) Din's main process does it on the
+ * user's behalf. Resolves whether it went in.
+ */
+async function enterFullscreen(host: HTMLElement, xid: number): Promise<boolean> {
+  if (navigator.userActivation?.isActive !== false) {
+    const entered = await host.requestFullscreen().then(
+      () => true,
+      () => false,
+    );
+    if (entered) return true;
+  }
+  const bridge = window.dinos?.pageFullscreen;
+  return bridge ? bridge.enterNative(xid).catch(() => false) : false;
+}
+
 /** The Keyboard Lock API, which TypeScript's DOM types don't have. */
 interface KeyboardLock {
   lock(codes?: string[]): Promise<void>;
@@ -531,21 +612,18 @@ function syncEscapeLock(): void {
 /**
  * Mirror an app's pointer lock with the DOM's: the cursor hides and the
  * canvas gets raw movement, unaccelerated where the platform offers it, as
- * games expect. Resolves whether the lock took.
+ * games expect. Blink allows it only just after a click; refused, Din's
+ * main process asks on the user's behalf. Resolves whether the lock took.
  */
-async function lockPointer(host: HTMLElement): Promise<boolean> {
+async function lockPointer(host: HTMLElement, xid: number): Promise<boolean> {
   if (document.pointerLockElement === host) return true;
-  try {
-    await host.requestPointerLock({ unadjustedMovement: true });
-    return true;
-  } catch {
-    try {
-      await host.requestPointerLock();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  const lock = (options?: PointerLockOptions) => host.requestPointerLock(options).then(
+    () => true,
+    () => false,
+  );
+  if ((await lock({ unadjustedMovement: true })) || (await lock())) return true;
+  const bridge = window.dinos?.pageFullscreen;
+  return bridge ? bridge.lockNativePointer(xid).catch(() => false) : false;
 }
 
 /**
@@ -563,6 +641,11 @@ function workspaceOrigin(host: HTMLElement | null): { x: number; y: number; widt
     width: parent?.clientWidth ?? window.innerWidth,
     height: parent?.clientHeight ?? window.innerHeight,
   };
+}
+
+function sameRect(a: Rect | null, b: Rect | null): boolean {
+  if (!a || !b) return a === b;
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 /** `value` held within [min, max], preferring min when the range is empty. */

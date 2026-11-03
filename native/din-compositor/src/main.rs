@@ -12,13 +12,16 @@
 //! (wire.rs): window announcements, input, geometry, focus, clipboard. Apps
 //! are paced by the renderer's acks: frame callbacks go out only once Din
 //! has shown the last frame. X11 apps come in through a rootless Xwayland
-//! the compositor manages (xwayland.rs).
+//! the compositor manages (xwayland.rs). In Din's session, a window in full
+//! screen goes to the screen's compositor instead, paced by the display
+//! (direct.rs).
 //!
 //! Spawned by electron/wayland-bridge.mts; exits when stdin closes.
 
 mod canvas;
 mod clipboard;
 mod constraints;
+mod direct;
 mod frames;
 mod gpu;
 mod logic;
@@ -43,6 +46,10 @@ use smithay::wayland::socket::ListeningSocketSource;
 
 use state::{ClientState, State};
 
+/// How far behind on its events a client may fall before it's cut off; the
+/// buffer only grows to it as needed.
+const CLIENT_BUFFER: usize = 4 << 20;
+
 fn env_size(name: &str, fallback: i32) -> i32 {
     std::env::var(name).ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(fallback)
 }
@@ -56,6 +63,9 @@ fn main() {
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new().expect("event loop");
     let display: Display<State> = Display::new().expect("wayland display");
     let dh = display.handle();
+    // A game's hitch (shaders compiling) with a fast mouse overran the
+    // default 4 KiB, cutting off Xwayland and every X app with it.
+    dh.set_default_max_buffer_size(CLIENT_BUFFER);
     let screen = (env_size("DIN_SCREEN_WIDTH", 1920), env_size("DIN_SCREEN_HEIGHT", 1080)).into();
 
     let (clipboard_tx, clipboard_rx) = channel::channel::<(clipboard::Contents, bool)>();
@@ -79,6 +89,16 @@ fn main() {
                 Ok(PostAction::Continue)
             })
             .expect("buffer socket source");
+    }
+
+    // The screen's compositor, putting a full-screen window's frames on the
+    // screen itself (direct.rs).
+    if let Some(stream) = state.direct.as_ref().and_then(|direct| direct.stream().ok()) {
+        handle
+            .insert_source(Generic::new(stream, Interest::READ, Mode::Level), |_, _, state| {
+                Ok(if state.direct_replies() { PostAction::Continue } else { PostAction::Remove })
+            })
+            .expect("direct source");
     }
 
     handle

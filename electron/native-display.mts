@@ -382,6 +382,8 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
   // Xwayland has no cookie (it admits only this user; see the compositor's
   // xwayland.rs), and a stale XAUTHORITY would only send clients looking.
   if (display.xwayland) delete env.XAUTHORITY;
+  // Din's embedded compositor's alone (session/direct.rs).
+  delete env.DIN_DIRECT_SOCKET;
   if (display.wayland) {
     Object.assign(env, {
       WAYLAND_DISPLAY: display.wayland,

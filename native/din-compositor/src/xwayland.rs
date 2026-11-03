@@ -144,9 +144,12 @@ impl XwmHandler for State {
         // Cascade until the shell places it, at the size the app asked for.
         // A window drawing its own title bar (or none) that names its own
         // position (a splash screen centered on the screen, a widget where
-        // it was left) keeps it: where it goes is the app's business.
+        // it was left) keeps it: where it goes is the app's business. So
+        // does one exactly covering a monitor, a game in full screen
+        // (logic.rs, covers_monitor).
         let offset = 40 * (self.toplevels.len() as i32 % 8);
-        let placed = window.is_decorated() && window.size_hints().is_some_and(|h| h.position.is_some());
+        let placed = window.is_decorated()
+            && (window.size_hints().is_some_and(|h| h.position.is_some()) || self.is_monitor(window.geometry()));
         let pos = if placed { window.geometry().loc } else { (80 + offset, 80 + offset).into() };
         let _ = window.set_mapped(true);
         let _ = window.configure(Rectangle::new(pos, window.geometry().size));
@@ -270,7 +273,13 @@ impl XwmHandler for State {
         self.x11_request(&window, serde_json::json!({ "type": "maximize", "maximized": false }));
     }
 
+    /// A game in full screen minimizes itself when it loses focus, as on
+    /// Windows, and then draws nothing until it sees itself restored.
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(index) = self.x11_toplevel(&window) {
+            self.toplevels[index].needs_restore = true;
+        }
+        let _ = window.set_suspended(true);
         self.x11_request(&window, serde_json::json!({ "type": "minimize" }));
     }
 

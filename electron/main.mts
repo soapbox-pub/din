@@ -1350,6 +1350,35 @@ function restoreFullscreenGuests(): void {
 }
 
 function registerPageFullscreenHandlers(): void {
+  // A native app's full screen and pointer lock (NativeWindowView.tsx).
+  // Blink allows them only just after a click or key, which games seldom
+  // ask on; from here, as a user gesture, it's as if the user had asked.
+  const onNativeWindow = async (event: Electron.IpcMainInvokeEvent, rawXid: unknown, body: string) => {
+    assertShellSender(event);
+    const xid = Number(rawXid);
+    if (!Number.isSafeInteger(xid) || xid <= 0) throw new Error('Invalid native window');
+    const result: unknown = await event.sender.executeJavaScript(
+      `(() => {
+        const host = document.querySelector('[data-native-window="${xid}"]');
+        if (!host) return false;
+        ${body}
+      })()`,
+      true,
+    );
+    return result === true;
+  };
+  ipcMain.handle('pageFullscreen:enterNative', (event, xid) =>
+    onNativeWindow(event, xid, 'return host.requestFullscreen().then(() => true, () => false);'),
+  );
+  ipcMain.handle('pageFullscreen:lockNativePointer', (event, xid) =>
+    onNativeWindow(
+      event,
+      xid,
+      `const lock = (options) => Promise.resolve(host.requestPointerLock(options)).then(() => true, () => false);
+        return lock({ unadjustedMovement: true }).then((locked) => locked || lock());`,
+    ),
+  );
+
   ipcMain.handle('pageFullscreen:fit', (event, wcId, rawWidth, rawHeight) => {
     assertShellSender(event);
     const guest = shellGuestFromId(wcId);

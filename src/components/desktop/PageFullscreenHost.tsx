@@ -6,6 +6,10 @@ import { guestElements, guestFrame, guestId, isGuestElement, isGuestFullscreen }
 
 interface PageFullscreenBridge {
   fit(webContentsId: number, width: number, height: number): Promise<void>;
+  /** A native app's window into full screen without a click or key just before (NativeWindowView.tsx). */
+  enterNative(xid: number): Promise<boolean>;
+  /** A native app's pointer lock, likewise. */
+  lockNativePointer(xid: number): Promise<boolean>;
 }
 
 declare global {

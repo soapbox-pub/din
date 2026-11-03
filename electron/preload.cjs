@@ -681,8 +681,9 @@ expose('display', {
 });
 
 // Page fullscreen bridge (window.dinos.pageFullscreen), backed by the
-// pageFullscreen:* handler in main.mts: lays a fullscreen <webview> page out
-// at its monitor's size, until it leaves fullscreen.
+// pageFullscreen:* handlers in main.mts: lays a fullscreen <webview> page out
+// at its monitor's size, until it leaves fullscreen, and puts a native app's
+// window in full screen when no click or key has just let the page do it.
 expose('pageFullscreen', {
   /**
    * @param {number} webContentsId the <webview>'s guest
@@ -691,6 +692,16 @@ expose('pageFullscreen', {
    */
   fit: (webContentsId, width, height) =>
     ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
+  /**
+   * @param {number} xid the native window (NativeWindowView.tsx)
+   * @returns {Promise<boolean>} whether it went into full screen
+   */
+  enterNative: (xid) => ipcRenderer.invoke('pageFullscreen:enterNative', xid),
+  /**
+   * @param {number} xid the native window (NativeWindowView.tsx)
+   * @returns {Promise<boolean>} whether the pointer is locked to it
+   */
+  lockNativePointer: (xid) => ipcRenderer.invoke('pageFullscreen:lockNativePointer', xid),
 });
 
 // Guest visibility bridge (window.dinos.guestVisibility), backed by the

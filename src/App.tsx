@@ -60,6 +60,7 @@ const defaultConfig: AppConfig = {
   syncProfileTheme: true,
   localTheme: null,
   wobblyWindows: true,
+  gamePerformance: true,
   minimizeEffect: 'magic-lamp',
   closeEffect: 'pop',
   cursorTrail: 'none',

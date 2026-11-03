@@ -9,8 +9,9 @@ use smithay::{
             memory::MemoryRenderBufferRenderElement,
             render_elements,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            texture::{TextureBuffer, TextureRenderElement},
         },
-        gles::GlesRenderer,
+        gles::{GlesRenderer, GlesTexture},
     },
     desktop::{Space, Window},
     input::pointer::{CursorImageStatus, CursorImageSurfaceData},
@@ -28,6 +29,7 @@ render_elements! {
     pub OutputElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
+    Texture=TextureRenderElement<GlesTexture>,
 }
 
 /// What a frame is drawn from.
@@ -38,6 +40,8 @@ pub struct Scene<'a> {
     pub cursor_status: &'a CursorImageStatus,
     pub cursors: &'a mut Cursors,
     pub dnd_icon: Option<&'a DndIcon>,
+    /// A full-screen game's frame over Din's window, and where (direct.rs).
+    pub direct: Option<(&'a TextureBuffer<GlesTexture>, Rectangle<i32, Logical>)>,
 }
 
 /// The elements for AREA of the layout at SCALE, front to back, positioned
@@ -107,6 +111,18 @@ pub fn elements(
                 }
             }
         }
+    }
+
+    if let Some((buffer, rect)) = scene.direct.filter(|(_, rect)| rect.overlaps(area)) {
+        let location = (rect.loc - origin).to_f64().to_physical(scale_xy);
+        elements.push(OutputElement::Texture(TextureRenderElement::from_texture_buffer(
+            location,
+            buffer,
+            None,
+            None,
+            Some(rect.size),
+            Kind::Unspecified,
+        )));
     }
 
     for window in scene.space.elements() {

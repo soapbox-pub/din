@@ -236,7 +236,7 @@ impl Gpu {
             && (self.shared_with_chromium || dmabuf.format().modifier == Modifier::Linear)
     }
 
-    fn allocate_id(&mut self) -> u32 {
+    pub fn allocate_id(&mut self) -> u32 {
         let id = self.next_buffer;
         self.next_buffer += 1;
         id
@@ -277,6 +277,24 @@ pub fn fully_opaque(surface: &WlSurface) -> bool {
         .unwrap_or(false)
 }
 
+/// SURFACE's buffer, where it alone is the whole window of GEOMETRY: no
+/// subsurfaces, unscaled and uncropped, so it can be shown as it is.
+pub fn lone_buffer(surface: &WlSurface, geometry: Rectangle<i32, Logical>) -> Option<utils::Buffer> {
+    if !get_children(surface).is_empty() || geometry.loc != (0, 0).into() {
+        return None;
+    }
+    with_renderer_surface_state(surface, |state| {
+        if state.buffer_scale() != 1 || state.buffer_transform() != Transform::Normal {
+            return None;
+        }
+        let size = state.buffer_size()?;
+        let view = state.view()?;
+        let whole = view.src == Rectangle::from_size(size.to_f64()) && view.dst == size;
+        (whole && size == geometry.size).then(|| state.buffer().cloned()).flatten()
+    })
+    .flatten()
+}
+
 /// A window whose app's own buffer Din shows (see the module docs).
 pub struct Shown {
     buffer: utils::Buffer,
@@ -306,19 +324,7 @@ impl Passthrough {
         geometry: Rectangle<i32, Logical>,
         opaque: bool,
     ) -> Option<u32> {
-        if !get_children(surface).is_empty() || geometry.loc != (0, 0).into() {
-            return None;
-        }
-        let buffer = with_renderer_surface_state(surface, |state| {
-            if state.buffer_scale() != 1 || state.buffer_transform() != Transform::Normal {
-                return None;
-            }
-            let size = state.buffer_size()?;
-            let view = state.view()?;
-            let whole = view.src == Rectangle::from_size(size.to_f64()) && view.dst == size;
-            (whole && size == geometry.size).then(|| state.buffer().cloned()).flatten()
-        })
-        .flatten()?;
+        let buffer = lone_buffer(surface, geometry)?;
         let dmabuf = get_dmabuf(&buffer).ok().filter(|d| gpu.shows(d))?;
         let format = passthrough_format(dmabuf.format().code, opaque)?;
         let id = match self.known.get(&buffer.id()) {
@@ -500,7 +506,7 @@ impl Drop for BufferChannel {
     }
 }
 
-fn send_with_fds(stream: &UnixStream, bytes: &[u8], fds: &[i32]) -> bool {
+pub fn send_with_fds(stream: &UnixStream, bytes: &[u8], fds: &[i32]) -> bool {
     let len = size_of_val(fds) as u32;
     // SAFETY: a standard SCM_RIGHTS sendmsg over buffers that outlive it.
     unsafe {

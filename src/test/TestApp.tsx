@@ -43,6 +43,7 @@ export function TestApp({ children }: TestAppProps) {
     syncProfileTheme: true,
     localTheme: null,
     wobblyWindows: true,
+    gamePerformance: true,
     minimizeEffect: 'magic-lamp',
     closeEffect: 'pop',
     cursorTrail: 'none',

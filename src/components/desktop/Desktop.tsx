@@ -47,6 +47,7 @@ import { BluetoothPromptHost } from './BluetoothIndicator';
 import { VolumesHost } from './VolumesHost';
 import { PrintHost } from './PrintHost';
 import { PageFullscreenHost } from './PageFullscreenHost';
+import { GamePerformanceHost } from './GamePerformanceHost';
 import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { isShown, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
@@ -233,6 +234,7 @@ function DesktopSession() {
                   <VolumesHost />
                   <PrintHost />
                   <PageFullscreenHost />
+                  <GamePerformanceHost />
                   <BootScreenSync />
                   <Wallpaper backdrop={<DesktopMenu />}>
                     <MenuBar />

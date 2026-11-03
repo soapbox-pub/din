@@ -30,7 +30,7 @@ use smithay::{
             decoration::XdgDecorationHandler,
         },
     },
-    backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
+    backend::renderer::utils::{import_surface_tree, on_commit_buffer_handler, with_renderer_surface_state},
 };
 use tracing::info;
 
@@ -146,6 +146,13 @@ impl State {
         });
     }
 
+    /// Upload the pointer's image (the cursor, a drag's icon) as soon as
+    /// it's committed: a cursor resized twice between frames had smithay
+    /// write damage past its texture (GL_INVALID_VALUE), leaving the old one.
+    pub fn import_pointer_image(&mut self, surface: &WlSurface) {
+        let _ = import_surface_tree(&mut self.backend.renderer, surface);
+    }
+
     /// Which displays SURFACE (of Din's) is on, to redraw them.
     fn redraw_for_surface(&mut self, surface: &WlSurface) {
         let mut root = surface.clone();
@@ -155,6 +162,7 @@ impl State {
         let cursor = matches!(&self.cursor_status, smithay::input::pointer::CursorImageStatus::Surface(s) if *s == root);
         let icon = self.dnd_icon.as_ref().is_some_and(|i| i.surface == root);
         if cursor || icon {
+            self.import_pointer_image(&root);
             self.queue_redraw_pointer();
         } else {
             // Din covers every display; each only renders what changed on it.

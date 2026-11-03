@@ -6,12 +6,16 @@
 //! and to use server-side decorations (Din draws the title bar), unless they
 //! insist on drawing their own, which the shell is told about.
 
-use std::{borrow::Cow, os::fd::OwnedFd, sync::Arc, time::Instant};
+use std::{borrow::Cow, collections::VecDeque, os::fd::OwnedFd, sync::Arc, time::Instant};
 
 use smithay::{
     backend::{
         allocator::dmabuf::Dmabuf,
-        renderer::{ImportDma, pixman::PixmanRenderer, utils::on_commit_buffer_handler},
+        renderer::{
+            ImportDma,
+            pixman::PixmanRenderer,
+            utils::{self, on_commit_buffer_handler},
+        },
     },
     delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
     delegate_ext_data_control, delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
@@ -24,7 +28,7 @@ use smithay::{
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::{LoopHandle, channel::Sender},
+        calloop::{Interest, LoopHandle, channel::Sender},
         wayland_protocols::xdg::{
             decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
             shell::server::xdg_toplevel,
@@ -42,7 +46,11 @@ use smithay::{
         seat::WaylandFocus,
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
         buffer::BufferHandler,
-        compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent, with_states},
+        compositor::{
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+            add_blocker, add_pre_commit_hook, get_parent, with_states,
+        },
+        dmabuf::get_dmabuf,
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::{OutputHandler, OutputManagerState},
@@ -71,6 +79,7 @@ use smithay::{
 use crate::{
     canvas::Canvas,
     clipboard::{Contents, read_from_app},
+    direct::DirectChannel,
     frames::FrameServer,
     gpu::{BufferChannel, Gpu, Passthrough, Shown, Target},
     stats::Stats,
@@ -88,7 +97,11 @@ pub struct ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        if let DisconnectReason::ProtocolError(err) = reason {
+            eprintln!("din-compositor: a client was disconnected for a protocol error: {err}");
+        }
+    }
 }
 
 /// An xdg toplevel, or an X11 window managed through Xwayland (xwayland.rs).
@@ -115,6 +128,20 @@ pub struct Toplevel {
     pub client_side: bool,
     /// Whether the shell was last told the app decorates itself.
     pub csd: bool,
+    /// Full screen was asked for before the shell knew the window: it's
+    /// told along with the window.
+    pub wants_fullscreen: bool,
+    /// An X window minimized in full screen, or by the app itself, which
+    /// must see itself restored (see logic.rs, restore_x11).
+    pub needs_restore: bool,
+    /// Its frames go to the screen's compositor, not Din (direct.rs).
+    pub direct_active: bool,
+    /// The screen's compositor refused its buffers: Din shows it.
+    pub direct_refused: bool,
+    /// Buffers given to the screen's compositor, oldest first: the first is
+    /// on screen, the rest on their way. They go back to the app as the
+    /// ones after them reach the screen.
+    pub direct_frames: VecDeque<(u32, utils::Buffer)>,
 }
 
 impl Toplevel {
@@ -133,6 +160,11 @@ impl Toplevel {
             known_size: None,
             client_side: true,
             csd: false,
+            wants_fullscreen: false,
+            needs_restore: false,
+            direct_active: false,
+            direct_refused: false,
+            direct_frames: VecDeque::new(),
         }
     }
 
@@ -302,6 +334,14 @@ pub struct State {
     pub streaming: bool,
     pub stats: Option<Stats>,
     pub screen: Size<i32, Logical>,
+    /// Din's monitors in root coordinates, once the shell has named them.
+    pub monitors: Vec<Rectangle<i32, Logical>>,
+    /// The screen's compositor, in Din's session (direct.rs).
+    pub direct: Option<DirectChannel>,
+    /// The window Din has in full screen, and where in Din's window.
+    pub direct_window: Option<(u32, Rectangle<i32, Logical>)>,
+    /// Surfaces whose frame callbacks wait for their frame to reach the screen.
+    pub direct_waiting: Vec<WlSurface>,
     /// Patch batches sent and not yet acked by the shell.
     pub in_flight: u32,
     /// Surfaces whose frame callbacks wait for the next ack.
@@ -420,6 +460,10 @@ impl State {
             streaming: false,
             stats: Stats::from_env(),
             screen,
+            monitors: Vec::new(),
+            direct: DirectChannel::connect(),
+            direct_window: None,
+            direct_waiting: Vec::new(),
             in_flight: 0,
             awaiting_frame: Vec::new(),
             focused: 0,
@@ -471,7 +515,13 @@ impl State {
     /// Tell the shell about a request from a window's own decorations (a
     /// title-bar drag, its maximize button), if the shell knows the window.
     pub fn window_request(&mut self, id: u32, mut message: serde_json::Value) {
-        if !self.toplevels.iter().any(|t| t.id == id && t.announced) {
+        let Some(t) = self.toplevels.iter_mut().find(|t| t.id == id) else { return };
+        if !t.announced {
+            // Before the shell knows the window, only full screen still
+            // means something once it does: it goes with the announcement.
+            if message["type"] == "fullscreen" {
+                t.wants_fullscreen = message["fullscreen"] == true;
+            }
             return;
         }
         message["id"] = id.into();
@@ -480,6 +530,9 @@ impl State {
 
     /// Forget a toplevel (destroyed or unmapped), telling the shell.
     pub fn remove_toplevel(&mut self, index: usize) {
+        if self.direct_window.is_some_and(|(id, _)| id == self.toplevels[index].id) {
+            self.stop_direct();
+        }
         let mut t = self.toplevels.remove(index);
         self.release_target(&mut t.target);
         self.passthrough.stop(&mut t.shown);
@@ -546,6 +599,31 @@ impl CompositorHandler for State {
         &client.get_data::<ClientState>().expect("client state").compositor_state
     }
 
+    /// A commit with a GPU buffer the app is still rendering into waits for
+    /// it to be done, as in anvil and niri; otherwise whatever draws it next
+    /// waits on the app's GPU work, and a slow game holds up the screen.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, _dh, surface| {
+            let dmabuf = with_states(surface, |states| {
+                match states.cached_state.get::<SurfaceAttributes>().pending().buffer.as_ref() {
+                    Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).ok().cloned(),
+                    _ => None,
+                }
+            });
+            let Some(dmabuf) = dmabuf else { return };
+            let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) else { return };
+            let Some(client) = surface.client() else { return };
+            let ready = state.handle.insert_source(source, move |_, _, state| {
+                let dh = state.dh.clone();
+                state.client_compositor_state(&client).blocker_cleared(state, &dh);
+                Ok(())
+            });
+            if ready.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.popup_manager.commit(surface);
@@ -585,6 +663,9 @@ impl CompositorHandler for State {
 impl BufferHandler for State {
     fn buffer_destroyed(&mut self, buffer: &wl_buffer::WlBuffer) {
         self.passthrough.destroyed(buffer, self.buffers.as_mut());
+        if let Some(direct) = self.direct.as_mut() {
+            direct.destroyed(buffer);
+        }
     }
 }
 

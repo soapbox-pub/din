@@ -1097,7 +1097,11 @@ type ShellMessage =
   | { type: 'drag-drop'; id: number; x: number; y: number }
   | { type: 'drag-end' }
   /** Din's monitors in viewport pixels, primary first (Wayland only: this X server has one screen). */
-  | { type: 'monitors'; monitors: { x: number; y: number; width: number; height: number }[] };
+  | { type: 'monitors'; monitors: { x: number; y: number; width: number; height: number }[] }
+  /** Din minimized a window or restored it (Wayland only). */
+  | { type: 'minimized'; id: number; minimized: boolean }
+  /** A window in full screen, to the screen's compositor at a rect, or back (no rect; Wayland only). */
+  | { type: 'direct'; id: number; x?: number; y?: number; width?: number; height?: number };
 
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;

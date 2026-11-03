@@ -1534,8 +1534,31 @@ function PowerSection() {
       <div className={cn('space-y-3', hasBattery && 'border-t border-border/60 pt-4')}>
         <h3 className="text-sm font-medium text-foreground">Power mode</h3>
         <PowerProfilesPanel profiles={profiles} />
+        {profiles.data?.profiles.includes('performance') && <GamePerformanceSwitch />}
       </div>
     </SectionShell>
+  );
+}
+
+function GamePerformanceSwitch() {
+  const { config, updateConfig } = useAppContext();
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className="min-w-0">
+        <Label htmlFor="game-performance" className="cursor-pointer text-sm">
+          Performance mode for games
+        </Label>
+        <p className="text-xs text-muted-foreground">
+          While a game is in full screen, the computer runs in performance mode, and goes back to
+          the mode it was in after.
+        </p>
+      </div>
+      <Switch
+        id="game-performance"
+        checked={config.gamePerformance}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, gamePerformance: checked }))}
+      />
+    </div>
   );
 }
 

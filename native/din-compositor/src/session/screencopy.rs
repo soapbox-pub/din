@@ -310,6 +310,7 @@ impl State {
             cursor_status: &self.cursor_status,
             cursors: &mut self.cursor,
             dnd_icon: self.dnd_icon.as_ref(),
+            direct: self.direct.element(),
         };
         let elements = render::elements(&mut scene, renderer, area, scale, info.cursor);
         let mut tracker = OutputDamageTracker::new(info.size, scale, transform);

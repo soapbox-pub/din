@@ -61,6 +61,7 @@ const SETTINGS: Setting[] = [
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },
   { key: 'dock.style', field: 'dockStyle', help: 'What the Dock sits on', param: { type: 'string', choices: ['none', 'modern', 'classic'] } },
   { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent', param: { type: 'integer', min: 50, max: 200 } },
+  { key: 'power.game-performance', field: 'gamePerformance', help: 'Performance power mode while a game is in full screen', param: bool },
   { key: 'datetime.clock-format', field: 'clockFormat', help: '12- or 24-hour time, or the locale’s', param: { type: 'string', choices: ['auto', '12', '24'] } },
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },
   { key: 'datetime.show-seconds', field: 'clockShowSeconds', help: 'The menu bar shows seconds', param: bool },
