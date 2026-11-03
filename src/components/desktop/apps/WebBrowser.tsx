@@ -133,9 +133,11 @@ import {
 } from '@/components/ui/context-menu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
 import {
+  completionSources,
   historyDestination,
   historyDisplayUrl,
   inlineCompletion,
+  isSuggestedSite,
   matchHistory,
   topSites,
   useBrowserHistory,
@@ -526,19 +528,28 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const [clearDataOpen, setClearDataOpen] = useState(false);
   const { toast } = useToast();
   const webviewMode = isWebviewAvailable();
-  // Persistent browsing history (feeds address-bar autocomplete).
-  const { history: browsingHistory, recordVisit, recordTitle, recordFavicon, clearHistory } =
-    useBrowserHistory();
+  // Persistent browsing history; it and the suggested sites feed address-bar
+  // autocomplete.
+  const {
+    history: browsingHistory,
+    suggestions: addressSuggestions,
+    recordVisit,
+    recordTitle,
+    recordFavicon,
+    clearHistory,
+    removeSuggestions,
+  } = useBrowserHistory();
   // The https address each tab was last sent to, and whether the user typed
   // it, until its load commits. A server redirect commits somewhere else
   // (fastmail.com → app.fastmail.com), so the address that was typed is
   // recorded too, or it could never autocomplete.
   const typedUrls = useRef(new Map<string, { url: string; typed: boolean }>());
-  // For navigateTab, which resolves a typed site to the address visited.
-  const historyRef = useRef(browsingHistory);
+  // For navigateTab, which resolves a typed site to the address visited (or
+  // the suggested site's).
+  const historyRef = useRef(addressSuggestions);
   useEffect(() => {
-    historyRef.current = browsingHistory;
-  }, [browsingHistory]);
+    historyRef.current = addressSuggestions;
+  }, [addressSuggestions]);
   const newTabSites = useMemo(
     () => topSites(browsingHistory, NEW_TAB_LINKS, NEW_TAB_SITE_COUNT),
     [browsingHistory],
@@ -2008,7 +2019,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           inputRef={addressRef}
           tabId={activeId}
           value={activeTab.address}
-          history={browsingHistory}
+          history={addressSuggestions}
+          onRemove={removeSuggestions}
           onChangeValue={(text) => updateTab(activeId, { address: text })}
           onPredict={predictNavigation}
           onNavigate={navigate}
@@ -2295,12 +2307,16 @@ function UndockedDevToolsReconciler({
  * re-render, because re-completing to the value the input already had ("redd"
  * -> "reddit.com" when it was already "reddit.com") is a no-op state update
  * that React bails out of, which would leave the box uncompleted.
+ *
+ * Shift+Delete takes the highlighted suggestion, or the inline completion,
+ * out of the suggestions, as in Chrome.
  */
 function AddressBar({
   inputRef,
   tabId,
   value,
   history,
+  onRemove,
   onChangeValue,
   onPredict,
   onNavigate,
@@ -2313,7 +2329,10 @@ function AddressBar({
   /** Active tab id; switching tabs dismisses the dropdown. */
   tabId: string;
   value: string;
+  /** History plus suggested sites, to match against. */
   history: BrowserHistoryEntry[];
+  /** Take entries out of the suggestions (Shift+Delete). */
+  onRemove: (entries: BrowserHistoryEntry[]) => void;
   onChangeValue: (text: string) => void;
   /** Where Enter would go now changed (the user typed or arrowed); lets the browser connect ahead. */
   onPredict?: (text: string) => void;
@@ -2385,6 +2404,25 @@ function AddressBar({
       setHighlighted(next);
       onChangeValue(next === -1 ? typed : suggestions[next].url);
       onPredict?.(next === -1 ? typed : suggestions[next].url);
+    } else if (e.key === 'Delete' && e.shiftKey) {
+      // Chrome's Shift+Delete: forget the highlighted suggestion, or with
+      // none highlighted, what the inline completion offered.
+      const input = e.currentTarget;
+      let removing: BrowserHistoryEntry[] = [];
+      if (show && highlighted >= 0) removing = [suggestions[highlighted]];
+      else if (
+        input.selectionStart !== input.selectionEnd &&
+        input.selectionEnd === input.value.length &&
+        input.selectionStart === typed.length
+      ) {
+        removing = completionSources(history, input.value);
+      }
+      if (!removing.length) return;
+      e.preventDefault();
+      onRemove(removing);
+      setHighlighted(-1);
+      onChangeValue(typed);
+      onPredict?.(typed);
     } else if (e.key === 'Escape' && show) {
       e.preventDefault();
       dismiss();
@@ -2502,7 +2540,7 @@ function AddressBar({
         <ul
           id="address-bar-suggestions"
           role="listbox"
-          aria-label="History suggestions"
+          aria-label="Suggestions"
           // Keep focus in the input so item clicks land before blur closes.
           onMouseDown={(e) => e.preventDefault()}
           className="absolute inset-x-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-border/60 bg-popover py-1 text-popover-foreground shadow-lg"
@@ -2524,7 +2562,11 @@ function AddressBar({
                   : 'hover:bg-accent/50',
               )}
             >
-              <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              {isSuggestedSite(entry) ? (
+                <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              ) : (
+                <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              )}
               <span className="min-w-0 max-w-[50%] truncate">
                 {entry.title ?? hostnameOf(entry.url) ?? entry.url}
               </span>

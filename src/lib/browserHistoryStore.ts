@@ -327,6 +327,57 @@ export function recordBrowserFavicon(owner: string, url: string, favicon: string
   update(owner, { ...current, favicon });
 }
 
+/** Forget some pages (Shift+Delete on an address-bar suggestion). */
+export function removeBrowserHistory(owner: string, urls: string[]): void {
+  const account = getAccount(owner);
+  const removed = urls.filter((url) => account.entries.delete(url));
+  if (!removed.length) return;
+  void persist(account, { remove: removed });
+  notify(account);
+}
+
+/**
+ * The suggested sites (see `browserSuggestedSites`) an account removed from
+ * its address-bar suggestions, by URL. Kept in localStorage, apart from
+ * history, so clearing history or its 90-day expiry doesn't bring them back.
+ */
+const dismissed = new Map<string, readonly string[]>();
+
+function dismissedKey(owner: string): string {
+  return `din-browser-dismissed-suggestions:${owner}`;
+}
+
+/** An account's dismissed suggested sites. Stable until it changes. */
+export function getDismissedSuggestions(owner: string): readonly string[] {
+  let urls = dismissed.get(owner);
+  if (!urls) {
+    try {
+      const parsed = z.array(z.string()).safeParse(
+        JSON.parse(localStorage.getItem(dismissedKey(owner)) ?? '[]'),
+      );
+      urls = parsed.success ? parsed.data : [];
+    } catch {
+      urls = [];
+    }
+    dismissed.set(owner, urls);
+  }
+  return urls;
+}
+
+/** Stop suggesting a suggested site to an account. */
+export function dismissSuggestion(owner: string, url: string): void {
+  const current = getDismissedSuggestions(owner);
+  if (current.includes(url)) return;
+  const next = [...current, url];
+  dismissed.set(owner, next);
+  try {
+    localStorage.setItem(dismissedKey(owner), JSON.stringify(next));
+  } catch (error) {
+    console.warn('Failed to save dismissed suggestions:', error);
+  }
+  for (const listener of listeners) listener();
+}
+
 /** Forget an account's whole history. */
 export function clearBrowserHistory(owner: string): void {
   const account = getAccount(owner);

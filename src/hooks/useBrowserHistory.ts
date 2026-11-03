@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   clearBrowserHistory,
+  dismissSuggestion,
   frecency,
   getBrowserHistory,
+  getDismissedSuggestions,
   loadBrowserHistory,
   recordBrowserFavicon,
   recordBrowserTitle,
   recordBrowserVisit,
+  removeBrowserHistory,
   subscribeBrowserHistory,
   type BrowserHistoryEntry,
 } from '@/lib/browserHistoryStore';
+import { SUGGESTED_SITES } from '@/lib/browserSuggestedSites';
 
 export type { BrowserHistoryEntry };
 
@@ -121,6 +125,63 @@ export function topSites(
   // Stable sort: ties keep the defaults first, in their given order.
   ranked.sort((a, b) => b.score - a.score);
   return ranked.slice(0, limit).map((r) => r.site);
+}
+
+/**
+ * What a suggested site counts for in matching, as a fresh followed-link
+ * visit does: a site the user has used about as much, or more, outranks it.
+ */
+const SUGGESTED_SITE_SCORE = 1;
+/**
+ * How many sites the address bar knows before suggested sites give way:
+ * each site in history takes a suggested one's place, least popular first.
+ */
+const SUGGESTED_SITE_LIMIT = 100;
+
+/** Whether a history entry is a suggested site, never visited (see `withSuggestedSites`). */
+export function isSuggestedSite(entry: BrowserHistoryEntry): boolean {
+  return entry.visits === 0;
+}
+
+/**
+ * History plus the suggested sites (see `browserSuggestedSites`) the address
+ * bar offers until the user's own sites take their place, as entries with no
+ * visits whose head start doesn't fade (`SUGGESTED_SITE_SCORE`). A site whose
+ * front page is in history needs no suggestion; one the user removed
+ * (`dismissed`) isn't offered again. Each site in history pushes the least
+ * popular suggestion out, so past `limit` sites there are none.
+ */
+export function withSuggestedSites(
+  history: BrowserHistoryEntry[],
+  sites: { url: string; title: string }[],
+  dismissed: readonly string[],
+  limit = SUGGESTED_SITE_LIMIT,
+  now = Date.now() / 1000,
+): BrowserHistoryEntry[] {
+  const hosts = new Set<string>();
+  const roots = new Set<string>();
+  for (const entry of history) {
+    const key = siteKey(entry.url);
+    if (!key) continue;
+    hosts.add(key);
+    if (new URL(entry.url).pathname === '/') roots.add(key);
+  }
+  const suggested: BrowserHistoryEntry[] = [];
+  for (const site of sites) {
+    if (hosts.size + suggested.length >= limit) break;
+    const key = siteKey(site.url);
+    if (!key || roots.has(key) || dismissed.includes(site.url)) continue;
+    suggested.push({
+      url: site.url,
+      title: site.title,
+      visitedAt: now,
+      visits: 0,
+      typed: 0,
+      score: SUGGESTED_SITE_SCORE,
+    });
+  }
+  // After history, so ties go to the user's own pages.
+  return suggested.length ? [...history, ...suggested] : history;
 }
 
 /** Scheme and `www.` stripped, for user-friendly matching and display. */
@@ -317,6 +378,23 @@ export function inlineCompletion(
 }
 
 /**
+ * The entries an inline completion (see `inlineCompletion`) offered, so
+ * Shift+Delete can take it back: the pages whose address it spells out.
+ */
+export function completionSources(
+  history: BrowserHistoryEntry[],
+  completed: string,
+): BrowserHistoryEntry[] {
+  const scheme = /^(?:https?|nsite):\/\//i.exec(completed)?.[0] ?? '';
+  const q = completed.slice(scheme.length).toLowerCase();
+  return history.filter(
+    (entry) =>
+      (!scheme || entry.url.toLowerCase().startsWith(scheme.toLowerCase())) &&
+      completionTargets(entry).some((t) => t.toLowerCase() === q),
+  );
+}
+
+/**
  * Where a schemeless address that names a visited site in full should go:
  * the URL that was visited, so "reddit.com" goes straight to
  * "https://www.reddit.com/" (as Chrome's omnibox does) instead of through
@@ -371,5 +449,38 @@ export function useBrowserHistory() {
   );
   const clearHistory = useCallback(() => clearBrowserHistory(owner), [owner]);
 
-  return { history, recordVisit, recordTitle, recordFavicon, clearHistory };
+  const dismissed = useSyncExternalStore(subscribeBrowserHistory, () =>
+    getDismissedSuggestions(owner),
+  );
+  /** History plus suggested sites: what the address bar matches against. */
+  const suggestions = useMemo(
+    () => withSuggestedSites(history, SUGGESTED_SITES, dismissed),
+    [history, dismissed],
+  );
+  /**
+   * Take pages out of the address bar's suggestions (Shift+Delete): history
+   * entries are forgotten, suggested sites dismissed for good.
+   */
+  const removeSuggestions = useCallback(
+    (entries: BrowserHistoryEntry[]) => {
+      for (const entry of entries) {
+        if (isSuggestedSite(entry)) dismissSuggestion(owner, entry.url);
+      }
+      removeBrowserHistory(
+        owner,
+        entries.filter((e) => !isSuggestedSite(e)).map((e) => e.url),
+      );
+    },
+    [owner],
+  );
+
+  return {
+    history,
+    suggestions,
+    recordVisit,
+    recordTitle,
+    recordFavicon,
+    clearHistory,
+    removeSuggestions,
+  };
 }
