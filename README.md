@@ -184,12 +184,13 @@ computer over: no files, accounts, apps, saved networks or settings, and no
 password (`os/din-erase.sh`). It takes the password, and only erases a
 computer whose next boot is official DinOS, since a build of the user's own
 comes from `~/DinOS`, which goes; the dialog builds official DinOS first if
-it isn't. Every other system leaves the boot menu, and the computer
-restarts. At the boot after, the initrd swaps an empty `@home` in for the
-old one and empties `/var/lib` and the rest of the user's traces, before
-anything has started; `din-erase-finish` then replaces the disk's
-passphrase with a random key on the boot partition, which the initrd unlocks
-it with, so it starts without asking, and deletes the old home. Din shows
+it isn't. Every other system leaves the boot menu, the disk gets a random
+key on the boot partition, which the initrd unlocks it with from then on
+without asking, and the computer restarts. At the boot after, the initrd
+swaps an empty `@home` in for the old one and empties `/var/lib` and the
+rest of the user's traces, before anything has started; `din-erase-finish`
+then takes the old password's keyslot off the disk, leaving only that key,
+and deletes the old home. Din shows
 Setup (`src/components/desktop/Setup.tsx`) in place of the desktop until
 there's a password again: the keyboard layout, then the password, which
 `din-password setup` sets everywhere, replacing the key. Deleted files aren't

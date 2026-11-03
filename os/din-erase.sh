@@ -18,7 +18,8 @@
 #       repository's main branch, as last fetched, with no changes of the
 #       user's, since their source (~/DinOS) is about to go and no update
 #       could follow it. Takes every other system out of the boot menu,
-#       then does `mark`.
+#       adds a key on the boot partition (SETUP_KEY) to the disk, so the
+#       restart doesn't ask for the password, then does `mark`.
 #   din-erase mark
 #       Mark the disk to be erased (MARK) and restart. Root's alone, without
 #       start's checks, for tests.
@@ -27,10 +28,11 @@
 #       has put an empty home in place of the old one and emptied the
 #       system's own record of the user (dinos-erase, configuration.nix),
 #       and before anything that reads what it emptied starts. On an
-#       encrypted disk, the passphrase typed at the boot screen gives way to
-#       a key on the boot partition (SETUP_KEY), which the initrd unlocks
-#       the disk with until Setup sets the new password, and any other way
-#       in (keyslots, tokens) goes. `din` loses its password, the boot
+#       encrypted disk, the setup key, which the initrd unlocked the disk
+#       with (or, if start couldn't add it, a new one added with the
+#       passphrase typed at the boot screen), becomes the only way in until
+#       Setup sets the new password: the old password's keyslot and any
+#       other (keyslots, tokens) go. `din` loses its password, the boot
 #       screen its wallpaper and layout, and the old home is deleted.
 #
 # A boot that stops partway leaves MARK, and the next one does it all again.
@@ -123,8 +125,10 @@ mark() {
 start() {
   is_live && die "DinOS running from a USB stick isn't erased; it starts fresh without its files on another computer."
   is_btrfs_install || die "This DinOS was installed before your files were kept apart from the system. Reinstall it from a USB stick, erasing the disk, to start over."
+  local password="" part
   if has_password; then
-    din-password check || exit 1
+    IFS= read -r password || true
+    printf '%s\n' "$password" | din-password check || exit 1
   fi
   case $(systemctl is-active din-update.service || true) in
     active | activating | deactivating | reloading) die "An update is running. Try again when it finishes." ;;
@@ -135,6 +139,13 @@ start() {
   nix-env --profile "$PROFILE" --delete-generations old >/dev/null
   "$(readlink -f "$PROFILE")/bin/switch-to-configuration" boot </dev/null >&2 ||
     die "Couldn't set up the boot menu."
+  # So the restart that erases doesn't ask for the password: the key left
+  # behind opens nothing but what's about to be erased.
+  part=$(luks_partition)
+  if [[ -n $part && -n $password ]]; then
+    printf '%s' "$password" | add_setup_key "$part" ||
+      die "The disk didn't take its setup key; nothing was erased."
+  fi
   mark
 }
 
@@ -144,26 +155,33 @@ slot_of() {
     sed -n 's/^Key slot \([0-9]*\) unlocked.*/\1/p' | head -n1
 }
 
-# The disk's keys: only SETUP_KEY opens it once this is done. The
-# passphrase comes from the boot screen, which left it in root's keyring
-# (as for nostrd-unlock); systemd may have left more than one, apart by NULs.
-forget_disk_password() {
-  local part=$1 id slot other token added=false
+# A new SETUP_KEY on partition $1, added with the passphrase on stdin: one of
+# several, apart by NULs, as systemd leaves them in root's keyring.
+add_setup_key() {
+  local part=$1 passphrase
   mkdir -p "$(dirname "$SETUP_KEY")"
+  head -c 64 /dev/urandom >"$SETUP_KEY.tmp"
+  sync "$SETUP_KEY.tmp"
+  mv -f "$SETUP_KEY.tmp" "$SETUP_KEY"
+  while IFS= read -r -d '' passphrase || [[ -n $passphrase ]]; do
+    if printf '%s' "$passphrase" | cryptsetup luksAddKey --batch-mode --key-file=- "$part" "$SETUP_KEY" 2>/dev/null; then
+      return 0
+    fi
+  done
+  rm -f "$SETUP_KEY"
+  return 1
+}
+
+# The disk's keys: only SETUP_KEY opens it once this is done. `start` added
+# it; failing that, the passphrase comes from the boot screen, which left it
+# in root's keyring (as for nostrd-unlock).
+forget_disk_password() {
+  local part=$1 id slot other token
   if [[ ! -s $SETUP_KEY ]] || [[ -z $(slot_of "$SETUP_KEY" "$part") ]]; then
     id=$(keyctl search @u user cryptsetup 2>/dev/null) ||
       die "The disk's passphrase wasn't typed at this boot, so its keys can't be changed."
-    head -c 64 /dev/urandom >"$SETUP_KEY.tmp"
-    sync "$SETUP_KEY.tmp"
-    mv -f "$SETUP_KEY.tmp" "$SETUP_KEY"
-    local passphrase
-    while IFS= read -r -d '' passphrase || [[ -n $passphrase ]]; do
-      if printf '%s' "$passphrase" | cryptsetup luksAddKey --batch-mode --key-file=- "$part" "$SETUP_KEY" 2>/dev/null; then
-        added=true
-        break
-      fi
-    done < <(keyctl pipe "$id")
-    $added || die "The passphrase typed at this boot doesn't open the disk."
+    keyctl pipe "$id" | add_setup_key "$part" ||
+      die "The passphrase typed at this boot doesn't open the disk."
   fi
   slot=$(slot_of "$SETUP_KEY" "$part")
   [[ -n $slot ]] || die "The setup key doesn't open the disk."

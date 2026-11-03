@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, TriangleAlert } from 'lucide-react';
+import { FolderOpen, KeyRound, Laptop, Loader2, Lock, SlidersHorizontal, Wifi, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useUpdateState } from '@/hooks/useUpdater';
 import { getEraseBridge, type EraseStatus } from '@/lib/erase';
@@ -20,9 +19,10 @@ import { cleanLockError } from '@/lib/lock';
 import { DEFAULT_UPDATE_BRANCH, DEFAULT_UPDATE_URL, getUpdaterBridge, type UpdateState } from '@/lib/updater';
 
 /**
- * Settings → About's Erase All Data (window.dinos.erase): the computer back
- * to official DinOS as it was installed, over a restart (os/din-erase.sh).
- * `request` changes to open the dialog, as `din update erase` does.
+ * Settings → About's Erase All Content and Settings (window.dinos.erase):
+ * the computer back to official DinOS as it was installed, over a restart
+ * (os/din-erase.sh). `request` changes to open the dialog, as
+ * `din update erase` does.
  */
 export function EraseSection({ request }: { request?: unknown }) {
   const bridge = getEraseBridge();
@@ -51,10 +51,10 @@ export function EraseSection({ request }: { request?: unknown }) {
       <h3 className="mt-2 text-sm font-medium text-muted-foreground">Erase This Computer</h3>
       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">Erase all data and settings</p>
+          <p className="text-sm font-medium text-foreground">Erase All Content and Settings</p>
           <p className="text-xs text-muted-foreground">
             {data.available
-              ? 'Start over with DinOS as it was installed: your files, accounts, apps and settings are deleted.'
+              ? 'Return this computer to how DinOS came.'
               : 'This DinOS was installed before your files were kept apart from the system. To start over, reinstall it from a USB stick and erase the disk.'}
           </p>
         </div>
@@ -62,7 +62,7 @@ export function EraseSection({ request }: { request?: unknown }) {
           <Button
             variant="outline"
             size="sm"
-            className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="shrink-0"
             onClick={() => {
               setAttempt((n) => n + 1);
               setOpen(true);
@@ -85,6 +85,20 @@ export function EraseSection({ request }: { request?: unknown }) {
   );
 }
 
+/** What erasing removes, as the summary lists it. */
+const REMOVED: { icon: LucideIcon; title: string; detail: string }[] = [
+  { icon: FolderOpen, title: 'Files and apps', detail: 'Everything in your home folder' },
+  { icon: KeyRound, title: 'Nostr keys', detail: 'Your account stays on relays. Keep a copy of your key.' },
+  { icon: Wifi, title: 'Networks and devices', detail: 'Saved Wi-Fi and Bluetooth pairings' },
+  { icon: SlidersHorizontal, title: 'Settings', detail: 'Back to how DinOS came' },
+];
+
+type Step = 'summary' | 'password' | 'confirm';
+
+/**
+ * Erasing in the steps a Mac's Erase Assistant takes: what goes, the
+ * password, then one last question.
+ */
 function EraseDialog({
   open,
   status,
@@ -97,6 +111,7 @@ function EraseDialog({
   onClose: () => void;
 }) {
   const update = useUpdateState();
+  const [step, setStep] = useState<Step>('summary');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [erasing, setErasing] = useState(false);
@@ -139,64 +154,94 @@ function EraseDialog({
         setErasing(false);
         setPassword('');
         setError(cleanLockError(e));
+        setStep(status.password ? 'password' : 'summary');
       });
   };
 
-  const ready = status.official && !busy && !erasing && (!status.password || password.length > 0);
-
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !erasing && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (ready) erase();
-          }}
-        >
-          <DialogHeader className="flex-row items-center gap-3 text-left">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive">
-              <TriangleAlert className="size-5" aria-hidden />
-            </span>
-            <div className="min-w-0 space-y-1">
-              <DialogTitle>Erase all data and settings?</DialogTitle>
-              <DialogDescription>
-                Everything on this computer is deleted: your files, apps, accounts, saved Wi-Fi
-                networks and settings. DinOS stays, as it was installed.
-              </DialogDescription>
-            </div>
-          </DialogHeader>
+      <DialogContent className={step === 'confirm' ? 'sm:max-w-sm' : 'sm:max-w-md'}>
+        {step === 'summary' && (
+          <div className="flex flex-col gap-6">
+            <DialogHeader className="items-center gap-3 text-center sm:text-center">
+              <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-b from-primary/25 to-primary/10 text-primary">
+                <Laptop className="size-8" aria-hidden />
+              </span>
+              <DialogTitle className="text-xl">Erase All Content and Settings</DialogTitle>
+              <DialogDescription>These will be removed, and DinOS reset to how it came.</DialogDescription>
+            </DialogHeader>
 
-          <ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-muted-foreground">
-            <li>
-              Your Nostr account isn’t deleted, since it lives on relays, but its key on this
-              computer is. Make sure you have a copy of it, or you can’t sign in again.
-            </li>
-            <li>
-              {status.encrypted
-                ? 'The computer restarts and asks for its password one last time. Then it starts like new, and asks you to choose a new password.'
-                : 'The computer restarts, and starts like new.'}
-            </li>
-            <li>
-              Deleted files aren’t overwritten. Before you give the computer away, reinstalling
-              DinOS from a USB stick and erasing the disk is surest.
-            </li>
-          </ul>
+            <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-foreground/[0.03]">
+              {REMOVED.map(({ icon: Icon, title, detail }) => (
+                <li key={title} className="flex items-center gap-3 px-4 py-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground/80">
+                    <Icon className="size-4" aria-hidden />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">{title}</span>
+                    <span className="block text-xs text-muted-foreground">{detail}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
 
-          {!status.official && (
-            <OfficialNotice update={update} building={building || busy} onBuild={() => void buildOfficial()} />
-          )}
+            {!status.official && (
+              <OfficialNotice update={update} building={building || busy} onBuild={() => void buildOfficial()} />
+            )}
 
-          {status.password && (
+            {error && (
+              <p className="text-center text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+
+            <p className="text-center text-xs text-muted-foreground">
+              Giving it away? Reinstalling from a USB stick erases the disk completely.
+            </p>
+
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!status.official || busy}
+                onClick={() => {
+                  setError(null);
+                  setStep(status.password ? 'password' : 'confirm');
+                }}
+              >
+                Continue
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {step === 'password' && (
+          <form
+            className="flex flex-col gap-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!password) return;
+              setError(null);
+              setStep('confirm');
+            }}
+          >
+            <DialogHeader className="items-center gap-3 text-center sm:text-center">
+              <span className="grid size-16 place-items-center rounded-2xl bg-foreground/[0.07] text-foreground/80">
+                <Lock className="size-8" aria-hidden />
+              </span>
+              <DialogTitle className="text-xl">Enter Your Password</DialogTitle>
+              <DialogDescription>The one you type when the computer starts.</DialogDescription>
+            </DialogHeader>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="erase-password">Password</Label>
               <Input
-                id="erase-password"
                 type="password"
                 autoComplete="current-password"
-                autoFocus={status.official}
+                autoFocus
+                placeholder="Password"
+                aria-label="Password"
                 value={password}
-                disabled={erasing}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={error ? 'erase-error' : undefined}
                 onChange={(e) => {
@@ -204,25 +249,42 @@ function EraseDialog({
                   setError(null);
                 }}
               />
+              {error && (
+                <p id="erase-error" className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
             </div>
-          )}
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setStep('summary')}>
+                Back
+              </Button>
+              <Button type="submit" disabled={!password}>
+                Continue
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
 
-          {error && (
-            <p id="erase-error" className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-
-          <DialogFooter>
-            <Button type="button" variant="secondary" onClick={onClose} disabled={erasing}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="destructive" disabled={!ready}>
-              {erasing && <Loader2 className="motion-safe:animate-spin" aria-hidden />}
-              {erasing ? 'Restarting…' : 'Erase and Restart'}
-            </Button>
-          </DialogFooter>
-        </form>
+        {step === 'confirm' && (
+          <div className="flex flex-col gap-6">
+            <DialogHeader className="items-center gap-2 text-center sm:text-center">
+              <DialogTitle>Erase this computer?</DialogTitle>
+              <DialogDescription className="text-center">
+                It restarts and starts like new. This can’t be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="sm:justify-center">
+              <Button type="button" variant="secondary" disabled={erasing} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="button" variant="destructive" disabled={erasing} onClick={erase}>
+                {erasing && <Loader2 className="motion-safe:animate-spin" aria-hidden />}
+                {erasing ? 'Restarting…' : 'Erase'}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -245,11 +307,13 @@ function OfficialNotice({
   const updating = update?.phase === 'updating';
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
-      <p className="text-sm text-foreground">
-        This computer runs DinOS with changes of yours, or from another repository. Erasing it goes
-        back to official DinOS, which is built first. That can take a while; keep the computer
-        plugged in.
-      </p>
+      <div>
+        <p className="text-sm font-medium text-foreground">Official DinOS first</p>
+        <p className="text-xs text-muted-foreground">
+          This computer runs a customized DinOS, which is erased with your files. Build official
+          DinOS to continue. Keep the charger plugged in.
+        </p>
+      </div>
       {updating ? (
         <div className="flex flex-col gap-2" role="status">
           <p className="text-xs text-muted-foreground">Building official DinOS… {update.percent}%</p>
