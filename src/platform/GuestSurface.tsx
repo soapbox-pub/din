@@ -3,8 +3,7 @@ import type { CSSProperties, Ref, RefObject } from 'react';
 import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
-import { createOverscrollBounce, parseOverscrollReport } from '@/lib/overscrollBounce';
-import { createGuest, guest, GUEST_EVENTS, guestId, guestMessage, isGuestFullscreen, type GuestElement } from '@/platform/guest';
+import { createGuest, guest, GUEST_EVENTS, guestId, isGuestFullscreen, type GuestElement } from '@/platform/guest';
 
 /** Imperative controls of a guest surface. */
 export interface GuestSurfaceHandle {
@@ -103,13 +102,8 @@ export function GuestSurface({
   const pageHidden = hidden || !windowVisible;
   const { config } = useAppContext();
   const zoomFactor = (config.zoomLevel / 100) * pageZoom;
-  const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const elRef = useRef<GuestElement | null>(null);
-  const pageZoomRef = useRef(pageZoom);
-  useLayoutEffect(() => {
-    pageZoomRef.current = pageZoom;
-  }, [pageZoom]);
   const initial = useRef({ src, partition, webpreferences, allowPopups, guestClassName });
 
   // Built off-DOM and appended fully configured: see createGuest.
@@ -211,30 +205,6 @@ export function GuestSurface({
     };
   }, [onAttach]);
 
-  // A scroll past the end of the page bounces it inside the surface, as on
-  // macOS (electron/overscroll-preload.cjs says when).
-  useEffect(() => {
-    const el = elRef.current;
-    if (!el) return;
-    const bounce = createOverscrollBounce(el, { clip: outerRef.current, scale: () => pageZoomRef.current });
-    const onMessage = (e: Event) => {
-      const message = guestMessage(e);
-      if (message?.channel !== 'din:overscroll' || isGuestFullscreen(el)) return;
-      const report = parseOverscrollReport(message.args[0]);
-      if (report) bounce.report(report);
-    };
-    el.addEventListener(GUEST_EVENTS.message, onMessage);
-    // A page that goes away mid-bounce leaves none behind.
-    el.addEventListener(GUEST_EVENTS.navigate, bounce.dispose);
-    el.addEventListener(GUEST_EVENTS.gone, bounce.dispose);
-    return () => {
-      el.removeEventListener(GUEST_EVENTS.message, onMessage);
-      el.removeEventListener(GUEST_EVENTS.navigate, bounce.dispose);
-      el.removeEventListener(GUEST_EVENTS.gone, bounce.dispose);
-      bounce.dispose();
-    };
-  }, []);
-
   // The engine doesn't pass the shell frame's zoom on to guests, and a
   // mismatch also offsets the guest's hit-testing; it resets on navigation,
   // so it's reapplied on every dom-ready.
@@ -307,7 +277,7 @@ export function GuestSurface({
   }, [fileDrag, fileDropBridge]);
 
   return (
-    <div ref={outerRef} className={className ?? 'relative h-full w-full'} style={{ display: 'flex', ...style }}>
+    <div className={className ?? 'relative h-full w-full'} style={{ display: 'flex', ...style }}>
       <div ref={containerRef} className="h-full w-full" style={{ display: 'flex' }} />
       {fileDrag && fileDropBridge && (
         <div

@@ -45,7 +45,6 @@ The surface keeps the guest in step with the desktop on its own:
 | Zoom | The interface zoom times `pageZoom`, reapplied on every `dom-ready` (the engine resets it, and a mismatch offsets hit-testing) |
 | Visibility | `dinos.guestVisibility`, from the window's visibility and `hidden` |
 | File drops | With `acceptFileDrops`, a cover during a Files drag forwards it to `dinos.guestFileDrop` |
-| Overscroll | `electron/overscroll-preload.cjs` (every app and web page) runs `src/shared/overscroll.ts` and reports a scroll past the end with `sendToHost('din:overscroll')`; the surface bounces the guest inside itself (`src/lib/overscrollBounce.ts`). The desktop's own windows bounce from `OverscrollHost` |
 
 Other guest plumbing goes through `guest.ts` helpers rather than the
 element: `GuestInputHost` (pointer forwarding, `findGuest`),

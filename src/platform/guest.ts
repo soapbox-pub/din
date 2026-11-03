@@ -188,12 +188,4 @@ export const GUEST_EVENTS = {
   navigate: 'did-navigate',
   navigateInPage: 'did-navigate-in-page',
   gone: 'render-process-gone',
-  /** A message from the guest's own preloads (`ipcRenderer.sendToHost`). */
-  message: 'ipc-message',
 } as const;
-
-/** A message from a guest's preloads, as `GUEST_EVENTS.message` carries it. */
-export function guestMessage(e: Event): { channel: string; args: unknown[] } | null {
-  const { channel, args } = e as Event & { channel?: unknown; args?: unknown };
-  return typeof channel === 'string' && Array.isArray(args) ? { channel, args } : null;
-}
