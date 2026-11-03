@@ -145,10 +145,13 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
 
   // The X screen is the shell's viewport (see the worker's coordinate notes):
   // a popup an app clamps to the screen then stays inside Din's. The shell
-  // spans every display, so that's their union.
+  // spans every display, so that's their union, in the viewport's CSS pixels
+  // (the displays' over the interface zoom).
   const displays = screen.getAllDisplays().map((d) => d.bounds);
-  const width = Math.max(...displays.map((b) => b.x + b.width)) - Math.min(...displays.map((b) => b.x));
-  const height = Math.max(...displays.map((b) => b.y + b.height)) - Math.min(...displays.map((b) => b.y));
+  const shell = shellContents();
+  const zoom = shell && !shell.isDestroyed() ? shell.getZoomFactor() : 1;
+  const width = Math.round((Math.max(...displays.map((b) => b.x + b.width)) - Math.min(...displays.map((b) => b.x))) / zoom);
+  const height = Math.round((Math.max(...displays.map((b) => b.y + b.height)) - Math.min(...displays.map((b) => b.y))) / zoom);
   const child = spawn(
     xvfb,
     [
