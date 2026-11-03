@@ -182,6 +182,31 @@ pkgs.testers.runNixOSTest {
         restart_keyring_with("hunter22")
         assert as_din(lookup) == "s3cret"
 
+    vault_key = session + "timeout 10 secret-tool lookup application din din-secret passwords-new-key file /home/din/.local/share/din/Passwords.kdbx"
+
+    def first_boot_keyring():
+        machine.succeed("pkill -u din -f gnome-keyring-daemon")
+        machine.wait_until_fails("pgrep -u din -f gnome-keyring-daemon")
+        machine.succeed("rm /home/din/.local/share/keyrings/login.keyring")
+        machine.succeed("printf hunter22 | keyctl padd user cryptsetup @u")
+        # The subtests above restarted it often enough for systemd's limit.
+        machine.succeed("systemctl reset-failed din-keyring-unlock")
+        machine.succeed("systemctl restart din-keyring-unlock")
+        machine.succeed("keyctl unlink $(keyctl search @u user cryptsetup) @u")
+
+    with subtest("the keyring the first boot makes leaves Passwords its vault's key"):
+        first_boot_keyring()
+        import base64, json
+        key = json.loads(as_din(vault_key))
+        assert len(base64.b64decode(key["salt"])) == 32, key
+        assert len(base64.b64decode(key["key"])) == 32, key
+
+    with subtest("not when there's a vault already"):
+        as_din("mkdir -p ~/.local/share/din && touch ~/.local/share/din/Passwords.kdbx")
+        first_boot_keyring()
+        machine.fail("su - din -c " + shlex.quote(vault_key))
+        as_din("rm ~/.local/share/din/Passwords.kdbx")
+
     def gpg_sign(key, passphrase=None):
         mode = f"--pinentry-mode loopback --passphrase {passphrase}" if passphrase else "--pinentry-mode error"
         return session + f"gpg --batch --no-autostart {mode} --local-user {key} --sign --output /dev/null --yes /dev/null"

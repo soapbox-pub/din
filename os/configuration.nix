@@ -372,11 +372,14 @@ let
     ELECTRON_RUN_AS_NODE=1 exec ${electron-hardened}/libexec/electron/electron ${din-app}/share/din/din-cli.mjs "$@"
   '';
 
-  # Unlocks and re-keys `din`'s login keyring with the computer's password
-  # (see the script).
+  # Unlocks and re-keys `din`'s login keyring with the computer's password,
+  # and leaves Passwords the key for its first vault (see the script).
   din-keyring = pkgs.writeShellApplication {
     name = "din-keyring";
-    runtimeInputs = [ pkgs.python3 pkgs.util-linux pkgs.coreutils config.systemd.package ];
+    runtimeInputs = [
+      (pkgs.python3.withPackages (ps: [ ps.argon2-cffi ]))
+      pkgs.util-linux pkgs.coreutils pkgs.libsecret config.systemd.package
+    ];
     text = ''
       exec python3 ${./din-keyring.py} "$@"
     '';
@@ -926,6 +929,9 @@ in
       "${din-password}/bin/din-password change"
       # Only on an erased computer with no password yet.
       "${din-password}/bin/din-password setup"
+      # Whether a password is the computer's (Passwords' setup), which
+      # `change` would tell anyway.
+      "${din-password}/bin/din-password check"
       "${din-password}/bin/din-password sudo status"
       "${din-password}/bin/din-password sudo approve"
       "${din-password}/bin/din-password sudo password"

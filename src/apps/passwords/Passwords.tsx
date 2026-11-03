@@ -88,7 +88,7 @@ export function Passwords() {
       </div>
     );
   } else if (!state.exists) {
-    body = <SetupScreen />;
+    body = <SetupScreen computerPassword={state.computerPassword} />;
   } else if (state.locked) {
     body = <LockScreen />;
   } else {

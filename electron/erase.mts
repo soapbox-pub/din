@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { ipcMain } from 'electron';
+import { computerPasswordSet } from './passwords.mts';
 import { runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_ERASE;
@@ -99,5 +100,7 @@ export function registerEraseHandlers(options: {
     if (!PASSWORD_HELPER) throw new Error('Setup is for DinOS');
     if (!isUsablePassword(password)) throw new Error('Not a usable password');
     await runHelper(PASSWORD_HELPER, ['setup'], `${password}\n`);
+    // Passwords' vault is `din`'s to make, with the same password.
+    await computerPasswordSet(password);
   });
 }

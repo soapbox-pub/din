@@ -21,6 +21,17 @@
 // (lock.mts calls computerPasswordChanged), when the vault's password is the
 // computer's old one.
 //
+// The vault is made with the computer's password, unasked, wherever Din is
+// given that password first. At the first boot after the Installer, Din never
+// sees it: din-keyring (os/din-keyring.py), creating the login keyring with the
+// boot screen's password, derives a key for a new vault from it, with this
+// file's KDF and a salt of its own, and leaves that in the keyring
+// (NEW_KEY_ATTRIBUTES); the vault is made from it here, with that salt, so the
+// password opens it like any other. Setup after erasing gives Din the
+// password itself (erase.mts calls computerPasswordSet). A computer that got
+// neither has Passwords' setup screen offer the computer's password, which
+// din-password checks.
+//
 // Autofill: the preload reports focus on a login field. If the vault has
 // logins for the frame's site (or could make one up, for a new password),
 // the desktop draws the choices below the field, and the pick comes back
@@ -31,7 +42,9 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { spawn } from 'node:child_process';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -52,6 +65,11 @@ const KDF_WORKER = path.join(import.meta.dirname, `passwords-kdf${path.extname(i
 const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
 const VAULT_FILE = path.join(DATA_HOME, 'din', 'Passwords.kdbx');
 const KEYRING_ATTRIBUTES = { application: 'din', 'din-secret': 'passwords-key', file: VAULT_FILE };
+/** A key for a vault not made yet, from din-keyring; os/din-keyring.py names it the same. */
+const NEW_KEY_ATTRIBUTES = { application: 'din', 'din-secret': 'passwords-new-key', file: VAULT_FILE };
+const PASSWORD_HELPER = process.env.DIN_PASSWORD;
+const LIVE_MARK = '/run/din/live';
+const SETUP_MARK = '/var/lib/din/setup';
 
 /** New vaults' Argon2id: 64 MiB, about half a second. */
 const KDF_MEMORY = 64 * 1024 * 1024;
@@ -78,6 +96,8 @@ export interface PasswordsState {
   autoUnlock: boolean;
   /** Sites (origins) the browser never offers to save a password for. */
   never: string[];
+  /** Whether the computer has a password a new vault can be made with (`createWithComputerPassword`). */
+  computerPassword: boolean;
 }
 
 export interface PasswordSummary {
@@ -344,6 +364,7 @@ async function state(): Promise<PasswordsState> {
     file: VAULT_FILE,
     autoUnlock: settings.autoUnlock,
     never: [...settings.never],
+    computerPassword: !!PASSWORD_HELPER && !existsSync(LIVE_MARK) && !existsSync(SETUP_MARK),
   };
 }
 
@@ -401,20 +422,60 @@ async function unlockWithPassword(password: string): Promise<void> {
 
 type AutoUnlock = 'unlocked' | 'retry' | 'no';
 
+/** A key kept in the keyring: `{ salt, key }`, both base64. */
+function parseKey(secret: Buffer): DerivedKey | null {
+  try {
+    const parsed = JSON.parse(secret.toString()) as { salt?: unknown; key?: unknown };
+    if (typeof parsed.salt !== 'string' || typeof parsed.key !== 'string') return null;
+    return { salt: parsed.salt, key: new Uint8Array(Buffer.from(parsed.key, 'base64')) };
+  } catch {
+    return null;
+  }
+}
+
+/** The first boot's vault, made from the key din-keyring left for it. */
+async function createFromKeyring(): Promise<AutoUnlock> {
+  const found = await lookupSecret(NEW_KEY_ATTRIBUTES);
+  if (found.state === 'locked' || found.state === 'unavailable') return 'retry';
+  if (found.state !== 'found') return 'no';
+  const key = parseKey(found.secret);
+  const salt = key ? Buffer.from(key.salt, 'base64') : null;
+  if (!key || !salt || salt.length !== 32 || key.key.length !== 32) {
+    void deleteSecret(NEW_KEY_ATTRIBUTES);
+    return 'no';
+  }
+  if (vault) return 'unlocked';
+  if (await exists()) return 'no';
+  knownKey = key;
+  lastDerived = null;
+  // The key stands in for the password, as in unlockFromKeyring: KDF runs
+  // with its salt answer with it.
+  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('')), 'Passwords');
+  useOurKdf(db);
+  db.header.kdfParameters?.set('S', kdbxweb.VarDictionary.ValueType.Bytes, arrayBuffer(salt));
+  opened(db, null);
+  try {
+    await save();
+  } catch (error) {
+    vault = null;
+    knownKey = null;
+    console.warn('[passwords] making the vault from the keyring:', error);
+    return 'no';
+  }
+  await rememberKey();
+  void deleteSecret(NEW_KEY_ATTRIBUTES);
+  return 'unlocked';
+}
+
 async function unlockFromKeyring(): Promise<AutoUnlock> {
   if (vault) return 'unlocked';
-  if (!settings.autoUnlock || lockedByUser || !(await exists())) return 'no';
+  if (!(await exists())) return createFromKeyring();
+  if (!settings.autoUnlock || lockedByUser) return 'no';
   const found = await lookupSecret(KEYRING_ATTRIBUTES);
   if (found.state === 'locked' || found.state === 'unavailable') return 'retry';
   if (found.state !== 'found') return 'no';
-  let key: DerivedKey;
-  try {
-    const parsed = JSON.parse(found.secret.toString()) as { salt?: unknown; key?: unknown };
-    if (typeof parsed.salt !== 'string' || typeof parsed.key !== 'string') return 'no';
-    key = { salt: parsed.salt, key: new Uint8Array(Buffer.from(parsed.key, 'base64')) };
-  } catch {
-    return 'no';
-  }
+  const key = parseKey(found.secret);
+  if (!key) return 'no';
   if (vault) return 'unlocked';
   knownKey = key;
   lastDerived = null;
@@ -464,6 +525,35 @@ async function create(password: string): Promise<void> {
   useOurKdf(db);
   opened(db, null);
   await save();
+}
+
+/** Whether `password` is the computer's, by din-password (os/din-password.py). */
+function isComputerPassword(password: string): Promise<boolean> {
+  if (!PASSWORD_HELPER || password.includes('\n')) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const child = spawn('sudo', ['-n', PASSWORD_HELPER, 'check'], { stdio: ['pipe', 'ignore', 'ignore'] });
+    child.stdin.on('error', () => {});
+    child.stdin.end(`${password}\n`);
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => resolve(code === 0));
+  });
+}
+
+async function createWithComputerPassword(password: string): Promise<void> {
+  if (vault || (await exists())) throw new Error('There\'s already a vault');
+  if (!(await isComputerPassword(password))) throw new Error('That isn\'t the computer\'s password');
+  await create(password);
+}
+
+/**
+ * The computer has its first password (Setup, after erasing: erase.mts):
+ * the vault is made with it, if there isn't one.
+ */
+export function computerPasswordSet(password: string): Promise<void> {
+  return serial(async () => {
+    if (vault || (await exists())) return;
+    await create(password);
+  }).catch((error: unknown) => console.warn('[passwords] making the vault:', error));
 }
 
 /** Read in what another app saved meanwhile. */
@@ -1346,6 +1436,7 @@ export function registerPasswordsHandlers(opts: Options): void {
     return state();
   }));
   handle('create', (pw) => serial(() => create(password(pw))));
+  handle('createWithComputerPassword', (pw) => serial(() => createWithComputerPassword(password(pw))));
   handle('unlock', (pw) => serial(() => unlockWithPassword(password(pw))));
   handle('lock', () => lock());
   handle('setAutoUnlock', (on) => serial(async () => {

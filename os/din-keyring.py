@@ -8,9 +8,19 @@ control socket, the way pam_gnome_keyring does at login and on passwd.
     din-keyring unlock    password on stdin; creates the keyring if missing
     din-keyring change    old and new password on stdin, one per line
 
+Creating the keyring with a password - the first boot after the Installer -
+it also leaves Passwords (electron/passwords.mts) the key for a new vault
+with that password, if there's none: the KeePass composite key run through
+the vault's Argon2id, with a salt drawn here. Din makes the vault from it
+with that salt, so the password opens it in Din and in KeePassXC alike, and
+the password itself goes nowhere but here.
+
 Run as root, it does its work as `din`: the daemon only answers its own user.
 """
 
+import base64
+import hashlib
+import json
 import os
 import socket
 import struct
@@ -26,6 +36,13 @@ OP_UNLOCK = 1
 OP_CHANGE = 2
 OP_QUIT = 3
 RESULTS = {0: "ok", 1: "denied", 2: "failed", 3: "no daemon"}
+
+# Passwords' vault and its new vaults' Argon2id, as in electron/passwords.mts.
+VAULT_FILE = "din/Passwords.kdbx"
+VAULT_KDF_MEMORY_KIB = 64 * 1024
+VAULT_KDF_ITERATIONS = 8
+VAULT_KDF_PARALLELISM = 2
+LOGIN_COLLECTION = "/org/freedesktop/secrets/collection/login"
 
 
 def fail(message):
@@ -63,11 +80,12 @@ def bus_name_owned():
     return result.stdout.strip() == "b true"
 
 
+def data_home():
+    return os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+
+
 def unlock(password):
-    keyring = os.path.join(
-        os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
-        "keyrings", "login.keyring",
-    )
+    keyring = os.path.join(data_home(), "keyrings", "login.keyring")
     created = not os.path.exists(keyring)
     result = control(OP_UNLOCK, password)
     if result != 0 or not created:
@@ -81,7 +99,40 @@ def unlock(password):
             break
         time.sleep(0.1)
     start_daemon()
-    return control(OP_UNLOCK, password)
+    result = control(OP_UNLOCK, password)
+    if result == 0 and password:
+        try:
+            leave_vault_key(password)
+        except (OSError, subprocess.SubprocessError, ImportError) as error:
+            # Passwords' setup screen asks instead.
+            print(f"No key for a new Passwords vault: {error}", file=sys.stderr)
+    return result
+
+
+def leave_vault_key(password):
+    """The key for a new Passwords vault with this password, in the keyring."""
+    vault = os.path.join(data_home(), VAULT_FILE)
+    if os.path.exists(vault):
+        return
+    from argon2.low_level import Type, hash_secret_raw
+
+    # KDBX 4's composite key for a password alone, as kdbxweb's Credentials.
+    composite = hashlib.sha256(hashlib.sha256(password).digest()).digest()
+    salt = os.urandom(32)
+    key = hash_secret_raw(
+        composite, salt,
+        time_cost=VAULT_KDF_ITERATIONS, memory_cost=VAULT_KDF_MEMORY_KIB,
+        parallelism=VAULT_KDF_PARALLELISM, hash_len=32, type=Type.ID, version=0x13,
+    )
+    secret = json.dumps({
+        "salt": base64.b64encode(salt).decode(),
+        "key": base64.b64encode(key).decode(),
+    })
+    subprocess.run(
+        ["secret-tool", "store", f"--collection={LOGIN_COLLECTION}", "--label=Passwords (Din, new)",
+         "application", "din", "din-secret", "passwords-new-key", "file", vault],
+        input=secret.encode(), check=True, timeout=30, stdout=subprocess.DEVNULL,
+    )
 
 
 def control(op, *args):

@@ -17,6 +17,8 @@ export interface PasswordsState {
   autoUnlock: boolean;
   /** Sites (origins) the browser never offers to save a password for. */
   never: string[];
+  /** Whether the computer has a password a new vault can be made with (`createWithComputerPassword`). */
+  computerPassword: boolean;
 }
 
 export interface PasswordSummary {
@@ -119,6 +121,8 @@ export interface PasswordsBridge {
   /** Tries the login keyring first, while the vault is locked and wasn't locked by hand. */
   state(): Promise<PasswordsState>;
   create(password: string): Promise<void>;
+  /** Make the vault with the computer's password, once it's checked to be that. */
+  createWithComputerPassword(password: string): Promise<void>;
   unlock(password: string): Promise<void>;
   lock(): Promise<void>;
   setAutoUnlock(on: boolean): Promise<void>;

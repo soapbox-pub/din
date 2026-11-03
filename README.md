@@ -160,7 +160,8 @@ One password runs the computer. Encrypting the disk sets its passphrase as
 `din`'s password too, and as the password of **nostrd**, the signer daemon that holds the Nostr account
 keys as its own user so nothing `din` runs can read them. Din signs through
 nostrd's socket, and the passphrase typed at boot unlocks it. It unlocks the
-login keyring too, and any GPG key whose passphrase is the same, so signing
+login keyring too (which the first boot creates with it, and Passwords'
+vault), and any GPG key whose passphrase is the same, so signing
 commits doesn't ask (`os/din-gpg.py`). Settings → Password changes it
 everywhere at once (`os/din-password.py`, disk first).
 
@@ -449,6 +450,14 @@ which KeePassXC, Strongbox and KeePassDX open with the same password. Only
 Din's main process holds it open (`electron/passwords.mts`); the app reaches
 it through its `passwords` permission. Argon2 runs in a worker thread with
 hash-wasm (`electron/passwords-kdf.mts`), since Electron's BoringSSL has none.
+
+The vault comes with the computer, set up with its password: the first boot
+after the Installer, creating the login keyring with the boot screen's
+password, leaves a key for it derived from that password (`os/din-keyring.py`)
+that Din makes the vault from, and Setup after erasing hands Din the new
+password to make it with. A computer without one gets a setup screen that
+takes the computer's password, checked by `din-password check`, or one of
+the vault's own.
 
 Set up with the computer's password, it opens at login with no prompt. The
 key derived from the password, not the password, is kept in the login
