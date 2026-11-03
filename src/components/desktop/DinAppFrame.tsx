@@ -920,27 +920,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         });
         if (!ok) throw new Error('That drag token is taken');
       },
-      'drag.startTab': ({ token, tabType, state, label }) => {
-        const ok = registerDrag({
-          token,
-          kind: 'tab',
-          source: appId,
-          label: typeof label === 'string' ? label.slice(0, 200) : '',
-          paths: [],
-          folders: false,
-          tabType,
-          tabState: state,
-        });
-        if (!ok) throw new Error('That drag token is taken');
-      },
       'drag.accept': async ({ token, operation }) => {
         const entry = acceptDrag(token, operation);
         if (!entry) return null;
-        if (entry.kind === 'tab') {
-          // Tabs move only between windows of the same app.
-          if (entry.source !== appId) return null;
-          return { kind: 'tab', tabType: entry.tabType ?? '', state: entry.tabState };
-        }
         // Without fs an app can only receive copies: it can't delete the
         // originals. Nor can it move what its source could only read.
         const op = permissions.includes('fs') ? (entry.accepted?.operation ?? operation) : 'copy';
@@ -955,12 +937,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const p = toDesktop(at);
         if (currentDrag()) setDragPoint({ x: p.clientX, y: p.clientY });
       },
-      'drag.finish': ({ token, dropEffect, at }) => {
-        const entry = finishDrag(token, dropEffect);
-        if (entry?.kind === 'tab' && !entry.accepted && dropEffect === 'none') {
-          const p = toDesktop(at);
-          push({ type: 'tabDetached', tabType: entry.tabType ?? '', state: entry.tabState, at: { x: p.clientX, y: p.clientY } });
-        }
+      'drag.finish': ({ token, dropEffect }) => {
+        finishDrag(token, dropEffect);
       },
 
       'clipboard.readFiles': async () => {

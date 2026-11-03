@@ -465,17 +465,21 @@ declare global {
 
 /** What's being dragged, as every app can see it during the drag. */
 export interface DragInfo {
-  kind: 'files' | 'tab';
+  kind: 'files';
   /** The app it came from. */
   source: string;
-  /** For `files`: how many, and whether they're all folders. Names only after the drop. */
+  /** How many, and whether they're all folders. Names only after the drop. */
   count: number;
   folders: boolean;
-  /** For `tab`: the app-defined type of tab (`terminal`, `editor`). */
-  tabType?: string;
 }
 
-
+/**
+ * Files dropped from other apps are the web's: the drop's `file` items, each
+ * with `getAsFileSystemHandle()`. Where a drag of files went, the source's
+ * `dragend` says, in its `dropEffect`. Anything else an app drags between
+ * its own windows is plain HTML drag and drop, under a type of its own
+ * (`dataTransfer.setData('application/x-my-thing', …)`).
+ */
 export interface DinDrag {
   /**
    * Call from `dragstart` to drag files out of the app. Sets the drag's data
@@ -487,25 +491,9 @@ export interface DinDrag {
    * dragstart can't do.
    */
   startPaths(e: DragEvent, paths: string[], label: string): void;
-  /**
-   * Call from `dragstart` to drag a tab out. `state` is what a window that
-   * accepts it gets, structured-cloneable; if it's dropped outside every
-   * window, `onTabDetached` asks the source to open it in a new window.
-   */
-  startTab(e: DragEvent, tabType: string, state: unknown, label: string): void;
   /** The drag going on anywhere on the desktop, or null. */
   readonly current: DragInfo | null;
   onChange(cb: (drag: DragInfo | null) => void): Unsubscribe;
-  /**
-   * Take a tab dropped from another window of the app. Call from `drop`
-   * with the event; null if it isn't one. Files dropped from other apps
-   * are the web's: the drop's `file` items, each with
-   * `getAsFileSystemHandle()`. Where a drag of files went, the source's
-   * `dragend` says, in its `dropEffect`.
-   */
-  acceptTab(e: DragEvent): Promise<{ tabType: string; state: unknown } | null>;
-  /** A tab this app was dragging was dropped outside every window. */
-  onTabDetached(cb: (e: { tabType: string; state: unknown; at: Point }) => void): Unsubscribe;
 }
 
 // ---------------------------------------------------------------------------

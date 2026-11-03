@@ -846,7 +846,7 @@ const DRAG_TYPE = 'application/x-din-drag';
 
 export interface DroppedFilesHost {
   /** The drag going on, as the desktop said. */
-  drag(): { kind: 'files' | 'tab'; count: number } | null;
+  drag(): { kind: 'files'; count: number } | null;
   /** Trade a drag's token for handles to its files. */
   accept(token: string, operation: 'copy' | 'move' | 'link'): Promise<FileSystemHandle[]>;
 }

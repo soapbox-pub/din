@@ -255,7 +255,6 @@ export interface Requests {
   /** The token is the app's own (random); the desktop refuses one already in use. */
   'drag.startFiles': [{ token: string; handles: string[]; label: string }, void];
   'drag.startPaths': [{ token: string; paths: string[]; label: string }, void];
-  'drag.startTab': [{ token: string; tabType: string; state: unknown; label: string }, void];
   /** A Din drag is over the app at this point (for the desktop's drag overlay). */
   'drag.over': [{ at: Point }, void];
   'drag.accept': [{ token: string; operation: 'copy' | 'move' | 'link' }, DropResultData | null];
@@ -278,9 +277,7 @@ export interface Requests {
   'nostr.decrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
 }
 
-export type DropResultData =
-  | { kind: 'files'; files: HandleData[]; operation: 'copy' | 'move' | 'link' }
-  | { kind: 'tab'; tabType: string; state: unknown };
+export type DropResultData = { kind: 'files'; files: HandleData[]; operation: 'copy' | 'move' | 'link' };
 
 export type Method = keyof Requests;
 
@@ -308,7 +305,6 @@ export type Push =
   | { type: 'closeRequest'; request: number }
   | { type: 'moveEnd' }
   | { type: 'drag'; drag: DragInfo | null }
-  | { type: 'tabDetached'; tabType: string; state: unknown; at: Point }
   | { type: 'fileChange'; handle: string; change: 'modified' | 'removed' }
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
   | { type: 'notification'; id: number; event: 'click' | 'close'; action: string | null }

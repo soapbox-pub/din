@@ -12,22 +12,20 @@ export const DRAG_MIME = 'application/x-din-drag';
 
 export interface DinDragEntry {
   token: string;
-  kind: 'files' | 'tab';
+  kind: 'files';
   /** The app that started it ('din' for the desktop). */
   source: string;
   paths: string[];
   folders: boolean;
   /** A source that may read the files but not write them: a target gets copies, never a move. */
   copyOnly?: boolean;
-  tabType?: string;
-  tabState?: unknown;
   /**
    * What the desktop's overlay shows following the pointer ("3 items"), for
    * a drag started in an app: a guest's own drag image doesn't reach the
    * screen. Unset for the desktop's own drags, whose drag image does.
    */
   label?: string;
-  /** Hears how it ended, for the source's onEnd / onTabDetached. */
+  /** Hears how it ended, for the source's onEnd. */
   onEnd?: (result: { dropped: boolean; operation: 'copy' | 'move' | 'link' | null }) => void;
   /** Set once a target took it. */
   accepted: { operation: 'copy' | 'move' | 'link' } | null;
@@ -97,7 +95,6 @@ export function dragInfo(entry: DinDragEntry | null): DragInfo | null {
     source: entry.source,
     count: entry.paths.length,
     folders: entry.folders,
-    tabType: entry.tabType,
   };
 }
 

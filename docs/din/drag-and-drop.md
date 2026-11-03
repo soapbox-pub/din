@@ -76,11 +76,7 @@ capture phase before the page's own listeners). Nothing is granted until a
 handle is asked for; the first trades the drag's token for them all, as
 the drop's `dropEffect` says. `getAsFile()` gives null: read the file
 through its handle. `droppedHandles(e)` in `src/shared/fileHandles.ts`
-does the reading. A tab dropped from another window of the app is
-`din.drag.acceptTab(e)`'s.
-
-```ts
-```
+does the reading.
 
 - During the drag, `din.drag.current` says what's coming (kind, count,
   whether they're all folders, the source app), which is what lets a
@@ -121,8 +117,11 @@ on the desktop; the new window calls `adoptedTab()` when it starts. A
 Terminal tab's payload carries its ptys as hand-over tokens
 (`din.system.pty.release` / `adopt`), so its shells keep running.
 
-`din.drag.startTab` (an HTML drag carrying a tab) stays for strips that
-use HTML drag and drop.
+A strip that uses HTML drag and drop instead needs nothing from Din: it
+puts the tab under a type of its own (`dataTransfer.setData('application/x-my-tab', …)`),
+which the app's other windows read in their `drop`, and a `dragend` whose
+`dropEffect` is `none` was dropped outside every window, at its
+`screenX` and `screenY`.
 
 ## Into and out of other kinds of window
 

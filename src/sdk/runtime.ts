@@ -725,15 +725,11 @@ export function installDin(transport: Transport): void {
   // ---- drag and drop ----
   let currentDrag: DragInfo | null = null;
   const drags = new Emitter<DragInfo | null>();
-  const detached = new Emitter<{ tabType: string; state: unknown; at: { x: number; y: number } }>();
   pushes.on((p) => {
-    if (p.type === 'drag') {
-      currentDrag = p.drag;
-      drags.emit(currentDrag);
-      reportDragOver(currentDrag !== null);
-    } else if (p.type === 'tabDetached') {
-      detached.emit({ tabType: p.tabType, state: p.state, at: p.at });
-    }
+    if (p.type !== 'drag') return;
+    currentDrag = p.drag;
+    drags.emit(currentDrag);
+    reportDragOver(currentDrag !== null);
   });
   // While a Din drag is on, say where it is over this window, at most once a
   // frame, for the desktop's drag overlay.
@@ -785,7 +781,7 @@ export function installDin(transport: Transport): void {
     drag: () => currentDrag,
     accept: async (token, operation) => {
       const result = await request('drag.accept', { token, operation });
-      return result?.kind === 'files' ? result.files.map(wrap) : [];
+      return result ? result.files.map(wrap) : [];
     },
   });
   const drag: DinDrag = {
@@ -797,20 +793,10 @@ export function installDin(transport: Transport): void {
       needFs();
       beginDrag(e, (token) => request('drag.startPaths', { token, paths, label }), paths.join('\n'));
     },
-    startTab(e, tabType, tabState, label) {
-      beginDrag(e, (token) => request('drag.startTab', { token, tabType, state: tabState, label }), label);
-    },
     get current() {
       return currentDrag;
     },
     onChange: (cb) => drags.on(cb),
-    async acceptTab(e) {
-      const token = e.dataTransfer?.getData(DRAG_MIME);
-      if (!token || currentDrag?.kind !== 'tab') return null;
-      const result = await request('drag.accept', { token, operation: 'move' });
-      return result?.kind === 'tab' ? { tabType: result.tabType, state: result.state } : null;
-    },
-    onTabDetached: (cb) => detached.on(cb),
   };
 
   // ---- clipboard ----
