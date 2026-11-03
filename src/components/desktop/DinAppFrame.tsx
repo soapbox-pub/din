@@ -71,7 +71,6 @@ import {
   onAppPort,
   storageToMigrate,
   appKeyOf,
-  appWindowIds,
   appWindows,
   persistedGrant,
   persistGrant,
@@ -542,10 +541,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (entries) forgetMigratedStorage(entries);
         for (const key of manifest.din.migrateRecentFiles ?? []) localStorage.removeItem(key);
       },
-      'app.windows': () =>
-        appWindowIds(appId)
-          .filter((id) => id !== windowId)
-          .map((id) => ({ id, title: appWindows.get(id)?.title() ?? appName })),
       'app.saveState': ({ state }) => {
         if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);
       },
@@ -1300,12 +1295,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     return subscribeNotifications(update);
   }, [hasAssistant, push]);
 
-  // Reachable by the app's other windows (din.app.windows, tab drags).
+  // Reachable by the app's other windows (tab drags).
   useEffect(() => {
     appWindows.set(windowId, {
       appId,
       push,
-      title: () => live.current.win?.title ?? appName,
       guestRect: () => guestRect(),
     });
     return () => {
@@ -1313,7 +1307,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       setViewedSession(windowId, null);
       setWindowBadge(windowId, appId, null);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowId, appId, push]);
 
   // The manifest's theme color tints the title bar until the app says otherwise.

@@ -191,7 +191,6 @@ export interface Requests {
   'app.openUrl': [{ url: string }, void];
   /** The manifest's `related_applications` that can be opened now. */
   'app.relatedApps': [void, RelatedApplication[]];
-  'app.windows': [void, { id: string; title: string }[]];
   'app.saveState': [{ state: unknown }, void];
   'window.tabDragMove': [{ at: Point; label: string }, { windowId: string; at: Point } | null];
   'window.tabDragEnd': [{ at: Point }, { windowId: string; at: Point } | null];

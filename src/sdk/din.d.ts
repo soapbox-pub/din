@@ -124,6 +124,11 @@ declare global {
  * has it back by the time `din.ready` resolves. JSON, up to 512 KB (more is
  * dropped, with a warning).
  *
+ * The app's windows talk to each other on a BroadcastChannel, which
+ * reaches the app's windows and nothing else (each app is an origin of its
+ * own), and share state in a SharedWorker, which lives while one of them
+ * does. Which others are open, they say there when asked.
+ *
  * Whether another app can be opened now is the web's
  * `navigator.getInstalledRelatedApps()`, for the apps the manifest lists in
  * `related_applications` as `{ "platform": "webapp", "url":
@@ -155,12 +160,6 @@ export interface DinApp {
    * others get a DinPermissionError.
    */
   openFiles(files: FileSystemHandle[]): Promise<void>;
-  /**
-   * The app's other open windows, front to back. They talk to each other
-   * on a BroadcastChannel, which reaches the app's windows and nothing else,
-   * and share state in a SharedWorker, which lives while one of them does.
-   */
-  windows(): Promise<{ id: string; title: string }[]>;
   /**
    * localStorage keys this app kept on the desktop's origin before it moved
    * out are copied in before the app's code runs (the manifest's
@@ -227,7 +226,7 @@ export interface FrameStyle {
  * quitting.
  */
 export interface DinWindow {
-  /** The window's id, unique on this desktop (what `din.app.windows()` lists). */
+  /** The window's id, unique on this desktop, for its app's other windows to address it by. */
   readonly id: string;
   /** The half or quarter of the screen it's snapped to, or null. */
   readonly snapped: Snap | null;

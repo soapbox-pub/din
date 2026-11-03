@@ -15,6 +15,8 @@ import { appLink, windowLaunch } from '@/shared/launch';
  * pointer (din.window.tabDragMove) and shows the tab's label there; the
  * tab itself travels to that window on a BroadcastChannel, or, for a new
  * window, waits in the app's shared session (src/shared/appSession.ts).
+ * The app's other windows, for "Move to window", answer on the same
+ * channel when asked who's there.
  *
  * A channel reaches every window of the app and nothing else: each app is
  * an origin of its own, and the only foreign content apps frame can't join
@@ -45,6 +47,9 @@ const ADOPT_PARAM = 'adoptTab';
 /** Where a new window's title bar goes, relative to the pointer that dropped its tab. */
 const GRAB = { x: 100, y: 16 };
 
+const WHO = 'din:who';
+const HERE = 'din:here';
+
 interface TabMessage {
   type: typeof MESSAGE;
   /** The window it's for. */
@@ -55,8 +60,24 @@ interface TabMessage {
   x?: number;
 }
 
-function isTabMessage(data: unknown): data is TabMessage {
-  return typeof data === 'object' && data !== null && (data as { type?: unknown }).type === MESSAGE;
+/** Asking the app's other windows who's there; each answers with a HereMessage. */
+interface WhoMessage {
+  type: typeof WHO;
+  from: string;
+}
+
+interface HereMessage {
+  type: typeof HERE;
+  to: string;
+  windowId: string;
+  title: string;
+}
+
+type ChannelMessage = TabMessage | WhoMessage | HereMessage;
+
+function isMessage(data: unknown): data is ChannelMessage {
+  const type = typeof data === 'object' && data !== null ? (data as { type?: unknown }).type : null;
+  return type === MESSAGE || type === WHO || type === HERE;
 }
 
 /** Where a tab dropped at x lands in a strip: its index, and the x of the gap (for the marker). */
@@ -100,38 +121,52 @@ export function useDinTabTransfer(options: DinTabTransferOptions, tabCount: numb
     latest.current = { options, tabCount, list };
   });
 
-  // The app's other windows, for "Move to window": refreshed when this one
-  // comes to the front (and a tab menu can only open then).
+  // Another window's tab arriving, and the app's other windows, for "Move
+  // to window": asked again when this one comes to the front (and a tab
+  // menu can only open then).
   const [others, setOthers] = useState<{ windowId: string; title: string }[]>([]);
-  useEffect(() => {
-    let live = true;
-    const refresh = () =>
-      void din.app.windows().then((ws) => {
-        if (live) setOthers(ws.map((w) => ({ windowId: w.id, title: w.title })));
-      });
-    refresh();
-    window.addEventListener('focus', refresh);
-    window.addEventListener('pointerdown', refresh, true);
-    return () => {
-      live = false;
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('pointerdown', refresh, true);
-    };
-  }, [din]);
-
-  // Another window's tab arriving, and where one hovering would land.
   const channel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {
     const open = new BroadcastChannel(CHANNEL);
     channel.current = open;
+    const post = (message: ChannelMessage) => open.postMessage(message);
+    // Windows that don't answer within a moment have closed.
+    let answered = new Set<string>();
+    let sweep: ReturnType<typeof setTimeout> | undefined;
     open.onmessage = ({ data }: MessageEvent<unknown>) => {
-      if (!isTabMessage(data) || data.to !== din.window.id) return;
+      if (!isMessage(data)) return;
+      const self = din.window.id;
+      if (data.type === WHO) {
+        if (data.from !== self) post({ type: HERE, to: data.from, windowId: self, title: document.title });
+        return;
+      }
+      if (data.to !== self) return;
+      if (data.type === HERE) {
+        const { windowId, title } = data;
+        answered.add(windowId);
+        setOthers((list) => [...list.filter((w) => w.windowId !== windowId), { windowId, title }]);
+        return;
+      }
       const strip = latest.current.list;
       const index = data.index ?? (strip && typeof data.x === 'number' ? slotAt(strip, data.x).index : Infinity);
       latest.current.options.receive(data.payload, index);
       window.focus();
     };
+    const refresh = () => {
+      const now = (answered = new Set());
+      post({ type: WHO, from: din.window.id });
+      clearTimeout(sweep);
+      sweep = setTimeout(() => setOthers((list) => list.filter((w) => now.has(w.windowId))), 500);
+    };
+    void din.ready.then(() => {
+      if (channel.current === open) refresh();
+    });
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pointerdown', refresh, true);
     return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pointerdown', refresh, true);
+      clearTimeout(sweep);
       open.close();
       if (channel.current === open) channel.current = null;
     };

@@ -146,10 +146,11 @@ the site, `mailto:` in Mail, `nostr:` in its viewer, and anything else in
 the Web Browser. Like a `noopener` open, it returns no window; `_self`,
 `_parent` and `_top` navigate the app's own page.
 
-An app's windows reach each other: `din.app.windows()` lists the others,
-front to back, with their ids; a `BroadcastChannel` carries messages
+An app's windows reach each other: a `BroadcastChannel` carries messages
 between them, reaching every window of the app (each app is an origin of
-its own) and nothing else, so a message for one names it; and a
+its own) and nothing else, so a message for one names it by its
+`din.window.id`, and which others are open they say there when asked (as
+`useDinTabTransfer` does, for "Move to window"); and a
 `SharedWorker` keeps state they share for as long as one of them is open
 (Files' undo history, a torn-off tab waiting for its new window):
 `sessionGet` and `sessionSet` in `src/shared/appSession.ts`.

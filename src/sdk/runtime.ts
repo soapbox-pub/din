@@ -515,7 +515,6 @@ export function installDin(transport: Transport): void {
       await request('app.open', { ...target, handles: await idsOf(files) });
     },
     openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
-    windows: () => request('app.windows'),
   };
 
   // ---- window ----

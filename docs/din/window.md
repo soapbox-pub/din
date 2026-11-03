@@ -33,7 +33,7 @@ it's crossed.
 Two things the web has no word for are `din.window`'s:
 
 ```ts
-din.window.id;        // unique on this desktop, as din.app.windows() lists them
+din.window.id;        // unique on this desktop, for the app's other windows to address it by
 din.window.snapped;   // 'left', 'right', 'top-left', …, or null (useSnapped())
 din.window.onSnappedChange((snap) => …);
 ```

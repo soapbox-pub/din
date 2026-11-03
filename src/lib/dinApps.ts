@@ -355,7 +355,6 @@ export interface AppWindowEntry {
   appId: string;
   /** Send the window's document a push. */
   push: (message: Push) => void;
-  title: () => string;
   /** Where the window's page is in the desktop's viewport. */
   guestRect: () => DOMRect | undefined;
 }
@@ -369,12 +368,6 @@ export function windowIdAt(x: number, y: number): string | null {
     if (id) return id;
   }
   return null;
-}
-
-/** An app's open windows, front to back. */
-export function appWindowIds(appId: string): string[] {
-  const z = (id: string) => Number(document.querySelector<HTMLElement>(`[data-window-id="${CSS.escape(id)}"]`)?.style.zIndex || 0);
-  return [...appWindows].filter(([, w]) => w.appId === appId).map(([id]) => id).sort((a, b) => z(b) - z(a));
 }
 
 /** The app window another one's tab is dragged over, which hears where (din.window.onTabHover). */
