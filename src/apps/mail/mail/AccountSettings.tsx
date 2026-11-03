@@ -5,11 +5,75 @@ import { DialogButton, Overlay } from '@/shared/dialogs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { MailAccount, MailServer } from '@/lib/mail';
-import { useMail } from './api';
+import { CATEGORY_NAMES, MAIL_CATEGORIES, type InboxTabs, type MailAccount, type MailServer } from '@/lib/mail';
+import { useInboxTabs, useMail, useSetInboxTabs } from './api';
 import { REMOTE_KEY } from './Reader';
+import { TAB_ICONS } from './tabs';
+
+const TAB_HINTS: Record<InboxTabs['tabs'][number], string> = {
+  promotions: 'Deals, offers and newsletters',
+  social: 'Social networks and media sites',
+  updates: 'Receipts, bills, notifications and accounts',
+  forums: 'Mailing lists and discussion groups',
+};
+
+/** Which inbox tabs are shown, and which new mail notifies (Settings → General). */
+function InboxTabsSettings() {
+  const query = useInboxTabs();
+  const set = useSetInboxTabs();
+  const prefs = query.data;
+  const others = MAIL_CATEGORIES.filter((c): c is InboxTabs['tabs'][number] => c !== 'primary');
+  return (
+    <div className="space-y-3">
+      <div>
+        <span className="block text-[13px] font-medium">Inbox tabs</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          The inbox is split up the way Gmail’s is: by Gmail itself on Gmail, and from each message’s headers elsewhere. Mail for a tab you don’t show stays in Primary. Move a sender to another tab from a message’s menu.
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="flex items-start gap-2.5 rounded-lg border border-border/70 p-2.5 text-[13px] text-muted-foreground">
+          <Checkbox checked disabled aria-label="Primary" className="mt-0.5" />
+          <span>
+            <span className="flex items-center gap-1.5 font-medium text-foreground"><TAB_ICONS.primary className="size-3.5" /> Primary</span>
+            <span className="block text-xs">Mail from people, and anything else</span>
+          </span>
+        </label>
+        {others.map((c) => {
+          const Icon = TAB_ICONS[c];
+          return (
+            <label key={c} className="flex items-start gap-2.5 rounded-lg border border-border/70 p-2.5 text-[13px]">
+              <Checkbox
+                className="mt-0.5"
+                checked={!!prefs?.tabs.includes(c)}
+                disabled={!prefs}
+                onCheckedChange={(on) => void set({ tabs: on === true ? [...(prefs?.tabs ?? []), c] : (prefs?.tabs ?? []).filter((t) => t !== c) })}
+              />
+              <span>
+                <span className="flex items-center gap-1.5 font-medium"><Icon className="size-3.5" /> {CATEGORY_NAMES[c]}</span>
+                <span className="block text-xs text-muted-foreground">{TAB_HINTS[c]}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <label className="flex items-start justify-between gap-4">
+        <span>
+          <span className="block text-[13px] font-medium">Notify only for Primary</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">New mail in the other tabs comes in quietly, and isn’t counted on Mail’s icon in the Dock.</span>
+        </span>
+        <Switch
+          checked={prefs ? prefs.notify === 'primary' && prefs.tabs.length > 0 : true}
+          disabled={!prefs || !prefs.tabs.length}
+          onCheckedChange={(on) => void set({ notify: on ? 'primary' : 'all' })}
+        />
+      </label>
+    </div>
+  );
+}
 
 function Server({ title, value, onChange }: { title: string; value: MailServer; onChange: (s: MailServer) => void }) {
   return (
@@ -169,7 +233,8 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
         {account ? (
           <AccountForm key={account.id} account={account} onRemoved={() => setSelected('general')} />
         ) : (
-          <div className="flex-1 space-y-4 p-5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            <InboxTabsSettings />
             <label className="flex items-start justify-between gap-4">
               <span>
                 <span className="block text-[13px] font-medium">Load remote content in messages</span>

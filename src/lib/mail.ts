@@ -113,6 +113,37 @@ export interface MessageSummary {
    * elsewhere; undefined for summaries kept from before Mail looked.
    */
   labels?: string[];
+  /**
+   * Its inbox tab, as Gmail sorts it there (Gmail's own on Gmail, Mail's
+   * guess from its headers elsewhere), before the user's rules and which
+   * tabs are shown; for the inbox's messages, undefined for summaries kept
+   * from before Mail looked.
+   */
+  category?: MailCategory;
+}
+
+/** Gmail's inbox tabs, Primary first. */
+export const MAIL_CATEGORIES = ['primary', 'promotions', 'social', 'updates', 'forums'] as const;
+export type MailCategory = (typeof MAIL_CATEGORIES)[number];
+
+export const CATEGORY_NAMES: Record<MailCategory, string> = {
+  primary: 'Primary',
+  promotions: 'Promotions',
+  social: 'Social',
+  updates: 'Updates',
+  forums: 'Forums',
+};
+
+export function isMailCategory(v: unknown): v is MailCategory {
+  return typeof v === 'string' && (MAIL_CATEGORIES as readonly string[]).includes(v);
+}
+
+/** How the inbox is split up, for every account. */
+export interface InboxTabs {
+  /** The tabs shown besides Primary, in Gmail's order; none, and the inbox has no tabs. Mail for a tab not shown is in Primary. */
+  tabs: Exclude<MailCategory, 'primary'>[];
+  /** Which new mail gets a notification and counts on Mail's Dock tile: only Primary's (with tabs shown), or all of it. */
+  notify: 'primary' | 'all';
 }
 
 /** The colors a label can have; one is picked from its id until it's given one. */
@@ -154,8 +185,10 @@ export interface MessagePage {
   messages: MessageSummary[];
   /** Messages in the mailbox (or matching the search). */
   total: number;
-  /** Whether there are older ones; ask again with `before` set to the last uid. */
+  /** Whether there are older ones; ask again with `before` set to the last uid (or `next`). */
   more: boolean;
+  /** Where to ask for older ones from, when it isn't the last message's uid: a tab's page looks past mail of other tabs. */
+  next?: number;
 }
 
 export interface MailAttachmentInfo {
@@ -264,8 +297,13 @@ export interface MailBridge {
   updateAccount(id: string, patch: MailAccountPatch): Promise<MailAccount>;
   removeAccount(id: string): Promise<void>;
   mailboxes(accountId: string): Promise<MailboxInfo[]>;
-  /** A page of a mailbox's messages, newest first; `label` keeps those with that keyword (not Gmail's labels, which are mailboxes). */
-  messages(accountId: string, path: string, options?: { before?: number; limit?: number; query?: string; filter?: MessageFilter; label?: string }): Promise<MessagePage>;
+  /**
+   * A page of a mailbox's messages, newest first; `label` keeps those with
+   * that keyword (not Gmail's labels, which are mailboxes), and `category`
+   * the inbox's in that tab (with the user's rules, and Primary taking the
+   * tabs not shown).
+   */
+  messages(accountId: string, path: string, options?: { before?: number; limit?: number; query?: string; filter?: MessageFilter; label?: string; category?: MailCategory }): Promise<MessagePage>;
   message(accountId: string, path: string, uid: number): Promise<MailMessage>;
   /**
    * The rest of a conversation, from the inbox, Sent and Archive (All Mail
@@ -295,6 +333,19 @@ export interface MailBridge {
   /** Whether senders' pictures are looked up (on unless turned off). */
   avatarLookups(): Promise<boolean>;
   setAvatarLookups(on: boolean): Promise<void>;
+  /** Which inbox tabs are shown, and which new mail notifies. */
+  inboxTabs(): Promise<InboxTabs>;
+  setInboxTabs(patch: Partial<InboxTabs>): Promise<InboxTabs>;
+  /**
+   * The dates of each tab's newest unread mail in the inbox (at most 100
+   * each, newest first), from the messages Mail has seen, with the
+   * user's rules and the tabs shown: for its "new" counts.
+   */
+  tabCounts(accountId: string): Promise<Record<MailCategory, number[]>>;
+  /** The senders whose mail goes to a tab of the user's choosing, by address. */
+  tabRules(accountId: string): Promise<Record<string, MailCategory>>;
+  /** Send a sender's mail, what's in the inbox and what comes, to a tab; null goes back to how it's sorted. */
+  setTabRule(accountId: string, address: string, category: MailCategory | null): Promise<void>;
   /** Mark every message in a mailbox read; resolves with how many were unread. */
   markAllRead(accountId: string, path: string): Promise<number>;
   /** Move to a mailbox by path, or to the account's archive, trash or junk. */
@@ -327,6 +378,8 @@ export interface MailArrival {
   subject: string;
   preview: string | null;
   date: number;
+  /** The inbox tab it's in. */
+  category: MailCategory;
 }
 
 /** Announced mail that's been read, moved or deleted: its notification goes. */
@@ -337,12 +390,15 @@ export interface MailRead {
 }
 
 /**
- * What the desktop has of it: the mailing lists and labels, for `din mail`; and new
- * mail and each inbox's unread count, watched from the moment Din starts,
- * for notifications and Mail's Dock badge.
+ * What the desktop has of it: the mailing lists, labels and inbox tabs, for
+ * `din mail`; and new mail and each inbox's unread count, watched from the
+ * moment Din starts, for notifications and Mail's Dock badge.
  */
-export type MailDesktopBridge = Pick<MailBridge, 'accounts' | 'mailboxes' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel'> & {
-  /** Each account's unread mail in its inbox, as last counted. */
+export type MailDesktopBridge = Pick<
+  MailBridge,
+  'accounts' | 'mailboxes' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule'
+> & {
+  /** Each account's unread mail in its inbox (only Primary's, when only Primary notifies), as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;
   onArrived(cb: (arrival: MailArrival) => void): () => void;

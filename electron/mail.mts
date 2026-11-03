@@ -49,6 +49,18 @@
 // mail with the stored copy. A keyword label's name can change without
 // rewriting it on every message: the keyword stays, as Thunderbird's do.
 //
+// The inbox is split into Gmail's tabs (Primary, Promotions, Social,
+// Updates, Forums). On Gmail each message's tab is Gmail's own, which IMAP
+// gives only to a search (X-GM-RAW category:…), so it's asked for as
+// summaries are fetched, and again for the newest mail at each sync, and
+// a tab's pages are Gmail's search; elsewhere it's guessed from a few
+// headers (electron/mail-categories.mts), and a tab's pages are read from
+// the stored copy, fetching more summaries as they're needed. A sender
+// the user moved to a tab goes there either way (kept with the account;
+// IMAP can't change Gmail's own tabs), and mail for a tab that isn't
+// shown is in Primary. Only Primary's new mail is announced and counted
+// on the Dock, unless the user asks for all of it.
+//
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
@@ -64,8 +76,10 @@ import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
+import { CATEGORIES, CATEGORY_HEADERS, categorize, isCategory } from './mail-categories.mts';
 import type {
   ConversationMessage,
+  InboxTabs,
   LabelColor,
   LabelKind,
   MailAccount,
@@ -74,6 +88,7 @@ import type {
   MailArrival,
   MailAttachment,
   MailboxInfo,
+  MailCategory,
   MailLabel,
   MailLabels,
   MailMessage,
@@ -101,6 +116,29 @@ interface StoredAccount extends MailAccount {
   password: string;
   /** What Din keeps of the account's labels, by id. */
   labels?: SavedLabel[];
+  /** The inbox tab each of these senders' mail goes to, by address (lowercase), as the user moved it. */
+  tabRules?: Record<string, MailCategory>;
+}
+
+/** Gmail's own: Primary, Promotions and Social. */
+const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social'], notify: 'primary' };
+let inboxTabs: InboxTabs = DEFAULT_TABS;
+
+function isInboxTabs(v: unknown): v is InboxTabs {
+  const t = v as InboxTabs;
+  return typeof v === 'object' && v !== null && Array.isArray(t.tabs) && (t.notify === 'primary' || t.notify === 'all');
+}
+
+/** The tabs in Gmail's order, Primary left out (it's always there). */
+function tabList(v: unknown[]): InboxTabs['tabs'] {
+  return CATEGORIES.filter((c): c is InboxTabs['tabs'][number] => c !== 'primary' && v.includes(c));
+}
+
+function tabRulesOf(v: unknown): Record<string, MailCategory> | undefined {
+  if (typeof v !== 'object' || v === null) return undefined;
+  const out: Record<string, MailCategory> = {};
+  for (const [address, c] of Object.entries(v)) if (RULE_ADDRESS.test(address) && isCategory(c)) out[address] = c;
+  return out;
 }
 
 /** A label's name (keywords only) and color, or a keyword deleted, which a server may go on listing. */
@@ -155,7 +193,12 @@ function load(): void {
     const data: unknown = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
     const list = (data as { accounts?: unknown }).accounts;
     accounts = Array.isArray(list) ? list.filter(isStoredAccount) : [];
-    for (const a of accounts) a.labels = Array.isArray(a.labels) ? a.labels.filter(isSavedLabel) : undefined;
+    for (const a of accounts) {
+      a.labels = Array.isArray(a.labels) ? a.labels.filter(isSavedLabel) : undefined;
+      a.tabRules = tabRulesOf(a.tabRules);
+    }
+    const tabs = (data as { inboxTabs?: unknown }).inboxTabs;
+    inboxTabs = isInboxTabs(tabs) ? { tabs: tabList(tabs.tabs), notify: tabs.notify } : DEFAULT_TABS;
   } catch {
     accounts = [];
   }
@@ -170,7 +213,7 @@ function save(): void {
   const file = storePath();
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ accounts }, null, 2), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify({ accounts, inboxTabs }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -200,7 +243,7 @@ function text(v: unknown, max: number): string {
 }
 
 function publicAccount(a: StoredAccount): MailAccount {
-  const { password: _password, labels: _labels, ...rest } = a;
+  const { password: _password, labels: _labels, tabRules: _tabRules, ...rest } = a;
   return rest;
 }
 
@@ -211,6 +254,8 @@ function account(id: unknown): StoredAccount {
 }
 
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+/** A sender a tab rule names: an address with nothing Gmail's search syntax would read as more. */
+const RULE_ADDRESS = /^[^\s@<>{}()"'\\:]+@[^\s@<>{}()"'\\:]+\.[^\s@<>{}()"'\\:]+$/;
 
 // ---------------------------------------------------------------------------
 // Finding an account's servers
@@ -415,17 +460,48 @@ const inboxNewest = new Map<string, number>();
 /** The unread messages announced, by account: their uids in the inbox. */
 const announced = new Map<string, Set<number>>();
 
-/** Count an inbox's unread mail again, telling the desktop of the count and of announced mail now read. */
+/** The most unread mail whose tabs are looked at to count Primary's; any older counts as Primary. */
+const UNSEEN_SORTED_MAX = 500;
+
+/** Whether only Primary's new mail notifies and counts. */
+function primaryOnly(): boolean {
+  return inboxTabs.notify === 'primary' && inboxTabs.tabs.length > 0;
+}
+
+/** The tab an inbox message is in: the user's rule for its sender, else how it's sorted; Primary for a tab not shown. */
+function tabOf(a: StoredAccount, s: MessageSummary): MailCategory {
+  const address = s.from[0]?.address.toLowerCase();
+  const c = (address && a.tabRules?.[address]) || s.category || 'primary';
+  return c === 'primary' || (inboxTabs.tabs as MailCategory[]).includes(c) ? c : 'primary';
+}
+
+/** Count an inbox's unread mail again (Primary's, when only it notifies), telling the desktop of the count and of announced mail now read. */
 async function countUnseen(a: StoredAccount): Promise<void> {
   let uids: number[];
+  let count: number;
   try {
-    uids = await inMailbox(a, 'INBOX', async (client) => (await client.search({ seen: false }, { uid: true })) || [], false);
+    [uids, count] = await inMailbox(a, 'INBOX', async (client): Promise<[number[], number]> => {
+      const found = (await client.search({ seen: false }, { uid: true })) || [];
+      if (!primaryOnly() || !client.mailbox) return [found, found.length];
+      // The newest unread mail's tabs, fetching the summaries not kept yet.
+      const store = storeOf(a);
+      checkValidity(a, store, 'INBOX', String(client.mailbox.uidValidity));
+      const newest = [...found].sort((x, y) => y - x).slice(0, UNSEEN_SORTED_MAX);
+      const kept = store.summaries('INBOX', newest);
+      await fetchSummaries(client, store, 'INBOX', newest.filter((u) => stale(kept.get(u)?.summary, 'INBOX')));
+      const now = store.summaries('INBOX', newest);
+      const elsewhere = newest.filter((u) => {
+        const s = now.get(u)?.summary;
+        return !!s && tabOf(a, s) !== 'primary';
+      }).length;
+      return [found, found.length - elsewhere];
+    }, false);
   } catch {
     return;
   }
   if (!accounts.includes(a)) return;
-  if (unseen.get(a.id) !== uids.length) {
-    unseen.set(a.id, uids.length);
+  if (unseen.get(a.id) !== count) {
+    unseen.set(a.id, count);
     deps.sendToShell('mail:unseen', Object.fromEntries(unseen));
   }
   const told = announced.get(a.id);
@@ -437,12 +513,12 @@ async function countUnseen(a: StoredAccount): Promise<void> {
   deps.sendToShell('mail:read', { accountId: a.id, path: 'INBOX', uids: read });
 }
 
-/** Announce the new unread mail among these uids, just stored. */
+/** Announce the new unread mail among these uids, just stored (only Primary's, unless all of it notifies). */
 function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
   const now = Date.now();
   const fresh = [...store.summaries('INBOX', uids).values()]
     .map((k) => k.summary)
-    .filter((m) => !m.seen && !m.draft && now - m.date < ARRIVAL_FRESH_MS)
+    .filter((m) => !m.seen && !m.draft && now - m.date < ARRIVAL_FRESH_MS && (!primaryOnly() || tabOf(a, m) === 'primary'))
     .sort((x, y) => y.uid - x.uid)
     .slice(0, ARRIVAL_MAX);
   if (!fresh.length) return;
@@ -459,6 +535,7 @@ function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
       subject: m.subject,
       preview: m.preview,
       date: m.date,
+      category: tabOf(a, m),
     };
     deps.sendToShell('mail:arrived', arrival);
   }
@@ -874,9 +951,9 @@ function byDate(list: MessageSummary[]): MessageSummary[] {
 /**
  * A page of a mailbox from its stored copy, or null when it doesn't have
  * all of it. `fallback` (the server can't be reached) settles for what it
- * has, and filters it.
+ * has, and filters it (to a tab's, with `keep`).
  */
-function storedPage(store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter = null, fallback = false, label = ''): MessagePage | null {
+function storedPage(store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter = null, fallback = false, label = '', keep?: (s: MessageSummary) => boolean): MessagePage | null {
   const box = store.box(mailbox);
   if (!box) return null;
   if (!fallback) {
@@ -884,13 +961,26 @@ function storedPage(store: MailStore, mailbox: string, before: number | undefine
     const page = older.slice(0, limit);
     const kept = store.summaries(mailbox, page);
     // Kept from before Mail read their References: fetched again, for conversations.
-    if (kept.size < page.length || [...kept.values()].some((k) => stale(k.summary))) return null;
+    if (kept.size < page.length || [...kept.values()].some((k) => stale(k.summary, mailbox))) return null;
     return { messages: byDate([...kept.values()].map((k) => k.summary)), total: box.uids.length, more: older.length > page.length };
   }
   const all = store
     .allSummaries(mailbox, before)
-    .filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true) && (!label || !!s.labels?.includes(label)));
-  return { messages: byDate(all.slice(0, limit)), total: filter || label ? all.length : box.uids.length, more: all.length > limit };
+    .filter((s) => (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true) && (!label || !!s.labels?.includes(label)) && (!keep || keep(s)));
+  return { messages: byDate(all.slice(0, limit)), total: filter || label || keep ? all.length : box.uids.length, more: all.length > limit };
+}
+
+/** Each of these inbox messages' tab, as Gmail's search sorts them (any it doesn't name are Primary). */
+async function gmailCategories(client: ImapFlow, uids: number[]): Promise<Map<number, MailCategory>> {
+  const out = new Map<number, MailCategory>(uids.map((u) => [u, 'primary']));
+  if (!uids.length) return out;
+  const range = uidRanges(uids);
+  for (const c of CATEGORIES) {
+    if (c === 'primary') continue;
+    const found = await client.search({ uid: range, gmraw: `category:${c}` }, { uid: true });
+    for (const u of found || []) if (out.has(u)) out.set(u, c);
+  }
+  return out;
 }
 
 /** Fetch and keep the summaries of these messages, with previews for those that have none yet. */
@@ -903,6 +993,10 @@ async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: strin
   const gmail = isGmail(client);
   const summaries = fetched.map((m) => summary(m, gmail));
   if (!gmail) noteKeywords(store, summaries.flatMap((s) => s.labels ?? []));
+  if (gmail && isInbox(mailbox)) {
+    const categories = await gmailCategories(client, summaries.map((s) => s.uid));
+    for (const s of summaries) s.category = categories.get(s.uid);
+  }
   const changed = store.putSummaries(mailbox, summaries);
 
   // Previews, a few KB of each message's text, fetched together for messages whose text is the same part.
@@ -1005,9 +1099,15 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     }
     store.setBox(mailbox, { validity, modseq: modseq?.toString() ?? null, uids, synced: Date.now() });
 
+    // A tab changed on Gmail's web page or app changes neither flags nor modseq: the newest mail's are asked for again.
+    if (gmail && isInbox(mailbox) && keep.length) {
+      const recent = new Set(uids.slice(0, GMAIL_TABS_SYNCED));
+      if (store.setCategories(mailbox, await gmailCategories(client, keep.filter((u) => recent.has(u))))) dirty = true;
+    }
+
     // Summaries kept from before Mail read References are fetched again, once.
     const have = store.summaries(mailbox, uids.slice(0, PAGE));
-    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => stale(have.get(u)?.summary)))) dirty = true;
+    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => stale(have.get(u)?.summary, mailbox)))) dirty = true;
   }, false);
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
   if (arrived.length) announce(a, store, arrived);
@@ -1049,7 +1149,13 @@ function scheduleSync(a: StoredAccount, mailbox: string, delay: number): void {
 }
 
 /** What's fetched for a message's summary. */
-const SUMMARY_FIELDS: FetchQueryObject = { uid: true, flags: true, labels: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true, headers: ['list-unsubscribe', 'references', 'authentication-results', 'received'] };
+const SUMMARY_FIELDS: FetchQueryObject = {
+  uid: true, flags: true, labels: true, envelope: true, bodyStructure: true, internalDate: true, size: true, threadId: true,
+  headers: ['list-unsubscribe', 'references', 'authentication-results', 'received', ...CATEGORY_HEADERS],
+};
+
+/** How many of a Gmail inbox's newest messages have their tabs asked for again at each sync. */
+const GMAIL_TABS_SYNCED = 500;
 
 /** How many of a long References list are kept, from each end: the root and the latest. */
 const REFERENCES_KEPT = 10;
@@ -1059,9 +1165,9 @@ function messageIds(value: string | undefined): string[] {
   return value?.match(/<[^<>\s]{1,500}>/g) ?? [];
 }
 
-/** Kept from before Mail read what conversations, senders' pictures and labels need: fetched again. */
-function stale(s: MessageSummary | undefined): boolean {
-  return !s || !s.references || s.senderVerified === undefined || s.labels === undefined;
+/** Kept from before Mail read what conversations, senders' pictures, labels and (in the inbox) tabs need: fetched again. */
+function stale(s: MessageSummary | undefined, mailbox: string): boolean {
+  return !s || !s.references || s.senderVerified === undefined || s.labels === undefined || (isInbox(mailbox) && s.category === undefined);
 }
 
 function keptReferences(ids: string[]): string[] {
@@ -1093,6 +1199,8 @@ function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
     inReplyTo: messageIds(m.envelope?.inReplyTo)[0] ?? null,
     references: keptReferences(messageIds(headers?.get('references')?.join(' '))),
     senderVerified: senderVouched(raw, from0Domain(m)),
+    // Gmail's are asked of Gmail (fetchSummaries).
+    category: gmail ? undefined : categorize(headers, addresses(m.envelope?.from)[0], m.envelope?.subject ?? ''),
   };
 }
 
@@ -1102,9 +1210,20 @@ function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
  * server, keeping what comes back. Searches and filters ask the server,
  * and settle for the stored copy when it can't be reached.
  */
-async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string): Promise<MessagePage> {
+async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string, category: MailCategory | null): Promise<MessagePage> {
   const store = storeOf(a);
   sessionOf(a.id);
+  // A search looks in every tab.
+  if (category && !query && !label && isInbox(mailbox) && inboxTabs.tabs.length) {
+    try {
+      if ((await labelKind(a)) === 'gmail') return await serverPage(a, store, mailbox, before, limit, '', filter, '', category);
+      return await tabPage(a, store, mailbox, before, limit, filter, category);
+    } catch (error) {
+      const local = storedPage(store, mailbox, before, limit, filter, true, '', (s) => tabOf(a, s) === category);
+      if (local) return local;
+      throw error;
+    }
+  }
   if (!query && !filter && !label) {
     const local = storedPage(store, mailbox, before, limit);
     if (local) {
@@ -1121,19 +1240,38 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
   }
 }
 
-async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string): Promise<MessagePage> {
+/**
+ * Gmail's search for a tab's mail: its category (Primary's taking the tabs
+ * not shown), and the senders the user moved there, without the ones they
+ * moved elsewhere.
+ */
+function gmailTabSearch(a: StoredAccount, tab: MailCategory): string {
+  const shown = new Set<MailCategory>(['primary', ...inboxTabs.tabs]);
+  const categories = tab === 'primary' ? CATEGORIES.filter((c) => c === 'primary' || !shown.has(c)) : [tab];
+  const into: string[] = [];
+  const away: string[] = [];
+  for (const [address, c] of Object.entries(a.tabRules ?? {})) ((shown.has(c) ? c : 'primary') === tab ? into : away).push(address);
+  const any = [...categories.map((c) => `category:${c}`), ...into.map((x) => `from:${x}`)].join(' ');
+  return `{${any}}${away.map((x) => ` -from:${x}`).join('')}`;
+}
+
+async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string, category: MailCategory | null = null): Promise<MessagePage> {
   return inMailbox(a, mailbox, async (client) => {
     const box = client.mailbox;
     const validity = box ? String(box.uidValidity) : '';
     checkValidity(a, store, mailbox, validity);
-    noteMailbox(store, client);
+    const gmail = noteMailbox(store, client);
     let uids: number[] = [];
     if (box && box.exists > 0) {
       const criteria: SearchObject = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true } : { all: true };
-      if (query) {
-        // Gmail searches the way its web page does; elsewhere, the usual headers and the body.
-        if (client.capabilities.has('X-GM-EXT-1')) criteria.gmraw = query;
-        else criteria.or = [{ subject: query }, { from: query }, { to: query }, { body: query }];
+      // Gmail searches the way its web page does; elsewhere, the usual headers and the body.
+      const raw = [gmail && category ? gmailTabSearch(a, category) : '', gmail ? query : ''].filter(Boolean).join(' ');
+      if (raw) {
+        criteria.gmraw = raw;
+        delete criteria.all;
+      }
+      if (query && !gmail) {
+        criteria.or = [{ subject: query }, { from: query }, { to: query }, { body: query }];
         delete criteria.all;
       }
       if (label) {
@@ -1143,7 +1281,7 @@ async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, b
       uids = (await client.search(criteria, { uid: true })) || [];
     }
     uids.sort((x, y) => y - x);
-    if (!query && !filter && !label && box) {
+    if (!query && !filter && !label && !category && box) {
       // The whole mailbox's uids: keep them, and forget what's gone. Flags
       // kept from before stay as current as they were (the modseq too), for
       // the next sync to bring up to date.
@@ -1161,6 +1299,45 @@ async function serverPage(a: StoredAccount, store: MailStore, mailbox: string, b
     const out = page.map((u) => kept.get(u)?.summary).filter((s): s is MessageSummary => !!s);
     return { messages: byDate(out), total: uids.length, more: older.length > page.length };
   });
+}
+
+/** The most of an inbox a tab's page looks through for its mail, before handing back what it found. */
+const TAB_SCAN_MAX = 1000;
+
+/**
+ * A page of an inbox tab's mail, where the server can't search for it: the
+ * stored copy read newest first, fetching the summaries it hasn't kept,
+ * until there's a page of the tab's or it's looked through TAB_SCAN_MAX
+ * (`next` says where to go on from).
+ */
+async function tabPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, filter: MessageFilter, tab: MailCategory): Promise<MessagePage> {
+  const synced = store.box(mailbox)?.synced;
+  if (synced === undefined) await sync(a, mailbox);
+  else if (Date.now() - synced > SYNC_AFTER_MS) scheduleSync(a, mailbox, 0);
+  const box = store.box(mailbox);
+  if (!box) return { messages: [], total: 0, more: false };
+  const older = before ? box.uids.filter((u) => u < before) : box.uids;
+  const wanted = (s: MessageSummary) => tabOf(a, s) === tab && (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true);
+  const out: MessageSummary[] = [];
+  let looked = 0;
+  for (; looked < older.length && looked < TAB_SCAN_MAX && out.length < limit; looked += PAGE) {
+    const chunk = older.slice(looked, looked + PAGE);
+    let kept = store.summaries(mailbox, chunk);
+    const missing = chunk.filter((u) => stale(kept.get(u)?.summary, mailbox));
+    if (missing.length) {
+      await inMailbox(a, mailbox, async (client) => {
+        if (client.mailbox) checkValidity(a, store, mailbox, String(client.mailbox.uidValidity));
+        await fetchSummaries(client, store, mailbox, missing);
+      });
+      kept = store.summaries(mailbox, chunk);
+    }
+    for (const u of chunk) {
+      const s = kept.get(u)?.summary;
+      if (s && wanted(s)) out.push(s);
+    }
+  }
+  const last = older[Math.min(looked, older.length) - 1];
+  return { messages: byDate(out), total: out.length, more: looked < older.length, next: last };
 }
 
 async function wholeMessage(client: ImapFlow, uid: number): Promise<Buffer> {
@@ -1331,7 +1508,7 @@ async function conversation(a: StoredAccount, ids: string[], threadId: string | 
         const uids = ((await c.search(criteria, { uid: true })) || []).sort((x, y) => y - x).slice(0, CONVERSATION_MAX);
         if (!uids.length) return [];
         const kept = store.summaries(mailbox, uids);
-        await fetchSummaries(c, store, mailbox, uids.filter((u) => stale(kept.get(u)?.summary)));
+        await fetchSummaries(c, store, mailbox, uids.filter((u) => stale(kept.get(u)?.summary, mailbox)));
         const now = store.summaries(mailbox, uids);
         return uids.flatMap((u) => {
           const summary = now.get(u)?.summary;
@@ -1750,6 +1927,55 @@ async function setLabels(a: StoredAccount, mailbox: string, uids: number[], chan
   if (gmail && remove.includes(mailbox)) store.removeUids(mailbox, uids);
   changed(a.id, mailbox);
   if (gmail) for (const l of [...add, ...remove]) if (l !== mailbox) scheduleSync(a, l, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Inbox tabs
+// ---------------------------------------------------------------------------
+
+/** Every inbox is sorted again: the app reads its lists again, and the Dock's counts are counted again. */
+function retabbed(list: StoredAccount[]): void {
+  for (const a of list) changed(a.id, 'INBOX');
+}
+
+function setInboxTabs(patch: unknown): InboxTabs {
+  const p = (patch ?? {}) as { tabs?: unknown; notify?: unknown };
+  const next = { ...inboxTabs };
+  if (p.tabs !== undefined) {
+    if (!Array.isArray(p.tabs)) throw new Error('Bad tabs');
+    next.tabs = tabList(p.tabs);
+  }
+  if (p.notify !== undefined) {
+    if (p.notify !== 'primary' && p.notify !== 'all') throw new Error('Bad notify');
+    next.notify = p.notify;
+  }
+  inboxTabs = next;
+  save();
+  retabbed(accounts);
+  return inboxTabs;
+}
+
+/** The dates of each tab's newest unread mail, from the inbox's stored copy. */
+function tabCounts(a: StoredAccount): Record<MailCategory, number[]> {
+  const out = Object.fromEntries(CATEGORIES.map((c) => [c, [] as number[]])) as Record<MailCategory, number[]>;
+  for (const s of storeOf(a).unreadSummaries('INBOX')) if (!s.draft) out[tabOf(a, s)].push(s.date);
+  for (const c of CATEGORIES) out[c] = out[c].sort((x, y) => y - x).slice(0, 100);
+  return out;
+}
+
+const TAB_RULES_MAX = 1000;
+
+function setTabRule(a: StoredAccount, address: unknown, category: unknown): void {
+  const sender = typeof address === 'string' ? address.trim().toLowerCase() : '';
+  if (sender.length > 320 || !RULE_ADDRESS.test(sender)) throw new Error('That isn’t an email address.');
+  if (category !== null && !isCategory(category)) throw new Error('No such tab');
+  const rules = { ...a.tabRules };
+  if (category === null) delete rules[sender];
+  else rules[sender] = category;
+  if (Object.keys(rules).length > TAB_RULES_MAX) throw new Error('That’s too many senders moved to tabs.');
+  a.tabRules = rules;
+  save();
+  retabbed([a]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2203,12 +2429,13 @@ export function registerMailHandlers(options: Deps): void {
   });
   handle('mail:mailboxes', (id) => mailboxes(account(id)));
   handle('mail:messages', (id, mailbox, opts) => {
-    const o = (opts ?? {}) as { before?: unknown; limit?: unknown; query?: unknown; filter?: unknown; label?: unknown };
+    const o = (opts ?? {}) as { before?: unknown; limit?: unknown; query?: unknown; filter?: unknown; label?: unknown; category?: unknown };
     const filter = o.filter === 'unread' || o.filter === 'flagged' ? o.filter : null;
     const before = Number.isInteger(o.before) && (o.before as number) > 0 ? (o.before as number) : undefined;
     const limit = Number.isInteger(o.limit) ? Math.min(Math.max(o.limit as number, 1), 200) : PAGE;
     const label = o.label === undefined || o.label === '' ? '' : labelIdArg(o.label);
-    return messages(account(id), mailboxArg(mailbox), before, limit, text(o.query, 500).trim(), filter, label);
+    const category = isCategory(o.category) ? o.category : null;
+    return messages(account(id), mailboxArg(mailbox), before, limit, text(o.query, 500).trim(), filter, label, category);
   });
   handle('mail:message', (id, mailbox, uid) => {
     if (!Number.isInteger(uid)) throw new Error('Bad uid');
@@ -2239,6 +2466,11 @@ export function registerMailHandlers(options: Deps): void {
   });
   handle('mail:avatarLookups', () => avatarLookups());
   handle('mail:setAvatarLookups', (on) => setAvatarLookups(on === true));
+  handle('mail:inboxTabs', () => inboxTabs);
+  handle('mail:setInboxTabs', (patch) => setInboxTabs(patch));
+  handle('mail:tabCounts', (id) => tabCounts(account(id)));
+  handle('mail:tabRules', (id) => ({ ...account(id).tabRules }));
+  handle('mail:setTabRule', (id, address, category) => setTabRule(account(id), address, category));
   handle('mail:markAllRead', (id, mailbox) => markAllRead(account(id), mailboxArg(mailbox)));
   handle('mail:move', (id, mailbox, uids, to) => move(account(id), mailboxArg(mailbox), uidList(uids), to));
   handle('mail:remove', (id, mailbox, uids) => remove(account(id), mailboxArg(mailbox), uidList(uids)));

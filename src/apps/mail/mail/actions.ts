@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { toast } from '@/shared/toast';
-import type { LabelColor, MailAccount, MailLabel, MailLabels, MailMessage } from '@/lib/mail';
+import { CATEGORY_NAMES, type LabelColor, type MailAccount, type MailCategory, type MailLabel, type MailLabels, type MailMessage } from '@/lib/mail';
 import { labelsKey, mailboxesKey, patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
 import { appLink } from '@/shared/launch';
@@ -157,6 +157,42 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [mail, qc, onRemoved, fail],
   );
 
+  /**
+   * Send these inbox messages' senders to a tab: the mail they've sent
+   * there and what they send. `leaving`: they're shown in another tab, so
+   * they go from the list.
+   */
+  const moveToTab = useCallback(
+    async (items: Item[], tab: MailCategory, leaving: boolean) => {
+      if (!mail) return;
+      const inbox = items.filter((i) => i.path.toUpperCase() === 'INBOX' && i.from[0]?.address);
+      const senders = new Map<string, { accountId: string; address: string }>();
+      for (const i of inbox) {
+        const address = i.from[0].address.toLowerCase();
+        senders.set(`${i.accountId}\u0000${address}`, { accountId: i.accountId, address });
+      }
+      if (!senders.size) return;
+      if (leaving) {
+        const keys = new Set(inbox.map((i) => i.key));
+        onRemoved(keys);
+        patchItems(qc, keys, null);
+      }
+      try {
+        for (const s of senders.values()) await mail.setTabRule(s.accountId, s.address, tab);
+        const addresses = [...new Set([...senders.values()].map((s) => s.address))];
+        const gmail = [...senders.values()].some((s) => qc.getQueryData<MailLabels>(labelsKey(s.accountId))?.kind === 'gmail');
+        toast(addresses.length === 1 ? `Mail from ${addresses[0]} goes to ${CATEGORY_NAMES[tab]}` : `Mail from ${addresses.length} senders goes to ${CATEGORY_NAMES[tab]}`, {
+          body: gmail ? 'What they’ve sent and what they send, here in Din (Gmail’s web page and app keep their own tabs).' : 'What they’ve sent and what they send.',
+        });
+      } catch (error) {
+        fail('Mail couldn’t move that', error);
+      }
+      void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
+      void qc.invalidateQueries({ queryKey: ['mail', 'tab-counts'] });
+    },
+    [mail, qc, onRemoved, fail],
+  );
+
   /** Every message in these mailboxes read, on the server in one command each. */
   const markAllRead = useCallback(
     async (sources: Source[]) => {
@@ -179,7 +215,7 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
     [mail, qc, fail],
   );
 
-  return { run, moveTo, setLabel, markAllRead, newMessage, compose };
+  return { run, moveTo, setLabel, moveToTab, markAllRead, newMessage, compose };
 }
 
 /**

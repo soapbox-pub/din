@@ -6,9 +6,9 @@ import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, Wind
 import { appLink, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
-import type { MailAccount, MailboxInfo, MailLabel, MailLabels, MailSubscription, MessageFilter, SpecialMailbox } from '@/lib/mail';
+import { CATEGORY_NAMES, type MailAccount, type MailboxInfo, type MailCategory, type MailLabel, type MailLabels, type MailSubscription, type MessageFilter, type SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
-import { keywordOf, sourcesOf, useAccounts, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, type Item, type Selection } from './api';
+import { keywordOf, sourcesOf, useAccounts, useInboxTabs, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, useSetInboxTabs, useTabCounts, type Item, type Selection } from './api';
 import { useLabelActions, useMessageActions } from './actions';
 import { labelsOfItems } from './labels';
 import { DeleteLabelDialog, LabelEditor } from './LabelDialogs';
@@ -18,7 +18,9 @@ import { Sidebar, type LabelPick } from './Sidebar';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_NAMES } from './mailboxes';
 import { ListSkeleton, MessageList, SelectBox } from './MessageList';
 import { Reader } from './Reader';
-import { labelEntries, messageMenu, type MenuEntry, type MenuPick } from './menu';
+import { labelEntries, messageMenu, type MenuEntry, type MenuPick, type TabPlace } from './menu';
+import { InboxTabBar } from './InboxTabBar';
+import { markTabSeen, tabsSeen } from './tabs';
 import { DropdownEntries } from './MenuEntries';
 import { groupConversations, type Conversation } from './conversations';
 import { isSelection, messageTarget, savedViewer, type SavedWindow } from './restore';
@@ -178,10 +180,12 @@ export function Viewer() {
     const target = wasReopened() ? null : messageTarget(windowLaunch().params);
     if (!target) return savedViewer(restoredState());
     const selection: Selection = { kind: 'mailbox', accountId: target.accountId, path: target.path };
-    return { selection, filter: null, search: '', message: target.key, scroll: 0 };
+    return { selection, tab: target.tab, filter: null, search: '', message: target.key, scroll: 0 };
   });
   const [chosenMailbox, setSelectionState] = useState<Selection>(() => restored?.selection ?? loadSelection());
   const [filter, setFilter] = useState<MessageFilter>(restored?.filter ?? null);
+  /** The inbox tab chosen; it stays as the inbox shown changes, as Gmail's does. */
+  const [tab, setTabState] = useState<MailCategory>(restored?.tab ?? 'primary');
   const [search, setSearch] = useState(restored?.search ?? '');
   const [query, setQuery] = useState(() => restored?.search.trim() ?? '');
   /** Conversations chosen to act on together, with Ctrl- and Shift-click, by key. */
@@ -241,7 +245,29 @@ export function Viewer() {
   const sources = useMemo(() => sourcesOf(selection, boxes, labels), [selection, boxes, labels]);
   const keyword = keywordOf(selection, labels);
   const effectiveFilter: MessageFilter = selection.kind === 'all' && selection.special === 'flagged' ? 'flagged' : filter;
-  const messages = useMessages(sources, effectiveFilter, query, keyword);
+
+  // An inbox (one account's or All Inboxes) has Gmail's tabs, but for a search, which looks in all of them.
+  const inboxTabs = useInboxTabs();
+  const setInboxTabs = useSetInboxTabs();
+  const shownTabs = useMemo<MailCategory[]>(() => (inboxTabs.data?.tabs.length ? ['primary', ...inboxTabs.data.tabs] : []), [inboxTabs.data]);
+  const selectedSpecial = selection.kind === 'all' ? selection.special : selection.kind === 'mailbox' ? boxes.get(selection.accountId)?.find((b) => b.path === selection.path)?.special ?? null : null;
+  const activeTab: MailCategory | null = shownTabs.length && selectedSpecial === 'inbox' && !query ? (shownTabs.includes(tab) ? tab : 'primary') : null;
+  const tabPlace = useMemo<TabPlace | null>(() => (activeTab ? { tabs: shownTabs, current: activeTab } : null), [activeTab, shownTabs]);
+  const tabCounts = useTabCounts(useMemo(() => [...new Set(sources.map((s) => s.accountId))], [sources]), !!activeTab);
+  // What's come to the other tabs since each was last open (the one open is always seen).
+  const freshMail = useMemo(() => {
+    const seenAt = tabsSeen();
+    const out: Partial<Record<MailCategory, number>> = {};
+    for (const t of shownTabs) if (t !== activeTab) out[t] = (tabCounts[t] ?? []).filter((d) => d > seenAt[t]).length;
+    return out;
+  }, [tabCounts, shownTabs, activeTab]);
+  useEffect(() => {
+    if (!activeTab) return;
+    markTabSeen(activeTab);
+    return () => markTabSeen(activeTab);
+  }, [activeTab]);
+
+  const messages = useMessages(sources, effectiveFilter, query, keyword, activeTab);
   const items = useMemo(() => {
     const seen = new Set<string>();
     const out: Item[] = [];
@@ -274,10 +300,15 @@ export function Viewer() {
       setCursor(restoreFound.key);
     }
   }
-  const { isSuccess, isFetching, fetchNextPage } = messages;
+  const { isSuccess, isFetching, fetchNextPage, hasNextPage } = messages;
   useEffect(() => {
     if (restoring && !restoreFound && isSuccess && !isFetching && restoreMore) void fetchNextPage();
   }, [restoring, restoreFound, isSuccess, isFetching, restoreMore, fetchNextPage]);
+  // A tab's page can find none of its mail among the inbox's newest: on to older mail.
+  const empty = conversations.length === 0;
+  useEffect(() => {
+    if (empty && isSuccess && !isFetching && hasNextPage) void fetchNextPage();
+  }, [empty, isSuccess, isFetching, hasNextPage, fetchNextPage]);
 
   // The open conversation as the list has it now (new mail in it, its
   // flags), or as it was opened.
@@ -301,10 +332,10 @@ export function Viewer() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
-      const state: SavedWindow = { kind: 'viewer', selection: chosenMailbox, filter, search, message: savedMessage, scroll: Math.round(scrollTop.current) };
+      const state: SavedWindow = { kind: 'viewer', selection: chosenMailbox, tab, filter, search, message: savedMessage, scroll: Math.round(scrollTop.current) };
       saveState(state);
     }, 300);
-  }, [chosenMailbox, filter, search, savedMessage]);
+  }, [chosenMailbox, tab, filter, search, savedMessage]);
   useEffect(() => {
     saveWindow();
   }, [saveWindow]);
@@ -345,6 +376,7 @@ export function Viewer() {
     const target = messageTarget(launch.params);
     if (!target) return;
     setSelection({ kind: 'mailbox', accountId: target.accountId, path: target.path });
+    setTabState(target.tab);
     setRestoring(target.key);
   });
 
@@ -367,7 +399,7 @@ export function Viewer() {
     },
     [conversations],
   );
-  const { run, moveTo, setLabel, markAllRead, newMessage, compose } = useMessageActions(accounts, onRemoved);
+  const { run, moveTo, setLabel, moveToTab, markAllRead, newMessage, compose } = useMessageActions(accounts, onRemoved);
   const labelActions = useLabelActions();
   /** The mailbox Mark All as Read is asking about. */
   const [markingRead, setMarkingRead] = useState<Selection | null>(null);
@@ -379,6 +411,7 @@ export function Viewer() {
   const pickFor = useCallback(
     (pick: MenuPick, list: Item[]) => {
       if (!list.length) return;
+      if (typeof pick === 'object' && 'tab' in pick) return void moveToTab(list, pick.tab, !!activeTab && pick.tab !== activeTab);
       if (typeof pick === 'object' && 'label' in pick) return void setLabel(list, pick.label, pick.on, viewingLabel === pick.label);
       if (typeof pick === 'object') return void moveTo(list, list[0].accountId, pick.move);
       if (pick === 'new-label') return setLabelDialog({ kind: 'new', accountId: list[0].accountId, apply: list });
@@ -387,7 +420,7 @@ export function Viewer() {
       if (pick === 'unread' && current && list.some((i) => current.items.some((c) => c.key === i.key))) setOpened(null);
       void run(pick, list);
     },
-    [moveTo, run, setLabel, current, viewingLabel],
+    [moveTo, run, setLabel, moveToTab, current, viewingLabel, activeTab],
   );
 
   const currentMessage = useMessage(current?.latest ?? null);
@@ -428,6 +461,17 @@ export function Viewer() {
   );
 
   const filterUnread = () => setFilter((f) => (f === 'unread' ? null : 'unread'));
+
+  const setTab = useCallback((t: MailCategory) => {
+    setTabState(t);
+    setChosen(new Set());
+    setOpened(null);
+    setCursor(null);
+    setRestoring(null);
+    restoreScroll.current = 0;
+    scrollTop.current = 0;
+    anchor.current = null;
+  }, []);
 
   const onSearch = (value: string) => {
     if (selection.kind === 'subscriptions') setSelection({ kind: 'all', special: 'inbox' });
@@ -653,6 +697,9 @@ export function Viewer() {
         items: [
           { id: 'sidebar', label: 'Show Sidebar', type: 'checkbox', checked: sidebarOpen, enabled: sidebarFits, accelerator: 'Ctrl+Alt+S' },
           { id: 'unread-only', label: 'Show Only Unread', type: 'checkbox', checked: filter === 'unread', accelerator: 'Ctrl+Alt+U' },
+          ...(activeTab
+            ? [{ type: 'separator' } as const, ...shownTabs.map((t): MenuItem => ({ id: `tab:${t}`, label: CATEGORY_NAMES[t], type: 'radio', group: 'tab', checked: t === activeTab }))]
+            : []),
           { type: 'separator' },
           { id: 'back', label: 'Back to Messages', enabled: !!current },
           { id: 'search', label: 'Search', accelerator: 'Ctrl+F', notInFields: true },
@@ -688,6 +735,7 @@ export function Viewer() {
       },
     ],
     (id) => {
+      if (id.startsWith('tab:')) return setTab(id.slice(4) as MailCategory);
       switch (id) {
         case 'new': return newMessage(defaultAccount);
         case 'window': return void window.open(appLink('mail', { viewer: true }));
@@ -791,7 +839,7 @@ export function Viewer() {
       <ToolButton label="Delete" onClick={() => pickFor('trash', current.items)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current.latest])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <LabelMenu entries={labelEntries(current.items, labelsFor(current.latest.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
-      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), labelsFor(current.latest.accountId), TOOLBAR_PICKS, true)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
+      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), labelsFor(current.latest.accountId), TOOLBAR_PICKS, true, tabPlace)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
     </ActionBar>
   );
 
@@ -825,13 +873,23 @@ export function Viewer() {
       {selectedItems.every((i) => i.accountId === first.accountId) && (
         <LabelMenu entries={labelEntries(selectedItems, labelsFor(first.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
       )}
-      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), labelsFor(first.accountId), SELECTION_PICKS, chosenConversations.length === 1)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
+      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), labelsFor(first.accountId), SELECTION_PICKS, chosenConversations.length === 1, tabPlace)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
     </ActionBar>
   ));
 
   const list = (
     <section ref={listRef} aria-label={title} className="flex min-h-0 flex-1 flex-col">
       {selectionBar}
+      {activeTab && (
+        <InboxTabBar
+          tabs={shownTabs}
+          current={activeTab}
+          fresh={freshMail}
+          onPick={setTab}
+          onHide={(t) => void setInboxTabs({ tabs: (inboxTabs.data?.tabs ?? []).filter((x) => x !== t) })}
+          onSettings={() => setDialog({ kind: 'settings', accountId: null })}
+        />
+      )}
       {filter === 'unread' && !current && (
         <div className="flex shrink-0 items-center gap-2 px-4 pt-2 pb-1">
           <button type="button" onClick={filterUnread} className="flex h-7 items-center gap-1.5 rounded-full bg-primary/12 pr-2 pl-3 text-xs font-medium outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60">
@@ -848,12 +906,14 @@ export function Viewer() {
         </div>
       ) : !conversations.length ? (
         <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
-          {sources.length === 0 && (boxes.size < accounts.length || (selection.kind === 'label' && !labels.has(selection.accountId))) ? (
+          {(sources.length === 0 && (boxes.size < accounts.length || (selection.kind === 'label' && !labels.has(selection.accountId)))) || messages.hasNextPage ? (
             <ListSkeleton />
           ) : query ? (
             'No messages matched your search.'
           ) : effectiveFilter ? (
             `No ${effectiveFilter === 'unread' ? 'unread' : 'starred'} messages.`
+          ) : activeTab && activeTab !== 'primary' ? (
+            `Your ${CATEGORY_NAMES[activeTab]} tab is empty.`
           ) : selection.kind === 'label' ? (
             'No messages have this label. Add it from a message’s Label as menu, or drag messages onto it.'
           ) : (
@@ -879,6 +939,7 @@ export function Viewer() {
           onKeyDown={onListKey}
           onPick={(pick, c) => pickFor(pick, pickTargets(pick, targetsFor(c)))}
           targetsFor={targetsFor}
+          tabPlace={tabPlace}
           restoreScroll={() => {
             const top = restoreScroll.current;
             restoreScroll.current = 0;
@@ -951,7 +1012,7 @@ export function Viewer() {
                   key={opened?.key}
                   items={current.items}
                   me={me}
-                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), labelsFor(item.accountId), READER_PICKS)}
+                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), labelsFor(item.accountId), READER_PICKS, true, tabPlace)}
                   onPick={(pick, item) => pickFor(pick, [item])}
                   labels={labelsOfItems(current.items, labelsFor(current.latest.accountId))}
                   onRemoveLabel={(id) => pickFor({ label: id, on: false }, current.items)}

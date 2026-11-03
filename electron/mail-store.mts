@@ -6,8 +6,8 @@
 //   - the folder list, as last listed;
 //   - for each mailbox, its UIDVALIDITY, the HIGHESTMODSEQ its flags were
 //     last brought up to date at, and every uid in it, newest first;
-//   - the summary (envelope, flags, labels, preview) of each message the
-//     list has shown, by mailbox and uid;
+//   - the summary (envelope, flags, labels, preview, inbox tab) of each
+//     message the list has shown, by mailbox and uid;
 //   - the messages that have been opened, as fetched (a big one without its
 //     big attachments), up to BODY_BYTES in all, the least recently opened
 //     going first;
@@ -19,7 +19,7 @@
 
 import fs from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import type { MessageSummary } from '../src/lib/mail.ts';
+import type { MailCategory, MessageSummary } from '../src/lib/mail.ts';
 
 const BODY_BYTES = 512 * 1024 * 1024;
 /** Bigger messages aren't kept; they're fetched each time they're opened. */
@@ -202,9 +202,16 @@ export class MailStore {
     return (this.db.prepare('SELECT uid FROM message WHERE path = ? ORDER BY uid DESC').all(path) as { uid: number }[]).map((r) => r.uid);
   }
 
+  /** The unread summaries kept from a mailbox. */
+  unreadSummaries(path: string): MessageSummary[] {
+    const rows = this.db.prepare("SELECT summary FROM message WHERE path = ? AND json_extract(summary, '$.seen') = 0").all(path) as { summary: string }[];
+    return rows.map((r) => JSON.parse(r.summary) as MessageSummary);
+  }
+
   /**
-   * Keep these summaries, with the previews already read unless they come
-   * with one. True when anything but a preview differs from what was kept.
+   * Keep these summaries, with the previews (and inbox tabs) already read
+   * unless they come with one. True when anything but a preview differs
+   * from what was kept.
    */
   putSummaries(path: string, list: MessageSummary[]): boolean {
     if (!list.length) return false;
@@ -212,8 +219,9 @@ export class MailStore {
     let changed = false;
     const put = this.db.prepare('INSERT INTO message (path, uid, summary, previewed) VALUES (?, ?, ?, ?) ON CONFLICT (path, uid) DO UPDATE SET summary = excluded.summary, previewed = excluded.previewed');
     this.transaction(() => {
-      for (const s of list) {
-        const old = kept.get(s.uid);
+      for (const given of list) {
+        const old = kept.get(given.uid);
+        const s = given.category === undefined && old?.summary.category !== undefined ? { ...given, category: old.summary.category } : given;
         if (!old || withoutPreview(old.summary) !== withoutPreview(s)) changed = true;
         const preview = s.preview ?? old?.summary.preview ?? null;
         put.run(path, s.uid, JSON.stringify({ ...s, preview }), old?.previewed || s.preview !== null ? 1 : 0);
@@ -239,6 +247,21 @@ export class MailStore {
         if (withoutPreview(next) === withoutPreview(summary)) continue;
         changed = true;
         update.run(JSON.stringify(next), path, uid);
+      }
+    });
+    return changed;
+  }
+
+  /** Change kept messages' inbox tabs; true when any differed. */
+  setCategories(path: string, categories: Map<number, MailCategory>): boolean {
+    let changed = false;
+    const update = this.db.prepare('UPDATE message SET summary = ? WHERE path = ? AND uid = ?');
+    this.transaction(() => {
+      for (const [uid, { summary }] of this.summaries(path, [...categories.keys()])) {
+        const category = categories.get(uid);
+        if (!category || summary.category === category) continue;
+        changed = true;
+        update.run(JSON.stringify({ ...summary, category }), path, uid);
       }
     });
     return changed;

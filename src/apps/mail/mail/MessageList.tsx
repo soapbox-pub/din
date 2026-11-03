@@ -9,7 +9,7 @@ import { LabelChip } from './LabelChip';
 import { addressLine, displayName, listDate } from './format';
 import { MAIL_DRAG } from './mailboxes';
 import { Avatar } from './Avatar';
-import { messageMenu, type MenuPick } from './menu';
+import { messageMenu, type MenuPick, type TabPlace } from './menu';
 import { ContextEntries } from './MenuEntries';
 
 function RowButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
@@ -186,6 +186,7 @@ export function MessageList({
   targetsFor,
   restoreScroll,
   onScroll,
+  tabPlace = null,
 }: {
   conversations: Conversation[];
   /** The conversations chosen to act on together (Ctrl- and Shift-click), by key. */
@@ -212,6 +213,8 @@ export function MessageList({
   /** Where to scroll to on showing, once: where a window Din reopened was left. */
   restoreScroll?: () => number;
   onScroll?: (top: number) => void;
+  /** The inbox tab the list is of, for its rows' Move to Tab. */
+  tabPlace?: TabPlace | null;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -276,7 +279,7 @@ export function MessageList({
             />
           </ContextMenuTrigger>
           <ContextMenuContent className="w-56">
-            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} labels={labelsFor(c.latest.accountId)} onPick={onPick} />
+            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} labels={labelsFor(c.latest.accountId)} place={tabPlace} onPick={onPick} />
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -290,6 +293,6 @@ export function MessageList({
 }
 
 /** Built only when the menu opens, not for every row of the list. */
-function RowMenu({ conversation, targets, boxes, labels, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; labels: MailLabels | undefined; onPick: (pick: MenuPick, c: Conversation) => void }) {
-  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, labels, undefined, targets.length === 1)} onPick={(pick) => onPick(pick, conversation)} />;
+function RowMenu({ conversation, targets, boxes, labels, place, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; labels: MailLabels | undefined; place: TabPlace | null; onPick: (pick: MenuPick, c: Conversation) => void }) {
+  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, labels, undefined, targets.length === 1, place)} onPick={(pick) => onPick(pick, conversation)} />;
 }

@@ -1,11 +1,11 @@
-import { getMailDesktopBridge, LABEL_COLORS, UNSUBSCRIBE_METHODS, type LabelColor, type LabelKind, type MailAccount, type MailLabel, type MailSubscription } from '@/lib/mail';
+import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailLabel, type MailSubscription } from '@/lib/mail';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
- * `din mail`: Mail's accounts, their labels, and the mailing lists in their
- * inboxes, as Mail's Subscriptions shows them (electron/mail.mts), and
- * leaving them. Unsubscribing asks on screen first: it sends mail or
+ * `din mail`: Mail's accounts, their labels, their inboxes' tabs and the
+ * senders moved between them, and the mailing lists in their inboxes, as
+ * Mail's Subscriptions shows them (electron/mail.mts), and leaving them. Unsubscribing asks on screen first: it sends mail or
  * requests from the user's account, and can't be taken back; so does
  * deleting a label, which comes off every message.
  */
@@ -45,13 +45,19 @@ function label(s: MailSubscription): string {
   return s.name ? `${s.name} <${s.address}>` : s.address;
 }
 
+function tabsText(t: InboxTabs): string {
+  if (!t.tabs.length) return 'The inbox has no tabs; all new mail notifies';
+  const names = ['primary' as const, ...t.tabs].map((c) => CATEGORY_NAMES[c]).join(', ');
+  return `Inbox tabs: ${names}; ${t.notify === 'primary' ? 'only Primary’s new mail notifies' : 'all new mail notifies'}`;
+}
+
 function day(ms: number): string {
   return new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -116,6 +122,48 @@ export const mailArea: Area = {
       }
       const on = await call(mail().avatarLookups());
       return { data: { lookups: on }, text: on ? 'Mail looks up senders’ pictures' : 'Mail doesn’t look up senders’ pictures' };
+    }),
+    command('mail', 'tabs', 'Which of Gmail’s inbox tabs Mail shows besides Primary, as Settings → General does; name some to show just those, or say off for none', [
+      { name: 'tabs', type: 'string', positional: true, rest: true, optional: true, help: `Tabs to show: ${MAIL_CATEGORIES.filter((c) => c !== 'primary').join(', ')}, or off` },
+    ], async (args) => {
+      const given = args.list('tabs').map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (given.length) {
+        const off = given.length === 1 && (given[0] === 'off' || given[0] === 'none');
+        const bad = off ? [] : given.filter((t) => !isMailCategory(t));
+        if (bad.length) throw new CommandError(`No tab called ${bad.join(', ')}`, 'usage');
+        await call(mail().setInboxTabs({ tabs: off ? [] : (given.filter((t) => isMailCategory(t) && t !== 'primary') as InboxTabs['tabs']) }));
+      }
+      const now = await call(mail().inboxTabs());
+      return { data: now, text: tabsText(now) };
+    }),
+    command('mail', 'notify', 'Which new mail gets a notification and counts on Mail’s Dock icon: only Primary’s, or all of it, as Settings → General’s Notify only for Primary does', [
+      { name: 'which', type: 'string', positional: true, optional: true, choices: ['primary', 'all'], help: 'primary or all' },
+    ], async (args) => {
+      const which = args.optString('which');
+      if (which !== undefined) await call(mail().setInboxTabs({ notify: which === 'all' ? 'all' : 'primary' }));
+      const now = await call(mail().inboxTabs());
+      return { data: now, text: tabsText(now) };
+    }),
+    command('mail', 'tab-rules', 'The senders whose mail goes to an inbox tab the user moved it to', [ACCOUNT], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const all = await Promise.all(accounts.map(async (a) => ({ account: a, rules: await call(mail().tabRules(a.id)) })));
+      const rows = all.flatMap(({ account, rules }) => Object.entries(rules).map(([address, tab]) => ({ accountId: account.id, account: account.name, address, tab })));
+      return {
+        data: rows,
+        text: rows.length ? rows.map((r) => `${r.address}  ${CATEGORY_NAMES[r.tab]}${accounts.length > 1 ? `  (${r.account})` : ''}`).join('\n') : 'No senders moved to a tab',
+      };
+    }),
+    command('mail', 'move-to-tab', 'Send a sender’s mail (what’s in the inbox and what comes) to an inbox tab, as a message’s Move to Tab does; auto puts it back where it’s sorted', [
+      { name: 'sender', type: 'string', positional: true, help: 'Their email address' },
+      { name: 'tab', type: 'string', positional: true, choices: [...MAIL_CATEGORIES, 'auto'], help: `${MAIL_CATEGORIES.join(', ')}, or auto` },
+      ACCOUNT,
+    ], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const sender = args.string('sender').trim().toLowerCase();
+      const tab = args.string('tab');
+      const to = isMailCategory(tab) ? tab : null;
+      for (const a of accounts) await call(mail().setTabRule(a.id, sender, to));
+      return { data: { sender, tab: to }, text: to ? `Mail from ${sender} goes to ${CATEGORY_NAMES[to]}` : `Mail from ${sender} is sorted as it comes again` };
     }),
     command('mail', 'labels', 'Each account’s labels, as Mail’s sidebar lists them, and how the account keeps them (Gmail’s own labels, or IMAP keywords)', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));

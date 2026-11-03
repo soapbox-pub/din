@@ -1764,12 +1764,12 @@ expose('phone', {
 });
 
 // Mail (window.dinos.mail), backed by electron/mail.mts: the accounts'
-// mailing lists and labels, for the `din mail` commands, and new mail and unread
+// mailing lists, labels and inbox tabs, for the `din mail` commands, and new mail and unread
 // counts, for notifications and Mail's Dock badge; Mail has all of it
 // through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'mailboxes', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'unseen']) {
+for (const method of ['accounts', 'mailboxes', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'inboxTabs', 'setInboxTabs', 'tabRules', 'setTabRule', 'unseen']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
 expose('mail', {

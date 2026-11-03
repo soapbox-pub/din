@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
-import type { MailAccount, MailBridge, MailboxInfo, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
+import type { InboxTabs, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
   return useDin().system.mail ?? null;
@@ -168,15 +168,19 @@ function sourceKey(s: Source): string {
   return `${s.accountId}\u0000${s.path}`;
 }
 
-export function messagesKey(sources: Source[], filter: MessageFilter, query: string, keyword: string | null) {
-  return ['mail', 'messages', sources.map(sourceKey).sort().join('\u0001'), filter, query, keyword] as const;
+export function messagesKey(sources: Source[], filter: MessageFilter, query: string, keyword: string | null, category: MailCategory | null) {
+  return ['mail', 'messages', sources.map(sourceKey).sort().join('\u0001'), filter, query, keyword, category] as const;
 }
 
-/** The newest messages of every source (with `keyword`, those that have it), merged by date, then older ones page by page. */
-export function useMessages(sources: Source[], filter: MessageFilter, query: string, keyword: string | null = null) {
+/**
+ * The newest messages of every source (with `keyword`, those that have it;
+ * with `category`, the inbox tab's), merged by date, then older ones page
+ * by page.
+ */
+export function useMessages(sources: Source[], filter: MessageFilter, query: string, keyword: string | null = null, category: MailCategory | null = null) {
   const mail = useMail();
   return useInfiniteQuery({
-    queryKey: messagesKey(sources, filter, query, keyword),
+    queryKey: messagesKey(sources, filter, query, keyword, category),
     enabled: !!mail && sources.length > 0,
     initialPageParam: null as Cursor | null,
     staleTime: 30_000,
@@ -184,7 +188,7 @@ export function useMessages(sources: Source[], filter: MessageFilter, query: str
       const want = sources.filter((s) => !pageParam || pageParam[sourceKey(s)] != null);
       const results = await Promise.allSettled(
         want.map((s) =>
-          mail!.messages(s.accountId, s.path, { before: pageParam?.[sourceKey(s)] ?? undefined, query: query || undefined, filter, label: keyword ?? undefined }),
+          mail!.messages(s.accountId, s.path, { before: pageParam?.[sourceKey(s)] ?? undefined, query: query || undefined, filter, label: keyword ?? undefined, category: category ?? undefined }),
         ),
       );
       const next: Cursor = {};
@@ -200,8 +204,8 @@ export function useMessages(sources: Source[], filter: MessageFilter, query: str
         }
         total += r.value.total;
         for (const m of r.value.messages) items.push({ ...m, accountId: s.accountId, path: s.path, key: itemKey(s.accountId, s.path, m.uid) });
-        const last = r.value.messages.at(-1);
-        next[sourceKey(s)] = r.value.more && last ? Math.min(...r.value.messages.map((m) => m.uid)) : null;
+        const last = r.value.next ?? (r.value.messages.length ? Math.min(...r.value.messages.map((m) => m.uid)) : undefined);
+        next[sourceKey(s)] = r.value.more && last ? last : null;
       });
       if (failure && !items.length) throw failure;
       items.sort((a, b) => b.date - a.date);
@@ -335,6 +339,57 @@ export function useSubscriptions(accounts: MailAccount[], months: number): Subsc
   });
 }
 
+const INBOX_TABS = ['mail', 'inbox-tabs'] as const;
+
+/** Which inbox tabs are shown, and which new mail notifies. */
+export function useInboxTabs() {
+  const mail = useMail();
+  return useQuery({ queryKey: INBOX_TABS, queryFn: () => mail!.inboxTabs(), enabled: !!mail, staleTime: 60_000 });
+}
+
+/** Change which inbox tabs are shown, or which new mail notifies. */
+export function useSetInboxTabs() {
+  const mail = useMail();
+  const qc = useQueryClient();
+  return useCallback(
+    async (patch: Partial<InboxTabs>) => {
+      const was = qc.getQueryData<InboxTabs>(INBOX_TABS);
+      if (was) qc.setQueryData<InboxTabs>(INBOX_TABS, { ...was, ...patch });
+      try {
+        qc.setQueryData(INBOX_TABS, await mail!.setInboxTabs(patch));
+      } finally {
+        void qc.invalidateQueries({ queryKey: INBOX_TABS });
+        void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
+        void qc.invalidateQueries({ queryKey: ['mail', 'tab-counts'] });
+      }
+    },
+    [mail, qc],
+  );
+}
+
+export function tabCountsKey(accountId: string) {
+  return ['mail', 'tab-counts', accountId] as const;
+}
+
+/** The dates of each tab's newest unread mail, merged over these accounts' inboxes. */
+export function useTabCounts(accountIds: string[], enabled: boolean): Partial<Record<MailCategory, number[]>> {
+  const mail = useMail();
+  const combine = useCallback((results: UseQueryResult<Record<MailCategory, number[]>>[]) => {
+    const out: Partial<Record<MailCategory, number[]>> = {};
+    for (const r of results) for (const [c, dates] of Object.entries(r.data ?? {}) as [MailCategory, number[]][]) out[c] = [...(out[c] ?? []), ...dates];
+    return out;
+  }, []);
+  return useQueries({
+    queries: accountIds.map((id) => ({
+      queryKey: tabCountsKey(id),
+      queryFn: () => mail!.tabCounts(id),
+      enabled: !!mail && enabled,
+      staleTime: 30_000,
+    })),
+    combine,
+  });
+}
+
 /** Refetch what a change on the server touched. */
 export function useLiveUpdates(): void {
   const mail = useMail();
@@ -345,6 +400,11 @@ export function useLiveUpdates(): void {
       void qc.invalidateQueries({ queryKey: mailboxesKey(accountId) });
       // New keywords on the mail. (Gmail's labels are its mailboxes, listed again when Mail changes them.)
       if (qc.getQueryData<MailLabels>(labelsKey(accountId))?.kind !== 'gmail') void qc.invalidateQueries({ queryKey: labelsKey(accountId) });
+      if (path.toUpperCase() === 'INBOX') {
+        void qc.invalidateQueries({ queryKey: tabCountsKey(accountId) });
+        // Tabs shown or hidden elsewhere (din mail tabs) say so as a change to every inbox.
+        void qc.invalidateQueries({ queryKey: INBOX_TABS });
+      }
       const needle = `${accountId}\u0000${path}`;
       void qc.invalidateQueries({
         predicate: (q) => q.queryKey[0] === 'mail' && q.queryKey[1] === 'messages' && String(q.queryKey[2]).split('\u0001').includes(needle),

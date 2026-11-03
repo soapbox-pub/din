@@ -1,14 +1,14 @@
-import type { MessageFilter } from '@/lib/mail';
+import { isMailCategory, type MailCategory, type MessageFilter } from '@/lib/mail';
 import { itemKey, type Selection } from './api';
 import type { ComposeSeed } from './format';
 
 /**
  * What a Mail window keeps with `din.app.saveState`, for Din to reopen it
- * as it was: a viewer's mailbox, filter, search, open message and place in
- * the list, or a message being written.
+ * as it was: a viewer's mailbox, inbox tab, filter, search, open message
+ * and place in the list, or a message being written.
  */
 export type SavedWindow =
-  | { kind: 'viewer'; selection: Selection; filter: MessageFilter; search: string; message: string | null; scroll: number }
+  | { kind: 'viewer'; selection: Selection; tab: MailCategory; filter: MessageFilter; search: string; message: string | null; scroll: number }
   | { kind: 'compose'; seed: ComposeSeed; dirty: boolean };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
@@ -26,6 +26,7 @@ export function savedViewer(state: unknown): Extract<SavedWindow, { kind: 'viewe
   return {
     kind: 'viewer',
     selection: state.selection,
+    tab: isMailCategory(state.tab) ? state.tab : 'primary',
     filter: state.filter === 'unread' || state.filter === 'flagged' ? state.filter : null,
     search: typeof state.search === 'string' ? state.search : '',
     message: typeof state.message === 'string' ? state.message : null,
@@ -41,11 +42,11 @@ export function savedCompose(state: unknown): Extract<SavedWindow, { kind: 'comp
 }
 
 /**
- * The message a launch's `{ accountId, mailbox, uid }` asks to open, or
- * null. (Not `path`: Din takes that for a file to open, and keeps it.)
+ * The message a launch's `{ accountId, mailbox, uid, tab }` asks to open,
+ * or null. (Not `path`: Din takes that for a file to open, and keeps it.)
  */
-export function messageTarget(params: Record<string, unknown>): { accountId: string; path: string; key: string } | null {
-  const { accountId, mailbox: path, uid } = params;
+export function messageTarget(params: Record<string, unknown>): { accountId: string; path: string; key: string; tab: MailCategory } | null {
+  const { accountId, mailbox: path, uid, tab } = params;
   if (typeof accountId !== 'string' || typeof path !== 'string' || !Number.isInteger(uid)) return null;
-  return { accountId, path, key: itemKey(accountId, path, uid as number) };
+  return { accountId, path, key: itemKey(accountId, path, uid as number), tab: isMailCategory(tab) ? tab : 'primary' };
 }
