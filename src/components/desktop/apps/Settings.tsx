@@ -4136,7 +4136,7 @@ function SystemCursorPicker() {
   const removeCursor = useRemoveSystemCursor();
   const { pickFiles } = useFilePicker();
   const { toast } = useToast();
-  const { updateConfig } = useAppContext();
+  const { config, updateConfig } = useAppContext();
   const { open } = useWindowActions();
   const [publishing, setPublishing] = useState<PublishTarget | null>(null);
 
@@ -4148,6 +4148,8 @@ function SystemCursorPicker() {
   }
 
   const { canChange, shared, sizes, fixedSize } = status.data;
+  // The zoom the pointer grows with, where it does (electron/cursor.mts).
+  const scale = status.data.followsZoom ? config.zoomLevel / 100 : 1;
   // While a change is in flight, show the requested choice.
   const { theme, size } = setCursor.isPending ? setCursor.variables : status.data;
   const busy = importCursor.isPending || removeCursor.isPending;
@@ -4313,6 +4315,11 @@ function SystemCursorPicker() {
         </div>
         {fixedSize && canChange && (
           <p className="mt-2 text-xs text-muted-foreground">This style comes in one size only.</p>
+        )}
+        {!fixedSize && scale !== 1 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Drawn at {Math.round(scale * 100)}%, to match the display’s zoom.
+          </p>
         )}
       </div>
 

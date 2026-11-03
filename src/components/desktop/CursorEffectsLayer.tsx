@@ -17,7 +17,11 @@ import { useReducedMotion } from '@/shared/reducedMotion';
 function useCursorImage(wanted: boolean, zoom: number): CursorImage | null {
   const status = useSystemCursorStatus();
   const theme = status.data?.theme;
-  const size = status.data?.size;
+  // As it's drawn: the chosen size, times the zoom where it grows with it
+  // (rounded as electron/cursor.mts rounds it).
+  const size = status.data
+    ? status.data.followsZoom ? Math.round(status.data.size * zoom) : status.data.size
+    : undefined;
   const { data } = useQuery({
     queryKey: ['cursor', 'effect-image', theme, size],
     queryFn: async () => {

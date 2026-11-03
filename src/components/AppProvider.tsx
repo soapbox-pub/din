@@ -3,6 +3,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme } from '@/contexts/AppContext';
 import { AppConfigSchema } from '@/lib/appConfigSchema';
 import { getZoomBridge } from '@/lib/zoom';
+import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { autoZoomForOutputs } from '@/lib/autoZoom';
 import { getDisplayBridge } from '@/lib/display';
 import { getMonitorsBridge } from '@/lib/monitors';
@@ -87,11 +88,13 @@ export function AppProvider(props: AppProviderProps) {
  * shrinks/grows, so the window manager's pixel math and xterm's cell
  * measurements stay consistent. No-op in a plain browser (no bridge); CSS
  * `zoom` is deliberately not a fallback because it scales rendering without
- * the viewport, overflowing the desktop (see src/lib/zoom.ts).
+ * the viewport, overflowing the desktop (see src/lib/zoom.ts). The pointer
+ * grows with it (electron/cursor.mts).
  */
 function useApplyZoom(zoomLevel: number) {
   useEffect(() => {
     getZoomBridge()?.set(zoomLevel / 100);
+    void getSystemCursorBridge()?.setScale(zoomLevel / 100).catch(() => {});
   }, [zoomLevel]);
 }
 

@@ -22,7 +22,7 @@ export interface SystemCursorTheme {
 export interface SystemCursorStatus {
   /** The current theme's id. */
   theme: string;
-  /** The current size, in logical pixels. */
+  /** The size chosen, in logical pixels, before the zoom. */
   size: number;
   /** The sizes that can be chosen. */
   sizes: number[];
@@ -34,6 +34,8 @@ export interface SystemCursorStatus {
   shared: boolean;
   /** Whether din-shell draws the pointer, and so can make it big when the mouse is shaken. */
   shellPointer: boolean;
+  /** Whether it's drawn `size` times the interface zoom (where Din is the desktop), not just `size`. */
+  followsZoom: boolean;
 }
 
 export interface SystemCursorPreview {
@@ -119,6 +121,8 @@ export interface SystemCursorBridge {
   set(choice: { theme: string; size: number }): Promise<void>;
   /** Whether shaking the mouse makes the pointer big (din-shell's; only where `shellPointer`). */
   setShakeToFind(on: boolean): Promise<void>;
+  /** The interface zoom (1 = 100%), which the pointer grows with where Din is the desktop. */
+  setScale(scale: number): Promise<void>;
   /**
    * Import the themes and effect packages in a file or folder (absolute
    * path) and use the first theme; resolves with their ids.

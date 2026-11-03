@@ -1040,7 +1040,7 @@ expose('mouse', {
 // shows and, on DinOS, changes, the themes the user imports, and the effect
 // packages that come in CursorFX files.
 expose('cursor', {
-  /** { theme, size, sizes, canChange }. */
+  /** { theme, size, sizes, canChange, followsZoom }. */
   status: () => ipcRenderer.invoke('cursor:status'),
 
   /** The installed cursor themes: { id, name }[]. */
@@ -1065,6 +1065,12 @@ expose('cursor', {
    * @param {boolean} on
    */
   setShakeToFind: (on) => ipcRenderer.invoke('cursor:shake-to-find', on),
+
+  /**
+   * The interface zoom, which the pointer grows with where Din is the desktop.
+   * @param {number} scale
+   */
+  setScale: (scale) => ipcRenderer.invoke('cursor:scale', scale),
 
   /**
    * Import the cursor themes and effect packages in a file or folder and

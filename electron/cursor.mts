@@ -14,6 +14,13 @@
 // GNOME and its kin, where that changes the desktop's pointer too
 // (desktop-settings.mts). Elsewhere (KDE) it only shows them.
 //
+// The pointer grows with the interface zoom, as text does: where Din is the
+// desktop, the size the user chose (kept in userData/cursor.json) times the
+// zoom is what GSettings, XCURSOR_SIZE and din-shell get, worked out once
+// here so Chromium's pointer and din-shell's (Shake to find's) match. Where
+// GSettings is the host desktop's too, the zoom is Din's alone and the
+// pointer stays the chosen size.
+//
 // Under din-shell, which draws the pointer on the screen, Din tells it the
 // theme, size and whether Shake to find the pointer is on, in
 // $XDG_RUNTIME_DIR/din-shell-pointer, which it watches
@@ -81,6 +88,8 @@ interface CursorStatus {
   shared: boolean;
   /** Whether din-shell draws the pointer, and so can make it big when the mouse is shaken. */
   shellPointer: boolean;
+  /** Whether the pointer grows with the interface zoom (where Din is the desktop). */
+  followsZoom: boolean;
 }
 
 /** One cursor of a theme, as straight (not premultiplied) RGBA. */
@@ -192,8 +201,8 @@ async function gsettings(...args: string[]): Promise<string> {
   return (await runCommand('gsettings', args, { timeout: 3_000 })).stdout.trim();
 }
 
-/** The current theme and size, from GSettings, falling back to DinOS's defaults. */
-async function current(): Promise<{ theme: string; size: number }> {
+/** The theme and size GSettings has now, falling back to DinOS's defaults. */
+async function system(): Promise<{ theme: string; size: number }> {
   let theme = FALLBACK_THEME;
   let size = 40;
   try {
@@ -207,6 +216,65 @@ async function current(): Promise<{ theme: string; size: number }> {
     // no gsettings here
   }
   return { theme, size };
+}
+
+/** The size the user chose and the zoom it's drawn at, as kept in userData. */
+interface Chosen {
+  size: number;
+  scale: number;
+}
+
+function chosenPath(): string {
+  return path.join(app.getPath('userData'), 'cursor.json');
+}
+
+let chosen: Chosen | null = null;
+
+/** The size the user chose, and the zoom last applied; at first, GSettings' size at 1. */
+async function readChosen(): Promise<Chosen> {
+  if (chosen) return chosen;
+  try {
+    const data = JSON.parse(await fs.readFile(chosenPath(), 'utf8')) as Partial<Chosen>;
+    if (typeof data.size === 'number' && data.size > 0) {
+      chosen = { size: data.size, scale: typeof data.scale === 'number' && data.scale > 0 ? data.scale : 1 };
+      return chosen;
+    }
+  } catch {
+    // not yet kept
+  }
+  chosen = { size: (await system()).size, scale: 1 };
+  return chosen;
+}
+
+async function writeChosen(next: Chosen): Promise<void> {
+  chosen = next;
+  try {
+    await fs.writeFile(chosenPath(), JSON.stringify(next));
+  } catch (error) {
+    console.warn('Could not keep the cursor size:', error);
+  }
+}
+
+/** The zoom the pointer's drawn at: Din's, where Din is the desktop. */
+function effectiveScale(scale: number): number {
+  return settingsOwner() === 'din' ? scale : 1;
+}
+
+/** The size drawn for SIZE at SCALE, the same for Chromium, apps and din-shell. */
+function drawnSize(size: number, scale: number): number {
+  return Math.max(1, Math.round(size * effectiveScale(scale)));
+}
+
+/** The theme, and the size the user chose (not the zoomed one GSettings has). */
+async function current(): Promise<{ theme: string; size: number }> {
+  const [{ theme }, { size }] = await Promise.all([system(), readChosen()]);
+  return { theme, size };
+}
+
+/** The theme, and the size it's drawn at. */
+async function drawn(): Promise<{ theme: string; size: number }> {
+  const [{ theme }, { size, scale }] = await Promise.all([system(), readChosen()]);
+  return { theme, size: drawnSize(size, scale) };
 }
 
 /** Whether a theme's arrow comes in one size only. */
@@ -230,10 +298,26 @@ function exportEnvironment(theme: string, size: number): void {
   process.env.XCURSOR_SIZE = String(size);
 }
 
+/** Make THEME the pointer's at the chosen SIZE, drawn at the zoom. */
 async function apply(theme: string, size: number): Promise<void> {
+  const { scale } = await readChosen();
+  await writeChosen({ size, scale });
+  const px = drawnSize(size, scale);
   await gsettings('set', SCHEMA, 'cursor-theme', theme);
-  await gsettings('set', SCHEMA, 'cursor-size', String(size));
-  exportEnvironment(theme, size);
+  await gsettings('set', SCHEMA, 'cursor-size', String(px));
+  exportEnvironment(theme, px);
+  void tellShell();
+}
+
+/** Draw the pointer at a new zoom, if that changes its size. */
+async function setScale(scale: number): Promise<void> {
+  const { size, scale: before } = await readChosen();
+  if (scale === before) return;
+  await writeChosen({ size, scale });
+  const px = drawnSize(size, scale);
+  if (px === (await system()).size) return;
+  await gsettings('set', SCHEMA, 'cursor-size', String(px));
+  exportEnvironment((await system()).theme, px);
   void tellShell();
 }
 
@@ -249,7 +333,7 @@ let shakeToFind = false;
 /** Tell din-shell the pointer's theme and size and whether a shake makes it big. */
 async function tellShell(): Promise<void> {
   if (!onShell) return;
-  const { theme, size } = await current();
+  const { theme, size } = await drawn();
   const file = path.join(process.env.XDG_RUNTIME_DIR!, 'din-shell-pointer');
   const temp = `${file}.${process.pid}`;
   try {
@@ -278,7 +362,7 @@ const PREVIEW_ROLES: { role: string; names: string[] }[] = [
  * size (logical pixels), for Studio to draw into its picture.
  */
 export async function pointerArrow(): Promise<(CursorPreview & { size: number }) | null> {
-  const { theme, size } = await current();
+  const { theme, size } = await drawn();
   const arrow = (await previews(theme, size)).find((p) => p.role === 'default');
   return arrow ? { ...arrow, size } : null;
 }
@@ -424,7 +508,7 @@ export function registerCursorHandlers(options: {
   const { assertShellSender } = options;
 
   if (canChange()) {
-    void current().then(({ theme, size }) => exportEnvironment(theme, size));
+    void drawn().then(({ theme, size }) => exportEnvironment(theme, size));
   }
 
   ipcMain.handle('cursor:status', async (event): Promise<CursorStatus> => {
@@ -433,6 +517,7 @@ export function registerCursorHandlers(options: {
     return {
       theme,
       size,
+      followsZoom: settingsOwner() === 'din',
       sizes: SIZES,
       fixedSize: await hasFixedSize(theme),
       canChange: canChange(),
@@ -447,6 +532,13 @@ export function registerCursorHandlers(options: {
     if (on === shakeToFind) return;
     shakeToFind = on;
     await tellShell();
+  });
+
+  ipcMain.handle('cursor:scale', async (event, scale: unknown) => {
+    assertShellSender(event);
+    if (typeof scale !== 'number' || !Number.isFinite(scale) || scale < 0.5 || scale > 2) throw new Error('Not a zoom');
+    if (!canChange()) return;
+    await setScale(scale);
   });
 
   ipcMain.handle('cursor:themes', async (event) => {
