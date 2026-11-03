@@ -4,13 +4,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
-    # Electron, from a newer nixpkgs than the rest of the system: 26.05 stops
-    # at 42, and Electron 41's find-in-page looped forever when the shell had
-    # an iframe, freezing the desktop on Ctrl+F (electron/electron#54199,
-    # fixed in 43.7.8). Bump it with `nix flake update nixpkgs-electron`, and
-    # keep package.json's electron on the same version.
-    nixpkgs-electron.url = "github:NixOS/nixpkgs/nixos-unstable";
-
     # The Din desktop environment (the repository root).
     din = {
       url = "path:..";
@@ -44,13 +37,18 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-electron, din, nostrd, deckmon, ngit }:
+  outputs = { self, nixpkgs, din, nostrd, deckmon, ngit }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
 
-      # The Electron that runs Din (configuration.nix's `electron`).
-      electron = { _module.args.electron = nixpkgs-electron.legacyPackages.${system}.electron_43; };
+      # The Electron that runs Din (configuration.nix's `electron`), from the
+      # system's own nixpkgs, so it shares the system's libraries. It has to
+      # be 43.7.8 or later: Electron 41's find-in-page looped forever when the
+      # shell had an iframe, freezing the desktop on Ctrl+F
+      # (electron/electron#54199). Keep package.json's electron on the same
+      # version.
+      electron = { _module.args.electron = pkgs.electron_43; };
 
       # The commit the system is built from, which system updates compare
       # with the tip they fetch (os/din-update.sh): `self.rev` for a clean
