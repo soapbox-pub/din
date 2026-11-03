@@ -207,8 +207,9 @@ export const Transcript = memo(function Transcript({
   /** Fork the conversation from before one of the user's messages. */
   onFork?: (message: UserMessage) => void;
   /**
-   * What it's doing shows outside the transcript (`currentWork`), so the
-   * turn it's working on leaves out its working line.
+   * What it's doing shows outside the transcript (`CurrentWork`), so the
+   * turn it's working on doesn't narrate it: its line just sums up the
+   * steps so far ("Read 3 files, ran a command"), to open them.
    */
   workElsewhere?: boolean;
 }) {
@@ -456,7 +457,7 @@ function Turn({
   turn: TurnEntry;
   working: boolean;
   latest: boolean;
-  /** Leave out the working line while it works: it shows elsewhere. */
+  /** What it's doing shows elsewhere: while it works, the line only sums up the steps so far, to open them. */
   workElsewhere?: boolean;
   home?: string;
 }) {
@@ -483,8 +484,11 @@ function Turn({
   const outcome = turn.idle?.outcome ?? (lastMessage?.error ? 'failed' : 'succeeded');
   const end = turn.idle?.time.created ?? Math.max(turn.start, ...assistants.map((m) => m.time.completed ?? m.time.created));
   const elapsed = duration(Math.max(0, end - turn.start));
+  // While what it's doing shows elsewhere, the line is only the way into the steps.
+  const quiet = working && workElsewhere;
   let label: string;
-  if (working) label = workingLabel(turn, now);
+  if (quiet) label = doneLabel(work.flatMap((block) => (block.kind === 'steps' ? block.steps : [])));
+  else if (working) label = workingLabel(turn, now);
   else if (outcome === 'interrupted') label = `Stopped after ${elapsed}`;
   else if (outcome === 'failed') label = `Failed after ${elapsed}`;
   else label = `Worked for ${elapsed}`;
@@ -493,7 +497,7 @@ function Turn({
     ? 0
     : work.reduce((n, block) => n + (block.kind === 'steps' ? block.steps.filter((s) => stillRunning(s, tasks)).length : 0), 0);
   if (leftRunning > 0) label += ` · ${stillRunningLabel(leftRunning)}`;
-  const spinning = working || leftRunning > 0;
+  const spinning = (working && !quiet) || leftRunning > 0;
 
   const render = (block: Block) => {
     if (block.kind === 'text') return <Markdown key={block.key} text={block.text} />;
@@ -505,13 +509,13 @@ function Turn({
   const summary = (
     <>
       {spinning && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />}
-      <span className={cn('min-w-0 truncate', working && SHIMMER)}>{label}</span>
+      <span className={cn('min-w-0 truncate', working && !quiet && SHIMMER)}>{label}</span>
     </>
   );
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {working && workElsewhere ? null : work.length > 0 ? (
+      {work.length > 0 ? (
         <Collapsible open={open} onOpenChange={setOpen}>
           <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
             {summary}
@@ -522,7 +526,7 @@ function Turn({
           </CollapsibleContent>
         </Collapsible>
       ) : (
-        (working || outcome !== 'succeeded') && (
+        ((working && !quiet) || (!working && outcome !== 'succeeded')) && (
           <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">{summary}</p>
         )
       )}

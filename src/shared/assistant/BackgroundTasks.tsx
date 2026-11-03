@@ -33,7 +33,7 @@ const ICON_BUTTON =
  * subagents the agent left running after its turn (or while it carries on),
  * opening into a list of them to open or stop. Nothing when there are none.
  * While the agent works it's the working line too ("Working · 7s · Running…
- * · 2 in the background"), which the transcript then leaves out.
+ * · 2 in the background"), which the transcript then doesn't narrate.
  */
 export function BackgroundTasks({
   tasks,
