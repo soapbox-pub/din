@@ -456,6 +456,10 @@ install() {
     [[ ! -d $top/@new ]] || btrfs subvolume delete -R "$top/@new" >/dev/null
     btrfs subvolume create "$top/@new" >/dev/null
     btrfs property set "$top/@new" compression zstd
+    # /tmp is a subvolume of its own inside the system's, so a snapshot of
+    # the system leaves what's passing through it out.
+    btrfs subvolume create "$top/@new/tmp" >/dev/null
+    chmod 1777 "$top/@new/tmp"
   fi
 
   target=$(mktemp -d /run/din-install.XXXXXX)

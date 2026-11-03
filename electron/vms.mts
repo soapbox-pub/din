@@ -237,6 +237,21 @@ interface StoredConfig extends VmConfig {
 }
 
 const dirOf = (id: string) => path.join(VMS_DIR, id);
+
+/**
+ * Make ~/VMs, without copy-on-write on Btrfs: disks rewritten in small pieces
+ * fragment and write several times over under it. Only files made after the
+ * flag is set get it, so it's set every time, for a folder made before.
+ * Compression, which home's files inherit, can't go with it, so it goes
+ * first: Btrfs refuses both in one call.
+ * Elsewhere chattr refuses, and nothing changes.
+ */
+async function makeVmsDir(): Promise<void> {
+  await fsp.mkdir(VMS_DIR, { recursive: true });
+  await run('chattr', ['-c', VMS_DIR])
+    .then(() => run('chattr', ['+C', VMS_DIR]))
+    .catch(() => {});
+}
 const configPath = (id: string) => path.join(dirOf(id), 'vm.json');
 const diskPath = (id: string) => path.join(dirOf(id), 'disk.qcow2');
 const varsPath = (id: string) => path.join(dirOf(id), 'vars.qcow2');
@@ -458,7 +473,7 @@ async function create(input: unknown): Promise<VmInfo> {
   if (config.secureBoot && !t.firmware?.varsMs) config.secureBoot = false;
   const diskGiB = int(raw.diskGiB, 1, MAX_DISK_GIB, 32);
 
-  await fsp.mkdir(VMS_DIR, { recursive: true });
+  await makeVmsDir();
   const dir = dirOf(name);
   try {
     await fsp.mkdir(dir);

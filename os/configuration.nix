@@ -1742,6 +1742,32 @@ in
     '';
   };
 
+  # Steam's library goes without copy-on-write where home is Btrfs: games are
+  # patched in place, and barely compress. The folder is made ahead, at
+  # Flathub's Steam's path, since only what's made in it after the flag is set
+  # gets it. (The VMs app does the same for ~/VMs, electron/vms.mts; journald
+  # does it for the journal, and mkswapfile for the swap file.)
+  systemd.services.din-nocow = {
+    description = "Turn copy-on-write off for Steam's library";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "local-fs.target" ];
+    path = with pkgs; [ coreutils util-linux e2fsprogs ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      User = "din";
+    };
+    script = ''
+      [ "$(findmnt -no FSTYPE --target /home/din)" = btrfs ] || exit 0
+      dir=/home/din/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps
+      mkdir -p "$dir"
+      # Compression, inherited from home, can't go with it, and Btrfs only
+      # takes it once compression's gone, not in the same call.
+      chattr -c "$dir"
+      chattr +C "$dir"
+    '';
+  };
+
   # Keeps the boot partition's copy of the layout and time zone current, for
   # systems whose layout was set before the boot screen had one.
   systemd.services.din-boot-screen-sync = {

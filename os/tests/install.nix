@@ -153,6 +153,16 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("cat /home/din/from-live").strip() == "live"
         assert "zstd" in machine.succeed("btrfs property get /home/din/from-live compression")
         assert "zstd" in machine.succeed("btrfs property get /etc compression")
+        machine.succeed("btrfs subvolume show /tmp")
+        assert machine.succeed("stat -c %a /tmp").strip() == "1777"
+        steam = "/home/din/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps"
+        machine.wait_for_unit("din-nocow.service")
+        assert "C" in machine.succeed(f"lsattr -d {steam}").split()[0], machine.succeed(f"lsattr -d {steam}")
+        assert machine.succeed(f"stat -c %U {steam}").strip() == "din"
+        machine.succeed(f"su din -c 'touch {steam}/game'")
+        assert "C" in machine.succeed(f"lsattr {steam}/game").split()[0]
+        # The hibernation swap file's way, in a subvolume that inherits zstd.
+        machine.succeed("btrfs subvolume create /var/lib/swaptest", "btrfs filesystem mkswapfile --size 64m /var/lib/swaptest/f", "btrfs subvolume delete -R /var/lib/swaptest")
         machine.succeed("echo mine > /home/din/kept", "mkdir -p /var/lib/bluetooth && echo paired > /var/lib/bluetooth/kept")
 
     with subtest("a reinstall replaces the system and keeps home"):
@@ -178,6 +188,8 @@ pkgs.testers.runNixOSTest {
         assert fs("/") == "ext4 /dev/mapper/dinos-root", fs("/")
         assert fs("/home") == "ext4 /dev/mapper/dinos-home", fs("/home")
         assert machine.succeed("cat /home/din/legacy").strip() == "legacy"
+        machine.wait_for_unit("din-nocow.service")
+        machine.fail("test -e /home/din/.var/app/com.valvesoftware.Steam")
         machine.succeed("mkdir -p /var/lib/bluetooth && echo paired > /var/lib/bluetooth/kept")
 
     with subtest("and can still be reinstalled, keeping home"):
