@@ -246,7 +246,7 @@ function useAssistantNotifications() {
           failed
             ? null
             : assistantApi
-                .messages(sessionID, 20)
+                .messages(sessionID, { limit: 20 })
                 .then(({ messages }) => replyPreview(messages))
                 .catch(() => null),
         ]).then(([session, reply]) =>

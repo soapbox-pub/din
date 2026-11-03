@@ -21,6 +21,7 @@ import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
 import { ForkDialog, type UserMessage } from '@/shared/assistant/ForkDialog';
+import { LoadMore } from '@/shared/assistant/LoadMore';
 import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/RequestCards';
 import { SessionList } from '@/shared/assistant/SessionList';
 import { Transcript } from '@/shared/assistant/Transcript';
@@ -738,7 +739,7 @@ function Conversation({
   onFork: (message?: UserMessage) => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
-  const { data: transcript, isLoading } = useSessionMessages(sessionID);
+  const { data: transcript, isLoading, loadEarlier, loadingEarlier, earlierFailed } = useSessionMessages(sessionID);
   const { data: permissions = [] } = useSessionPermissions(sessionID);
   const { data: forms = [] } = useSessionForms(sessionID);
   const passwords = useSessionPasswords(sessionID);
@@ -831,6 +832,32 @@ function Conversation({
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' });
     el.focus({ preventScroll: true });
   };
+  // Earlier messages go in above what's on screen, which stays put, unless
+  // Home asked for the very top. `prepending` is kept current (scrolling and
+  // messages coming in below move it) until they arrive.
+  const firstID = messages?.[0]?.id;
+  const prepending = useRef<{ first: string | undefined; top: number; height: number } | null>(null);
+  const toTop = useRef(false);
+  const showEarlier = useCallback(
+    (all = false) => {
+      const el = scrollRef.current;
+      if (el) prepending.current = { first: firstID, top: el.scrollTop, height: el.scrollHeight };
+      void loadEarlier(all).catch((error: unknown) =>
+        notify({ title: 'Couldn’t load earlier messages', description: cleanAssistantError(error), destructive: true }),
+      );
+    },
+    [firstID, loadEarlier, notify],
+  );
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const before = prepending.current;
+    if (!el || !before) return;
+    if (firstID !== before.first && !stick.current) {
+      el.scrollTop = toTop.current ? 0 : before.top + (el.scrollHeight - before.height);
+    }
+    // Loading all of them brings several pages.
+    prepending.current = { first: firstID, top: el.scrollTop, height: el.scrollHeight };
+  }, [firstID, messages, queued, permissions.length, forms.length, passwords.length, running]);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -845,6 +872,8 @@ function Conversation({
     find: () => {
       setFinding(true);
       findBarRef.current?.focus();
+      // Find looks through the whole conversation.
+      if (transcript?.more) showEarlier(true);
     },
   }));
 
@@ -922,8 +951,16 @@ function Conversation({
         <div
           ref={scrollRef}
           tabIndex={-1}
+          onKeyDown={(e) => {
+            // Home goes to the start of the conversation, not of what's loaded.
+            if (e.key !== 'Home' || e.altKey || e.metaKey || e.shiftKey || !transcript?.more) return;
+            toTop.current = true;
+            showEarlier(true);
+          }}
           onScroll={(e) => {
             const el = e.currentTarget;
+            if (prepending.current) prepending.current = { ...prepending.current, top: el.scrollTop, height: el.scrollHeight };
+            if (el.scrollTop > 0) toTop.current = false;
             const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
             if (jumping.current && !bottom) return;
             jumping.current = false;
@@ -947,7 +984,17 @@ function Conversation({
             ) : (
               <>
                 {transcript?.more && (
-                  <p className="mb-6 text-center text-xs text-muted-foreground">Earlier messages aren’t shown.</p>
+                  <LoadMore
+                    scrollRef={scrollRef}
+                    edge="top"
+                    loaded={messages?.length ?? 0}
+                    loading={loadingEarlier}
+                    failed={earlierFailed}
+                    onLoad={showEarlier}
+                    label="Show earlier messages"
+                    loadingLabel="Loading earlier messages…"
+                    className="mb-6"
+                  />
                 )}
                 <FileLinkBaseContext value={fileLinkBase}>
                   <Transcript

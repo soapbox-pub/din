@@ -82,8 +82,9 @@ function currentHighlight(range: Range | undefined): Highlight {
  * Find in a conversation (Ctrl+F): highlights where the text occurs in the
  * transcript under `scrollRef`, with the CSS Custom Highlight API so its DOM
  * stays React's, and steps through the matches. It keeps up as the
- * conversation grows. Like a browser's find, it searches what is shown, so
- * collapsed tool output and earlier messages that aren't loaded are left out.
+ * conversation grows (opening it loads the earlier messages, so it covers all
+ * of it). Like a browser's find, it searches what is shown, so collapsed tool
+ * output is left out.
  */
 export function FindBar({
   scrollRef,

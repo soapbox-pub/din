@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 import {
   AssistantError,
   assistantApi,
@@ -9,7 +17,11 @@ import {
   type ApprovalDecision,
   type AssistantEvent,
   type AssistantStatus,
+  ASSISTANT_PAGE_MAX,
   type FormInfo,
+  type MessagePage,
+  type SessionMessage,
+  type SessionPage,
   type FormValue,
   type ModelInfo,
   type ModelRef,
@@ -37,9 +49,12 @@ const MODEL_STORAGE_KEY = 'din.assistant.model';
 export const assistantKeys = {
   all: ['assistant'] as const,
   sessions: ['assistant', 'sessions'] as const,
+  sessionSearch: (search: string) => ['assistant', 'sessions', 'search', search] as const,
+  projectSessions: (projectID: string) => ['assistant', 'sessions', 'project', projectID] as const,
   active: ['assistant', 'active'] as const,
   session: (id: string) => ['assistant', 'session', id] as const,
   messages: (id: string) => ['assistant', 'messages', id] as const,
+  earlierMessages: (id: string) => ['assistant', 'earlier-messages', id] as const,
   permissions: (id: string) => ['assistant', 'permissions', id] as const,
   forms: (id: string) => ['assistant', 'forms', id] as const,
   inbox: (id: string) => ['assistant', 'inbox', id] as const,
@@ -187,6 +202,8 @@ export function useAssistantEventSync() {
       if (sessionID) {
         refresh(assistantKeys.messages(sessionID));
         if (event.type.startsWith('session.inbox.')) refresh(assistantKeys.inbox(sessionID));
+        // Undoing can take back messages from among the earlier ones, which are otherwise never refetched.
+        if (event.type.startsWith('session.revert.')) queryClient.removeQueries({ queryKey: assistantKeys.earlierMessages(sessionID) });
       }
       // Commands start and stop with the tool calls that run them, and one
       // finishing in the background tells its session.
@@ -216,14 +233,42 @@ export function useAssistantEventSync() {
 // Queries
 // ---------------------------------------------------------------------------
 
-export function useAssistantSessions() {
+/** Pages of sessions, as one list: a session updated between two pages' fetches is in both. */
+function sessionsOf(data: InfiniteData<SessionPage>): SessionInfo[] {
+  const seen = new Set<string>();
+  return data.pages.flatMap((page) => page.sessions.filter((s) => !seen.has(s.id) && seen.add(s.id)));
+}
+
+/**
+ * Top-level sessions, recently updated first, a page at a time:
+ * `fetchNextPage` loads older ones. Refetching refetches each loaded page.
+ */
+function useSessionPages(queryKey: readonly unknown[], filter: { search?: string; project?: string }, enabled = true) {
   const ready = useAssistantReady();
-  return useQuery({
-    queryKey: assistantKeys.sessions,
-    queryFn: () => assistantApi.sessions(),
-    enabled: ready,
+  return useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam }) => assistantApi.sessions({ ...filter, cursor: pageParam ?? undefined }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next,
+    select: sessionsOf,
+    enabled: ready && enabled,
     staleTime: 30_000,
   });
+}
+
+/** Top-level sessions, recently updated first; `fetchNextPage` loads older ones. */
+export function useAssistantSessions() {
+  return useSessionPages(assistantKeys.sessions, {});
+}
+
+/** All of the top-level sessions whose titles have `search`, a page at a time. */
+export function useSessionSearch(search: string) {
+  return useSessionPages(assistantKeys.sessionSearch(search), { search }, search !== '');
+}
+
+/** One project's top-level sessions, a page at a time, once `enabled`. */
+export function useProjectSessions(projectID: string, enabled: boolean) {
+  return useSessionPages(assistantKeys.projectSessions(projectID), { project: projectID }, enabled);
 }
 
 export function useAssistantSession(sessionID: string | null) {
@@ -346,6 +391,9 @@ export function useRunningShells(directories: string[]): ShellInfo[] {
   });
 }
 
+/** How many of the most recently updated conversations' folders are looked in for commands. */
+const WORK_SESSION_LIMIT = 60;
+
 /**
  * What's running, conversation by conversation: a conversation stays busy
  * while it works, and after, while a command or subagent it started in the
@@ -359,7 +407,11 @@ export function useAssistantWork(directories: string[] = []): AssistantWork {
   const folders = [
     ...new Set([
       ...directories,
-      ...(sessions ?? []).filter((s) => !s.time.archived).map((s) => s.location.directory),
+      // The recent ones', not every older one scrolled to.
+      ...(sessions ?? [])
+        .slice(0, WORK_SESSION_LIMIT)
+        .filter((s) => !s.time.archived)
+        .map((s) => s.location.directory),
       ...activeLineages.flatMap((chain) => chain.map((s) => s.location.directory)),
     ]),
   ].sort();
@@ -427,11 +479,37 @@ export function tasksOf(work: AssistantWork, sessionID: string): BackgroundTask[
   return work.tasks.get(sessionID) ?? NO_TASKS;
 }
 
+/** A page of a session's earlier messages; the first also says where the latest ones started then. */
+interface EarlierPage extends MessagePage {
+  floor?: { id: string; created: number };
+}
+
+/**
+ * A session's latest messages, and back to `floor` when earlier ones are
+ * loaded: however many came in since, the two meet with nothing between.
+ */
+async function fetchLatestMessages(queryClient: QueryClient, sessionID: string): Promise<MessagePage> {
+  const floor = queryClient.getQueryData<InfiniteData<EarlierPage>>(assistantKeys.earlierMessages(sessionID))?.pages[0]?.floor;
+  let page = await assistantApi.messages(sessionID);
+  const messages = page.messages;
+  while (floor && page.older && messages.length > 0 && messages[0].time.created > floor.created) {
+    page = await assistantApi.messages(sessionID, { cursor: page.older, limit: ASSISTANT_PAGE_MAX });
+    messages.unshift(...page.messages);
+  }
+  return { messages, older: page.older };
+}
+
+/**
+ * A session's messages, oldest first. The latest refetch as it works; earlier
+ * ones load on request (`loadEarlier`), a page at a time or, with `all`, back
+ * to the start, and since they don't change they're fetched once.
+ */
 export function useSessionMessages(sessionID: string | null) {
   const ready = useAssistantReady();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const latest = useQuery({
     queryKey: assistantKeys.messages(sessionID ?? ''),
-    queryFn: () => assistantApi.messages(sessionID!),
+    queryFn: () => fetchLatestMessages(queryClient, sessionID!),
     enabled: ready && sessionID !== null,
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>
@@ -439,6 +517,65 @@ export function useSessionMessages(sessionID: string | null) {
       // session's.
       previousQuery?.queryKey[2] === sessionID ? previous : undefined,
   });
+  const earlier = useInfiniteQuery({
+    queryKey: assistantKeys.earlierMessages(sessionID ?? ''),
+    queryFn: async ({ pageParam }): Promise<EarlierPage> => {
+      if (pageParam) return assistantApi.messages(sessionID!, { cursor: pageParam, limit: ASSISTANT_PAGE_MAX });
+      // The first page goes on from the latest messages as they are now.
+      const now = queryClient.getQueryData<MessagePage>(assistantKeys.messages(sessionID!));
+      const first = now?.messages[0];
+      if (!now?.older || !first) return { messages: [], older: null };
+      const page = await assistantApi.messages(sessionID!, { cursor: now.older, limit: ASSISTANT_PAGE_MAX });
+      return { ...page, floor: { id: first.id, created: first.time.created } };
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.older,
+    // Only loadEarlier fetches them.
+    enabled: false,
+    staleTime: Infinity,
+  });
+
+  const { refetch, fetchNextPage } = earlier;
+  // One load at a time, since a second would cancel the first; asking for
+  // all of them during one makes it go on to the start.
+  const loading = useRef<{ sessionID: string; all: boolean; done: Promise<void> } | null>(null);
+  const loadEarlier = useCallback(
+    (all = false): Promise<void> => {
+      if (!sessionID) return Promise.resolve();
+      const current = loading.current;
+      if (current?.sessionID === sessionID) {
+        current.all ||= all;
+        return current.done;
+      }
+      const load = { sessionID, all, done: Promise.resolve() };
+      load.done = (async () => {
+        try {
+          let result = queryClient.getQueryData(assistantKeys.earlierMessages(sessionID))
+            ? await fetchNextPage()
+            : await refetch();
+          while (load.all && !result.isError && result.data?.pages.at(-1)?.older) result = await fetchNextPage();
+          if (result.isError) throw result.error;
+        } finally {
+          if (loading.current === load) loading.current = null;
+        }
+      })();
+      loading.current = load;
+      return load.done;
+    },
+    [queryClient, sessionID, fetchNextPage, refetch],
+  );
+
+  const data = useMemo(() => {
+    if (!latest.data) return undefined;
+    const pages = earlier.data?.pages ?? [];
+    const seen = new Set(latest.data.messages.map((m) => m.id));
+    const before: SessionMessage[] = [];
+    for (const page of [...pages].reverse()) before.push(...page.messages.filter((m) => !seen.has(m.id) && seen.add(m.id)));
+    const more = pages.length > 0 ? pages[pages.length - 1].older !== null : latest.data.older !== null;
+    return { messages: before.length ? [...before, ...latest.data.messages] : latest.data.messages, more };
+  }, [latest.data, earlier.data]);
+
+  return { data, isLoading: latest.isLoading, loadEarlier, loadingEarlier: earlier.isFetching, earlierFailed: earlier.isError };
 }
 
 export function useSessionPermissions(sessionID: string | null) {

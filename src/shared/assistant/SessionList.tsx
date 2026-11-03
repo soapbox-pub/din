@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Ref } from 'react';
+import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
+import { LoadMore } from '@/shared/assistant/LoadMore';
 import { OpenCodeUpdate } from '@/shared/assistant/OpenCodeUpdate';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { useAssistantHost } from '@/shared/assistant/host';
@@ -26,7 +27,10 @@ import {
   useMoveSession,
   usePendingRequests,
   useProjectIcons,
+  useProjectSessions,
+  useSessionSearch,
 } from '@/hooks/useAssistant';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
@@ -130,7 +134,9 @@ export function SessionList({
   className?: string;
   style?: CSSProperties;
 }) {
-  const { data: sessions, isLoading } = useAssistantSessions();
+  const sessionPages = useAssistantSessions();
+  const { data: sessions, isLoading } = sessionPages;
+  const scrollRef = useRef<HTMLDivElement>(null);
   // Working, or still running a command or subagent it started.
   const { busy } = useAssistantWork();
   const pending = usePendingRequests();
@@ -204,14 +210,26 @@ export function SessionList({
   };
 
   const needle = filter.trim().toLowerCase();
+  // The server searches every conversation's title; the ones loaded here
+  // can match by folder or project too.
+  const search = useSessionSearch(useDebouncedValue(needle, 250));
+  const found = useMemo(() => (search.data ?? []).filter((s) => !s.time.archived), [search.data]);
   const matches = needle
-    ? listed.filter(
-        (s) =>
-          sessionTitle(s).toLowerCase().includes(needle) ||
-          s.location.directory.toLowerCase().includes(needle) ||
-          projectOf.get(s.id)?.label.toLowerCase().includes(needle),
-      )
+    ? [
+        ...new Map(
+          [
+            ...listed.filter(
+              (s) =>
+                sessionTitle(s).toLowerCase().includes(needle) ||
+                s.location.directory.toLowerCase().includes(needle) ||
+                projectOf.get(s.id)?.label.toLowerCase().includes(needle),
+            ),
+            ...found.filter((s) => sessionTitle(s).toLowerCase().includes(needle)),
+          ].map((s) => [s.id, s]),
+        ).values(),
+      ].sort((a, b) => b.time.updated - a.time.updated)
     : [];
+  const searching = needle !== '' && (search.isFetching || search.isPending);
 
   const row = (session: SessionInfo, tag?: string) => (
     <li key={session.id}>
@@ -375,7 +393,7 @@ export function SessionList({
           </button>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
         {isLoading ? (
           <div className="space-y-2 p-2" aria-label="Loading conversations">
             <Skeleton className="h-3 w-1/3" />
@@ -385,9 +403,32 @@ export function SessionList({
           </div>
         ) : needle ? (
           matches.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">No conversation matches.</p>
+            searching ? (
+              <p className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-muted-foreground" role="status">
+                <Loader2 className="size-3.5 animate-spin" aria-hidden /> Searching…
+              </p>
+            ) : (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">No conversation matches.</p>
+            )
           ) : (
-            <ul className="space-y-px">{matches.map((s) => row(s, projectOf.get(s.id)?.label))}</ul>
+            <>
+              <ul className="space-y-px">
+                {matches.map((s) => row(s, projectOf.get(s.id)?.label ?? directoryName(mains.get(s.location.directory) ?? s.location.directory, home)))}
+              </ul>
+              {search.hasNextPage && (
+                <LoadMore
+                  scrollRef={scrollRef}
+                  edge="bottom"
+                  loaded={found.length}
+                  loading={search.isFetching}
+                  failed={search.isFetchNextPageError}
+                  onLoad={() => void search.fetchNextPage()}
+                  label="Show more matches"
+                  loadingLabel="Searching…"
+                  className="mt-2"
+                />
+              )}
+            </>
           )
         ) : listed.length === 0 ? (
           <p className="px-3 py-8 text-center text-sm text-muted-foreground">Conversations you start show up here.</p>
@@ -478,24 +519,35 @@ export function SessionList({
                     </Button>
                   </div>
                   {open && (
-                    <ul className="space-y-px">
-                      {shown.map((s) => row(s))}
-                      {(hidden > 0 || all) && sessions.length > PROJECT_LIMIT && (
-                        <li>
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(project.key)}
-                            className="w-full rounded-md px-2.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          >
-                            {all ? 'Show less' : `Show ${hidden} more`}
-                          </button>
-                        </li>
-                      )}
-                    </ul>
+                    <ProjectSessions
+                      projectID={project.sessions[0].projectID}
+                      sessions={sessions}
+                      shown={shown}
+                      expanded={all}
+                      // The project may have older ones than the list has loaded.
+                      mayHaveOlder={hidden > 0 || (sessions.length >= PROJECT_LIMIT && !!sessionPages.hasNextPage)}
+                      waiting={waiting}
+                      onToggle={() => toggleExpanded(project.key)}
+                      row={row}
+                    />
                   )}
                 </section>
               );
             })}
+            {sessionPages.hasNextPage && (
+              <LoadMore
+                scrollRef={scrollRef}
+                edge="bottom"
+                loaded={listed.length}
+                loading={sessionPages.isFetching}
+                failed={sessionPages.isFetchNextPageError}
+                // Most of a page goes under projects' "Show more", so a page may not fill the view.
+                auto={false}
+                onLoad={() => void sessionPages.fetchNextPage()}
+                label="Show older conversations"
+                loadingLabel="Loading older conversations…"
+              />
+            )}
           </div>
         )}
       </div>
@@ -507,6 +559,65 @@ export function SessionList({
         onDeleted={() => deleting && onDeleted(deleting.id)}
       />
     </nav>
+  );
+}
+
+/**
+ * A project's conversations: the first few, or once expanded all the list
+ * has loaded and then the project's older ones from the server, a page at a
+ * time.
+ */
+function ProjectSessions({
+  projectID,
+  sessions,
+  shown,
+  expanded,
+  mayHaveOlder,
+  waiting,
+  onToggle,
+  row,
+}: {
+  projectID: string | undefined;
+  /** The ones the list has loaded. */
+  sessions: SessionInfo[];
+  /** Those of them shown while it's not expanded. */
+  shown: SessionInfo[];
+  expanded: boolean;
+  mayHaveOlder: boolean;
+  /** Conversations shown under "Needs you" instead. */
+  waiting: ReadonlySet<string>;
+  onToggle: () => void;
+  row: (session: SessionInfo) => ReactNode;
+}) {
+  const own = useProjectSessions(projectID ?? '', expanded && projectID !== undefined);
+  const all = useMemo(() => {
+    if (!expanded) return shown;
+    const known = new Set(sessions.map((s) => s.id));
+    // Older than any the list has loaded, so they go after them.
+    return [...sessions, ...(own.data ?? []).filter((s) => !known.has(s.id) && !s.time.archived && !waiting.has(s.id))];
+  }, [expanded, shown, sessions, own.data, waiting]);
+  const hidden = sessions.length - shown.length;
+  const more = 'w-full rounded-md px-2.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+  return (
+    <ul className="space-y-px">
+      {all.map((s) => row(s))}
+      {expanded && (own.hasNextPage || own.isFetchingNextPage) && (
+        <li>
+          <button type="button" disabled={own.isFetching} onClick={() => void own.fetchNextPage()} className={cn(more, 'flex items-center gap-1.5')}>
+            {own.isFetchingNextPage && <Loader2 className="size-3 animate-spin" aria-hidden />}
+            Show older
+          </button>
+        </li>
+      )}
+      {(expanded || mayHaveOlder) && (
+        <li>
+          <button type="button" onClick={onToggle} className={more}>
+            {expanded ? 'Show less' : hidden > 0 ? `Show ${hidden} more` : 'Show more'}
+          </button>
+        </li>
+      )}
+    </ul>
   );
 }
 

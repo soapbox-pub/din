@@ -412,11 +412,47 @@ function query(params: Record<string, string | number | undefined>): string {
 
 const id = (value: string) => encodeURIComponent(value);
 
+/** A page of a list the server pages through, and where the next one starts. */
+interface Paged<T> {
+  data: T[];
+  cursor?: { next?: string | null };
+}
+
+/** The server hands out a cursor even on the last page; a full page is what says there may be more. */
+function nextCursor<T>(reply: Paged<T>, limit: number): string | null {
+  return reply.data.length >= limit ? (reply.cursor?.next ?? null) : null;
+}
+
+/** The most a page of sessions or messages may hold. */
+export const ASSISTANT_PAGE_MAX = 200;
+
+/** Sessions, newest first, and the cursor to the page after them (null on the last). */
+export interface SessionPage {
+  sessions: SessionInfo[];
+  next: string | null;
+}
+
+/** Messages, oldest first, and the cursor to the ones before them (null at the start). */
+export interface MessagePage {
+  messages: SessionMessage[];
+  older: string | null;
+}
+
 /** OpenCode's API, the requests Din makes. */
 export const assistantApi = {
-  /** Top-level sessions (not subagents'), newest first. */
-  sessions: async (limit = 60) =>
-    (await call<{ data: SessionInfo[] }>('GET', `/api/session${query({ limit, parentID: 'null', order: 'desc' })}`)).data,
+  /**
+   * Top-level sessions (not subagents'), recently updated first: a page of
+   * them, all of them or those whose title has `search`, or one project's.
+   * `cursor` goes on from an earlier page, with that page's filters.
+   */
+  sessions: async (options: { limit?: number; cursor?: string; search?: string; project?: string } = {}): Promise<SessionPage> => {
+    const { limit = 100, cursor, search, project } = options;
+    const reply = await call<Paged<SessionInfo>>(
+      'GET',
+      `/api/session${query(cursor ? { limit, cursor } : { limit, parentID: 'null', order: 'desc', search, project })}`,
+    );
+    return { sessions: reply.data, next: nextCursor(reply, limit) };
+  },
 
   session: async (sessionID: string) =>
     (await call<{ data: SessionInfo }>('GET', `/api/session/${id(sessionID)}`)).data,
@@ -424,15 +460,14 @@ export const assistantApi = {
   /** The sessions working right now. */
   active: async () => Object.keys((await call<{ data: Record<string, unknown> }>('GET', '/api/session/active')).data),
 
-  /** A session's latest messages, oldest first, and whether there are earlier ones. */
-  messages: async (sessionID: string, limit = 150) => {
-    const reply = await call<{ data: SessionMessage[] }>(
+  /** A session's latest messages, or with `cursor` the ones before an earlier page's. */
+  messages: async (sessionID: string, options: { limit?: number; cursor?: string } = {}): Promise<MessagePage> => {
+    const { limit = 150, cursor } = options;
+    const reply = await call<Paged<SessionMessage>>(
       'GET',
-      `/api/session/${id(sessionID)}/message${query({ limit, order: 'desc' })}`,
+      `/api/session/${id(sessionID)}/message${query(cursor ? { limit, cursor } : { limit, order: 'desc' })}`,
     );
-    // The server hands out a cursor even on the last page; a full page is
-    // what says there may be more.
-    return { messages: [...reply.data].reverse(), more: reply.data.length >= limit };
+    return { messages: [...reply.data].reverse(), older: nextCursor(reply, limit) };
   },
 
   create: async (options: { directory?: string; model?: ModelRef; agent?: string; title?: string }) =>
