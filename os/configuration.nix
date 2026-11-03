@@ -1770,8 +1770,8 @@ in
   # above).
   #
   # The Installer can encrypt root with LUKS, so the same initrd boots either.
-  # These mirror systemd's 90-image-dissect.rules, which NixOS's initrd leaves
-  # out: an encrypted root partition shows up as gpt-auto-root-luks and pulls
+  # These stand in for systemd's 90-image-dissect.rules (masked below): an
+  # encrypted root partition shows up as gpt-auto-root-luks and pulls
   # in its own unlock (a passphrase prompt on the console), and the unlocked
   # device becomes gpt-auto-root. A plain root never asks or waits.
   #
@@ -1783,11 +1783,27 @@ in
   # when it's in the boot disk's root partition. A DinOS disk that's merely
   # plugged in - the computer's own, under a live stick - is left alone, and
   # two such disks never trip over their shared group name.
+  #
+  # A device only becomes gpt-auto-root once blkid has said what's on it, and
+  # never when that's LVM. systemd's own 90-image-dissect.rules, which the
+  # initrd's udev reads from systemd's package, makes any unlocked `root`
+  # gpt-auto-root whatever it holds, so on an LVM install root briefly named
+  # the volume group itself, before `dinos-root` came up: mounted at once, it
+  # failed into an emergency shell hidden behind the boot screen. A check of
+  # root before mounting used to win that race. A file of the same name here
+  # masks it.
   boot.initrd.systemd.enable = true;
+  boot.initrd.services.udev.packages = [
+    (pkgs.writeTextFile {
+      name = "dinos-mask-image-dissect";
+      destination = "/etc/udev/rules.d/90-image-dissect.rules";
+      text = "# Masked by DinOS: os/configuration.nix's own rules name root.\n";
+    })
+  ];
   boot.initrd.services.udev.rules = ''
-    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}!="crypto_LUKS|LVM2_member", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="?*", ENV{ID_FS_TYPE}!="crypto_LUKS|LVM2_member", SYMLINK+="gpt-auto-root"
     SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="crypto_LUKS", SYMLINK+="gpt-auto-root-luks", ENV{SYSTEMD_WANTS}+="systemd-cryptsetup@root.service"
-    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", ENV{ID_FS_TYPE}!="LVM2_member", SYMLINK+="gpt-auto-root"
+    SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", ENV{ID_FS_TYPE}=="?*", ENV{ID_FS_TYPE}!="LVM2_member", SYMLINK+="gpt-auto-root"
     SUBSYSTEM=="block", ENV{ID_PART_GPT_AUTO_ROOT}=="1", ENV{ID_FS_TYPE}=="LVM2_member", ENV{SYSTEMD_WANTS}+="dinos-lvm@$kernel.service"
     SUBSYSTEM=="block", ENV{DM_UUID}=="CRYPT-*", ENV{DM_NAME}=="root", ENV{ID_FS_TYPE}=="LVM2_member", ENV{SYSTEMD_WANTS}+="dinos-lvm@$kernel.service"
     SUBSYSTEM=="block", ENV{DM_NAME}=="dinos-root", SYMLINK+="gpt-auto-root"
