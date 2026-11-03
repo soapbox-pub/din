@@ -115,10 +115,13 @@ export function SessionList({
   onDeleted,
   searchRef,
   unread,
+  menu,
   className,
   style,
 }: {
   selected: string | null;
+  /** More in the list's title bar, before New conversation: the app's menu. */
+  menu?: ReactNode;
   /** Conversations with unread notifications. */
   unread?: ReadonlySet<string>;
   onSelect: (id: string) => void;
@@ -352,6 +355,7 @@ export function SessionList({
         <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
           Assistant
         </span>
+        {menu}
         <Button
           variant="ghost"
           size="icon"

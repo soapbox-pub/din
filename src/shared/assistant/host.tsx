@@ -25,6 +25,11 @@ export interface AssistantHost {
   pickFiles(options: { title: string; confirmLabel: string }): Promise<string[]>;
   /** Din's file picker, for a folder: its path, or null if cancelled. */
   pickFolder(options: { title: string; confirmLabel: string; initialPath?: string }): Promise<string | null>;
+  /**
+   * Its dialogs show over every window (the desktop's own), so one mustn't
+   * stay open over a page the user has to use, such as a sign-in.
+   */
+  dialogsOverWindows?: boolean;
   /** A short-lived message (a toast). */
   notify(message: { title: string; description?: string; destructive?: boolean }): void;
   /**

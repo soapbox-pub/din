@@ -2226,6 +2226,24 @@ expose('assistant', {
   /** The models OpenCode's own interface used last. */
   recentModels: () => ipcRenderer.invoke('assistant:recentModels'),
 
+  /** Claude Code, for the Claude provider: where it is and who it's signed in as (electron/claude-code.mts). */
+  claude: () => ipcRenderer.invoke('assistant:claude'),
+
+  /** Run Claude Code's installer. */
+  claudeInstall: () => ipcRenderer.invoke('assistant:claudeInstall'),
+
+  /** Start `claude auth login`: resolves with the page to sign in on. */
+  claudeLogin: () => ipcRenderer.invoke('assistant:claudeLogin'),
+
+  /**
+   * The code the sign-in page for other devices showed.
+   * @param {string} code
+   */
+  claudeCode: (code) => ipcRenderer.invoke('assistant:claudeCode', code),
+
+  /** Stop a sign-in under way. */
+  claudeCancel: () => ipcRenderer.invoke('assistant:claudeCancel'),
+
   /**
    * One request to the server's API.
    * @param {string} method

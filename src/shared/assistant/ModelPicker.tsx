@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ManageProvidersDialog } from '@/shared/assistant/Providers';
 import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { useAssistantIntegrations } from '@/hooks/useAssistant';
-import { modelKey, type ModelInfo, type ModelRef } from '@/lib/assistant';
+import { modelKey, providerName as displayName, type ModelInfo, type ModelRef } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** How many of a provider's models show before searching; the newest first. */
@@ -50,8 +50,8 @@ export function ModelPicker({
   const searching = search.trim().length > 0;
 
   const providerName = useMemo(() => {
-    const names = new Map((integrations ?? []).map((i) => [i.id, i.name]));
-    return (providerID: string) => names.get(providerID) ?? providerID;
+    const names = new Map((integrations ?? []).map((i) => [i.id, displayName(i.id, i.name)]));
+    return (providerID: string) => names.get(providerID) ?? displayName(providerID, providerID);
   }, [integrations]);
 
   const recentModels = useMemo(() => {
@@ -90,7 +90,7 @@ export function ModelPicker({
       className="cursor-pointer gap-2"
     >
       <Check className={cn('size-4 shrink-0', modelKey(model) === selectedKey ? 'opacity-100' : 'opacity-0')} aria-hidden />
-      <ProviderIcon baseURL={model.settings?.baseURL} className="text-muted-foreground" />
+      <ProviderIcon providerID={model.providerID} baseURL={model.settings?.baseURL} className="text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate">{model.name}</span>
       <ModelPrice cost={model.cost} />
     </CommandItem>
@@ -119,7 +119,7 @@ export function ModelPicker({
               className,
             )}
           >
-            <ProviderIcon baseURL={selected?.settings?.baseURL} />
+            <ProviderIcon providerID={selected?.providerID} baseURL={selected?.settings?.baseURL} />
             <span className="truncate">{selected?.name ?? value?.id ?? 'Choose a model'}</span>
             <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
           </Button>

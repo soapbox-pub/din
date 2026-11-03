@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils';
 
 /**
  * Settings → Assistant: whether Din keeps OpenCode running, the state of
- * its server, where new conversations work, and the AI providers it may
- * use.
+ * its server, the AI providers it may use, and below them where new
+ * conversations work and how replies look.
  */
 export function AssistantSettingsSection() {
   const { config, updateConfig } = useAppContext();
@@ -56,31 +56,34 @@ export function AssistantSettingsSection() {
           {config.assistantEnabled && (
             <>
               <ServerStatus />
-              <FolderSetting
-                value={config.assistantDirectory}
-                onChange={(assistantDirectory) => updateConfig((current) => ({ ...current, assistantDirectory }))}
-              />
-              <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
-                <div className="flex min-w-0 items-start gap-3">
-                  <Palette className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <div className="min-w-0">
-                    <Label htmlFor="assistant-colorful" className="cursor-pointer text-sm font-normal">
-                      Colorful replies
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Color headings, bold and italic text, code, links and list markers in the agent’s replies.
-                    </p>
-                  </div>
-                </div>
-                <Switch
-                  id="assistant-colorful"
-                  checked={config.assistantColorfulReplies}
-                  onCheckedChange={(assistantColorfulReplies) =>
-                    updateConfig((current) => ({ ...current, assistantColorfulReplies }))
-                  }
-                />
-              </div>
               <ProviderList />
+              {/* Smaller things, out of the way below the providers. */}
+              <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
+                <FolderSetting
+                  value={config.assistantDirectory}
+                  onChange={(assistantDirectory) => updateConfig((current) => ({ ...current, assistantDirectory }))}
+                />
+                <div className="flex items-center justify-between gap-4 py-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <Palette className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <div className="min-w-0">
+                      <Label htmlFor="assistant-colorful" className="cursor-pointer text-sm font-normal">
+                        Colorful replies
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Color headings, bold and italic text, code, links and list markers in the agent’s replies.
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    id="assistant-colorful"
+                    checked={config.assistantColorfulReplies}
+                    onCheckedChange={(assistantColorfulReplies) =>
+                      updateConfig((current) => ({ ...current, assistantColorfulReplies }))
+                    }
+                  />
+                </div>
+              </div>
             </>
           )}
         </>
@@ -196,7 +199,7 @@ function FolderSetting({ value, onChange }: { value: string; onChange: (path: st
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+    <div className="flex items-center justify-between gap-4 py-3">
       <div className="flex min-w-0 items-start gap-3">
         <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0">

@@ -55,7 +55,7 @@ a missing or bad argument).
 | `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks and phones plugged in by USB, as Files' sidebar has them: list them (with what a phone is waiting on), mount, unlock an encrypted one with its passphrase, eject |
 | `studio` | Studio: its takes in ~/Videos/Studio, recording one (start, stop, mark a highlight or a retake), transcribing one again, and going live (asks on screen first) or ending the stream |
 | `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
-| `assistant` | OpenCode, the agent behind the Assistant, as Settings → Assistant: its status, checking for and installing a newer release (restarting its server, which stops what the agent is doing), restarting it |
+| `assistant` | OpenCode, the agent behind the Assistant, as Settings → Assistant: its status, checking for and installing a newer release (restarting its server, which stops what the agent is doing), restarting it, and Claude for it (`claude`, `connect-claude`: installing Claude Code, signing it in and connecting it) |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
 | `update`, `firmware` | DinOS updates and firmware, as Settings → About |
 

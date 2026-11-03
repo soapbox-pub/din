@@ -3,39 +3,60 @@ import { Bot } from 'lucide-react';
 import type { ModelInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
-/** Where a provider's icon comes from, given the URL its requests go to. */
-function iconSource(baseURL: string | undefined): string | null {
-  if (!baseURL) return null;
+/** Icons of Din's own, in color, for providers models.dev has none for. */
+const OWN_ICONS: Record<string, string> = { 'claude-agent': '/claude.svg' };
+
+/**
+ * Where a provider's icon comes from: Din's own for a few, else the logo
+ * models.dev (the catalog OpenCode's providers come from) has for its id,
+ * one color, drawn in the text's. One it has none for is a sparkle there.
+ */
+function iconSource(providerID: string | undefined, baseURL: string | undefined): { src: string; tint: boolean } | null {
   try {
-    const url = new URL(baseURL);
     // Meridian, the local bridge to a Claude subscription.
-    if (url.hostname === '127.0.0.1' && url.port === '3456') return '/meridian.svg';
-    if (url.protocol !== 'https:') return null;
-    // API hosts rarely serve one; the site they belong to does.
-    const host = url.hostname.replace(/^(ai\.|api\.|enclave\.)/, '');
-    return `https://${host}/favicon.ico`;
+    const url = baseURL ? new URL(baseURL) : null;
+    if (url?.hostname === '127.0.0.1' && url.port === '3456') return { src: '/meridian.svg', tint: false };
   } catch {
-    return null;
+    // Not a URL: go by the id.
   }
+  if (!providerID) return null;
+  if (OWN_ICONS[providerID]) return { src: OWN_ICONS[providerID], tint: false };
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerID)) return null;
+  return { src: `https://models.dev/logos/${providerID}.svg`, tint: true };
 }
 
-/** A provider's favicon, or a robot when it has none. */
-export function ProviderIcon({ baseURL, size = 16, className }: { baseURL?: string; size?: number; className?: string }) {
-  const src = iconSource(baseURL);
+/** A provider's logo, or a robot when it can't be shown. */
+export function ProviderIcon({
+  providerID,
+  baseURL,
+  size = 16,
+  className,
+}: {
+  providerID?: string;
+  baseURL?: string;
+  size?: number;
+  className?: string;
+}) {
+  const icon = iconSource(providerID, baseURL);
   const [failed, setFailed] = useState<string | null>(null);
+  const style = { width: size, height: size };
 
-  if (!src || failed === src) {
-    return <Bot aria-hidden className={cn('shrink-0', className)} style={{ width: size, height: size }} />;
+  if (!icon || failed === icon.src) {
+    return <Bot aria-hidden className={cn('shrink-0', className)} style={style} />;
   }
+  if (!icon.tint) {
+    return (
+      <img src={icon.src} alt="" aria-hidden className={cn('shrink-0 object-contain', className)} style={style} onError={() => setFailed(icon.src)} />
+    );
+  }
+  // One-color logos take the text's color through a mask, so they show in dark themes too.
+  const mask = `url("${icon.src}") center / contain no-repeat`;
   return (
-    <img
-      src={src}
-      alt=""
-      aria-hidden
-      className={cn('shrink-0 object-contain', className)}
-      style={{ width: size, height: size }}
-      onError={() => setFailed(src)}
-    />
+    <span aria-hidden className={cn('relative inline-block shrink-0', className)} style={style}>
+      <span className="absolute inset-0 bg-current" style={{ mask, WebkitMask: mask }} />
+      {/* Loaded only to find out whether it can be: a mask says nothing when it can't. */}
+      <img src={icon.src} alt="" className="hidden" onError={() => setFailed(icon.src)} />
+    </span>
   );
 }
 

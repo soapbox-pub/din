@@ -25,6 +25,28 @@ export interface AssistantStatus {
   error: string | null;
 }
 
+/** A `claude auth login` under way, or the last one (electron/claude-code.mts). */
+export interface ClaudeLogin {
+  state: 'starting' | 'waiting' | 'done' | 'failed';
+  /** The sign-in page, which comes back to this computer by itself. */
+  url: string | null;
+  /** The page for signing in elsewhere, which shows a code to paste. */
+  codeUrl: string | null;
+  message: string | null;
+}
+
+/** Claude Code on this computer, for the Claude provider. */
+export interface ClaudeCodeStatus {
+  binary: string | null;
+  version: string | null;
+  loggedIn: boolean;
+  /** Who it's signed in as, when it says. */
+  account: string | null;
+  installing: boolean;
+  login: ClaudeLogin | null;
+  error: string | null;
+}
+
 /**
  * One server event, slimmed by the main process: its type, the session it's
  * about, and its data for the kinds the shell reads (permission requests,
@@ -69,6 +91,16 @@ export interface AssistantBridge {
   /** Update OpenCode to its newest release, restarting its server (and stopping what the agent is doing). */
   upgrade(): Promise<void>;
   recentModels(): Promise<{ providerID: string; modelID: string }[]>;
+  /** Claude Code, for the Claude provider: where it is and who it's signed in as. */
+  claude(): Promise<ClaudeCodeStatus>;
+  /** Run Claude Code's installer, into ~/.local/bin. */
+  claudeInstall(): Promise<void>;
+  /** Start signing Claude Code in to a Claude plan: the page to sign in on. */
+  claudeLogin(): Promise<ClaudeLogin>;
+  /** The code the sign-in page for other devices showed. */
+  claudeCode(code: string): Promise<void>;
+  /** Stop a sign-in under way. */
+  claudeCancel(): Promise<void>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
   /** sudo's password and approval requests from the agent's commands. */
   passwords(): Promise<PasswordRequest[]>;
@@ -353,15 +385,35 @@ export type IntegrationMethod =
   | { type: 'command'; id: string; label: string; command: string[] }
   | { type: 'external'; id: string; label: string };
 
+/** A problem a provider reports with how it's connected: sign in again (at `url`, if given). */
+export interface ConnectionProblem {
+  status: 'needs_auth';
+  message: string;
+  url?: string;
+}
+
 export type IntegrationConnection =
-  | { type: 'env'; name: string }
-  | { type: 'credential'; id: string; label: string; method: string };
+  | { type: 'env'; name: string; status?: ConnectionProblem }
+  | { type: 'credential'; id: string; label: string; method: string; status?: ConnectionProblem };
 
 export interface IntegrationInfo {
   id: string;
   name: string;
   methods: IntegrationMethod[];
   connections: IntegrationConnection[];
+}
+
+/** Providers Din shows by another name than OpenCode's: Claude Agent is Claude. */
+const PROVIDER_NAMES: Record<string, string> = { 'claude-agent': 'Claude' };
+
+/** A provider's name as Din shows it. */
+export function providerName(providerID: string, name: string): string {
+  return PROVIDER_NAMES[providerID] ?? name;
+}
+
+/** The credential ids a provider is connected with (not environment variables). */
+export function credentialIDs(integration: IntegrationInfo): string[] {
+  return integration.connections.flatMap((c) => (c.type === 'credential' ? [c.id] : []));
 }
 
 export interface OAuthAttempt {
@@ -597,6 +649,13 @@ export const assistantApi = {
     (await call<{ data: CommandInfo[] }>('GET', `/api/command${query({ 'location[directory]': directory })}`)).data,
 
   integrations: async () => (await call<{ data: IntegrationInfo[] }>('GET', '/api/integration')).data,
+
+  integration: async (integrationID: string) =>
+    (await call<{ data: IntegrationInfo }>('GET', `/api/integration/${id(integrationID)}`)).data,
+
+  /** Connect with a credential the provider finds itself (Claude Code's own login). */
+  connectExternal: (integrationID: string, methodID: string) =>
+    call<unknown>('POST', `/api/integration/${id(integrationID)}/connect/external`, { methodID }),
 
   connectKey: (integrationID: string, key: string) =>
     call<unknown>('POST', `/api/integration/${id(integrationID)}/connect/key`, { key }),

@@ -55,6 +55,7 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
       notify: ({ title, description, destructive }) =>
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,
+      dialogsOverWindows: true,
     }),
     [config.assistantDirectory, config.assistantColorfulReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast],
   );

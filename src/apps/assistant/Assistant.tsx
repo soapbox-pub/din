@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Redo2, SquarePen, Undo2 } from 'lucide-react';
+import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SlidersHorizontal, SquarePen, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
@@ -18,6 +18,7 @@ import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { Composer, type ComposerHandle, type SlashCommand } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
+import { AddProviderDialog, ManageProvidersDialog } from '@/shared/assistant/Providers';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
 import { ForkDialog, type UserMessage } from '@/shared/assistant/ForkDialog';
@@ -112,6 +113,7 @@ const SUGGESTIONS = [
 /** The commands Din runs itself in a conversation, beside the server's. */
 const CONVERSATION_COMMANDS: SlashCommand[] = [
   { name: 'compact', description: 'Summarize the conversation to free up the model’s context', instant: true },
+  { name: 'connect', description: 'Add an AI provider: Claude, OpenRouter and more', instant: true },
   { name: 'fork', description: 'Continue in a new conversation, from here or an earlier message', instant: true },
   { name: 'new', description: 'Start a new conversation in this folder', instant: true },
   { name: 'rename', args: '[title]', description: 'Rename this conversation' },
@@ -121,9 +123,9 @@ const CONVERSATION_COMMANDS: SlashCommand[] = [
 
 /** And once something is undone, a way to bring it back. */
 const UNDONE_COMMANDS: SlashCommand[] = [
-  ...CONVERSATION_COMMANDS.slice(0, 3),
+  ...CONVERSATION_COMMANDS.slice(0, 4),
   { name: 'redo', description: 'Bring back what /undo took away, files too', instant: true },
-  ...CONVERSATION_COMMANDS.slice(3),
+  ...CONVERSATION_COMMANDS.slice(4),
 ];
 
 /** A user message's files that can be attached again (pasted ones aren't kept). */
@@ -133,8 +135,8 @@ function reattachable(message: UserMessage): PromptAttachment[] {
   );
 }
 
-/** A new conversation has only the server's: there is nothing yet to compact or rename. */
-const NO_COMMANDS: SlashCommand[] = [];
+/** A new conversation has the server's and /connect: there is nothing yet to compact or rename. */
+const NEW_COMMANDS: SlashCommand[] = CONVERSATION_COMMANDS.filter((c) => c.name === 'connect');
 
 /** Din's commands and then the server's, those it has too left out. */
 function useSlashCommands(directory: string | undefined, own: SlashCommand[]): SlashCommand[] {
@@ -285,6 +287,9 @@ function AssistantWindow() {
   // The conversation a tab's Delete is asking about.
   const [deleting, setDeleting] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  // Add provider (/connect, the menu) and Manage providers, over the window.
+  const [providers, setProviders] = useState<'add' | 'manage' | null>(null);
+  const addProvider = () => setProviders('add');
   const searchRef = useRef<HTMLInputElement>(null);
   const conversationRef = useRef<ConversationHandle>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
@@ -562,6 +567,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
+        menu={<AssistantMenu onAddProvider={addProvider} onManageProviders={() => setProviders('manage')} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -662,6 +668,7 @@ function AssistantWindow() {
             onNew={startNew}
             onOpenSession={choose}
             onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
+            onAddProvider={addProvider}
           />
         ) : (
           <NewConversation
@@ -670,6 +677,7 @@ function AssistantWindow() {
             onDirectoryChange={(directory) => updateTab(activeTab.id, { directory })}
             draftKey={newConversationDraftKey(activeTab.id)}
             onStarted={(sessionID) => started(activeTab, sessionID)}
+            onAddProvider={addProvider}
           />
         )}
       </main>
@@ -679,7 +687,35 @@ function AssistantWindow() {
         onOpenChange={(open) => !open && setDeleting(null)}
         onDeleted={() => deleting && removeSessions(new Set([deleting]))}
       />
+      <AddProviderDialog open={providers === 'add'} onOpenChange={(open) => !open && setProviders(null)} />
+      <ManageProvidersDialog open={providers === 'manage'} onOpenChange={(open) => !open && setProviders(null)} />
     </div>
+  );
+}
+
+/** The app's menu, in the list's title bar: providers, and Settings → Assistant for the rest. */
+function AssistantMenu({ onAddProvider, onManageProviders }: { onAddProvider: () => void; onManageProviders: () => void }) {
+  const { openApp } = useAssistantHost();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="Assistant settings" title="Settings">
+          <Settings className="size-4" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuItem onSelect={onAddProvider}>
+          <Plus aria-hidden /> Add Provider…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onManageProviders}>
+          <SlidersHorizontal aria-hidden /> Manage Providers…
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openApp('settings', { section: 'assistant' })}>
+          <Settings aria-hidden /> Assistant Settings…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -724,6 +760,7 @@ function Conversation({
   onNew,
   onOpenSession,
   onFork,
+  onAddProvider,
 }: {
   ref?: Ref<ConversationHandle>;
   sessionID: string;
@@ -737,6 +774,8 @@ function Conversation({
   onOpenSession: (sessionID: string) => void;
   /** Fork it, whole or from before `message`. */
   onFork: (message?: UserMessage) => void;
+  /** /connect: add an AI provider. */
+  onAddProvider: () => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
   const { data: transcript, isLoading, loadEarlier, loadingEarlier, earlierFailed } = useSessionMessages(sessionID);
@@ -917,6 +956,8 @@ function Conversation({
         return compact.mutateAsync(sessionID, { onError: fail('Couldn’t compact the conversation') });
       case 'new':
         return onNew(session?.location.directory);
+      case 'connect':
+        return onAddProvider();
       case 'fork':
         return setForking(true);
       case 'rename':
@@ -1196,12 +1237,15 @@ function NewConversation({
   onDirectoryChange: setDirectory,
   draftKey,
   onStarted,
+  onAddProvider,
 }: {
   /** The folder it works in; null for the default one. */
   directory: string | null;
   onDirectoryChange: (directory: string) => void;
   draftKey: string;
   onStarted: (id: string) => void;
+  /** /connect: add an AI provider. */
+  onAddProvider: () => void;
 }) {
   const defaultDirectory = useAssistantDirectory();
   const home = useHomeDirectory();
@@ -1212,7 +1256,7 @@ function NewConversation({
   const start = useStartConversation();
   const { notify, pickFolder } = useAssistantHost();
   const folder = directory ?? defaultDirectory;
-  const commands = useSlashCommands(folder, NO_COMMANDS);
+  const commands = useSlashCommands(folder, NEW_COMMANDS);
 
   const begin = (text: string, files: PromptAttachment[] = [], command?: string) =>
     start.mutateAsync(
@@ -1251,7 +1295,7 @@ function NewConversation({
             placeholder="Ask the assistant to do something…"
             onSubmit={(text, files) => begin(text, files)}
             commands={commands}
-            onCommand={(name, args, files) => begin(args, files, name)}
+            onCommand={(name, args, files) => (name === 'connect' ? onAddProvider() : begin(args, files, name))}
             toolbar={
               <>
                 <ModelPicker models={models} value={model} recent={recent} onChange={setModel} />

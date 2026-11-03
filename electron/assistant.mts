@@ -38,6 +38,7 @@ import path from 'node:path';
 import { ipcMain } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
 import { revokeSudoGrant } from './askpass.mts';
+import { cancelClaudeLogin, claudeStatus, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
 
 const INSTALL_DIR = path.join(os.homedir(), '.opencode/bin');
 const STATE_DIR = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'opencode');
@@ -180,6 +181,10 @@ async function serverEnvironment(): Promise<NodeJS.ProcessEnv> {
   else delete env.DBUS_SESSION_BUS_ADDRESS;
   env.DISPLAY = ':din-none';
   env.PATH = [INSTALL_DIR, env.PATH].filter(Boolean).join(path.delimiter);
+  // OpenCode's Claude provider looks for `claude` on PATH, and Claude Code's
+  // own install (claude-code.mts) is in ~/.local/bin, which may not be on it.
+  const claude = findClaude();
+  if (claude) env.OPENCODE_CLAUDE_PATH = claude;
   return env;
 }
 
@@ -617,6 +622,34 @@ export function registerAssistantHandlers(options: {
   ipcMain.handle('assistant:recentModels', (event) => {
     assertShellSender(event);
     return recentModels();
+  });
+
+  // Claude Code, for the Claude provider (claude-code.mts). Only the Assistant
+  // app and the desktop reach these (din-apps.mts).
+  ipcMain.handle('assistant:claude', async (event) => {
+    assertShellSender(event);
+    return claudeStatus(await serverEnvironment());
+  });
+
+  ipcMain.handle('assistant:claudeInstall', async (event) => {
+    assertShellSender(event);
+    await installClaude(await serverEnvironment());
+  });
+
+  ipcMain.handle('assistant:claudeLogin', async (event) => {
+    assertShellSender(event);
+    return startClaudeLogin(await serverEnvironment());
+  });
+
+  ipcMain.handle('assistant:claudeCode', (event, code: unknown) => {
+    assertShellSender(event);
+    if (typeof code !== 'string') throw new Error('That isn’t a sign-in code');
+    sendClaudeLoginCode(code);
+  });
+
+  ipcMain.handle('assistant:claudeCancel', (event) => {
+    assertShellSender(event);
+    cancelClaudeLogin();
   });
 
   ipcMain.handle('assistant:request', (event, method: unknown, apiPath: unknown, body: unknown) => {
