@@ -198,6 +198,8 @@ export interface PasswordsDesktopBridge extends PasswordsBridge {
   answerOffer(offerId: number, answer: 'save' | 'never' | 'dismiss', username?: string): Promise<void>;
   onSuggest(callback: (suggestion: PasswordSuggestion) => void): () => void;
   onHide(callback: (requestId: number) => void): () => void;
+  /** The page lost the keyboard while showing these suggestions: to a click on them, or to something else. */
+  onPageBlur(callback: (requestId: number) => void): () => void;
   onKey(callback: (event: { requestId: number; key: 'ArrowDown' | 'ArrowUp' | 'Enter' | 'Escape' }) => void): () => void;
   onOffer(callback: (offer: PasswordOffer) => void): () => void;
   onOfferGone(callback: (offerId: number) => void): () => void;

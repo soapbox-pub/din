@@ -1712,6 +1712,8 @@ expose('passwords', {
   onSuggest: (callback) => listen('passwords:suggest', callback),
   /** @param {(requestId: number) => void} callback */
   onHide: (callback) => listen('passwords:hide', (p) => callback(p.requestId)),
+  /** @param {(requestId: number) => void} callback */
+  onPageBlur: (callback) => listen('passwords:page-blur', (p) => callback(p.requestId)),
   /** @param {(event: unknown) => void} callback */
   onKey: (callback) => listen('passwords:key', callback),
   /** @param {(offer: unknown) => void} callback */

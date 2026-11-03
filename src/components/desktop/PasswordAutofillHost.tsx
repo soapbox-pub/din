@@ -106,13 +106,14 @@ export function PasswordAutofillHost() {
         open('passwords');
         return;
       }
+      // A click here took the keyboard from the page: it gets it back before
+      // the login arrives, which puts it in the field.
+      findGuest(s.wcId)?.focus();
       if (row === 'generated') {
         void bridge.choose(s.requestId, { type: 'generated' });
       } else if (row.startsWith('login:')) {
         void bridge.choose(s.requestId, { type: 'login', id: row.slice('login:'.length) });
       }
-      // A click here took the keyboard from the page: give it back to the field.
-      findGuest(s.wcId)?.focus();
     },
     [bridge, open],
   );
@@ -129,18 +130,39 @@ export function PasswordAutofillHost() {
   );
 
   // A click on the desktop anywhere but the suggestions closes them (the
-  // page's own clicks close them from its side).
+  // page's own clicks close them from its side). A click on them takes the
+  // keyboard from the page, which says so: they stay for that, and close
+  // when the page lost it to anything else.
   const listRef = useRef<HTMLDivElement>(null);
+  const pressedAt = useRef(0);
   const requestId = suggestion?.requestId;
   useEffect(() => {
     if (!bridge || requestId === undefined) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.target instanceof Node && listRef.current?.contains(e.target)) return;
+    const dismiss = () => {
       setSuggestion((s) => (s?.requestId === requestId ? null : s));
       void bridge.choose(requestId, { type: 'dismiss' });
     };
+    const pressed = () => performance.now() - pressedAt.current < 1000;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Node)) return;
+      if (listRef.current?.contains(e.target)) pressedAt.current = performance.now();
+      // The page's own clicks reach here as clicks on it: it handles them.
+      else if (e.target !== findGuest(suggestionRef.current?.wcId ?? -1)) dismiss();
+    };
+    let timer = 0;
+    const offPageBlur = bridge.onPageBlur((id) => {
+      if (id !== requestId || pressed()) return;
+      // The press may not have arrived yet.
+      timer = window.setTimeout(() => {
+        if (!pressed()) dismiss();
+      }, 200);
+    });
     document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      offPageBlur();
+      clearTimeout(timer);
+    };
   }, [bridge, requestId]);
 
   const rowsKey = rows.join('\n');

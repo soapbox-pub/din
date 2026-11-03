@@ -172,7 +172,7 @@ if (/^https?:$/.test(location.protocol)) {
 
   // A click on the desktop's suggestions takes the keyboard from the page
   // before the click lands, so a field left focused in a page that lost focus
-  // only says so, and main decides whether the suggestions stay.
+  // only says so, and the desktop decides whether the suggestions stay.
   document.addEventListener('focusout', (event) => {
     if (event.target !== current) return;
     const field = current;
@@ -180,8 +180,9 @@ if (/^https?:$/.test(location.protocol)) {
       if (document.activeElement === field && !document.hasFocus()) {
         pageBlurred = true;
         if (shown) ipcRenderer.send('passwords:page-blur');
-      } else if (field === current) {
-        hide();
+      } else {
+        pageBlurred = false;
+        if (field === current) hide();
       }
     });
   }, true);
@@ -256,7 +257,11 @@ if (/^https?:$/.test(location.protocol)) {
       if (login.username && username) type(username, login.username);
       if (password) type(password, login.password);
     } finally {
+      // Back in the field, for Enter to sign in: a click on the suggestions took the keyboard.
+      if (anchor === current) anchor.focus();
       filling = false;
+      // Unless the page is yet to get the keyboard back, which isn't the user going into the field either.
+      pageBlurred = !document.hasFocus();
     }
   });
 }
