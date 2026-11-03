@@ -232,6 +232,7 @@ import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSecti
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
 import { PhoneSettingsSection } from '@/components/desktop/apps/PhoneSettingsSection';
 import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSection';
+import { EraseSection } from '@/components/desktop/apps/EraseSection';
 import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
@@ -279,8 +280,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * Developers holds debug utilities: restarting Din (DinOS) and intentionally
  * crashing the shell to test the error boundary. About shows Din's logo and DinOS's version, and
  * the update it's building through `window.dinos.updater`, offers the restart
- * that finishes one and the repository it's built from, and firmware updates
- * through `window.dinos.firmware`; elsewhere on Linux, it puts Din on the login
+ * that finishes one and the repository it's built from, firmware updates
+ * through `window.dinos.firmware`, and erasing the computer (EraseSection); elsewhere on Linux, it puts Din on the login
  * screen (LoginSessionSection).
  */
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
@@ -428,7 +429,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
     ) : id === 'developers' ? (
       <DevelopersSection />
     ) : (
-      <AboutSection />
+      <AboutSection eraseRequest={typeof params?.erase === 'number' ? params.erase : undefined} />
     );
 
   const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -4807,7 +4808,7 @@ function SudoModeSetting() {
  * next boot, so this mostly reports, and offers the restart. It also turns
  * that off, and changes the repository and branch they're built from.
  */
-function AboutSection() {
+function AboutSection({ eraseRequest }: { eraseRequest?: number }) {
   const bridge = getUpdaterBridge();
   const state = useUpdateState();
   const dinos = !!bridge && state?.available !== false;
@@ -4867,6 +4868,8 @@ function AboutSection() {
       {!dinos && <LoginSessionSection />}
 
       <FirmwareSection />
+
+      {dinos && state && !state.live && <EraseSection request={eraseRequest} />}
     </SectionShell>
   );
 }

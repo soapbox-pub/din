@@ -138,6 +138,7 @@ import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
+import { registerEraseHandlers } from './erase.mts';
 import { registerPasswordsHandlers } from './passwords.mts';
 import { registerAskpass } from './askpass.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
@@ -6062,6 +6063,7 @@ app.whenReady().then(() => {
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
+  registerEraseHandlers({ assertShellSender });
   registerPasswordsHandlers({
     assertShellSender,
     isBridgeEvent,

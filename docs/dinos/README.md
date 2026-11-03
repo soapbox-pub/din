@@ -24,6 +24,7 @@ interface Dinos {
   session: SessionBridge;
   bootScreen: BootScreenBridge;
   lock: LockBridge;
+  erase: EraseBridge;
   power: PowerBridge;
   installer: InstallerBridge;
   updater: UpdaterBridge;
@@ -144,7 +145,7 @@ directly by components.
 
 | Area | Namespaces |
 |---|---|
-| Session and boot | `boot`, `session`, `bootScreen`, `lock`, `power`, `installer`, `updater`, `firmware` |
+| Session and boot | `boot`, `session`, `bootScreen`, `lock`, `erase`, `power`, `installer`, `updater`, `firmware` |
 | Files and terminals | `fs`, `volumes`, `pty`, `indd`, `passwords` |
 | Network | `wifi`, `vpn`, `tor`, `siteLocations`, `bluetooth`, `bluetoothLogin`, `phone`, `airplay` |
 | Displays and input | `display`, `monitors`, `zoom`, `brightness`, `keyboard`, `cursor`, `iconTheme`, `screenshot`, `dictation`, `shellShortcuts` |

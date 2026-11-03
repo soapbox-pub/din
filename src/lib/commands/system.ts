@@ -1,4 +1,5 @@
 import { nip19 } from 'nostr-tools';
+import { getEraseBridge } from '@/lib/erase';
 import { getFirmwareBridge } from '@/lib/firmware';
 import { getLockBridge } from '@/lib/lock';
 import { blossomListTags, normalizeBlossomUrl, normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
@@ -21,7 +22,7 @@ function restartDinSoon(bridge = updater()) {
 
 export const updateArea: Area = {
   name: 'update',
-  summary: 'DinOS updates: status, check, apply, your own builds, restarting Din, where they come from',
+  summary: 'DinOS updates: status, check, apply, your own builds, restarting Din, where they come from, erasing the computer',
   commands: [
     command('update', 'status', 'The running system, and any update in the works', [], async () => {
       const state = await call(updater().state());
@@ -88,6 +89,12 @@ export const updateArea: Area = {
       { name: 'branch', type: 'string', positional: true, optional: true, help: 'Its branch (default: main)' },
     ], async (args) => {
       await call(updater().setSource(args.string('url'), args.optString('branch') ?? 'main'));
+    }),
+    command('update', 'erase', 'Erase all data and settings, back to official DinOS: opens Settings → About to confirm, with the password', [], async (_args, ctx) => {
+      const status = await call(need(getEraseBridge(), 'Erasing').status());
+      if (!status.available) throw new CommandError('This computer can’t be erased from Din');
+      ctx.actions.open('settings', { section: 'about', erase: Date.now() });
+      return { text: 'Settings asks you to confirm.' };
     }),
   ],
 };

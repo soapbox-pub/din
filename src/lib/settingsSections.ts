@@ -263,6 +263,7 @@ export const SECTIONS: SettingsSection[] = [
       'Update automatically', 'commit', 'source', 'branch', 'fork', 'repository',
       'Login screen', 'Use Din as your desktop', 'Log in to Din by default', 'Roll back', 'Remove from login screen',
       'session', 'display manager', 'GDM', 'LightDM', 'desktop environment',
+      'Erase all data', 'Erase This Computer', 'factory reset', 'reset', 'wipe', 'start over',
     ],
   },
   {

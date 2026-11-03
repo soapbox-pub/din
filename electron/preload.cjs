@@ -1954,6 +1954,29 @@ expose('lock', {
   setSudoMode: (mode, password) => ipcRenderer.invoke('lock:set-sudo-mode', mode, password),
 });
 
+// Erase bridge (window.dinos.erase), backed by electron/erase.mts: erasing
+// the computer back to official DinOS, and the Setup screen that follows.
+expose('erase', {
+  /** Whether the computer can be erased, and what that takes. */
+  status: () => ipcRenderer.invoke('erase:status'),
+
+  /**
+   * Erase the computer: it restarts, and resolves only if it can't.
+   * @param {string} [password] The computer's, where it has one.
+   */
+  start: (password) => ipcRenderer.invoke('erase:start', password),
+
+  /** Whether the computer was erased and Setup must give it a password. */
+  setupNeeded: () => ipcRenderer.invoke('erase:setup-needed'),
+
+  /**
+   * Give the erased computer its password: the disk's, sudo's, the lock
+   * screen's, the Nostr keys' and the keyring's.
+   * @param {string} password
+   */
+  setUp: (password) => ipcRenderer.invoke('erase:set-up', password),
+});
+
 // Askpass bridge (window.dinos.askpass), backed by electron/askpass.mts: sudo
 // asking to approve a command, or for the password with no terminal to ask on.
 expose('askpass', {

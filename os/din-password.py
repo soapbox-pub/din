@@ -7,6 +7,12 @@ GPG key that had it. This changes all five, after checking the old one itself,
 so Din can run it through sudo without a password.
 
     din-password change    old and new password on stdin, one per line
+    din-password setup     the first password on stdin, for Setup after the
+                           computer was erased (os/din-erase.sh): only then,
+                           while it has none, and the disk opens with the
+                           setup key on the boot partition, which this
+                           removes
+    din-password check     the password on stdin; fails if it isn't the one
     din-password sudo status|approve|password|skip
                            what sudo asks for: the user's approval in Din,
                            the password, or nothing. `approve` and `skip`
@@ -68,6 +74,9 @@ NOSTRD_SOCKET = "/run/nostrd/signer.sock"
 SKIP_RULE = "/var/lib/din/sudoers.d/no-password"
 ASK_PASSWORD = "/var/lib/din/sudo-password"
 GRANTS = "/run/din/sudo-grants"
+SETUP_MARK = "/var/lib/din/setup"
+SETUP_KEY = "/boot/din/setup.key"
+SETUP_KEY_COPY = "/run/cryptsetup-keys.d/root.key"
 SHELL_SERVICE = "din-shell.service"
 APPROVAL_TIMEOUT = 10 * 60
 
@@ -218,6 +227,79 @@ def change():
     if result.returncode != 0:
         fail("The disk, Nostr keys, keyring and GPG keys have the new password, but sudo and "
              "the lock screen still take the old one. " + result.stderr.strip())
+
+
+def with_secrets(secrets, command):
+    """Run command(paths): each secret readable at its path, through a pipe."""
+    pipes = [os.pipe() for _ in secrets]
+    for (_, write), secret in zip(pipes, secrets):
+        os.write(write, secret.encode())
+        os.close(write)
+    reads = [read for read, _ in pipes]
+    try:
+        return subprocess.run(
+            command([f"/dev/fd/{read}" for read in reads]),
+            pass_fds=reads,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        for read in reads:
+            os.close(read)
+
+
+def setup_disk(partition, new):
+    """The setup key gives way to the new password, unless that's done already."""
+    opens = with_secrets([new], lambda paths: [
+        "cryptsetup", "open", "--test-passphrase", f"--key-file={paths[0]}", partition,
+    ])
+    if opens.returncode == 0:
+        return
+    if not os.path.exists(SETUP_KEY):
+        fail("The disk has no setup key to replace.")
+    added = with_secrets([new], lambda paths: [
+        "cryptsetup", "luksAddKey", "--batch-mode", f"--key-file={SETUP_KEY}", partition, paths[0],
+    ])
+    if added.returncode != 0:
+        fail("The disk's password couldn't be set; nothing was. " + added.stderr.strip())
+    removed = subprocess.run(
+        ["cryptsetup", "luksRemoveKey", "--batch-mode", partition, SETUP_KEY],
+        capture_output=True, text=True,
+    )
+    if removed.returncode != 0:
+        fail("The disk has the new password, but its setup key still opens it too. "
+             + removed.stderr.strip())
+    os.remove(SETUP_KEY)
+    # The initrd's copy, which it unlocked the disk with at this boot.
+    remove(SETUP_KEY_COPY)
+
+
+def setup():
+    new = sys.stdin.read().split("\n")[0]
+    if not os.path.exists(SETUP_MARK) or password_hash():
+        fail("This computer's password is set already.")
+    if not usable(new):
+        fail("The password needs 8 or more letters, numbers or symbols, and no others.")
+
+    partition = luks_partition()
+    if partition:
+        setup_disk(partition, new)
+    try:
+        change_nostrd("", new)
+    except (OSError, RuntimeError) as error:
+        fail(f"The disk has the new password, but the Nostr keys don't ({error}).")
+    try:
+        change_keyring("", new)
+        change_gpg("", new)
+    except RuntimeError as error:
+        fail(f"The disk and Nostr keys have the new password, but the keyring doesn't ({error}).")
+    result = subprocess.run(["chpasswd"], input=f"{USER}:{new}\n", text=True, capture_output=True)
+    if result.returncode != 0:
+        fail("The disk, Nostr keys and keyring have the new password, but sudo and the lock "
+             "screen don't. " + result.stderr.strip())
+    os.remove(SETUP_MARK)
+    # Its rule that sudo needs no password goes with the password's coming.
+    subprocess.run(["systemctl", "restart", "din-sudo.service"], capture_output=True)
 
 
 def check_stdin_password():
@@ -431,6 +513,10 @@ def main():
     args = sys.argv[1:]
     if args == ["change"]:
         change()
+    elif args == ["setup"]:
+        setup()
+    elif args == ["check"]:
+        check_stdin_password()
     elif args == ["sudo", "status"]:
         print(sudo_status())
     elif args == ["sudo", "approve"]:
@@ -446,7 +532,7 @@ def main():
     elif args == ["sudo", "check"]:
         sudo_check()
     else:
-        fail("usage: din-password change | sudo status|approve|password|skip|grant|revoke|check")
+        fail("usage: din-password change | setup | check | sudo status|approve|password|skip|grant|revoke|check")
 
 
 if __name__ == "__main__":

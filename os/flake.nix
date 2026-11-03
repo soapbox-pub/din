@@ -155,6 +155,8 @@
           accounts = test ./tests/accounts.nix;
           airplay-display = test ./tests/airplay-display.nix;
           boot-screen = test ./tests/boot-screen.nix;
+          # Installs onto a disk from the test machine's image, then erases it.
+          erase = import ./tests/erase.nix (args // { inherit makeImage; });
           firmware = test ./tests/firmware.nix;
           # Boots the test machine's own disk image, as a USB stick.
           install = import ./tests/install.nix (args // { inherit makeImage; });

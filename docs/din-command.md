@@ -73,7 +73,9 @@ loading or installing an extension (`din extensions load|install`), sending a te
 (`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`) and forgetting a phone with its messages (`din phone forget`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
-aren't commands; the user changes those in Settings.
+aren't commands; the user changes those in Settings. `din update erase`
+only opens Settings → About's Erase dialog, where the user types the
+password to erase the computer.
 
 ## How it works
 
