@@ -490,7 +490,7 @@ function AssistantWindow() {
       { sessionID, before: message?.id },
       {
         onSuccess: (session) => {
-          if (message) saveDraft(session.id, message.text);
+          if (message) saveDraft(session.id, message.text, reattachable(message));
           setState((prev) => placeTab(prev, newAssistantTab(session.id)));
           setListOpen(false);
         },

@@ -2,7 +2,7 @@ import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type 
 import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
-import { draftStorageKey } from '@/lib/assistantTabs';
+import { draftStorageKey, loadDraftFiles, saveDraftFiles } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
@@ -62,6 +62,31 @@ function useDraft(key: string | undefined) {
   return [text, save] as const;
 }
 
+/**
+ * The composer's files, kept under `key` like its text. They load a moment
+ * after it shows, ahead of any attached meanwhile.
+ */
+function useDraftFiles(key: string | undefined) {
+  const [files, setFiles] = useState<PromptAttachment[]>([]);
+  const [loaded, setLoaded] = useState(!key);
+  useEffect(() => {
+    if (!key) return;
+    let live = true;
+    void loadDraftFiles(key).then((kept) => {
+      if (!live) return;
+      setFiles((current) => [...kept.filter((f) => !current.some((c) => c.uri === f.uri)), ...current]);
+      setLoaded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  useEffect(() => {
+    if (key && loaded) saveDraftFiles(key, files);
+  }, [key, loaded, files]);
+  return [files, setFiles] as const;
+}
+
 /** The commands a partly typed `/name` could be, those it starts first. */
 function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] {
   const query = typed.toLowerCase();
@@ -83,7 +108,7 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
  * on: the arrows move through it, Tab or Enter fills one in (Enter runs an
  * instant one), Escape puts it away.
  *
- * With `draftKey`, unsent text is kept until it's sent.
+ * With `draftKey`, unsent text and files are kept until they're sent.
  */
 export function Composer({
   onSubmit,
@@ -121,11 +146,11 @@ export function Composer({
   onCycleAgent?: () => void;
   className?: string;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
-  /** Keeps unsent text across restarts, one draft per key. */
+  /** Keeps unsent text and files across restarts, one draft per key. */
   draftKey?: string;
 }) {
   const [text, setText] = useDraft(draftKey);
-  const [files, setFiles] = useState<PromptAttachment[]>([]);
+  const [files, setFiles] = useDraftFiles(draftKey);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
   const host = useAssistantHost();
