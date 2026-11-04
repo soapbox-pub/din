@@ -224,6 +224,15 @@ let
     text = builtins.readFile ./din-wifi.sh;
   };
 
+  # The privileged half of Settings → Firewall, which lets the ports the
+  # user chooses through the firewall (see the script, and
+  # electron/firewall.mts). It's the firewall's own iptables.
+  din-firewall = pkgs.writeShellApplication {
+    name = "din-firewall";
+    runtimeInputs = [ pkgs.coreutils config.networking.firewall.package ];
+    text = builtins.readFile ./din-firewall.sh;
+  };
+
   # Adds and removes the interface Quick Share's Wi-Fi hotspot runs on (see
   # the script, and electron/quickshare-hotspot.mts).
   din-hotspot = pkgs.writeShellApplication {
@@ -396,7 +405,7 @@ let
   # jmtpfs, ifuse and libimobiledevice's tools for phones plugged in by USB
   # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
-  # Tor's, the WiFi reset's and Quick Share's hotspot's helpers, and for checking the password
+  # Tor's, the WiFi reset's, Quick Share's hotspot's and the firewall's helpers, and for checking the password
   # Din takes for sudo (electron/askpass.mts). Last, the optional features'
   # programs (Wine's, for Windows programs' Start-menu entries).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
@@ -415,6 +424,7 @@ let
     export DIN_TOR=${din-tor}/bin/din-tor
     export DIN_WIFI=${din-wifi}/bin/din-wifi
     export DIN_HOTSPOT=${din-hotspot}/bin/din-hotspot
+    export DIN_FIREWALL=${din-firewall}/bin/din-firewall
     export DIN_QUICKSHARE_PYTHON=${quickshare-python}/bin/python3
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
@@ -692,6 +702,21 @@ in
   # runs it, and it asks before it takes a file unless the user has turned
   # on its Quick Save.
   networking.firewall.allowedTCPPorts = [ 47331 localSendPort ];
+  # The ports the user lets in in Settings → Firewall (os/din-firewall.sh):
+  # a chain of their own, ahead of the refusal that ends nixos-fw, filled
+  # from what's saved each time the firewall starts or reloads. They stay
+  # off the hotspot, whose table drops them first (below). A firewall whose
+  # start fails stops altogether, letting everything in, so a failure here
+  # leaves just the user's ports shut.
+  networking.firewall.extraCommands = ''
+    ip46tables -N din-fw 2>/dev/null || true
+    ip46tables -A nixos-fw -j din-fw
+    ${din-firewall}/bin/din-firewall apply || echo "din-firewall: the ports let in in Settings → Firewall weren't" >&2
+  '';
+  networking.firewall.extraStopCommands = ''
+    ip46tables -F din-fw 2>/dev/null || true
+    ip46tables -X din-fw 2>/dev/null || true
+  '';
   # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
   # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.
   networking.firewall.interfaces.dinqs0.allowedUDPPorts = [ 53 67 ];
@@ -798,6 +823,9 @@ in
       "${din-wifi}/bin/din-wifi reset"
       "${din-hotspot}/bin/din-hotspot up"
       "${din-hotspot}/bin/din-hotspot down"
+      # Settings → Firewall. What it opens is only reachable by what's
+      # listening there, which the user's programs could be anyway.
+      "${din-firewall}/bin/din-firewall"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.

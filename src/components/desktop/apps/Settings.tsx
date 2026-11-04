@@ -233,6 +233,7 @@ import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSec
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
+import { FirewallSettingsSection } from '@/components/desktop/apps/FirewallSettingsSection';
 import { OptionalFeaturesSection } from '@/components/desktop/apps/OptionalFeaturesSection';
 import { PhoneSettingsSection } from '@/components/desktop/apps/PhoneSettingsSection';
 import { LoginSessionSection } from '@/components/desktop/apps/LoginSessionSection';
@@ -254,7 +255,9 @@ import type { SectionId } from '@/lib/settingsSections';
  * explanatory fallback. The Bluetooth section pairs, connects and forgets
  * devices through `window.dinos.bluetooth` (BlueZ over D-Bus), each paired one
  * with its own page (BluetoothSettingsSection). Phone adds the
- * phones whose texts Messages shows (PhoneSettingsSection). The Display section arranges the monitors through
+ * phones whose texts Messages shows (PhoneSettingsSection). Firewall lets in
+ * the ports the user chooses, on DinOS, through `window.dinos.firewall`
+ * (FirewallSettingsSection). The Display section arranges the monitors through
  * `window.dinos.display` (wlr-randr under din-shell, xrandr on bare X11), falling back
  * where neither can manage them. Battery & Power reads the battery through
  * `window.dinos.power` (/sys/class/power_supply), leaving it out on machines with
@@ -382,6 +385,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       <BluetoothSettingsSection />
     ) : id === 'phone' ? (
       <PhoneSettingsSection addRequest={params?.add === true ? params.nonce ?? true : undefined} />
+    ) : id === 'firewall' ? (
+      <FirewallSettingsSection />
     ) : id === 'display' ? (
       <DisplaySection />
     ) : id === 'brightness' ? (

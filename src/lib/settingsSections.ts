@@ -21,6 +21,7 @@ import {
   Palette,
   Printer,
   RefreshCw,
+  Shield,
   Shapes,
   Smartphone,
   Sparkles,
@@ -45,6 +46,7 @@ export type SectionId =
   | 'printers'
   | 'datetime'
   | 'background'
+  | 'firewall'
   | 'accessibility'
   | 'password'
   | 'notifications'
@@ -247,6 +249,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Background Activity',
     icon: RefreshCw,
     search: ['Let apps refresh in the background', 'Scheduled', 'Run now', 'Pause', 'Resume', 'Remove', 'periodic sync', 'periodicSync', 'background refresh', 'background sync', 'service worker', 'cron', 'schedule', 'wake up', 'battery'],
+  },
+  {
+    id: 'firewall',
+    group: 'System',
+    name: 'Firewall',
+    icon: Shield,
+    search: ['Allowed ports', 'Allow a port', 'What it’s for', 'Port', 'Protocol', 'TCP', 'UDP', 'open a port', 'port forwarding', 'incoming connections', 'LocalSend', 'game server', 'server', 'iptables', 'security', 'network'],
   },
   {
     id: 'datetime',

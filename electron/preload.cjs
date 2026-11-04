@@ -10,6 +10,8 @@
 //   - window.dinos.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.dinos.tor: Tor's status and on/off switch for Settings, and the
 //     onion services pages name, for the Web Browser
+//   - window.dinos.firewall: the ports the user lets through the firewall,
+//     for Settings → Firewall (DinOS)
 //   - window.dinos.display: multi-output arrangement (wlr-randr/xrandr) for the
 //     Settings app
 //   - window.dinos.pageFullscreen: fits a fullscreen web page to its monitor
@@ -652,6 +654,47 @@ expose('tor', {
     const listener = (_event, hosts) => callback(hosts);
     ipcRenderer.on('tor:tls-hosts', listener);
     return () => ipcRenderer.removeListener('tor:tls-hosts', listener);
+  },
+});
+
+/**
+ * @typedef {{ protocol: 'tcp' | 'udp' | 'both', from: number, to: number, name: string }} FirewallRule
+ * @typedef {{ canChange: boolean, active: boolean | null, rules: FirewallRule[] }} FirewallStatus
+ */
+
+// Firewall bridge (window.dinos.firewall), backed by the firewall:* handlers
+// in electron/firewall.mts: the ports the user has let other devices connect
+// to, on DinOS.
+expose('firewall', {
+  /** @returns {Promise<FirewallStatus>} */
+  status: () => ipcRenderer.invoke('firewall:status'),
+
+  /**
+   * Let other devices connect to a port, or a range of them.
+   * @param {FirewallRule} rule
+   * @returns {Promise<FirewallStatus>}
+   */
+  allow: (rule) => ipcRenderer.invoke('firewall:allow', rule),
+
+  /**
+   * Stop letting them in.
+   * @param {{ protocol: FirewallRule['protocol'], from: number, to: number }} rule
+   * @returns {Promise<FirewallStatus>}
+   */
+  remove: (rule) => ipcRenderer.invoke('firewall:remove', rule),
+
+  /**
+   * Subscribe to changes. Returns an unsubscribe fn.
+   * @param {(status: FirewallStatus) => void} callback
+   */
+  onStatus: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {FirewallStatus} status
+     */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('firewall:status', listener);
+    return () => ipcRenderer.removeListener('firewall:status', listener);
   },
 });
 

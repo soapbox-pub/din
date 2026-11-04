@@ -7,6 +7,7 @@ import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { extensionsArea } from './extensions';
 import { featuresArea } from './features';
+import { firewallArea } from './firewall';
 import { installerArea } from './installer';
 import { cursorsArea, iconsArea, skinsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
@@ -48,6 +49,7 @@ export const AREAS: readonly Area[] = [
   contactsArea,
   vpnArea,
   torArea,
+  firewallArea,
   soundArea,
   displayArea,
   brightnessArea,
@@ -74,6 +76,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   wifi: 'wifi',
   bluetooth: 'bluetooth',
   phone: 'phone',
+  firewall: 'firewall',
   themes: 'settings',
   cursors: 'settings',
   icons: 'icons',

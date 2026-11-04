@@ -83,6 +83,7 @@ import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
 import { isOnionProxyCertificate } from './onion-proxy.mts';
+import { registerFirewallHandlers } from './firewall.mts';
 import {
   isOnionUrl,
   keepTorSession,
@@ -5959,6 +5960,7 @@ app.whenReady().then(() => {
   });
   registerVpnHandlers({ assertShellSender });
   registerTorHandlers({ assertShellSender, sendToShell });
+  registerFirewallHandlers({ assertShellSender, sendToShell });
   registerSiteLocationHandlers({ assertShellSender, sendToShell });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
