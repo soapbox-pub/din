@@ -15,6 +15,7 @@
 // ports (electron/din-apps.mts).
 import './ipc-registry.mts';
 import { ptyRoutes } from './pty-routes.mts';
+import { allowCameraThroughPortal, PIPEWIRE_CAMERA_FEATURE } from './camera-portal.mts';
 import {
   appIdOf,
   attachAppGuest,
@@ -78,7 +79,7 @@ import {
 import { parseCanonicalHost } from './nsite-store.mts';
 import { registerNativeAppHandlers, runWindowsProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { isWindowsProgram } from './windows-apps.mts';
-import { registerNativeDisplayHandlers } from './native-display.mts';
+import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
@@ -301,6 +302,14 @@ protocol.registerSchemesAsPrivileged([
 // every page, when it can't tell). Din is the whole desktop: losing WebGL
 // leaves the Terminal on its DOM renderer until Din restarts.
 app.disableDomainBlockingFor3DAPIs();
+
+// Where Din is the desktop, cameras come from PipeWire (camera-portal.mts).
+// That goes through the session bus: without one, Chromium would wait on it
+// forever, and enumerateDevices with it, microphones included.
+const hasSessionBus = !!process.env.DBUS_SESSION_BUS_ADDRESS && !process.env.DBUS_SESSION_BUS_ADDRESS.startsWith('disabled:');
+if (process.env.DIN_DESKTOP_SESSION === '1' && hasSessionBus) {
+  app.commandLine.appendSwitch('enable-features', PIPEWIRE_CAMERA_FEATURE);
+}
 
 // safeStorage (Mail's passwords, the bunker's keys, Chromium's cookies) picks
 // its Linux keyring by XDG_CURRENT_DESKTOP, and knows only the big desktops:
@@ -5809,6 +5818,12 @@ function registerDevtoolsHandlers(): void {
 }
 
 app.whenReady().then(() => {
+  if (process.env.DIN_DESKTOP_SESSION === '1' && hasSessionBus) {
+    sessionBusAddress().then(allowCameraThroughPortal).catch((error) => {
+      console.warn('Could not allow the camera through the desktop portal:', error);
+    });
+  }
+
   // Replace Electron's default application menu. Its role accelerators
   // (Ctrl+W "Close Window", Ctrl+Q "Quit") tear down the entire shell -
   // fatal in a desktop environment where Ctrl+W means "close the app's
