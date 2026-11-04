@@ -611,7 +611,7 @@ const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
 /** The catalog's cards. */
 function CatalogGrid({ apps }: { apps: StoreApp[] }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
       {apps.map((app) => (
         <StoreAppCard key={app.host} app={app} />
       ))}
@@ -631,7 +631,7 @@ const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex min-w-0 flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
     >
       <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
@@ -652,7 +652,7 @@ const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
         <GetPill app={app} name={view.name} />
       </div>
 
-      <p className="line-clamp-2 min-h-10 flex-1 text-sm text-muted-foreground">
+      <p className="line-clamp-2 min-h-10 flex-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
         {view.about}
       </p>
 
@@ -661,7 +661,8 @@ const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
           {app.hashtags.slice(0, 3).map((tag) => (
             <span
               key={tag}
-              className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+              className="max-w-full truncate rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+              title={tag}
             >
               {tag}
             </span>
@@ -776,7 +777,7 @@ function AppDetail({
         <Screenshots app={app} name={view.name} />
 
         {view.about ? (
-          <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">{view.about}</p>
+          <p className="max-w-prose whitespace-pre-line text-base leading-relaxed [overflow-wrap:anywhere]">{view.about}</p>
         ) : (
           <p className="text-muted-foreground">This site doesn’t describe itself.</p>
         )}
@@ -786,7 +787,8 @@ function AppDetail({
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-md bg-secondary px-2 py-0.5 text-sm text-secondary-foreground"
+                className="max-w-full truncate rounded-md bg-secondary px-2 py-0.5 text-sm text-secondary-foreground"
+                title={tag}
               >
                 {tag}
               </span>
@@ -1050,7 +1052,7 @@ function FeaturedSkeleton() {
 
 function CatalogSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
       {Array.from({ length: 6 }, (_, i) => (
         <div
           key={i}
