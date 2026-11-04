@@ -1382,6 +1382,11 @@ expose('theme', {
    */
   setSelection: (color) => ipcRenderer.send('theme:selection', color),
   /**
+   * Give native apps (GTK) the desktop's colors.
+   * @param {Record<string, string | boolean>} palette `#rrggbb` colors and `dark`
+   */
+  setNativePalette: (palette) => ipcRenderer.send('theme:native', palette),
+  /**
    * Subscribe to "Set Image as Desktop Background" in a page's right-click
    * menu. Returns an unsubscribe fn.
    * @param {(url: string) => void} callback

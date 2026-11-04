@@ -1777,6 +1777,12 @@ export const Window = memo(function Window({
   // no title bar, border, shadow or background, and resize handles only
   // outside it.
   const frameless = win.frameless;
+  // A Linux app drawing its own title bar is told it's tiled (see the
+  // compositor's state.rs), so it draws square corners and no shadow of its
+  // own; floating, Din gives it the corners and shadow every window has,
+  // clipping the app to them. Other frameless windows (a media player
+  // skin) are their own shape and get none.
+  const nativeFrameless = frameless && typeof win.params?.xid === 'number';
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
   // an arbitrary page color, so tinted chrome flips its foregrounds to plain
@@ -1893,9 +1899,12 @@ export const Window = memo(function Window({
           : win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:animation-duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:animation-duration-200',
-        flush || frameless
+        flush || (frameless && !nativeFrameless)
           ? 'rounded-none'
+          : frameless
+          ? 'rounded-xl shadow-2xl ring-1 ring-black/20 transition-shadow'
           : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
+        !flush && nativeFrameless && isTop && 'ring-ring/50',
         !flush && !frameless && isTop && 'ring-ring/50',
         // Tiles sit side by side, so the focused one needs a border that
         // shows, like Hyprland's active border.
@@ -1949,7 +1958,7 @@ export const Window = memo(function Window({
       <div
         className={cn(
           'relative flex-1 overflow-hidden',
-          ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
+          ownsHeader || frameless ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
         )}
       >
         <WindowOwnHeaderContext.Provider value={setOwnHeader}>

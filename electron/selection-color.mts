@@ -6,7 +6,7 @@
 //
 // Where Din is the desktop, native apps get the nearest of GNOME's accent
 // colors (libadwaita's selections and highlights), the way they get its
-// light/dark mode (setNativeColorScheme in main.mts).
+// light/dark mode and the rest of its colors (gtk-theme.mts).
 
 import type { WebContents } from 'electron';
 import { runCommand } from './system.mts';

@@ -154,6 +154,7 @@ import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.
 import { registerEyeDropperHandlers } from './eyedropper.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
 import { attachSelectionColor, setSelectionColor } from './selection-color.mts';
+import { setNativeColorScheme, setNativePalette } from './gtk-theme.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
@@ -5356,38 +5357,19 @@ function registerBrowserPreconnectHandler(): void {
 // Din is the desktop here: the shell reports its own light/dark mode and
 // nativeTheme passes it on to every web contents, browser tabs included.
 //
-// Where Din is the desktop, native apps get it too, through GSettings:
-// color-scheme is what the settings portal answers (libadwaita, Qt 6,
-// Electron and Flatpak apps), and GTK 3 only knows dark as a theme, so
-// Adwaita flips to Adwaita-dark. Another theme the user picked is theirs.
+// Where Din is the desktop, native apps get it too, and Din's colors with
+// it (gtk-theme.mts).
 // ---------------------------------------------------------------------------
-let nativeColorScheme: 'light' | 'dark' | null = null;
-
-async function setNativeColorScheme(scheme: 'light' | 'dark'): Promise<void> {
-  if (process.env.DIN_DESKTOP_SESSION !== '1' || scheme === nativeColorScheme) return;
-  nativeColorScheme = scheme;
-  const gsettings = async (...args: string[]) =>
-    (await runCommand('gsettings', args, { timeout: 3_000 })).stdout.trim();
-  const schema = 'org.gnome.desktop.interface';
-  try {
-    await gsettings('set', schema, 'color-scheme', scheme === 'dark' ? 'prefer-dark' : 'default');
-    const theme = (await gsettings('get', schema, 'gtk-theme')).replace(/^'|'$/g, '');
-    const want = scheme === 'dark' ? 'Adwaita-dark' : 'Adwaita';
-    if ((theme === 'Adwaita' || theme === 'Adwaita-dark') && theme !== want) {
-      await gsettings('set', schema, 'gtk-theme', want);
-    }
-  } catch (error) {
-    nativeColorScheme = null;
-    console.warn('Could not pass the color scheme on to native apps:', error);
-  }
-}
-
 function registerThemeHandler(): void {
   ipcMain.on('theme:set', (event, source: unknown) => {
     if (!isShellSender(event)) return;
     if (source !== 'light' && source !== 'dark' && source !== 'system') return;
     nativeTheme.themeSource = source;
-    if (source !== 'system') void setNativeColorScheme(source);
+    if (source !== 'system') setNativeColorScheme(source);
+  });
+  ipcMain.on('theme:native', (event, palette: unknown) => {
+    if (!isShellSender(event)) return;
+    setNativePalette(palette);
   });
   ipcMain.on('theme:selection', (event, color: unknown) => {
     if (!isShellSender(event)) return;

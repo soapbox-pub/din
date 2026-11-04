@@ -1360,6 +1360,9 @@ in
     # Pointer themes: Adwaita (GTK's own default) and the others Settings
     # offers; and the icon themes it offers.
     ++ [ adwaita-icon-theme din-cursor-themes din-icon-themes ]
+    # GTK 3 apps' theme: libadwaita's look, as GTK 4 apps have it, in Din's
+    # colors and light/dark mode (electron/gtk-theme.mts).
+    ++ [ adw-gtk3 ]
     # xdg-open, and Din as the handler for the links it opens (see
     # xdg.mime.defaultApplications below).
     ++ [
@@ -1464,13 +1467,15 @@ in
   # (electron/cursor.mts). The themes are din-cursor-themes, above.
   # DinOS's default is Capitaine at 40 (which shows its 36px images), set
   # in the system's dconf database, under whatever the user picks. The icon
-  # theme is GSettings' too (icon-theme), and Din's own by default.
+  # theme is GSettings' too (icon-theme), and Din's own by default, and so
+  # is GTK 3's theme, adw-gtk3 (above).
   programs.dconf.enable = true;
   programs.dconf.profiles.user.databases = [
     {
       settings."org/gnome/desktop/interface" = {
         cursor-theme = "capitaine-cursors";
         icon-theme = "Din";
+        gtk-theme = "adw-gtk3";
         cursor-size = lib.gvariant.mkInt32 40;
       };
     }
