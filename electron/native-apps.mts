@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
 import { forgetIconIndex, resolveAppIcon } from './icon-theme.mts';
 import {
@@ -211,8 +211,12 @@ function parseExec(exec: string): string[] {
     .filter((arg, index) => arg.length > 0 || index === 0);
 }
 
-/** Parse a .desktop file, or null when it isn't a launchable application. */
-function parseDesktopFile(file: string, id: string): DesktopEntry | null {
+/**
+ * Parse a .desktop file, or null when it isn't a launchable application.
+ * `running` is for the entry of a program already running, which is there
+ * whether or not its TryExec is on Din's PATH.
+ */
+function parseDesktopFile(file: string, id: string, running = false): DesktopEntry | null {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -258,7 +262,7 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
   // TryExec names a binary whose absence means the app isn't really
   // installed (common for entries shipped by a meta-package).
   const tryExec = values.get('TryExec');
-  if (tryExec && !which(tryExec)) return null;
+  if (tryExec && !running && !which(tryExec)) return null;
 
   // Exec is a string value like any other: its escapes (\\ -> \) come off
   // before the quoting rules apply.
@@ -406,6 +410,8 @@ let entryCache: { at: number; entries: Map<string, DesktopEntry> } | null = null
 let wmClassIndex = new Map<string, string>();
 /** pid -> app id, for every app Din has launched this session. */
 const launchedPids = new Map<number, string>();
+/** pid -> the AppImage it runs, for every AppImage file Din has opened, until it exits. */
+const launchedAppImages = new Map<number, string>();
 
 /** In-flight scan, so concurrent callers share one pass over the disk. */
 let entryScan: Promise<Map<string, DesktopEntry>> | null = null;
@@ -552,7 +558,7 @@ async function launch(appId: string, uri?: string): Promise<void> {
   if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
   Object.assign(env, entry.env);
 
-  const pid = spawnDetached(argv, entryCwd(entry), env);
+  const { pid } = spawnDetached(argv, entryCwd(entry), env);
   if (pid) launchedPids.set(pid, appId);
 }
 
@@ -597,14 +603,14 @@ export async function terminalEnvironment(): Promise<NodeJS.ProcessEnv> {
 }
 
 /** Start a process detached from the shell, returning its pid. */
-function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): number | undefined {
+function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): ChildProcess {
   const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: 'ignore' });
   // Detached and unreferenced: never holds the event loop open.
   child.unref();
   child.on('error', () => {
     if (child.pid) launchedPids.delete(child.pid);
   });
-  return child.pid;
+  return child;
 }
 
 /**
@@ -641,7 +647,17 @@ async function runAppImage(file: string): Promise<void> {
     const { mode } = fs.statSync(file);
     fs.chmodSync(file, mode | 0o100);
   }
-  spawnDetached(appImageArgv(file), path.dirname(file), env);
+  const child = spawnDetached(appImageArgv(file), path.dirname(file), env);
+  // Its windows' processes may not say which AppImage they run (see
+  // programBundle), but they descend from this one, which does.
+  const { pid } = child;
+  if (!pid) return;
+  launchedAppImages.set(pid, file);
+  const forget = (): void => {
+    launchedAppImages.delete(pid);
+  };
+  child.once('exit', forget);
+  child.once('error', forget);
 }
 
 /**
@@ -798,6 +814,43 @@ interface ProgramBundle {
   binDirs: string[];
   /** The AppImage it runs from, which opens it again. */
   appImage: string | null;
+  /** The AppImage's folder, mounted or extracted, when it runs from one. */
+  appDir: string | null;
+}
+
+/** Folders above a binary looked through for the AppImage folder it's in. */
+const MAX_APPDIR_DEPTH = 6;
+
+/**
+ * The AppImage folder a binary is in: the nearest folder above it with the
+ * AppRun every AppImage starts from and a desktop entry beside it. Not the
+ * Nix store, whose programs aren't AppImages.
+ */
+function appDirOf(exe: string): string | null {
+  if (exe.startsWith('/nix/store/')) return null;
+  let dir = path.dirname(exe);
+  for (let depth = 0; depth < MAX_APPDIR_DEPTH && dir !== path.dirname(dir); depth++) {
+    try {
+      if (fs.statSync(path.join(dir, 'AppRun')).isFile() && fs.readdirSync(dir).some((n) => n.endsWith('.desktop'))) {
+        return dir;
+      }
+    } catch {
+      // Not this one.
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/** The AppImage Din opened that a process descends from, if any. */
+function launchedAppImageFor(pid: number): string | null {
+  let current: number | null = pid;
+  for (let depth = 0; current && current > 1 && depth < 12; depth += 1) {
+    const file = launchedAppImages.get(current);
+    if (file) return file;
+    current = parentPid(current);
+  }
+  return null;
 }
 
 /** A process's environment variable, or null. */
@@ -825,25 +878,33 @@ function isDirectory(dir: string): boolean {
  * from Din, whose own store path has a desktop entry.
  */
 function programBundle(pid: number): ProgramBundle | null {
-  // An AppImage's runtime says where it mounted (or extracted) itself.
-  const appDir = processEnv(pid, 'APPDIR');
-  if (appDir && path.isAbsolute(appDir) && isDirectory(appDir)) {
+  let exe: string | null;
+  try {
+    exe = fs.realpathSync(`/proc/${pid}/exe`);
+  } catch {
+    exe = null;
+  }
+  // An AppImage's runtime says where it mounted (or extracted) itself. A
+  // Chromium (Electron) program writes its process title over its
+  // environment, though, leaving /proc's copy blank, so the folder is also
+  // found from where its binary is.
+  let appDir = processEnv(pid, 'APPDIR');
+  if (!appDir || !path.isAbsolute(appDir) || !isDirectory(appDir)) appDir = exe && appDirOf(exe);
+  if (appDir) {
     const usrShare = path.join(appDir, 'usr/share');
-    const appImage = processEnv(pid, 'APPIMAGE');
+    const appImage = [processEnv(pid, 'APPIMAGE'), launchedAppImageFor(pid)].find(
+      (file): file is string => !!file && path.isAbsolute(file) && fs.existsSync(file),
+    );
     return {
       entryDirs: [appDir, path.join(usrShare, 'applications')],
       iconDirs: [appDir, path.join(usrShare, 'icons'), path.join(usrShare, 'pixmaps')],
       binDirs: [path.join(appDir, 'usr')],
-      appImage: appImage && path.isAbsolute(appImage) && fs.existsSync(appImage) ? appImage : null,
+      appImage: appImage ?? null,
+      appDir,
     };
   }
   // A Nix package: the store path its binary is in.
-  let exe: string;
-  try {
-    exe = fs.realpathSync(`/proc/${pid}/exe`);
-  } catch {
-    return null;
-  }
+  if (!exe) return null;
   const store = /^\/nix\/store\/[^/]+/.exec(exe)?.[0];
   if (!store) return null;
   const share = path.join(store, 'share');
@@ -852,6 +913,7 @@ function programBundle(pid: number): ProgramBundle | null {
     iconDirs: [path.join(share, 'icons'), path.join(share, 'pixmaps')],
     binDirs: [store],
     appImage: null,
+    appDir: null,
   };
 }
 
@@ -888,7 +950,8 @@ function bundleEntry(bundle: ProgramBundle, wmClass: string[]): DesktopEntry | n
       continue;
     }
     for (const name of names) {
-      const entry = parseDesktopFile(path.join(dir, name), name);
+      // Its TryExec names a binary on the bundle's own PATH, not Din's.
+      const entry = parseDesktopFile(path.join(dir, name), name, true);
       if (entry && !found.has(name)) found.set(name, entry);
     }
   }
@@ -907,6 +970,21 @@ function appImageArgv(file: string): string[] {
   return runner ? [runner, file] : [file];
 }
 
+/**
+ * The command that runs an AppImage appimage-run extracted, when which
+ * AppImage it was isn't known (one started outside Din, whose environment
+ * Chromium wrote over): appimage-run runs the folder it keeps, which, unlike
+ * a runtime's mount, stays. Null for any other folder.
+ */
+function extractedAppDirArgv(appDir: string): string[] | null {
+  const runner = which('appimage-run');
+  const cache = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'appimage-run');
+  // <cache>/<sha256>, or <cache>/<sha256>/squashfs-root from older versions.
+  const hashDir = path.basename(appDir) === 'squashfs-root' ? path.dirname(appDir) : appDir;
+  if (!runner || path.dirname(hashDir) !== cache) return null;
+  return [runner, '-w', appDir];
+}
+
 /** A registry id for an unlisted app, from a name that may be anything. */
 function unlistedId(name: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
@@ -921,12 +999,14 @@ async function unlistedAppFor(pid: number, wmClass: string[]): Promise<UnlistedA
     // Its Exec names a program on the bundle's own PATH, which isn't Din's;
     // an AppImage opens again from the AppImage, since its mount goes away.
     let argv = found.argv;
+    const extracted = !bundle.appImage && bundle.appDir ? extractedAppDirArgv(bundle.appDir) : null;
     if (bundle.appImage) argv = appImageArgv(bundle.appImage);
+    else if (extracted) argv = extracted;
     else if (!path.isAbsolute(argv[0])) {
       const bin = bundle.binDirs.map((dir) => path.join(dir, 'bin', argv[0])).find(isExecutable);
       if (bin) argv = [bin, ...argv.slice(1)];
     }
-    const entry: DesktopEntry = { ...found, argv, urlIndex: bundle.appImage ? null : found.urlIndex };
+    const entry: DesktopEntry = { ...found, argv, urlIndex: bundle.appImage || extracted ? null : found.urlIndex };
     const iconFile = found.iconName ? bundleIconFile(found.iconName, bundle) : null;
     const { icon, glyph } = iconFile
       ? { icon: (await resolveAppIcon(iconFile)).icon, glyph: false }
