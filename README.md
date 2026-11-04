@@ -150,14 +150,18 @@ be installed on a physical machine. Write it to a drive and boot from it:
 sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-The image is 14 GiB, to fit any 16 GB stick; any tool that writes images
-(Etcher, Rufus, `dd`) will do.
+The image is 6 GiB, to fit any 8 GB stick; any tool that writes images
+(Etcher, Rufus, `dd`) will do. Its root is Btrfs laid out as an installed
+disk is (below), with everything compressed at zstd's strongest level, since
+a USB stick is slow to read, and about 1 GiB free for a live session; nothing
+grows it at boot (`os/make-stick-image.nix`).
 
 Written to a USB stick instead, the same image is a live system: boot a laptop
 from it and Din opens the **Install DinOS** app, which copies the running
 system onto the computer's own disk — erasing it, or into its unpartitioned
 space next to Windows (shrink Windows' partition in Disk Management first; the
-firmware's boot menu then picks between them). The sign-in, saved Wi-Fi, and
+firmware's boot menu then picks between them). It copies with `btrfs send`,
+the data still compressed, so each byte is read off the stick once, as stored. The sign-in, saved Wi-Fi, and
 files from the live session come along. The app only appears when DinOS is
 running from removable media; the disk work is `os/din-install.sh`, run as
 root through a sudo rule for that one program. Because the stick and the

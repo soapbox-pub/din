@@ -31,10 +31,13 @@ let
     mkdir "$t/boot" "$t/home"
     mount "$esp" "$t/boot"
     mount /dev/mapper/dinos-home "$t/home"
+    # The Btrfs stick's own properties don't go on ext4, and nor does
+    # ~/.var, which din-nocow makes on Btrfs: the ext4 sticks of the time
+    # had none.
     rsync -aHAX --numeric-ids \
       --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' \
       --exclude='/tmp/*' --exclude='/boot' --exclude='/var/cache/*' --exclude='/var/log/journal/*' \
-      --exclude='/lost+found' / "$t/" || [ $? = 24 ]
+      --exclude='/lost+found' --exclude='/home/*/.var' --filter='-x btrfs.*' / "$t/" || [ $? = 24 ]
     cp -r /boot/. "$t/boot/"
     rm -f "$t/boot/loader/random-seed"
     : >"$t/etc/machine-id"
@@ -130,7 +133,15 @@ pkgs.testers.runNixOSTest {
     with subtest("the stick boots live"):
         boot(live=True)
         assert machine.succeed("lsblk -dno TRAN /dev/sda").strip() == "usb"
-        assert fs("/").startswith("ext4"), fs("/")
+        # Laid out as an installed disk is (os/make-stick-image.nix).
+        assert fs("/").startswith("btrfs /dev/sda2"), fs("/")
+        assert "path @" in machine.succeed("btrfs subvolume get-default /")
+        assert "subvol=/@home" in machine.succeed("findmnt -no OPTIONS /home"), fs("/home")
+        machine.succeed("btrfs subvolume show /tmp")
+        assert "zstd" in machine.succeed("btrfs property get /etc compression")
+        assert machine.succeed("stat -c %U /home/din/.opencode/bin/opencode").strip() == "din"
+        machine.wait_for_unit("dinos-live.service")
+        assert machine.succeed("nix config show min-free").strip() == "0"
         machine.succeed("echo live > /home/din/from-live")
 
     with subtest("an encrypted disk installed before Btrfs still boots"):
@@ -145,6 +156,12 @@ pkgs.testers.runNixOSTest {
         install("wipe")
         assert machine.succeed("blkid -o value -s TYPE /dev/vda2").strip() == "btrfs"
         assert machine.succeed("blkid -o value -s LABEL /dev/vda2").strip() == "DinOS"
+        # Sent from snapshots of the stick's, which are gone from both.
+        machine.succeed("mkdir -p /mnt/top /mnt/stick", "mount -o subvolid=5 /dev/vda2 /mnt/top", "mount -o subvolid=5 /dev/sda2 /mnt/stick")
+        subvols = sorted(machine.succeed("btrfs subvolume list /mnt/top | awk '{ print $NF }'").split())
+        assert subvols == ["@", "@/tmp", "@home"], subvols
+        machine.fail("ls -d /mnt/stick/.din-install-*")
+        machine.succeed("umount /mnt/top /mnt/stick")
 
     with subtest("it boots, with home in its own subvolume, compressed"):
         boot(live=False)

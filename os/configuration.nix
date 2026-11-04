@@ -149,8 +149,8 @@ let
   din-installer = pkgs.writeShellApplication {
     name = "din-install";
     runtimeInputs = with pkgs; [
-      coreutils util-linux gawk gnugrep gnused jq rsync dosfstools e2fsprogs
-      btrfs-progs efibootmgr systemd cryptsetup lvm2 openssl
+      coreutils util-linux gawk gnugrep gnused jq rsync pv findutils dosfstools
+      e2fsprogs btrfs-progs efibootmgr systemd cryptsetup lvm2 openssl
       config.services.nostrd.package
     ];
     text = builtins.readFile ./din-pristine.sh + builtins.readFile ./din-install.sh;
@@ -1218,6 +1218,8 @@ in
   # Nix holds it as a temporary root.
   nix.settings.min-free = 3 * 1024 * 1024 * 1024;
   nix.settings.max-free = 10 * 1024 * 1024 * 1024;
+  # Settings for this boot alone, which a live USB stick writes (dinos-live).
+  nix.extraOptions = "!include /run/din/nix.conf";
   # Builds - system updates' above all, which run in the background - take
   # only the time the desktop leaves.
   nix.daemonCPUSchedPolicy = "idle";
@@ -1784,7 +1786,7 @@ in
   # The same image is a live USB stick and, copied by the Installer app, the
   # system on a computer's own disk - often with the stick still plugged in.
   # So nothing is mounted by label, which both copies share: root is the
-  # partition of the root type (set on the image in flake.nix) on the disk the
+  # partition of the root type (set on the image, os/make-stick-image.nix) on the disk the
   # boot loader ran from, found by systemd's GPT auto-discovery in a systemd
   # initrd, and /boot is the ESP the boot loader ran from (see the udev rules
   # above).
@@ -1798,8 +1800,8 @@ in
   # An installed system's root partition (see os/din-install.sh) holds, under
   # any encryption, Btrfs, whose default subvolume is the system and `@home`
   # home, so the system can be reinstalled without touching anyone's files.
-  # That's mounted the way the live stick's ext4 is; nothing below is about
-  # it but mounting home.
+  # The live stick's is laid out the same (os/make-stick-image.nix). Nothing
+  # below is about it but mounting home.
   #
   # Systems installed before Btrfs have LVM there instead: a `dinos` volume
   # group with `root` and `home` volumes, both ext4. The group is made with
@@ -1851,9 +1853,9 @@ in
     };
   };
   # /home is mounted here rather than through fileSystems: it's a subvolume
-  # of root's Btrfs, or on older systems a volume of its own, while the live
-  # stick and systems installed before the split have no home apart, and
-  # must boot as they always have. An installed system that has one must
+  # of root's Btrfs (on the live stick too), or on older systems a volume of
+  # its own, while older sticks and systems installed before the split have
+  # no home apart, and must boot as they always have. An installed system that has one must
   # never come up on an empty /home - if it can't be mounted, booting stops.
   boot.initrd.systemd.services.dinos-home = {
     description = "Mount DinOS's home";
@@ -1963,8 +1965,9 @@ in
 
   # Waiting for root also waits out the passphrase prompt, so it has no time
   # limit: systemd's default 90 seconds dropped a computer left at the prompt
-  # into emergency mode. It's Btrfs on an installed system and ext4 on the
-  # live stick and systems installed before Btrfs.
+  # into emergency mode. It's Btrfs on the live stick and an installed
+  # system, and ext4 on systems installed before Btrfs (and sticks before
+  # them).
   boot.initrd.supportedFilesystems = { btrfs = true; ext4 = true; };
   boot.supportedFilesystems.btrfs = true;
   fileSystems."/" = {
@@ -1987,6 +1990,9 @@ in
   # caches go in memory too (dinos-live-caches). /run/din/live marks such a
   # boot. What a session keeps - the sign-in, saved WiFi, nostrd's keys -
   # still goes on the stick, for the next boot and for the Installer to copy.
+  # The stick has about 1 GiB free (os/make-stick-image.nix), always under
+  # Nix's min-free, and all the store on it is the system's own, so Nix
+  # doesn't collect garbage there.
   systemd.services.dinos-live = {
     description = "Spare the USB stick DinOS is running from";
     wantedBy = [ "sysinit.target" ];
@@ -2011,6 +2017,7 @@ in
       mount -o remount,noatime,lazytime,commit=60 /
       printf '[Journal]\nStorage=volatile\n' > /run/systemd/journald.conf.d/dinos-live.conf
       journalctl --relinquish-var
+      printf 'min-free = 0\n' > /run/din/nix.conf
     '';
   };
   # How quick the stick is, for Din to say when it's slow

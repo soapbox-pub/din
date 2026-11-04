@@ -87,19 +87,16 @@
         install -Dm755 package/bin/opencode $out/bin/opencode
       '';
 
-      makeImage = nixos: import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
+      makeImage = nixos: import ./make-stick-image.nix {
         inherit (nixos) config pkgs;
         lib = nixpkgs.lib;
-        format = "raw";
-        partitionTableType = "efi";
-        # A fixed size that fits any "16 GB" USB stick (15 GB or so, in
-        # bytes), whatever writes it: the root filesystem's free space is
-        # what a live session has for apps and downloads, and nothing grows
-        # it later. The Installer sizes an installed system's own. The
-        # release compresses the empty space away (scripts/dinos-release.sh).
-        diskSize = 14 * 1024;
-        # An appliance image doesn't need a nixpkgs channel copy on disk.
-        copyChannel = false;
+        # A fixed size, which nothing grows later: the system, compressed
+        # (about 4.3 GB in November 2026), at least 1 GiB free for a live
+        # session, which the build checks (make-stick-image.nix), and room
+        # for the system to grow. It fits any "8 GB" USB stick, and the
+        # less there is, the sooner a stick is written. The Installer sizes
+        # an installed system's own.
+        diskSize = 6 * 1024;
         # Writable, so it can update itself.
         contents = [{
           source = opencode;
@@ -108,12 +105,6 @@
           user = "din";
           group = "users";
         }];
-        # Mark the root partition as an x86-64 root, which is how the
-        # initrd finds it (see fileSystems in configuration.nix).
-        postVM = ''
-          ${nixpkgs.legacyPackages.${system}.gptfdisk}/bin/sgdisk \
-            --typecode=2:4f68bce3-e8cd-4db1-96e7-fbcaf984b709 $diskImage
-        '';
       };
     in
     {

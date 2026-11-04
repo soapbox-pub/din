@@ -38,13 +38,18 @@
 # confined with --devices, so a second DinOS disk in the same computer never
 # gets confused for it.
 #
-# The installed system is a file-level copy of the live one: the same Nix
-# store, the same boot entries, and the session (sign-in, saved WiFi) the user
-# set up while trying it - or, for a reinstall, the session already on the
-# disk. The system partition has the GPT root type, so it's found through
-# auto-discovery (the root partition on the disk the boot loader came from),
-# and boots the same whichever disk it's on, even with the stick still
-# plugged in.
+# The installed system is a copy of the live one: the same Nix store, the
+# same boot entries, and the session (sign-in, saved WiFi) the user set up
+# while trying it - or, for a reinstall, the session already on the disk.
+# The stick is Btrfs laid out the same way (os/make-stick-image.nix), so the
+# copy is Btrfs's own: read-only snapshots of the running system and home,
+# sent across with their data still compressed, so each byte is read off the
+# slow stick once, as it's stored, and written as it is. An install over
+# LVM, a reinstall of a disk from before Btrfs, copies file by file with
+# rsync instead. The system partition has the GPT root type, so it's found
+# through auto-discovery (the root partition on the disk the boot loader
+# came from), and boots the same whichever disk it's on, even with the stick
+# still plugged in.
 
 ROOT_TYPE=4f68bce3-e8cd-4db1-96e7-fbcaf984b709 # Linux root (x86-64)
 # The system partition's LUKS mapping while installing. Not `root`: udev
@@ -252,6 +257,7 @@ release_disk() {
 target=""
 top=""
 source_esp=""
+src_top=""
 old_root=""
 crypt_open=""
 vg_devices=""
@@ -281,6 +287,11 @@ cleanup() {
   if [[ -n $source_esp ]]; then
     umount "$source_esp" 2>/dev/null || true
     rmdir "$source_esp" 2>/dev/null || true
+  fi
+  if [[ -n $src_top ]]; then
+    delete_snapshots "$src_top" 2>/dev/null || true
+    umount "$src_top" 2>/dev/null || true
+    rmdir "$src_top" 2>/dev/null || true
   fi
 }
 
@@ -375,9 +386,120 @@ make_pristine() {
   touch "$root/$SETUP_MARK"
 }
 
+# Delete the snapshots an install makes, in the Btrfs top level at $1.
+delete_snapshots() {
+  local snap
+  for snap in "$1"/.din-install-*; do
+    [[ ! -d $snap ]] || btrfs subvolume delete "$snap" >/dev/null
+  done
+}
+
+# What a copy has no use for: the running system's passing files and caches.
+COPY_SKIPS=(var/tmp var/cache var/log/journal mnt media)
+
+# Copy the running system - and, with $1, its home - onto the new disk's
+# Btrfs, at `top`, the way Btrfs sends it: from read-only snapshots, with
+# the data still compressed, so each byte is read off the stick once, as
+# it's stored, and written as it is. Writable snapshots of what arrives
+# become `@new` and `@home`. Properties come along, the compression too.
+send_system() {
+  local with_home=$1 snaps=() total status=() rc_file dir
+  src_top=$(mktemp -d /run/din-install-src.XXXXXX)
+  mount -o subvolid=5 "$(findmnt -nvo SOURCE /)" "$src_top"
+  delete_snapshots "$src_top"
+  btrfs subvolume snapshot -r / "$src_top/.din-install-system" >/dev/null
+  snaps=("$src_top/.din-install-system")
+  if [[ -n $with_home ]]; then
+    btrfs subvolume snapshot -r /home "$src_top/.din-install-home" >/dev/null
+    snaps+=("$src_top/.din-install-home")
+  fi
+  # The stream is about the size of the data, as it's stored; its progress
+  # as whole percents.
+  total=$(used_bytes)
+  rc_file=$(mktemp)
+  set +e
+  {
+    btrfs send -q --compressed-data "${snaps[@]}" | pv -n -i 1 -s "$total" | btrfs receive -q "$top"
+    echo "${PIPESTATUS[*]}" >"$rc_file"
+  } 2>&1 >/dev/null |
+    awk '/^[0-9]+$/ { p = $1 > 99 ? 99 : $1; if (p != last) { print "progress", p; fflush(); last = p }; next } { print > "/dev/stderr" }'
+  read -r -a status <"$rc_file"
+  set -e
+  rm -f "$rc_file"
+  delete_snapshots "$src_top"
+  umount "$src_top"
+  rmdir "$src_top"
+  src_top=""
+  [[ ${status[*]:-} == "0 0 0" ]] || die "Copying the system failed."
+
+  btrfs subvolume snapshot "$top/.din-install-system" "$top/@new" >/dev/null
+  if [[ -n $with_home ]]; then
+    btrfs subvolume snapshot "$top/.din-install-home" "$top/@home" >/dev/null
+  fi
+  delete_snapshots "$top"
+  # A snapshot has an empty directory where a subvolume was inside it:
+  # /tmp is one of its own, as on the stick, so a snapshot of the system
+  # leaves what's passing through it out.
+  rm -rf "$top/@new/tmp"
+  btrfs subvolume create "$top/@new/tmp" >/dev/null
+  chmod 1777 "$top/@new/tmp"
+  for dir in "${COPY_SKIPS[@]}"; do
+    [[ ! -d $top/@new/$dir ]] || find "$top/@new/$dir" -mindepth 1 -delete
+  done
+  if [[ -n $with_home ]]; then
+    find "$top/@home" -mindepth 2 -maxdepth 2 -name .cache -type d -exec find {} -mindepth 1 -delete \;
+    [[ ! -d $top/@home/.nix-build ]] || find "$top/@home/.nix-build" -mindepth 1 -delete
+  fi
+}
+
+# Copy the running system - and, with $1, its home - file by file into
+# `@new` (or LVM's root volume, for a reinstall of a disk from before
+# Btrfs), mounted at `target`.
+copy_files() {
+  local with_home=$1 dir
+  target=$(mktemp -d /run/din-install.XXXXXX)
+  if [[ $layout == lvm ]]; then
+    mount "/dev/mapper/$VG-root" "$target"
+  else
+    btrfs subvolume create "$top/@new" >/dev/null
+    btrfs property set "$top/@new" compression zstd
+    # /tmp is a subvolume of its own inside the system's, so a snapshot of
+    # the system leaves what's passing through it out.
+    btrfs subvolume create "$top/@new/tmp" >/dev/null
+    chmod 1777 "$top/@new/tmp"
+    mount -o subvol=@new "$dev" "$target"
+  fi
+  mkdir "$target/boot" "$target/home"
+  if [[ -n $with_home ]]; then
+    mount -o subvol=@home "$dev" "$target/home"
+  fi
+
+  local excludes=(
+    --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*'
+    --exclude='/tmp/*' --exclude='/boot' --exclude='/lost+found'
+    --exclude='/home/*/.cache/*' --exclude='/home/.nix-build/*'
+  )
+  for dir in "${COPY_SKIPS[@]}"; do
+    excludes+=(--exclude="/$dir/*")
+  done
+  [[ -n $with_home ]] || excludes+=(--exclude='/home/*')
+  # Btrfs's own properties, the compression above all, are the new
+  # filesystem's: rsync leaves the ones files inherit in place.
+  excludes+=(--filter='-x btrfs.*')
+  # rsync's overall progress, as whole percents.
+  set +e
+  rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 "${excludes[@]}" / "$target/" |
+    awk -v RS='[\r\n]+' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+%$/) { sub("%", "", $i); if ($i != last) { print "progress", $i; fflush(); last = $i } } }'
+  local rc=${PIPESTATUS[0]}
+  set -e
+  # 24: files vanished mid-copy (caches, sockets) - expected from a live system.
+  [[ $rc == 0 || $rc == 24 ]] || die "Copying the system failed (rsync exit $rc)."
+}
+
 install() {
-  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" dev stash="" layout=btrfs oem=""
+  local disk=$1 mode=$2 encrypt=$3 boot required ss json esp part before passphrase="" dev stash="" layout=btrfs oem="" src_fs
   boot=$(boot_disk)
+  src_fs=$(findmnt -nvo FSTYPE /)
   is_live "$boot" || die "DinOS can only be installed while running from a USB stick."
   grep -qxF -- "$disk" <<<"$(candidate_disks "$boot")" || die "$disk is not a disk DinOS can be installed on."
   [[ $mode == wipe || $mode == free || $mode == keep || $mode == oem ]] || die "Unknown install mode: $mode"
@@ -494,50 +616,29 @@ install() {
       open_system "$part" "$passphrase"
       mkfs.btrfs -q -f -L "$FS_LABEL" "$dev"
       mount_top "$dev"
-      btrfs subvolume create "$top/@home" >/dev/null
-      btrfs property set "$top/@home" compression zstd
+      # The live session's home comes with the system (send_system), unless
+      # the disk is for someone else.
+      if [[ -n $oem || $src_fs != btrfs ]]; then
+        btrfs subvolume create "$top/@home" >/dev/null
+        btrfs property set "$top/@home" compression zstd
+      fi
     fi
     # What's left of an earlier attempt.
-    [[ ! -d $top/@new ]] || btrfs subvolume delete -R "$top/@new" >/dev/null
-    btrfs subvolume create "$top/@new" >/dev/null
-    btrfs property set "$top/@new" compression zstd
-    # /tmp is a subvolume of its own inside the system's, so a snapshot of
-    # the system leaves what's passing through it out.
-    btrfs subvolume create "$top/@new/tmp" >/dev/null
-    chmod 1777 "$top/@new/tmp"
-  fi
-
-  target=$(mktemp -d /run/din-install.XXXXXX)
-  if [[ $layout == lvm ]]; then
-    mount "/dev/mapper/$VG-root" "$target"
-  else
-    mount -o subvol=@new "$dev" "$target"
-  fi
-  mkdir "$target/boot" "$target/home"
-  # A reinstall never mounts home: nothing below can touch it.
-  if [[ $mode != keep ]]; then
-    mount -o subvol=@home "$dev" "$target/home"
+    local old
+    for old in "$top/@new" "$top"/.din-install-*; do
+      [[ ! -d $old ]] || btrfs subvolume delete -R "$old" >/dev/null
+    done
   fi
 
   step copy
-  local excludes=(
-    --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*'
-    --exclude='/tmp/*' --exclude='/boot' --exclude='/mnt/*' --exclude='/media/*'
-    --exclude='/var/tmp/*' --exclude='/var/cache/*' --exclude='/var/log/journal/*'
-    --exclude='/home/*/.cache/*' --exclude='/home/.nix-build/*' --exclude='/lost+found'
-  )
-  [[ $mode != keep && -z $oem ]] || excludes+=(--exclude='/home/*')
-  # Btrfs's own properties, the compression above all, are the new
-  # filesystem's: rsync leaves the ones files inherit in place.
-  excludes+=(--filter='-x btrfs.*')
-  # rsync's overall progress, as whole percents.
-  set +e
-  rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 "${excludes[@]}" / "$target/" |
-    awk -v RS='[\r\n]+' '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+%$/) { sub("%", "", $i); if ($i != last) { print "progress", $i; fflush(); last = $i } } }'
-  local rc=${PIPESTATUS[0]}
-  set -e
-  # 24: files vanished mid-copy (caches, sockets) - expected from a live system.
-  [[ $rc == 0 || $rc == 24 ]] || die "Copying the system failed (rsync exit $rc)."
+  if [[ $layout == btrfs && $src_fs == btrfs ]]; then
+    send_system "$([[ $mode != keep && -z $oem ]] && echo home || true)"
+    target=$(mktemp -d /run/din-install.XXXXXX)
+    mount -o subvol=@new "$dev" "$target"
+    mkdir -p "$target/boot" "$target/home"
+  else
+    copy_files "$([[ $mode != keep && -z $oem ]] && echo home || true)"
+  fi
 
   step boot
   # Only formatted now, so a reinstall that fails before this leaves the old
