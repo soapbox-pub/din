@@ -50,6 +50,8 @@ fun fader(sprite, z)
 
 fun ease(f)
 {
+  if (f.instant)
+    f.opacity = f.target;
   f.opacity += (f.target - f.opacity) * 0.12;
   if (Math.Abs(f.target - f.opacity) < 0.005)
     f.opacity = f.target;
@@ -71,6 +73,12 @@ black = Image("black.png");
 wallpaper = fader(Sprite(), -100);
 dim = fader(Sprite(black.Scale(screen.w, screen.h)), -90);
 dim.sprite.SetPosition(screen.x, screen.y, -90);
+# These two cover the screen, and Plymouth blends every pixel of a sprite whose
+# opacity is changing on the CPU, under a second a frame or worse on a screen of
+# 5 million pixels. Easing counts frames, so that fade would last half a minute
+# and keep the keyboard waiting. They change at once; the small sprites fade.
+wallpaper.instant = 1;
+dim.instant = 1;
 wallpaper_tries = 0;
 
 # Scaled to cover the screen, centered, as Din draws it.
