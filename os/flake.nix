@@ -117,6 +117,18 @@
       };
     in
     {
+      # Din as a desktop on another NixOS system, beside the ones it has
+      # (desktop-module.nix): import this and set
+      # services.desktopManager.din.enable.
+      nixosModules.din = import ./desktop-module.nix { inherit din; };
+      nixosModules.default = self.nixosModules.din;
+
+      # A throwaway NixOS with that module, for trying it (desktop-vm.nix).
+      nixosConfigurations.din-desktop-vm = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [ self.nixosModules.din ./desktop-vm.nix ];
+      };
+
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
@@ -146,6 +158,9 @@
         # system in a QEMU window.
         vm = self.nixosConfigurations.dinos.config.system.build.vm;
 
+        # `nix run ./os#desktop-vm`: plain NixOS with Din on its login screen.
+        desktop-vm = self.nixosConfigurations.din-desktop-vm.config.system.build.vm;
+
         default = self.packages.${system}.image;
       };
 
@@ -167,6 +182,11 @@
         in
         {
           accounts = test ./tests/accounts.nix;
+          desktop-module = import ./tests/desktop-module.nix {
+            inherit nixpkgs;
+            pkgs = nixpkgs.legacyPackages.${system};
+            module = self.nixosModules.din;
+          };
           airplay-display = test ./tests/airplay-display.nix;
           boot-screen = test ./tests/boot-screen.nix;
           # Installs onto a disk from the test machine's image, then erases it.

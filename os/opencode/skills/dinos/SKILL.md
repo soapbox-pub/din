@@ -105,7 +105,7 @@ same way.
   conversation; they may not see it at once, so give it a long timeout and
   batch root work into one `sudo sh -c '…'`.
 - Changing npm dependencies means refreshing `npmDepsHash` in
-  `os/configuration.nix` (see the README).
+  `os/packages.nix` (see the README).
 - If Din doesn't start, the user can hold Space at startup to pick an older
   system, or press Ctrl+Alt+F2 for a text login.
 - Logs: `journalctl -b 0` (this boot), `-b -1` (the last);

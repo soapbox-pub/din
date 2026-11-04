@@ -160,7 +160,7 @@ function unsupported() {
   if (fs.existsSync("/etc/NIXOS")) {
     return [
       "NixOS's /usr is read-only, so the login screen's menu is set in its configuration instead.",
-      "DinOS is NixOS with Din as its desktop: see os/configuration.nix's din-shell for how it runs.",
+      "Add os/flake.nix's nixosModules.din to it and set services.desktopManager.din.enable (README, \"Din on NixOS\").",
     ].join("\n");
   }
   if (process.getuid?.() === 0) return "Run this as yourself, not root: the session is installed for your user.";
@@ -398,7 +398,7 @@ async function build({ profile = false } = {}) {
   copy(await electronDist(), path.join(staging, "electron"));
   hardenElectron(path.join(staging, "electron", "electron"));
 
-  // The same layout as DinOS's (os/configuration.nix's din-app): the host
+  // The same layout as DinOS's (os/packages.nix's din-app): the host
   // beside dist/ and the node_modules it imports. No package.json, so
   // Electron keeps the profile `npm run dev` uses.
   const app = path.join(staging, "app");

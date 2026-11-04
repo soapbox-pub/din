@@ -112,7 +112,36 @@ packages are often older) and the compositor's libraries:
 - Fedora: `sudo dnf install pkgconf-pkg-config libseat-devel libinput-devel systemd-devel mesa-libgbm-devel libdrm-devel libxkbcommon-devel pixman-devel`
 - Arch: `sudo pacman -S --needed pkgconf seatd libinput systemd-libs mesa libdrm libxkbcommon pixman`
 
-The script says which are missing. NixOS can't take it (`/usr` is read-only).
+The script says which are missing. NixOS can't take it (`/usr` is read-only);
+it has a module instead.
+
+### Din on NixOS
+
+On NixOS, Din goes on the login screen from the system's configuration, with
+`os/flake.nix`'s `nixosModules.din` (`os/desktop-module.nix`):
+
+```nix
+# flake.nix
+inputs.din.url = "git+https://git.shakespeare.diy/npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/din.git?dir=os";
+
+# the system's modules
+din.nixosModules.din
+{ services.desktopManager.din.enable = true; }
+```
+
+It's the session above, built by Nix from the same derivations as DinOS
+(`os/packages.nix`) with the system's own nixpkgs, and with the `din`
+command. It turns on what Din's Settings works through, NetworkManager,
+Bluetooth, UDisks, UPower, PipeWire and the login keyring, each only by
+default (`enableSystemServices = false` leaves them to you), and makes Din's
+file chooser the portal's in Din's session alone. `extraElectronFlags` passes
+Electron more arguments. Updates are the system's: Din updates when the
+input does. DinOS's own parts (its updater, the Installer, the lock screen,
+nostrd, optional features) stay off.
+
+`nix run ./os#desktop-vm` tries it in a throwaway NixOS: log in as `tester`,
+password `din`. `nix build ./os#checks.x86_64-linux.desktop-module` checks
+that the module adds nothing when it's off and none of DinOS when it's on.
 
 `npm run os:build` produces the real artifact: a raw UEFI disk image meant to
 be installed on a physical machine. Write it to a drive and boot from it:
@@ -339,8 +368,11 @@ since QEMU provides no GPU), with boot logs mirrored to the serial console
     `./os#image` (the default) and the QEMU demo as `./os#vm`, and pulls in
     the Din source tree (the repo root) as an input
   - `os/configuration.nix` — the whole OS definition: the din-shell service
-    (Din's compositor) + Electron launcher + Nix build of Din
-    (`buildNpmPackage`)
+    (Din's compositor), the Electron launcher and the rest
+  - `os/packages.nix` — the Nix builds of Din (`buildNpmPackage`), its
+    compositor, din-fd and the Electron it runs on, shared by DinOS and
+    `os/desktop-module.nix`, Din as a desktop on any NixOS (see "Din on
+    NixOS")
   - `os/din-install.sh` — the Installer app's privileged helper (see
     `electron/installer.mts`)
 
@@ -676,11 +708,11 @@ computer), whose users look for it under its link.
 ### Updating npm dependencies
 
 The Nix build fetches npm deps from `package-lock.json` pinned by hash.
-After changing dependencies, refresh the hash in `os/configuration.nix`:
+After changing dependencies, refresh the hash in `os/packages.nix`:
 
 ```sh
 nix run --inputs-from ./os nixpkgs#prefetch-npm-deps -- package-lock.json
-# copy the sha256-... into npmDepsHash in os/configuration.nix
+# copy the sha256-... into npmDepsHash in os/packages.nix
 ```
 
 Also note: when built from a git checkout, the flake only sees **git-tracked**

@@ -99,9 +99,11 @@ export function registerLoginSessionHandlers(options: {
 }): void {
   const { devUrl, assertShellSender, sendToShell } = options;
 
+  // scripts/session.mjs's builds, and NixOS's desktop module
+  // (os/desktop-module.nix), which has no builds of its own to manage.
   ipcMain.handle('session:isLoginSession', (event) => {
     assertShellSender(event);
-    return !!process.env.DIN_SESSION_RELEASE;
+    return !!process.env.DIN_SESSION_RELEASE || process.env.DIN_LOGIN_SESSION === '1';
   });
 
   ipcMain.handle('session:status', async (event) => {
