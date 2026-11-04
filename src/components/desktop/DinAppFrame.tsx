@@ -67,19 +67,16 @@ import {
   linkedAppId,
   DIN_APPS_PARTITION,
   SYSTEM_PERMISSIONS,
-  forgetMigratedStorage,
   getAppsBridge,
   manifestIcon,
   manifestPermissions,
   onAppPort,
-  storageToMigrate,
   appKeyOf,
   appWindows,
   persistedGrant,
   persistGrant,
   markGrantsStored,
   unstoredGrants,
-  recentFilesToMigrate,
   releaseGrant,
   windowIdAt,
   hoverTab,
@@ -145,38 +142,6 @@ function normalizePath(path: unknown): string | null {
     else parts.push(part);
   }
   return `/${parts.join('/')}`;
-}
-
-/**
- * Every string an app's saved state holds, as a whole value: JSON is looked
- * into (and JSON within its strings), `~/` read as home. What requestAccess
- * grants unasked must be named exactly, never just a prefix of something.
- */
-function savedStrings(values: string[], home: string): Set<string> {
-  const out = new Set<string>();
-  const add = (s: string) => out.add(s.startsWith('~/') ? `${home}/${s.slice(2)}` : s);
-  const walk = (value: unknown, depth: number): void => {
-    if (depth > 64) return;
-    if (typeof value === 'string') {
-      add(value);
-      if (/^\s*[[{"]/.test(value)) {
-        try {
-          walk(JSON.parse(value), depth + 1);
-        } catch {
-          // Just a string.
-        }
-      }
-    } else if (Array.isArray(value)) {
-      for (const v of value) walk(v, depth + 1);
-    } else if (value && typeof value === 'object') {
-      for (const [k, v] of Object.entries(value)) {
-        add(k);
-        walk(v, depth + 1);
-      }
-    }
-  };
-  for (const value of values) walk(value, 0);
-  return out;
 }
 
 /** How recently the user must have pressed a key or clicked in the app (or picked from its menus) for it to read the file clipboard. */
@@ -286,12 +251,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     fsGranted: boolean;
     /** Roots on their way to main: replies wait for them. */
     scoping: Promise<unknown>;
-    /**
-     * On the launch that moved the app's state out of the desktop: that
-     * state (and files migrated with it), whose paths requestAccess grants
-     * without asking. Empty otherwise.
-     */
-    carryOver: string[];
     /** When the user last picked from the app's menus (a gesture main doesn't see). */
     menuPickedAt: number;
   } | null>(null);
@@ -539,11 +498,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'app.openUrl': ({ url }) => {
         if (typeof url === 'string') live.current.openUrl(url);
       },
-      'storage.migrated': () => {
-        const entries = storageToMigrate(manifest);
-        if (entries) forgetMigratedStorage(entries);
-        for (const key of manifest.din.migrateRecentFiles ?? []) localStorage.removeItem(key);
-      },
       'app.saveState': ({ state }) => {
         if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);
       },
@@ -776,13 +730,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const wanted = [...new Set((Array.isArray(paths) ? paths : []).map(normalizePath).filter((p): p is string => p !== null))].slice(0, 5000);
         if (!s || wanted.length === 0) return [];
         const fs = getFsBridge();
-        // Named exactly by its own saved state from before it moved, or
-        // within reach already: no need to ask.
-        const saved = s.carryOver.length > 0 && fs ? savedStrings(s.carryOver, (await fs.homedir()).replace(/\/$/, '')) : new Set<string>();
+        // Within reach already: no need to ask.
         const reached = await reaches(wanted, true);
         // Only what's there is worth asking about.
         const there = await Promise.all(wanted.map((p) => (fs ? fs.stat(p).then(() => true, () => false) : Promise.resolve(true))));
-        const ask = wanted.filter((p, i) => there[i] && !saved.has(p) && !reached[i]);
+        const ask = wanted.filter((p, i) => there[i] && !reached[i]);
         if (ask.length > 0) {
           const allowed = await new Promise<boolean>((resolve) =>
             setAccessRequest({ paths: ask, reason: typeof reason === 'string' ? reason.slice(0, 300) : '', resolve }),
@@ -1063,7 +1015,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       fsRoots: scopedFs ? new Map<string, boolean>() : null,
       fsGranted: false,
       scoping: Promise.resolve() as Promise<unknown>,
-      carryOver: Object.values(storageToMigrate(manifest) ?? {}),
       menuPickedAt: 0,
     };
     session.current = s;
@@ -1104,25 +1055,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     const apps = getAppsBridge();
     const fs = getFsBridge();
     let fsUrlBase: string | null = null;
-    // Files it kept elsewhere before it moved, copied in once.
-    if (fs && manifest.din.migrateFiles) {
-      const home = (await fs.homedir()).replace(/\/$/, '');
-      const expand = (p: string) => (p.startsWith('~/') ? `${home}/${p.slice(2)}` : p);
-      for (const [from, to] of Object.entries(manifest.din.migrateFiles)) {
-        const [src, dst] = [expand(from), expand(to)];
-        if (!src.startsWith('/') || !dst.startsWith('/')) continue;
-        const exists = (p: string) => fs.stat(p).then(() => true, () => false);
-        if ((await exists(dst)) || !(await exists(src))) continue;
-        try {
-          const { data } = await fs.readFile(src, 256 * 1024 * 1024);
-          await fs.mkdir(dirname(dst)).catch(() => {});
-          await fs.writeFile(dst, data);
-          s.carryOver.push(new TextDecoder().decode(data));
-        } catch (error) {
-          console.error(`din: migrating ${src} for ${appId}:`, error);
-        }
-      }
-    }
     if (scopedFs && s.fsRoots && fs) {
       const home = (await fs.homedir()).replace(/\/$/, '');
       for (const folder of fixedFolders) {
@@ -1153,11 +1085,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       }
     }
 
-    // Recent files it kept here before it moved, as persisted handles.
-    const recent = await recentFilesToMigrate(appId, manifest, (path) =>
-      fs ? fs.stat(path).then((st) => (st.kind === 'directory' ? 'directory' : 'file'), () => null) : Promise.resolve(null),
-    );
-
     const l = live.current;
     const hello: Hello = {
       type: 'hello',
@@ -1168,8 +1095,6 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       frameStyle: frameStyle(l.win?.accent ?? null),
       theme: themeSnapshot(),
       permissions,
-      storage: storageToMigrate(manifest),
-      recentFiles: recent,
       unstoredHandles: unstoredGrants(appId).map(({ token, kind, path, writable }) => ({
         __dinFileHandle: 1 as const,
         token,

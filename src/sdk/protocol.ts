@@ -144,18 +144,6 @@ export interface Hello {
   theme: ThemeData;
   permissions: Permission[];
   /**
-   * localStorage entries the app kept on the desktop's origin before it
-   * moved out (its manifest's `migrateStorage`), to seed its own storage
-   * with once. Null when there's nothing to move.
-   */
-  storage: Record<string, string> | null;
-  /**
-   * Recent-file lists the app kept on the desktop's origin, as JSON arrays of
-   * `{ token, key, name, path, time }` (the manifest's `migrateRecentFiles`),
-   * merged into the app's own under the same keys.
-   */
-  recentFiles: Record<string, string> | null;
-  /**
    * Handles the desktop keeps for the app that its IndexedDB doesn't have
    * yet (kept before handles went there), to put in its `din-handles`
    * database under their tokens.
@@ -199,7 +187,6 @@ export interface Requests {
   'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
   'assistant.follow': [{ sessionID: string }, void];
   'assistant.viewing': [{ sessionID: string | null }, void];
-  'storage.migrated': [void, void];
 
   'window.setTitle': [{ title: string | null }, void];
   'window.setIcon': [{ url: string | null }, void];

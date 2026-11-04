@@ -1065,30 +1065,6 @@ export function installDin(transport: Transport): void {
   void helloArrived.then(async (hello) => {
     h = hello;
 
-    // Settings this app kept on the desktop's origin, before anything reads storage.
-    if (hello.storage) {
-      for (const [key, value] of Object.entries(hello.storage)) {
-        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
-      }
-      tell('storage.migrated');
-    }
-    if (hello.recentFiles) {
-      for (const [key, value] of Object.entries(hello.recentFiles)) {
-        const parse = (text: string | null): { key?: unknown }[] => {
-          try {
-            const list: unknown = JSON.parse(text ?? '[]');
-            return Array.isArray(list) ? list : [];
-          } catch {
-            return [];
-          }
-        };
-        const mine = parse(localStorage.getItem(key));
-        const known = new Set(mine.map((e) => e?.key));
-        localStorage.setItem(key, JSON.stringify([...mine, ...parse(value).filter((e) => !known.has(e?.key))]));
-      }
-      tell('storage.migrated');
-    }
-
     // Handles kept from before they went in IndexedDB, put there now.
     if (hello.unstoredHandles.length > 0) {
       void seedHandles(hello.unstoredHandles.map((s) => [s.token, s]))

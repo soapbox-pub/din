@@ -35,9 +35,6 @@
       "picture",
       "editor"
     ],
-    "migrateStorage": [
-      "din:photo-editor:*"
-    ],
     "permissions": [
       "file-folders"
     ]

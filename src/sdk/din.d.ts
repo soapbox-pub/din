@@ -159,11 +159,6 @@ export interface DinApp {
    * others get a DinPermissionError.
    */
   openFiles(files: FileSystemHandle[]): Promise<void>;
-  /**
-   * localStorage keys this app kept on the desktop's origin before it moved
-   * out are copied in before the app's code runs (the manifest's
-   * `migrateStorage`); nothing to call.
-   */
 }
 
 // ---------------------------------------------------------------------------
@@ -847,30 +842,10 @@ export interface DinManifest {
     /** Windows go under this app's Dock tile. */
     dockAs?: string;
     /**
-     * localStorage keys (a trailing `*` matches a prefix) the app kept on the
-     * desktop's origin before it moved out. The desktop copies them into the
-     * app's storage before its first launch, once.
-     */
-    migrateStorage?: string[];
-    /**
      * Folders the app reaches by path through `din.system.fs` without the
      * whole filesystem: `~/Music`, `~/.local/share/din/skins`. Created if
      * missing. Media Player.
      */
     folders?: string[];
-    /**
-     * Recent-file lists the app kept on the desktop's origin, as JSON arrays
-     * of `{ path, time }` under these keys. The desktop turns each entry it
-     * can still find into `{ token, key, name, path, time }` in the app's
-     * storage, once, the token its key in `src/shared/handleStore.ts`.
-     */
-    migrateRecentFiles?: string[];
-    /**
-     * Files the app kept elsewhere before it moved, to copy once into its
-     * folders: `{ "~/.local/share/din/x.json": "~/.local/share/din/app/x.json" }`.
-     * Copied on a launch when the destination is missing; paths they name
-     * count as the app's saved state for `din.files.requestAccess`.
-     */
-    migrateFiles?: Record<string, string>;
   };
 }

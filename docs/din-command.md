@@ -156,8 +156,7 @@ size and frame, shortcuts, `launch_handler`, and asks for:
   them, and offers **Open Without**, which runs the app as a plain web
   page. For a named origin the answer is remembered until the folder or
   the request changes.
-- Never honored: `migrateStorage`, `migrateRecentFiles`, `migrateFiles`,
-  `dockAs`, `hidden`, file and protocol handlers.
+- Never honored: `dockAs`, `hidden`, file and protocol handlers.
 
 Files are served only from inside the folder named (symlinks out of it
 don't count), and a folder holding Din's own profile is refused. A path

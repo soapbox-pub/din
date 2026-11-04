@@ -32,9 +32,6 @@
       "drawing",
       "pen tool",
       "bezier"
-    ],
-    "migrateStorage": [
-      "din:vector-editor:*"
     ]
   }
 }

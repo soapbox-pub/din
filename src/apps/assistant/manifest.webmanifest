@@ -32,9 +32,6 @@
       "OpenCode",
       "chat",
       "robot"
-    ],
-    "migrateStorage": [
-      "din.assistant.*"
     ]
   }
 }

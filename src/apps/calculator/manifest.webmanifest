@@ -6,7 +6,6 @@
   "launch_handler": { "client_mode": "navigate-new" },
   "din": {
     "window": { "size": { "width": 380, "height": 620 }, "floating": true, "frame": "standard" },
-    "keywords": ["arithmetic", "TI-89", "TI-84", "graphing calculator", "CAS", "algebra", "calculus", "derivative", "integral", "solve", "math", "graph", "homework"],
-    "migrateStorage": ["din:calculator:*"]
+    "keywords": ["arithmetic", "TI-89", "TI-84", "graphing calculator", "CAS", "algebra", "calculus", "derivative", "integral", "solve", "math", "graph", "homework"]
   }
 }

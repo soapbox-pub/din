@@ -2,8 +2,8 @@
  * Apps the `din` command runs from a folder or a dev server
  * (electron/din-launch.mts): served at din://<origin>/ like a built-in app,
  * but with a manifest Din has never seen. The desktop keeps only the parts
- * of it that can't reach past the app (no storage migration, no files
- * copied), and asks before granting its permissions (LaunchedAppFrame).
+ * of it that can't reach past the app, and asks before granting its
+ * permissions (LaunchedAppFrame).
  * They're in the app registry while they have windows (LaunchHost).
  */
 import { createElement, lazy } from 'react';
@@ -112,8 +112,8 @@ function strings(v: unknown, max: number): string[] {
 
 /**
  * The parts of a launched app's manifest Din honors: what it looks like and
- * what it asks for. The migration members, file and protocol handlers, and
- * anything naming another app are dropped. Icons arrive inlined as data URLs.
+ * what it asks for. File and protocol handlers, and anything naming another
+ * app, are dropped. Icons arrive inlined as data URLs.
  */
 export function sanitizeManifest(raw: unknown, fallbackName: string): DinManifest {
   const m = isObject(raw) ? raw : {};
