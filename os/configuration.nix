@@ -41,6 +41,9 @@ let
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
 
+  # LocalSend's port, TCP and UDP, which the firewall lets in (below).
+  localSendPort = 53317;
+
   # pkexec inside appimage-run's sandbox, where the real one can't work (see
   # programs.appimage, below): the user's systemd runs the real one outside.
   # In here /run/wrappers/bin/pkexec is this script; out there it's pkexec.
@@ -681,7 +684,14 @@ in
   # Quick Share's port (PORT in electron/quickshare.mts), for a phone
   # sharing over Bluetooth that moves to the hotspot. Nothing listens on it
   # unless one of the user's phones has opened its share sheet.
-  networking.firewall.allowedTCPPorts = [ 47331 ];
+  #
+  # LocalSend (localsend.org), the file sharing app on every platform, on
+  # 53317: its HTTP server, and the multicast its devices find each other
+  # with (allowedUDPPorts, below). Without them other devices can't send to
+  # this computer, and mostly can't see it. Nothing listens unless the user
+  # runs it, and it asks before it takes a file unless the user has turned
+  # on its Quick Save.
+  networking.firewall.allowedTCPPorts = [ 47331 localSendPort ];
   # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
   # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.
   networking.firewall.interfaces.dinqs0.allowedUDPPorts = [ 53 67 ];
@@ -2236,7 +2246,8 @@ in
   # network would otherwise stop together, and Wi-Fi was gone before deckmon
   # got to say goodbye. Ordering it after network.target stops it first.
   systemd.services."user@".after = [ "network.target" ];
-  networking.firewall.allowedUDPPorts = [ 5353 ];
+  # mDNS, for finding receivers, and LocalSend's discovery (above).
+  networking.firewall.allowedUDPPorts = [ 5353 localSendPort ];
   networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
   # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to
