@@ -120,6 +120,12 @@ export interface MessageSummary {
    * from before Mail looked.
    */
   category?: MailCategory;
+  /**
+   * The version of Mail's own sorting that guessed `category`
+   * (electron/mail-categories.mts's SORTER_VERSION), so mail sorted by
+   * older rules is sorted again; undefined for summaries kept from before.
+   */
+  sorted?: number;
 }
 
 /** Gmail's inbox tabs, Primary first. */

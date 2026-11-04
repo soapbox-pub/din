@@ -55,10 +55,13 @@
 // summaries are fetched, and again for the newest mail at each sync, and
 // a tab's pages are Gmail's search; elsewhere it's guessed from a few
 // headers (electron/mail-categories.mts), and a tab's pages are read from
-// the stored copy, fetching more summaries as they're needed. A sender
-// the user moved to a tab goes there either way (kept with the account;
-// IMAP can't change Gmail's own tabs), and mail for a tab that isn't
-// shown is in Primary. Only Primary's new mail is announced and counted
+// the stored copy, fetching more summaries as they're needed (and fetching
+// again those guessed by older rules, SORTER_VERSION). A sender the user
+// moved to a tab goes there either way (kept with the account; IMAP can't
+// change Gmail's own tabs); else mail from someone the user has written to
+// (the addresses in Sent, looked through now and then and kept with the
+// stored copy) is Primary unless it's a list's; and mail for a tab that
+// isn't shown is in Primary. Only Primary's new mail is announced and counted
 // on the Dock, unless the user asks for all of it.
 //
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
@@ -76,7 +79,7 @@ import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
-import { CATEGORIES, CATEGORY_HEADERS, categorize, isCategory } from './mail-categories.mts';
+import { CATEGORIES, CATEGORY_HEADERS, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
 import type {
   ConversationMessage,
   InboxTabs,
@@ -120,8 +123,8 @@ interface StoredAccount extends MailAccount {
   tabRules?: Record<string, MailCategory>;
 }
 
-/** Gmail's own: Primary, Promotions and Social. */
-const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social'], notify: 'primary' };
+/** Gmail's own three, and Updates, so receipts and notifications aren't in Primary. */
+const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social', 'updates'], notify: 'primary' };
 let inboxTabs: InboxTabs = DEFAULT_TABS;
 
 function isInboxTabs(v: unknown): v is InboxTabs {
@@ -468,10 +471,102 @@ function primaryOnly(): boolean {
   return inboxTabs.notify === 'primary' && inboxTabs.tabs.length > 0;
 }
 
-/** The tab an inbox message is in: the user's rule for its sender, else how it's sorted; Primary for a tab not shown. */
+/** The addresses each account has written to, by account (the stored copy's, read once). */
+const correspondents = new Map<string, Set<string>>();
+/** When each account's Sent was last looked through for them. */
+const correspondentsLooked = new Map<string, number>();
+/** How often Sent is looked through for new ones (sending through Mail adds its recipients straight away). */
+const CORRESPONDENTS_EVERY_MS = 6 * 60 * 60 * 1000;
+/** How many of Sent's messages are looked through, newest first, the first time. */
+const SENT_LOOKED_MAX = 3000;
+const CORRESPONDENTS_MAX = 5000;
+
+/** What's kept of who an account writes to: Sent's UIDVALIDITY, the newest uid looked at in it, and the addresses. */
+interface KeptCorrespondents {
+  validity: string;
+  uid: number;
+  addresses: string[];
+}
+
+function keptCorrespondents(a: StoredAccount): KeptCorrespondents | null {
+  try {
+    const v = JSON.parse(storeOf(a).getMeta('correspondents') ?? 'null') as KeptCorrespondents | null;
+    return v && typeof v.validity === 'string' && typeof v.uid === 'number' && Array.isArray(v.addresses) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function correspondentsOf(a: StoredAccount): Set<string> {
+  let found = correspondents.get(a.id);
+  if (!found) correspondents.set(a.id, (found = new Set(keptCorrespondents(a)?.addresses.filter((x) => typeof x === 'string'))));
+  return found;
+}
+
+/** Add these to who the account writes to (an address, not the account's own, nor one nobody reads); true when any were new. */
+function noteCorrespondents(a: StoredAccount, found: Set<string>, list: string[]): boolean {
+  let added = false;
+  const own = a.email.toLowerCase();
+  for (const x of list) {
+    const address = x.trim().toLowerCase();
+    if (found.has(address) || address === own || !RULE_ADDRESS.test(address) || isAutomatedAddress(address)) continue;
+    found.add(address);
+    added = true;
+  }
+  return added;
+}
+
+function keepCorrespondents(a: StoredAccount, found: Set<string>, validity: string, uid: number): void {
+  storeOf(a).setMeta('correspondents', JSON.stringify({ validity, uid, addresses: [...found].slice(-CORRESPONDENTS_MAX) }));
+}
+
+/** The user just wrote to these: their mail is Primary from now on. */
+function rememberCorrespondents(a: StoredAccount, recipients: string[]): void {
+  const found = correspondentsOf(a);
+  if (!noteCorrespondents(a, found, recipients)) return;
+  const kept = keptCorrespondents(a);
+  keepCorrespondents(a, found, kept?.validity ?? '', kept?.uid ?? 0);
+  retabbed([a]);
+}
+
+/** Look through Sent's mail not looked at yet (at most every CORRESPONDENTS_EVERY_MS) for who the user writes to. */
+async function lookForCorrespondents(a: StoredAccount): Promise<void> {
+  if (Date.now() - (correspondentsLooked.get(a.id) ?? 0) < CORRESPONDENTS_EVERY_MS) return;
+  correspondentsLooked.set(a.id, Date.now());
+  const sent = await specialPath(a, 'sent');
+  const added = await inMailbox(a, sent, async (client) => {
+    const box = client.mailbox;
+    if (!box || !accounts.includes(a)) return false;
+    const validity = String(box.uidValidity);
+    const kept = keptCorrespondents(a);
+    const since = kept?.validity === validity ? kept.uid : 0;
+    const found = correspondentsOf(a);
+    const uids = box.exists > 0 ? ((await client.search(since ? { uid: `${since + 1}:*` } : { all: true }, { uid: true })) || []) : [];
+    const newer = uids.filter((u) => u > since).sort((x, y) => y - x).slice(0, SENT_LOOKED_MAX);
+    if (!newer.length) {
+      if (!kept || kept.validity !== validity) keepCorrespondents(a, found, validity, since);
+      return false;
+    }
+    let added = false;
+    for await (const m of client.fetch(uidRanges(newer), { uid: true, envelope: true }, { uid: true })) {
+      const e = m.envelope;
+      if (noteCorrespondents(a, found, [...addresses(e?.to), ...addresses(e?.cc), ...addresses(e?.bcc)].map((x) => x.address))) added = true;
+    }
+    keepCorrespondents(a, found, validity, Math.max(since, newer[0]));
+    return added;
+  }, false);
+  if (added) retabbed([a]);
+}
+
+/**
+ * The tab an inbox message is in: the user's rule for its sender, else
+ * Primary from someone the user writes to (but not a list's mail), else how
+ * it's sorted; Primary for a tab not shown.
+ */
 function tabOf(a: StoredAccount, s: MessageSummary): MailCategory {
   const address = s.from[0]?.address.toLowerCase();
-  const c = (address && a.tabRules?.[address]) || s.category || 'primary';
+  const writesTo = !!address && !s.listUnsubscribe && correspondentsOf(a).has(address);
+  const c = (address && a.tabRules?.[address]) || (writesTo ? 'primary' : s.category) || 'primary';
   return c === 'primary' || (inboxTabs.tabs as MailCategory[]).includes(c) ? c : 'primary';
 }
 
@@ -544,6 +639,8 @@ function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
 /** Forget an account's counts and announcements (it's gone, or moved servers). */
 function forgetArrivals(id: string): void {
   inboxNewest.delete(id);
+  correspondents.delete(id);
+  correspondentsLooked.delete(id);
   const told = announced.get(id);
   announced.delete(id);
   if (told?.size) deps.sendToShell('mail:read', { accountId: id, path: 'INBOX', uids: [...told] });
@@ -1105,10 +1202,14 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
       if (store.setCategories(mailbox, await gmailCategories(client, keep.filter((u) => recent.has(u))))) dirty = true;
     }
 
-    // Summaries kept from before Mail read References are fetched again, once.
-    const have = store.summaries(mailbox, uids.slice(0, PAGE));
-    if (await fetchSummaries(client, store, mailbox, uids.slice(0, PAGE).filter((u) => stale(have.get(u)?.summary, mailbox)))) dirty = true;
+    // Summaries kept from before Mail read References are fetched again, once; in the inbox, those
+    // sorted by older rules too, as far back as RESORTED (the newest page is fetched either way).
+    const newest = uids.slice(0, isInbox(mailbox) ? RESORTED : PAGE);
+    const have = store.summaries(mailbox, newest);
+    const again = newest.filter((u, i) => (have.has(u) || i < PAGE) && stale(have.get(u)?.summary, mailbox));
+    if (await fetchSummaries(client, store, mailbox, again)) dirty = true;
   }, false);
+  if (isInbox(mailbox)) void lookForCorrespondents(a).catch(() => {});
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
   if (arrived.length) announce(a, store, arrived);
   if (dirty) changed(a.id, mailbox);
@@ -1157,6 +1258,9 @@ const SUMMARY_FIELDS: FetchQueryObject = {
 /** How many of a Gmail inbox's newest messages have their tabs asked for again at each sync. */
 const GMAIL_TABS_SYNCED = 500;
 
+/** How many of the inbox's newest kept messages are fetched again at a sync when their tab was guessed by older rules. */
+const RESORTED = 500;
+
 /** How many of a long References list are kept, from each end: the root and the latest. */
 const REFERENCES_KEPT = 10;
 
@@ -1165,9 +1269,9 @@ function messageIds(value: string | undefined): string[] {
   return value?.match(/<[^<>\s]{1,500}>/g) ?? [];
 }
 
-/** Kept from before Mail read what conversations, senders' pictures, labels and (in the inbox) tabs need: fetched again. */
+/** Kept from before Mail read what conversations, senders' pictures, labels and (in the inbox) tabs need, or sorted by older rules: fetched again. */
 function stale(s: MessageSummary | undefined, mailbox: string): boolean {
-  return !s || !s.references || s.senderVerified === undefined || s.labels === undefined || (isInbox(mailbox) && s.category === undefined);
+  return !s || !s.references || s.senderVerified === undefined || s.labels === undefined || (isInbox(mailbox) && (s.category === undefined || s.sorted !== SORTER_VERSION));
 }
 
 function keptReferences(ids: string[]): string[] {
@@ -1201,6 +1305,7 @@ function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
     senderVerified: senderVouched(raw, from0Domain(m)),
     // Gmail's are asked of Gmail (fetchSummaries).
     category: gmail ? undefined : categorize(headers, addresses(m.envelope?.from)[0], m.envelope?.subject ?? ''),
+    sorted: SORTER_VERSION,
   };
 }
 
@@ -2085,6 +2190,7 @@ async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
   } else {
     void specialPath(a, 'sent').then((sent) => scheduleSync(a, sent, 2000)).catch(() => {});
   }
+  rememberCorrespondents(a, recipients);
   if (m.answering) await setFlagsRaw(a, m.answering.path, m.answering.uid, '\\Answered').catch(() => {});
   if (m.draftUid) await deleteDraft(a, m.draftUid);
 }
