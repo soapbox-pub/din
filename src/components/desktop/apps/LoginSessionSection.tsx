@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { History, Loader2, LogIn, MonitorCog, RotateCw, Star, Trash2, Undo2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -64,12 +64,30 @@ function hasNewer(status: LoginSessionStatus): boolean {
 
 type Confirm = 'return' | 'uninstall' | null;
 
+/** The Login screen heading over a note with nothing to press. */
+function SystemSessionCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <>
+      <h3 className="mt-2 text-sm font-medium text-muted-foreground">Login screen</h3>
+      <div className="flex items-start gap-3 rounded-xl border border-border/60 p-4">
+        <LogIn className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="text-xs text-muted-foreground">{children}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /**
  * Settings → About, on a Linux that isn't DinOS: puts Din on the login
  * screen beside the desktop that's there (scripts/session.mjs, through
  * window.dinos.session), from `npm run dev`; and from that session, updates
  * it from the checkout, rolls it back, goes back to the old desktop, or
- * takes Din off again. Nothing shows where Din can't be a session.
+ * takes Din off again. On NixOS it says the system's configuration does
+ * that instead (os/desktop-module.nix), and in that session that it did.
+ * Nothing shows anywhere else Din can't be a session.
  */
 export function LoginSessionSection() {
   const bridge = getSessionBridge();
@@ -101,6 +119,27 @@ export function LoginSessionSection() {
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
   }, [lines]);
+
+  // NixOS: the system's configuration puts Din on the login screen
+  // (os/desktop-module.nix), not this.
+  if (status?.system) {
+    return (
+      <SystemSessionCard title="Din is your desktop">
+        It’s on the login screen from this computer’s NixOS configuration
+        (<code className="font-mono">services.desktopManager.din</code>), and updates along with the system.
+      </SystemSessionCard>
+    );
+  }
+  if (status?.available && !status.supported && status.nixos) {
+    return (
+      <SystemSessionCard title="Use Din as your desktop">
+        On NixOS, Din goes on the login screen from the system’s configuration: add the{' '}
+        <code className="font-mono">nixosModules.din</code> of Din’s <code className="font-mono">os</code> flake to
+        it and set <code className="font-mono">services.desktopManager.din.enable = true</code> (the README’s “Din
+        on NixOS”).
+      </SystemSessionCard>
+    );
+  }
 
   if (!bridge?.status || !status?.available || !status.supported) return null;
 

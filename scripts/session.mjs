@@ -725,6 +725,8 @@ function status() {
   return {
     supported: !reason,
     reason,
+    // NixOS has the desktop module instead (os/desktop-module.nix).
+    nixos: fs.existsSync("/etc/NIXOS"),
     installed: !!releaseInfo("current") && systemFilesPresent(),
     systemFilesCurrent: systemFilesCurrent(),
     current: releaseInfo("current"),

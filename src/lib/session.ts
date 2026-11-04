@@ -24,6 +24,13 @@ export interface LoginSessionRelease {
 export interface LoginSessionStatus {
   /** False where there's no checkout to build from (a DinOS build, say). */
   available: boolean;
+  /**
+   * This is a login session the system's configuration made (NixOS's
+   * desktop module, os/desktop-module.nix), which Din doesn't manage.
+   */
+  system?: boolean;
+  /** The computer runs NixOS, which takes the desktop module instead. */
+  nixos?: boolean;
   /** An action is running. */
   busy?: boolean;
   /** Whether this computer can have the session, and why not. */

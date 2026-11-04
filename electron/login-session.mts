@@ -109,7 +109,9 @@ export function registerLoginSessionHandlers(options: {
   ipcMain.handle('session:status', async (event) => {
     assertShellSender(event);
     const file = script(devUrl);
-    if (!file) return { available: false };
+    // NixOS's desktop module's session: the system's configuration put Din
+    // on the login screen, and nothing here manages it.
+    if (!file) return process.env.DIN_LOGIN_SESSION === '1' ? { available: false, system: true } : { available: false };
     const status: unknown = JSON.parse(await runScript(file, ['status', '--json'], undefined, STATUS_TIMEOUT_MS));
     return { available: true, busy: running !== null, ...(status as object) };
   });
