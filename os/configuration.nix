@@ -43,21 +43,30 @@ let
 
   # Optional features: parts of the system that aren't in it until someone
   # turns them on, in Settings → Optional Features or with `din features`
-  # (electron/features.mts). Each is a package from the system's own nixpkgs,
-  # pinned like the rest, but only its derivation is in the system, not what
-  # it builds: installing one builds it as the user, through the Nix daemon,
-  # which downloads it from the binary cache (the Whisper model from Hugging
-  # Face), into ~/.local/state/din/features/<id>, a link that keeps it from
-  # being collected. Everything that uses one finds it through that link
-  # (the launcher's PATH and DIN_* variables, below, and nix-ld's library
-  # path), so it works the moment it's installed, and is simply missing
-  # until then. System updates bring installed ones up to date
-  # (os/din-update.sh). Together they're over 2 GB the disk image doesn't
-  # carry. `size` is what installing one takes, about, for Settings to show.
-  # `default` ones come with the computer all the same: Din downloads them
-  # in the background once it's installed (never from a live USB stick),
-  # until the user removes one.
+  # (electron/features.mts). Each is a few packages from the system's own
+  # nixpkgs, its `parts`, pinned like the rest but named by the paths they
+  # build alone, so none of them is in the system, nor anything about how
+  # they're made: installing one downloads each from the binary cache, which
+  # has everything nixpkgs builds (scripts/dinos-release.sh checks), as the
+  # user through the Nix daemon, to a link at
+  # ~/.local/state/din/features/<id>/<part> that keeps it from being
+  # collected. A part that's a plain download (the Whisper model, from
+  # Hugging Face) gives its URL and hash, and lands where fetchurl would put
+  # it. Everything that uses one finds it through those links (the
+  # launcher's PATH and DIN_* variables, below, and nix-ld's library path),
+  # so it works the moment it's installed, and is simply missing until then.
+  # System updates bring installed ones up to date (os/din-update.sh).
+  # Together they're over 2 GB the disk image doesn't carry. `size` is what
+  # installing one takes, about, for Settings to show. `default` ones come
+  # with the computer all the same: Din downloads them in the background
+  # once it's installed (never from a live USB stick), until the user
+  # removes one.
   featuresDir = "/home/din/.local/state/din/features";
+  whisperModel = {
+    name = "ggml-large-v3-turbo-q5_0.bin";
+    url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
+    hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
+  };
   dinFeatures = {
     # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
     # runs 32- and 64-bit programs without 32-bit host libraries. The Full
@@ -67,7 +76,7 @@ let
       title = "Windows apps";
       description = "Wine, which runs Windows programs like apps of their own.";
       size = 850;
-      package = pkgs.wineWow64Packages.stableFull;
+      parts.wine = pkgs.wineWow64Packages.stableFull;
     };
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
@@ -75,11 +84,7 @@ let
       title = "Virtual machines";
       description = "QEMU, for the Virtual Machines app: Windows, macOS and Linux in a window.";
       size = 470;
-      package = pkgs.symlinkJoin {
-        name = "din-feature-vms";
-        paths = [ pkgs.qemu_kvm pkgs.swtpm ];
-        postBuild = "ln -s ${pkgs.OVMFFull.fd}/FV $out/share/ovmf";
-      };
+      parts = { qemu = pkgs.qemu_kvm; swtpm = pkgs.swtpm; ovmf = pkgs.OVMFFull.fd; };
     };
     # Dictation's speech recognizer (electron/dictation.mts), and Studio's
     # transcripts (electron/capture.mts): whisper.cpp on the GPU through
@@ -89,17 +94,7 @@ let
       description = "Whisper, which turns speech into text on this computer, for dictation and Studio’s captions.";
       size = 630;
       default = true;
-      package = pkgs.symlinkJoin {
-        name = "din-feature-dictation";
-        paths = [ pkgs.whisper-cpp-vulkan ];
-        postBuild = ''
-          mkdir -p $out/share/whisper
-          ln -s ${pkgs.fetchurl {
-            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
-            hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
-          }} $out/share/whisper/model.bin
-        '';
-      };
+      parts = { whisper = pkgs.whisper-cpp-vulkan; model = whisperModel; };
     };
     # WebKitGTK, the system webview Tauri, wry and other GTK webview apps
     # load instead of bundling a browser engine, on nix-ld's library path
@@ -108,41 +103,52 @@ let
       title = "Web view for Linux apps";
       description = "WebKitGTK, which downloaded Linux apps built with Tauri and other GTK web views need.";
       size = 200;
-      package = pkgs.symlinkJoin {
-        name = "din-feature-webkit";
-        paths = [ pkgs.webkitgtk_4_1 pkgs.libsoup_3 ];
-      };
+      parts = { webkitgtk = pkgs.webkitgtk_4_1; libsoup = pkgs.libsoup_3; };
     };
-    # Rootless Podman (also answering to `docker`) and distrobox, a full
-    # Ubuntu, Fedora or Arch userland with its own package manager, sharing
-    # $HOME. The system keeps their configuration (virtualisation.containers,
-    # below); this is the programs.
+    # Rootless Podman (also answering to `docker`, below) and distrobox, a
+    # full Ubuntu, Fedora or Arch userland with its own package manager,
+    # sharing $HOME. The system keeps their configuration
+    # (virtualisation.containers, below); this is the programs.
     containers = {
       title = "Linux containers";
       description = "Podman, Docker’s command and distrobox, for other Linux systems’ software in containers.";
       size = 200;
-      package = pkgs.symlinkJoin {
-        name = "din-feature-containers";
-        paths = [ config.virtualisation.podman.package pkgs.distrobox ];
-        postBuild = "ln -s podman $out/bin/docker";
-      };
+      parts = { podman = config.virtualisation.podman.package; distrobox = pkgs.distrobox; };
     };
   };
-  # What Settings and the updater read: each feature's derivation (with its
-  # context, so the .drv files are in the system) and the path it builds
-  # (without, so what it builds isn't).
+  # A part is a package, or a download ({ name, url, hash }).
+  isDownload = part: part ? url;
+  partPath = part: builtins.unsafeDiscardStringContext
+    (if isDownload part then (pkgs.fetchurl part).outPath else part.outPath);
+  # A feature's part, as everything that uses it finds it.
+  featurePart = id: part: "${featuresDir}/${id}/${part}";
+  # What Settings and the updater read: each feature's parts, by the paths
+  # they build, without their context, so neither they nor how they're
+  # built are in the system.
   featuresManifest = pkgs.writeText "din-features.json" (builtins.toJSON (lib.mapAttrs
     (id: f: {
       inherit (f) title description;
       size = f.size * 1000 * 1000;
       default = f.default or false;
-      drv = builtins.unsafeDiscardOutputDependency f.package.drvPath;
-      out = builtins.unsafeDiscardStringContext f.package.outPath;
+      parts = lib.mapAttrs (name: part: { path = partPath part; }
+        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; }) f.parts;
     })
     dinFeatures));
   # Their programs, for PATH: whatever isn't installed is a folder that
   # isn't there.
-  featuresPath = lib.concatMapStringsSep ":" (id: "${featuresDir}/${id}/bin") (lib.attrNames dinFeatures);
+  featuresPath = lib.concatStringsSep ":" (lib.concatLists (lib.mapAttrsToList
+    (id: f: lib.mapAttrsToList (name: _: "${featurePart id name}/bin")
+      (lib.filterAttrs (_: part: !isDownload part) f.parts))
+    dinFeatures));
+  # Docker's command, for Podman once Linux containers are installed.
+  docker = pkgs.writeShellScriptBin "docker" ''
+    podman=${featurePart "containers" "podman"}/bin/podman
+    if [ ! -x "$podman" ]; then
+      echo "docker: install Linux containers in Settings → Optional Features (din features install containers)" >&2
+      exit 127
+    fi
+    exec "$podman" "$@"
+  '';
 
   # The privileged half of the Installer app, which copies a live USB boot
   # onto the computer's own disk (see the script, and electron/installer.mts).
@@ -405,17 +411,17 @@ let
     # carries its live streams to RTMP, and whisper.cpp's command-line tool
     # transcribes the takes, with dictation's model.
     export DIN_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
-    export DIN_WHISPER_CLI=${featuresDir}/dictation/bin/whisper-cli
-    export DIN_WHISPER_SERVER=${featuresDir}/dictation/bin/whisper-server
-    export DIN_WHISPER_MODEL=${featuresDir}/dictation/share/whisper/model.bin
+    export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
+    export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
+    export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
-    export DIN_QEMU=${featuresDir}/vms/bin/qemu-system-x86_64
-    export DIN_QEMU_IMG=${featuresDir}/vms/bin/qemu-img
-    export DIN_SWTPM=${featuresDir}/vms/bin/swtpm
-    export DIN_OVMF=${featuresDir}/vms/share/ovmf
+    export DIN_QEMU=${featurePart "vms" "qemu"}/bin/qemu-system-x86_64
+    export DIN_QEMU_IMG=${featurePart "vms" "qemu"}/bin/qemu-img
+    export DIN_SWTPM=${featurePart "vms" "swtpm"}/bin/swtpm
+    export DIN_OVMF=${featurePart "vms" "ovmf"}/FV
     # Optional features (above, and electron/features.mts).
     export DIN_FEATURES=/etc/dinos/features.json
     export DIN_FEATURES_DIR=${featuresDir}
@@ -1167,7 +1173,7 @@ in
     ];
   };
   environment.sessionVariables.NIX_LD_LIBRARY_PATH =
-    lib.mkForce "/run/current-system/sw/share/nix-ld/lib:${featuresDir}/webkit/lib";
+    lib.mkForce "/run/current-system/sw/share/nix-ld/lib:${featurePart "webkit" "webkitgtk"}/lib:${featurePart "webkit" "libsoup"}/lib";
   services.envfs.enable = true;
   programs.appimage = {
     enable = true;
@@ -1270,8 +1276,9 @@ in
   # escape hatch for anything else. ngit brings git-remote-nostr, so git takes
   # nostr:// remotes, Din's own among them.
   # din-update is there for DIN_UPDATER, above. FFmpeg is how the Assistant
-  # edits Studio's takes (os/opencode/skills/studio).
-  environment.systemPackages = with pkgs; [ git ngit unzip din-keyring din-cli din-updater ffmpeg ]
+  # edits Studio's takes (os/opencode/skills/studio). `docker` is Podman's,
+  # once Linux containers are installed (above).
+  environment.systemPackages = with pkgs; [ git ngit unzip din-keyring din-cli din-updater ffmpeg docker ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [

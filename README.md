@@ -679,16 +679,24 @@ Linux apps (WebKitGTK, on nix-ld's library path) and Linux containers
 (Podman, `docker`, distrobox). Together they're over 2 GB the disk image
 doesn't carry.
 
-Each is a package from the system's nixpkgs, listed in `dinFeatures` in
-`os/configuration.nix`. The system has only its derivation, in
-`/etc/dinos/features.json` with the path it builds; installing one builds
-that as the user through the Nix daemon (`electron/features.mts`), which
-downloads it from the binary cache, into `~/.local/state/din/features/<id>`,
-a GC root. Everything that uses it looks there (the launcher's PATH and
-`DIN_*` variables), so it works as soon as it's installed. Removing one
-deletes the link and whatever only it used. A system update builds the new
-versions of installed ones before switching (`os/din-update.sh`), and Din
-updates any it couldn't soon after it starts. A computer updated from a
+Each is a few packages from the system's nixpkgs, its parts, listed in
+`dinFeatures` in `os/configuration.nix`. The system names them in
+`/etc/dinos/features.json` only by the store paths they are, so none of
+them, nor how they're built, is in the system (and so not on the disk
+image); installing one downloads each part as the user through the Nix
+daemon (`electron/features.mts`) from the binary cache, which has
+everything nixpkgs builds, into `~/.local/state/din/features/<id>/<part>`,
+a GC root. The release checks every part is there
+(`scripts/dinos-release.sh`). A part that's a plain download, the Whisper
+model, gives its URL and hash and lands where `fetchurl` would put it.
+Everything that uses a feature looks at its parts' links (the launcher's
+PATH and `DIN_*` variables, nix-ld's library path; `docker` is a small
+script in the system for Podman), so it works as soon as it's installed.
+Removing one deletes its links and whatever only it used. A system update
+downloads the new versions of installed ones before switching
+(`os/din-update.sh`), and Din updates any it couldn't soon after it
+starts; one installed before features had parts, a single link, is
+downloaded again in parts. A computer updated from a
 DinOS that had them all built in keeps them all: the first time Din starts
 with optional features there, it installs every one, from what's still in
 the store.

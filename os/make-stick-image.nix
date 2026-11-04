@@ -20,10 +20,7 @@
 #
 # nixpkgs' make-disk-image.nix only makes ext4 for a partitioned image, so
 # this does what it does - install the system, then its boot loader with
-# switch-to-configuration - in a VM, onto Btrfs. And where it has
-# pkgs.closureInfo say what the system's store paths are, which can't take
-# a system naming derivations (its optional features'), this works that out
-# itself (store-registration.py).
+# switch-to-configuration - in a VM, onto Btrfs.
 {
   pkgs,
   lib,
@@ -36,6 +33,8 @@
 }:
 
 let
+  closureInfo = pkgs.closureInfo { rootPaths = [ config.system.build.toplevel ]; };
+
   # The ESP where make-disk-image.nix put it (8 MiB in, ending at 257 MiB).
   espStartMiB = 8;
   espSizeMiB = 249;
@@ -117,10 +116,9 @@ vmTools.runInLinuxVM (
       mount /dev/vda1 /mnt/boot
 
       # nixos-install copies the system out of the host's store, which the VM
-      # shares, once a database says what's in it (store-registration.py).
+      # shares, once a database says what's in it.
       export NIX_STATE_DIR=$TMPDIR/state
-      ${pkgs.python3}/bin/python3 -I ${./store-registration.py} ${config.system.build.toplevel} > $TMPDIR/registration
-      nix-store --load-db < $TMPDIR/registration
+      nix-store --load-db < ${closureInfo}/registration
       nixos-install --root /mnt --no-bootloader --no-root-passwd --no-channel-copy \
         --system ${config.system.build.toplevel} --substituters ""
 

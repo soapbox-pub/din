@@ -710,24 +710,42 @@ run_local() {
 }
 
 # The optional features the user installed (Settings → Optional Features,
-# electron/features.mts), each a link in FEATURES_DIR, brought up to what
-# system $1 has: built as the user, as Din builds them, so the links stay
-# the user's and nothing here acts on a path in their home as root. A
-# feature that doesn't build (offline, say) isn't the update's to fail:
-# it keeps working as it was, and Din tries again when it next starts.
+# electron/features.mts), each a folder in FEATURES_DIR of links to its
+# parts (or, from before parts, one link), brought up to what system $1
+# has: downloaded as the user, as Din downloads them, so the links stay the
+# user's and nothing here acts on a path in their home as root. A feature
+# that doesn't download (offline, say) isn't the update's to fail: Din
+# tries again when it next starts.
 FEATURES_DIR=$FORK_HOME/.local/state/din/features
 update_features() {
-  local manifest=$1/etc/dinos/features.json link id drv out
+  local manifest=$1/etc/dinos/features.json dir id
   [[ -f $manifest && -d $FEATURES_DIR ]] || return 0
-  for link in "$FEATURES_DIR"/*; do
-    [[ -L $link ]] || continue
-    id=${link##*/}
-    drv=$(jq -r --arg id "$id" '.[$id].drv // empty' "$manifest")
-    out=$(jq -r --arg id "$id" '.[$id].out // empty' "$manifest")
-    [[ -n $drv && -n $out && $(readlink "$link") != "$out" ]] || continue
+  for dir in "$FEATURES_DIR"/*; do
+    [[ -L $dir || -d $dir ]] || continue
+    id=${dir##*/}
+    jq -e --arg id "$id" 'has($id)' "$manifest" >/dev/null || continue
     echo "Updating the optional feature $id"
-    runuser -u "$FORK_USER" -- env HOME="$FORK_HOME" \
-      nix build --out-link "$link" "$drv^out" </dev/null ||
+    # The script is the user's shell's to expand, not this one's.
+    # shellcheck disable=SC2016
+    runuser -u "$FORK_USER" -- env HOME="$FORK_HOME" "$BASH" -c '
+        set -euo pipefail
+        dir=$1 parts=$2
+        [[ ! -L $dir ]] || rm "$dir"
+        mkdir -p "$dir"
+        for name in $(jq -r "keys[]" <<<"$parts"); do
+          path=$(jq -r --arg n "$name" ".[\$n].path" <<<"$parts")
+          [[ $(readlink "$dir/$name" || true) != "$path" ]] || continue
+          url=$(jq -r --arg n "$name" ".[\$n].url // empty" <<<"$parts")
+          if [[ -n $url ]]; then
+            nix store prefetch-file --name "$(jq -r --arg n "$name" ".[\$n].name" <<<"$parts")" \
+              --expected-hash "$(jq -r --arg n "$name" ".[\$n].hash" <<<"$parts")" "$url"
+          fi
+          nix build --out-link "$dir/$name" "$path"
+        done
+        for link in "$dir"/*; do
+          [[ ! -L $link ]] || jq -e --arg n "${link##*/}" "has(\$n)" <<<"$parts" >/dev/null || rm "$link"
+        done
+      ' update-feature "$dir" "$(jq -c --arg id "$id" '.[$id].parts' "$manifest")" </dev/null ||
       echo "Couldn't update the optional feature $id" >&2
   done
 }
