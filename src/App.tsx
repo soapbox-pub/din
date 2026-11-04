@@ -17,6 +17,7 @@ import { AppProvider } from '@/components/AppProvider';
 import { AppConfig } from '@/contexts/AppContext';
 import { APP_RELAYS } from '@/lib/appRelays';
 import { instrumentQueryCache } from '@/lib/perfRuntime';
+import { loginStorage } from '@/lib/loginStorage';
 import AppRouter from './AppRouter';
 
 const head = createHead({
@@ -114,7 +115,7 @@ export function App() {
     <UnheadProvider head={head}>
       <AppProvider storageKey="nostr:app-config" defaultConfig={defaultConfig}>
         <QueryClientProvider client={queryClient}>
-          <NostrLoginProvider storageKey='nostr:login'>
+          <NostrLoginProvider storageKey='nostr:login' storage={loginStorage}>
             <NostrProvider>
               <NostrSync />
               <NostrdSync />
