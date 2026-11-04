@@ -91,6 +91,20 @@ import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import { APP_MIME } from '@/components/desktop/icons/wallpaper';
+import { useWallpaperTone } from '@/hooks/useWallpaperTone';
+
+/** The bar's height (h-9), which is the strip of wallpaper its look follows. */
+const MENU_BAR_HEIGHT = 36;
+
+/**
+ * The scrim over the wallpaper, reaching past the bar (h-12) so it can fade
+ * out gently. It holds 55% down to the bottom of the bar's text, which is what
+ * white text needs for 4.5:1 even over a pure white part of the wallpaper.
+ */
+const WALLPAPER_SCRIM: Record<'dark' | 'light', string> = {
+  dark: 'linear-gradient(to bottom, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.55) 50%, rgb(0 0 0 / 0.2) 75%, transparent)',
+  light: 'linear-gradient(to bottom, rgb(255 255 255 / 0.65), rgb(255 255 255 / 0.55) 50%, rgb(255 255 255 / 0.2) 75%, transparent)',
+};
 
 /**
  * Menu bar along the top of the desktop.
@@ -103,7 +117,11 @@ import { APP_MIME } from '@/components/desktop/icons/wallpaper';
  *
  * The bar itself is borderless and transparent, over a soft scrim fading
  * into the wallpaper so it reads as part of the desktop rather than a
- * separate chrome strip. A window maximized under it paints its title bar's
+ * separate chrome strip. Over a wallpaper, its text and scrim follow the
+ * wallpaper instead of the theme, as macOS's do: white over a dark scrim on a
+ * dark one, black over a light scrim on a light one, the same along the whole
+ * bar. The scrim is strong enough to keep that text legible over the parts of
+ * the wallpaper that go the other way. A window maximized under it paints its title bar's
  * color up behind the bar (Window's bar strip) - its app's accent, the
  * default translucent chrome, or for a frameless window, whose title bar's
  * color isn't known, solid white or black - so the two read as one seamless
@@ -130,14 +148,28 @@ export function MenuBar() {
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);
   const pull = usePullDown(fullscreen?.id ?? null);
+  // Under a maximized window the bar goes with its title bar, not the wallpaper.
+  const wallpaperTone = useWallpaperTone(MENU_BAR_HEIGHT);
+  const tone = fullscreen ? null : wallpaperTone;
+  const tokens = accent
+    ? themeColorTokens(accent)
+    : tone && themeColorTokens(tone === 'dark' ? '#000000' : '#ffffff');
 
   return (
     <>
     {/* Before the workspace, so under every window. */}
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-x-0 top-0 h-9 bg-gradient-to-b from-background/60 via-background/25 to-transparent"
-    />
+    {tone ? (
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-12"
+        style={{ background: WALLPAPER_SCRIM[tone] }}
+      />
+    ) : (
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-9 bg-gradient-to-b from-background/60 via-background/25 to-transparent"
+      />
+    )}
     <header
       aria-label="Menu bar"
       // Ctrl+F2 lands on the Apps button (src/lib/desktopFocus.ts), and the
@@ -146,8 +178,9 @@ export function MenuBar() {
       onKeyDown={(e) => moveAmongItems(e, 'button')}
       {...pull}
       // The accent is sanitized by the window; its tokens keep the bar's
-      // contents legible on it, as on the title bar.
-      style={accent ? themeColorTokens(accent) : undefined}
+      // contents legible on it, as on the title bar. Over the wallpaper, the
+      // same tokens keep them legible on its scrim.
+      style={tokens ?? undefined}
       // Equal side columns keep the clock centered on the screen however
       // much each side holds.
       // tracking-tight approximates SF Pro's optical spacing at menu-bar sizes.
