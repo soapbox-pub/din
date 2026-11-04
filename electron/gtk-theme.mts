@@ -13,6 +13,12 @@
 // - GTK 3 on X11 (most AppImages force it) reads no GSettings: without an
 //   XSETTINGS daemon its settings come from ~/.config/gtk-3.0/settings.ini,
 //   which gets the same theme and mode.
+// - Flatpak apps get the mode from the settings portal, but the rest only
+//   once they can see it: GTK themes are Flatpak extensions there
+//   (org.gtk.Gtk3theme.*), and a sandbox's ~/.config is its own. So the
+//   user's Flatpak installation gets adw-gtk3's two halves from Flathub,
+//   and every Flatpak app read access to GTK's settings folders, which
+//   Flatpak mounts as the app's own (setUpFlatpaks).
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -249,6 +255,74 @@ export function setNativeColorScheme(scheme: 'light' | 'dark'): void {
   }, 'the color scheme');
 }
 
+/** GTK's settings folders, as Flatpak names them in a filesystem permission. */
+const GTK_CONFIG_FOLDERS = ['xdg-config/gtk-3.0', 'xdg-config/gtk-4.0'];
+
+/** adw-gtk3's halves as Flatpak extensions. */
+const FLATPAK_THEMES = THEME_PAIRS[1].map((name) => `org.gtk.Gtk3theme.${name}`);
+
+/** Long enough to download two small extensions. */
+const FLATPAK_INSTALL_TIMEOUT = 5 * 60_000;
+
+async function flatpak(args: string[], timeout = 30_000): Promise<string> {
+  return (await runCommand('flatpak', args, { timeout })).stdout;
+}
+
+function lines(text: string): string[] {
+  return text.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+/**
+ * The permissions from GTK_CONFIG_FOLDERS that the user's global Flatpak
+ * overrides (`flatpak override --user`) say nothing about. One they took
+ * away (`!xdg-config/gtk-3.0`) counts as said.
+ */
+export function missingFolderGrants(overrides: string): string[] {
+  const line = overrides.split('\n').find((l) => /^\s*filesystems\s*=/.test(l)) ?? '';
+  const granted = line
+    .replace(/^\s*filesystems\s*=/, '')
+    .split(';')
+    .map((entry) => entry.trim().replace(/^!/, '').replace(/:(ro|rw|create)$/, '').replace(/\/$/, ''));
+  return GTK_CONFIG_FOLDERS.filter((folder) => !granted.includes(folder));
+}
+
+/**
+ * Let the user's Flatpak apps see Din's GTK settings, and give them the
+ * theme. Once per run of Din, in the background: whatever fails (no
+ * Flatpak, no network) is tried again next time.
+ */
+async function setUpFlatpaks(): Promise<void> {
+  try {
+    await flatpak(['--version']);
+  } catch {
+    return;
+  }
+  const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share');
+  let overrides = '';
+  try {
+    overrides = await fsp.readFile(path.join(dataHome, 'flatpak/overrides/global'), 'utf8');
+  } catch {
+    // None yet.
+  }
+  const missing = missingFolderGrants(overrides);
+  if (missing.length) {
+    await flatpak(['override', '--user', ...missing.map((folder) => `--filesystem=${folder}:ro`)]);
+  }
+  // Only where there are apps to theme, and only the user's own
+  // installation, which needs no password; a system one is left to
+  // whoever installs apps there.
+  const apps = lines(await flatpak(['list', '--user', '--app', '--columns=application']));
+  if (!apps.length) return;
+  const installed = new Set(lines(await flatpak(['list', '--user', '--runtime', '--columns=application'])));
+  const themes = FLATPAK_THEMES.filter((ref) => !installed.has(ref));
+  if (!themes.length) return;
+  const remotes = lines(await flatpak(['remotes', '--user', '--columns=name']));
+  if (!remotes.includes('flathub')) return;
+  await flatpak(['install', '--user', '--noninteractive', 'flathub', ...themes], FLATPAK_INSTALL_TIMEOUT);
+}
+
+let flatpaksSetUp = false;
+
 let appliedPalette: string | null = null;
 
 /** Native apps' colors, and with them their mode. */
@@ -256,6 +330,10 @@ export function setNativePalette(value: unknown): void {
   if (!onDinDesktop()) return;
   const palette = parsePalette(value);
   if (!palette) return;
+  if (!flatpaksSetUp) {
+    flatpaksSetUp = true;
+    setUpFlatpaks().catch((error: unknown) => console.warn('Could not set up Flatpak apps’ theme:', error));
+  }
   setNativeColorScheme(palette.dark ? 'dark' : 'light');
   const key = JSON.stringify(palette);
   enqueue(async () => {
