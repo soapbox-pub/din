@@ -572,9 +572,11 @@ function SystemHeader({
         <StatCard
           label="GPU"
           value={formatPercent(gpu.busy)}
-          detail={`${formatBytes(gpu.memoryUsed)} of ${formatBytes(gpu.memoryTotal)}${
-            gpu.sharedUsed > 0 ? ` · ${formatBytes(gpu.sharedUsed)} shared` : ''
-          }`}
+          detail={gpu.memoryTotal > 0
+            ? `${formatBytes(gpu.memoryUsed)} of ${formatBytes(gpu.memoryTotal)}${
+              gpu.sharedUsed > 0 ? ` · ${formatBytes(gpu.sharedUsed)} shared` : ''
+            }`
+            : 'Uses system memory'}
           history={gpuHistory}
           tone="text-chart-3"
         />

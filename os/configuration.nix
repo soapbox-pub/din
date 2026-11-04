@@ -2117,6 +2117,9 @@ in
   # GPU acceleration for din-shell/Electron, plus the firmware real WiFi and
   # graphics hardware needs.
   hardware.graphics.enable = true;
+  # Mesa has no VA-API driver for Intel GPUs; this one is what decodes video
+  # on them, from Broadwell on.
+  hardware.graphics.extraPackages = [ pkgs.intel-media-driver ];
   hardware.enableRedistributableFirmware = true;
 
   # BlueZ, for Bluetooth devices (Settings and the menu bar pair and connect

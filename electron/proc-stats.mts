@@ -78,6 +78,11 @@ export interface DrmClient {
   id: string;
   /** GPU time used so far, every engine together, in ns. */
   engineNs: number;
+  /**
+   * For a driver that counts GPU clock cycles instead of ns (xe), by engine:
+   * the cycles this client has been busy and the cycles that have passed.
+   */
+  cycles: Map<string, { busy: number; total: number }>;
 }
 
 /** Parse /proc/<pid>/fdinfo/<fd>. Null when the fd isn't a GPU client. */
@@ -90,7 +95,12 @@ export function parseDrmFdinfo(text: string): DrmClient | null {
   for (const match of text.matchAll(/^drm-engine-(?!capacity-)[\w-]+:\s+(\d+) ns/gm)) {
     engineNs += Number(match[1]);
   }
-  return { id: `${pdev}/${client[1]}`, engineNs };
+  const cycles: DrmClient['cycles'] = new Map();
+  for (const match of text.matchAll(/^drm-cycles-([\w-]+):\s+(\d+)/gm)) {
+    const total = new RegExp(`^drm-total-cycles-${match[1]}:\\s+(\\d+)`, 'm').exec(text);
+    if (total) cycles.set(match[1], { busy: Number(match[2]), total: Number(total[1]) });
+  }
+  return { id: `${pdev}/${client[1]}`, engineNs, cycles };
 }
 
 /** Parse /proc/<pid>/stat. Null for kernel threads and unreadable lines. */
@@ -257,10 +267,58 @@ function findGpuDevice(): Promise<string | null> {
   return gpuDevice;
 }
 
+/** xe's idle counters, one per GT (render, media), found once. */
+let xeIdleFiles: Promise<string[]> | null = null;
+function findXeIdleFiles(): Promise<string[]> {
+  xeIdleFiles ??= (async () => {
+    const list = (dir: string) => fsp.readdir(dir).catch(() => [] as string[]);
+    const cards = (await list('/sys/class/drm')).filter((name) => /^card\d+$/.test(name)).sort();
+    for (const card of cards) {
+      const device = `/sys/class/drm/${card}/device`;
+      const files: string[] = [];
+      for (const tile of (await list(device)).filter((name) => /^tile\d+$/.test(name))) {
+        for (const gt of (await list(`${device}/${tile}`)).filter((name) => /^gt\d+$/.test(name))) {
+          const file = `${device}/${tile}/${gt}/gtidle/idle_residency_ms`;
+          if (await fsp.access(file).then(() => true, () => false)) files.push(file);
+        }
+      }
+      if (files.length > 0) return files;
+    }
+    return [];
+  })();
+  return xeIdleFiles;
+}
+
+let xeIdleBefore: { at: number; idle: number[] } | null = null;
+
+/**
+ * How busy an xe GPU has been since the last call, in percent: its busiest GT's
+ * time out of idle. Null without one. It has no memory of its own to report.
+ */
+async function readXeGpu(): Promise<GpuTotals | null> {
+  const files = await findXeIdleFiles();
+  if (files.length === 0) return null;
+  const idle = await Promise.all(files.map(async (file) => Number(await fsp.readFile(file, 'utf8').catch(() => '0')) || 0));
+  const at = performance.now();
+  const before = xeIdleBefore;
+  xeIdleBefore = { at, idle };
+  const elapsed = before ? at - before.at : 0;
+  const busy = elapsed > 0 && before
+    ? Math.max(...idle.map((ms, i) => 100 - ((ms - before.idle[i]) / elapsed) * 100))
+    : 0;
+  return {
+    busy: Math.min(100, Math.max(0, busy)),
+    memoryUsed: 0,
+    memoryTotal: 0,
+    sharedUsed: 0,
+    sharedTotal: 0,
+  };
+}
+
 /** The GPU's totals, or null on a machine without one Din can read. */
 export async function readGpu(): Promise<GpuTotals | null> {
   const device = await findGpuDevice();
-  if (!device) return null;
+  if (!device) return readXeGpu();
   const read = async (name: string) => Number(await fsp.readFile(`${device}/${name}`, 'utf8').catch(() => '0')) || 0;
   const [busy, memoryUsed, memoryTotal, sharedUsed, sharedTotal] = await Promise.all([
     read('gpu_busy_percent'),

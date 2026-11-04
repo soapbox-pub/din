@@ -12,9 +12,11 @@
 // ticks since the last sample (/proc/stat).
 //
 // GPU: the whole GPU's busy share and memory come from its driver
-// (/sys/class/drm/card*/device, amdgpu only), a process's from the GPU time
-// its DRM clients report (/proc/<pid>/fdinfo, as nvtop reads it) over the
-// time since the last sample. Walking every fd of every process each sample
+// (/sys/class/drm/card*/device; amdgpu's busy share and memory, xe's busy share
+// from its idle counters), a process's from the GPU time its DRM clients report
+// (/proc/<pid>/fdinfo, as nvtop reads it) over the time since the last sample.
+// xe reports that in GPU clock cycles, which become time by the share of the
+// cycles passed that the client was busy. Walking every fd of every process each sample
 // is thousands of readlinks, so which fds are on the GPU is remembered and
 // only looked for again every FD_RESCAN samples. A client open in several
 // processes (a child inherits its parent's fds) counts for the oldest.
@@ -185,6 +187,10 @@ let previous: {
 } | null = null;
 /** Each process's fds on the GPU, as last looked for. */
 let drmFds = new Map<string, number[]>();
+/** Each client's cycle counters at the last sample, by client and engine (xe). */
+let drmCycles = new Map<string, { busy: number; total: number }>();
+/** The GPU time each client's cycles have come to so far, in ns, by client (xe). */
+let drmCycleNs = new Map<string, number>();
 let samples = 0;
 /** Command lines by process (pid, start time, comm: exec changes the last). */
 let cmdlines = new Map<string, string[]>();
@@ -302,7 +308,7 @@ async function underMain(pid: number): Promise<boolean> {
  * The GPU time each of our processes has used so far, in ns, by process key.
  * A client open in several processes counts once, for the oldest of them.
  */
-async function gpuTimes(entries: ProcEntry[], me: number): Promise<Map<string, number>> {
+async function gpuTimes(entries: ProcEntry[], me: number, wallNs: number): Promise<Map<string, number>> {
   const rescan = samples % FD_RESCAN === 0;
   const mine = entries.filter((entry) => entry.uid === me).sort((a, b) => a.startTicks - b.startTicks);
   const fds = new Map<string, number[]>();
@@ -318,15 +324,29 @@ async function gpuTimes(entries: ProcEntry[], me: number): Promise<Map<string, n
   drmFds = fds;
   const claimed = new Set<string>();
   const times = new Map<string, number>();
+  const cycles: typeof drmCycles = new Map();
+  const cycleNs: typeof drmCycleNs = new Map();
   mine.forEach((entry, i) => {
     let ns = 0;
     for (const client of clients[i]) {
       if (claimed.has(client.id)) continue;
       claimed.add(client.id);
-      ns += client.engineNs;
+      let clientCycleNs = drmCycleNs.get(client.id) ?? 0;
+      for (const [engine, now] of client.cycles) {
+        const key = `${client.id}/${engine}`;
+        const before = drmCycles.get(key);
+        if (before && now.total > before.total) {
+          clientCycleNs += ((now.busy - before.busy) / (now.total - before.total)) * wallNs;
+        }
+        cycles.set(key, now);
+      }
+      cycleNs.set(client.id, clientCycleNs);
+      ns += client.engineNs + clientCycleNs;
     }
     times.set(processKey(entry), ns);
   });
+  drmCycles = cycles;
+  drmCycleNs = cycleNs;
   return times;
 }
 
@@ -345,8 +365,8 @@ async function sample(): Promise<SystemSnapshot | null> {
   const host = await hosts();
   const me = process.getuid?.() ?? -1;
   const at = process.hrtime.bigint();
-  const gpuNs = await gpuTimes(entries, me);
   const wallNs = previous ? Number(at - previous.at) : 0;
+  const gpuNs = await gpuTimes(entries, me, wallNs);
   samples += 1;
 
   // Command lines don't change without the comm changing too (exec), so
@@ -496,6 +516,8 @@ function stop(): void {
   previous = null;
   cmdlines = new Map();
   drmFds = new Map();
+  drmCycles = new Map();
+  drmCycleNs = new Map();
   samples = 0;
   users = null;
 }

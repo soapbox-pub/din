@@ -111,7 +111,7 @@ export interface SystemSnapshot {
   cpu: number;
   cpuCount: number;
   memory: MemoryTotals;
-  /** Null without a GPU whose driver says how busy it is (only amdgpu does). */
+  /** Null without a GPU whose driver says how busy it is (amdgpu and xe do). */
   gpu: GpuTotals | null;
   disk: DiskTotals;
   /** Seconds since boot. */
