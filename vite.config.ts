@@ -76,6 +76,30 @@ function dinApps(): Plugin {
   };
 }
 
+/**
+ * What pdf.js fetches as it needs it (src/shared/pdf.ts): character maps
+ * for CJK text, the standard fonts a PDF names without embedding, its
+ * WebAssembly image decoders and colour profile. In development they're
+ * node_modules/pdfjs-dist's own; the build copies them to dist/pdfjs/, which
+ * every app reaches at its own /pdfjs/ (electron/din-apps.mts).
+ */
+function pdfjsAssets(): Plugin {
+  const root = path.resolve(__dirname, "node_modules/pdfjs-dist");
+  return {
+    name: "pdfjs-assets",
+    apply: "build",
+    generateBundle() {
+      for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+        for (const file of fs.readdirSync(path.join(root, dir))) {
+          // Scripting (QuickJS) is never turned on.
+          if (file.startsWith("quickjs") || file.startsWith("LICENSE_QUICKJS") || file.startsWith("LICENSE_PDFJS_QUICKJS")) continue;
+          this.emitFile({ type: "asset", fileName: `pdfjs/${dir}/${file}`, source: fs.readFileSync(path.join(root, dir, file)) });
+        }
+      }
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
   server: {
@@ -89,6 +113,7 @@ export default defineConfig(() => ({
     react(),
     tailwindcss(),
     dinApps(),
+    pdfjsAssets(),
   ],
   // The Calculator's giac worker imports its WebAssembly relative to
   // itself, which pre-bundling would break.

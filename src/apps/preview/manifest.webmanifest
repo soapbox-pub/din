@@ -1,6 +1,6 @@
 {
   "name": "Preview",
-  "description": "A window for one file opened from Files: a picture, a video, a song, an archive's contents, a cursor theme, or text to read and edit.",
+  "description": "A window for one file opened from Files: a picture, a video, a song, a PDF, an archive's contents, a cursor theme, or text to read and edit.",
   "icons": [
     {
       "src": "/icons/apps/preview.png",
@@ -31,7 +31,8 @@
       "quick look",
       "pictures",
       "photos",
-      "images"
+      "images",
+      "pdf"
     ]
   }
 }
