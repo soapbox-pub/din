@@ -24,6 +24,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { bluetoothPhones } from './bluetooth.mts';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
 import { sessionBusAddress } from './native-display.mts';
 import { bMessage, bMessageText, parseVCards } from './phone-vcard.mts';
@@ -164,16 +165,20 @@ function scratchFile(extension: string): string {
   return path.join(os.tmpdir(), `din-phone-${randomUUID()}.${extension}`);
 }
 
+/** What turns sharing on, for the kind of phone it is (bluetooth.mts can tell from its maker). */
+const TURN_ON: Record<'iphone' | 'android' | 'unknown', string> = {
+  iphone: 'Open Settings → Bluetooth on it, tap ⓘ beside this computer, and turn on Show Notifications.',
+  android: 'Connect again, and choose Allow when it asks about messages.',
+  unknown: 'On an iPhone, turn on Show Notifications for this computer in Settings → Bluetooth (ⓘ); on an Android phone, connect again and choose Allow.',
+};
+
 /** Friendlier words for why a session couldn't start. */
-function explain(error: unknown): string {
+function explain(error: unknown, platform: 'iphone' | 'android' | null): string {
   const text = error instanceof Error ? error.message : String(error);
   const type = error instanceof DBusError ? error.type : '';
-  if (/service record|not supported|NotSupported|profile/i.test(text + type)) {
-    return 'The phone isn’t sharing its messages. On an iPhone, open Settings → Bluetooth, tap ⓘ beside this computer, and turn on Show Notifications.';
-  }
-  if (/refused|denied|NotAuthorized|Rejected/i.test(text + type)) {
-    return 'The phone turned it down. On an iPhone, turn on Show Notifications for this computer in Settings → Bluetooth (ⓘ).';
-  }
+  const turnOn = TURN_ON[platform ?? 'unknown'];
+  if (/service record|not supported|NotSupported|profile/i.test(text + type)) return `The phone isn’t sharing its messages. ${turnOn}`;
+  if (/refused|denied|NotAuthorized|Rejected/i.test(text + type)) return `The phone turned it down. ${turnOn}`;
   if (/host is down|timed? ?out|unreachable|page|no route|connection reset|abort/i.test(text)) return 'The phone isn’t in range.';
   return `Bluetooth said: ${text}`;
 }
@@ -350,7 +355,9 @@ export class MapConnection implements PhoneConnection {
     } catch (error) {
       const away = !this.session;
       this.close();
-      this.hooks.status({ status: 'offline', error: away && /in range/.test(explain(error)) ? null : explain(error) });
+      const phone = (await bluetoothPhones().catch(() => null))?.find((p) => p.address.toUpperCase() === this.address.toUpperCase());
+      const why = explain(error, phone?.platform ?? null);
+      this.hooks.status({ status: 'offline', error: away && /in range/.test(why) ? null : why });
       this.scheduleRetry();
     } finally {
       this.trying = false;
