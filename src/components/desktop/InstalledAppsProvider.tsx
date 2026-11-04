@@ -6,7 +6,7 @@ import { NATIVE_APP_ICON, nsiteIconName, WEB_APP_ICON, webIconName } from '@/lib
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { useIsLiveBoot } from '@/hooks/useInstaller';
-import type { NativeApp } from '@/lib/nativeApps';
+import { subscribeUnlistedNativeApps, unlistedNativeApps, type NativeApp } from '@/lib/nativeApps';
 import {
   createWebApp,
   DEFAULT_WEB_APPS,
@@ -219,6 +219,8 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
   const nsiteApps = store ? nsiteEntries : NO_NSITE_APPS;
   // Apps the `din` command is running (src/lib/launchedApps.ts).
   const launched = useSyncExternalStore(subscribeLaunchedApps, launchedApps);
+  // Linux apps running without being installed (`nix run`, an AppImage).
+  const unlisted = useSyncExternalStore(subscribeUnlistedNativeApps, unlistedNativeApps);
   // Apps from folders on this computer (src/lib/fileApps.ts).
   const [storedFileApps, setStoredFileApps] = useLocalStorage<unknown>(FILE_APPS_KEY, []);
   const fileApps = useMemo(() => parseFileApps(storedFileApps), [storedFileApps]);
@@ -310,6 +312,8 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         ),
       ),
       ...nativeApps.map(nativeAppToDefinition),
+      // Kept out of the launcher: they're here only while they run.
+      ...unlisted.map((app) => ({ ...nativeAppToDefinition(app), hidden: true })),
       ...fileApps.map(fileAppDefinition),
       ...launched.map((app) => app.definition),
     ];
@@ -339,7 +343,12 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
       nsiteApps,
       fileApps,
       // A launch opens its window as soon as it's registered, before this list has it.
-      getApp: (id) => apps.find((app) => app.id === id) ?? launchedApp(id)?.definition,
+      getApp: (id) => {
+        const found = apps.find((app) => app.id === id) ?? launchedApp(id)?.definition;
+        if (found) return found;
+        const running = unlistedNativeApps().find((app) => app.id === id);
+        return running && { ...nativeAppToDefinition(running), hidden: true };
+      },
       findWebAppByUrl: (url) => webApps.find((webApp) => webApp.url === url),
       findNsiteApp: (host) => nsiteApps.find((entry) => entry.host === host),
       findAppIdForUrl,
@@ -425,7 +434,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         setWebApps((prev) => prev.filter((webApp) => webApp.id !== id));
       },
     };
-  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, live, launched, themeIcons, fileApps, saveFileApp, setStoredFileApps]);
+  }, [webApps, setWebApps, nsiteApps, setNsiteEntries, storedSites, store, nativeApps, unlisted, live, launched, themeIcons, fileApps, saveFileApp, setStoredFileApps]);
 
   return (
     <InstalledAppsContext.Provider value={value}>

@@ -60,16 +60,18 @@ export interface NativeAppsBridge {
   /** Start an app by its registry id, with a link for it to open (one of its `schemes`). */
   launch(appId: string, uri?: string): Promise<void>;
   /**
-   * The installed app a window belongs to, by its owner's pid and WM_CLASS,
-   * or null when it can't be matched.
+   * The app a window belongs to, by its owner's pid and WM_CLASS, or null
+   * when it can't be matched. One that isn't installed (a `nix run`
+   * program, an AppImage, found by where its process runs from) comes with
+   * its record, for the desktop to register (`addUnlistedNativeApp`).
    */
-  resolve(pid: number | null, wmClass: string[]): Promise<string | null>;
+  resolve(pid: number | null, wmClass: string[]): Promise<{ appId: string; app?: NativeApp } | null>;
   /**
-   * Open a Windows program (.exe, .msi, .bat, .lnk) by absolute path. It
-   * runs through Wine, set up on first use; rejects with a user-facing
-   * message when it can't (e.g. Wine isn't installed).
+   * Run a program file by absolute path: a Windows program (.exe, .msi,
+   * .bat, .lnk) through Wine, set up on first use, or an AppImage. Rejects
+   * with a user-facing message when it can't (e.g. Wine isn't installed).
    */
-  runWindowsProgram(file: string): Promise<void>;
+  runProgram(file: string): Promise<void>;
   /** Force quit the program owning a window, by pid (apps on Din's display only). */
   forceQuit(pid: number): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
@@ -78,13 +80,43 @@ export interface NativeAppsBridge {
   onOpenUrl(callback: (url: string) => void): () => void;
 }
 
-/** File extensions opened as Windows programs (see electron/windows-apps.mts). */
-const WINDOWS_PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk'];
+/**
+ * File extensions run as programs when opened: Windows programs, through
+ * Wine (electron/windows-apps.mts), and AppImages (electron/native-apps.mts).
+ */
+const PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk', '.appimage'];
 
-/** Whether a file name is a Windows program Din can open. */
-export function isWindowsProgram(name: string): boolean {
+/** Whether a file name is a program Din runs when it's opened. */
+export function isProgram(name: string): boolean {
   const lower = name.toLowerCase();
-  return WINDOWS_PROGRAM_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  return PROGRAM_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+// Apps known only because they're running: a program from `nix run`, an
+// AppImage. Their windows get the app's name and icon from the desktop
+// entry beside the program; the registry lists them, hidden from the
+// launcher, for the rest of the session.
+
+let unlisted: readonly NativeApp[] = [];
+const unlistedListeners = new Set<() => void>();
+
+/** Register a running app that isn't installed, replacing its old record. */
+export function addUnlistedNativeApp(app: NativeApp): void {
+  const old = unlisted.find((a) => a.id === app.id);
+  if (old && old.name === app.name && old.icon === app.icon) return;
+  unlisted = [...unlisted.filter((a) => a.id !== app.id), app];
+  for (const listener of unlistedListeners) listener();
+}
+
+/** The running apps that aren't installed, for useSyncExternalStore. */
+export function unlistedNativeApps(): readonly NativeApp[] {
+  return unlisted;
+}
+
+/** Subscribe to unlisted apps' arrival. Returns an unsubscribe fn. */
+export function subscribeUnlistedNativeApps(listener: () => void): () => void {
+  unlistedListeners.add(listener);
+  return () => unlistedListeners.delete(listener);
 }
 
 declare global {

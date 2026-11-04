@@ -103,7 +103,7 @@ import { useTabTransfer, type TabTransfer, type TabTransferOptions } from '@/hoo
 import { parkedTab } from '@/lib/tabTransfer';
 import { parentPath } from '@/lib/fs';
 import { appForFile } from '@/lib/fileTypes';
-import { isWindowsProgram } from '@/lib/nativeApps';
+import { isProgram } from '@/lib/nativeApps';
 import {
   claimBrowserSession,
   forgetBrowserWindow,
@@ -3667,10 +3667,10 @@ function DownloadChip({
   const { open } = useWindowActions();
   const { state, filename, receivedBytes, totalBytes, savePath } = download;
   const done = state === 'completed';
-  // Open and show-in-folder use Din's own apps, as Files does; only Windows
-  // programs go to the main process, which runs them.
+  // Open and show-in-folder use Din's own apps, as Files does; only programs
+  // (Windows's, AppImages) go to the main process, which runs them.
   const openFile = () => {
-    if (isWindowsProgram(filename)) bridge?.openDownload(savePath).catch(() => {});
+    if (isProgram(filename)) bridge?.openDownload(savePath).catch(() => {});
     else open(appForFile(filename), { path: savePath });
   };
   const showInFolder = () => open('file-browser', { path: parentPath(savePath), select: filename });

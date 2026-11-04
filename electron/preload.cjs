@@ -793,18 +793,19 @@ expose('nativeApps', {
   launch: (appId, uri) => ipcRenderer.invoke('native-apps:launch', appId, uri),
 
   /**
-   * The installed app a window belongs to, by owner pid and WM_CLASS.
+   * The app a window belongs to, by owner pid and WM_CLASS, with its record
+   * when it isn't installed (a `nix run` program, an AppImage).
    * @param {number | null} pid
    * @param {string[]} wmClass
    */
   resolve: (pid, wmClass) => ipcRenderer.invoke('native-apps:resolve', pid, wmClass),
 
   /**
-   * Open a Windows program (.exe, .msi, .bat, .lnk) by absolute path,
-   * through Wine (electron/windows-apps.mts).
+   * Run a program file by absolute path: a Windows program (.exe, .msi,
+   * .bat, .lnk) through Wine (electron/windows-apps.mts), or an AppImage.
    * @param {string} file
    */
-  runWindowsProgram: (file) => ipcRenderer.invoke('native-apps:run-windows-program', file),
+  runProgram: (file) => ipcRenderer.invoke('native-apps:run-program', file),
 
   /**
    * Force quit the program that owns a window (by its pid), for windows

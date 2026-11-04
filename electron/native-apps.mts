@@ -497,6 +497,11 @@ function isUninstaller(entry: DesktopEntry): boolean {
 
 /** The desktop entry behind a registry id, or a throw when there is none. */
 async function entryFor(appId: string): Promise<DesktopEntry> {
+  const unlisted = unlistedApps.get(appId);
+  if (unlisted) {
+    if (!unlisted.entry) throw new Error(`${unlisted.app.name} can’t be opened from here; it isn’t installed`);
+    return unlisted.entry;
+  }
   const desktopId = appId.startsWith(NATIVE_PREFIX)
     ? `${appId.slice(NATIVE_PREFIX.length)}.desktop`
     : appId;
@@ -607,14 +612,50 @@ function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): num
  * display, through Wine. Runs in the file's own folder, as double-clicking
  * it in Explorer would. Throws with a user-facing message when it can't.
  */
-export async function runWindowsProgram(file: string): Promise<void> {
-  if (!path.isAbsolute(file) || !isWindowsProgram(file) || !fs.statSync(file).isFile()) {
-    throw new Error('Not a Windows program');
-  }
+async function runWindowsProgram(file: string): Promise<void> {
   const display = await requireDisplay();
   const env = await appEnvironment(display);
   const command = await windowsProgramCommand(file, env);
   spawnDetached(command.argv, path.dirname(file), { ...env, ...command.env });
+}
+
+/** Whether a file is an AppImage, which Din runs when it's opened. */
+export function isAppImage(file: string): boolean {
+  return path.extname(file).toLowerCase() === '.appimage';
+}
+
+/** Whether a file is a program Din runs when it's opened: Windows's, or an AppImage. */
+export function isProgram(file: string): boolean {
+  return isWindowsProgram(file) || isAppImage(file);
+}
+
+/**
+ * Run an AppImage, in its own folder. One just downloaded isn't executable
+ * yet; opening it is the user saying to run it, so it's made executable
+ * (for its owner) first, as it would have to be in a terminal.
+ */
+async function runAppImage(file: string): Promise<void> {
+  const display = await requireDisplay();
+  const env = await appEnvironment(display);
+  if (!isExecutable(file)) {
+    const { mode } = fs.statSync(file);
+    fs.chmodSync(file, mode | 0o100);
+  }
+  spawnDetached(appImageArgv(file), path.dirname(file), env);
+}
+
+/**
+ * Open a program file onto the embedded display: a Windows program (.exe,
+ * .msi, .bat, .lnk) through Wine, running in the file's own folder as
+ * double-clicking it in Explorer would; an AppImage as itself. Throws with a
+ * user-facing message when it can't.
+ */
+export async function runProgram(file: string): Promise<void> {
+  if (!path.isAbsolute(file) || !isProgram(file) || !fs.statSync(file).isFile()) {
+    throw new Error('Not a program');
+  }
+  if (isAppImage(file)) await runAppImage(file);
+  else await runWindowsProgram(file);
 }
 
 /**
@@ -723,20 +764,240 @@ function parentPid(pid: number): number | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Programs that aren't installed
+//
+// `nix run nixpkgs#foo` and an AppImage both run a program whose desktop
+// entry sits beside it - in its store path's share/applications, in the
+// AppImage's mount - rather than anywhere XDG looks. Its windows find that
+// entry through the process, so they get the app's name and icon (and a
+// Dock tile that can open it again) instead of the generic host's. A
+// program with no entry at all gets a tile named for its WM_CLASS.
+// ---------------------------------------------------------------------------
+
+/** An app known only because it's running, with its record for the shell. */
+interface UnlistedApp {
+  app: NativeApp;
+  /** How to open it again; null for one named only by its WM_CLASS. */
+  entry: DesktopEntry | null;
+}
+
+/** Unlisted apps seen this session, by registry id. */
+const unlistedApps = new Map<string, UnlistedApp>();
+
+/** Registry id prefix of an unlisted app, after NATIVE_PREFIX. */
+const UNLISTED_MARK = '+';
+
+/** Where a running program came from: its desktop entries and icons. */
+interface ProgramBundle {
+  /** Folders holding its desktop entries. */
+  entryDirs: string[];
+  /** Folders to look for its icon in (icon-theme roots, or flat folders). */
+  iconDirs: string[];
+  /** Folders whose bin/ its entry's Exec names a program in. */
+  binDirs: string[];
+  /** The AppImage it runs from, which opens it again. */
+  appImage: string | null;
+}
+
+/** A process's environment variable, or null. */
+function processEnv(pid: number, name: string): string | null {
+  try {
+    const prefix = `${name}=`;
+    const found = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').find((v) => v.startsWith(prefix));
+    return found ? found.slice(prefix.length) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isDirectory(dir: string): boolean {
+  try {
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The installed app a window belongs to: by launched-pid ancestry first
- * (exact), then by WM_CLASS (a good guess for apps that re-exec or hand off
- * to an already-running instance).
+ * The bundle a window's own process runs from. Only the process itself
+ * counts, not its parents: a program started from Din's Terminal descends
+ * from Din, whose own store path has a desktop entry.
  */
-async function appIdForWindow(pid: number | null, wmClass: string[]): Promise<string | null> {
+function programBundle(pid: number): ProgramBundle | null {
+  // An AppImage's runtime says where it mounted (or extracted) itself.
+  const appDir = processEnv(pid, 'APPDIR');
+  if (appDir && path.isAbsolute(appDir) && isDirectory(appDir)) {
+    const usrShare = path.join(appDir, 'usr/share');
+    const appImage = processEnv(pid, 'APPIMAGE');
+    return {
+      entryDirs: [appDir, path.join(usrShare, 'applications')],
+      iconDirs: [appDir, path.join(usrShare, 'icons'), path.join(usrShare, 'pixmaps')],
+      binDirs: [path.join(appDir, 'usr')],
+      appImage: appImage && path.isAbsolute(appImage) && fs.existsSync(appImage) ? appImage : null,
+    };
+  }
+  // A Nix package: the store path its binary is in.
+  let exe: string;
+  try {
+    exe = fs.realpathSync(`/proc/${pid}/exe`);
+  } catch {
+    return null;
+  }
+  const store = /^\/nix\/store\/[^/]+/.exec(exe)?.[0];
+  if (!store) return null;
+  const share = path.join(store, 'share');
+  return {
+    entryDirs: [path.join(share, 'applications')],
+    iconDirs: [path.join(share, 'icons'), path.join(share, 'pixmaps')],
+    binDirs: [store],
+    appImage: null,
+  };
+}
+
+/** Icon sizes to try, best first: big enough to look sharp, small to send. */
+const BUNDLE_ICON_SIZES = ['256x256', '512x512', '192x192', '128x128', '96x96', '64x64', '48x48', '32x32'];
+
+/** An icon file for `name` in a bundle's folders, or null. */
+function bundleIconFile(name: string, bundle: ProgramBundle): string | null {
+  if (path.isAbsolute(name)) return fs.existsSync(name) ? name : null;
+  const ext = path.extname(name).toLowerCase();
+  const bare = ext === '.png' || ext === '.svg' || ext === '.xpm' ? name.slice(0, -ext.length) : name;
+  if (!bare || bare.includes('/')) return null;
+  for (const dir of bundle.iconDirs) {
+    const candidates = [
+      path.join(dir, `${bare}.svg`),
+      path.join(dir, `${bare}.png`),
+      path.join(dir, 'hicolor/scalable/apps', `${bare}.svg`),
+      ...BUNDLE_ICON_SIZES.map((size) => path.join(dir, 'hicolor', size, 'apps', `${bare}.png`)),
+    ];
+    const found = candidates.find((file) => fs.existsSync(file));
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The entry in a bundle that a window's WM_CLASS names, else its only one. */
+function bundleEntry(bundle: ProgramBundle, wmClass: string[]): DesktopEntry | null {
+  const found = new Map<string, DesktopEntry>();
+  for (const dir of bundle.entryDirs) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir).filter((name) => name.endsWith('.desktop'));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const entry = parseDesktopFile(path.join(dir, name), name);
+      if (entry && !found.has(name)) found.set(name, entry);
+    }
+  }
+  if (found.size === 0) return null;
+  const index = buildWmClassIndex(found);
+  for (const name of wmClass) {
+    const appId = index.get(name.toLowerCase());
+    if (appId) return found.get(`${appId.slice(NATIVE_PREFIX.length)}.desktop`) ?? null;
+  }
+  return found.size === 1 ? [...found.values()][0] : null;
+}
+
+/** The command that runs an AppImage: appimage-run where there is one (NixOS). */
+function appImageArgv(file: string): string[] {
+  const runner = which('appimage-run');
+  return runner ? [runner, file] : [file];
+}
+
+/** A registry id for an unlisted app, from a name that may be anything. */
+function unlistedId(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+  return `${NATIVE_PREFIX}${UNLISTED_MARK}${slug || 'app'}`;
+}
+
+/** The unlisted app a window's process belongs to, from its bundle. */
+async function unlistedAppFor(pid: number, wmClass: string[]): Promise<UnlistedApp | null> {
+  const bundle = programBundle(pid);
+  const found = bundle && bundleEntry(bundle, wmClass);
+  if (bundle && found) {
+    // Its Exec names a program on the bundle's own PATH, which isn't Din's;
+    // an AppImage opens again from the AppImage, since its mount goes away.
+    let argv = found.argv;
+    if (bundle.appImage) argv = appImageArgv(bundle.appImage);
+    else if (!path.isAbsolute(argv[0])) {
+      const bin = bundle.binDirs.map((dir) => path.join(dir, 'bin', argv[0])).find(isExecutable);
+      if (bin) argv = [bin, ...argv.slice(1)];
+    }
+    const entry: DesktopEntry = { ...found, argv, urlIndex: bundle.appImage ? null : found.urlIndex };
+    const iconFile = found.iconName ? bundleIconFile(found.iconName, bundle) : null;
+    const { icon, glyph } = iconFile
+      ? { icon: (await resolveAppIcon(iconFile)).icon, glyph: false }
+      : await resolveAppIcon(found.iconName);
+    const id = unlistedId(found.id.replace(/\.desktop$/, ''));
+    return {
+      entry,
+      app: {
+        id,
+        desktopId: found.id,
+        name: found.name,
+        comment: found.comment,
+        icon,
+        iconGlyph: glyph,
+        categories: found.categories,
+        keywords: found.keywords,
+        terminal: false,
+        schemes: entry.urlIndex === null ? [] : found.schemes,
+      },
+    };
+  }
+  // Nothing to go on but the window's class: "localsend_app", "Gimp".
+  const name = wmClass[1] || wmClass[0];
+  if (!name) return null;
+  return {
+    entry: null,
+    app: {
+      id: unlistedId(`class-${name}`),
+      desktopId: '',
+      name,
+      comment: null,
+      icon: null,
+      iconGlyph: false,
+      categories: [],
+      keywords: [],
+      terminal: false,
+      schemes: [],
+    },
+  };
+}
+
+/** What a window belongs to: an app's registry id, and its record when it's unlisted. */
+interface WindowApp {
+  appId: string;
+  app?: NativeApp;
+}
+
+/**
+ * The app a window belongs to: by launched-pid ancestry first (exact), then
+ * by WM_CLASS (a good guess for apps that re-exec or hand off to an
+ * already-running instance), then by where its program came from.
+ */
+async function appForWindow(pid: number | null, wmClass: string[]): Promise<WindowApp | null> {
   const byPid = appIdForPid(pid);
-  if (byPid) return byPid;
+  if (byPid) {
+    const unlisted = unlistedApps.get(byPid);
+    return unlisted ? { appId: byPid, app: unlisted.app } : { appId: byPid };
+  }
   await entries();
   for (const name of wmClass) {
     const appId = wmClassIndex.get(name.toLowerCase());
-    if (appId) return appId;
+    if (appId) return { appId };
   }
-  return null;
+  if (pid === null) return null;
+  const unlisted = await unlistedAppFor(pid, wmClass);
+  if (!unlisted) return null;
+  // A program seen before keeps the record it had, so it's one Dock tile.
+  const known = unlistedApps.get(unlisted.app.id);
+  if (!known || (unlisted.entry && !known.entry)) unlistedApps.set(unlisted.app.id, unlisted);
+  const app = unlistedApps.get(unlisted.app.id)!.app;
+  return { appId: app.id, app };
 }
 
 /**
@@ -773,10 +1034,10 @@ export function registerNativeAppHandlers(options: {
     await launch(appId, uri);
   });
 
-  ipcMain.handle('native-apps:run-windows-program', async (event, file) => {
+  ipcMain.handle('native-apps:run-program', async (event, file) => {
     assertShellSender(event);
     if (typeof file !== 'string') throw new Error('A file path is required');
-    await runWindowsProgram(file);
+    await runProgram(file);
   });
 
   ipcMain.handle('native-apps:force-quit', async (event, pid) => {
@@ -790,6 +1051,6 @@ export function registerNativeAppHandlers(options: {
     const classes = Array.isArray(wmClass)
       ? wmClass.filter((c): c is string => typeof c === 'string').slice(0, 4)
       : [];
-    return appIdForWindow(Number.isInteger(pid) ? pid : null, classes);
+    return appForWindow(Number.isInteger(pid) ? pid : null, classes);
   });
 }

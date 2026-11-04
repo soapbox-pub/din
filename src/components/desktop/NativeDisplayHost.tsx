@@ -3,7 +3,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
-import { getNativeAppsBridge } from '@/lib/nativeApps';
+import { addUnlistedNativeApp, getNativeAppsBridge } from '@/lib/nativeApps';
 import { ScreenLayer } from './MonitorsProvider';
 import {
   AlertDialog,
@@ -72,10 +72,12 @@ export function NativeDisplayHost() {
           const bridge = getNativeAppsBridge();
           void (bridge ? bridge.resolve(surface.pid, surface.wmClass) : Promise.resolve(null))
             .catch(() => null)
-            .then((appId) => {
+            .then((found) => {
               // Gone before the lookup finished (a splash screen, say).
               if (!isNativeWindowOpen(surface.id) || windowsRef.current.has(surface.id)) return;
-              const hostId = appId && getApp(appId) ? appId : UNMATCHED_APP_ID;
+              // Not installed, but running: its own tile, named for it.
+              if (found?.app) addUnlistedNativeApp(found.app);
+              const hostId = found && getApp(found.appId) ? found.appId : UNMATCHED_APP_ID;
               const chrome = windowChrome(surface);
               const id = open(hostId, {
                 xid: surface.id,

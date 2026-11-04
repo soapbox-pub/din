@@ -1,4 +1,4 @@
-import { isWindowsProgram } from '@/lib/nativeApps';
+import { isProgram } from '@/lib/nativeApps';
 import type { FsEntryKind } from '@/lib/fs';
 
 /**
@@ -64,7 +64,7 @@ export function fileCategory(name: string, kind: FsEntryKind): FileCategory {
   if (ARCHIVE.has(ext)) return 'archive';
   if (DISK.has(ext)) return 'disk';
   if (DOCUMENT.has(ext)) return 'document';
-  if (isWindowsProgram(name)) return 'program';
+  if (isProgram(name)) return 'program';
   return 'other';
 }
 

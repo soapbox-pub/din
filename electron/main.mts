@@ -77,8 +77,7 @@ import {
   clearNsiteBlobCache,
 } from './nsite.mts';
 import { parseCanonicalHost } from './nsite-store.mts';
-import { registerNativeAppHandlers, runWindowsProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
-import { isWindowsProgram } from './windows-apps.mts';
+import { isProgram, registerNativeAppHandlers, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
 import { registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
@@ -5276,7 +5275,7 @@ function registerBrowserDownloadHandlers(): void {
   privateBrowserSession().on('will-download', onWillDownload);
   torBrowserSession().on('will-download', onWillDownload);
 
-  // Run a downloaded setup.exe, the way it would on Windows. Everything else
+  // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else
   // opens in Din's own apps from the renderer; the OS default handler isn't
   // Din's (it picked whatever desktop app was installed, VSCodium for
   // folders). Restricted to files under ~/Downloads so the shell can't be
@@ -5284,7 +5283,7 @@ function registerBrowserDownloadHandlers(): void {
   ipcMain.handle('browser:openDownload', async (event, filePath) => {
     assertShellSender(event);
     if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
-    if (isWindowsProgram(filePath)) return runWindowsProgram(filePath);
+    if (isProgram(filePath)) return runProgram(filePath);
   });
 }
 

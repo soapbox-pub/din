@@ -44,7 +44,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useVolumes } from '@/hooks/useVolumes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { printFile } from '@/shared/print';
-import { isWindowsProgram } from '@/lib/nativeApps';
+import { isProgram } from '@/lib/nativeApps';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
 import { windowLaunchFiles } from '@/shared/fileHandles';
@@ -759,14 +759,15 @@ function FileBrowserTab({
       if (music.length > 0) openIn('media-player', music.map((f) => joinPath(cwd, f.name)), { at: Date.now() });
       for (const file of files.filter((f) => !isMediaPlayerFile(f.name))) {
         const target = joinPath(cwd, file.name);
-        if (!isWindowsProgram(file.name)) {
+        if (!isProgram(file.name)) {
           din.files.fromPath(target).then((handle) => din.app.openFiles([handle])).catch((error: unknown) =>
             setStatus({ kind: 'error', text: cleanFsError(error) }),
           );
           continue;
         }
-        // Windows programs run, as they would from Explorer. The first one
-        // also sets up Wine, which takes a while, so say something meanwhile.
+        // Programs run, as they would from Explorer: Windows programs, and
+        // AppImages. The first Windows one also sets up Wine, which takes a
+        // while, so say something meanwhile.
         // Habitual double-clicks land here twice; one copy is plenty.
         if (startingRef.current.has(target)) continue;
         startingRef.current.add(target);
@@ -1829,7 +1830,7 @@ function FileBrowserTab({
                 {menuFor === 'items' && selectedNames.length > 0 ? (
                   <>
                     <ContextMenuItem onSelect={() => openNames(selectedNames)}>
-                      {single && isWindowsProgram(single.name) ? 'Run' : 'Open'}
+                      {single && isProgram(single.name) ? 'Run' : 'Open'}
                       <ContextMenuShortcut>Enter</ContextMenuShortcut>
                     </ContextMenuItem>
                     {single?.name.includes('/') && (

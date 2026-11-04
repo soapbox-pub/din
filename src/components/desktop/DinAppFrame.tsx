@@ -56,7 +56,7 @@ import {
 } from '@/lib/dictation';
 import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
-import { getNativeAppsBridge, isWindowsProgram } from '@/lib/nativeApps';
+import { getNativeAppsBridge, isProgram } from '@/lib/nativeApps';
 import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
@@ -514,13 +514,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         for (const id of handles) {
           const g = await usableGrant(id);
           const name = basename(g.path);
-          // A Windows program runs, through Wine, instead of opening: for an
+          // A program (Windows's, through Wine, or an AppImage) runs instead of opening: for an
           // app with fs alone (Files), which reaches as far anyway. One that
           // can only write its own folders mustn't make a program and run it.
           const native = getNativeAppsBridge();
-          if (g.kind === 'file' && isWindowsProgram(name)) {
+          if (g.kind === 'file' && isProgram(name)) {
             need('fs');
-            if (native) await native.runWindowsProgram(g.path);
+            if (native) await native.runProgram(g.path);
           } else live.current.actions.open(appForFile(name), { path: g.path });
         }
       },

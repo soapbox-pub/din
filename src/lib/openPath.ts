@@ -2,7 +2,7 @@ import type { AppDefinition } from '@/lib/apps';
 import { isDesktopEntryName, parseDesktopEntry, type DesktopEntry } from '@/lib/desktopIcons';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge, type FsEntryKind } from '@/lib/fs';
-import { getNativeAppsBridge, isWindowsProgram, NATIVE_APP_PREFIX } from '@/lib/nativeApps';
+import { getNativeAppsBridge, isProgram, NATIVE_APP_PREFIX } from '@/lib/nativeApps';
 
 /** What opening a path needs of the desktop. */
 export interface OpenPathDeps {
@@ -39,7 +39,7 @@ export function launchEntry(entry: DesktopEntry, fileName: string, deps: OpenPat
 
 /**
  * Open a file or folder as double-clicking it does: a folder in Files, a
- * launcher's app, a Windows program through Wine, anything else in the app
+ * launcher's app, a program (Windows's through Wine, an AppImage), anything else in the app
  * for its kind (`din open`, desktop icons).
  */
 export async function openPath(path: string, kind: FsEntryKind, deps: OpenPathDeps): Promise<void> {
@@ -49,8 +49,8 @@ export async function openPath(path: string, kind: FsEntryKind, deps: OpenPathDe
     return;
   }
   const native = getNativeAppsBridge();
-  if (native && isWindowsProgram(name)) {
-    await native.runWindowsProgram(path);
+  if (native && isProgram(name)) {
+    await native.runProgram(path);
     return;
   }
   if (isDesktopEntryName(name)) {
