@@ -383,13 +383,15 @@ let
     [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
   '';
 
-  # libmtp's udev rules probe a USB device for MTP and mark it ID_MTP_DEVICE,
-  # which electron/phone-usb.mts looks for. They're in libmtp's `out` output,
-  # but services.udev.packages keeps only each package's `bin` output
-  # (lib.getBin), which has none, so name the rules from `out` itself.
+  # libmtp marks MTP devices ID_MTP_DEVICE, which electron/phone-usb.mts looks
+  # for: its hwdb lists the devices it knows, and its rules probe the rest.
+  # Both are in libmtp's `out` output, but services.udev.packages keeps only
+  # each package's `bin` output (lib.getBin), which has neither, so they're
+  # named from `out` itself.
   libmtpUdevRules = pkgs.runCommand "libmtp-udev-rules" { } ''
-    mkdir -p $out/lib/udev/rules.d
-    ln -s ${pkgs.libmtp.out}/lib/udev/rules.d/69-libmtp.rules $out/lib/udev/rules.d/69-libmtp.rules
+    mkdir -p $out/lib/udev/rules.d $out/lib/udev/hwdb.d
+    ln -s ${pkgs.libmtp.out}/lib/udev/rules.d/69-libmtp.rules $out/lib/udev/rules.d/
+    ln -s ${pkgs.libmtp.out}/lib/udev/hwdb.d/69-libmtp.hwdb $out/lib/udev/hwdb.d/
   '';
 
   # Launcher: Electron running the Din host on Wayland (din-shell provides
