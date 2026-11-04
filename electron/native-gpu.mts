@@ -101,16 +101,44 @@ export function connectGpuBuffers(socketPath: string, shell: () => Electron.WebC
   if (!fd) return false;
 
   const imported = new Map<number, Electron.SharedTextureImported>();
+  /**
+   * Each buffer's transfer to the shell, settled once the page holds its
+   * own reference. Until then the import here is all that keeps the
+   * texture alive, and the page hasn't got it to drop: a buffer an app
+   * made and destroyed within a frame or two (every frame of a resize)
+   * was released mid-transfer, and the page drew a texture already gone,
+   * a white box, and kept it, since its drop had come first.
+   */
+  const transfers = new Map<number, Promise<void>>();
 
   /** Hand one imported buffer to the shell; it keeps it until 'drop'. */
   const sendToShell = (id: number, texture: Electron.SharedTextureImported) => {
     const contents = shell();
     if (!contents || contents.isDestroyed()) return;
-    sharedTexture
+    const transfer = sharedTexture
       .sendSharedTexture({ frame: contents.mainFrame, importedSharedTexture: texture }, id)
       .catch(() => {
         // The page went away mid-transfer; a reload re-requests everything.
       });
+    transfers.set(id, transfer);
+    void transfer.then(() => {
+      if (transfers.get(id) === transfer) transfers.delete(id);
+    });
+  };
+
+  /** Let go of a buffer, here and in the shell, once it has reached the shell. */
+  const drop = (id: number) => {
+    const texture = imported.get(id);
+    imported.delete(id);
+    const transfer = transfers.get(id);
+    transfers.delete(id);
+    const release = () => {
+      texture?.release();
+      const contents = shell();
+      if (contents && !contents.isDestroyed()) contents.send('native-display:drop', id);
+    };
+    if (transfer) void transfer.then(release);
+    else release();
   };
 
   const onMessage = ({ payload, fds }: { payload: Buffer; fds: number[] }) => {
@@ -155,14 +183,9 @@ export function connectGpuBuffers(socketPath: string, shell: () => Electron.WebC
         sendToShell(message.buffer, texture);
         return;
       }
-      case 'drop': {
-        imported.get(message.buffer)?.release();
-        imported.delete(message.buffer);
-        if (contents && !contents.isDestroyed()) {
-          contents.send('native-display:drop', message.buffer);
-        }
+      case 'drop':
+        drop(message.buffer);
         return;
-      }
       case 'present':
         if (contents && !contents.isDestroyed()) {
           contents.send('native-display:present', message.windows);
@@ -172,8 +195,13 @@ export function connectGpuBuffers(socketPath: string, shell: () => Electron.WebC
   };
 
   const onClose = () => {
-    for (const texture of imported.values()) texture.release();
+    for (const [id, texture] of imported) {
+      const transfer = transfers.get(id);
+      if (transfer) void transfer.then(() => texture.release());
+      else texture.release();
+    }
     imported.clear();
+    transfers.clear();
   };
 
   try {
