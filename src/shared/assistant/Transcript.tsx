@@ -100,7 +100,9 @@ function group(messages: SessionMessage[]): Entry[] {
       turn = undefined;
       prompt = undefined;
       compaction = undefined;
-    } else if (message.type === 'assistant' || turn || prompt) {
+    } else if (message.type === 'assistant' || turn || prompt || backgroundNotice(message)) {
+      // Background work finishing wakes the agent as a prompt would: its
+      // notice opens the turn, folded into the work with what that does.
       (turn ?? open(message)).items.push(message);
     } else entries.push({ kind: 'note', message });
   }
@@ -117,6 +119,11 @@ function stillRunning(step: Step, tasks: ReadonlySet<string>): boolean {
   if (step.type !== 'tool' || toolRunning(step)) return false;
   const id = toolTaskID(step);
   return id !== undefined && tasks.has(id);
+}
+
+/** The session's notice that a command, subagent or other work it left running has finished. */
+function backgroundNotice(message: SessionMessage): boolean {
+  return (message.type === 'synthetic' || message.type === 'system') && !!message.metadata?.source;
 }
 
 function compacting(message: SessionMessage): boolean {
@@ -953,7 +960,7 @@ function Note({ message, home }: { message: SessionMessage; home?: string }) {
     case 'skill':
       return <Divider>Using skill: {message.name}</Divider>;
     case 'synthetic':
-      if (message.metadata?.source) return <BackgroundDone message={message} />;
+      if (backgroundNotice(message)) return <BackgroundDone message={message} />;
       return message.description ? <Divider>{message.description}</Divider> : null;
     case 'shell':
       return (
