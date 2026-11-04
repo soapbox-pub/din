@@ -38,6 +38,8 @@ import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_proces
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
 import { chromiumRenderNode, connectGpuBuffers, dinFd } from './native-gpu.mts';
 import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
+import { settingsOwner } from './desktop-settings.mts';
+import { startXSettings } from './xsettings.mts';
 
 // .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
 const WORKER = path.join(import.meta.dirname, `native-display-worker${path.extname(import.meta.filename)}`);
@@ -283,6 +285,12 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
       current = display;
       // The shell connected before there was a display: hand it the port.
       if (shellWantsPort) sendPortToShell();
+      // X apps' theme, icons, pointer and fonts (xsettings.mts), where
+      // GSettings holds the desktop's: not under KDE and the like, whose
+      // own settings these would contradict.
+      if (settingsOwner() !== 'other') {
+        void startXSettings(display.xwayland ?? display.display, display.xwayland ? null : display.xauthority);
+      }
       await publishToSession(display);
       return display;
     } finally {

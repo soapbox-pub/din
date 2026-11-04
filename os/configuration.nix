@@ -385,7 +385,8 @@ let
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
-  # pointer's theme and size (electron/cursor.mts), bsdtar (libarchive), 7-Zip (the free build, without unRAR),
+  # pointer's theme and size (electron/cursor.mts), xsettingsd for X apps'
+  # settings (electron/xsettings.mts), bsdtar (libarchive), 7-Zip (the free build, without unRAR),
   # unar plus gzip/xz/bzip2/zstd for the Files app's archives, and
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
@@ -396,7 +397,7 @@ let
   # Din takes for sudo (electron/askpass.mts). Last, the optional features'
   # programs (Wine's, for Windows programs' Start-menu entries).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH:${featuresPath}
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${pkgs.xsettingsd}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH:${featuresPath}
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -1476,7 +1477,13 @@ in
         cursor-theme = "capitaine-cursors";
         icon-theme = "Din";
         gtk-theme = "adw-gtk3";
+        # Din's own interface font (Inter, below), at its text size (14px).
+        font-name = "Inter 10.5";
         cursor-size = lib.gvariant.mkInt32 40;
+      };
+      # Native apps' title bars have the buttons Din's windows do.
+      settings."org/gnome/desktop/wm/preferences" = {
+        button-layout = "appmenu:minimize,maximize,close";
       };
     }
   ];
@@ -1484,6 +1491,8 @@ in
   # Emoji and broad Unicode coverage for web content. noto-fonts has no
   # Chinese, Japanese or Korean, which otherwise render as boxes.
   fonts.packages = with pkgs; [
+    # Din's interface font, for native apps too (font-name above).
+    inter
     noto-fonts
     noto-fonts-cjk-sans
     noto-fonts-cjk-serif

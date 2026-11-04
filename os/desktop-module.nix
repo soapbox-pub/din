@@ -143,7 +143,8 @@ in
         message = "Din's desktop is built for x86_64-linux only.";
       }];
       services.displayManager.sessionPackages = [ cfg.package ];
-      environment.systemPackages = [ cfg.package pkgs.adwaita-icon-theme ];
+      # xsettingsd: X apps' settings on Din's display (electron/xsettings.mts).
+      environment.systemPackages = [ cfg.package pkgs.adwaita-icon-theme pkgs.xsettingsd ];
       hardware.graphics.enable = true;
       security.polkit.enable = true;
       programs.dconf.enable = true;
