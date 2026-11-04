@@ -562,6 +562,8 @@ in
   # it looks the nearby WiFi networks up in BeaconDB (the module's default
   # provider), and reads a GPS if there is one. Din asks each site in its own
   # prompt and is the user's GeoClue agent itself, in place of the demo one.
+  # Din asks it too, to set the time zone while the time is set
+  # automatically (electron/datetime.mts).
   services.geoclue2 = {
     enable = true;
     enableDemoAgent = false;
@@ -1789,8 +1791,9 @@ in
   # The text consoles take the layout din-keyboard writes, not a fixed one.
   environment.etc."vconsole.conf".source = lib.mkForce "/var/lib/din/console.conf";
 
-  # Settings → Date & Time turns setting the clock from the network off by
-  # leaving this file (os/din-time.sh): timedated would disable the unit,
+  # Settings → Date & Time turns setting the clock from the network (and the
+  # time zone from where the computer is) off by leaving this file
+  # (os/din-time.sh): timedated would disable the unit,
   # which NixOS's read-only /etc doesn't allow.
   systemd.services.systemd-timesyncd.unitConfig.ConditionPathExists = "!/var/lib/din/manual-time";
 

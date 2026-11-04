@@ -119,6 +119,7 @@ import {
   timeFormatOptions,
   zoneLongName,
   zoneOffset,
+  type DateTimeStatus,
 } from '@/lib/datetime';
 import {
   useDateTimeStatus,
@@ -126,7 +127,9 @@ import {
   useSetTime,
   useSetTimeZone,
   useTimeZones,
+  useZonePlaces,
 } from '@/hooks/useDateTime';
+import { TimeZoneMap } from '@/components/desktop/apps/TimeZoneMap';
 import { useClock } from '@/hooks/useClock';
 import type { AppConfig, ClockFormat, DesktopLayout, TaskbarButtons, TaskbarPosition, TaskbarStyle } from '@/contexts/AppContext';
 import { useDesktopIcons } from '@/contexts/DesktopIconsContext';
@@ -2988,7 +2991,7 @@ function SystemDateTime() {
     return <FallbackCard>Could not read the date and time.</FallbackCard>;
   }
 
-  const { timeZone, automatic, synchronized, canChange, canAutomatic } = status.data;
+  const { timeZone, automatic, synchronized, canChange, canAutomatic, zoneDetection } = status.data;
   // While a change is in flight, show the requested choice.
   const isAutomatic = setAutomatic.isPending ? setAutomatic.variables : automatic;
 
@@ -3004,9 +3007,11 @@ function SystemDateTime() {
             description={
               isAutomatic
                 ? synchronized
-                  ? 'Kept in step with internet time servers.'
+                  ? zoneDetection !== null
+                    ? 'The clock follows internet time servers, and the time zone where you are.'
+                    : 'Kept in step with internet time servers.'
                   : 'Waiting to reach an internet time server.'
-                : 'The clock keeps the time you set.'
+                : 'The clock and time zone stay as you set them.'
             }
             checked={isAutomatic}
             disabled={!canAutomatic || setAutomatic.isPending}
@@ -3029,7 +3034,12 @@ function SystemDateTime() {
       </div>
 
       <SubHeading>Time zone</SubHeading>
-      <TimeZonePicker current={timeZone} canChange={canChange} />
+      <TimeZonePicker
+        current={timeZone}
+        canChange={canChange}
+        // While Din sets it, it isn't picked by hand.
+        detection={isAutomatic && zoneDetection !== null ? zoneDetection : null}
+      />
     </>
   );
 }
@@ -3092,8 +3102,28 @@ function ManualTimeForm() {
   );
 }
 
-function TimeZonePicker({ current, canChange }: { current: string; canChange: boolean }) {
+/** What the time zone card says while the time zone is set automatically. */
+const DETECTION_NOTE: Record<NonNullable<DateTimeStatus['zoneDetection']>, string> = {
+  pending: 'Finding where you are…',
+  detecting: 'Finding where you are…',
+  found: 'Set from where you are.',
+  failed: 'Couldn’t find where you are yet; it tries again once you’re online. To choose it yourself, turn off Set time automatically.',
+};
+
+function TimeZonePicker({
+  current,
+  canChange: systemCanChange,
+  detection,
+}: {
+  current: string;
+  canChange: boolean;
+  /** How finding it is going, while it's set automatically; null while it's picked by hand. */
+  detection: DateTimeStatus['zoneDetection'];
+}) {
+  const automatic = detection !== null;
+  const canChange = systemCanChange && !automatic;
   const zones = useTimeZones();
+  const places = useZonePlaces();
   const setZone = useSetTimeZone();
   const [query, setQuery] = useState('');
   const selectedRef = useRef<HTMLButtonElement>(null);
@@ -3106,14 +3136,27 @@ function TimeZonePicker({ current, canChange }: { current: string; canChange: bo
 
   const entries = useMemo(() => {
     const at = new Date();
-    return (zones.data ?? []).map((zone) => ({ zone, ...describeZone(zone), offset: zoneOffset(zone, at) }));
-  }, [zones.data]);
+    // Countries and parts of them, so "Texas" won't find it but "United States" or "Central" will.
+    const placeOf = new Map((places.data ?? []).map((place) => [place.zone, place]));
+    let countryName: (code: string) => string = (code) => code;
+    try {
+      const names = new Intl.DisplayNames([], { type: 'region' });
+      countryName = (code) => names.of(code) ?? code;
+    } catch {
+      // codes, then
+    }
+    return (zones.data ?? []).map((zone) => {
+      const place = placeOf.get(zone);
+      const where = place ? `${place.countries.map(countryName).join(' ')} ${place.comment}` : '';
+      return { zone, ...describeZone(zone), offset: zoneOffset(zone, at), where: `${where} ${zoneLongName(zone, at)}` };
+    });
+  }, [zones.data, places.data]);
 
   const filtered = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return entries;
     return entries.filter((entry) => {
-      const haystack = `${entry.city} ${entry.region} ${entry.zone} ${entry.offset}`.toLowerCase();
+      const haystack = `${entry.city} ${entry.region} ${entry.zone} ${entry.offset} ${entry.where}`.toLowerCase();
       return terms.every((term) => haystack.includes(term));
     });
   }, [entries, query]);
@@ -3136,11 +3179,31 @@ function TimeZonePicker({ current, canChange }: { current: string; canChange: bo
           <p className="text-xs text-muted-foreground">
             {[longName, offset].filter(Boolean).join(', ')}
           </p>
+          {detection && (
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+              {(detection === 'pending' || detection === 'detecting') && (
+                <Loader2 className="size-3 motion-safe:animate-spin" aria-hidden />
+              )}
+              {DETECTION_NOTE[detection]}
+            </p>
+          )}
         </div>
       </div>
 
+      {systemCanChange && (places.data?.length ?? 0) > 0 && (
+        <TimeZoneMap
+          current={selected ?? current}
+          places={places.data ?? []}
+          disabled={automatic}
+          onPick={(zone) => setZone.mutate(zone)}
+        />
+      )}
+
       {canChange && (
         <>
+          <p className="text-xs text-muted-foreground">
+            Click where you are on the map, or search for a city in your time zone.
+          </p>
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"

@@ -253,7 +253,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'System',
     name: 'Date & Time',
     icon: Clock,
-    search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone'],
+    search: ['Time', 'Set time automatically', 'Time zone', 'Clock', 'Clock format', 'Show the date in the menu bar', 'The weekday and date, beside the time.', 'Show seconds in the menu bar', 'The clock ticks every second.', '24-hour', '12-hour', 'calendar', 'timezone', 'map', 'location'],
   },
   {
     id: 'features',

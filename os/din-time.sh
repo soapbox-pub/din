@@ -7,9 +7,14 @@
 #
 #   din-time zone <Area/City>
 #       Make <Area/City> the time zone, here and on the boot screen
-#       (din-boot-screen).
+#       (din-boot-screen). Only while it isn't set automatically.
+#   din-time detected-zone <Area/City>
+#       The same, for the zone Din found the computer is in. Only while
+#       it's set automatically.
 #   din-time automatic on|off
-#       Set the clock from the network (systemd-timesyncd), or don't.
+#       Set the clock from the network (systemd-timesyncd), and the time
+#       zone from where the computer is (Din, electron/datetime.mts), or
+#       don't.
 #   din-time set <YYYY-MM-DD HH:MM:SS>
 #       Set the clock, in the time zone's local time. Only while it isn't
 #       set from the network.
@@ -59,6 +64,12 @@ set_time() {
 case "${1:-}" in
   zone)
     [[ $# == 2 ]] || die "usage: din-time zone <Area/City>"
+    [[ -e $MANUAL_FILE ]] || die "The time zone is set automatically."
+    set_zone "$2"
+    ;;
+  detected-zone)
+    [[ $# == 2 ]] || die "usage: din-time detected-zone <Area/City>"
+    [[ ! -e $MANUAL_FILE ]] || die "The time zone is set by hand."
     set_zone "$2"
     ;;
   automatic)
@@ -69,5 +80,5 @@ case "${1:-}" in
     [[ $# == 2 ]] || die "usage: din-time set <YYYY-MM-DD HH:MM:SS>"
     set_time "$2"
     ;;
-  *) die "usage: din-time zone <Area/City> | automatic on|off | set <YYYY-MM-DD HH:MM:SS>" ;;
+  *) die "usage: din-time zone|detected-zone <Area/City> | automatic on|off | set <YYYY-MM-DD HH:MM:SS>" ;;
 esac

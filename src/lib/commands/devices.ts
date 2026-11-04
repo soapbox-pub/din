@@ -307,7 +307,7 @@ export const datetimeArea: Area = {
       const shown = q ? zones.filter((z) => z.toLowerCase().includes(q)) : zones;
       return { data: shown, text: shown.join('\n') };
     }),
-    command('datetime', 'zone', 'Set the time zone', [
+    command('datetime', 'zone', 'Set the time zone (turn automatic off first)', [
       { name: 'zone', type: 'string', positional: true, help: 'An IANA name, e.g. America/New_York' },
     ], async (args) => {
       const bridge = need(getDateTimeBridge(), 'Date & Time');
@@ -315,7 +315,18 @@ export const datetimeArea: Area = {
       if (!zones.includes(args.string('zone'))) throw new CommandError(`No time zone ${args.string('zone')}; din datetime zones lists them`);
       await call(bridge.setZone(args.string('zone')));
     }),
-    command('datetime', 'automatic', 'Set the clock from the network, or not', [ON], async (args) => {
+    command('datetime', 'zone-at', 'The time zone at a place', [
+      { name: 'latitude', type: 'string', positional: true, help: 'Degrees north, e.g. 29.76' },
+      { name: 'longitude', type: 'string', positional: true, help: 'Degrees east, e.g. -95.37' },
+    ], async (args) => {
+      const latitude = Number(args.string('latitude'));
+      const longitude = Number(args.string('longitude'));
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new CommandError('Give the latitude and longitude in degrees', 'usage');
+      const zone = await call(need(getDateTimeBridge(), 'Date & Time').zoneAt(latitude, longitude));
+      if (!zone) throw new CommandError('No time zone there');
+      return { data: zone, text: zone };
+    }),
+    command('datetime', 'automatic', 'Set the clock from the network and the time zone from where you are, or not', [ON], async (args) => {
       await call(need(getDateTimeBridge(), 'Date & Time').setAutomatic(args.bool('on')));
     }),
     command('datetime', 'set', 'Set the clock by hand (turn automatic off first)', [

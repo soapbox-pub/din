@@ -983,11 +983,21 @@ expose('keyboard', {
 // electron/datetime.mts: the system's time zone and clock, which Settings
 // shows and, on DinOS, changes.
 expose('datetime', {
-  /** { timeZone, automatic, synchronized, canChange, canAutomatic }. */
+  /** { timeZone, automatic, synchronized, canChange, canAutomatic, zoneDetection }. */
   status: () => ipcRenderer.invoke('datetime:status'),
 
   /** Every time zone there is, as IANA names. */
   zones: () => ipcRenderer.invoke('datetime:zones'),
+
+  /** Where each zone is: [{ zone, latitude, longitude, countries, comment }]. */
+  places: () => ipcRenderer.invoke('datetime:places'),
+
+  /**
+   * The time zone at a point on the map, or null.
+   * @param {number} latitude
+   * @param {number} longitude
+   */
+  zoneAt: (latitude, longitude) => ipcRenderer.invoke('datetime:zone-at', latitude, longitude),
 
   /**
    * Make a time zone the system's.
@@ -996,7 +1006,8 @@ expose('datetime', {
   setZone: (zone) => ipcRenderer.invoke('datetime:set-zone', zone),
 
   /**
-   * Set the clock from the network, or don't.
+   * Set the clock from the network and the time zone from where the
+   * computer is, or don't.
    * @param {boolean} automatic
    */
   setAutomatic: (automatic) => ipcRenderer.invoke('datetime:set-automatic', automatic),

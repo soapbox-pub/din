@@ -20,15 +20,35 @@ export interface DateTimeStatus {
   canChange: boolean;
   /** Whether there's a network time service to turn on and off. */
   canAutomatic: boolean;
+  /**
+   * While the time is set automatically, how finding the time zone from
+   * where the computer is went. Null where Din doesn't set it.
+   */
+  zoneDetection: 'pending' | 'detecting' | 'found' | 'failed' | null;
+}
+
+/** A zone's principal place (tzdata's zone1970.tab). */
+export interface ZonePlace {
+  zone: string;
+  latitude: number;
+  longitude: number;
+  /** ISO 3166 codes of the countries it covers. */
+  countries: string[];
+  /** Which part of the country, where it has more than one zone. */
+  comment: string;
 }
 
 export interface DateTimeBridge {
   status(): Promise<DateTimeStatus>;
   /** Every time zone there is, as IANA names. */
   zones(): Promise<string[]>;
-  /** Make a time zone the system's. */
+  /** Where each zone is, for the map; empty where that isn't known. */
+  places(): Promise<ZonePlace[]>;
+  /** The time zone at a point, or null. */
+  zoneAt(latitude: number, longitude: number): Promise<string | null>;
+  /** Make a time zone the system's (only while it isn't set automatically). */
   setZone(zone: string): Promise<void>;
-  /** Set the clock from the network, or don't. */
+  /** Set the clock from the network and the time zone from where the computer is, or don't. */
   setAutomatic(automatic: boolean): Promise<void>;
   /** Set the clock, as local time "YYYY-MM-DD HH:MM:SS". */
   setTime(time: string): Promise<void>;

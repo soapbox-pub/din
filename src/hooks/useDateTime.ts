@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDateTimeBridge } from '@/lib/datetime';
-import type { DateTimeStatus } from '@/lib/datetime';
+import type { DateTimeStatus, ZonePlace } from '@/lib/datetime';
 
 /** TanStack Query hooks over the date & time bridge (window.dinos.datetime). */
 
@@ -16,8 +16,12 @@ export function useDateTimeStatus() {
     queryKey: ['datetime', 'status'],
     queryFn: () => requireBridge().status(),
     enabled: getDateTimeBridge() !== undefined,
-    // Whether the clock has synchronized changes on its own.
-    refetchInterval: 15_000,
+    // Whether the clock has synchronized, and the time zone been found,
+    // changes on its own; the time zone is watched closely while it's looked for.
+    refetchInterval: (query) => {
+      const detection = query.state.data?.zoneDetection;
+      return detection === 'pending' || detection === 'detecting' ? 2_000 : 15_000;
+    },
     retry: false,
   });
 }
@@ -27,6 +31,17 @@ export function useTimeZones() {
   return useQuery<string[]>({
     queryKey: ['datetime', 'zones'],
     queryFn: () => requireBridge().zones(),
+    enabled: getDateTimeBridge() !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** Where each zone is, for the map. */
+export function useZonePlaces() {
+  return useQuery<ZonePlace[]>({
+    queryKey: ['datetime', 'places'],
+    queryFn: () => requireBridge().places(),
     enabled: getDateTimeBridge() !== undefined,
     staleTime: Infinity,
     retry: false,
@@ -46,7 +61,7 @@ export function useSetTimeZone() {
   return useDateTimeMutation((zone: string) => requireBridge().setZone(zone));
 }
 
-/** Set the clock from the network, or don't. */
+/** Set the clock from the network and the time zone from where the computer is, or don't. */
 export function useSetAutomaticTime() {
   return useDateTimeMutation((automatic: boolean) => requireBridge().setAutomatic(automatic));
 }

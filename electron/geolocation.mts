@@ -12,6 +12,8 @@
 // in the shell the first time, like the camera (see hardenGuestSession in
 // main.mts), and checked again here for every request.
 //
+// Din asks too, for the time zone while it's set automatically (locateHere).
+//
 // One GeoClue client serves every page. It starts on the first request and
 // keeps running while pages keep asking, so a watch sees the location as
 // GeoClue updates it; a minute after the last request it stops.
@@ -202,6 +204,14 @@ async function locate(): Promise<GeoFix> {
     };
     s.waiters.add(done);
   });
+}
+
+/**
+ * Where the computer is, for Din itself: the automatic time zone
+ * (electron/datetime.mts). Rejects when GeoClue can't say.
+ */
+export function locateHere(): Promise<GeoFix> {
+  return locate();
 }
 
 /** The top document of a web guest, or null for anything else. */
