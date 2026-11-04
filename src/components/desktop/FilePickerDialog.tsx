@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   ChevronDown,
@@ -133,6 +133,14 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   /** Where a Shift+click range starts. */
   const anchorRef = useRef<string | null>(null);
+  /** The row the keyboard is on: the last one clicked, moved to, or typed. */
+  const [cursor, setCursor] = useState<string | null>(null);
+  /** Bumped to scroll the cursor's row into view. */
+  const [revealToken, setRevealToken] = useState(0);
+  /** What's been typed to find a name, and when the last key was. */
+  const typeahead = useRef({ text: '', at: 0 });
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(options.currentName ?? '');
   /** A save that would replace this path, waiting for the user to say so. */
   const [replacing, setReplacing] = useState<string | null>(null);
@@ -167,12 +175,20 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
       .map((entry) => ({ entry, path: joinPath(folder, entry.name), when: entry.mtimeMs }));
   }, [inRecent, recent.data, filter, folder, listing.data, showHidden, sort]);
   const byPath = useMemo(() => new Map(items.map((item) => [item.path, item])), [items]);
+  const indexByPath = useMemo(() => new Map(items.map((item, i) => [item.path, i])), [items]);
+  const cursorIndex = cursor === null ? -1 : (indexByPath.get(cursor) ?? -1);
 
   /** Whether an entry can be what the picker returns. */
   const choosable = useCallback(
     (entry: FsEntry) =>
       directory ? entry.kind === 'directory' : entry.kind === 'file' && filterMatches(filter, entry.name),
     [directory, filter],
+  );
+  /** Files shown but out of reach: of another type, or any file when choosing a folder. */
+  const dimmed = useCallback(
+    (entry: FsEntry) =>
+      entry.kind !== 'directory' && !(saving ? filterMatches(filter, entry.name) : choosable(entry)),
+    [saving, filter, choosable],
   );
 
   const sections = useMemo(() => {
@@ -205,12 +221,20 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     ];
   }, [hasRecent, home.data, homeListing.data, bookmarks.bookmarks, volumes.data]);
 
-  const navigate = useCallback((target: string) => {
+  /** Open a place, with the cursor on `cursorOn` (the folder just left, going up). */
+  const navigate = useCallback((target: string, cursorOn: string | null = null) => {
     setSelected(new Set());
     anchorRef.current = null;
+    setCursor(cursorOn);
     setReplacing(null);
+    typeahead.current.text = '';
+    // The list is replaced, so keys would go nowhere if it had focus.
+    if (document.activeElement?.closest('[role="listbox"]')) dialogRef.current?.focus();
     setCwd(target === RECENT || target.length <= 1 ? target || '/' : target.replace(/\/+$/, ''));
   }, []);
+  const goUp = useCallback(() => {
+    if (folder && folder !== '/') navigate(parentPath(folder), folder);
+  }, [folder, navigate]);
 
   const setSort = (key: SortKey) =>
     setPrefs((stored) => {
@@ -274,9 +298,15 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     if (selectedPaths.length > 0) finish(selectedPaths);
   };
 
-  const clickItem = useCallback(
-    (item: PickerItem, event: React.MouseEvent) => {
+  /**
+   * Put the cursor on a row and select it, as clicking it does: with
+   * `toggle` (Ctrl) adding or removing it, with `range` (Shift) selecting
+   * everything choosable from the anchor to it.
+   */
+  const pick = useCallback(
+    (item: PickerItem, { toggle = false, range = false }: { toggle?: boolean; range?: boolean } = {}) => {
       const { entry, path } = item;
+      setCursor(path);
       if (saving) {
         if (entry.kind === 'file') {
           setName(entry.name);
@@ -284,20 +314,25 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         }
         return;
       }
-      if (!choosable(entry)) {
-        setSelected(new Set());
-        return;
-      }
-      const toggle = multiple && (event.ctrlKey || event.metaKey);
-      const range = multiple && event.shiftKey && anchorRef.current !== null;
-      if (range) {
-        const paths = items.filter((i) => choosable(i.entry)).map((i) => i.path);
-        const from = paths.indexOf(anchorRef.current!);
-        const to = paths.indexOf(path);
-        if (from !== -1 && to !== -1) {
-          setSelected(new Set(paths.slice(Math.min(from, to), Math.max(from, to) + 1)));
+      toggle &&= multiple;
+      if (multiple && range && anchorRef.current !== null) {
+        const from = indexByPath.get(anchorRef.current);
+        const to = indexByPath.get(path);
+        if (from !== undefined && to !== undefined) {
+          setSelected(
+            new Set(
+              items
+                .slice(Math.min(from, to), Math.max(from, to) + 1)
+                .filter((i) => choosable(i.entry))
+                .map((i) => i.path),
+            ),
+          );
           return;
         }
+      }
+      if (!choosable(entry)) {
+        if (!toggle) setSelected(new Set());
+        return;
       }
       anchorRef.current = path;
       setSelected((current) => {
@@ -307,7 +342,13 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         return next;
       });
     },
-    [saving, choosable, multiple, items],
+    [saving, choosable, multiple, items, indexByPath],
+  );
+
+  const clickItem = useCallback(
+    (item: PickerItem, event: React.MouseEvent) =>
+      pick(item, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }),
+    [pick],
   );
 
   const openItem = useCallback(
@@ -322,8 +363,6 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     [navigate, saving, save, choosable, finish],
   );
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const input = nameRef.current;
     if (!input) return dialogRef.current?.focus();
@@ -354,6 +393,78 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
     }),
     [chooseLabel, saving, choosable, directory, finish, openItem, isFavorite, toggleFavorite],
   );
+
+  const listRef = useRef<HTMLUListElement>(null);
+
+  /** Move the cursor to the row at `index`, selecting it, and show it. */
+  const moveTo = (index: number, extend: boolean) => {
+    const item = items[index];
+    if (!item) return;
+    pick(item, { range: extend });
+    setRevealToken((t) => t + 1);
+    listRef.current?.focus({ preventScroll: true });
+  };
+
+  /** The nearest row from `index` the cursor can be on, looking in `step`'s direction. */
+  const reachable = (index: number, step: 1 | -1): number => {
+    for (let i = index; i >= 0 && i < items.length; i += step) {
+      if (!dimmed(items[i].entry)) return i;
+    }
+    return -1;
+  };
+
+  /**
+   * The list's keys, from anywhere in the picker but a text field: arrows,
+   * Home/End and Page Up/Down move the cursor (Shift extends the selection),
+   * and typing a name's first letters goes to it, as in Files.
+   */
+  const listKeys = (e: React.KeyboardEvent): boolean => {
+    if (e.ctrlKey || e.metaKey || e.altKey || items.length === 0) return false;
+    const extend = e.shiftKey;
+    const page = Math.max(
+      1,
+      Math.floor((listRef.current?.closest('[data-picker-scroll]')?.clientHeight ?? 0) / ROW_HEIGHT) - 2,
+    );
+    const go = (index: number, step: 1 | -1) => {
+      const start = Math.min(Math.max(index, 0), items.length - 1);
+      // Past the last row the cursor can be on, the nearest one back.
+      const found = reachable(start, step) !== -1 ? reachable(start, step) : reachable(start, step === 1 ? -1 : 1);
+      if (found !== -1) moveTo(found, extend);
+      return true;
+    };
+    switch (e.key) {
+      case 'ArrowDown':
+        return go(cursorIndex === -1 ? 0 : cursorIndex + 1, 1);
+      case 'ArrowUp':
+        return go(cursorIndex === -1 ? 0 : cursorIndex - 1, -1);
+      case 'Home':
+        return go(0, 1);
+      case 'End':
+        return go(items.length - 1, -1);
+      case 'PageDown':
+        return go(cursorIndex === -1 ? 0 : cursorIndex + page, 1);
+      case 'PageUp':
+        return go(cursorIndex === -1 ? 0 : cursorIndex - page, -1);
+    }
+    if (e.key.length !== 1) return false;
+    const now = Date.now();
+    const t = typeahead.current;
+    // Space only continues a name being typed; otherwise it presses buttons.
+    if (e.key === ' ' && (t.text === '' || now - t.at > TYPEAHEAD_MS)) return false;
+    t.text = now - t.at > TYPEAHEAD_MS ? e.key.toLowerCase() : t.text + e.key.toLowerCase();
+    t.at = now;
+    // A letter typed again looks past the row it's on, so repeating it cycles.
+    const from = cursorIndex === -1 ? 0 : t.text.length === 1 ? cursorIndex + 1 : cursorIndex;
+    for (let i = 0; i < items.length; i++) {
+      const index = (from + i) % items.length;
+      const { entry } = items[index];
+      if (!dimmed(entry) && entry.name.toLowerCase().startsWith(t.text)) {
+        moveTo(index, false);
+        return true;
+      }
+    }
+    return true;
+  };
 
   const title =
     options.title ??
@@ -418,8 +529,11 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             : 'This folder is empty.'
         }
         choosable={choosable}
-        dimmed={(entry) => entry.kind !== 'directory' && !(saving ? filterMatches(filter, entry.name) : choosable(entry))}
+        dimmed={dimmed}
         selected={selected}
+        cursorIndex={cursorIndex}
+        revealToken={revealToken}
+        listRef={listRef}
         multiple={multiple}
         onClick={clickItem}
         onOpen={openItem}
@@ -445,19 +559,27 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         className="flex h-[600px] max-h-full w-[900px] max-w-full flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-2xl outline-none"
         onKeyDown={(e) => {
           const typing = e.target instanceof HTMLInputElement;
+          // Keys from menus and lists portaled out of the picker (a row's
+          // right-click menu, the file type list) are theirs.
+          const inside = e.target instanceof Node && e.currentTarget.contains(e.target);
+          const cursorItem = cursorIndex === -1 ? null : items[cursorIndex];
           if (e.key === 'Escape') {
             e.stopPropagation();
             onCancel();
-          } else if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
+          } else if (inside && e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
             e.preventDefault();
-            if (canConfirm) confirm();
+            // On a folder, Enter opens it, as double-clicking does.
+            if (!typing && cursorItem?.entry.kind === 'directory') navigate(cursorItem.path);
+            else if (canConfirm) confirm();
           } else if (
             folder &&
             folder !== '/' &&
             ((e.altKey && e.key === 'ArrowUp') || (e.key === 'Backspace' && !typing))
           ) {
             e.preventDefault();
-            navigate(parentPath(folder));
+            goUp();
+          } else if (inside && !typing && listKeys(e)) {
+            e.preventDefault();
           } else if (e.ctrlKey && e.key.toLowerCase() === 'h') {
             e.preventDefault();
             toggleHidden();
@@ -477,7 +599,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             className="size-7"
             aria-label="Parent folder"
             disabled={!folder || folder === '/'}
-            onClick={() => folder && navigate(parentPath(folder))}
+            onClick={goUp}
           >
             <ArrowUp className="size-4" aria-hidden />
           </Button>
@@ -667,6 +789,11 @@ interface Place {
 const ROW_HEIGHT = 32;
 /** Extra rows rendered above/below the viewport to hide scroll pop-in. */
 const OVERSCAN = 10;
+/** Above the rows in the scroll area: the sticky column headers (`h-8`) and the list's `p-1`. */
+const HEADER_HEIGHT = 32;
+const LIST_PADDING = 4;
+/** How long type-ahead keeps adding to what's been typed (ms), as in Files. */
+const TYPEAHEAD_MS = 1000;
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
@@ -713,6 +840,9 @@ const PickerList = memo(function PickerList({
   choosable,
   dimmed,
   selected,
+  cursorIndex,
+  revealToken,
+  listRef,
   multiple,
   onClick,
   onOpen,
@@ -727,6 +857,11 @@ const PickerList = memo(function PickerList({
   choosable: (entry: FsEntry) => boolean;
   dimmed: (entry: FsEntry) => boolean;
   selected: ReadonlySet<string>;
+  /** The keyboard's row, or -1. */
+  cursorIndex: number;
+  /** When it changes, the cursor's row scrolls into view (and on mount). */
+  revealToken: number;
+  listRef: React.RefObject<HTMLUListElement | null>;
   multiple: boolean;
   onClick: (item: PickerItem, event: React.MouseEvent) => void;
   onOpen: (item: PickerItem) => void;
@@ -738,9 +873,29 @@ const PickerList = memo(function PickerList({
     overscan: OVERSCAN,
   });
   const columns = COLUMNS.filter((col) => showLocation || col.key !== 'location');
+  const rowId = useId();
+
+  // Scroll the cursor's row into view when asked to, which a click (on a
+  // row already in view) doesn't, and when the list first shows, for the
+  // folder just left. The rows mounted come from the scroll position, so
+  // a row far off is reached by scrolling, not `scrollIntoView`.
+  const revealed = useRef<number | null>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || cursorIndex === -1 || revealed.current === revealToken) return;
+    revealed.current = revealToken;
+    const top = HEADER_HEIGHT + LIST_PADDING + cursorIndex * ROW_HEIGHT;
+    if (top - HEADER_HEIGHT < el.scrollTop) el.scrollTop = top - HEADER_HEIGHT;
+    else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
+  }, [containerRef, cursorIndex, revealToken]);
 
   return (
-    <div ref={containerRef} onScroll={onScroll} className="@container flex h-full flex-col overflow-y-auto">
+    <div
+      ref={containerRef}
+      onScroll={onScroll}
+      data-picker-scroll
+      className="@container flex h-full flex-col overflow-y-auto"
+    >
       {/* In the scroll area, so its columns line up with the rows' beside the scrollbar. */}
       <div
         role="row"
@@ -789,18 +944,29 @@ const PickerList = memo(function PickerList({
       ) : (
         <div className="p-1">
           <ul
-            className="relative"
+            ref={listRef}
+            // One tab stop for the whole list; the keys move its cursor.
+            tabIndex={0}
+            className={cn(
+              'group/list relative rounded-md outline-none',
+              // With no row to ring, the list shows it has focus itself.
+              cursorIndex === -1 && 'focus-visible:ring-2 focus-visible:ring-ring',
+            )}
             style={{ height: totalHeight }}
             role="listbox"
+            aria-label="Files"
             aria-multiselectable={multiple || undefined}
+            aria-activedescendant={cursorIndex === -1 ? undefined : `${rowId}-${cursorIndex}`}
           >
             {items.slice(start, end).map((item, i) => (
               <PickerRow
                 key={item.path}
+                id={`${rowId}-${start + i}`}
                 item={item}
                 location={showLocation ? displayFolder(item.path, home) : null}
                 top={(start + i) * ROW_HEIGHT}
                 dim={dimmed(item.entry)}
+                isCursor={start + i === cursorIndex}
                 isSelected={selected.has(item.path) && choosable(item.entry)}
                 onClick={onClick}
                 onOpen={onOpen}
@@ -827,20 +993,25 @@ const copyPath = (path: string) => void navigator.clipboard?.writeText(path).cat
 
 /** One row in the picker list, absolutely positioned within the virtual list. */
 const PickerRow = memo(function PickerRow({
+  id,
   item,
   location,
   top,
   dim,
+  isCursor,
   isSelected,
   onClick,
   onOpen,
   menu,
 }: {
+  id: string;
   item: PickerItem;
   /** The containing folder, shown in Recent. */
   location: string | null;
   top: number;
   dim: boolean;
+  /** The keyboard's row, ringed while the list has focus. */
+  isCursor: boolean;
   isSelected: boolean;
   onClick: (item: PickerItem, event: React.MouseEvent) => void;
   onOpen: (item: PickerItem) => void;
@@ -852,19 +1023,25 @@ const PickerRow = memo(function PickerRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li className="absolute inset-x-0" style={{ top, height: ROW_HEIGHT }} role="option" aria-selected={isSelected}>
-          <button
-            type="button"
-            disabled={dim}
+        <li
+          id={id}
+          className="absolute inset-x-0"
+          style={{ top, height: ROW_HEIGHT }}
+          role="option"
+          aria-selected={isSelected}
+          aria-disabled={dim || undefined}
+        >
+          <div
             title={location !== null ? path : undefined}
-            onClick={(e) => onClick(item, e)}
-            onDoubleClick={() => onOpen(item)}
+            onClick={dim ? undefined : (e) => onClick(item, e)}
+            onDoubleClick={dim ? undefined : () => onOpen(item)}
             className={cn(
-              'flex h-full w-full items-center gap-3 rounded-md px-3 text-left text-sm',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'flex h-full w-full cursor-default select-none items-center gap-3 rounded-md px-3 text-left text-sm',
               isSelected
                 ? 'bg-primary/15 text-foreground'
-                : 'text-foreground hover:bg-foreground/5',
+                : 'text-foreground',
+              !isSelected && !dim && 'hover:bg-foreground/5',
+              isCursor && 'group-focus/list:ring-2 group-focus/list:ring-inset group-focus/list:ring-ring',
               dim && 'opacity-40',
             )}
           >
@@ -891,7 +1068,7 @@ const PickerRow = memo(function PickerRow({
             <span className="hidden w-36 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
               {item.when !== null ? formatWhen(item.when) : ''}
             </span>
-          </button>
+          </div>
         </li>
       </ContextMenuTrigger>
       <ContextMenuContent className="z-[1001]">
