@@ -148,16 +148,18 @@ export function MenuBar() {
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);
   const pull = usePullDown(fullscreen?.id ?? null);
-  // Under a maximized window the bar goes with its title bar, not the wallpaper.
-  const wallpaperTone = useWallpaperTone(MENU_BAR_HEIGHT);
-  const tone = fullscreen ? null : wallpaperTone;
+  const tone = useWallpaperTone(MENU_BAR_HEIGHT);
+  // Under a maximized window the text goes with its title bar, not the wallpaper.
   const tokens = accent
     ? themeColorTokens(accent)
-    : tone && themeColorTokens(tone === 'dark' ? '#000000' : '#ffffff');
+    : !fullscreen && tone && themeColorTokens(tone === 'dark' ? '#000000' : '#ffffff');
 
   return (
     <>
-    {/* Before the workspace, so under every window. */}
+    {/* Before the workspace, so under every window. It stays the wallpaper's
+        while a window maximizes or restores: the window's strip, near enough
+        opaque, covers it as it arrives, so changing it would only show as a
+        flash ahead of the window. */}
     {tone ? (
       <div
         aria-hidden
@@ -180,7 +182,7 @@ export function MenuBar() {
       // The accent is sanitized by the window; its tokens keep the bar's
       // contents legible on it, as on the title bar. Over the wallpaper, the
       // same tokens keep them legible on its scrim.
-      style={tokens ?? undefined}
+      style={tokens || undefined}
       // Equal side columns keep the clock centered on the screen however
       // much each side holds.
       // tracking-tight approximates SF Pro's optical spacing at menu-bar sizes.
