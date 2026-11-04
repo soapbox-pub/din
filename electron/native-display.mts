@@ -414,6 +414,11 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
     });
     delete env.WAYLAND_DISPLAY;
   }
+  // Qt apps look like GTK ones, so like Din (gtk-theme.mts): Qt's own GTK 3
+  // platform theme, in every qtbase, takes GTK's colors, font, icons and
+  // light/dark mode, where GSettings holds the desktop's. Qt picks it by
+  // desktop name, which Din's isn't one of. A theme the user set is theirs.
+  if (!env.QT_QPA_PLATFORMTHEME && settingsOwner() !== 'other') env.QT_QPA_PLATFORMTHEME = 'gtk3';
   return env;
 }
 
