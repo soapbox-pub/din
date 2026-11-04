@@ -1229,7 +1229,7 @@ in
       libdrm libgbm libglvnd libGL vulkan-loader wayland libxkbcommon
       libx11 libxcb libxext libxfixes libxrandr libxrender libxi libxcursor
       libxcomposite libxdamage libxtst libxscrnsaver libxshmfence libxkbfile
-      alsa-lib libpulseaudio pipewire SDL2
+      alsa-lib libpulseaudio pipewire SDL2 zstd
     ];
   };
   environment.sessionVariables.NIX_LD_LIBRARY_PATH =
@@ -1253,7 +1253,17 @@ in
     # output, which is the program's: a daemon that answers its app there
     # opens its replies with appimage-run's line, which the app can't read.
     # It says it on standard error instead.
+    #
+    # AppImages leave out what every ordinary distribution has, but the
+    # environment nixpkgs gives them hasn't all of it: libzstd above all,
+    # which bundled Qt, libtiff and libsystemd link against (Solarus Editor
+    # and Buzz wouldn't start without it), and a few more that bundled
+    # libraries name.
     package = pkgs.appimage-run.override {
+      extraPkgs = pkgs: with pkgs; [
+        zstd libbsd libdecor libdeflate libpng libwebp libxau libxdmcp
+        elfutils libffi
+      ];
       appimageTools = pkgs.appimageTools // {
         appimage-exec = pkgs.runCommand "appimage-exec.sh" { } ''
           mkdir -p $out/bin
