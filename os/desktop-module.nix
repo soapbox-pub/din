@@ -17,7 +17,7 @@ let
   cfg = config.services.desktopManager.din;
 
   dinPackages = import ./packages.nix { inherit pkgs lib din; inherit (cfg) electron; };
-  inherit (dinPackages) din-app din-compositor din-fd electron-hardened;
+  inherit (dinPackages) din-app din-compositor din-fd electron-hardened din-polkit-agent;
 
   # What Din runs, as on DinOS (configuration.nix's makeDinLauncher, which
   # says what each is for), less what's DinOS's alone.
@@ -34,6 +34,7 @@ let
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_ASKPASS_SCRIPT=${./din-askpass.py}
+    export DIN_POLKIT_AGENT=${din-polkit-agent}/bin/din-polkit-agent
     # Chromium dlopens libva for hardware video decoding, which Electron's
     # wrapper leaves off the library path.
     export LD_LIBRARY_PATH=${pkgs.libva-minimal.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

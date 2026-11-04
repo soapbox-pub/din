@@ -42,7 +42,7 @@ import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { PromptHost } from './PromptHost';
-import { AdminPromptHost } from './AdminPrompt';
+import { AdminPromptHost, PolkitPromptHost } from './AdminPrompt';
 import { ScreenSharePicker } from './ScreenShareHost';
 import { EyeDropperHost } from './EyeDropperHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
@@ -246,6 +246,7 @@ function DesktopSession() {
                     <NsiteBridgeHost />
                     <PromptHost />
                     <AdminPromptHost />
+                    <PolkitPromptHost />
                     <ScreenSharePicker />
                     <EyeDropperHost />
                     <DesktopHotkeys />

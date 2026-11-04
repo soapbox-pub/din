@@ -174,7 +174,19 @@ let
     grep -q "$out/libexec/electron/electron" $out/bin/electron
     chmod 555 $out/bin/electron
   '';
+
+  # polkit's authentication agent for Din's session (see the script, and
+  # electron/polkit-agent.mts): GLib's D-Bus and polkit's PolkitAgent.Session,
+  # which runs polkit-agent-helper-1 to check the password.
+  din-polkit-agent = pkgs.writeShellApplication {
+    name = "din-polkit-agent";
+    runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.pygobject3 ])) pkgs.systemd ];
+    text = ''
+      export GI_TYPELIB_PATH=${pkgs.polkit.out}/lib/girepository-1.0:${pkgs.glib.out}/lib/girepository-1.0
+      exec python3 -I ${./din-polkit-agent.py} "$@"
+    '';
+  };
 in
 {
-  inherit din-app din-compositor din-fd electron-hardened;
+  inherit din-app din-compositor din-fd electron-hardened din-polkit-agent;
 }

@@ -272,15 +272,35 @@ function nameOf(pid: number): string {
  * typed there), or the Assistant anywhere above it.
  */
 function requesterOf(sudo: number): string {
+  return requesterFrom(parentOf(sudo));
+}
+
+/**
+ * The program `pid` is, or the first above it that isn't a shell, in the
+ * same words as sudo's requests (requesterOf): polkit's asker
+ * (electron/polkit-agent.mts) is the program itself.
+ */
+export function requesterFrom(start: number): string {
   let named = '';
-  for (let pid = parentOf(sudo), steps = 0; pid > 1 && steps < 32; pid = parentOf(pid), steps++) {
+  for (let pid = start, steps = 0; pid > 1 && steps < 32; pid = parentOf(pid), steps++) {
     const name = nameOf(pid);
     const args = argv(pid);
     if (name === 'opencode' || path.basename(args[0] ?? '') === 'opencode') return 'Assistant';
     if (!named && args.some((arg) => path.basename(arg) === 'pty-host.py')) named = 'Terminal';
-    if (!named && name && !SHELLS.has(name)) named = name;
+    if (!named && name && !SHELLS.has(name)) named = fullName(name, args);
   }
   return named || 'A program';
+}
+
+/**
+ * A program's name in full: the kernel keeps 15 characters of it, so it's
+ * taken from the command line where that starts the same, less the dot and
+ * -wrapped a Nix wrapper adds (.system76-keyboard-configurator-wrapped).
+ */
+function fullName(name: string, args: string[]): string {
+  const base = path.basename(args[0] ?? '').replace(/^\.(.+)-wrapped$/, '$1');
+  const short = name.replace(/^\./, '');
+  return base.length >= short.length && base.startsWith(short) ? base : name;
 }
 
 /**

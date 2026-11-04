@@ -14,7 +14,7 @@ let
   # Din itself: its app, its compositors, din-fd and the Electron it runs on
   # (os/packages.nix), shared with the desktop module other NixOS systems
   # use (os/desktop-module.nix).
-  inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened;
+  inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened din-polkit-agent;
 
   # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
   # from its repository (the flake's `deckmon` input). It captures the screen
@@ -403,6 +403,9 @@ let
     # sudo's askpass helper's script: Din answers the password only to it
     # (electron/askpass.mts).
     export DIN_ASKPASS_SCRIPT=${./din-askpass.py}
+    # polkit's authentication agent, which asks for the password in Din
+    # when a program asks polkit (pkexec, systemctl…) (electron/polkit-agent.mts).
+    export DIN_POLKIT_AGENT=${din-polkit-agent}/bin/din-polkit-agent
     export DIN_DECKMON=${din-deckmon}/bin/deckmon
     # Screen recording (electron/screen-recorder.mts), through din-shell's
     # screencopy, encoded with VA-API.

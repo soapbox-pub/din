@@ -142,6 +142,7 @@ import { registerLockHandlers } from './lock.mts';
 import { registerEraseHandlers } from './erase.mts';
 import { registerPasswordsHandlers } from './passwords.mts';
 import { registerAskpass } from './askpass.mts';
+import { registerPolkitAgent } from './polkit-agent.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
@@ -1929,8 +1930,9 @@ async function readPowerProfiles(): Promise<PowerProfilesState> {
 }
 
 // Restart and shut down, through logind. The menu offers each only where
-// logind answers a plain "yes" for this session: "challenge" would want a
-// polkit agent to ask for a password, and Din has none.
+// logind answers a plain "yes" for this session: "challenge" would have
+// polkit's agent (electron/polkit-agent.mts) ask for the password, which a
+// click on Restart shouldn't.
 const LOGIND_BUS = 'org.freedesktop.login1';
 const LOGIND_PATH = '/org/freedesktop/login1';
 const LOGIND_IFACE = 'org.freedesktop.login1.Manager';
@@ -6097,6 +6099,11 @@ app.whenReady().then(() => {
       shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
   });
   registerAskpass({
+    sendToShell,
+    hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
+    assertShellSender,
+  });
+  registerPolkitAgent({
     sendToShell,
     hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
     assertShellSender,

@@ -2061,6 +2061,47 @@ expose('askpass', {
   approve: (requestId, allow) => ipcRenderer.invoke('askpass:approve', requestId, allow),
 });
 
+// polkit bridge (window.dinos.polkit), backed by electron/polkit-agent.mts:
+// a program asking polkit for something that needs the password.
+expose('polkit', {
+  /**
+   * Subscribe to requests. Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, requester: string, message: string, action: string, user: string | null }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, requester: string, message: string, action: string, user: string | null }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('polkit:request', listener);
+    return () => ipcRenderer.removeListener('polkit:request', listener);
+  },
+
+  /**
+   * Subscribe to requests that went away (answered, the program gave up, or
+   * it timed out). Returns an unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number }} d
+     */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('polkit:cancel', listener);
+    return () => ipcRenderer.removeListener('polkit:cancel', listener);
+  },
+
+  /**
+   * Answer with the password, or null to cancel. Resolves `{ ok: false }`
+   * when the password isn't right.
+   * @param {number} requestId
+   * @param {string | null} password
+   */
+  answer: (requestId, password) => ipcRenderer.invoke('polkit:answer', requestId, password),
+});
+
 // Updater bridge (window.dinos.updater), backed by electron/updater.mts: builds
 // Din's source and stages it for the next boot.
 expose('updater', {

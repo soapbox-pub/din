@@ -12,6 +12,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getAskpassBridge, type AskpassRequest } from '@/lib/askpass';
+import { getPolkitBridge, type PolkitRequest } from '@/lib/polkit';
 import { closeNotification, notify } from '@/lib/notificationCenter';
 
 interface AdminPasswordDialogProps {
@@ -280,6 +281,88 @@ export function AdminPromptHost() {
       onCancel={() => {
         if (!current) return;
         void getAskpassBridge()?.answer(current.requestId, null).catch(() => {});
+        done(current.requestId);
+      }}
+    />
+  );
+}
+
+/** What a polkit request says it's for, with whose password when it isn't the user's. */
+function polkitDescription(request: PolkitRequest): string | undefined {
+  const forUser = request.user ? `Enter the password for ${request.user}.` : '';
+  return [request.message, forUser].filter(Boolean).join(' ') || undefined;
+}
+
+/**
+ * Asks for the computer's password when a program asks polkit for something
+ * that needs it, as pkexec does (electron/polkit-agent.mts). As with sudo's
+ * requests (AdminPromptHost), each is a notification first, and clicking it
+ * opens the dialog. A wrong password stays there; polkit checks it, and
+ * only the right one lets the program go on.
+ *
+ * Renders nothing outside the Electron shell.
+ */
+export function PolkitPromptHost() {
+  const [requests, setRequests] = useState<PolkitRequest[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const notifications = useRef(new Map<number, string>());
+
+  useEffect(() => {
+    const bridge = getPolkitBridge();
+    if (!bridge) return;
+    const shown = notifications.current;
+    const offRequest = bridge.onRequest((request) => {
+      setRequests((q) => [...q, request]);
+      shown.set(
+        request.requestId,
+        notify({
+          source: { name: 'Din', icon: ShieldCheck },
+          title: `${request.requester} needs your password`,
+          body: request.message,
+          urgency: 'critical',
+          replaceKey: `polkit:${request.requestId}`,
+          onActivate: () => setOpenId(request.requestId),
+        }),
+      );
+    });
+    const offCancel = bridge.onCancel((requestId) => {
+      setRequests((q) => q.filter((r) => r.requestId !== requestId));
+      setOpenId((open) => (open === requestId ? null : open));
+      const id = shown.get(requestId);
+      if (id) closeNotification(id, 'closed');
+      shown.delete(requestId);
+    });
+    return () => {
+      offRequest();
+      offCancel();
+    };
+  }, []);
+
+  const current = requests.find((r) => r.requestId === openId) ?? null;
+  const done = (requestId: number) => {
+    setRequests((q) => q.filter((r) => r.requestId !== requestId));
+    setOpenId(null);
+    const id = notifications.current.get(requestId);
+    if (id) closeNotification(id, 'closed');
+    notifications.current.delete(requestId);
+  };
+
+  return (
+    <AdminPasswordDialog
+      key={current?.requestId}
+      open={current !== null}
+      title={`${current?.requester ?? ''} wants to make changes as administrator`}
+      description={current ? polkitDescription(current) : undefined}
+      onSubmit={async (password) => {
+        if (!current) return null;
+        const { ok } = (await getPolkitBridge()?.answer(current.requestId, password)) ?? { ok: true };
+        if (!ok) return 'That password isn’t right.';
+        done(current.requestId);
+        return null;
+      }}
+      onCancel={() => {
+        if (!current) return;
+        void getPolkitBridge()?.answer(current.requestId, null).catch(() => {});
         done(current.requestId);
       }}
     />
