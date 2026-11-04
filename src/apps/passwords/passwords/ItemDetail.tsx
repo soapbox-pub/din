@@ -48,15 +48,21 @@ function FieldRow({
       </button>
       {extra}
       {onCopy && (
-        <span
-          aria-live="polite"
+        <button
+          type="button"
+          onClick={copy}
+          tabIndex={-1}
+          title="Copy"
+          aria-label={copyLabel}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-opacity',
+            'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground',
             copied ? 'text-primary opacity-100' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
           )}
         >
-          {copied ? <Check className="size-4" aria-label="Copied" /> : <Copy className="size-4" aria-hidden />}
-        </span>
+          <span aria-live="polite">
+            {copied ? <Check className="size-4" aria-label="Copied" /> : <Copy className="size-4" aria-hidden />}
+          </span>
+        </button>
       )}
     </div>
   );
