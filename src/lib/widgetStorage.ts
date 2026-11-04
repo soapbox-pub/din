@@ -30,7 +30,9 @@ export function storageArea(identity: string, instance?: string): string {
 }
 
 export function storageGet(area: string, key: string): string | null {
-  return read(area)[key] ?? null;
+  const items = read(area);
+  // Own keys only: `toString` or `constructor` would find Object.prototype's.
+  return Object.hasOwn(items, key) ? items[key] : null;
 }
 
 /** Throws if the area would go over its quota. */
@@ -43,7 +45,7 @@ export function storageSet(area: string, key: string, value: string): void {
 
 export function storageRemove(area: string, key: string): void {
   const items = read(area);
-  if (!(key in items)) return;
+  if (!Object.hasOwn(items, key)) return;
   delete items[key];
   write(area, items);
 }
