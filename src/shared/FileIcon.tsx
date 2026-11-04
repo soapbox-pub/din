@@ -109,9 +109,11 @@ export function FileIcon({
           alt=""
           draggable={false}
           // In px: a grid item's percentages don't hold a tall picture to its box.
-          style={{ maxWidth: px, maxHeight: px }}
+          // The corner scales with the box: the theme's radius on a list row's
+          // small, short thumbnail rounds it into a pill.
+          style={{ maxWidth: px, maxHeight: px, borderRadius: Math.min(8, Math.max(2, Math.round(px / 12))) }}
           className={cn(
-            'rounded-sm object-contain shadow-sm',
+            'object-contain shadow-sm',
             px > 24 && 'ring-1 ring-foreground/10',
             'motion-safe:animate-in motion-safe:fade-in-0',
           )}
