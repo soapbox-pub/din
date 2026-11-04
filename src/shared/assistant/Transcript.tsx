@@ -891,6 +891,54 @@ function Compaction({ message }: { message: Extract<SessionMessage, { type: 'com
   );
 }
 
+type SyntheticMessage = Extract<SessionMessage, { type: 'synthetic' | 'system' }>;
+
+/** A command's leading `cd <dir> &&`, which says nothing about what it does. */
+const LEADING_CD = /^\s*cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*/;
+
+/** What finished in the background and how, for its notice's line. */
+function backgroundLabel(source: string, state: string | undefined): { icon: LucideIcon; text: string } {
+  const how = state === 'error' ? 'failed' : state === 'cancelled' ? 'stopped' : 'finished';
+  if (source === 'shell') return { icon: SquareTerminal, text: `Background command ${how}` };
+  if (source === 'subagent') return { icon: Bot, text: `Subagent ${how}` };
+  if (/image/i.test(source)) return { icon: Sparkles, text: `Image ${how}` };
+  return { icon: Clock, text: `Background task ${how}` };
+}
+
+/**
+ * The notice the session gets when work it left running finishes (a
+ * background command, subagent or image): a quiet row like a tool step's,
+ * naming it, that opens into what it reported.
+ */
+function BackgroundDone({ message }: { message: SyntheticMessage }) {
+  const [open, setOpen] = useState(false);
+  const { source = '', state } = message.metadata ?? {};
+  const { icon, text } = backgroundLabel(source, state);
+  const full = message.description?.trim() ?? '';
+  const short = (source === 'shell' ? full.replace(LEADING_CD, '') : full).split('\n')[0];
+  // The report comes wrapped in one element (`<shell id=… command=…>…</shell>`).
+  const body = message.text.trim().replace(/^<[a-z_-]+\b[^>]*>\n?/i, '').replace(/\n?<\/[a-z_-]+>$/i, '').trim();
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className={cn(ROW, '-ml-1.5 w-[calc(100%+0.75rem)]')}>
+        {createElement(icon, { className: 'size-3.5 shrink-0', 'aria-hidden': true })}
+        <span className="min-w-0 flex-1 truncate" title={full}>
+          {text}
+          {short && <code className="ml-1.5 font-mono text-xs text-foreground/80">{short}</code>}
+        </span>
+        {state === 'error' && <X className="size-3.5 shrink-0 text-destructive" aria-label="Failed" />}
+        <RowChevron open={open} />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mb-2 ml-5 mt-1 space-y-2 rounded-lg bg-muted/50 p-2.5">
+          {source === 'shell' && full && <OutputBlock label="Command" text={full} />}
+          {body && <OutputBlock label={source === 'shell' ? 'Output' : 'Result'} text={body} />}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 /** Everything else a session records, as a quiet line, or nothing. */
 function Note({ message, home }: { message: SessionMessage; home?: string }) {
   switch (message.type) {
@@ -905,6 +953,7 @@ function Note({ message, home }: { message: SessionMessage; home?: string }) {
     case 'skill':
       return <Divider>Using skill: {message.name}</Divider>;
     case 'synthetic':
+      if (message.metadata?.source) return <BackgroundDone message={message} />;
       return message.description ? <Divider>{message.description}</Divider> : null;
     case 'shell':
       return (

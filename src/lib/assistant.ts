@@ -257,7 +257,17 @@ export type SessionMessage =
       tokens?: TokenUsage;
       time: { created: number; streamed?: number; completed?: number };
     })
-  | (MessageBase & { type: 'synthetic' | 'system'; text: string; description?: string })
+  | (MessageBase & {
+      type: 'synthetic' | 'system';
+      text: string;
+      description?: string;
+      /**
+       * Set on the notice of background work finishing: `source` is what ran it
+       * (`shell`, `subagent`, a tool's name), `state` how it ended
+       * (`completed`, `error`, `cancelled`).
+       */
+      metadata?: { source?: string; state?: string };
+    })
   | (MessageBase & { type: 'skill'; name: string; text: string })
   | (MessageBase & { type: 'shell'; command: string; status: string; output?: { output: string } })
   | (MessageBase & { type: 'agent-switched'; agent: string })
