@@ -1682,7 +1682,7 @@ in
     description = "Set up hibernation on an encrypted disk";
     wantedBy = [ "multi-user.target" ];
     after = [ "local-fs.target" ];
-    path = with pkgs; [ coreutils util-linux gawk gnugrep btrfs-progs config.systemd.package ];
+    path = with pkgs; [ coreutils util-linux e2fsprogs gawk gnugrep btrfs-progs config.systemd.package ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -1719,6 +1719,10 @@ in
             btrfs subvolume create "$dir" >/dev/null
           fi
           chmod 0700 "$dir"
+          # An installed root is compressed, as the stick it came from is, and
+          # the folder inherits that. A file that inherits it from the folder
+          # can't go without copy-on-write, and mkswapfile fails.
+          chattr -c "$dir"
           btrfs filesystem mkswapfile --size "$size" "$swap" >/dev/null
         else
           mkdir -p -m 0700 "$dir"
