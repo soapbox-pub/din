@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatBytes, isValidEntryName, joinPath } from '@/lib/fs';
+import { formatBytes, isKnownTime, isValidEntryName, joinPath } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
 import { FileIcon } from '@/shared/FileIcon';
@@ -576,7 +576,7 @@ const ListRow = memo(function ListRow(props: ItemProps) {
         {typeLabel(name, entry.kind)}
       </span>
       <span className="hidden w-40 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
-        {entry.mtimeMs !== null ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
+        {isKnownTime(entry.mtimeMs) ? MTIME_FORMAT.format(entry.mtimeMs) : ''}
       </span>
     </div>
   );

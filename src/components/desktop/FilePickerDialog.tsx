@@ -22,6 +22,7 @@ import {
   compareEntriesBy,
   formatBytes,
   getFsBridge,
+  isKnownTime,
   joinPath,
   parentPath,
 } from '@/lib/fs';
@@ -1066,7 +1067,7 @@ const PickerRow = memo(function PickerRow({
               {entry.kind === 'file' && entry.size !== null ? formatBytes(entry.size) : ''}
             </span>
             <span className="hidden w-36 shrink-0 truncate text-xs tabular-nums text-muted-foreground @md:block">
-              {item.when !== null ? formatWhen(item.when) : ''}
+              {isKnownTime(item.when) ? formatWhen(item.when) : ''}
             </span>
           </div>
         </li>
