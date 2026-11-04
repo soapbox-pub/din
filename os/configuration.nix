@@ -41,6 +41,21 @@ let
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
 
+  # pkexec inside appimage-run's sandbox, where the real one can't work (see
+  # programs.appimage, below): the user's systemd runs the real one outside.
+  # In here /run/wrappers/bin/pkexec is this script; out there it's pkexec.
+  appimagePkexec = pkgs.writeShellApplication {
+    name = "pkexec";
+    text = ''
+      env=()
+      for name in DISPLAY XAUTHORITY WAYLAND_DISPLAY; do
+        if [[ -n "''${!name:-}" ]]; then env+=(-E "$name"); fi
+      done
+      exec ${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect \
+        "''${env[@]}" -- /run/wrappers/bin/pkexec "$@"
+    '';
+  };
+
   # Optional features: parts of the system that aren't in it until someone
   # turns them on, in Settings → Optional Features or with `din features`
   # (electron/features.mts). Each is a few packages from the system's own
@@ -1186,12 +1201,38 @@ in
     binfmt = true;
     # The AppImage environment's locales are the system's (i18n), not glibc's
     # full set: that's another 220 MiB of every language there is.
+    #
+    # pkexec can't raise privileges in there: bubblewrap always sets
+    # no_new_privs, so setuid does nothing, and an AppImage that runs part of
+    # itself as root (`pkexec $APPIMAGE --daemon`, System76's Keyboard
+    # Configurator) fails with "pkexec must be setuid root". In its place is
+    # one that asks the user's systemd to run the real pkexec, outside, with
+    # the same input, output and exit status; polkit asks for the password in
+    # Din as for any other, and an AppImage it names runs through binfmt.
+    #
+    # appimage-run says what it's doing ("… installed in …") on standard
+    # output, which is the program's: a daemon that answers its app there
+    # opens its replies with appimage-run's line, which the app can't read.
+    # It says it on standard error instead.
     package = pkgs.appimage-run.override {
-      buildFHSEnv = pkgs.buildFHSEnv.override {
+      appimageTools = pkgs.appimageTools // {
+        appimage-exec = pkgs.runCommand "appimage-exec.sh" { } ''
+          mkdir -p $out/bin
+          sed 's/\becho /echo >\&2 /' ${pkgs.appimageTools.appimage-exec}/bin/appimage-exec.sh \
+            > $out/bin/appimage-exec.sh
+          chmod +x $out/bin/appimage-exec.sh
+          ! grep -n '\becho [^>]' $out/bin/appimage-exec.sh
+        '';
+      };
+      buildFHSEnv = args: (pkgs.buildFHSEnv.override {
         callPackage = fn: args: pkgs.callPackage fn (args // {
           pkgs = pkgs // { glibcLocales = config.i18n.glibcLocales; };
         });
-      };
+      }) (args // {
+        extraBwrapArgs = (args.extraBwrapArgs or [ ]) ++ [
+          "--ro-bind" "${appimagePkexec}/bin/pkexec" "/run/wrappers/bin/pkexec"
+        ];
+      });
     };
   };
 

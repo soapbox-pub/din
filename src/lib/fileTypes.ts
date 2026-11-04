@@ -205,6 +205,8 @@ export function typeLabel(name: string, kind: FsEntryKind): string {
   if (kind === 'file' && isCursorTheme(name)) return 'Cursor theme';
   const category = fileCategory(name, kind);
   const ext = extensionOf(name);
+  // The one program that isn't Windows's: a Linux app in a single file.
+  if (category === 'program' && ext === 'appimage') return 'AppImage';
   if (category === 'folder' || category === 'pdf' || category === 'program' || !ext) {
     return CATEGORY_LABEL[category];
   }
