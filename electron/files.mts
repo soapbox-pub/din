@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { ipcMain, protocol } from 'electron';
+import { ipcMain, nativeImage, protocol } from 'electron';
 import { CommandError, runCommand } from './system.mts';
 
 const fsp = fs.promises;
@@ -469,7 +469,7 @@ function memoryLimitKiB(): number {
 async function runArchiveTool(
   file: string,
   args: string[],
-  options: { read: string[]; write?: string; signal?: AbortSignal; maxBuffer?: number },
+  options: { read: string[]; write?: string; signal?: AbortSignal; maxBuffer?: number; timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const sandbox = (await canSandbox())
     ? [
@@ -483,7 +483,7 @@ async function runArchiveTool(
   const script = 'tool=$1; limit=$2; shift 2; command -v "$tool" >/dev/null || exit 127; ulimit -v "$limit"; exec nice -n 10 "$@" </dev/null';
   try {
     return await runCommand('sh', ['-c', script, 'sh', file, String(memoryLimitKiB()), ...sandbox, file, ...args], {
-      timeout: ARCHIVE_TIMEOUT_MS,
+      timeout: options.timeout ?? ARCHIVE_TIMEOUT_MS,
       maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
       signal: options.signal,
     });
@@ -1297,6 +1297,174 @@ export function registerFileOpsHandlers({ assertShellSender, sendToShell }: {
   });
 }
 
+// An AppImage's own icon, for Files and the desktop to show in place of the
+// generic program icon. An AppImage is a runtime with a SquashFS image of
+// the app's folder appended, which 7-Zip opens as it is; the icon is the
+// folder's .DirIcon (by the AppImage spec), usually a link to a PNG or SVG
+// inside it, else the one its desktop entry names, at the top. 7-Zip runs
+// in the archive sandbox, and only the icon's files come out, into a
+// folder that's gone once it's read. Images in the DwarFS AppImages some
+// newer runtimes build can't be opened, and keep the generic icon.
+
+/** How long pulling an icon out of an AppImage may take. */
+const APPIMAGE_ICON_TIMEOUT_MS = 20_000;
+/** An icon file bigger than this isn't one. */
+const MAX_APPIMAGE_ICON_BYTES = 4 * 1024 * 1024;
+/** PNG icons are scaled down to this, the largest a file's icon is drawn. */
+const APPIMAGE_ICON_PX = 256;
+/** Links followed from .DirIcon before giving up. */
+const MAX_ICON_LINKS = 4;
+/** AppImages' icons kept before the oldest are dropped. */
+const APPIMAGE_ICON_CACHE = 200;
+
+interface AppImageIcon {
+  data: Buffer;
+  type: 'image/png' | 'image/svg+xml';
+}
+
+const appImageIcons = new Map<string, Promise<AppImageIcon | null>>();
+
+function isAppImageFile(file: string): boolean {
+  return file.toLowerCase().endsWith('.appimage');
+}
+
+/**
+ * Where a link inside the AppImage's folder points, as a path in it, or
+ * null if it leads out. Absolute links mean the folder they were made in:
+ * `/…/Name.AppDir/icon.png` or `/usr/share/…`.
+ */
+function appDirLink(from: string, target: string): string | null {
+  let inside: string;
+  if (target.startsWith('/')) {
+    const appDir = target.lastIndexOf('.AppDir/');
+    inside = appDir >= 0 ? target.slice(appDir + '.AppDir/'.length) : target.slice(1);
+  } else {
+    inside = path.posix.join(path.posix.dirname(from), target);
+  }
+  inside = path.posix.normalize(inside);
+  return inside === '.' || inside.startsWith('../') || inside === '..' || inside.startsWith('/') ? null : inside;
+}
+
+/** Pull `names` out of the AppImage into `dest`; those it doesn't have are skipped. */
+async function extractFromAppImage(file: string, dest: string, names: string[]): Promise<void> {
+  try {
+    await runArchiveTool(
+      '7zz',
+      ['x', '-y', '-bso0', '-bsp0', '-bse0', '-r-', '-snl', `-p${NO_PASSPHRASE}`, `-o${dest}`, '--', file, ...names.map(safeArg)],
+      { read: [file], write: dest, timeout: APPIMAGE_ICON_TIMEOUT_MS },
+    );
+  } catch {
+    // A name it doesn't have, or the runtime's data after the image, is a
+    // complaint, not a failure: what came out is looked at all the same.
+  }
+}
+
+/** An extracted icon file, if it's a PNG or an SVG (never through a link). */
+async function readIconFile(file: string): Promise<AppImageIcon | null> {
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fsp.open(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch {
+    return null;
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.size === 0 || stats.size > MAX_APPIMAGE_ICON_BYTES) return null;
+    const data = await handle.readFile();
+    if (data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+      const image = nativeImage.createFromBuffer(data);
+      if (image.isEmpty()) return null;
+      const { width, height } = image.getSize();
+      if (Math.max(width, height) <= APPIMAGE_ICON_PX) return { data, type: 'image/png' };
+      const scale = APPIMAGE_ICON_PX / Math.max(width, height);
+      const small = image.resize({
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+        quality: 'best',
+      });
+      return small.isEmpty() ? null : { data: small.toPNG(), type: 'image/png' };
+    }
+    if (/<svg[\s>]/.test(data.subarray(0, 4096).toString('utf8'))) return { data, type: 'image/svg+xml' };
+    return null;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** The icon file `name` in the AppImage, following links inside it. */
+async function appImageIconAt(file: string, dest: string, name: string, extracted: boolean): Promise<AppImageIcon | null> {
+  let current = name;
+  for (let hop = 0; hop <= MAX_ICON_LINKS; hop++) {
+    if (!extracted || hop > 0) await extractFromAppImage(file, dest, [current]);
+    const out = path.join(dest, current);
+    let link: string | null = null;
+    try {
+      if ((await fsp.lstat(out)).isSymbolicLink()) link = await fsp.readlink(out);
+    } catch {
+      return null;
+    }
+    if (link === null) return readIconFile(out);
+    const next = appDirLink(current, link);
+    if (!next) return null;
+    current = next;
+  }
+  return null;
+}
+
+/** The Icon= of the first desktop entry at the top of the extracted folder. */
+async function desktopEntryIcon(dest: string): Promise<string | null> {
+  let names: string[];
+  try {
+    names = (await fsp.readdir(dest)).filter((n) => n.endsWith('.desktop')).sort();
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    try {
+      const stats = await fsp.lstat(path.join(dest, name));
+      if (!stats.isFile() || stats.size > 64 * 1024) continue;
+      const text = await fsp.readFile(path.join(dest, name), 'utf8');
+      const icon = /^Icon\s*=\s*(.+?)\s*$/m.exec(text)?.[1];
+      if (icon && !icon.includes('/')) return icon;
+    } catch {
+      // Next one.
+    }
+  }
+  return null;
+}
+
+async function findAppImageIcon(file: string): Promise<AppImageIcon | null> {
+  const dest = await fsp.mkdtemp(path.join(os.tmpdir(), 'din-appimage-icon-'));
+  try {
+    // The top of the folder in one go: .DirIcon, the desktop entry, and the
+    // icons that are usually beside it.
+    await extractFromAppImage(file, dest, ['.DirIcon', '*.desktop', '*.png', '*.svg']);
+    const dirIcon = await appImageIconAt(file, dest, '.DirIcon', true);
+    if (dirIcon) return dirIcon;
+    const icon = await desktopEntryIcon(dest);
+    if (!icon) return null;
+    for (const ext of ['.svg', '.png']) {
+      const found = await appImageIconAt(file, dest, icon + ext, true);
+      if (found) return found;
+    }
+    return null;
+  } finally {
+    await fsp.rm(dest, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** An AppImage's icon, made once per version of the file. */
+function appImageIcon(file: string, stats: fs.Stats): Promise<AppImageIcon | null> {
+  const key = `${file}\0${stats.mtimeMs}\0${stats.size}`;
+  let icon = appImageIcons.get(key);
+  if (!icon) {
+    icon = findAppImageIcon(file).catch(() => null);
+    appImageIcons.set(key, icon);
+    if (appImageIcons.size > APPIMAGE_ICON_CACHE) appImageIcons.delete(appImageIcons.keys().next().value!);
+  }
+  return icon;
+}
+
 /** Content types for what the shell renders inline. */
 const MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -1341,13 +1509,27 @@ export async function serveLocalFile(request: Request, file: string, cors: Recor
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response(null, { status: 405, headers: cors });
     }
-    let size: number;
+    let stats: fs.Stats;
     try {
-      const stats = await fsp.stat(file);
+      stats = await fsp.stat(file);
       if (!stats.isFile()) return new Response(null, { status: 404, headers: cors });
-      size = stats.size;
     } catch {
       return new Response(null, { status: 404, headers: cors });
+    }
+    const size = stats.size;
+
+    // An SVG is a document: never let one run script in this origin.
+    const safety = {
+      'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+      'x-content-type-options': 'nosniff',
+    };
+
+    // <url>?icon: the icon a program carries inside it (an AppImage's).
+    if (new URL(request.url).searchParams.has('icon')) {
+      const icon = isAppImageFile(file) ? await appImageIcon(file, stats) : null;
+      if (!icon) return new Response(null, { status: 404, headers: cors });
+      const headers = { ...cors, ...safety, 'content-type': icon.type, 'cache-control': 'no-cache', 'content-length': String(icon.data.length) };
+      return new Response(request.method === 'HEAD' ? null : new Uint8Array(icon.data), { status: 200, headers });
     }
 
     const ext = path.extname(file).slice(1).toLowerCase();
@@ -1356,9 +1538,7 @@ export async function serveLocalFile(request: Request, file: string, cors: Recor
       'content-type': MIME[ext] ?? 'application/octet-stream',
       'accept-ranges': 'bytes',
       'cache-control': 'no-cache',
-      // An SVG is a document: never let one run script in this origin.
-      'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
-      'x-content-type-options': 'nosniff',
+      ...safety,
     };
 
     let start = 0;
