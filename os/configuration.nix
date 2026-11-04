@@ -383,6 +383,15 @@ let
     [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
   '';
 
+  # libmtp's udev rules probe a USB device for MTP and mark it ID_MTP_DEVICE,
+  # which electron/phone-usb.mts looks for. They're in libmtp's `out` output,
+  # but services.udev.packages keeps only each package's `bin` output
+  # (lib.getBin), which has none, so name the rules from `out` itself.
+  libmtpUdevRules = pkgs.runCommand "libmtp-udev-rules" { } ''
+    mkdir -p $out/lib/udev/rules.d
+    ln -s ${pkgs.libmtp.out}/lib/udev/rules.d/69-libmtp.rules $out/lib/udev/rules.d/69-libmtp.rules
+  '';
+
   # Launcher: Electron running the Din host on Wayland (din-shell provides
   # the compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -1040,7 +1049,7 @@ in
   # it.
   services.udev.packages = [
     pkgs.brightnessctl
-    pkgs.libmtp
+    libmtpUdevRules
     (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
     '')
