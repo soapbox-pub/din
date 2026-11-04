@@ -23,6 +23,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import time
+
     machine.wait_for_unit("multi-user.target")
     machine.wait_until_succeeds("test -e /dev/dri/card0")
     machine.succeed("udevadm settle")
@@ -50,8 +52,13 @@ pkgs.testers.runNixOSTest {
     machine.succeed("(plymouth ask-for-password --prompt=unlock > /tmp/typed; echo done > /tmp/asked) >/dev/null 2>&1 &")
     machine.sleep(3)
     machine.screenshot("asking")
+    # Across a blink: some of these show the caret.
+    for i in range(3):
+        time.sleep(0.3)
+        machine.screenshot(f"asking-blink-{i}")
     machine.send_chars("azer")
-    machine.sleep(1)
+    # The caret stays on for half a second after a key.
+    time.sleep(0.2)
     machine.screenshot("typing")
     machine.send_chars("ty\n")
     machine.wait_for_file("/tmp/asked")

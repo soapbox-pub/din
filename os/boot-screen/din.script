@@ -153,10 +153,38 @@ fun show_lock()
   dim.target = 0.3;
 }
 
-fun set_entry(string, alpha, size)
+# The caret, which blinks in the field while it waits for the password: before
+# the placeholder when the field is empty, after the dots once typing starts.
+caret_w = Math.Max(px(2), 1);
+caret_h = px(22);
+caret = Sprite(Image("cursor.png").Scale(caret_w, caret_h));
+caret.SetZ(12);
+caret.SetOpacity(0);
+caret_shown = 0;
+caret_frame = 0;
+# Refresh runs 50 times a second: half a second on, half a second off.
+CARET_PERIOD = 50;
+
+CARET_NONE = 0;
+CARET_BEFORE = 1;
+CARET_AFTER = 2;
+
+fun set_entry(string, alpha, size, caret_at)
 {
   image = text(string, alpha, "Regular", size);
   center(entry.sprite, image, field_y + Math.Int((px(48) - image.GetHeight()) / 2));
+  left = Math.Int((screen.w - image.GetWidth()) / 2);
+  if (caret_at == CARET_BEFORE)
+    caret.SetX(screen.x + left - px(6) - caret_w);
+  else
+    caret.SetX(screen.x + left + image.GetWidth() + px(4));
+  caret.SetY(screen.y + field_y + Math.Int((px(48) - caret_h) / 2));
+  if (caret_at == CARET_NONE)
+    global.caret_shown = 0;
+  else
+    global.caret_shown = 1;
+  # Solid while typing, as in any text field; the blink starts again after.
+  global.caret_frame = 0;
 }
 
 fun set_caption(string)
@@ -177,14 +205,14 @@ fun display_password(prompt, bullets)
   }
   if (bullets == 0)
   {
-    set_entry("Password", 0.5, 15);
+    set_entry("Password", 0.5, 15, CARET_BEFORE);
   }
   else
   {
     dots = "";
     for (i = 0; i < bullets && i < 24; i++)
       dots += "•";
-    set_entry(dots, 1, 20);
+    set_entry(dots, 1, 20, CARET_AFTER);
   }
   show_lock();
 }
@@ -195,7 +223,7 @@ fun display_normal()
   if (global.asked > 0 && !global.entered)
   {
     global.entered = 1;
-    set_entry("Unlocking…", 0.7, 15);
+    set_entry("Unlocking…", 0.7, 15, CARET_NONE);
   }
 }
 
@@ -226,6 +254,7 @@ fun root_mounted()
 {
   global.mounted = 1;
   global.locked = 0;
+  global.caret_shown = 0;
   clock.target = 0;
   date.target = 0;
   field.target = 0;
@@ -288,6 +317,14 @@ fun refresh()
   global.footer = ease(footer);
   global.track = ease(track);
   global.fill = ease(fill);
+
+  global.caret_frame++;
+  if (caret_frame >= CARET_PERIOD)
+    global.caret_frame = 0;
+  if (caret_shown && locked && caret_frame < CARET_PERIOD / 2)
+    caret.SetOpacity(entry.opacity * 0.9);
+  else
+    caret.SetOpacity(0);
 }
 
 Plymouth.SetRefreshFunction(refresh);
