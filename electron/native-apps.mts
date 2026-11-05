@@ -38,6 +38,9 @@ import {
   wineCommand,
   wineEnvironment,
   winePrefix,
+  programForShortcut,
+  runUninstaller,
+  unixPathOf,
   windowsProgramCommand,
   windowsShellDir,
 } from './windows-apps.mts';
@@ -64,6 +67,8 @@ export interface NativeApp {
   terminal: boolean;
   /** URL schemes it opens (MimeType=x-scheme-handler/…), e.g. ["nostr"]. */
   schemes: string[];
+  /** A Windows program installed in Din's prefix, which Din can uninstall. */
+  uninstallable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +102,8 @@ interface DesktopEntry {
    * Windows program's own window's.
    */
   windows?: boolean;
+  /** The file it was read from, when it's one. */
+  file?: string;
 }
 
 /** Stands in argv for Exec's %u / %U until a URL is given. */
@@ -305,6 +312,10 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
     if (!isWineCommand(argv[0] ?? '')) return null;
     argv = ['wine', ...argv.slice(1)];
     for (const name of Object.keys(env)) delete env[name];
+    // Wine never takes away an entry when its program's uninstaller takes
+    // away the shortcut it made it for; one whose shortcut is gone is too.
+    const shortcut = argv.find((arg) => /^[a-z]:\\.+\.lnk$/i.test(arg));
+    if (shortcut && !unixPathOf(shortcut)) return null;
   }
   const urlAt = argv.indexOf(URL_ARG);
   argv = argv.filter((arg) => arg !== URL_ARG);
@@ -339,6 +350,7 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
     urlIndex,
     schemes,
     windows,
+    file,
   };
 }
 
@@ -520,6 +532,7 @@ async function listApps(): Promise<NativeApp[]> {
       keywords: entry.keywords,
       terminal: entry.terminal,
       schemes: entry.schemes,
+      ...(entry.windows ? { uninstallable: true } : {}),
     });
     if (apps.length % BATCH === 0) await breathe();
   }
@@ -721,6 +734,48 @@ export async function runProgram(file: string): Promise<void> {
   }
   if (isAppImage(file)) await runAppImage(file);
   else await runWindowsProgram(file);
+}
+
+/** Tell the shell the installed apps changed, set by registerNativeAppHandlers. */
+let appsChanged: () => void = () => {};
+
+/** Forget the scanned entries and tell the shell to list apps again. */
+function rescan(): void {
+  entryCache = null;
+  forgetIconIndex();
+  appsChanged();
+}
+
+/**
+ * Uninstall a Windows program, as Windows' Apps & Features does: by its
+ * own uninstaller, which asks what it asks and takes away its shortcuts,
+ * then its entries go from the list. One with none (a program that only
+ * made a shortcut) loses its shortcut. Resolves once that's done.
+ */
+async function uninstall(appId: string): Promise<'uninstalled' | 'removed'> {
+  const entry = await entryFor(appId);
+  if (!entry.windows || !entry.file) throw new Error(`${entry.name} can’t be uninstalled here`);
+  const program = programForShortcut({ name: entry.name, folder: entry.cwd });
+  if (program) {
+    const display = await requireDisplay();
+    await runUninstaller(program, await appEnvironment(display));
+    rescan();
+    // An uninstaller that hands over to a copy of itself (NSIS's) returns
+    // at once; look again once that has likely finished.
+    for (const delay of [10_000, 60_000]) setTimeout(rescan, delay).unref();
+    return 'uninstalled';
+  }
+  // No uninstaller: its shortcut, Windows' and Wine's entry for it.
+  const shortcut = entry.argv.find((arg) => /^[a-z]:\\.+\.lnk$/i.test(arg));
+  const lnk = shortcut ? unixPathOf(shortcut) : null;
+  if (lnk && lnk.startsWith(`${winePrefix()}${path.sep}`)) fs.rmSync(lnk, { force: true });
+  const shell = windowsShellApplications();
+  const own = path.join(dataHome(), 'applications');
+  if (entry.file.startsWith(`${shell}${path.sep}`) || entry.file.startsWith(`${own}${path.sep}`)) {
+    fs.rmSync(entry.file, { force: true });
+  }
+  rescan();
+  return 'removed';
 }
 
 /**
@@ -1057,34 +1112,12 @@ function windowsProgramFile(pid: number): { file: string; prefix: string } | nul
   } catch {
     return null;
   }
-  const match = /^([a-z]):\\(.+\.exe)$/i.exec(argv0);
-  if (!match) return null;
+  if (!/^[a-z]:\\.+\.exe$/i.test(argv0)) return null;
   const prefix = processEnv(pid, 'WINEPREFIX') || path.join(os.homedir(), '.wine');
   if (!path.isAbsolute(prefix)) return null;
-  let file: string;
+  const file = unixPathOf(argv0, prefix);
   try {
-    file = fs.realpathSync(path.join(prefix, 'dosdevices', `${match[1].toLowerCase()}:`));
-  } catch {
-    return null;
-  }
-  for (const part of match[2].split('\\')) {
-    if (!part || part === '.' || part === '..') return null;
-    let next = path.join(file, part);
-    if (!fs.existsSync(next)) {
-      const lower = part.toLowerCase();
-      let found: string | undefined;
-      try {
-        found = fs.readdirSync(file).find((name) => name.toLowerCase() === lower);
-      } catch {
-        return null;
-      }
-      if (!found) return null;
-      next = path.join(file, found);
-    }
-    file = next;
-  }
-  try {
-    return fs.statSync(file).isFile() ? { file, prefix } : null;
+    return file && fs.statSync(file).isFile() ? { file, prefix } : null;
   } catch {
     return null;
   }
@@ -1243,7 +1276,8 @@ export function registerNativeAppHandlers(options: {
 }): void {
   const { assertShellSender } = options;
 
-  watchUserApplications(() => options.shell()?.send('native-apps:changed'));
+  appsChanged = () => options.shell()?.send('native-apps:changed');
+  watchUserApplications(appsChanged);
 
   // Apps are listed even where the display can't run: terminal apps don't
   // need it, and launching any other says what's missing, where an empty
@@ -1269,6 +1303,12 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof file !== 'string') throw new Error('A file path is required');
     await runProgram(file);
+  });
+
+  ipcMain.handle('native-apps:uninstall', async (event, appId) => {
+    assertShellSender(event);
+    if (typeof appId !== 'string') throw new Error('An app id is required');
+    return uninstall(appId);
   });
 
   ipcMain.handle('native-apps:force-quit', async (event, pid) => {

@@ -118,7 +118,34 @@ function shellMounts(): [string, string][] {
     [path.join(shell, 'mime'), path.join(share, 'mime')],
     [path.join(shell, 'desktop-directories'), path.join(share, 'desktop-directories')],
     [path.join(shell, 'menus'), path.join(home(), '.config/menus')],
+    [path.join(shell, 'desktop'), path.join(share, DESKTOP_LINKS)],
   ];
+}
+
+/**
+ * Where Wine's copies of desktop shortcuts go: out of sight. A program's
+ * shortcut on the desktop is its .lnk, in the Desktop folder (which is
+ * the user's), and Din opens that; Wine's .desktop beside it would be the
+ * same icon twice.
+ */
+const DESKTOP_LINKS = 'din-desktop-links';
+
+/**
+ * The sandbox's ~/.config/user-dirs.dirs: the user's folders where they
+ * are, but the desktop Wine writes its .desktop copies to out of sight
+ * (DESKTOP_LINKS). Wine links Windows' Desktop folder to the user's again
+ * (windows-apps.mts, arrangeDrives).
+ */
+function userDirsFile(): string {
+  const file = path.join(windowsShellDir(), 'user-dirs.dirs');
+  const lines = [
+    `XDG_DESKTOP_DIR="$HOME/.local/share/${DESKTOP_LINKS}"`,
+    ...[['DOCUMENTS', 'Documents'], ['DOWNLOAD', 'Downloads'], ['MUSIC', 'Music'], ['PICTURES', 'Pictures'], ['VIDEOS', 'Videos']]
+      .map(([key, name]) => `XDG_${key}_DIR="$HOME/${name}"`),
+  ];
+  const text = `${lines.join('\n')}\n`;
+  if (fs.readFileSync(file, { encoding: 'utf8', flag: 'a+' }) !== text) fs.writeFileSync(file, text);
+  return file;
 }
 
 /** Whether a path is a folder, following links. */
@@ -253,6 +280,7 @@ export async function sandboxed(
   }
   args.push('--bind', options.prefix, options.prefix);
   for (const [from, to] of shellMounts()) args.push('--bind', from, to);
+  args.push('--ro-bind', userDirsFile(), path.join(homeDir, '.config/user-dirs.dirs'));
 
   for (const file of options.share ?? []) {
     const shared = shareFor(file, options.prefix);

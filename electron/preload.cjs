@@ -858,6 +858,13 @@ expose('nativeApps', {
   forceQuit: (pid) => ipcRenderer.invoke('native-apps:force-quit', pid),
 
   /**
+   * Uninstall a Windows program installed in Din's prefix, by its own
+   * uninstaller, or take away its shortcut where it has none.
+   * @param {string} appId
+   */
+  uninstall: (appId) => ipcRenderer.invoke('native-apps:uninstall', appId),
+
+  /**
    * Subscribe to "the installed apps changed" (a program was installed or
    * removed). Returns an unsubscribe fn.
    * @param {() => void} callback

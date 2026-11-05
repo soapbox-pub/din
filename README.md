@@ -477,6 +477,17 @@ prefix and the sandbox. All sandboxes share one `/tmp` (under
 socket. Where bubblewrap is missing or can't make namespaces, programs run
 unsandboxed.
 
+An installed Windows program has Uninstall in its right-click menus (and
+`din apps remove`), as in Windows' Apps & Features. Din finds the program
+in the prefix registry's Uninstall keys: first by place (the shortcut's
+folder inside its InstallLocation or its icon's folder), then by name
+("Foo 2.1 (64-bit)" for "Foo", never "Foobar"). It then runs `wine uninstaller --remove <key>`, which opens
+the program's own uninstaller. A program without one only loses its
+shortcut. Wine never takes away an entry whose shortcut an uninstaller
+deleted, so Din hides those. Wine's `.desktop` copies of desktop shortcuts
+go to a folder out of sight, since the `.lnk` on the Desktop is the same
+icon.
+
 On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.

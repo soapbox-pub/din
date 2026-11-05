@@ -262,8 +262,15 @@ function arrangeDrives(prefix: string): void {
     try {
       if (!fs.statSync(target).isDirectory()) continue;
       const stat = fs.lstatSync(link);
-      if (stat.isSymbolicLink() || fs.readdirSync(link).length > 0) continue;
-      fs.rmdirSync(link);
+      if (stat.isSymbolicLink()) {
+        // Wine links Desktop to the sandbox's out-of-sight desktop, where its
+        // .desktop copies go (wine-sandbox.mts); Windows' is the user's.
+        if (!fs.readlinkSync(link).includes('din-desktop-links')) continue;
+        fs.rmSync(link);
+      } else {
+        if (fs.readdirSync(link).length > 0) continue;
+        fs.rmdirSync(link);
+      }
       fs.symlinkSync(target, link);
     } catch {
       // Missing on either side; leave it as Wine made it.
@@ -511,6 +518,164 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
   linkDotnet(prefix);
   forgetDirect3D(prefix);
   linkDirect3D(prefix);
+}
+
+// ---------------------------------------------------------------------------
+// Installed programs, and taking them away again, as Windows' Apps &
+// Features does: by the program's own uninstaller, which an installer
+// registers under the Uninstall key.
+// ---------------------------------------------------------------------------
+
+/**
+ * The file a Windows path in a prefix names, through its drive letters
+ * (`C:\Program Files\Foo\foo.exe`), or null when it isn't there. Windows
+ * paths ignore case, so a name that isn't there as written is looked for
+ * in its folder.
+ */
+export function unixPathOf(windowsPath: string, prefix = winePrefix()): string | null {
+  const match = /^([a-z]):\\(.*)$/i.exec(windowsPath.trim());
+  if (!match) return null;
+  let file: string;
+  try {
+    file = fs.realpathSync(path.join(prefix, 'dosdevices', `${match[1].toLowerCase()}:`));
+  } catch {
+    return null;
+  }
+  for (const part of match[2].split('\\')) {
+    if (!part || part === '.') continue;
+    if (part === '..') return null;
+    let next = path.join(file, part);
+    if (!fs.existsSync(next)) {
+      const lower = part.toLowerCase();
+      let found: string | undefined;
+      try {
+        found = fs.readdirSync(file).find((name) => name.toLowerCase() === lower);
+      } catch {
+        return null;
+      }
+      if (!found) return null;
+      next = path.join(file, found);
+    }
+    file = next;
+  }
+  return file;
+}
+
+/** A program as Apps & Features lists it: its Uninstall key's values. */
+export interface InstalledProgram {
+  /** The key's name, which `uninstaller --remove` takes. */
+  key: string;
+  name: string;
+  /** Its folder (InstallLocation), as a path here, when it says. */
+  location: string | null;
+  /** The file its icon is in (DisplayIcon), as a path here. */
+  icon: string | null;
+}
+
+/** A .reg file's string value, unescaped. */
+function regString(raw: string): string {
+  return raw.replace(/\\(.)/g, (_, c: string) => (c === 'n' ? '\n' : c === '0' ? '' : c));
+}
+
+/** The folder a value naming a file or folder (`"C:\Foo\foo.exe",0`) is in, here. */
+function regPath(value: string | undefined, folder: boolean): string | null {
+  if (!value) return null;
+  const bare = value.replace(/^"([^"]*)".*$/, '$1').replace(/,\s*-?\d+$/, '').replace(/\\+$/, '');
+  const file = unixPathOf(bare);
+  if (!file) return null;
+  return folder ? file : path.dirname(file);
+}
+
+/**
+ * The programs installed in Din's prefix that have an uninstaller, from
+ * the registry Wine keeps in its files (64- and 32-bit, every user's and
+ * the user's own). Components that hide themselves are left out.
+ */
+export function installedPrograms(): InstalledProgram[] {
+  const prefix = winePrefix();
+  const programs: InstalledProgram[] = [];
+  const section = /^\[(?:Software\\\\Wow6432Node|Software)\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\(.+?)\]/i;
+  for (const name of ['system.reg', 'user.reg']) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(prefix, name), 'utf8');
+    } catch {
+      continue;
+    }
+    let key: string | null = null;
+    let values: Record<string, string> = {};
+    const finish = () => {
+      if (key && values.UninstallString && values.DisplayName && values.SystemComponent !== '1') {
+        programs.push({
+          key,
+          name: values.DisplayName,
+          location: regPath(values.InstallLocation, true),
+          icon: regPath(values.DisplayIcon, false),
+        });
+      }
+    };
+    for (const line of text.split('\n')) {
+      if (line.startsWith('[')) {
+        finish();
+        const match = section.exec(line);
+        key = match ? regString(match[1]) : null;
+        values = {};
+        continue;
+      }
+      if (!key) continue;
+      const value = /^"([A-Za-z]+)"=(?:str\(\d\):)?"(.*)"\s*$/.exec(line);
+      if (value) values[value[1]] = regString(value[2]);
+      const dword = /^"SystemComponent"=dword:0*1\s*$/i.exec(line);
+      if (dword) values.SystemComponent = '1';
+    }
+    finish();
+  }
+  return programs;
+}
+
+/** A name with only its letters and digits, for comparing. */
+function plain(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * The installed program a shortcut opens, by where it is (the shortcut's
+ * folder inside the program's InstallLocation, or the one its icon is in),
+ * else by name ("Foo" for "Foo 2.1 (64-bit)"). Null when none is.
+ */
+export function programForShortcut(shortcut: { name: string; folder: string | null }): InstalledProgram | null {
+  const programs = installedPrograms();
+  const inside = (folder: string | null) =>
+    !!folder && !!shortcut.folder && (shortcut.folder === folder || shortcut.folder.startsWith(`${folder}${path.sep}`));
+  const byPlace = programs.find((program) => inside(program.location)) ?? programs.find((program) => inside(program.icon));
+  if (byPlace) return byPlace;
+  const wanted = plain(shortcut.name);
+  if (wanted.length < 3) return null;
+  // "Foo 2.1 (64-bit)" for "Foo", but not "Foobar" for it.
+  const lower = shortcut.name.trim().toLowerCase();
+  const versioned = (name: string) => {
+    const rest = name.trim().toLowerCase();
+    return rest.startsWith(lower) && /^($|[\s(\-–:,v\d])/.test(rest.slice(lower.length));
+  };
+  return programs.find((program) => plain(program.name) === wanted) ?? programs.find((program) => versioned(program.name)) ?? null;
+}
+
+/**
+ * Run a program's uninstaller, in its own window, as Windows does, and
+ * wait for it to finish (or, for one that hands over to a copy of itself
+ * and exits, for that hand-over).
+ */
+export async function runUninstaller(program: InstalledProgram, baseEnv: NodeJS.ProcessEnv): Promise<void> {
+  await ensurePrefix(baseEnv);
+  const wine = wineBinary();
+  if (!wine) throw new Error(NO_WINE);
+  const command = await wineCommand([wine, 'uninstaller', '--remove', program.key], baseEnv);
+  await new Promise<void>((resolve, reject) => {
+    execFile(command.argv[0], command.argv.slice(1), { env: command.env, cwd: path.join(winePrefix(), 'drive_c'), timeout: 0 }, (error, _stdout, stderr) => {
+      if (error && !error.killed) reject(new Error(`${program.name} couldn’t be uninstalled: ${lastLine(stderr || error.message)}`));
+      else resolve();
+    });
+  });
 }
 
 /**

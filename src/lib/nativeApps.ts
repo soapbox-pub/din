@@ -45,6 +45,8 @@ export interface NativeApp {
   terminal?: boolean;
   /** URL schemes it opens (its desktop entry's x-scheme-handler types), e.g. ["nostr"]. */
   schemes?: string[];
+  /** A Windows program installed in Din's prefix, which Din can uninstall. */
+  uninstallable?: boolean;
 }
 
 /** What `list()` reports. */
@@ -74,6 +76,12 @@ export interface NativeAppsBridge {
   runProgram(file: string): Promise<void>;
   /** Force quit the program owning a window, by pid (apps on Din's display only). */
   forceQuit(pid: number): Promise<void>;
+  /**
+   * Uninstall an `uninstallable` Windows program: run its own uninstaller,
+   * in a window of its own, resolving once it's done ('uninstalled'), or,
+   * for one without, take away its shortcut ('removed').
+   */
+  uninstall(appId: string): Promise<'uninstalled' | 'removed'>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
   /** Subscribe to links native apps open. Returns an unsubscribe fn. */
@@ -188,6 +196,33 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       history: true,
     });
   });
+}
+
+/**
+ * Uninstall a Windows program (`uninstallable`), notifying the user of what
+ * came of it: its uninstaller's window says the rest.
+ */
+export function uninstallNativeApp(app: { id: string; name: string }): void {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) return;
+  bridge.uninstall(app.id).then(
+    (result) => {
+      if (result !== 'removed') return;
+      notify({
+        source: { name: 'Din' },
+        title: `Removed ${app.name}`,
+        body: 'It had no uninstaller, so only its shortcut is gone.',
+        history: true,
+      });
+    },
+    (error: unknown) =>
+      notify({
+        source: { name: 'Din' },
+        title: `Couldn’t uninstall ${app.name}`,
+        body: cleanNativeAppError(error),
+        history: true,
+      }),
+  );
 }
 
 /** Install Xvfb, then open the app it was missing for. */
