@@ -105,8 +105,12 @@ const isGlass = (tokens: Record<string, string> | undefined) => {
   return material === 'liquid' || material === 'frosted';
 };
 
-/** How much of the terminal's color is laid over the window's glass: enough to keep text on it readable whatever's behind. */
-const GLASS_TINT = 72;
+/**
+ * How much of the terminal's color the window's frosted glass is, as a hex
+ * alpha on its accent: black glass in the dark, white in the light, enough
+ * to keep text on it readable whatever's behind.
+ */
+const GLASS_ALPHA = 'c0';
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
@@ -502,17 +506,17 @@ export function Terminal() {
   useLayoutEffect(() => setDinLook(dark, selection, glass), [dark, selection, glass]);
   // The whole window is the terminal's color: the header's tokens follow its
   // palette, and the accent carries it to the window controls and to the
-  // menu bar over a fullscreen window. On glass the color is laid over the
-  // window's glass instead (no accent, so the window keeps it), and goes
-  // near-opaque with it while maximized or snapped.
+  // menu bar over a fullscreen window. On glass the accent has alpha, so the
+  // window is frosted glass of the terminal's color, black or white (solid
+  // while maximized or snapped), and the page and its cells are clear over it.
   const palette = terminalTheme(dark, selection, false);
   const surface = {
-    background: glass ? `color-mix(in oklab, ${palette.background} ${GLASS_TINT}%, transparent)` : palette.background,
+    background: glass ? 'transparent' : palette.background,
     '--background': palette.background,
     '--foreground': palette.foreground,
     '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
   } as CSSProperties;
-  useWindowAccent(glass ? null : palette.background);
+  useWindowAccent(glass ? `${palette.background}${GLASS_ALPHA}` : palette.background);
   const closeWindow = useCallback(() => window.close(), []);
 
   // A window opened for a tab torn off another one starts empty, and gets

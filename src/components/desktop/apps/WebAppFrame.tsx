@@ -74,8 +74,9 @@ export function WebAppFrame({
   const src =
     deepLink && home && sameOrigin(home, deepLink) ? deepLink : home;
 
+  // Opaque: a page's alpha would make the window frosted, which is for Din's apps.
   useEffect(() => {
-    setAccent(pageColor);
+    setAccent(normalizeThemeColor(pageColor));
     return () => setAccent(null);
   }, [pageColor, setAccent]);
 

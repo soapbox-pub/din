@@ -39,6 +39,25 @@ export function normalizeThemeColor(input: string | null | undefined): string | 
   return null;
 }
 
+/**
+ * The opacity an untrusted color string asks for (0–1), from the same forms
+ * normalizeThemeColor accepts: `#rgba`, `#rrggbbaa` or `rgba()`'s fourth
+ * channel (a number or a percentage). 1 for an opaque color or anything
+ * that doesn't parse.
+ */
+export function themeColorAlpha(input: string | null | undefined): number {
+  if (!input || normalizeThemeColor(input) === null) return 1;
+  const value = input.trim();
+  const hex = value.match(/^#([0-9a-f]{4}|[0-9a-f]{8})$/i)?.[1];
+  if (hex) return parseInt(hex.length === 4 ? hex[3] + hex[3] : hex.slice(6), 16) / 255;
+  const fn = value.match(/^rgba?\([^,]+,[^,]+,[^,]+,\s*([\d.]+)(%?)\s*\)$/i);
+  if (fn) {
+    const a = Number(fn[1]) / (fn[2] ? 100 : 1);
+    return Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : 1;
+  }
+  return 1;
+}
+
 /** WCAG 2.1 relative luminance of a normalized `#rrggbb` color (0–1). */
 export function themeColorLuminance(color: string): number {
   const channel = (i: number) => {

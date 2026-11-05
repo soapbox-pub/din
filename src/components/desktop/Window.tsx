@@ -25,7 +25,7 @@ import {
   type ResizeDir,
   type WindowChrome,
 } from '@/contexts/WindowChromeContext';
-import { isDarkThemeColor, normalizeThemeColor, themeColorTokens } from '@/lib/themeColor';
+import { isDarkThemeColor, normalizeThemeColor, themeColorAlpha, themeColorTokens } from '@/lib/themeColor';
 import { useSuperHeld } from '@/lib/superKey';
 import { beginWindowGesture, endWindowGesture } from '@/lib/windowGestures';
 import { registerWindowChrome, TEAR_AWAY_PX } from '@/lib/windowChromes';
@@ -570,8 +570,15 @@ export const Window = memo(function Window({
   // theme-color), tinting the title bar Safari-style. The raw value comes
   // from an untrusted page, so it's strictly normalized before it's stored
   // in the window manager, where the menu bar also reads it.
+  // An accent with alpha (a Din app's own, as the Terminal's; the desktop's
+  // web views pass theirs opaque) asks for the window to be frosted glass of
+  // that color (accentAlpha), solid where windows are.
+  const [accentAlpha, setAccentAlpha] = useState(1);
   const publishAccent = useCallback(
-    (color: string | null) => setAccent(win.id, normalizeThemeColor(color)),
+    (color: string | null) => {
+      setAccent(win.id, normalizeThemeColor(color));
+      setAccentAlpha(themeColorAlpha(color));
+    },
     [setAccent, win.id],
   );
 
@@ -1766,7 +1773,9 @@ export const Window = memo(function Window({
   // requestAnimationFrame loops.
   // So is a window on a workspace its monitor isn't showing.
   if (win.minimized || win.away || hiddenBehind) geometry.visibility = 'hidden';
-  if (win.accent && !win.frameless) geometry.backgroundColor = win.accent;
+  // Glass of the accent's color (accentLayer below) leaves the window clear.
+  const frostedAccent = win.accent !== null && accentAlpha < 1 && !win.frameless;
+  if (win.accent && !win.frameless && !frostedAccent) geometry.backgroundColor = win.accent;
 
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
@@ -1806,6 +1815,15 @@ export const Window = memo(function Window({
   // App-published title-bar content (the browser's tabs) is styled with theme
   // tokens, so re-point them at the accent the same way.
   const titlebarTint = accent ? (themeColorTokens(accent) as CSSProperties) : undefined;
+  // A frosted accent's glass: the accent at its alpha over the blurred
+  // desktop, under the whole window, while Settings → Themes has glass
+  // (Solid, Reduce transparency and Increase contrast make it the accent,
+  // opaque); maximized or snapped it eases to the accent, opaque, as other
+  // windows go near-opaque, and the menu-bar strip over it is the accent too.
+  const glassOn = !config.reduceTransparency && !config.increaseContrast;
+  const accentLayer: CSSProperties | undefined = frostedAccent && accent
+    ? { backgroundColor: glassOn && !flush ? `color-mix(in srgb, ${accent} ${Math.round(accentAlpha * 100)}%, transparent)` : accent }
+    : undefined;
 
   // Din's title bar, or the pieces of it an app lays out itself (WindowHeader).
   const frame: WindowFrame = {
@@ -1942,6 +1960,17 @@ export const Window = memo(function Window({
           accent (inline, on the section) replaces it. */}
       {!frameless && !accent && (
         <div aria-hidden className="window-glass pointer-events-none absolute -inset-px -z-10 rounded-[inherit]" />
+      )}
+      {accentLayer && (
+        <div
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute -inset-px -z-10 rounded-[inherit]',
+            'transition-[background-color] duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none',
+            glassOn && !flush && 'backdrop-blur-xl backdrop-saturate-150',
+          )}
+          style={accentLayer}
+        />
       )}
       <div
         ref={stripRef}

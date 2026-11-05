@@ -924,12 +924,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // theme color, Safari style.
   const chromeColor = isPrivate ? PRIVATE_CHROME_COLOR : activeTab.themeColor;
 
-  // Tint the window chrome with the chrome color. The Window sanitizes the raw
-  // value; null restores the default. A layout effect, so the title bar and
-  // the menu bar repaint in the same frame as the toolbar on a tab switch.
+  // Tint the window chrome with the chrome color, opaque (a page's alpha
+  // would make the window frosted, which is for Din's apps). The Window
+  // sanitizes it too; null restores the default. A layout effect, so the
+  // title bar and the menu bar repaint in the same frame as the toolbar on a
+  // tab switch.
   const setAccent = useWindowAccent();
   useLayoutEffect(() => {
-    setAccent(chromeColor);
+    setAccent(normalizeThemeColor(chromeColor));
     return () => setAccent(null);
   }, [chromeColor, setAccent]);
 
