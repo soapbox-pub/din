@@ -742,7 +742,7 @@ export type Permission =
   /**
    * The camera, the microphone and the whole screen in the app's own page
    * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
-   * takes in ~/Videos/Studio, the screen recorded with its pointer, live
+   * projects of takes and clips in ~/Videos/Studio, the screen recorded with its pointer, live
    * streams over RTMP. Studio.
    */
   | 'capture'

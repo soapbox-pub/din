@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type StudioAspect, type StudioScene, type TakeInfo } from '@/lib/capture';
+import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type ProjectChange, type ProjectInfo, type ProjectItem, type StudioAspect, type StudioScene } from '@/lib/capture';
 import { cn } from '@/lib/utils';
 import { canOpenApp, onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCloseGuard, useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -21,13 +21,29 @@ import { useCapture, useDevices } from './engine/media';
 import { LiveSender, TakeRecorder } from './engine/recorder';
 import { useStudioSettings } from './settings';
 import { formatTime } from './format';
-import { forgetFileUrl, useTakes, type TakeAction } from './takes';
+import { forgetFileUrl, useProjects, type ItemAction, type ProjectAction } from './takes';
 import { Controls, type Phase } from './ui/Controls';
 import { GoLiveDialog } from './ui/GoLive';
+import { MakeView } from './ui/MakeView';
+import { ProjectPanel } from './ui/ProjectPanel';
+import { ProjectSwitcher } from './ui/ProjectSwitcher';
 import { Segmented } from './ui/Segmented';
 import { Stage } from './ui/Stage';
-import { TakesList } from './ui/TakesList';
-import { TakeView } from './ui/TakeView';
+import { TakeView, type ItemChange } from './ui/TakeView';
+
+/** What Add Clips offers to pick. */
+const CLIP_TYPES = [
+  {
+    description: 'Videos and sound',
+    accept: {
+      'video/*': ['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi'],
+      'audio/*': ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac'],
+    },
+  },
+];
+
+/** How much of a clip goes to main at once. */
+const CLIP_CHUNK = 8 * 1024 * 1024;
 
 const SCENES: { value: StudioScene; label: string; icon: React.ReactNode }[] = [
   { value: 'screen-camera', label: 'Screen and Camera', icon: <MonitorSmartphone className="size-4" aria-hidden /> },
@@ -43,19 +59,21 @@ const ASPECTS: { value: StudioAspect; label: string; icon: React.ReactNode }[] =
 
 /** What Studio was asked to do from outside: `din studio`, the menu bar's stop button. */
 interface Action {
-  action: 'record' | 'stop' | 'mark' | 'live';
+  action: 'record' | 'stop' | 'mark' | 'live' | 'project';
   nonce: unknown;
   scene?: StudioScene;
   aspect?: StudioAspect;
   kind?: 'highlight' | 'retake';
   destination?: string;
+  /** The project to record into, by its folder. */
+  project?: string;
 }
 
 function actionOf({ params }: Pick<Launch, 'params'>, reopened = false): Action | null {
   // A window Din reopens keeps its last params: what they asked for was done then.
   if (reopened) return null;
   const { action, nonce } = params;
-  if (action !== 'record' && action !== 'stop' && action !== 'mark' && action !== 'live') return null;
+  if (action !== 'record' && action !== 'stop' && action !== 'mark' && action !== 'live' && action !== 'project') return null;
   const scene = params.scene === 'screen-camera' || params.scene === 'camera' || params.scene === 'screen' ? params.scene : undefined;
   const aspect = params.aspect === '16:9' || params.aspect === '9:16' || params.aspect === '1:1' ? params.aspect : undefined;
   return {
@@ -65,14 +83,18 @@ function actionOf({ params }: Pick<Launch, 'params'>, reopened = false): Action 
     aspect,
     kind: params.kind === 'retake' ? 'retake' : 'highlight',
     destination: typeof params.destination === 'string' ? params.destination : undefined,
+    project: typeof params.project === 'string' && params.project.startsWith('/') ? params.project : undefined,
   };
 }
 
 /**
  * Studio: record yourself and the screen, for the Assistant to edit, or go
- * live. One picture (the stage) is what's recorded and streamed; each take
- * also keeps the screen, the camera and the microphone apart, with a
- * transcript, so the Assistant can cut it on words and reframe it.
+ * live. Takes go into a project, as many as it takes, beside clips brought
+ * in; the user sets their order and which to use, and the Assistant makes
+ * one thing from the project. One picture (the stage) is what's recorded and
+ * streamed; each take also keeps the screen, the camera and the microphone
+ * apart, with a transcript, so the Assistant can cut it on words and
+ * reframe it.
  */
 export function Studio() {
   const din = useDin();
@@ -88,14 +110,30 @@ export function Studio() {
   /** When the take being recorded started. */
   const [takeStart, setTakeStart] = useState<number | null>(null);
   const [live, setLive] = useState<LiveStatus | null>(null);
-  const [view, setView] = useState<{ take: string; focus: number } | null>(null);
-  const [showTakes, setShowTakes] = useState(false);
+  const [view, setView] = useState<{ kind: 'take'; take: string } | { kind: 'make'; focus: number } | null>(null);
+  const [showProject, setShowProject] = useState(true);
+  const showProjectRef = useRef(showProject);
+  useEffect(() => {
+    showProjectRef.current = showProject;
+  }, [showProject]);
   const [goLiveOpen, setGoLiveOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [trashing, setTrashing] = useState<TakeInfo | null>(null);
+  const [renamingProject, setRenamingProject] = useState(false);
+  const [trashing, setTrashing] = useState<{ item: ProjectItem } | { project: ProjectInfo } | null>(null);
+  /** The take just recorded or clip just added, shown so in the project. */
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [importing, setImporting] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [canAssist, setCanAssist] = useState(false);
-  const { takes, loading, forget, refresh } = useTakes(capture);
+  const { projects, loading, put, refresh } = useProjects(capture);
+  const project = (settings.project && projects.find((p) => p.path === settings.project)) || null;
+  /** The project the next take goes into: kept in a ref, so a take asked for from outside goes where it said. */
+  const target = useRef<string | null>(null);
+  // Until the projects are listed, the one Studio had open.
+  const wanted = loading ? settings.project || null : project?.path ?? null;
+  useEffect(() => {
+    target.current = wanted;
+  }, [wanted]);
 
   const take = useRef<TakeRecorder | null>(null);
   const sender = useRef<LiveSender | null>(null);
@@ -319,6 +357,7 @@ export function Studio() {
           mixAudio: hasMic && mixer.hasSystem ? 'voice+computer' : hasMic ? 'voice' : mixer.hasSystem ? 'computer' : null,
         },
         {
+          project: target.current,
           scene: settings.scene,
           aspect: settings.aspect,
           canvas: CANVAS[settings.aspect],
@@ -327,6 +366,9 @@ export function Studio() {
         },
       );
       take.current = recorder;
+      target.current = recorder.project;
+      update({ project: recorder.project });
+      setFresh(recorder.take);
       setTakeStart(recorder.startedAt);
       setMarkers(0);
       setNow(Date.now());
@@ -336,7 +378,7 @@ export function Studio() {
       setPhase('idle');
       setNotice(`Couldn’t start recording: ${cleanCaptureError(error)}`);
     }
-  }, [capture, cam.stream, compositor, mixer, program, scr.stream, settings]);
+  }, [capture, cam.stream, compositor, mixer, program, scr.stream, settings, update]);
 
   const record = useCallback(() => {
     if (phase !== 'idle' || !capture) return;
@@ -379,7 +421,9 @@ export function Studio() {
       const saved = await t.stop();
       if (saved) {
         forgetFileUrl(saved.poster ?? '');
-        setView({ take: saved.path, focus: Date.now() });
+        // Ready for the next take: this one waits in the project.
+        setFresh(saved.path);
+        if (!showProjectRef.current) setNotice(`${saved.title} is saved in the project. Record another, or open the project to put them together.`);
       }
     } catch (error) {
       setNotice(`The take couldn’t be saved: ${cleanCaptureError(error)}`);
@@ -444,12 +488,22 @@ export function Studio() {
       const change: Partial<typeof l.settings> = {};
       if (a.scene) change.scene = a.scene;
       if (a.aspect) change.aspect = a.aspect;
+      if (a.project && l.phase === 'idle') {
+        change.project = a.project;
+        target.current = a.project;
+      }
       if (Object.keys(change).length) l.update(change);
       // Once the new setup's captures are up.
       setTimeout(() => latest.current.record(), a.scene || a.aspect ? 1200 : 0);
     } else if (a.action === 'stop') void l.stop();
     else if (a.action === 'mark') l.mark(a.kind ?? 'highlight');
-    else if (a.action === 'live' && !l.live) {
+    else if (a.action === 'project' && a.project && l.phase === 'idle') {
+      // A project made from outside: takes go into it from now on.
+      l.update({ project: a.project });
+      target.current = a.project;
+      setView(null);
+      setShowProject(true);
+    } else if (a.action === 'live' && !l.live) {
       if (a.destination) l.update({ destination: a.destination });
       setGoLiveOpen(true);
     }
@@ -457,46 +511,192 @@ export function Studio() {
   useEffect(() => perform(actionOf(windowLaunch(), wasReopened())), [perform]);
   useEffect(() => onLaunch((launch) => perform(actionOf(launch))), [perform]);
 
-  // ---- takes ----
-  const openTake = (t: TakeInfo, focus = false) => {
-    if (busy && phase !== 'idle') return;
-    setView({ take: t.path, focus: focus ? Date.now() : 0 });
+  // ---- the project ----
+  const fail = useCallback((what: string) => (e: unknown) => setNotice(`${what}: ${cleanCaptureError(e)}`), []);
+  const changeProject = useCallback(
+    (path: string, change: ProjectChange) => capture?.updateProject(path, change).then(put, fail('Couldn’t change the project')),
+    [capture, put, fail],
+  );
+
+  const selectProject = useCallback(
+    (p: ProjectInfo) => {
+      if (phase !== 'idle') return;
+      setView(null);
+      setFresh(null);
+      setRenamingProject(false);
+      if (!p.single) {
+        update({ project: p.path });
+        return;
+      }
+      // A take from before projects becomes a project of its own.
+      void capture?.openProject(p.path).then((opened) => {
+        put(opened);
+        update({ project: opened.path });
+      }, fail(`Couldn’t open ${p.title}`));
+    },
+    [capture, phase, put, update, fail],
+  );
+
+  const newProject = useCallback(async (): Promise<ProjectInfo | null> => {
+    if (!capture || phase !== 'idle') return null;
+    try {
+      const made = await capture.createProject();
+      put(made);
+      update({ project: made.path });
+      target.current = made.path;
+      setView(null);
+      setFresh(null);
+      setShowProject(true);
+      setRenamingProject(true);
+      return made;
+    } catch (e) {
+      fail('Couldn’t make a project')(e);
+      return null;
+    }
+  }, [capture, phase, put, update, fail]);
+
+  /** Bring files in as clips, one after another, into the project (a new one if there's none). */
+  const importClips = useCallback(
+    async (files: FileSystemFileHandle[]) => {
+      if (!capture || files.length === 0) return;
+      let into = project && !project.single ? project.path : null;
+      if (!into && project?.single) into = (await capture.openProject(project.path).catch(() => null))?.path ?? null;
+      if (!into) into = (await newProject())?.path ?? null;
+      if (!into) return;
+      setShowProject(true);
+      for (const handle of files) {
+        setImporting((list) => [...list, handle.name]);
+        let clip: string | null = null;
+        try {
+          const file = await handle.getFile();
+          const begun = await capture.importBegin(into, file.name);
+          clip = begun.take;
+          const writer = await capture.open(begun.take, begun.file);
+          try {
+            for (let at = 0; at < file.size; at += CLIP_CHUNK) {
+              await capture.write(writer, new Uint8Array(await file.slice(at, at + CLIP_CHUNK).arrayBuffer()));
+            }
+          } finally {
+            await capture.close(writer);
+          }
+          const added = await capture.importEnd(begun.take);
+          if (added) setFresh(added.path);
+        } catch (e) {
+          if (clip) void capture.importEnd(clip, true).catch(() => {});
+          fail(`Couldn’t add ${handle.name}`)(e);
+        } finally {
+          setImporting((list) => {
+            const i = list.indexOf(handle.name);
+            return i === -1 ? list : [...list.slice(0, i), ...list.slice(i + 1)];
+          });
+        }
+      }
+    },
+    [capture, project, newProject, fail],
+  );
+
+  const pickClips = useCallback(async () => {
+    let files: FileSystemFileHandle[];
+    try {
+      files = await window.showOpenFilePicker({ title: 'Add Clips', confirmLabel: 'Add', multiple: true, mode: 'read', startIn: 'videos', types: CLIP_TYPES });
+    } catch {
+      return; // Cancelled.
+    }
+    await importClips(files);
+  }, [importClips]);
+
+  const reveal = (path: string) => void din.files.fromPath(path).then((h) => din.app.openFiles([h]));
+
+  const moveItem = (name: string, to: number) => {
+    if (!project) return;
+    const order = project.items.map((i) => i.take.name).filter((n) => n !== name);
+    order.splice(Math.max(0, Math.min(order.length, to)), 0, name);
+    void changeProject(project.path, { order });
   };
-  const takeAction = (t: TakeInfo, action: TakeAction) => {
+
+  const changeItem = (item: ProjectItem, change: ItemChange) => {
+    if (project) void changeProject(project.path, { item: { name: item.take.name, ...change } });
+  };
+
+  const itemAction = (item: ProjectItem, action: ItemAction) => {
+    const index = project?.items.findIndex((i) => i.take.path === item.take.path) ?? -1;
     switch (action) {
       case 'open':
-        openTake(t);
+        if (phase === 'idle') setView({ kind: 'take', take: item.take.path });
         break;
-      case 'assistant':
-        openTake(t, true);
+      case 'keep':
+        changeItem(item, { keep: !item.keep });
+        break;
+      case 'up':
+        if (index > 0) moveItem(item.take.name, index - 1);
+        break;
+      case 'down':
+        if (index !== -1) moveItem(item.take.name, index + 1);
         break;
       case 'reveal':
-        void din.files.fromPath(t.path).then((h) => din.app.openFiles([h]));
+        reveal(item.take.path);
         break;
       case 'rename':
-        setShowTakes(true);
-        setRenaming(t.path);
+        setShowProject(true);
+        setRenaming(item.take.path);
         break;
       case 'transcribe':
-        void capture?.transcribe(t.path).catch((e: unknown) => setNotice(`Couldn’t transcribe ${t.title}: ${cleanCaptureError(e)}`));
+        void capture?.transcribe(item.take.path).catch(fail(`Couldn’t transcribe ${item.take.title}`));
         break;
       case 'trash':
-        setTrashing(t);
+        setTrashing({ item });
         break;
     }
   };
-  const renamed = (t: TakeInfo, title: string | null) => {
-    setRenaming(null);
-    if (title && title !== t.title) void capture?.rename(t.path, title).catch((e: unknown) => setNotice(cleanCaptureError(e)));
+
+  const projectAction = (action: ProjectAction) => {
+    if (!project) return;
+    switch (action) {
+      case 'assistant':
+        if (phase === 'idle') setView({ kind: 'make', focus: Date.now() });
+        break;
+      case 'import':
+        void pickClips();
+        break;
+      case 'rename':
+        setShowProject(true);
+        setRenamingProject(true);
+        break;
+      case 'reveal':
+        reveal(project.path);
+        break;
+      case 'trash':
+        setTrashing({ project });
+        break;
+    }
   };
-  const trash = async (t: TakeInfo) => {
+
+  const renamed = (item: ProjectItem, title: string | null) => {
+    setRenaming(null);
+    if (title && title !== item.take.title) void capture?.rename(item.take.path, title).catch(fail('Couldn’t rename it'));
+  };
+
+  const projectRenamed = (title: string | null) => {
+    setRenamingProject(false);
+    if (project && title && title !== project.title) void changeProject(project.path, { title });
+  };
+
+  const trash = async (what: NonNullable<typeof trashing>) => {
     setTrashing(null);
+    const path = 'item' in what ? what.item.take.path : what.project.path;
+    const title = 'item' in what ? what.item.take.title : what.project.title;
     try {
-      await din.system.fs?.trash(t.path);
-      forget(t.path);
-      if (view?.take === t.path) setView(null);
+      await din.system.fs?.trash(path);
+      if ('project' in what) {
+        put({ path, removed: true });
+        if (settings.project === path) update({ project: '' });
+        setView(null);
+      } else {
+        if (project) refresh(project.path);
+        if (view?.kind === 'take' && view.take === path) setView(null);
+      }
     } catch (e) {
-      setNotice(`Couldn’t move ${t.title} to the Trash: ${cleanCaptureError(e)}`);
+      setNotice(`Couldn’t move ${title} to the Trash: ${cleanCaptureError(e)}`);
     }
   };
 
@@ -506,6 +706,17 @@ export function Studio() {
   const setAspect = (aspect: StudioAspect) => update({ aspect });
   useMenuBar(
     [
+      {
+        label: 'Project',
+        items: [
+          { id: 'new-project', label: 'New Project', accelerator: 'Ctrl+N', enabled: phase === 'idle' && !!capture },
+          { id: 'import', label: 'Add Clips…', accelerator: 'Ctrl+I', enabled: !!capture },
+          { type: 'separator' },
+          { id: 'make', label: 'Make with Assistant…', enabled: !!project && phase === 'idle' && canAssist && project.items.some((i) => i.keep) },
+          { id: 'reveal-project', label: 'Show in Files', enabled: !!project },
+          { id: 'rename-project', label: 'Rename Project', enabled: !!project },
+        ],
+      },
       {
         label: 'Record',
         items: [
@@ -528,7 +739,7 @@ export function Studio() {
           { type: 'separator' },
           ...ASPECTS.map((a) => ({ id: `aspect:${a.value}`, type: 'radio' as const, group: 'aspect', checked: settings.aspect === a.value, label: a.label, enabled: !busy })),
           { type: 'separator' },
-          { id: 'takes', type: 'checkbox', checked: showTakes, label: 'Takes', accelerator: 'Ctrl+T' },
+          { id: 'project', type: 'checkbox', checked: showProject, label: 'Project', accelerator: 'Ctrl+T' },
         ],
       },
     ],
@@ -539,7 +750,12 @@ export function Studio() {
       else if (id === 'retake') mark('retake');
       else if (id === 'go-live') setGoLiveOpen(true);
       else if (id === 'end-live') void endLive();
-      else if (id === 'takes') setShowTakes((s) => !s);
+      else if (id === 'project') setShowProject((s) => !s);
+      else if (id === 'new-project') void newProject();
+      else if (id === 'import') void pickClips();
+      else if (id === 'make') projectAction('assistant');
+      else if (id === 'reveal-project') projectAction('reveal');
+      else if (id === 'rename-project') projectAction('rename');
       else if (id.startsWith('scene:')) setScene(id.slice(6) as StudioScene);
       else if (id.startsWith('aspect:') && !busy) setAspect(id.slice(7) as StudioAspect);
     },
@@ -571,8 +787,9 @@ export function Studio() {
   );
 
   // ---- what to show ----
-  const openTakeInfo = view ? takes.find((t) => t.path === view.take) ?? null : null;
-  const options = { canTranscribe: !!status?.transcribe, canAssist };
+  const openIndex = view?.kind === 'take' && project ? project.items.findIndex((i) => i.take.path === view.take) : -1;
+  const openItem = openIndex === -1 ? null : project!.items[openIndex]!;
+  const options = { canTranscribe: !!status?.transcribe, canAssist, recording: phase !== 'idle' };
   const bubbleShown = layout.scene === 'screen-camera' && layout.shape !== 'split' && !!cam.stream && !!scr.stream;
   const cameraControl = {
     on: settings.cameraOn,
@@ -611,23 +828,24 @@ export function Studio() {
       <WindowDragRegion className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
         <div className="flex items-center gap-2 pl-1 text-sm font-semibold">
           <Clapperboard className="size-4 text-muted-foreground" aria-hidden />
-          <span className="hidden @2xl/studio:inline">Studio</span>
+          <span className="hidden @4xl/studio:inline">Studio</span>
         </div>
-        <div className="absolute left-1/2 hidden -translate-x-1/2 @xl/studio:block">
+        <ProjectSwitcher projects={projects} current={project} disabled={phase !== 'idle'} onSelect={selectProject} onNew={() => void newProject()} />
+        <div className="absolute left-1/2 hidden -translate-x-1/2 @3xl/studio:block">
           <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} />
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className="@xl/studio:hidden">
+          <div className="@3xl/studio:hidden">
             <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} iconOnly />
           </div>
           <Segmented label="Shape of the picture" value={settings.aspect} onChange={setAspect} segments={ASPECTS} disabled={busy} iconOnly />
           <button
             type="button"
-            onClick={() => setShowTakes((s) => !s)}
-            aria-pressed={showTakes}
-            aria-label="Takes"
-            title="Takes (Ctrl+T)"
-            className={cn('grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring', showTakes && 'bg-accent text-foreground')}
+            onClick={() => setShowProject((s) => !s)}
+            aria-pressed={showProject}
+            aria-label="Project"
+            title="Project (Ctrl+T)"
+            className={cn('grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring', showProject && 'bg-accent text-foreground')}
           >
             <PanelRight className="size-4" />
           </button>
@@ -637,15 +855,19 @@ export function Studio() {
 
       <div className="flex min-h-0 flex-1">
         <main className="relative flex min-w-0 flex-1 flex-col">
-          {openTakeInfo && phase === 'idle' ? (
+          {openItem && phase === 'idle' ? (
             <TakeView
-              take={openTakeInfo}
-              focusComposer={view?.focus ?? 0}
+              key={openItem.take.path}
+              item={openItem}
+              index={openIndex}
+              count={project!.items.length}
               options={options}
               onBack={() => setView(null)}
-              onAction={(a) => takeAction(openTakeInfo, a)}
-              onRefresh={() => refresh(openTakeInfo.path)}
+              onAction={(a) => itemAction(openItem, a)}
+              onChange={(change) => changeItem(openItem, change)}
             />
+          ) : view?.kind === 'make' && project && phase === 'idle' ? (
+            <MakeView project={project} focusComposer={view.focus} canAssist={canAssist} onBack={() => setView(null)} onRefresh={() => refresh(project.path)} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col bg-neutral-950">
               {(notice || live?.behind) && (
@@ -706,17 +928,27 @@ export function Studio() {
             </div>
           )}
         </main>
-        {showTakes && (
-          <TakesList
-            takes={takes}
+        {showProject && (
+          <ProjectPanel
+            project={project}
             loading={loading}
-            selected={view?.take ?? null}
+            selected={view?.kind === 'take' ? view.take : null}
+            fresh={fresh}
             renaming={renaming}
+            renamingProject={renamingProject}
             options={options}
-            onOpen={(t) => openTake(t)}
-            onAction={takeAction}
+            importing={importing}
+            onOpen={(item) => itemAction(item, 'open')}
+            onItemAction={itemAction}
             onRenamed={renamed}
-            onClose={() => setShowTakes(false)}
+            onProjectAction={projectAction}
+            onProjectRenamed={projectRenamed}
+            onMove={moveItem}
+            onImport={(files) => void importClips(files)}
+            onPickClips={() => void pickClips()}
+            onNewProject={() => void newProject()}
+            onMake={() => projectAction('assistant')}
+            onClose={() => setShowProject(false)}
           />
         )}
       </div>
@@ -738,8 +970,12 @@ export function Studio() {
       <AlertDialog open={trashing !== null} onOpenChange={(open) => !open && setTrashing(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Move “{trashing?.title}” to the Trash?</AlertDialogTitle>
-            <AlertDialogDescription>Its folder goes to the Trash with everything in it, including what the Assistant made from it.</AlertDialogDescription>
+            <AlertDialogTitle>Move “{trashing && ('item' in trashing ? trashing.item.take.title : trashing.project.title)}” to the Trash?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {trashing && 'project' in trashing
+                ? 'The project’s folder goes to the Trash with every take and clip in it, and what the Assistant made from them.'
+                : 'Its folder goes to the Trash with everything recorded in it. The rest of the project stays.'}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

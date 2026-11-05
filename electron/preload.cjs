@@ -3869,6 +3869,7 @@ expose('screenRecorder', {
 const capture = {};
 for (const method of [
   'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+  'projects', 'project', 'createProject', 'openProject', 'updateProject', 'importBegin', 'importEnd', 'importFile',
   'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
 ]) {
   capture[method] = (...args) => ipcRenderer.invoke(`capture:${method}`, ...args);
@@ -3890,6 +3891,8 @@ expose('capture', {
   onState: (callback) => listen('capture:state', callback),
   /** @param {(take: unknown) => void} callback */
   onChanged: (callback) => listen('capture:changed', callback),
+  /** @param {(project: unknown) => void} callback */
+  onProjectChanged: (callback) => listen('capture:projectChanged', callback),
   /** @param {(ended: unknown) => void} callback */
   onStreamEnded: (callback) => listen('capture:streamEnded', callback),
 });

@@ -1,28 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUp, Film, FolderOpen, Loader2, MoreHorizontal, Play, Sparkles } from 'lucide-react';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import type { TakeInfo } from '@/lib/capture';
+import { ArrowLeft, Eye, EyeOff, Film, Loader2, MoreHorizontal, Scissors } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import type { ProjectItem, TakeInfo } from '@/lib/capture';
 import { cn } from '@/lib/utils';
-import { useDin } from '@/sdk/react';
 import { formatTime, formatWhen } from '../format';
-import { useFileUrl, type TakeAction } from '../takes';
-import { TakeActionItems } from './TakeActionItems';
-import { appLink } from '@/shared/launch';
+import { itemActions, usedLength, useFileUrl, type ItemAction } from '../takes';
+import { ActionItems } from './ActionItems';
 
 const SCENES: Record<TakeInfo['scene'], string> = {
   'screen-camera': 'Screen and camera',
   camera: 'Camera',
   screen: 'Screen',
 };
-
-/** What people ask for most, to start from. */
-const SUGGESTIONS = [
-  'A vertical clip for TikTok with captions',
-  'Cut the mistakes and long pauses',
-  'A YouTube video with chapters',
-  'Three short clips of the best moments',
-];
 
 function transcriptNote(take: TakeInfo): string | null {
   switch (take.transcript) {
@@ -37,111 +26,95 @@ function transcriptNote(take: TakeInfo): string | null {
   }
 }
 
-function EditRow({ path, onOpen, onReveal }: { path: string; onOpen: () => void; onReveal: () => void }) {
-  const name = path.split('/').pop() ?? path;
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <li className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent/60">
-          <Film className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-sm outline-none focus-visible:underline">
-            {name}
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" aria-label={`More for ${name}`} className="grid size-7 place-items-center rounded-md text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-background focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100">
-                <MoreHorizontal className="size-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onOpen}>
-                <Play className="size-4" aria-hidden />
-                Open
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onReveal}>
-                <FolderOpen className="size-4" aria-hidden />
-                Show in Files
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </li>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={onOpen}>
-          <Play className="size-4" aria-hidden />
-          Open
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={onReveal}>
-          <FolderOpen className="size-4" aria-hidden />
-          Show in Files
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+export interface ItemChange {
+  keep?: boolean;
+  note?: string;
+  in?: number | null;
+  out?: number | null;
 }
 
-/** One take: watch it, and ask the Assistant to make something of it. */
+const button = 'inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+
+/** One take or clip of the project: watch it, and say how the edit should use it. */
 export function TakeView({
-  take,
-  focusComposer,
+  item,
+  index,
+  count,
   options,
   onBack,
   onAction,
-  onRefresh,
+  onChange,
 }: {
-  take: TakeInfo;
-  /** Put the cursor in "What should the Assistant make?" as it opens. */
-  focusComposer: number;
-  options: { canTranscribe: boolean; canAssist: boolean };
+  item: ProjectItem;
+  index: number;
+  count: number;
+  options: { canTranscribe: boolean };
   onBack: () => void;
-  onAction: (action: TakeAction) => void;
-  onRefresh: () => void;
+  onAction: (action: ItemAction) => void;
+  onChange: (change: ItemChange) => void;
 }) {
-  const din = useDin();
+  const { take } = item;
   const video = useFileUrl(take.program);
-  const [prompt, setPrompt] = useState('');
-  const [sent, setSent] = useState(false);
-  const composer = useRef<HTMLTextAreaElement>(null);
-  const finished = take.status === 'ready' || take.status === 'interrupted';
+  const player = useRef<HTMLVideoElement>(null);
+  const [note, setNote] = useState(item.note);
+  const [error, setError] = useState<string | null>(null);
+  // Another window, or `din studio arrange`, changed it. (Each take gets its own view: Studio keys it.)
+  const [noteFrom, setNoteFrom] = useState(item.note);
+  if (noteFrom !== item.note) {
+    setNoteFrom(item.note);
+    setNote(item.note);
+  }
 
-  useEffect(() => {
-    if (focusComposer) composer.current?.focus();
-  }, [focusComposer]);
-
-  // What the Assistant makes lands in edits/: listed as it appears.
-  useEffect(() => {
-    const fs = din.system.fs;
-    if (!fs) return;
-    let id: number | null = null;
-    let live = true;
-    const dir = `${take.path}/edits`;
-    void fs.watch(dir).then((watch) => {
-      if (!live && watch !== null) void fs.unwatch(watch);
-      else id = watch;
-    });
-    const off = fs.onChange((path) => {
-      if (path === dir || path.startsWith(`${dir}/`)) onRefresh();
-    });
-    return () => {
-      live = false;
-      off();
-      if (id !== null) void fs.unwatch(id);
-    };
-  }, [din, take.path, onRefresh]);
-
-  const send = () => {
-    const text = prompt.trim();
-    if (!text) return;
-    const nonce = Date.now();
-    void window.open(appLink('assistant', { intent: 'studio.edit', directory: take.path, prompt: text, title: take.title, nonce, intentNonce: nonce, sessionID: null }));
-    setSent(true);
-    setPrompt('');
+  // The part the edit uses is where it starts playing.
+  const seeked = useRef<string | null>(null);
+  const onLoaded = () => {
+    if (seeked.current === take.path || !player.current) return;
+    seeked.current = take.path;
+    if (item.in !== null) player.current.currentTime = item.in;
   };
 
-  const openFile = (path: string) => void din.files.fromPath(path).then((h) => din.app.openFiles([h]));
-  const reveal = (path: string) => void din.files.fromPath(path.slice(0, path.lastIndexOf('/'))).then((h) => din.app.openFiles([h]));
-  const note = transcriptNote(take);
+  const at = () => Math.round((player.current?.currentTime ?? 0) * 100) / 100;
+  const setEdge = (edge: 'in' | 'out') => {
+    const time = at();
+    if (edge === 'in' && item.out !== null && time >= item.out) return setError('The start has to come before the end.');
+    if (edge === 'out' && time <= (item.in ?? 0)) return setError('The end has to come after the start.');
+    setError(null);
+    onChange(edge === 'in' ? { in: time > 0 ? time : null } : { out: time });
+  };
+  const playUsed = () => {
+    const v = player.current;
+    if (!v) return;
+    v.currentTime = item.in ?? 0;
+    void v.play();
+  };
+  // Playing the part the edit uses stops at its end.
+  useEffect(() => {
+    const v = player.current;
+    if (!v || item.out === null) return;
+    const out = item.out;
+    let stopped = false;
+    const tick = () => {
+      if (!stopped && v.currentTime >= out && v.currentTime < out + 0.5) {
+        stopped = true;
+        v.pause();
+      }
+      if (v.currentTime < out) stopped = false;
+    };
+    v.addEventListener('timeupdate', tick);
+    return () => v.removeEventListener('timeupdate', tick);
+  }, [item.out, video]);
+
+  const finished = take.status === 'ready' || take.status === 'interrupted';
   const portrait = take.aspect === '9:16';
+  const trimmed = item.in !== null || item.out !== null;
+  const meta = [
+    take.kind === 'clip' ? 'Clip' : null,
+    formatWhen(take.created),
+    take.duration > 0 ? formatTime(take.duration * 1000) : null,
+    take.kind === 'recording' ? take.aspect : null,
+    take.kind === 'recording' ? SCENES[take.scene] : null,
+    transcriptNote(take),
+  ].filter(Boolean);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -159,19 +132,19 @@ export function TakeView({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <TakeActionItems take={take} kind="dropdown" options={options} onAction={onAction} />
+              <ActionItems groups={itemActions(item, { first: index === 0, last: index === count - 1 }, options)} kind="dropdown" onAction={onAction} />
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        <div className={cn('mx-auto w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10', portrait ? 'max-w-sm' : take.aspect === '1:1' ? 'max-w-xl' : '')}>
+        <div className={cn('mx-auto w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10', portrait ? 'max-w-sm' : take.aspect === '1:1' ? 'max-w-xl' : '', !item.keep && 'opacity-60')}>
           <div className={cn('grid place-items-center', portrait ? 'aspect-[9/16]' : take.aspect === '1:1' ? 'aspect-square' : 'aspect-video')}>
             {video ? (
-              <video key={video} src={video} controls playsInline className="h-full w-full bg-black" aria-label={`${take.title}, as recorded`} />
+              <video ref={player} key={video} src={video} controls playsInline onLoadedMetadata={onLoaded} className="h-full w-full bg-black" aria-label={`${take.title}, as recorded`} />
             ) : take.status === 'finishing' ? (
               <p className="flex items-center gap-2 text-sm text-white/70">
                 <Loader2 className="size-4 animate-spin" aria-hidden />
-                Saving…
+                {take.kind === 'clip' ? 'Adding…' : 'Saving…'}
               </p>
             ) : (
               <Film className="size-8 text-white/30" aria-hidden />
@@ -179,93 +152,68 @@ export function TakeView({
           </div>
         </div>
 
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{take.title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {[formatWhen(take.created), take.duration > 0 ? formatTime(take.duration * 1000) : null, take.aspect, SCENES[take.scene], note]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {take.status === 'interrupted' && (
-            <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">This take was cut off before it was stopped. What was recorded until then is kept.</p>
-          )}
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              <span className="text-muted-foreground tabular-nums">{index + 1}. </span>
+              {take.title}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">{meta.join(' · ')}</p>
+            {take.status === 'interrupted' && (
+              <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+                {take.kind === 'clip' ? 'This clip wasn’t added all the way.' : 'This take was cut off before it was stopped. What was recorded until then is kept.'}
+              </p>
+            )}
+          </div>
+          <button type="button" onClick={() => onChange({ keep: !item.keep })} aria-pressed={!item.keep} className={button}>
+            {item.keep ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+            {item.keep ? 'Leave Out of the Edit' : 'Use in the Edit'}
+          </button>
         </div>
 
-        <section aria-labelledby="studio-make" className="rounded-2xl border bg-card p-4 shadow-sm">
-          <h2 id="studio-make" className="flex items-center gap-2 text-base font-semibold">
-            <Sparkles className="size-4 text-primary" aria-hidden />
-            Make with Assistant
+        <section aria-labelledby="studio-trim" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <h2 id="studio-trim" className="flex items-center gap-2 text-base font-semibold">
+            <Scissors className="size-4 text-muted-foreground" aria-hidden />
+            The part to use
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Say what you want. The Assistant cuts it from this take, using what was said and the marks you made, and saves it beside it.
+            {trimmed
+              ? `From ${formatTime((item.in ?? 0) * 1000)} to ${formatTime((item.out ?? take.duration) * 1000)}, ${formatTime(usedLength(item) * 1000)} of it.`
+              : 'All of it. Play to where it should start or end, and mark it. The Assistant still cuts mistakes and pauses inside it.'}
           </p>
-          {options.canAssist ? (
-            <>
-              <div className="mt-3 flex items-end gap-2 rounded-xl border bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
-                <textarea
-                  ref={composer}
-                  value={prompt}
-                  rows={2}
-                  disabled={!finished}
-                  aria-label="What should the Assistant make?"
-                  placeholder={finished ? 'What should the Assistant make?' : 'Available once the take is saved'}
-                  onChange={(e) => {
-                    setPrompt(e.target.value);
-                    setSent(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      send();
-                    }
-                  }}
-                  className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] outline-none placeholder:text-muted-foreground"
-                />
-                <button
-                  type="button"
-                  onClick={send}
-                  disabled={!prompt.trim() || !finished}
-                  aria-label="Send to the Assistant"
-                  className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
-                >
-                  <ArrowUp className="size-4" />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className={button} disabled={!video || !finished} onClick={() => setEdge('in')}>
+              Start Here
+            </button>
+            <button type="button" className={button} disabled={!video || !finished} onClick={() => setEdge('out')}>
+              End Here
+            </button>
+            {trimmed && (
+              <>
+                <button type="button" className={button} disabled={!video} onClick={playUsed}>
+                  Play the Part
                 </button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={!finished}
-                    onClick={() => {
-                      setPrompt(s);
-                      setSent(false);
-                      composer.current?.focus();
-                    }}
-                    className="h-8 rounded-full bg-muted px-3 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-              {sent && <p className="mt-3 text-sm text-muted-foreground" role="status">Sent. The Assistant is working on it, and what it makes shows up below.</p>}
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Turn on the Assistant in Settings to edit takes with it.</p>
-          )}
+                <button type="button" className={button} onClick={() => onChange({ in: null, out: null })}>
+                  Use All of It
+                </button>
+              </>
+            )}
+          </div>
+          {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
         </section>
 
-        <section aria-labelledby="studio-edits">
-          <h2 id="studio-edits" className="mb-2 text-sm font-semibold text-muted-foreground">Made from this take</h2>
-          {take.edits.length === 0 ? (
-            <div className="rounded-xl border border-dashed px-6 py-8 text-center text-sm text-muted-foreground">Nothing yet. What the Assistant makes is saved in this take’s edits folder.</div>
-          ) : (
-            <ul className="flex flex-col gap-0.5 rounded-xl border p-1">
-              {take.edits.map((path) => (
-                <EditRow key={path} path={path} onOpen={() => openFile(path)} onReveal={() => reveal(path)} />
-              ))}
-            </ul>
-          )}
+        <section aria-labelledby="studio-note">
+          <h2 id="studio-note" className="mb-2 text-sm font-semibold text-muted-foreground">Note for the Assistant</h2>
+          <textarea
+            id="studio-note-field"
+            aria-labelledby="studio-note"
+            value={note}
+            rows={3}
+            placeholder="Anything about this one: “the second half is better”, “use as the intro”"
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={() => note.trim() !== item.note && onChange({ note: note.trim() })}
+            className="w-full resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          />
         </section>
       </div>
     </div>

@@ -34,10 +34,10 @@ const INTENTS: Record<string, IntentKind> = {
     context: ({ directory, title }) => ({
       description: `From Studio: ${title}`,
       text: [
-        `The user recorded “${title}” in Studio, Din’s recorder, and asks you to make something from it.`,
-        `The take is the folder you’re working in (${directory}): take.json says what each track is and lines them up on one clock, and transcript.json has every word spoken with its time.`,
-        'Load the studio skill before you start: it explains the take and how to edit it with ffmpeg.',
-        'Put what you make in the take’s edits folder, and leave the recorded files as they are.',
+        `The user made the project “${title}” in Studio, Din’s recorder, and asks you to make something from it.`,
+        `The project is the folder you’re working in (${directory}): project.json lists its takes and clips in the order they go, which ones to use, and the user’s trims and notes. Each is a folder in takes/, whose take.json says what each track is and lines them up on one clock, and whose transcript.json has every word spoken with its time.`,
+        'Load the studio skill before you start: it explains the project and its takes, and how to edit them with ffmpeg.',
+        'Put what you make in the project’s edits folder, and leave the recorded files as they are.',
       ].join('\n'),
     }),
   },

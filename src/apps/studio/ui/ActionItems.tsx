@@ -1,26 +1,31 @@
 import { Fragment } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import type { TakeInfo } from '@/lib/capture';
-import { takeActions, type TakeAction } from '../takes';
 
-/** A take's actions as menu items, for its ⋯ menu or its right-click one. */
-export function TakeActionItems({
-  take,
+export interface MenuAction<T extends string> {
+  id: T;
+  label: string;
+  icon: LucideIcon;
+  enabled: boolean;
+  destructive?: boolean;
+}
+
+/** Actions in groups as menu items, for a ⋯ menu or the matching right-click one. */
+export function ActionItems<T extends string>({
+  groups,
   kind,
-  options,
   onAction,
 }: {
-  take: TakeInfo;
+  groups: MenuAction<T>[][];
   kind: 'dropdown' | 'context';
-  options: { canTranscribe: boolean; canAssist: boolean };
-  onAction: (action: TakeAction) => void;
+  onAction: (action: T) => void;
 }) {
   const Item = kind === 'dropdown' ? DropdownMenuItem : ContextMenuItem;
   const Separator = kind === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator;
   return (
     <>
-      {takeActions(take, options).map((group, i) => (
+      {groups.map((group, i) => (
         <Fragment key={i}>
           {i > 0 && <Separator />}
           {group.map(({ id, label, icon: Icon, enabled, destructive }) => (
@@ -34,4 +39,3 @@ export function TakeActionItems({
     </>
   );
 }
-

@@ -8,11 +8,17 @@
 // (pointer included, encoded on the GPU), as the Screenshot app's recordings
 // are (screen-recorder.mts).
 //
-// A take is a folder, ~/Videos/Studio/<date> Take <n>/, made for the
-// Assistant to edit: take.json says what's in it and lines its tracks up on
-// one clock, and transcript.json has every word spoken with its time
-// (whisper.cpp, as dictation uses, run after the take). The studio skill
-// (os/opencode/skills/studio) tells the Assistant how to read it.
+// A project is a folder, ~/Videos/Studio/<date> <title>/, of takes and clips
+// for the Assistant to make one thing from: project.json lists them in the
+// order they go, which to use, and the user's notes and trims, and edits/ is
+// where the Assistant puts what it makes. Each take is a folder in its
+// takes/: take.json says what's in it and lines its tracks up on one clock,
+// and transcript.json has every word spoken with its time (whisper.cpp, as
+// dictation uses, run after the take). A clip is a file the user brought in,
+// kept in a take folder of its own with the same take.json, so the Assistant
+// reads both alike. The studio skill (os/opencode/skills/studio) tells the
+// Assistant how to read them. Takes from before projects sit right in
+// ~/Videos/Studio; one becomes a project of its own when it's opened.
 //
 // Going live: Studio sends the picture it composes, already encoded, and
 // FFmpeg turns its Opus into the AAC that RTMP wants and pushes it to the
@@ -42,6 +48,10 @@ const STREAM_BACKLOG_WARN = 8 * 1024 * 1024;
 const STREAM_BACKLOG_MAX = 256 * 1024 * 1024;
 const TAKE_FORMAT = 'din-studio-take';
 const TAKE_VERSION = 1;
+const PROJECT_FORMAT = 'din-studio-project';
+const PROJECT_VERSION = 1;
+/** Where a project keeps its takes and clips. */
+const TAKES_DIR = 'takes';
 
 export type StudioScene = 'screen-camera' | 'camera' | 'screen';
 export type StudioAspect = '16:9' | '9:16' | '1:1';
@@ -67,7 +77,7 @@ export interface LiveStatus {
 }
 
 export interface CaptureState {
-  recording: { take: string; title: string; startedAt: number } | null;
+  recording: { take: string; title: string; project: string; startedAt: number } | null;
   live: LiveStatus | null;
 }
 
@@ -90,6 +100,10 @@ export interface TakeInfo {
   path: string;
   /** The folder's name. */
   name: string;
+  /** The project's folder, or null for a take from before projects. */
+  project: string | null;
+  /** Recorded in Studio, or a file the user brought in. */
+  kind: 'recording' | 'clip';
   title: string;
   /** ISO 8601. */
   created: string;
@@ -106,7 +120,44 @@ export interface TakeInfo {
   edits: string[];
 }
 
+export interface ProjectItem {
+  take: TakeInfo;
+  /** In the edit; false for one the user set aside. */
+  keep: boolean;
+  /** What the user said about it, for the Assistant. */
+  note: string;
+  /** Where the part to use starts and ends, in seconds on the take's clock; null for its start or end. */
+  in: number | null;
+  out: number | null;
+}
+
+export interface ProjectInfo {
+  path: string;
+  name: string;
+  title: string;
+  /** ISO 8601. */
+  created: string;
+  /** When something was last added, ISO 8601. */
+  updated: string;
+  /** Its takes and clips, in the order they go. */
+  items: ProjectItem[];
+  /** What the Assistant made, in its edits folder. */
+  edits: string[];
+  /** A take from before projects, made into a project when it's opened. */
+  single: boolean;
+}
+
+export interface ProjectChange {
+  title?: string;
+  /** Every take's folder name, in the new order. */
+  order?: string[];
+  /** One take's place in the edit, by its folder name. */
+  item?: { name: string; keep?: boolean; note?: string; in?: number | null; out?: number | null };
+}
+
 export interface TakeStart {
+  /** The project to record into; a new one when left out. */
+  project?: string;
   title?: string;
   scene: StudioScene;
   aspect: StudioAspect;
@@ -251,34 +302,70 @@ function studioFolder(): string {
   return path.join(os.homedir(), 'Videos', 'Studio');
 }
 
-/** A take's folder from what a caller named: only folders right inside Studio's. */
+function named(value: unknown, what: string): string {
+  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) throw new Error(`Not a ${what}`);
+  return path.resolve(value);
+}
+
+/** A take's folder from what a caller named: in a project's takes, or right inside Studio's from before projects. */
 function takeFolder(take: unknown): string {
-  if (typeof take !== 'string' || !path.isAbsolute(take) || take.includes('\0')) throw new Error('Not a take');
-  const resolved = path.resolve(take);
-  if (path.dirname(resolved) !== studioFolder()) throw new Error('Not a take');
+  const resolved = named(take, 'take');
+  const parent = path.dirname(resolved);
+  if (parent === studioFolder()) return resolved;
+  if (path.basename(parent) === TAKES_DIR && path.dirname(path.dirname(parent)) === studioFolder()) return resolved;
+  throw new Error('Not a take');
+}
+
+/** A project's folder from what a caller named: only folders right inside Studio's. */
+function projectFolder(project: unknown): string {
+  const resolved = named(project, 'project');
+  if (path.dirname(resolved) !== studioFolder()) throw new Error('Not a project');
   return resolved;
 }
 
-/** "2026-11-01 Take 3": the day's next number. */
-function newTakeFolder(): { folder: string; title: string } {
-  const root = studioFolder();
-  fs.mkdirSync(root, { recursive: true });
+/** The project a take is in, or null for one from before projects. */
+function projectOf(take: string): string | null {
+  const parent = path.dirname(take);
+  return path.basename(parent) === TAKES_DIR && path.dirname(path.dirname(parent)) === studioFolder() ? path.dirname(parent) : null;
+}
+
+function today(): string {
   const date = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
-  const day = `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(root);
-  } catch {
-    // Just made.
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
+}
+
+/** A name a folder can have: no slashes, no leading dot, not too long. */
+function folderName(text: string, fallback: string): string {
+  const cleaned = text.replace(/[/\\\0:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 80).trim();
+  return cleaned || fallback;
+}
+
+/** Make `<parent>/<base>`, or `<base> 2`, `<base> 3`… if it's taken. */
+function newFolder(parent: string, base: string): string {
+  fs.mkdirSync(parent, { recursive: true });
+  for (let n = 1; ; n++) {
+    const folder = path.join(parent, n === 1 ? base : `${base} ${n}`);
+    try {
+      fs.mkdirSync(folder);
+      return folder;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
   }
+}
+
+/** "Take 3": the project's next number. */
+function newTakeFolder(project: string): { folder: string; title: string } {
+  const takes = path.join(project, TAKES_DIR);
+  fs.mkdirSync(takes, { recursive: true });
   let n = 1;
-  for (const name of names) {
-    const match = name.match(/^(\d{4}-\d{2}-\d{2}) Take (\d+)$/);
-    if (match && match[1] === day) n = Math.max(n, Number(match[2]) + 1);
+  for (const name of fs.readdirSync(takes)) {
+    const match = name.match(/^Take (\d+)$/);
+    if (match) n = Math.max(n, Number(match[1]) + 1);
   }
   for (;;) {
-    const folder = path.join(root, `${day} Take ${n}`);
+    const folder = path.join(takes, `Take ${n}`);
     try {
       fs.mkdirSync(folder);
       return { folder, title: `Take ${n}` };
@@ -295,36 +382,86 @@ type TakeJson = Record<string, unknown> & {
   scene?: StudioScene;
   aspect?: StudioAspect;
   status?: TakeInfo['status'];
+  imported?: string;
   tracks?: Record<string, { file?: string } & Record<string, unknown>>;
   transcript?: { file?: string; status?: TranscriptState; error?: string };
 };
 
-async function readTake(folder: string): Promise<TakeJson | null> {
+interface ItemJson {
+  take: string;
+  keep?: boolean;
+  note?: string;
+  in?: number | null;
+  out?: number | null;
+}
+
+type ProjectJson = Record<string, unknown> & {
+  title?: string;
+  created?: string;
+  items?: ItemJson[];
+};
+
+async function readJson<T extends object>(file: string): Promise<T | null> {
   try {
-    const parsed: unknown = JSON.parse(await fsp.readFile(path.join(folder, 'take.json'), 'utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as TakeJson) : null;
+    const parsed: unknown = JSON.parse(await fsp.readFile(file, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as T) : null;
   } catch {
     return null;
   }
 }
 
-/** take.json's writes, one at a time per take, each a whole file put in place at once. */
-const takeWrites = new Map<string, Promise<unknown>>();
+function readTake(folder: string): Promise<TakeJson | null> {
+  return readJson<TakeJson>(path.join(folder, 'take.json'));
+}
 
-function updateTake(folder: string, change: (take: TakeJson) => TakeJson): Promise<TakeJson> {
-  const previous = takeWrites.get(folder) ?? Promise.resolve();
+function readProject(folder: string): Promise<ProjectJson | null> {
+  return readJson<ProjectJson>(path.join(folder, 'project.json'));
+}
+
+/** A folder's JSON file's writes, one at a time, each a whole file put in place at once. */
+const jsonWrites = new Map<string, Promise<unknown>>();
+
+function updateJson<T extends object>(file: string, change: (value: T) => T): Promise<T> {
+  const previous = jsonWrites.get(file) ?? Promise.resolve();
   const next = previous.catch(() => {}).then(async () => {
-    const take = change((await readTake(folder)) ?? {});
-    const tmp = path.join(folder, `.take.json.${process.pid}`);
-    await fsp.writeFile(tmp, `${JSON.stringify(take, null, 2)}\n`);
-    await fsp.rename(tmp, path.join(folder, 'take.json'));
-    return take;
+    const value = change((await readJson<T>(file)) ?? ({} as T));
+    const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}`);
+    await fsp.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`);
+    await fsp.rename(tmp, file);
+    return value;
   });
-  takeWrites.set(folder, next);
+  jsonWrites.set(file, next);
   void next.finally(() => {
-    if (takeWrites.get(folder) === next) takeWrites.delete(folder);
+    if (jsonWrites.get(file) === next) jsonWrites.delete(file);
   });
   return next;
+}
+
+function updateTake(folder: string, change: (take: TakeJson) => TakeJson): Promise<TakeJson> {
+  return updateJson<TakeJson>(path.join(folder, 'take.json'), change);
+}
+
+function updateProjectJson(folder: string, change: (project: ProjectJson) => ProjectJson): Promise<ProjectJson> {
+  return updateJson<ProjectJson>(path.join(folder, 'project.json'), change);
+}
+
+async function filesIn(folder: string): Promise<string[]> {
+  try {
+    return (await fsp.readdir(folder, { withFileTypes: true }))
+      .filter((e) => e.isFile() && !e.name.startsWith('.'))
+      .map((e) => path.join(folder, e.name))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function aspectOf(width: unknown, height: unknown): StudioAspect {
+  const w = Number(width);
+  const h = Number(height);
+  if (!(w > 0) || !(h > 0)) return '16:9';
+  const ratio = w / h;
+  return ratio > 1.2 ? '16:9' : ratio < 0.8 ? '9:16' : '1:1';
 }
 
 async function takeInfo(folder: string): Promise<TakeInfo | null> {
@@ -335,46 +472,376 @@ async function takeInfo(folder: string): Promise<TakeInfo | null> {
     const full = path.join(folder, file);
     return fs.existsSync(full) ? full : null;
   };
-  let edits: string[] = [];
-  try {
-    edits = (await fsp.readdir(path.join(folder, 'edits'), { withFileTypes: true }))
-      .filter((e) => e.isFile() && !e.name.startsWith('.'))
-      .map((e) => path.join(folder, 'edits', e.name))
-      .sort();
-  } catch {
-    // None yet.
-  }
   const status = take.status ?? 'ready';
+  const clip = typeof take.imported === 'string';
+  const program = take.tracks?.program;
   return {
     path: folder,
     name: path.basename(folder),
+    project: projectOf(folder),
+    kind: clip ? 'clip' : 'recording',
     title: typeof take.title === 'string' ? take.title : path.basename(folder),
     created: typeof take.created === 'string' ? take.created : new Date(0).toISOString(),
     duration: typeof take.duration === 'number' ? take.duration : 0,
     scene: take.scene ?? 'camera',
-    aspect: take.aspect ?? '16:9',
-    // A take still "recording" that nothing here is recording was cut off (Din quit, a crash).
-    status: status === 'recording' && current?.folder !== folder ? 'interrupted' : status,
+    aspect: take.aspect ?? (clip ? aspectOf(program?.width, program?.height) : '16:9'),
+    // A take still "recording" or "finishing" that nothing here is working on was cut off (Din quit, a crash).
+    status:
+      status === 'recording' && current?.folder !== folder ? 'interrupted'
+        : status === 'finishing' && clip && !importing.has(folder) ? 'interrupted'
+          : status,
     transcript: take.transcript?.status ?? 'none',
-    program: await existing(take.tracks?.program?.file),
+    program: await existing(program?.file),
     poster: await existing('poster.jpg'),
-    edits,
+    edits: await filesIn(path.join(folder, 'edits')),
   };
 }
 
-async function listTakes(): Promise<TakeInfo[]> {
+function finite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) / 1000 : null;
+}
+
+/** The takes in a project's takes folder, by folder name. */
+async function takesIn(project: string): Promise<Map<string, TakeInfo>> {
+  const dir = path.join(project, TAKES_DIR);
+  let names: string[] = [];
+  try {
+    names = (await fsp.readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
+  } catch {
+    // None yet.
+  }
+  const infos = await Promise.all(names.map((n) => takeInfo(path.join(dir, n))));
+  return new Map(infos.filter((t): t is TakeInfo => t !== null).map((t) => [t.name, t]));
+}
+
+/**
+ * A project as it is on disk: project.json's order, with takes it doesn't
+ * name yet (one being recorded, one copied in by hand) at the end, and
+ * those that are gone (moved to the Trash) left out.
+ */
+async function projectInfo(folder: string): Promise<ProjectInfo | null> {
+  const project = await readProject(folder);
+  if (!project || project.format !== PROJECT_FORMAT) {
+    // A take from before projects: a project of one, until it's opened.
+    const take = await takeInfo(folder);
+    if (!take) return null;
+    return {
+      path: folder,
+      name: take.name,
+      title: take.title,
+      created: take.created,
+      updated: take.created,
+      items: [{ take, keep: true, note: '', in: null, out: null }],
+      edits: take.edits,
+      single: true,
+    };
+  }
+  const takes = await takesIn(folder);
+  const items: ProjectItem[] = [];
+  for (const item of Array.isArray(project.items) ? project.items : []) {
+    const take = item && typeof item.take === 'string' ? takes.get(item.take) : undefined;
+    if (!take) continue;
+    takes.delete(item.take);
+    items.push({ take, keep: item.keep !== false, note: typeof item.note === 'string' ? item.note : '', in: finite(item.in), out: finite(item.out) });
+  }
+  for (const take of [...takes.values()].sort((a, b) => a.created.localeCompare(b.created))) {
+    items.push({ take, keep: true, note: '', in: null, out: null });
+  }
+  const created = typeof project.created === 'string' ? project.created : new Date(0).toISOString();
+  return {
+    path: folder,
+    name: path.basename(folder),
+    title: typeof project.title === 'string' && project.title ? project.title : path.basename(folder),
+    created,
+    updated: items.reduce((latest, i) => (i.take.created > latest ? i.take.created : latest), created),
+    items,
+    edits: await filesIn(path.join(folder, 'edits')),
+    single: false,
+  };
+}
+
+async function listProjects(): Promise<ProjectInfo[]> {
   let names: string[];
   try {
     names = await fsp.readdir(studioFolder());
   } catch {
     return [];
   }
-  const takes = await Promise.all(names.filter((n) => !n.startsWith('.')).map((n) => takeInfo(path.join(studioFolder(), n))));
-  return takes.filter((t): t is TakeInfo => t !== null).sort((a, b) => b.created.localeCompare(a.created));
+  const projects = await Promise.all(names.filter((n) => !n.startsWith('.')).map((n) => projectInfo(path.join(studioFolder(), n))));
+  return projects.filter((p): p is ProjectInfo => p !== null).sort((a, b) => b.updated.localeCompare(a.updated));
+}
+
+async function listTakes(project?: string): Promise<TakeInfo[]> {
+  const projects = project ? [await projectInfo(projectFolder(project))].filter((p): p is ProjectInfo => p !== null) : await listProjects();
+  const takes = projects.flatMap((p) => p.items.map((i) => i.take));
+  return project ? takes : takes.sort((a, b) => b.created.localeCompare(a.created));
+}
+
+async function writeProject(folder: string, title: string, created: string, items: ItemJson[]): Promise<void> {
+  await updateProjectJson(folder, () => ({
+    format: PROJECT_FORMAT,
+    version: PROJECT_VERSION,
+    about: 'Takes and clips made with Din’s Studio, for the Assistant to make one thing from. The studio skill explains this folder.',
+    title,
+    created,
+    items,
+  }));
+  await fsp.mkdir(path.join(folder, 'edits'), { recursive: true }).catch(() => {});
+}
+
+async function createProject(title: unknown): Promise<ProjectInfo> {
+  const name = typeof title === 'string' && title.trim() ? title.trim().slice(0, 200) : 'New Project';
+  const folder = newFolder(studioFolder(), `${today()} ${folderName(name, 'Project')}`);
+  await writeProject(folder, name, new Date().toISOString(), []);
+  const info = await projectInfo(folder);
+  if (!info) throw new Error('The project couldn’t be made');
+  projectChanged(folder);
+  return info;
+}
+
+/**
+ * Make a take from before projects into a project of its own, in place: the
+ * folder keeps its name and becomes the project, the take moves into its
+ * takes folder, and what the Assistant made from it into the project's edits.
+ */
+async function openProject(project: unknown): Promise<ProjectInfo> {
+  const folder = projectFolder(project);
+  const existing = await projectInfo(folder);
+  if (!existing) throw new Error('No such project');
+  if (!existing.single) return existing;
+  if (current?.folder === folder || transcribing.has(folder)) throw new Error('This take is busy; try again once it’s saved');
+  const take = existing.items[0]!.take;
+  const moving = path.join(studioFolder(), `.${path.basename(folder)}.${process.pid}`);
+  await fsp.rename(folder, moving);
+  try {
+    await fsp.mkdir(path.join(folder, TAKES_DIR), { recursive: true });
+    const name = folderName(take.title, 'Take 1');
+    const moved = path.join(folder, TAKES_DIR, name);
+    await fsp.rename(moving, moved);
+    const edits = path.join(moved, 'edits');
+    if (fs.existsSync(edits)) await fsp.rename(edits, path.join(folder, 'edits'));
+    await writeProject(folder, take.title, take.created, [{ take: name, keep: true }]);
+  } catch (error) {
+    // Put it back as it was.
+    if (fs.existsSync(moving)) {
+      await fsp.rm(folder, { recursive: true, force: true }).catch(() => {});
+      await fsp.rename(moving, folder).catch(() => {});
+    }
+    throw error;
+  }
+  changed(path.join(folder, TAKES_DIR, folderName(take.title, 'Take 1')));
+  const info = await projectInfo(folder);
+  if (!info) throw new Error('No such project');
+  return info;
+}
+
+/** project.json's items as they are now, every take in it named. */
+async function currentItems(folder: string): Promise<ItemJson[]> {
+  const info = await projectInfo(folder);
+  if (!info || info.single) throw new Error('Not a project');
+  return info.items.map((i) => ({
+    take: i.take.name,
+    keep: i.keep,
+    ...(i.note ? { note: i.note } : {}),
+    ...(i.in !== null ? { in: i.in } : {}),
+    ...(i.out !== null ? { out: i.out } : {}),
+  }));
+}
+
+async function changeProject(project: unknown, change: ProjectChange): Promise<ProjectInfo> {
+  const folder = projectFolder(project);
+  let items = await currentItems(folder);
+  if (Array.isArray(change.order)) {
+    const at = new Map(change.order.filter((n): n is string => typeof n === 'string').map((n, i) => [n, i]));
+    // What the order leaves out stays after what it names, as it was.
+    items = [...items].sort((a, b) => (at.get(a.take) ?? Infinity) - (at.get(b.take) ?? Infinity));
+  }
+  const item = change.item;
+  if (item && typeof item.name === 'string') {
+    const target = items.find((i) => i.take === item.name);
+    if (!target) throw new Error('That take isn’t in this project');
+    if (typeof item.keep === 'boolean') target.keep = item.keep;
+    if (typeof item.note === 'string') {
+      const note = item.note.trim().slice(0, 2000);
+      if (note) target.note = note;
+      else delete target.note;
+    }
+    for (const edge of ['in', 'out'] as const) {
+      if (!(edge in item)) continue;
+      const value = finite(item[edge]);
+      if (value === null) delete target[edge];
+      else target[edge] = value;
+    }
+    if (target.in !== undefined && target.out !== undefined && target.in !== null && target.out !== null && target.out <= target.in) {
+      throw new Error('The end has to come after the start');
+    }
+  }
+  const title = typeof change.title === 'string' && change.title.trim() ? change.title.trim().slice(0, 200) : undefined;
+  await updateProjectJson(folder, (p) => ({ ...p, ...(title ? { title } : {}), items }));
+  projectChanged(folder);
+  const info = await projectInfo(folder);
+  if (!info) throw new Error('No such project');
+  return info;
+}
+
+/** A new take goes at the end of its project. */
+async function addToProject(take: string): Promise<void> {
+  const project = projectOf(take);
+  if (!project) return;
+  const name = path.basename(take);
+  await updateProjectJson(project, (p) => {
+    const items = Array.isArray(p.items) ? p.items : [];
+    return items.some((i) => i?.take === name) ? p : { ...p, items: [...items, { take: name, keep: true }] };
+  });
+}
+
+/** A take that's gone leaves its project's list, so a new one of the same name starts afresh. */
+async function removeFromProject(take: string): Promise<void> {
+  const project = projectOf(take);
+  if (!project) return;
+  const name = path.basename(take);
+  await updateProjectJson(project, (p) => ({ ...p, items: (Array.isArray(p.items) ? p.items : []).filter((i) => i?.take !== name) })).catch(() => {});
+}
+
+function projectChanged(folder: string): void {
+  void projectInfo(folder).then((project) => options?.sendToShell('capture:projectChanged', project ?? { path: folder, removed: true }));
 }
 
 function changed(folder: string): void {
   void takeInfo(folder).then((take) => options?.sendToShell('capture:changed', take ?? { path: folder, removed: true }));
+  const project = projectOf(folder);
+  if (project) projectChanged(project);
+}
+
+// ---------------------------------------------------------------------------
+// Clips: files the user brings in
+// ---------------------------------------------------------------------------
+
+/** What FFmpeg says a file holds: its length and picture size, and whether it has sound. */
+function probe(file: string): Promise<{ duration: number; width?: number; height?: number; video: boolean; audio: boolean }> {
+  return new Promise((resolve) => {
+    const tool = ffmpeg();
+    if (!tool) {
+      resolve({ duration: 0, video: true, audio: true });
+      return;
+    }
+    const child = spawn(tool, ['-hide_banner', '-i', file], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let log = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      log = (log + chunk.toString()).slice(-65_536);
+    });
+    const done = () => {
+      const d = log.match(/Duration: (\d+):(\d+):([\d.]+)/);
+      const v = log.match(/Stream #[^\n]*Video:[^\n]*?(\d{2,5})x(\d{2,5})/);
+      resolve({
+        duration: d ? Math.round((Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) * 1000) / 1000 : 0,
+        ...(v ? { width: Number(v[1]), height: Number(v[2]) } : {}),
+        video: /Stream #[^\n]*Video:/.test(log),
+        audio: /Stream #[^\n]*Audio:/.test(log),
+      });
+    };
+    child.once('exit', done);
+    child.once('error', done);
+  });
+}
+
+/** Clips being copied in: their folder, and the webContents writing them. */
+const importing = new Map<string, number>();
+
+/** The extension a clip's file keeps: its own, if it's a plain one. */
+function clipFile(name: string): string {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  return `clip.${/^[a-z0-9]{1,5}$/.test(ext) ? ext : 'mp4'}`;
+}
+
+/** Make a clip's folder in a project, for its file to be written into (`open`, `write`, `close`, then `importEnd`). */
+async function importBegin(owner: number, project: unknown, name: unknown): Promise<{ take: string; file: string }> {
+  const folder = projectFolder(project);
+  const info = await projectInfo(folder);
+  if (!info || info.single) throw new Error('Not a project');
+  const original = typeof name === 'string' && name.trim() ? path.basename(name.trim()).slice(0, 200) : 'Clip';
+  const title = original.replace(/\.[^.]+$/, '') || original;
+  const take = newFolder(path.join(folder, TAKES_DIR), folderName(title, 'Clip'));
+  const file = clipFile(original);
+  importing.set(take, owner);
+  watchOwner(owner);
+  await updateTake(take, () => ({
+    format: TAKE_FORMAT,
+    version: TAKE_VERSION,
+    about: 'A clip brought into Din’s Studio, for editing. The studio skill explains this folder.',
+    title,
+    imported: original,
+    created: new Date().toISOString(),
+    status: 'finishing',
+  }));
+  await addToProject(take);
+  changed(take);
+  return { take, file };
+}
+
+/** The clip is all there: read what's in it, give it a poster, and transcribe it. */
+async function importEnd(take: unknown, discard: unknown): Promise<TakeInfo | null> {
+  const folder = takeFolder(take);
+  const json = await readTake(folder);
+  if (!json || typeof json.imported !== 'string') throw new Error('Not a clip');
+  importing.delete(folder);
+  await closeWriters((w) => w.folder === folder);
+  const file = clipFile(json.imported);
+  const full = path.join(folder, file);
+  if (discard === true || !fs.existsSync(full) || fs.statSync(full).size === 0) {
+    await fsp.rm(folder, { recursive: true, force: true });
+    await removeFromProject(folder);
+    changed(folder);
+    return null;
+  }
+  const info = await probe(full);
+  if (!info.video && !info.audio) {
+    await fsp.rm(folder, { recursive: true, force: true });
+    await removeFromProject(folder);
+    changed(folder);
+    throw new Error(`${json.imported} isn’t a video or a sound file`);
+  }
+  const tool = ffmpeg();
+  if (tool && info.video) {
+    const at = info.duration > 2 ? 1 : 0;
+    await run(tool, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(at), '-i', full, '-frames:v', '1', '-vf', 'scale=min(640\\,iw):-2', '-q:v', '4', path.join(folder, 'poster.jpg')]).catch(() => {});
+  }
+  const canTranscribe = info.audio && whisper() !== null && tool !== null;
+  await updateTake(folder, (t) => ({
+    ...t,
+    status: 'ready',
+    duration: info.duration,
+    ...(info.width ? { canvas: { width: info.width, height: info.height } } : {}),
+    tracks: {
+      program: {
+        file,
+        start: 0,
+        ...(info.width ? { width: info.width, height: info.height } : {}),
+        ...(info.audio ? { audio: 'clip' } : {}),
+      },
+    },
+    switches: [],
+    markers: [],
+    transcript: { file: 'transcript.json', status: canTranscribe ? 'working' : 'none' },
+  }));
+  changed(folder);
+  if (canTranscribe) void transcribe(folder).catch(() => {});
+  return takeInfo(folder);
+}
+
+/** Copy a file into a project as a clip: for the desktop's `din studio import`, which names files by path. */
+async function importFile(owner: number, project: unknown, source: unknown): Promise<TakeInfo | null> {
+  if (typeof source !== 'string' || !path.isAbsolute(source)) throw new Error('Not a file');
+  const stat = await fsp.stat(source);
+  if (!stat.isFile()) throw new Error(`${path.basename(source)} isn’t a file`);
+  const { take, file } = await importBegin(owner, project, path.basename(source));
+  try {
+    await fsp.copyFile(source, path.join(take, file), fs.constants.COPYFILE_FICLONE);
+  } catch (error) {
+    await importEnd(take, true).catch(() => {});
+    throw error;
+  }
+  return importEnd(take, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +863,10 @@ const writers = new Map<string, Writer>();
 
 async function openWriter(owner: number, take: unknown, file: unknown): Promise<string> {
   const folder = takeFolder(take);
-  if (typeof file !== 'string' || !WRITABLE.test(file)) throw new Error('Not a file Studio writes');
+  if (typeof file !== 'string') throw new Error('Not a file Studio writes');
+  // A clip's own file, only while it's being brought in, and only by who's bringing it.
+  const clip = importing.get(folder) === owner && /^clip\.[a-z0-9]{1,5}$/.test(file);
+  if (!WRITABLE.test(file) && !clip) throw new Error('Not a file Studio writes');
   const handle = await fsp.open(path.join(folder, file), 'w');
   const id = randomUUID();
   writers.set(id, { folder, file, handle, queue: Promise.resolve(), owner });
@@ -441,6 +911,7 @@ interface ScreenTrack {
 
 interface Recording {
   folder: string;
+  project: string;
   title: string;
   owner: number;
   startedAt: number;
@@ -454,7 +925,7 @@ let current: Recording | null = null;
 
 function state(): CaptureState {
   return {
-    recording: current ? { take: current.folder, title: current.title, startedAt: current.startedAt } : null,
+    recording: current ? { take: current.folder, title: current.title, project: current.project, startedAt: current.startedAt } : null,
     live: live ? liveStatus(live) : null,
   };
 }
@@ -506,7 +977,7 @@ function startScreen(file: string, area: Electron.Rectangle, audio: boolean, gpu
   });
 }
 
-async function begin(owner: number, request: TakeStart): Promise<{ take: string; title: string; screen: { start: number; width: number; height: number } | null }> {
+async function begin(owner: number, request: TakeStart): Promise<{ take: string; title: string; project: string; screen: { start: number; width: number; height: number } | null }> {
   if (current) throw new Error('Studio is already recording');
   const scene: StudioScene = request.scene === 'screen' || request.scene === 'camera' ? request.scene : 'screen-camera';
   const aspect: StudioAspect = request.aspect === '9:16' || request.aspect === '1:1' ? request.aspect : '16:9';
@@ -514,7 +985,13 @@ async function begin(owner: number, request: TakeStart): Promise<{ take: string;
     width: Math.max(16, Math.min(7680, Math.round(Number(request.canvas?.width) || 1920))),
     height: Math.max(16, Math.min(7680, Math.round(Number(request.canvas?.height) || 1080))),
   };
-  const { folder, title: numbered } = newTakeFolder();
+  // Into the project asked for (a take from before projects becomes one), else a new one.
+  let project: string;
+  // One that's gone (moved to the Trash meanwhile) gets a new one too.
+  if (typeof request.project === 'string' && request.project && fs.existsSync(projectFolder(request.project))) project = (await openProject(request.project)).path;
+  else project = (await createProject(undefined)).path;
+  if (current) throw new Error('Studio is already recording');
+  const { folder, title: numbered } = newTakeFolder(project);
   const title = typeof request.title === 'string' && request.title.trim() ? request.title.trim().slice(0, 200) : numbered;
 
   let screenTrack: ScreenTrack | null = null;
@@ -528,7 +1005,7 @@ async function begin(owner: number, request: TakeStart): Promise<{ take: string;
     else screenTrack = started;
   }
 
-  current = { folder, title, owner, startedAt: Date.now(), scene, aspect, canvas, screen: screenTrack };
+  current = { folder, project, title, owner, startedAt: Date.now(), scene, aspect, canvas, screen: screenTrack };
   await updateTake(folder, () => ({
     format: TAKE_FORMAT,
     version: TAKE_VERSION,
@@ -539,6 +1016,7 @@ async function begin(owner: number, request: TakeStart): Promise<{ take: string;
     scene,
     aspect,
   }));
+  await addToProject(folder);
   // A window that closes mid-take leaves what it recorded, finished.
   watchOwner(owner);
   publishState();
@@ -546,6 +1024,7 @@ async function begin(owner: number, request: TakeStart): Promise<{ take: string;
   return {
     take: folder,
     title,
+    project,
     screen: screenTrack ? { start: screenTrack.start, width: screenTrack.width, height: screenTrack.height } : null,
   };
 }
@@ -612,6 +1091,7 @@ async function end(request: TakeEnd): Promise<TakeInfo | null> {
 
   if (request.discard) {
     await fsp.rm(folder, { recursive: true, force: true });
+    await removeFromProject(folder);
     changed(folder);
     return null;
   }
@@ -711,6 +1191,9 @@ function abandon(owner: number): void {
   } else {
     void closeWriters((w) => w.owner === owner);
   }
+  for (const [folder, by] of importing) {
+    if (by === owner) void importEnd(folder, true).catch(() => {});
+  }
   if (live?.owner === owner) void stopStream();
 }
 
@@ -764,8 +1247,9 @@ function transcribe(folder: string): Promise<void> {
         : 'Transcription isn’t available here');
     }
     const take = await readTake(folder);
-    const mic = take?.tracks?.mic;
-    if (!mic?.file) throw new Error('This take has no microphone');
+    // A clip's own sound, which is all it has.
+    const mic = take?.tracks?.mic ?? (typeof take?.imported === 'string' ? take.tracks?.program : undefined);
+    if (!mic?.file) throw new Error(typeof take?.imported === 'string' ? 'This clip has no sound' : 'This take has no microphone');
     await updateTake(folder, (t) => ({ ...t, transcript: { file: 'transcript.json', status: 'working' } }));
     changed(folder);
     const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), 'din-studio-'));
@@ -1093,9 +1577,52 @@ export function registerCaptureHandlers(opts: Options): void {
     reported = { x: bounds.x + x * zoom, y: bounds.y + y * zoom };
   });
 
-  ipcMain.handle('capture:takes', async (event) => {
+  ipcMain.handle('capture:takes', async (event, project: unknown) => {
     assertShellSender(event);
-    return listTakes();
+    return listTakes(typeof project === 'string' ? project : undefined);
+  });
+
+  ipcMain.handle('capture:projects', async (event) => {
+    assertShellSender(event);
+    return listProjects();
+  });
+
+  ipcMain.handle('capture:project', async (event, project: unknown) => {
+    assertShellSender(event);
+    return projectInfo(projectFolder(project));
+  });
+
+  ipcMain.handle('capture:createProject', async (event, title: unknown) => {
+    assertShellSender(event);
+    return createProject(title);
+  });
+
+  ipcMain.handle('capture:openProject', async (event, project: unknown) => {
+    assertShellSender(event);
+    return openProject(project);
+  });
+
+  ipcMain.handle('capture:updateProject', async (event, project: unknown, change: unknown) => {
+    assertShellSender(event);
+    return changeProject(project, (change && typeof change === 'object' ? change : {}) as ProjectChange);
+  });
+
+  ipcMain.handle('capture:importBegin', async (event, project: unknown, name: unknown) => {
+    assertShellSender(event);
+    return importBegin(event.sender.id, project, name);
+  });
+
+  ipcMain.handle('capture:importEnd', async (event, take: unknown, discard: unknown) => {
+    assertShellSender(event);
+    return importEnd(take, discard);
+  });
+
+  // By path: the desktop's alone (`din studio import`). Apps bring files in
+  // through importBegin, writing what the user handed them; this isn't on
+  // their bridge (din-apps.mts), or it would read any file by its path.
+  ipcMain.handle('capture:importFile', async (event, project: unknown, file: unknown) => {
+    assertShellSender(event);
+    return importFile(event.sender.id, project, file);
   });
 
   ipcMain.handle('capture:take', async (event, take: unknown) => {

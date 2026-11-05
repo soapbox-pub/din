@@ -1175,6 +1175,7 @@ export function installDin(transport: Transport): void {
         const c: Record<string, unknown> = {};
         for (const m of [
           'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+          'projects', 'project', 'createProject', 'openProject', 'updateProject', 'importBegin', 'importEnd',
           'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
         ]) {
           c[m] = (...args: unknown[]) => sys.call('capture', `capture:${m}`, args);
@@ -1182,6 +1183,7 @@ export function installDin(transport: Transport): void {
         c.streamWrite = (...args: unknown[]) => sys.send('capture', 'capture:streamWrite', args);
         c.onState = (cb: (state: unknown) => void) => sys.on('capture', 'capture:state', (s) => cb(s));
         c.onChanged = (cb: (take: unknown) => void) => sys.on('capture', 'capture:changed', (t) => cb(t));
+        c.onProjectChanged = (cb: (project: unknown) => void) => sys.on('capture', 'capture:projectChanged', (p) => cb(p));
         c.onStreamEnded = (cb: (ended: unknown) => void) => sys.on('capture', 'capture:streamEnded', (e) => cb(e));
         system.capture = c as unknown as CaptureBridge;
       }

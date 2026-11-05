@@ -1,52 +1,61 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FolderOpen, Pencil, Play, RefreshCw, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
-import type { CaptureBridge, TakeInfo } from '@/lib/capture';
+import { ArrowDown, ArrowUp, Eye, EyeOff, FolderOpen, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
+import type { CaptureBridge, ProjectInfo, ProjectItem } from '@/lib/capture';
 import { useDin } from '@/sdk/react';
 
-/** The takes, newest first, kept current as Studio records and main finishes them. */
-export function useTakes(capture: CaptureBridge | undefined): {
-  takes: TakeInfo[];
+function sorted(list: ProjectInfo[]): ProjectInfo[] {
+  return [...list].sort((a, b) => b.updated.localeCompare(a.updated));
+}
+
+/** The projects, the one added to last first, kept current as Studio records and main finishes takes. */
+export function useProjects(capture: CaptureBridge | undefined): {
+  projects: ProjectInfo[];
   loading: boolean;
-  forget: (path: string) => void;
+  /** Put a project as main just gave it. */
+  put: (project: ProjectInfo | { path: string; removed: true }) => void;
   refresh: (path: string) => void;
 } {
-  const [takes, setTakes] = useState<TakeInfo[]>([]);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [loading, setLoading] = useState(() => capture !== undefined);
 
-  const put = useCallback((take: TakeInfo | { path: string; removed: true }) => {
-    setTakes((list) => {
-      const rest = list.filter((t) => t.path !== take.path);
-      if ('removed' in take) return rest;
-      return [take, ...rest].sort((a, b) => b.created.localeCompare(a.created));
+  const put = useCallback((project: ProjectInfo | { path: string; removed: true }) => {
+    setProjects((list) => {
+      const rest = list.filter((p) => p.path !== project.path);
+      return 'removed' in project ? rest : sorted([project, ...rest]);
     });
   }, []);
+
+  const refresh = useCallback(
+    (path: string) => {
+      void capture?.project(path).then((p) => put(p ?? { path, removed: true }), () => put({ path, removed: true }));
+    },
+    [capture, put],
+  );
 
   useEffect(() => {
     if (!capture) return;
     let live = true;
-    capture.takes().then(
+    capture.projects().then(
       (list) => {
         if (!live) return;
-        setTakes(list);
+        setProjects(sorted(list));
         setLoading(false);
       },
       () => live && setLoading(false),
     );
-    const off = capture.onChanged(put);
+    const offProject = capture.onProjectChanged(put);
+    // A take from before projects is a project of its own.
+    const offTake = capture.onChanged((take) => {
+      if ('removed' in take || take.project === null) refresh(take.path);
+    });
     return () => {
       live = false;
-      off();
+      offProject();
+      offTake();
     };
-  }, [capture, put]);
+  }, [capture, put, refresh]);
 
-  const forget = useCallback((path: string) => setTakes((list) => list.filter((t) => t.path !== path)), []);
-  const refresh = useCallback(
-    (path: string) => {
-      void capture?.take(path).then((take) => put(take ?? { path, removed: true }), () => {});
-    },
-    [capture, put],
-  );
-  return { takes, loading, forget, refresh };
+  return { projects, loading, put, refresh };
 }
 
 const urls = new Map<string, Promise<string>>();
@@ -77,29 +86,64 @@ export function forgetFileUrl(path: string): void {
   urls.delete(path);
 }
 
-export type TakeAction = 'open' | 'assistant' | 'reveal' | 'rename' | 'transcribe' | 'trash';
+/** The part of a take the edit uses, in seconds. */
+export function usedLength(item: ProjectItem): number {
+  const end = item.out ?? item.take.duration;
+  return Math.max(0, end - (item.in ?? 0));
+}
 
-interface ActionInfo {
-  id: TakeAction;
+export type ItemAction = 'open' | 'keep' | 'up' | 'down' | 'reveal' | 'rename' | 'transcribe' | 'trash';
+
+interface ActionInfo<T extends string> {
+  id: T;
   label: string;
   icon: LucideIcon;
   enabled: boolean;
   destructive?: boolean;
 }
 
-/** A take's actions, in groups, for its ⋯ menu and its right-click menu alike. */
-export function takeActions(take: TakeInfo, options: { canTranscribe: boolean; canAssist: boolean }): ActionInfo[][] {
+/** A take's or clip's actions, in groups, for its ⋯ menu and its right-click menu alike. */
+export function itemActions(
+  item: ProjectItem,
+  place: { first: boolean; last: boolean },
+  options: { canTranscribe: boolean },
+): ActionInfo<ItemAction>[][] {
+  const { take } = item;
   const finished = take.status === 'ready' || take.status === 'interrupted';
   return [
     [
       { id: 'open', label: 'Open', icon: Play, enabled: true },
-      { id: 'assistant', label: 'Make with Assistant…', icon: Sparkles, enabled: finished && options.canAssist },
+      item.keep
+        ? { id: 'keep', label: 'Leave Out of the Edit', icon: EyeOff, enabled: true }
+        : { id: 'keep', label: 'Use in the Edit', icon: Eye, enabled: true },
+    ],
+    [
+      { id: 'up', label: 'Move Up', icon: ArrowUp, enabled: !place.first },
+      { id: 'down', label: 'Move Down', icon: ArrowDown, enabled: !place.last },
     ],
     [
       { id: 'reveal', label: 'Show in Files', icon: FolderOpen, enabled: true },
       { id: 'rename', label: 'Rename', icon: Pencil, enabled: true },
       { id: 'transcribe', label: 'Transcribe Again', icon: RefreshCw, enabled: finished && options.canTranscribe && take.transcript !== 'working' },
     ],
-    [{ id: 'trash', label: 'Move to Trash', icon: Trash2, enabled: take.status !== 'recording', destructive: true }],
+    [{ id: 'trash', label: 'Move to Trash', icon: Trash2, enabled: take.status !== 'recording' && take.status !== 'finishing', destructive: true }],
+  ];
+}
+
+export type ProjectAction = 'assistant' | 'import' | 'rename' | 'reveal' | 'trash';
+
+/** A project's actions, for its ⋯ menu and its right-click menu alike. */
+export function projectActions(project: ProjectInfo, options: { canAssist: boolean; recording: boolean }): ActionInfo<ProjectAction>[][] {
+  const ready = project.items.some((i) => i.keep && (i.take.status === 'ready' || i.take.status === 'interrupted'));
+  return [
+    [
+      { id: 'assistant', label: 'Make with Assistant…', icon: Sparkles, enabled: options.canAssist && ready },
+      { id: 'import', label: 'Add Clips…', icon: Plus, enabled: true },
+    ],
+    [
+      { id: 'reveal', label: 'Show in Files', icon: FolderOpen, enabled: true },
+      { id: 'rename', label: 'Rename Project', icon: Pencil, enabled: true },
+    ],
+    [{ id: 'trash', label: 'Move Project to Trash', icon: Trash2, enabled: !options.recording, destructive: true }],
   ];
 }
