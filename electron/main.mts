@@ -134,7 +134,7 @@ import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
-import { cleanUpPrinting, registerPrintingHandlers, requestPagePrint } from './printing.mts';
+import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
@@ -2772,6 +2772,8 @@ function registerSystemEvents(): void {
         if (topic === 'network') torNetworkChanged();
         // A network just joined has its AirPlay receivers looked for at once.
         if (topic === 'network') airplayNetworkChanged();
+        // And its printers are listed again, before CUPS has browsed for them.
+        if (topic === 'network') printingNetworkChanged();
       }, SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };

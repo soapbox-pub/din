@@ -610,7 +610,10 @@ printer on the network, or one plugged in that speaks IPP over USB, appears
 in the print dialog as soon as it's on. The first time Din prints to one (or
 makes it the default) it gives it a driverless queue of its own, so it's
 still there after a restart. Din reads the printer list in the background
-once it starts, so the print dialog doesn't wait on the network. Settings →
+once it starts, so the print dialog doesn't wait on the network, and
+remembers the network printers found on each Wi-Fi or wired network
+(`printers.json` in Din's config), so they're listed again as soon as the
+computer is back on it, before CUPS has found them. Settings →
 Printers shows them and their queues, sets the
 default, prints a test page, and adds older USB printers with the best
 driver installed (gutenprint, brlaser).

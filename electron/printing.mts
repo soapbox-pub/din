@@ -17,6 +17,14 @@
 // second), so Din reads it in the background once it starts and answers
 // from the last reading, reading again behind it (`knownState`).
 //
+// The network printers found are remembered for the network they were found
+// on (NetworkManager's connection, by UUID, as AirPlay's receivers are), and
+// listed again as soon as the computer is back on it, before CUPS has
+// browsed for them; a printer drops off once a few readings there in a row
+// don't find it (one browse can miss a printer that's waking up), and one
+// not seen on its network for a month is forgotten. One on this computer
+// itself (a localhost URI) is never remembered.
+//
 // Everything printed goes to CUPS as a PDF. A page (a browser tab, a web
 // app) is laid out by Chromium with printToPDF; a frame that called print()
 // on its own (the hidden iframe sites print receipts through), a picture, a
@@ -41,7 +49,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, ipcMain, session, type WebContents } from 'electron';
+import { app as electronApp, BrowserWindow, ipcMain, session, type WebContents } from 'electron';
+import { activeNetworks } from './active-networks.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const TIMEOUT_MS = 20_000;
@@ -53,6 +62,12 @@ const JOB_POLL_MS = 3000;
 const STATE_FRESH_MS = 2000;
 /** How long after Din starts it first reads the printer list, out of the way of starting up. */
 const WARM_UP_MS = 5000;
+/** How many readings in a row may miss a network printer before it's dropped. */
+const BROWSE_MISSES = 2;
+/** A remembered printer not seen on its network for this long is forgotten. */
+const REMEMBER_FOR_MS = 30 * 24 * 60 * 60_000;
+/** When a printer was last seen is written down at most this often. */
+const SEEN_SAVE_MS = 60 * 60_000;
 /** The dialog shows this many pages; the rest are counted. */
 const PREVIEW_PAGES = 30;
 const PREVIEW_PIXELS = 480;
@@ -310,35 +325,146 @@ function serviceName(uri: string): string | null {
   }
 }
 
-async function state(): Promise<PrintersState> {
-  let names: string[];
+// ---------------------------------------------------------------------------
+// Printers remembered for each network
+// ---------------------------------------------------------------------------
+
+interface RememberedPrinter {
+  /** Its device URI, as `lpstat -l -e` gives it. */
+  uri: string;
+  /** When a reading last found it, in ms. */
+  seen: number;
+}
+
+interface Config {
+  /** The network printers found on each network, by connection UUID, then CUPS name. */
+  networks: Record<string, Record<string, RememberedPrinter>>;
+}
+
+function configPath(): string {
+  return path.join(electronApp.getPath('userData'), 'printers.json');
+}
+
+let config: Config | null = null;
+
+function readConfig(): Config {
+  if (config) return config;
+  config = { networks: {} };
+  let data: { networks?: unknown } | null;
   try {
-    // `-l`: "name type printer-uri device-uri" (URIs are percent-encoded).
-    const lines = (await cups('lpstat', ['-l', '-e'])).stdout.split('\n').map((l) => l.trim().split(/\s+/));
-    names = [];
-    for (const [name, , , uri] of lines) {
-      if (!name) continue;
-      names.push(name);
-      if (uri) networkUris.set(name, uri);
-    }
-  } catch (error) {
-    // No printers at all is an error to lpstat; no CUPS is ENOENT or a
-    // refused connection.
-    const reason = explain(error).message;
-    if (/isn’t available|isn’t running/.test(reason)) return { available: false, printers: [], jobs: [] };
-    names = [];
+    data = JSON.parse(fs.readFileSync(configPath(), 'utf8')) as typeof data;
+  } catch {
+    return config;
   }
-  const [details, defaults, queued, ranked] = await Promise.all([
-    cups('lpstat', ['-l', '-p']).then((r) => r.stdout, () => ''),
-    cups('lpstat', ['-d']).then((r) => r.stdout, () => ''),
-    cups('lpstat', ['-o']).then((r) => r.stdout, () => ''),
-    cups('lpq', ['-a']).then((r) => r.stdout, () => ''),
-  ]);
-  const queues = parsePrinters(details);
-  const defaultName = /destination: (\S+)/.exec(defaults)?.[1] ?? null;
-  const printers: Printer[] = [...new Set([...names, ...queues.keys()])].map((name) => {
+  if (data?.networks && typeof data.networks === 'object') {
+    for (const [network, printers] of Object.entries(data.networks)) {
+      if (!printers || typeof printers !== 'object') continue;
+      const kept: Record<string, RememberedPrinter> = {};
+      for (const [name, p] of Object.entries(printers as Record<string, Partial<RememberedPrinter> | null>)) {
+        if (typeof p?.uri === 'string' && rememberable(p.uri) && typeof p.seen === 'number') {
+          kept[name] = { uri: p.uri, seen: p.seen };
+        }
+      }
+      config.networks[network] = kept;
+    }
+  }
+  return config;
+}
+
+function writeConfig(): void {
+  try {
+    fs.writeFileSync(configPath(), JSON.stringify(readConfig(), null, 2));
+  } catch (error) {
+    console.warn('printing: could not save the printers found:', explain(error).message);
+  }
+}
+
+/** A printer on the network, not this computer (ipp-usb's, a test one). */
+function rememberable(uri: string): boolean {
+  return /^(ipp|ipps|dnssd):\/\//.test(uri) && !/^\w+:\/\/(localhost|127\.|\[::1\])/i.test(uri);
+}
+
+/** The networks the computer is on, as activeNetworks gives them. */
+let networks: string[] = [];
+/**
+ * The network printers listed: what readings found, and until they've missed
+ * one a few times, those remembered for these networks. By CUPS name.
+ */
+const sightings = new Map<string, { uri: string; misses: number }>();
+
+/** Remember the printers a reading found for the networks it ran on, and forget the old. */
+function remember(found: Map<string, string>, on: string[]): void {
+  const { networks: remembered } = readConfig();
+  const now = Date.now();
+  let dirty = false;
+  for (const network of on) {
+    const saved = (remembered[network] ??= {});
+    for (const [name, uri] of found) {
+      if (!rememberable(uri)) continue;
+      const old = saved[name];
+      if (old && old.uri === uri && now - old.seen < SEEN_SAVE_MS) continue;
+      saved[name] = { uri, seen: now };
+      dirty = true;
+    }
+  }
+  for (const [network, saved] of Object.entries(remembered)) {
+    for (const [name, p] of Object.entries(saved)) {
+      if (now - p.seen < REMEMBER_FOR_MS) continue;
+      delete saved[name];
+      dirty = true;
+    }
+    if (Object.keys(saved).length === 0) {
+      delete remembered[network];
+      dirty = true;
+    }
+  }
+  if (dirty) writeConfig();
+}
+
+/** A printer removed is forgotten everywhere, until CUPS finds it again. */
+function forget(name: string): void {
+  sightings.delete(name);
+  const { networks: remembered } = readConfig();
+  let dirty = false;
+  for (const saved of Object.values(remembered)) {
+    if (!(name in saved)) continue;
+    delete saved[name];
+    dirty = true;
+  }
+  if (dirty) writeConfig();
+}
+
+/** What a reading browsed: the network printers it found are seen, the rest missed once more. */
+function sighted(found: Map<string, string>, on: string[]): void {
+  // Not if the computer changed networks while it looked.
+  if (on !== networks) return;
+  for (const [name, uri] of found) sightings.set(name, { uri, misses: 0 });
+  for (const [name, s] of sightings) {
+    if (!found.has(name) && ++s.misses > BROWSE_MISSES) sightings.delete(name);
+  }
+  remember(found, on);
+}
+
+// ---------------------------------------------------------------------------
+// The printer list
+// ---------------------------------------------------------------------------
+
+/** What a reading found, apart from the network printers (`sightings`). */
+interface Reading {
+  queues: Map<string, Omit<Printer, 'isDefault' | 'configured'>>;
+  /** Destinations `lpstat -e` lists that aren't network ones CUPS browsed. */
+  others: string[];
+  defaultName: string | null;
+  jobs: PrintJob[];
+}
+
+/** The printer list: a reading's queues, with the network printers listed now. */
+function compose(reading: Reading): PrintersState {
+  const { queues, defaultName } = reading;
+  const names = new Set([...reading.others, ...sightings.keys(), ...queues.keys()]);
+  const printers: Printer[] = [...names].map((name) => {
     const queue = queues.get(name);
-    const uri = networkUris.get(name);
+    const uri = networkUris.get(name) ?? sightings.get(name)?.uri;
     return {
       name,
       displayName: queue?.displayName ?? displayName(name, (uri && serviceName(uri)) || undefined),
@@ -350,7 +476,47 @@ async function state(): Promise<PrintersState> {
     };
   });
   printers.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.displayName.localeCompare(b.displayName));
-  return { available: true, printers, jobs: parseJobs(queued, ranked) };
+  return { available: true, printers, jobs: reading.jobs };
+}
+
+/** The last reading of a running CUPS, which a change of network lists again with that network's printers. */
+let lastReading: Reading | null = null;
+
+async function state(): Promise<PrintersState> {
+  const on = networks;
+  // All at once: `-e` browses the network for a second, and with no queues
+  // the others do too.
+  const [browsed, details, defaults, queued, ranked] = await Promise.all([
+    // `-l`: "name type printer-uri device-uri" (URIs are percent-encoded).
+    cups('lpstat', ['-l', '-e']).then((r) => ({ stdout: r.stdout, error: null }), (error: unknown) => ({ stdout: '', error })),
+    cups('lpstat', ['-l', '-p']).then((r) => r.stdout, () => ''),
+    cups('lpstat', ['-d']).then((r) => r.stdout, () => ''),
+    cups('lpstat', ['-o']).then((r) => r.stdout, () => ''),
+    cups('lpq', ['-a']).then((r) => r.stdout, () => ''),
+  ]);
+  // No printers at all is an error to lpstat; no CUPS is ENOENT or a
+  // refused connection.
+  if (browsed.error && /isn’t available|isn’t running/.test(explain(browsed.error).message)) {
+    return { available: false, printers: [], jobs: [] };
+  }
+  const found = new Map<string, string>();
+  const others: string[] = [];
+  for (const [name, type, , uri] of browsed.stdout.split('\n').map((l) => l.trim().split(/\s+/))) {
+    if (!name) continue;
+    if (uri) networkUris.set(name, uri);
+    // `network`: one CUPS browsed that has no queue of its own.
+    if (type === 'network' && uri) found.set(name, uri);
+    else others.push(name);
+  }
+  sighted(found, on);
+  const reading: Reading = {
+    queues: parsePrinters(details),
+    others,
+    defaultName: /destination: (\S+)/.exec(defaults)?.[1] ?? null,
+    jobs: parseJobs(queued, ranked),
+  };
+  lastReading = reading;
+  return compose(reading);
 }
 
 let lastState: { value: PrintersState; at: number } | null = null;
@@ -386,14 +552,59 @@ function changed(): void {
   reading = null;
 }
 
+// On another network, the printers found on the last one are gone and this
+// one's are listed at once, while CUPS browses for them.
+let checkingNetworks: Promise<void> | null = null;
+/** A change came in while checking, which the check may have missed. */
+let checkAgain = false;
+
+function checkNetworks(): Promise<void> {
+  if (checkingNetworks) {
+    checkAgain = true;
+    return checkingNetworks;
+  }
+  checkingNetworks = activeNetworks()
+    .then((now) => {
+      if (now.join() === networks.join()) return;
+      // Coming from no network (or before the first check), what's been
+      // found stays: it was found here.
+      if (networks.length > 0) sightings.clear();
+      networks = now;
+      const { networks: remembered } = readConfig();
+      for (const network of now) {
+        for (const [name, p] of Object.entries(remembered[network] ?? {})) {
+          if (Date.now() - p.seen < REMEMBER_FOR_MS && !sightings.has(name)) sightings.set(name, { uri: p.uri, misses: 0 });
+        }
+      }
+      // The list is answered at once with this network's printers, and read again behind it.
+      generation++;
+      reading = null;
+      lastState = lastReading ? { value: compose(lastReading), at: 0 } : null;
+      if (lastState) readState().catch(() => {});
+    })
+    .finally(() => {
+      checkingNetworks = null;
+      if (checkAgain) {
+        checkAgain = false;
+        void checkNetworks();
+      }
+    });
+  return checkingNetworks;
+}
+
+/** NetworkManager says something changed: the computer may be on another network. */
+export function printingNetworkChanged(): void {
+  void checkNetworks();
+}
+
 /**
  * Give a printer CUPS found on the network a queue of its own, so it stays
  * after a restart. A no-op for one that has a queue already.
  */
 async function keep(name: string): Promise<void> {
   if (await cups('lpstat', ['-v', name]).then(() => true, () => false)) return;
-  if (!networkUris.has(name)) await state();
-  const uri = networkUris.get(name);
+  if (!networkUris.has(name) && !sightings.has(name)) await state();
+  const uri = networkUris.get(name) ?? sightings.get(name)?.uri;
   if (!uri || !/^(ipp|ipps|dnssd):/.test(uri)) return;
   const description = serviceName(uri) ?? displayName(name);
   // `everywhere` asks the printer what it can do, the way a temporary queue would.
@@ -980,6 +1191,8 @@ export function registerPrintingHandlers(options: {
   // Read the list before anyone asks, so the first print dialog or Settings
   // has it at once (and CUPS, started on demand, is up by then).
   setTimeout(() => readState().catch(() => {}), WARM_UP_MS);
+  // Which network this is, so its printers are listed before CUPS finds them.
+  void checkNetworks();
 
   ipcMain.handle('printing:capabilities', async (event, printer: unknown) => {
     assertShellSender(event);
@@ -1090,9 +1303,11 @@ export function registerPrintingHandlers(options: {
 
   ipcMain.handle('printing:remove', async (event, printer: unknown) => {
     assertShellSender(event);
-    await cups('lpadmin', ['-x', requireString(printer, 'printer')]).catch((error) => {
+    const name = requireString(printer, 'printer');
+    await cups('lpadmin', ['-x', name]).catch((error) => {
       throw explain(error);
     });
+    forget(name);
     changed();
   });
 
