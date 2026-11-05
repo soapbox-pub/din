@@ -82,6 +82,11 @@ export interface NativeAppsBridge {
    * for one without, take away its shortcut ('removed').
    */
   uninstall(appId: string): Promise<'uninstalled' | 'removed'>;
+  /**
+   * Start Windows apps over: close every Windows program and delete Din's
+   * Windows installation (WINDOWS_RESET_CONSEQUENCE).
+   */
+  resetWindows(): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
   /** Subscribe to links native apps open. Returns an unsubscribe fn. */
@@ -196,6 +201,21 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       history: true,
     });
   });
+}
+
+/** What resetting Windows apps does, for whatever asks first. */
+export const WINDOWS_RESET_CONSEQUENCE =
+  'Every Windows program closes, and every one installed is deleted, with its settings. Files in your Desktop, Documents, Downloads, Music, Pictures and Videos stay.';
+
+/** Start Windows apps over (`resetWindows`), once the user has agreed to. */
+export async function resetWindowsApps(): Promise<void> {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) throw new Error('Windows apps run only in Din’s desktop app');
+  try {
+    await bridge.resetWindows();
+  } catch (error) {
+    throw new Error(cleanNativeAppError(error), { cause: error });
+  }
 }
 
 /**

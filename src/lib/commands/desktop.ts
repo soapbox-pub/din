@@ -13,6 +13,7 @@ import {
 } from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
 import { websiteLabel } from '@/lib/nsiteApps';
+import { resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
@@ -103,6 +104,17 @@ export const appsArea: Area = {
       if (!ctx.apps.canUninstall(app.id)) throw new CommandError(`${app.name} can’t be removed`);
       ctx.apps.uninstallApp(app.id);
       return { text: `Removed ${app.name}` };
+    }),
+    command('apps', 'reset-windows', 'Start Windows apps over: delete every Windows program installed, and its settings', [], async (_args, ctx) => {
+      const ok = await ctx.confirm({
+        title: 'Reset Windows apps?',
+        description: `A command asked to reset them. ${WINDOWS_RESET_CONSEQUENCE}`,
+        action: 'Reset',
+        destructive: true,
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await resetWindowsApps();
+      return { text: 'Windows apps start over: the next Windows program sets them up anew' };
     }),
     command('apps', 'links', 'Websites whose links an installed nsite opens, because the website names it as its own', [], (_args, ctx) => ({
       data: ctx.apps.linkedWebsites.map((website) => ({

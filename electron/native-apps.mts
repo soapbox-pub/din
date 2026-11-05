@@ -39,6 +39,7 @@ import {
   wineEnvironment,
   winePrefix,
   programForShortcut,
+  resetWindowsApps,
   runUninstaller,
   unixPathOf,
   windowsProgramCommand,
@@ -1309,6 +1310,12 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof appId !== 'string') throw new Error('An app id is required');
     return uninstall(appId);
+  });
+
+  ipcMain.handle('native-apps:reset-windows', async (event) => {
+    assertShellSender(event);
+    await resetWindowsApps({ ...process.env });
+    rescan();
   });
 
   ipcMain.handle('native-apps:force-quit', async (event, pid) => {

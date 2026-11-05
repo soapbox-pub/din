@@ -865,6 +865,13 @@ expose('nativeApps', {
   uninstall: (appId) => ipcRenderer.invoke('native-apps:uninstall', appId),
 
   /**
+   * Start Windows apps over: close every Windows program and delete Din's
+   * Windows installation, every program installed in it, and their
+   * settings. Files in the folders it shares with home stay.
+   */
+  resetWindows: () => ipcRenderer.invoke('native-apps:reset-windows'),
+
+  /**
    * Subscribe to "the installed apps changed" (a program was installed or
    * removed). Returns an unsubscribe fn.
    * @param {() => void} callback

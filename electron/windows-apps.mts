@@ -679,6 +679,26 @@ export async function runUninstaller(program: InstalledProgram, baseEnv: NodeJS.
 }
 
 /**
+ * Start Windows apps over: close every Windows program, and delete the
+ * prefix (every program installed in it, and their settings) and what Wine
+ * wrote for it (shortcuts, icons, file types). Files in the folders it
+ * shares with home stay. The next program sets up a new prefix.
+ */
+export async function resetWindowsApps(baseEnv: NodeJS.ProcessEnv): Promise<void> {
+  const wine = wineBinary();
+  const prefix = winePrefix();
+  if (wine && fs.existsSync(prefix)) {
+    const wineserver = path.join(path.dirname(fs.realpathSync(wine)), 'wineserver');
+    await run(fs.existsSync(wineserver) ? wineserver : 'wineserver', ['-k'], { ...baseEnv, ...wineEnvironment(), WINEPREFIX: prefix }).catch(() => {
+      // None running.
+    });
+  }
+  await prefixReady?.catch(() => {});
+  prefixReady = null;
+  for (const dir of [prefix, windowsShellDir()]) fs.rmSync(dir, { recursive: true, force: true });
+}
+
+/**
  * The command and extra environment that open a Windows program file
  * (.exe, .msi, .bat, .lnk) in Din's prefix.
  *
