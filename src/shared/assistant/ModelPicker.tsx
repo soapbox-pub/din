@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronDown, Settings } from 'lucide-react';
+import { Brain, Check, ChevronDown, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -10,11 +10,27 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { useAssistantIntegrations } from '@/hooks/useAssistant';
-import { modelKey, providerName as displayName, type ModelInfo, type ModelRef } from '@/lib/assistant';
+import {
+  DEFAULT_VARIANT,
+  modelKey,
+  providerName as displayName,
+  supportedVariant,
+  variantName,
+  type ModelInfo,
+  type ModelRef,
+} from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** How many of a provider's models show before searching; the newest first. */
@@ -163,5 +179,62 @@ export function ModelPicker({
         </PopoverContent>
       </Popover>
     </>
+  );
+}
+
+/**
+ * How hard the model thinks: its default, or one of the levels it offers
+ * (Low, High, Max…). Nothing shows for a model that offers none.
+ */
+export function ThinkingPicker({
+  model,
+  value,
+  onChange,
+  disabled,
+}: {
+  model: ModelInfo | null | undefined;
+  /** The level chosen; undefined (or `default`) for the model's default. */
+  value: string | undefined;
+  /** Undefined for the model's default. */
+  onChange: (variant: string | undefined) => void;
+  disabled?: boolean;
+}) {
+  const variants = model?.variants ?? [];
+  if (variants.length === 0) return null;
+  const current = supportedVariant(model, value) ?? DEFAULT_VARIANT;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="h-8 min-w-0 gap-1 px-2 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+          aria-label={`Thinking: ${variantName(current)}`}
+          title="How hard the model thinks"
+        >
+          <Brain className="size-3.5 shrink-0" aria-hidden />
+          <span className="truncate">{variantName(current)}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-44">
+        <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">Thinking</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={current}
+          onValueChange={(next) => onChange(next === DEFAULT_VARIANT ? undefined : next)}
+        >
+          <DropdownMenuRadioItem value={DEFAULT_VARIANT}>Default</DropdownMenuRadioItem>
+          {variants
+            .filter((v) => v.id !== DEFAULT_VARIANT)
+            .map((v) => (
+              <DropdownMenuRadioItem key={v.id} value={v.id}>
+                {variantName(v.id)}
+              </DropdownMenuRadioItem>
+            ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

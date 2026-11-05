@@ -974,7 +974,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         need('assistant');
         if (typeof patch.enabled === 'boolean') live.current.updateConfig((c) => ({ ...c, assistantEnabled: patch.enabled }));
         const m = patch.model;
-        if (m && typeof m.id === 'string' && typeof m.providerID === 'string') setStoredModel({ id: m.id, providerID: m.providerID });
+        if (m && typeof m.id === 'string' && typeof m.providerID === 'string') {
+          setStoredModel({ id: m.id, providerID: m.providerID, ...(typeof m.variant === 'string' && m.variant ? { variant: m.variant } : {}) });
+        }
       },
       'assistant.follow': ({ sessionID }) => {
         need('assistant');

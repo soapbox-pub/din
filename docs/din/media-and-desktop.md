@@ -109,7 +109,7 @@ desktop keeps Din's settings for it and announces requests, questions and
 finished turns, so it needs to know what an app shows:
 
 ```ts
-din.assistant.settings;                   // { enabled, directory, colorfulReplies, model }
+din.assistant.settings;                   // { enabled, directory, colorfulReplies, model: { id, providerID, variant? } }
 din.assistant.onSettingsChange(apply);
 din.assistant.setSettings({ model });     // or { enabled: true }
 din.assistant.follow(sessionID);          // started or written in here: Din says when it finishes

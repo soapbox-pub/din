@@ -13,6 +13,9 @@ import {
   assistantApi,
   getAssistantBridge,
   modelKey,
+  modelRef,
+  supportedVariant,
+  DEFAULT_VARIANT,
   type AgentInfo,
   type ApprovalDecision,
   type AssistantEvent,
@@ -912,8 +915,9 @@ export function readStoredModel(): ModelRef | null {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(MODEL_STORAGE_KEY) ?? 'null');
     if (typeof parsed !== 'object' || parsed === null) return null;
-    const { id, providerID } = parsed as Record<string, unknown>;
-    return typeof id === 'string' && typeof providerID === 'string' ? { id, providerID } : null;
+    const { id, providerID, variant } = parsed as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof providerID !== 'string') return null;
+    return typeof variant === 'string' && variant ? { id, providerID, variant } : { id, providerID };
   } catch {
     return null;
   }
@@ -923,11 +927,12 @@ const modelListeners = new Set<() => void>();
 
 export function setStoredModel(model: ModelRef): void {
   const din = typeof window === 'undefined' ? undefined : window.din;
+  const ref = modelRef(model, model.variant);
   if (din) {
-    din.assistant.setSettings({ model: { id: model.id, providerID: model.providerID } });
+    din.assistant.setSettings({ model: ref });
     return;
   }
-  localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({ id: model.id, providerID: model.providerID }));
+  localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(ref));
   for (const listener of modelListeners) listener();
 }
 
@@ -943,11 +948,14 @@ export function subscribeStoredModel(listener: () => void): () => void {
 /**
  * The model new conversations start with: the one last picked in Din, else
  * the one OpenCode's own interface used last, else the server's default.
- * Only models a connected provider offers count.
+ * Only models a connected provider offers count. `variant` is how hard it
+ * thinks, as last picked for it (undefined for its default).
  */
 export function usePreferredModel(): {
   model: ModelInfo | null;
+  variant: string | undefined;
   setModel: (model: ModelRef) => void;
+  setVariant: (variant: string | undefined) => void;
   models: ModelInfo[];
   isLoading: boolean;
 } {
@@ -955,8 +963,6 @@ export function usePreferredModel(): {
   const [stored, setStored] = useState(readStoredModel);
 
   useEffect(() => subscribeStoredModel(() => setStored(readStoredModel())), []);
-
-  const setModel = useCallback((model: ModelRef) => setStoredModel(model), []);
 
   const models = useMemo(() => data?.models ?? [], [data]);
   const model = useMemo(() => {
@@ -973,7 +979,25 @@ export function usePreferredModel(): {
     return models[0] ?? null;
   }, [models, stored, data]);
 
-  return { model, setModel, models, isLoading };
+  const variant = model && stored && modelKey(stored) === modelKey(model) ? supportedVariant(model, stored.variant) : undefined;
+
+  // A model picked keeps the thinking level, where it has the same one.
+  const setModel = useCallback(
+    (next: ModelRef) => {
+      const info = models.find((m) => modelKey(m) === modelKey(next));
+      setStoredModel(modelRef(next, next.variant ?? supportedVariant(info, variant)));
+    },
+    [models, variant],
+  );
+
+  const setVariant = useCallback(
+    (next: string | undefined) => {
+      if (model) setStoredModel(modelRef(model, supportedVariant(model, next)));
+    },
+    [model],
+  );
+
+  return { model, variant, setModel, setVariant, models, isLoading };
 }
 
 // ---------------------------------------------------------------------------
@@ -1075,12 +1099,24 @@ export interface StartConversation {
   context?: { text: string; description: string };
 }
 
+/**
+ * The model a conversation starts with: `model` thinking as hard as asked,
+ * or for the preferred model with no level given, at the one last picked
+ * for it.
+ */
+function startingModel(model: ModelRef): ModelRef {
+  if (model.variant) return modelRef(model, model.variant === DEFAULT_VARIANT ? undefined : model.variant);
+  const stored = readStoredModel();
+  const variant = stored && modelKey(stored) === modelKey(model) && stored.variant !== DEFAULT_VARIANT ? stored.variant : undefined;
+  return modelRef(model, variant);
+}
+
 /** Start a conversation with its first message; resolves with the new session. */
 export function useStartConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ text, files, model, agent, directory, command, context }: StartConversation) => {
-      const session = await assistantApi.create({ directory, model: model ?? undefined, agent });
+      const session = await assistantApi.create({ directory, model: model ? startingModel(model) : undefined, agent });
       followDinSession(session.id);
       if (context) await assistantApi.synthetic(session.id, context.text, context.description);
       if (command) await assistantApi.command(session.id, command, text, files);

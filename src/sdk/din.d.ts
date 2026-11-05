@@ -676,8 +676,8 @@ export interface AssistantSettings {
   /** The folder new conversations work in; '' for the home folder. */
   directory: string;
   colorfulReplies: boolean;
-  /** The model new conversations use, if one was chosen. */
-  model: { id: string; providerID: string } | null;
+  /** The model new conversations use, if one was chosen, and how hard it thinks (`variant`, unset for its default). */
+  model: { id: string; providerID: string; variant?: string } | null;
 }
 
 /**

@@ -375,6 +375,8 @@ export interface ModelInfo {
   settings?: { baseURL?: string };
   /** US dollars per million tokens, cheapest tier first. */
   cost?: { input: number; output: number }[];
+  /** How hard it can think (`low`, `high`, `max`…), for models that let it be chosen. */
+  variants?: { id: string }[];
 }
 
 export interface AgentInfo {
@@ -707,6 +709,35 @@ export const assistantApi = {
 
 export function modelKey(model: Pick<ModelRef, 'providerID' | 'id'>): string {
   return `${model.providerID}/${model.id}`;
+}
+
+/** What the server calls a model left to think as hard as it does by default. */
+export const DEFAULT_VARIANT = 'default';
+
+/** `variant` if `model` offers it, else undefined (its default). */
+export function supportedVariant(model: Pick<ModelInfo, 'variants'> | null | undefined, variant: string | undefined): string | undefined {
+  return variant && variant !== DEFAULT_VARIANT && model?.variants?.some((v) => v.id === variant) ? variant : undefined;
+}
+
+/** Just the reference to a model (with how hard it thinks), as the server takes it. */
+export function modelRef(model: Pick<ModelRef, 'providerID' | 'id'>, variant?: string): ModelRef {
+  return { id: model.id, providerID: model.providerID, ...(variant ? { variant } : {}) };
+}
+
+const VARIANT_NAMES: Record<string, string> = {
+  none: 'None',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
+
+/** A thinking level's name for people. */
+export function variantName(variant: string | undefined): string {
+  if (!variant || variant === DEFAULT_VARIANT) return 'Default';
+  return VARIANT_NAMES[variant] ?? variant.charAt(0).toUpperCase() + variant.slice(1);
 }
 
 /** The last folder in a path, for a session's subtitle. */

@@ -28,7 +28,7 @@ import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { Composer, type ComposerHandle, type SlashCommand } from '@/shared/assistant/Composer';
-import { ModelPicker } from '@/shared/assistant/ModelPicker';
+import { ModelPicker, ThinkingPicker } from '@/shared/assistant/ModelPicker';
 import { PROVIDER_WINDOW_APP_ID, providerWindowParams } from '@/shared/assistant/providerWindow';
 import { FileLinkBaseContext } from '@/shared/assistant/fileLinks';
 import { FindBar, type FindBarHandle } from '@/shared/assistant/FindBar';
@@ -96,6 +96,9 @@ import {
   formatContextUsage,
   formatCost,
   modelKey,
+  modelRef,
+  supportedVariant,
+  DEFAULT_VARIANT,
   sessionTitle,
   tildify,
   type FileDiff,
@@ -893,6 +896,7 @@ function Conversation({
   const { data: queued } = useSessionInbox(sessionID);
   const { data: active = [] } = useActiveSessions();
   const { models, setModel } = usePreferredModel();
+  const sessionModel = session?.model && models.find((m) => modelKey(m) === modelKey(session.model!));
   const { data: recentData } = useRecentModelKeys();
   const home = useHomeDirectory();
   const send = useSendPrompt(sessionID);
@@ -1226,11 +1230,23 @@ function Conversation({
                   value={session?.model}
                   recent={recentData}
                   onChange={(model) => {
-                    setModel(model);
-                    switchModel.mutate({ sessionID, model }, { onError: fail('Couldn’t switch models') });
+                    // The thinking level carries over, where the new model has it.
+                    const ref = modelRef(model, supportedVariant(model, session?.model?.variant) ?? DEFAULT_VARIANT);
+                    setModel(ref);
+                    switchModel.mutate({ sessionID, model: ref }, { onError: fail('Couldn’t switch models') });
                   }}
                 />
                 <AgentPicker value={agent} onChange={changeAgent} />
+                <ThinkingPicker
+                  model={sessionModel}
+                  value={session?.model?.variant}
+                  onChange={(variant) => {
+                    if (!session?.model) return;
+                    const ref = modelRef(session.model, variant ?? DEFAULT_VARIANT);
+                    setModel(ref);
+                    switchModel.mutate({ sessionID, model: ref }, { onError: fail('Couldn’t change how hard it thinks') });
+                  }}
+                />
               </>
             }
             onCycleAgent={cycleAgent}
@@ -1376,7 +1392,7 @@ function NewConversation({
   const home = useHomeDirectory();
   const [agent, setAgent] = useState('build');
   const cycleAgent = useCycleAgent(agent, setAgent);
-  const { model, setModel, models } = usePreferredModel();
+  const { model, variant, setModel, setVariant, models } = usePreferredModel();
   const { data: recent } = useRecentModelKeys();
   const start = useStartConversation();
   const { notify, pickFolder } = useAssistantHost();
@@ -1425,6 +1441,7 @@ function NewConversation({
               <>
                 <ModelPicker models={models} value={model} recent={recent} onChange={setModel} />
                 <AgentPicker value={agent} onChange={setAgent} />
+                <ThinkingPicker model={model} value={variant} onChange={setVariant} />
               </>
             }
             onCycleAgent={cycleAgent}
