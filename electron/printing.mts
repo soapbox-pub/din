@@ -610,12 +610,42 @@ export function printingNetworkChanged(): void {
   void checkNetworks();
 }
 
+const IS_TEMPORARY_TEST = `{
+OPERATION Get-Printer-Attributes
+GROUP operation-attributes-tag
+ATTR charset attributes-charset utf-8
+ATTR naturalLanguage attributes-natural-language en
+ATTR uri printer-uri $uri
+ATTR keyword requested-attributes printer-is-temporary
+}
+`;
+
+/**
+ * Whether CUPS has a queue of its own for a printer, one that stays.
+ *
+ * `lpstat -v` isn't enough: it answers for a printer CUPS only browsed on the
+ * network too, and for the temporary queue CUPS makes to print to one, which
+ * it throws away again a minute after the job; until then the printer looked
+ * kept, and once it was gone its options were unknown.
+ */
+async function hasOwnQueue(name: string): Promise<boolean> {
+  const test = path.join(temp(), 'is-temporary.test');
+  if (!fs.existsSync(test)) fs.writeFileSync(test, IS_TEMPORARY_TEST);
+  try {
+    const { stdout } = await cups('ipptool', ['-tv', `ipp://localhost/printers/${encodeURIComponent(name)}`, test]);
+    return /printer-is-temporary \(boolean\) = false/.test(stdout);
+  } catch {
+    // No such queue (ipptool comes with CUPS, as lpstat does).
+    return false;
+  }
+}
+
 /**
  * Give a printer CUPS found on the network a queue of its own, so it stays
  * after a restart. A no-op for one that has a queue already.
  */
 async function keep(name: string): Promise<void> {
-  if (await cups('lpstat', ['-v', name]).then(() => true, () => false)) return;
+  if (await hasOwnQueue(name)) return;
   if (!networkUris.has(name) && !sightings.has(name)) await state();
   const uri = networkUris.get(name) ?? sightings.get(name)?.uri;
   if (!uri || !/^(ipp|ipps|dnssd):/.test(uri)) return;
@@ -643,7 +673,11 @@ async function queueOptions(printer: string): Promise<QueueOptions | null> {
     const chosen = values.find((v) => v.startsWith('*'))?.slice(1) ?? null;
     options.set(match[1], { values: values.map((v) => v.replace(/^\*/, '')), default: chosen });
   }
-  return options;
+  // A printer CUPS has no queue for, or whose temporary queue it has thrown
+  // away, prints "Unable to get PPD file" and nothing else, and exits 0: its
+  // options aren't known, not missing (two-sided printing vanished from the
+  // dialog a minute after a job, until the next one made the queue again).
+  return options.size > 0 ? options : null;
 }
 
 const GRAY_MODEL = /^(gray|grey|black|mono|monochrome|kgray|bi-level|devicegray)/i;
