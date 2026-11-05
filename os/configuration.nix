@@ -1506,6 +1506,16 @@ in
         MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;inode/directory;
         NoDisplay=true
       '')
+      # The defaults' mimeapps.list in the system profile's etc/xdg too, which
+      # is on XDG_CONFIG_DIRS: appimage-run's sandbox (Signal) puts its own
+      # /etc/xdg over the system's, so there xdg-open never sees
+      # /etc/xdg/mimeapps.list, and opened links in whatever mimeinfo.cache
+      # lists first (a Flatpak browser) or not at all. /run, and the profile
+      # in it, comes through.
+      (runCommand "din-mimeapps" { } ''
+        mkdir -p $out/etc/xdg
+        ln -s ${config.environment.etc."xdg/mimeapps.list".source} $out/etc/xdg/mimeapps.list
+      '')
     ];
   # Podman's configuration, as virtualisation.podman would make it, for the
   # Linux containers feature's Podman (above), which is rootless: no root
