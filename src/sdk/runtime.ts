@@ -521,7 +521,11 @@ export function installDin(transport: Transport): void {
       if (!target) throw new TypeError(`Not an app's URL: ${String(url)}`);
       await request('app.open', { ...target, handles: await idsOf(files) });
     },
-    openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
+    openFiles: async (files, app) => request('app.openFiles', { handles: (await idsOf(files)) ?? [], ...(app ? { app } : {}) }),
+    openWithApps: async (file) => {
+      const [handle] = (await idsOf([file])) ?? [];
+      return handle ? request('app.openWithApps', { handle }) : [];
+    },
   };
 
   // ---- window ----

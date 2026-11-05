@@ -488,6 +488,16 @@ deleted, so Din hides those. Wine's `.desktop` copies of desktop shortcuts
 go to a folder out of sight, since the `.lnk` on the Desktop is the same
 icon.
 
+Files' and the desktop's right-click menus have Open With for the
+installed apps that open a file (`din apps open-with`), by its type. Types
+come from the shared MIME database's globs, plus the types Windows programs
+register, which Wine writes as packages beside their entries. Wine's entries
+for those types are `NoDisplay`, so Din keeps NoDisplay entries only for
+opening files. They're named and drawn from their program's own version
+info and icon, found through the ProgID's open command in the registry. A
+file of a kind Din has no app for opens in the first of them: Windows
+programs' own types first, then by name.
+
 On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.

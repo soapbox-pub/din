@@ -35,7 +35,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 import { setCloseGuard } from '@/lib/closeGuards';
-import { appForFile } from '@/lib/fileTypes';
+import { appForFile, dinOpens } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
 import { unreadAssistantSessions } from '@/lib/assistantNotifications';
 import { closeNotification, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
@@ -56,7 +56,7 @@ import {
 } from '@/lib/dictation';
 import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
-import { getNativeAppsBridge, isProgram } from '@/lib/nativeApps';
+import { getNativeAppsBridge, isProgram, openInInstalledApp } from '@/lib/nativeApps';
 import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
@@ -469,19 +469,35 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // Who asked, which the opened app reads as `din.app.opener`.
         live.current.actions.open(target, { ...clean, ...files, ...(readOnlyPaths.length > 0 ? { readOnlyPaths } : {}), opener: appId });
       },
-      'app.openFiles': async ({ handles }) => {
+      'app.openFiles': async ({ handles, app }) => {
         for (const id of handles) {
           const g = await usableGrant(id);
           const name = basename(g.path);
           // A program (Windows's, through Wine, or an AppImage) runs instead of opening: for an
           // app with fs alone (Files), which reaches as far anyway. One that
           // can only write its own folders mustn't make a program and run it.
+          // The same goes for a file opened in an installed (native) app,
+          // which reaches whatever the user can.
           const native = getNativeAppsBridge();
           if (g.kind === 'file' && isProgram(name)) {
             need('fs');
             if (native) await native.runProgram(g.path);
+          } else if (typeof app === 'string' && g.kind === 'file') {
+            need('fs');
+            if (native) await native.openFile(app, g.path);
+          } else if (g.kind === 'file' && !dinOpens(name) && permissions.includes('fs') && (await openInInstalledApp(g.path))) {
+            // Opened in the installed app for its type.
           } else live.current.actions.open(appForFile(name), { path: g.path });
         }
+      },
+      // Open With: the installed apps for a file's type, for an app with fs.
+      'app.openWithApps': async ({ handle }) => {
+        need('fs');
+        const g = await usableGrant(handle);
+        const native = getNativeAppsBridge();
+        if (!native || g.kind !== 'file') return [];
+        const apps = await native.fileHandlers(g.path);
+        return apps.map((a) => ({ id: a.id, name: a.name, icon: a.icon }));
       },
       // Getting Installed Related Apps: the apps the manifest names as
       // webapps, by their din:// manifest URLs, that are installed (and,

@@ -633,6 +633,32 @@ export function installedPrograms(): InstalledProgram[] {
   return programs;
 }
 
+/**
+ * The program a file type (a ProgID, as Wine's entries for file types
+ * name it) opens in: its open command's program, as a path here.
+ */
+export function programForProgId(progId: string): string | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(winePrefix(), 'system.reg'), 'utf8');
+  } catch {
+    return null;
+  }
+  const escaped = progId.replace(/\\/g, '\\\\\\\\').toLowerCase();
+  const header = `[software\\\\classes\\\\${escaped}\\\\shell\\\\open\\\\command]`;
+  const at = text.toLowerCase().indexOf(header);
+  if (at === -1) return null;
+  const block = text.slice(at, text.indexOf('\n[', at + 1) === -1 ? undefined : text.indexOf('\n[', at + 1));
+  const value = /^@=(?:str\(\d\):)?"(.*)"\s*$/m.exec(block);
+  if (!value) return null;
+  const command = regString(value[1]).trim();
+  const program = command.startsWith('"') ? command.slice(1, command.indexOf('"', 1)) : command.split(/\s+/)[0];
+  const file = unixPathOf(program.replace(/%SystemRoot%/i, 'C:\\windows'));
+  if (file) return file;
+  // A bare name, as Wine's own are ("hh.exe" for help files): in Windows' folder.
+  return /^[^\\/:]+$/.test(program) ? unixPathOf(`C:\\windows\\${program.toLowerCase().endsWith('.exe') ? program : `${program}.exe`}`) : null;
+}
+
 /** A name with only its letters and digits, for comparing. */
 function plain(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '');

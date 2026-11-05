@@ -144,6 +144,15 @@ export function isVCard(name: string): boolean {
   return ext === 'vcf' || ext === 'vcard';
 }
 
+/**
+ * Whether a file is a kind Din's own apps open. One that isn't opens in the
+ * installed app for its type, when there is one (a Windows program's own
+ * files in it), else in Preview.
+ */
+export function dinOpens(name: string): boolean {
+  return fileCategory(name, 'file') !== 'other';
+}
+
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
   if (isMediaPlayerFile(name)) return 'media-player';

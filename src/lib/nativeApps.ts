@@ -87,6 +87,13 @@ export interface NativeAppsBridge {
    * Windows installation (WINDOWS_RESET_CONSEQUENCE).
    */
   resetWindows(): Promise<void>;
+  /**
+   * The installed apps that open a file, by its type (Open With): Windows
+   * programs' own types' first, then by name.
+   */
+  fileHandlers(file: string): Promise<NativeApp[]>;
+  /** Open a file in one of its `fileHandlers`. */
+  openFile(appId: string, file: string): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
   /** Subscribe to links native apps open. Returns an unsubscribe fn. */
@@ -201,6 +208,24 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       history: true,
     });
   });
+}
+
+/**
+ * Open a file in the installed app for its type when Din has no app of its
+ * own for it (`opensItself` false): a Windows program's project file in
+ * that program, say. Resolves false when there's none, or no bridge.
+ */
+export async function openInInstalledApp(file: string): Promise<boolean> {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) return false;
+  const [app] = await bridge.fileHandlers(file).catch(() => []);
+  if (!app) return false;
+  try {
+    await bridge.openFile(app.id, file);
+  } catch (error) {
+    throw new Error(cleanNativeAppError(error), { cause: error });
+  }
+  return true;
 }
 
 /** What resetting Windows apps does, for whatever asks first. */

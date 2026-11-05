@@ -154,11 +154,29 @@ export interface DinApp {
    */
   launch(url: string | URL, files: FileSystemHandle[]): Promise<void>;
   /**
-   * Open files in whichever app the desktop has for them (Files' default).
-   * A Windows program (.exe) runs, through Wine, for an app with `fs`;
-   * others get a DinPermissionError.
+   * Open files in whichever app the desktop has for them (Files' default),
+   * or in `app`, one of `openWithApps`' (an installed Linux or Windows
+   * app). A Windows program (.exe) runs, through Wine. For an app with
+   * `fs`, a kind of file Din has no app of its own for opens in the
+   * installed app for its type, when there is one. Running a program, or
+   * opening in an installed app, takes `fs`; others get a DinPermissionError.
    */
-  openFiles(files: FileSystemHandle[]): Promise<void>;
+  openFiles(files: FileSystemHandle[], app?: string): Promise<void>;
+  /**
+   * The installed apps (Linux's, and Windows programs') that open a file,
+   * by its type, for an Open With menu: Windows programs' own types'
+   * first. Takes `fs`.
+   */
+  openWithApps(file: FileSystemHandle): Promise<OpenWithApp[]>;
+}
+
+/** An installed app that opens a file (`din.app.openWithApps`). */
+export interface OpenWithApp {
+  /** What `din.app.openFiles` takes to open the file in it. */
+  id: string;
+  name: string;
+  /** Its icon, as a data: URL, when it has one. */
+  icon: string | null;
 }
 
 // ---------------------------------------------------------------------------

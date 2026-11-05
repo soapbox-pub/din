@@ -13,7 +13,7 @@ import {
 } from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
 import { websiteLabel } from '@/lib/nsiteApps';
-import { resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
+import { getNativeAppsBridge, resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
@@ -68,11 +68,24 @@ export const appsArea: Area = {
     command('apps', 'open', 'Open an app, with files if you like', [
       { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
       { name: 'files', type: 'path', positional: true, rest: true, help: 'Files to open in it' },
-    ], (args, ctx) => {
+    ], async (args, ctx) => {
       const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
       const files = args.list('files');
+      // An installed app (Linux's, a Windows program) opens each file itself, as Open With does.
+      if (app.native && files.length > 0) {
+        const native = need(getNativeAppsBridge(), 'Installed apps');
+        for (const file of files) await call(native.openFile(app.id, file));
+        return { text: `Opened ${files.length === 1 ? files[0] : `${files.length} files`} in ${app.name}` };
+      }
       const id = ctx.actions.open(app.id, files.length === 1 ? { path: files[0] } : files.length > 1 ? { paths: files } : undefined);
       return { data: { window: id ?? null }, text: id ? `Opened ${app.name} (${id})` : `Started ${app.name}` };
+    }),
+    command('apps', 'open-with', 'The installed apps (Linux apps, Windows programs) that open a file, as Open With lists them', [
+      { name: 'file', type: 'path', positional: true, help: 'The file' },
+    ], async (args) => {
+      const native = need(getNativeAppsBridge(), 'Installed apps');
+      const apps = await call(native.fileHandlers(args.string('file')));
+      return { data: apps.map((app) => ({ id: app.id, name: app.name })), text: apps.map((app) => `${app.id}\t${app.name}`).join('\n') || 'No installed app opens it' };
     }),
     command('apps', 'install', 'Install a website as an app', [
       { name: 'url', type: 'string', positional: true, help: 'Its https URL' },

@@ -75,6 +75,12 @@ const WITHHELD = [
   'NODE_OPTIONS',
   'LD_PRELOAD',
   'LD_LIBRARY_PATH',
+  // The sandbox's home has its own: Wine's shortcuts, icons and file types
+  // go where shellMounts puts windowsShellDir, at ~/.local/share's defaults.
+  'XDG_DATA_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
 ];
 
 function home(): string {

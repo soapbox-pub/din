@@ -38,6 +38,7 @@ import {
   wineCommand,
   wineEnvironment,
   winePrefix,
+  programForProgId,
   programForShortcut,
   resetWindowsApps,
   runUninstaller,
@@ -105,10 +106,21 @@ interface DesktopEntry {
   windows?: boolean;
   /** The file it was read from, when it's one. */
   file?: string;
+  /** Where in argv a file goes (Exec's %f or %F), or null when it takes none. */
+  fileIndex: number | null;
+  /** The MIME types it opens (MimeType), links' x-scheme-handler ones aside. */
+  mimeTypes: string[];
+  /**
+   * Kept out of the launcher (NoDisplay): only there to open files, as
+   * Wine's entries for the file types Windows programs register are.
+   */
+  hidden: boolean;
 }
 
 /** Stands in argv for Exec's %u / %U until a URL is given. */
 const URL_ARG = '\u0000url';
+/** Stands in argv for Exec's %f / %F until a file is given. */
+const FILE_ARG = '\u0000file';
 
 /** `$XDG_DATA_HOME`, per the base-directory spec. */
 function dataHome(): string {
@@ -181,10 +193,10 @@ function unescapeValue(value: string): string {
  * Split an Exec value into argv, honoring the spec's quoting and dropping
  * field codes (%f, %U, ...).
  *
- * Field codes stand for files or URLs to open; Din launches apps with no
- * files, so they're simply removed - except %% which is a literal '%', and
- * a %u or %U argument of its own, which becomes URL_ARG so a link can be
- * passed there.
+ * Field codes stand for files or URLs to open; launched alone, an app gets
+ * none, so they're removed - except %% which is a literal '%', a %u or %U
+ * argument of its own, which becomes URL_ARG so a link (or a file) can be
+ * passed there, and a %f or %F one, FILE_ARG, for a file.
  */
 function parseExec(exec: string): string[] {
   const argv: string[] = [];
@@ -232,7 +244,9 @@ function parseExec(exec: string): string[] {
     .map((arg) =>
       arg === '%u' || arg === '%U'
         ? URL_ARG
-        : arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')),
+        : arg === '%f' || arg === '%F'
+          ? FILE_ARG
+          : arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')),
     )
     .filter((arg, index) => arg.length > 0 || index === 0);
 }
@@ -279,7 +293,9 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
   const flag = (key: string): boolean => values.get(key) === 'true';
 
   if ((values.get('Type') ?? 'Application') !== 'Application') return null;
-  if (flag('NoDisplay') || flag('Hidden')) return null;
+  if (flag('Hidden')) return null;
+  // NoDisplay ones only open files: read on, and kept only if they do.
+  const hidden = flag('NoDisplay');
 
   const name = get('Name');
   const exec = values.get('Exec');
@@ -318,10 +334,18 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
     const shortcut = argv.find((arg) => /^[a-z]:\\.+\.lnk$/i.test(arg));
     if (shortcut && !unixPathOf(shortcut)) return null;
   }
-  const urlAt = argv.indexOf(URL_ARG);
-  argv = argv.filter((arg) => arg !== URL_ARG);
+  let urlIndex: number | null = null;
+  let fileIndex: number | null = null;
+  const clean: string[] = [];
+  for (const arg of argv) {
+    if (arg === URL_ARG) urlIndex ??= clean.length;
+    else if (arg === FILE_ARG) fileIndex ??= clean.length;
+    else clean.push(arg);
+  }
+  argv = clean;
   if (argv.length === 0 || !argv[0]) return null;
-  const urlIndex = urlAt > 0 ? urlAt : null;
+  if (urlIndex === 0) urlIndex = null;
+  if (fileIndex === 0) fileIndex = null;
 
   const list = (key: string): string[] =>
     (get(key) ?? '')
@@ -335,6 +359,11 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
           .filter((type) => type.toLowerCase().startsWith('x-scheme-handler/'))
           .map((type) => type.slice('x-scheme-handler/'.length).toLowerCase())
           .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme));
+  const takesFile = fileIndex !== null || urlIndex !== null;
+  const mimeTypes = takesFile
+    ? list('MimeType').map((type) => type.toLowerCase()).filter((type) => /^[a-z0-9.+-]+\/[a-z0-9.+_-]+$/.test(type) && !type.startsWith('x-scheme-handler/'))
+    : [];
+  if (hidden && mimeTypes.length === 0) return null;
 
   return {
     id,
@@ -352,6 +381,9 @@ function parseDesktopFile(file: string, id: string, running = false, windowsShel
     schemes,
     windows,
     file,
+    fileIndex,
+    mimeTypes,
+    hidden,
   };
 }
 
@@ -498,7 +530,7 @@ function buildWmClassIndex(scanned: Map<string, DesktopEntry>): Map<string, stri
     if (!normalized || index.has(normalized)) return;
     index.set(normalized, appId);
   };
-  const all = [...scanned.values()];
+  const all = [...scanned.values()].filter((entry) => !entry.hidden);
   const appIdOf = (entry: DesktopEntry) => NATIVE_PREFIX + entry.id.replace(/\.desktop$/, '');
 
   for (const entry of all) add(entry.startupWmClass, appIdOf(entry));
@@ -520,7 +552,7 @@ async function listApps(): Promise<NativeApp[]> {
   const scanned = [...(await entries()).values()];
   const apps: NativeApp[] = [];
   for (const entry of scanned) {
-    if (isUninstaller(entry)) continue;
+    if (entry.hidden || isUninstaller(entry)) continue;
     const { icon, glyph } = await resolveAppIcon(entry.iconName);
     apps.push({
       id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
@@ -589,19 +621,30 @@ function entryCwd(entry: DesktopEntry): string {
  * its Terminal (see terminalAppCommand). A `uri` is passed where the entry's
  * Exec takes one, and only for a scheme the entry says it opens.
  */
-async function launch(appId: string, uri?: string): Promise<void> {
+async function launch(appId: string, uri?: string, file?: string): Promise<void> {
   const entry = await entryFor(appId);
   if (entry.terminal) throw new Error(`${entry.name} runs in the Terminal`);
   const scheme = uri?.slice(0, uri.indexOf(':')).toLowerCase();
   if (uri !== undefined && (entry.urlIndex === null || !scheme || !entry.schemes.includes(scheme))) {
     throw new Error(`${entry.name} doesn't open ${scheme ?? ''}: links`);
   }
+  // A file goes where its Exec takes one (%f), else a link (%u: a path is
+  // one too), and only a file of a type it says it opens.
+  const fileAt = entry.fileIndex ?? entry.urlIndex;
+  if (file !== undefined) {
+    const types = mimeTypesFor(file);
+    if (fileAt === null || !entry.mimeTypes.some((type) => types.includes(type))) {
+      throw new Error(`${entry.name} doesn't open ${path.basename(file)}`);
+    }
+  }
   const display = await requireDisplay();
 
   const argv =
-    uri !== undefined && entry.urlIndex !== null
-      ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
-      : entry.argv;
+    file !== undefined && fileAt !== null
+      ? [...entry.argv.slice(0, fileAt), file, ...entry.argv.slice(fileAt)]
+      : uri !== undefined && entry.urlIndex !== null
+        ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
+        : entry.argv;
   const env = await appEnvironment(display);
   if (entry.windows) {
     // A program installed before the prefix had what it has now (.NET) gets
@@ -610,7 +653,8 @@ async function launch(appId: string, uri?: string): Promise<void> {
     const wine = wineBinary();
     if (!wine) throw new Error(`${entry.name} needs Windows apps: install it in Settings → Optional Features`);
     const cwd = entry.cwd ?? undefined;
-    const command = await wineCommand([wine, ...argv.slice(1)], env, { cwd, share: cwd ? [cwd] : [] });
+    const share = [...(cwd ? [cwd] : []), ...(file !== undefined ? [file] : [])];
+    const command = await wineCommand([wine, ...argv.slice(1)], env, { cwd, share });
     const { pid } = spawnDetached(command.argv, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), command.env);
     if (pid) launchedPids.set(pid, appId);
     return;
@@ -735,6 +779,115 @@ export async function runProgram(file: string): Promise<void> {
   }
   if (isAppImage(file)) await runAppImage(file);
   else await runWindowsProgram(file);
+}
+
+// ---------------------------------------------------------------------------
+// Opening files in installed apps: what Open With offers, and what a file
+// Din has no app of its own for opens in. Types are by extension, through
+// the shared MIME database's globs (and the types Windows programs
+// register, which Wine writes as packages beside their entries).
+// ---------------------------------------------------------------------------
+
+/** Extension (lower-case, no dot) -> MIME types, rebuilt with the entries. */
+let globCache: { at: number; types: Map<string, Set<string>> } | null = null;
+
+/** The MIME types a file's name says it is. */
+function mimeTypesFor(file: string): string[] {
+  if (!globCache || Date.now() - globCache.at > SCAN_TTL_MS || !entryCache) {
+    const types = new Map<string, Set<string>>();
+    const add = (pattern: string, type: string) => {
+      const match = /^\*\.([^*?[\]/]+)$/.exec(pattern.trim());
+      if (!match) return;
+      const ext = match[1].toLowerCase();
+      if (!types.has(ext)) types.set(ext, new Set());
+      types.get(ext)!.add(type.toLowerCase());
+    };
+    const mimeDirs = [path.join(dataHome(), 'mime'), path.join(windowsShellDir(), 'mime'), ...dataDirs().map((dir) => path.join(dir, 'mime'))];
+    for (const dir of mimeDirs) {
+      try {
+        for (const line of fs.readFileSync(path.join(dir, 'globs2'), 'utf8').split('\n')) {
+          if (line.startsWith('#')) continue;
+          const [, type, pattern] = line.split(':');
+          if (type && pattern) add(pattern, type);
+        }
+      } catch {
+        // No database here.
+      }
+    }
+    // Wine's packages, where nothing has made a database of them.
+    const packages = path.join(windowsShellDir(), 'mime/packages');
+    try {
+      for (const name of fs.readdirSync(packages)) {
+        if (!name.endsWith('.xml')) continue;
+        const xml = fs.readFileSync(path.join(packages, name), 'utf8').slice(0, 64 * 1024);
+        for (const block of xml.matchAll(/<mime-type\s+type="([^"]+)"[^>]*>([\s\S]*?)<\/mime-type>/g)) {
+          for (const glob of block[2].matchAll(/<glob\s+pattern="([^"]+)"/g)) add(glob[1], block[1]);
+        }
+      }
+    } catch {
+      // None.
+    }
+    globCache = { at: Date.now(), types };
+  }
+  const dot = path.basename(file).lastIndexOf('.');
+  if (dot <= 0) return [];
+  return [...(globCache.types.get(path.basename(file).slice(dot + 1).toLowerCase()) ?? [])];
+}
+
+/**
+ * The installed apps that open a file, by its type: Windows programs'
+ * first (what a file of a Windows program's own type is for), then by
+ * name. An entry for another Wine prefix than Din's is left out: its
+ * prefix may be long gone.
+ */
+async function handlerEntries(file: string): Promise<DesktopEntry[]> {
+  const types = new Set(mimeTypesFor(file));
+  if (types.size === 0) return [];
+  const seen = new Set<string>();
+  const found: DesktopEntry[] = [];
+  for (const entry of (await entries()).values()) {
+    if (entry.terminal || !entry.mimeTypes.some((type) => types.has(type))) continue;
+    if (isWineCommand(entry.argv[0]) && !entry.windows) continue;
+    const key = `${entry.name}\u0000${entry.argv.join('\u0000')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(entry);
+  }
+  return found.sort((a, b) => Number(!!b.windows) - Number(!!a.windows) || a.name.localeCompare(b.name));
+}
+
+/** Open With's apps for a file, as the shell lists them. */
+async function fileHandlers(file: string): Promise<NativeApp[]> {
+  const apps: NativeApp[] = [];
+  for (const entry of await handlerEntries(file)) {
+    let { icon, glyph } = await resolveAppIcon(entry.iconName);
+    let name = entry.name;
+    // Wine names the entries for file types by their program's file name
+    // ("hh"); the program's own name and icon are better, as its windows have.
+    const progIdAt = entry.windows ? entry.argv.findIndex((arg) => arg.toLowerCase() === '/progidopen') : -1;
+    const program = progIdAt > 0 && entry.argv[progIdAt + 1] ? programForProgId(entry.argv[progIdAt + 1]) : null;
+    if (program) {
+      const info = await programInfo(program).catch(() => null);
+      if (info?.name) name = info.name;
+      if (info?.icon) {
+        icon = `data:image/png;base64,${info.icon.toString('base64')}`;
+        glyph = false;
+      }
+    }
+    apps.push({
+      id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
+      desktopId: entry.id,
+      name,
+      comment: entry.comment,
+      icon,
+      iconGlyph: glyph,
+      categories: entry.categories,
+      keywords: entry.keywords,
+      terminal: false,
+      schemes: [],
+    });
+  }
+  return apps;
 }
 
 /** Tell the shell the installed apps changed, set by registerNativeAppHandlers. */
@@ -1153,6 +1306,9 @@ async function windowsProgramApp(pid: number): Promise<UnlistedApp | null> {
         urlIndex: null,
         schemes: [],
         windows: isDinPrefix(prefix),
+        fileIndex: null,
+        mimeTypes: [],
+        hidden: false,
       }
     : null;
   return {
@@ -1304,6 +1460,19 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof file !== 'string') throw new Error('A file path is required');
     await runProgram(file);
+  });
+
+  ipcMain.handle('native-apps:file-handlers', async (event, file) => {
+    assertShellSender(event);
+    if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('A file path is required');
+    return fileHandlers(file);
+  });
+
+  ipcMain.handle('native-apps:open-file', async (event, appId, file) => {
+    assertShellSender(event);
+    if (typeof appId !== 'string') throw new Error('An app id is required');
+    if (typeof file !== 'string' || !path.isAbsolute(file) || !fs.statSync(file).isFile()) throw new Error('Not a file');
+    await launch(appId, undefined, file);
   });
 
   ipcMain.handle('native-apps:uninstall', async (event, appId) => {

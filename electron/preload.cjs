@@ -872,6 +872,19 @@ expose('nativeApps', {
   resetWindows: () => ipcRenderer.invoke('native-apps:reset-windows'),
 
   /**
+   * The installed apps that open a file, by its type (Open With).
+   * @param {string} file
+   */
+  fileHandlers: (file) => ipcRenderer.invoke('native-apps:file-handlers', file),
+
+  /**
+   * Open a file in one of its fileHandlers.
+   * @param {string} appId
+   * @param {string} file
+   */
+  openFile: (appId, file) => ipcRenderer.invoke('native-apps:open-file', appId, file),
+
+  /**
    * Subscribe to "the installed apps changed" (a program was installed or
    * removed). Returns an unsubscribe fn.
    * @param {() => void} callback

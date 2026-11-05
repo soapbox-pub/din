@@ -1,8 +1,8 @@
 import type { AppDefinition } from '@/lib/apps';
 import { isDesktopEntryName, parseDesktopEntry, type DesktopEntry } from '@/lib/desktopIcons';
-import { appForFile } from '@/lib/fileTypes';
+import { appForFile, dinOpens } from '@/lib/fileTypes';
 import { getFsBridge, type FsEntryKind } from '@/lib/fs';
-import { getNativeAppsBridge, isProgram, NATIVE_APP_PREFIX } from '@/lib/nativeApps';
+import { getNativeAppsBridge, isProgram, NATIVE_APP_PREFIX, openInInstalledApp } from '@/lib/nativeApps';
 
 /** What opening a path needs of the desktop. */
 export interface OpenPathDeps {
@@ -40,7 +40,8 @@ export function launchEntry(entry: DesktopEntry, fileName: string, deps: OpenPat
 /**
  * Open a file or folder as double-clicking it does: a folder in Files, a
  * launcher's app, a program (Windows's through Wine, an AppImage), anything else in the app
- * for its kind (`din open`, desktop icons).
+ * for its kind, or a kind Din has no app for in the installed app for its type
+ * (`din open`, desktop icons).
  */
 export async function openPath(path: string, kind: FsEntryKind, deps: OpenPathDeps): Promise<void> {
   const name = basename(path);
@@ -59,5 +60,6 @@ export async function openPath(path: string, kind: FsEntryKind, deps: OpenPathDe
     if (launchEntry(parseDesktopEntry(text), name, deps)) return;
     throw new Error(`${name} doesn’t open an app Din has`);
   }
+  if (!dinOpens(name) && (await openInInstalledApp(path))) return;
   deps.open(appForFile(name), { path });
 }
