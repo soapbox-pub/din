@@ -21,7 +21,8 @@
 //! extend the desktop onto a TV (virtual_output.rs).
 //!
 //! Settings → Accessibility's zoom, colour filters and keyboard aids are
-//! the compositor's, so they reach every app (accessibility.rs).
+//! the compositor's, so they reach every app (accessibility.rs), as are
+//! Settings → Keyboard's layouts and which of them is typing (layouts.rs).
 //!
 //! A native app in full screen (a game) skips Din's window: Din's embedded
 //! compositor hands its frames here, drawn over Din's window on their monitor
@@ -40,6 +41,7 @@ mod edid;
 mod gamma;
 mod input;
 mod keys;
+mod layouts;
 mod magic_mouse;
 mod mouse;
 mod output_management;

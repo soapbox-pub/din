@@ -40,6 +40,7 @@ import { ScreenShareMenuItem } from '@/components/desktop/ScreenShareHost';
 import { ScreenRecordingMenuItem } from '@/components/desktop/ScreenRecordingHost';
 import { StudioMenuItem } from '@/components/desktop/StudioMenuItem';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
+import { KeyboardMenuItem } from '@/components/desktop/KeyboardIndicator';
 import type { TaskbarStyle } from '@/contexts/AppContext';
 import { BarSideContext, useBarSide, useTaskbarEdge } from '@/contexts/BarSideContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -165,6 +166,7 @@ export function Taskbar() {
           <WorkspacesMenuItem />
           <TrayItems />
           <AssistantMenuItem />
+          <KeyboardMenuItem />
           <AirPlayMenuItem />
           <BrightnessMenuItem />
           <VolumeMenuItem />

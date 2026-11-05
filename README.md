@@ -434,9 +434,15 @@ Apps type with the system's keyboard layout (`electron/keyboard.mts` reads it
 from `XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
 keyboard config). Din sends them physical keys and both servers apply the
 layout; the Xvfb fallback needs `setxkbmap` for it. Settings → Keyboard shows
-the layout and changes it on DinOS and GNOME. DinOS keeps it in
-`/var/lib/din/keyboard`, which Din's compositor reads when it starts (`os/din-keyboard.sh`
-writes it as root), so Din's own windows switch after Din restarts.
+the layouts (up to four, XKB's groups) and changes them on DinOS and GNOME.
+DinOS keeps them in `/var/lib/din/keyboard` (`os/din-keyboard.sh` writes it as
+root), which din-shell starts with; Din tells it a changed list and the layout
+typing in `$XDG_RUNTIME_DIR/din-shell-keyboard`
+(`native/din-compositor/src/session/layouts.rs`), so a change takes effect at
+once. With more than one, the menu bar shows the layout typing and switches
+it, and so do Ctrl+Space (back to the last one) and Ctrl+Alt+Space (the next),
+as Control-Space and Control-Option-Space on a Mac; the embedded display's
+servers get the keymap with the layout typing first.
 
 Settings → Date & Time shows the system's time zone and clock, read from
 systemd-timedated (`electron/datetime.mts`), and on DinOS changes them

@@ -192,7 +192,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Keyboard',
     icon: Keyboard,
-    search: ['Keyboard layout', 'The layout everything on this computer types with.', 'language', 'input', 'typing', 'QWERTY', 'Dvorak'],
+    search: ['Keyboard layout', 'Layouts', 'Add Layout…', 'The layout everything on this computer types with.', 'Switch layouts', 'Ctrl+Space', 'input source', 'input menu', 'language', 'input', 'typing', 'QWERTY', 'Dvorak', 'Colemak', 'AZERTY'],
   },
   {
     id: 'mouse',

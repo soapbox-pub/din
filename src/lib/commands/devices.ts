@@ -2,7 +2,15 @@ import { getAudioBridge, MAX_VOLUME, type AudioDevices } from '@/lib/audio';
 import { getBrightnessBridge, MIN_BRIGHTNESS, MIN_TEMPERATURE, MAX_TEMPERATURE, type NightLightSchedule } from '@/lib/brightness';
 import { getDisplayBridge, formatRefresh, friendlyOutputName, refreshRates, type DisplayPlacement } from '@/lib/display';
 import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
-import { getKeyboardBridge } from '@/lib/keyboard';
+import {
+  LAYOUT_SWITCH_KEYS,
+  MAX_KEYBOARD_LAYOUTS,
+  getKeyboardBridge,
+  layoutKey,
+  withLayoutAdded,
+  withLayoutRemoved,
+  type KeyboardLayoutChoice,
+} from '@/lib/keyboard';
 import { FOCUS_AREAS, leaveArea, runFocusKey, type FocusKey } from '@/lib/desktopFocus';
 import { getDateTimeBridge } from '@/lib/datetime';
 import { getPrintingBridge, printFile } from '@/lib/printing';
@@ -16,6 +24,7 @@ import { call, command, need, pick } from './util';
 
 const audio = () => need(getAudioBridge(), 'Sound');
 const brightness = () => need(getBrightnessBridge(), 'Brightness');
+const keyboard = () => need(getKeyboardBridge(), 'Keyboard layouts');
 const ON: Param = { name: 'on', type: 'boolean', positional: true, help: 'on or off' };
 
 function deviceRows(devices: AudioDevices, kind: 'sinks' | 'sources') {
@@ -256,7 +265,7 @@ export const powerArea: Area = {
 
 export const keyboardArea: Area = {
   name: 'keyboard',
-  summary: 'The keyboard layout, and moving the keyboard about the desktop',
+  summary: 'The keyboard’s layouts, switching between them, and moving the keyboard about the desktop',
   commands: [
     command('keyboard', 'focus', 'Give the keyboard to a part of the desktop, as Ctrl+F2, F3, F8 and F6 do', [
       { name: 'part', type: 'string', positional: true, choices: [...FOCUS_AREAS, 'window', 'next', 'previous'], help: 'Where it goes; window gives it back to the window' },
@@ -265,31 +274,92 @@ export const keyboardArea: Area = {
       if (part === 'window') leaveArea();
       else if (!runFocusKey(part as FocusKey)) throw new CommandError(`The ${part} isn’t on screen`);
     }),
-    command('keyboard', 'status', 'The layout in use', [], async () => {
-      const status = await call(need(getKeyboardBridge(), 'Keyboard layouts').status());
-      return { data: status, text: `${status.layout.name} (${status.layout.layout}${status.layout.variant ? `:${status.layout.variant}` : ''})${status.restartNeeded ? '\nDin’s own windows switch after Din restarts' : ''}` };
+    command('keyboard', 'status', 'The layouts, and the one typing', [], async () => {
+      const status = await call(keyboard().status());
+      const lines = status.layouts.map((l, i) =>
+        `${i === status.active ? '*' : ' '} ${layoutId(l)}\t${l.name}${i === 0 && status.layouts.length > 1 ? ' (default)' : ''}`);
+      if (status.restartNeeded) lines.push('Din’s own windows switch after Din restarts');
+      return { data: status, text: lines.join('\n') };
     }),
     command('keyboard', 'layouts', 'Every layout there is', [
       { name: 'search', type: 'string', positional: true, optional: true, help: 'Only those whose name has this' },
     ], async (args) => {
-      const layouts = await call(need(getKeyboardBridge(), 'Keyboard layouts').layouts());
+      const layouts = await call(keyboard().layouts());
       const q = args.optString('search')?.toLowerCase();
       const shown = q ? layouts.filter((l) => l.name.toLowerCase().includes(q) || l.layout === q) : layouts;
-      return { data: shown, text: shown.map((l) => `${l.layout}${l.variant ? `:${l.variant}` : ''}\t${l.name}`).join('\n') };
+      return { data: shown, text: shown.map((l) => `${layoutId(l)}\t${l.name}`).join('\n') };
     }),
-    command('keyboard', 'layout', 'Make a layout the system’s', [
-      { name: 'layout', type: 'string', positional: true, help: 'LAYOUT or LAYOUT:VARIANT, e.g. us or us:colemak' },
+    command('keyboard', 'layout', `Make these the computer’s layouts, one to ${MAX_KEYBOARD_LAYOUTS}; the first is the default`, [
+      { name: 'layouts', type: 'string', positional: true, rest: true, help: 'LAYOUT or LAYOUT:VARIANT, e.g. us or us:colemak' },
     ], async (args) => {
-      const bridge = need(getKeyboardBridge(), 'Keyboard layouts');
-      const [layout, variant = ''] = args.string('layout').split(':');
-      const layouts = await call(bridge.layouts());
-      const found = layouts.find((l) => l.layout === layout && l.variant === variant);
-      if (!found) throw new CommandError(`No layout ${args.string('layout')}; din keyboard layouts lists them`);
-      await call(bridge.set({ layout, variant }));
-      return { text: found.name };
+      const ids = args.list('layouts');
+      if (ids.length === 0 || ids.length > MAX_KEYBOARD_LAYOUTS) throw new CommandError(`Give one to ${MAX_KEYBOARD_LAYOUTS} layouts`, 'usage');
+      const found = await Promise.all(ids.map(findLayout));
+      await call(keyboard().setLayouts(found.map(({ layout, variant }) => ({ layout, variant }))));
+      return { text: found.map((l) => l.name).join(', ') };
+    }),
+    command('keyboard', 'add', 'Add a layout to switch to', [
+      { name: 'layout', type: 'string', positional: true, help: 'LAYOUT or LAYOUT:VARIANT, e.g. de or us:colemak' },
+    ], async (args) => {
+      const found = await findLayout(args.string('layout'));
+      const status = await call(keyboard().status());
+      const next = withLayoutAdded(status.layouts, found);
+      if (!next) {
+        throw new CommandError(status.layouts.some((l) => layoutKey(l) === layoutKey(found))
+          ? `${found.name} is already one of the layouts`
+          : `The keyboard has ${MAX_KEYBOARD_LAYOUTS} layouts already; remove one first`);
+      }
+      await call(keyboard().setLayouts(next));
+      return { text: `Added ${found.name}` };
+    }),
+    command('keyboard', 'remove', 'Remove one of the layouts', [
+      { name: 'layout', type: 'string', positional: true, help: 'LAYOUT or LAYOUT:VARIANT, as din keyboard status lists them' },
+    ], async (args) => {
+      const status = await call(keyboard().status());
+      const index = indexOfLayout(status.layouts, args.string('layout'));
+      const next = withLayoutRemoved(status.layouts, index);
+      if (!next) throw new CommandError('That’s the only layout; add another first');
+      await call(keyboard().setLayouts(next));
+      return { text: `Removed ${status.layouts[index].name}` };
+    }),
+    command('keyboard', 'switch', `Type with another of the layouts, as ${LAYOUT_SWITCH_KEYS.next} does`, [
+      { name: 'layout', type: 'string', positional: true, optional: true, help: 'LAYOUT or LAYOUT:VARIANT, or next (the default) or previous' },
+    ], async (args) => {
+      const bridge = keyboard();
+      const status = await call(bridge.status());
+      if (!status.canSwitch) {
+        throw new CommandError(status.layouts.length > 1 ? 'Din can’t switch layouts here' : 'There’s only one layout; din keyboard add adds another');
+      }
+      const which = args.optString('layout') ?? 'next';
+      const count = status.layouts.length;
+      const index = which === 'next' ? (status.active + 1) % count
+        : which === 'previous' ? (status.active + count - 1) % count
+          : indexOfLayout(status.layouts, which);
+      await call(bridge.select(index));
+      return { text: status.layouts[index].name };
     }),
   ],
 };
+
+/** LAYOUT or LAYOUT:VARIANT. */
+function layoutId(choice: KeyboardLayoutChoice): string {
+  return choice.variant ? `${choice.layout}:${choice.variant}` : choice.layout;
+}
+
+/** A layout xkeyboard-config has, by LAYOUT or LAYOUT:VARIANT. */
+async function findLayout(id: string) {
+  const [layout, variant = ''] = id.split(':');
+  const found = (await call(keyboard().layouts())).find((l) => l.layout === layout && l.variant === variant);
+  if (!found) throw new CommandError(`No layout ${id}; din keyboard layouts lists them`);
+  return found;
+}
+
+/** Which of LAYOUTS is ID. */
+function indexOfLayout(layouts: KeyboardLayoutChoice[], id: string): number {
+  const index = layouts.findIndex((l) => layoutId(l) === id);
+  if (index < 0) throw new CommandError(`${id} isn’t one of the layouts; din keyboard status lists them`);
+  return index;
+}
 
 export const datetimeArea: Area = {
   name: 'datetime',

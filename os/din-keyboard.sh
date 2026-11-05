@@ -9,9 +9,11 @@
 #
 # Din runs this through sudo from electron/keyboard.mts.
 #
-#   din-keyboard set <layout> [variant]
-#       Make <layout>, or its <variant>, the system layout. Any other
-#       XKB_DEFAULT_* lines (model, options) are kept.
+#   din-keyboard set <layout>[:<variant>]...
+#       Make the layouts, each one or its <variant>, the system's: up to
+#       four, the first the one it starts typing with, the others to switch
+#       to (XKB groups; Din switches them). Any other XKB_DEFAULT_* lines
+#       (model, options) are kept.
 #   din-keyboard restart
 #       Restart Din's session, so its compositor picks the layout up.
 #   din-keyboard remap
@@ -42,9 +44,21 @@ valid_name() {
 }
 
 set_layout() {
-  local layout=$1 variant=${2:-}
-  valid_name "$layout" || die "Not a keyboard layout: $layout"
-  [[ -z $variant ]] || valid_name "$variant" || die "Not a keyboard variant: $variant"
+  (($# >= 1 && $# <= 4)) || die "One to four layouts, not $#"
+  local layouts=() variants=() any_variant='' entry layout variant
+  for entry in "$@"; do
+    layout=${entry%%:*}
+    variant=
+    [[ $entry != *:* ]] || variant=${entry#*:}
+    valid_name "$layout" || die "Not a keyboard layout: $layout"
+    [[ -z $variant ]] || valid_name "$variant" || die "Not a keyboard variant: $variant"
+    layouts+=("$layout")
+    variants+=("$variant")
+    [[ -z $variant ]] || any_variant=1
+  done
+  local layout_list variant_list
+  layout_list=$(IFS=,; echo "${layouts[*]}")
+  variant_list=$(IFS=,; echo "${variants[*]}")
 
   mkdir -p "$(dirname "$LAYOUT_FILE")"
   local tmp
@@ -53,8 +67,8 @@ set_layout() {
     if [[ -f $LAYOUT_FILE ]]; then
       grep -E '^XKB_DEFAULT_(RULES|MODEL|OPTIONS)=' "$LAYOUT_FILE" || true
     fi
-    echo "XKB_DEFAULT_LAYOUT=$layout"
-    [[ -z $variant ]] || echo "XKB_DEFAULT_VARIANT=$variant"
+    echo "XKB_DEFAULT_LAYOUT=$layout_list"
+    [[ -z $any_variant ]] || echo "XKB_DEFAULT_VARIANT=$variant_list"
   } >"$tmp"
   chmod 644 "$tmp"
   mv "$tmp" "$LAYOUT_FILE"
@@ -106,10 +120,12 @@ remap() {
   local args
   layout_flags -- args options
   # Caps Lock's first symbol, from `key <CAPS> { [ BackSpace ] };` or the
-  # longer form with `symbols[1]= [ BackSpace ]`.
+  # longer form with `symbols[1]= [ BackSpace ]`: the first layout's, the
+  # one the computer starts with. The key is remapped whatever layout is
+  # typing, so a Colemak first makes Caps Lock a Backspace in the others.
   local keymap
   keymap=$(xkbcli compile-keymap "${args[@]}" | tr -d '\n')
-  if grep -qE 'key <CAPS>\s*\{[^}]*\[\s*BackSpace\s*[],]' <<<"$keymap"; then
+  if grep -qE 'key <CAPS>\s*\{\s*(symbols\[1\]\s*=\s*)?\[\s*BackSpace\s*[],]' <<<"$keymap"; then
     write_remap backspace
     apply_remap
   elif [[ -f $REMAP_FILE ]]; then
@@ -140,8 +156,8 @@ console() {
 
 case "${1:-}" in
   set)
-    [[ $# == 2 || $# == 3 ]] || die "usage: din-keyboard set <layout> [variant]"
-    set_layout "$2" "${3:-}"
+    shift
+    set_layout "$@"
     ;;
   restart) systemctl restart --no-block "$SESSION_UNIT" ;;
   remap)
@@ -152,5 +168,5 @@ case "${1:-}" in
     [[ $# == 1 ]] || die "usage: din-keyboard console"
     console
     ;;
-  *) die "usage: din-keyboard set <layout> [variant] | restart | remap | console" ;;
+  *) die "usage: din-keyboard set <layout>[:<variant>]... | restart | remap | console" ;;
 esac

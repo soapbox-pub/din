@@ -1047,10 +1047,15 @@ expose('nativeDisplay', {
 });
 
 // Keyboard bridge (window.dinos.keyboard), backed by the keyboard:* handlers in
-// electron/keyboard.mts: the system's keyboard layout, which Settings shows
-// and, where Din knows how, changes to one from xkeyboard-config's list.
+// electron/keyboard.mts: the system's keyboard layouts, which Settings shows
+// and, where Din knows how, changes to ones from xkeyboard-config's list, and
+// the one typing, which the menu bar switches.
 expose('keyboard', {
-  /** The system's layout ({ layout, variant, name }), whether it can be changed, and whether Din needs a restart for it. */
+  /**
+   * The system's layouts ({ layout, variant, name }[]), the one typing,
+   * whether they can be changed and switched between, and whether Din needs
+   * a restart for them.
+   */
   status: () => ipcRenderer.invoke('keyboard:status'),
 
   /** Every layout and variant there is: { layout, variant, name }[]. */
@@ -1061,6 +1066,33 @@ expose('keyboard', {
    * @param {{ layout: string, variant: string }} choice
    */
   set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
+
+  /**
+   * Make these the system's layouts, one to four, the first the default.
+   * @param {{ layout: string, variant: string }[]} choices
+   */
+  setLayouts: (choices) => ipcRenderer.invoke('keyboard:setLayouts', choices),
+
+  /**
+   * Type with the system's layout at this index.
+   * @param {number} index
+   */
+  select: (index) => ipcRenderer.invoke('keyboard:select', index),
+
+  /**
+   * Hear of every change to the layouts or the one typing (Ctrl+Space's
+   * included), with the new status. Returns an unsubscribe fn.
+   * @param {(status: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} status
+     */
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('keyboard:changed', handler);
+    return () => ipcRenderer.removeListener('keyboard:changed', handler);
+  },
 
   /** Restart Din, so its own windows take a changed layout (DinOS). */
   restart: () => ipcRenderer.invoke('keyboard:restart'),

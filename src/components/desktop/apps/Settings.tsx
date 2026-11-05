@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
+  ArrowDown,
+  ArrowUp,
   Blend,
   Contrast,
   Type,
@@ -108,7 +110,18 @@ import {
   useAudioStreams,
 } from '@/hooks/useAudio';
 import { VolumeGlyph, VolumeSlider } from '@/components/desktop/VolumeIndicator';
-import { getKeyboardBridge, layoutKey } from '@/lib/keyboard';
+import {
+  LAYOUT_SWITCH_KEYS,
+  MAX_KEYBOARD_LAYOUTS,
+  getKeyboardBridge,
+  layoutKey,
+  layoutTag,
+  withLayoutAdded,
+  withLayoutMoved,
+  withLayoutRemoved,
+  type KeyboardLayout,
+  type KeyboardLayoutChoice,
+} from '@/lib/keyboard';
 import { getMouseBridge } from '@/lib/mouse';
 import { cleanLockError, getLockBridge, type SudoMode } from '@/lib/lock';
 import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
@@ -138,7 +151,8 @@ import {
   useKeyboardLayouts,
   useKeyboardStatus,
   useRestartForKeyboardLayout,
-  useSetKeyboardLayout,
+  useSelectKeyboardLayout,
+  useSetKeyboardLayouts,
 } from '@/hooks/useKeyboardLayout';
 import {
   brightnessText,
@@ -266,8 +280,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * falling back where no such daemon runs. The Sound
  * section drives the default sink's volume/mute through `window.dinos.audio`
  * (wpctl/PipeWire), including outputs on a sound card's inactive profile.
- * Keyboard picks the layout native Linux apps type with
- * through `window.dinos.keyboard`. Printers lists the printers CUPS can reach, sets
+ * Keyboard picks the layouts everything types with, and which one's
+ * typing, through `window.dinos.keyboard`. Printers lists the printers CUPS can reach, sets
  * the default, and shows the queue (PrintersSettingsSection). Optional Features installs and removes the
  * parts of DinOS kept off the disk until wanted, like Wine and QEMU (OptionalFeaturesSection). Date & Time sets the time zone and clock
  * through `window.dinos.datetime`, and how Din's clocks show the time. Password changes the computer's one password
@@ -2733,38 +2747,20 @@ function MouseSection() {
 }
 
 /**
- * The system's keyboard layout (window.dinos.keyboard), which Din's own windows and
- * the native Linux apps it runs both type with. Picking one from
- * xkeyboard-config's list changes the system's, where Din can (DinOS, GNOME).
+ * The system's keyboard layouts (window.dinos.keyboard), which Din's own
+ * windows and the native Linux apps it runs both type with: up to four, the
+ * first the one the computer starts with (and the boot screen and text
+ * consoles use). Where Din can (DinOS, GNOME) they're added from
+ * xkeyboard-config's list, removed and reordered; on DinOS, with more than
+ * one, the menu bar and Ctrl+Space switch between them.
  */
 function KeyboardSection() {
   const bridge = getKeyboardBridge();
   const status = useKeyboardStatus();
-  const layouts = useKeyboardLayouts();
-  const setLayout = useSetKeyboardLayout();
+  const setLayouts = useSetKeyboardLayouts();
+  const selectLayout = useSelectKeyboardLayout();
   const restart = useRestartForKeyboardLayout();
-  const [query, setQuery] = useState('');
-  const selectedRef = useRef<HTMLButtonElement>(null);
-
-  // While a change is in flight, show the requested choice.
-  const selected = setLayout.isPending ? setLayout.variables : status.data?.layout ?? null;
-  const selectedKey = selected ? layoutKey(selected) : null;
-
-  const filtered = useMemo(() => {
-    const all = layouts.data ?? [];
-    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return all;
-    return all.filter((entry) => {
-      const haystack = `${entry.name} ${entry.layout} ${entry.variant}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [layouts.data, query]);
-
-  // Bring the system's layout into view when the list first appears.
-  const showList = status.data?.canChange === true && Boolean(layouts.data);
-  useEffect(() => {
-    if (showList) revealInList(selectedRef.current);
-  }, [showList]);
+  const [adding, setAdding] = useState(false);
 
   if (!bridge) {
     return (
@@ -2799,7 +2795,18 @@ function KeyboardSection() {
     );
   }
 
-  const { layout, canChange, restartNeeded } = status.data;
+  const { layout, canChange, canSwitch, restartNeeded } = status.data;
+  // While a change is in flight, show the requested list.
+  const layouts: KeyboardLayout[] = setLayouts.isPending
+    ? setLayouts.variables.map((choice) => ({ ...choice, name: nameOf(choice, status.data.layouts) }))
+    : status.data.layouts;
+  const active = selectLayout.isPending ? selectLayout.variables : status.data.active;
+  const full = layouts.length >= MAX_KEYBOARD_LAYOUTS;
+  const change = (next: KeyboardLayoutChoice[] | null) => {
+    if (next) setLayouts.mutate(next);
+  };
+  /** A menu item's action, when the change it makes can be made. */
+  const changer = (next: KeyboardLayoutChoice[] | null) => (canChange && next ? () => change(next) : undefined);
 
   return (
     <SectionShell title="Keyboard">
@@ -2808,9 +2815,11 @@ function KeyboardSection() {
         <div className="min-w-0">
           <p className="text-sm text-foreground">{layout.name}</p>
           <p className="text-xs text-muted-foreground">
-            {canChange
-              ? 'The layout everything on this computer types with.'
-              : 'Din uses your system’s layout. Change it in your desktop’s keyboard settings.'}
+            {!canChange
+              ? 'Din uses your system’s layout. Change it in your desktop’s keyboard settings.'
+              : layouts.length > 1
+                ? 'The layout typing now.'
+                : 'The layout everything on this computer types with.'}
           </p>
         </div>
       </div>
@@ -2830,87 +2839,68 @@ function KeyboardSection() {
         </div>
       )}
 
-      {canChange && (
-        <div className="flex flex-col gap-2">
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search layouts"
-              aria-label="Search keyboard layouts"
-              className="pl-8"
-            />
-          </div>
+      <SubHeading>Layouts</SubHeading>
+      <ul aria-label="Keyboard layouts" className="flex flex-col gap-1.5">
+        {layouts.map((entry, index) => (
+          <KeyboardLayoutRow
+            key={layoutKey(entry)}
+            entry={entry}
+            tag={layoutTag(entry, layouts)}
+            first={index === 0}
+            typing={layouts.length > 1 && index === active}
+            onUse={canSwitch && index !== active ? () => selectLayout.mutate(index) : undefined}
+            onMoveUp={changer(withLayoutMoved(layouts, index, -1))}
+            onMoveDown={changer(withLayoutMoved(layouts, index, 1))}
+            onRemove={changer(withLayoutRemoved(layouts, index))}
+            editable={canChange}
+          />
+        ))}
+      </ul>
 
-          {layouts.isLoading ? (
-            <div className="flex flex-col gap-1" aria-hidden>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-9 w-full bg-foreground/10" />
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <FallbackCard>
-              {layouts.data?.length
-                ? 'No layouts match your search.'
-                : 'No keyboard layouts were found. Install xkeyboard-config to choose one.'}
-            </FallbackCard>
-          ) : (
-            <div
-              role="radiogroup"
-              aria-label="Keyboard layout"
-              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-md border bg-muted/20 p-1"
-            >
-              {filtered.map((entry) => {
-                const key = layoutKey(entry);
-                const active = key === selectedKey;
-                return (
-                  <button
-                    key={key}
-                    ref={active ? selectedRef : undefined}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => {
-                      if (!active) setLayout.mutate({ layout: entry.layout, variant: entry.variant });
-                    }}
-                    className={cn(
-                      'flex items-center gap-3 rounded-md px-2 py-1.5 text-left',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      active ? 'bg-primary/10' : 'hover:bg-foreground/5',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                        active
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-muted-foreground/50',
-                      )}
-                      aria-hidden
-                    >
-                      {active && <Check className="size-3" />}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">{entry.name}</span>
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                      {entry.variant ? `${entry.layout}(${entry.variant})` : entry.layout}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+      {canChange && !adding && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" disabled={full} onClick={() => setAdding(true)}>
+            <Plus aria-hidden />
+            Add Layout…
+          </Button>
+          {full && (
+            <p className="text-xs text-muted-foreground">
+              A keyboard can have {MAX_KEYBOARD_LAYOUTS} layouts at once. Remove one to add another.
+            </p>
           )}
         </div>
       )}
 
-      {setLayout.isError && (
+      {canChange && adding && (
+        <KeyboardLayoutPicker
+          configured={layouts}
+          onPick={(choice) => {
+            change(withLayoutAdded(layouts, choice));
+            setAdding(false);
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {canSwitch && (
+        <p className="text-xs text-muted-foreground">
+          Switch layouts from the menu bar, or press{' '}
+          <kbd className="rounded border bg-muted px-1 font-mono">{LAYOUT_SWITCH_KEYS.previous}</kbd>{' '}
+          for the one you used last and{' '}
+          <kbd className="rounded border bg-muted px-1 font-mono">{LAYOUT_SWITCH_KEYS.next}</kbd>{' '}
+          for the next. Keep Ctrl held and press Space again to go further back.
+        </p>
+      )}
+      {canChange && layouts.length > 1 && (
+        <p className="text-xs text-muted-foreground">
+          The first layout is the one the computer starts with, and the one its password is typed with.
+        </p>
+      )}
+
+      {(setLayouts.isError || selectLayout.isError) && (
         <p role="alert" className="text-sm text-destructive">
-          {setLayout.error instanceof Error
-            ? setLayout.error.message
+          {(setLayouts.error ?? selectLayout.error) instanceof Error
+            ? (setLayouts.error ?? selectLayout.error)!.message
             : 'Could not change the keyboard layout.'}
         </p>
       )}
@@ -2921,6 +2911,216 @@ function KeyboardSection() {
         </p>
       )}
     </SectionShell>
+  );
+}
+
+/** A layout's name, from the list it's in, or its XKB name. */
+function nameOf(choice: KeyboardLayoutChoice, layouts: KeyboardLayout[]): string {
+  const found = layouts.find((entry) => layoutKey(entry) === layoutKey(choice));
+  return found?.name ?? (choice.variant ? `${choice.layout} (${choice.variant})` : choice.layout);
+}
+
+/**
+ * One of the system's layouts: its tag, its name, and, in its ⋯ and
+ * right-click menus, typing with it, moving it and removing it.
+ */
+function KeyboardLayoutRow({
+  entry,
+  tag,
+  first,
+  typing,
+  editable,
+  onUse,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  entry: KeyboardLayout;
+  tag: string;
+  first: boolean;
+  typing: boolean;
+  editable: boolean;
+  onUse?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onRemove?: () => void;
+}) {
+  const actions: { label: string; icon: LucideIcon; onSelect?: () => void; destructive?: boolean; separated?: boolean }[] = [
+    ...(onUse ? [{ label: 'Type with This Layout', icon: Check, onSelect: onUse }] : []),
+    ...(editable
+      ? [
+          { label: 'Move Up', icon: ArrowUp, onSelect: onMoveUp },
+          { label: 'Move Down', icon: ArrowDown, onSelect: onMoveDown },
+          { label: 'Remove', icon: Trash2, onSelect: onRemove, destructive: true, separated: true },
+        ]
+      : []),
+  ];
+  const row = (
+    <li
+      className={cn(
+        'flex items-center gap-3 rounded-md border p-2.5',
+        typing ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40',
+      )}
+    >
+      <span
+        aria-hidden
+        className="flex h-6 min-w-9 shrink-0 items-center justify-center rounded border border-foreground/30 px-1 text-[0.6875rem] font-semibold tracking-wide text-foreground/90"
+      >
+        {tag}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm">{entry.name}</span>
+        <span className="block truncate font-mono text-xs text-muted-foreground">
+          {entry.variant ? `${entry.layout}(${entry.variant})` : entry.layout}
+        </span>
+      </span>
+      {typing && <span className="shrink-0 text-xs text-primary">Typing</span>}
+      {first && <span className="shrink-0 text-xs text-muted-foreground">Default</span>}
+      {actions.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`${entry.name}: more`}>
+              <MoreHorizontal aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {actions.map((action) => (
+              <Fragment key={action.label}>
+                {action.separated && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  disabled={!action.onSelect}
+                  variant={action.destructive ? 'destructive' : undefined}
+                  onSelect={action.onSelect}
+                >
+                  <action.icon aria-hidden />
+                  {action.label}
+                </DropdownMenuItem>
+              </Fragment>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </li>
+  );
+  if (actions.length === 0) return row;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent>
+        {actions.map((action) => (
+          <Fragment key={action.label}>
+            {action.separated && <ContextMenuSeparator />}
+            <ContextMenuItem
+              disabled={!action.onSelect}
+              variant={action.destructive ? 'destructive' : undefined}
+              onSelect={action.onSelect}
+            >
+              <action.icon aria-hidden />
+              {action.label}
+            </ContextMenuItem>
+          </Fragment>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** xkeyboard-config's layouts, searchable; picking one adds it. */
+function KeyboardLayoutPicker({
+  configured,
+  onPick,
+  onCancel,
+}: {
+  configured: KeyboardLayoutChoice[];
+  onPick: (choice: KeyboardLayoutChoice) => void;
+  onCancel: () => void;
+}) {
+  const layouts = useKeyboardLayouts();
+  const [query, setQuery] = useState('');
+  const have = useMemo(() => new Set(configured.map(layoutKey)), [configured]);
+
+  const filtered = useMemo(() => {
+    const all = layouts.data ?? [];
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return all;
+    return all.filter((entry) => {
+      const haystack = `${entry.name} ${entry.layout} ${entry.variant}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [layouts.data, query]);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <Input
+            type="search"
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') onCancel();
+            }}
+            placeholder="Search layouts"
+            aria-label="Search keyboard layouts"
+            className="pl-8"
+          />
+        </div>
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+
+      {layouts.isLoading ? (
+        <div className="flex flex-col gap-1" aria-hidden>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-9 w-full bg-foreground/10" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <FallbackCard>
+          {layouts.data?.length
+            ? 'No layouts match your search.'
+            : 'No keyboard layouts were found. Install xkeyboard-config to choose one.'}
+        </FallbackCard>
+      ) : (
+        <ul aria-label="Layouts to add" className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+          {filtered.map((entry) => {
+            const key = layoutKey(entry);
+            const added = have.has(key);
+            return (
+              <li key={key}>
+                <button
+                  type="button"
+                  disabled={added}
+                  onClick={() => onPick({ layout: entry.layout, variant: entry.variant })}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    added ? 'opacity-60' : 'hover:bg-foreground/5',
+                  )}
+                >
+                  <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+                    {added ? <Check className="size-3.5" /> : <Plus className="size-3.5 text-muted-foreground" />}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                    {entry.name}
+                    {added && <span className="sr-only"> (added)</span>}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                    {entry.variant ? `${entry.layout}(${entry.variant})` : entry.layout}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -79,7 +79,7 @@ import {
 import { parseCanonicalHost } from './nsite-store.mts';
 import { isProgram, registerNativeAppHandlers, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
-import { registerKeyboardHandlers } from './keyboard.mts';
+import { attachLayoutKeys, registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
 import { isOnionProxyCertificate } from './onion-proxy.mts';
@@ -6006,7 +6006,7 @@ app.whenReady().then(() => {
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
-  registerKeyboardHandlers({ assertShellSender });
+  registerKeyboardHandlers({ assertShellSender, send: sendToShell });
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
   registerMouseHandlers({ assertShellSender, sendToShell });
@@ -6523,6 +6523,8 @@ app.on('web-contents-created', (_event, contents) => {
   // Brightness and volume keys arrive as ordinary keyboard input to whichever
   // contents holds focus (shell or any guest), so hook them everywhere.
   attachMediaKeys(contents);
+  // Ctrl+Space and Ctrl+Alt+Space switch keyboard layouts, wherever focus is.
+  attachLayoutKeys(contents);
 
   // Holding Super lets the shell drag windows from anywhere, but it can't
   // see the key while focus is inside a guest, so forward its presses (not

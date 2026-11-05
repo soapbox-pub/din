@@ -88,6 +88,7 @@ import { primaryArea } from '@/lib/monitors';
 import type { AppDefinition } from '@/lib/apps';
 import { focusedWindow, isShown } from '@/hooks/useWindows';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
+import { KeyboardMenuItem } from '@/components/desktop/KeyboardIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import { APP_MIME } from '@/components/desktop/icons/wallpaper';
@@ -206,6 +207,7 @@ export function MenuBar() {
         <WorkspacesMenuItem />
         <TrayItems />
         <AssistantMenuItem />
+        <KeyboardMenuItem />
         <AirPlayMenuItem />
         <BrightnessMenuItem />
         <VolumeMenuItem />
