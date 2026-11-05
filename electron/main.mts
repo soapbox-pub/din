@@ -6882,7 +6882,9 @@ app.on('web-contents-created', (_event, contents) => {
           ? chromeExtensions.getContextMenuItems(contents, params)
           : [],
       openLink: (url, disposition) => {
-        if (/^(https|chrome-extension):\/\//i.test(url)) {
+        // What a tab can load (isAllowedTabUrl): plain http too, since the
+        // user picked it (a dev server's images, say), and nsite: pages'.
+        if (/^(https?|nsite|chrome-extension):\/\//i.test(url)) {
           // "Open link/image in new tab" (disposition 'default') opens in the
           // background like Chrome; "Open in new window" stays foreground.
           sendToShell('crx:openTab', {
