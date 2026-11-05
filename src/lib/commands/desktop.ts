@@ -18,6 +18,7 @@ import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
+import { bookmarkCommands } from './bookmarks';
 
 /**
  * `din apps`, `din windows`, `din workspace`, `din widgets`, `din desktop-icons`,
@@ -462,8 +463,9 @@ export const screenshotArea: Area = {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser’s site data',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar) and site data',
   commands: [
+    ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
       { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
     ], async (args, ctx) => {

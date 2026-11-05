@@ -4,6 +4,7 @@ import { getAdblockBridge } from '@/lib/adblock';
 import { useAdblockSettings } from '@/hooks/useAdblock';
 import { getPopupsBridge } from '@/lib/popups';
 import { usePopupSettings } from '@/hooks/usePopups';
+import { useBookmarksBarShown } from '@/hooks/useBrowserBookmarks';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -29,6 +30,11 @@ export interface PreferencesProps {
   /** Whether to offer "Clear browsing data" (hidden in private windows). */
   showClearData: boolean;
   onClearBrowsingData: () => void;
+  /** Open about:bookmarks. */
+  onOpenBookmarks: () => void;
+  /** Import a bookmarks.html file, or export every bookmark to one. */
+  onImportBookmarks: () => void;
+  onExportBookmarks: () => void;
 }
 
 /**
@@ -46,7 +52,11 @@ export function PreferencesPage(props: PreferencesProps) {
     onTreeTabsChange,
     showClearData,
     onClearBrowsingData,
+    onOpenBookmarks,
+    onImportBookmarks,
+    onExportBookmarks,
   } = props;
+  const [barShown, setBarShown] = useBookmarksBarShown();
 
   return (
     // Opaque, like the new-tab page: the surface underneath is a white
@@ -80,6 +90,30 @@ export function PreferencesPage(props: PreferencesProps) {
               onCheckedChange={onTreeTabsChange}
             />
           </SettingRow>
+        </PreferencesSection>
+
+        <PreferencesSection
+          title="Bookmarks"
+          description="Saved on this device. Bring them from another browser, or take them to one, as a bookmarks.html file."
+        >
+          <SettingRow
+            htmlFor="prefs-bookmarks-bar"
+            label="Always show bookmarks bar"
+            description="Show it under every page, not only on new tabs (Ctrl+Shift+B)."
+          >
+            <Switch id="prefs-bookmarks-bar" checked={barShown} onCheckedChange={setBarShown} />
+          </SettingRow>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={onOpenBookmarks}>
+              Manage bookmarks
+            </Button>
+            <Button variant="secondary" onClick={onImportBookmarks}>
+              Import…
+            </Button>
+            <Button variant="secondary" onClick={onExportBookmarks}>
+              Export…
+            </Button>
+          </div>
         </PreferencesSection>
 
         <AdblockSection />

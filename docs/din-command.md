@@ -43,7 +43,7 @@ a missing or bad argument).
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
 | `notifications` | List, send, click, dismiss, clear |
-| `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
+| `browser` | The Web Browser: its bookmarks, as the star, the bookmarks bar and `about:bookmarks` have them (list, add, make folders, edit, move, remove, import and export `bookmarks.html` files, show the bar under every page), and its site data: delete one site's cookies and storage, as its site info does |
 | `extensions` | The Web Browser's extensions: list, load one from a folder (asks on screen first), install one from a `.crx` file (shows what it can do and asks first), reload, publish to Nostr (asks on screen first), find on `about:extensions` (`store`), install one by its address (shows what it can do and asks first, as Get does), remove |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
@@ -70,7 +70,7 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
+installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), deleting a folder of bookmarks (`din browser remove-bookmark`), replacing a file with exported bookmarks (`din browser export-bookmarks`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
 (`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), letting a port through the firewall (`din firewall allow`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on

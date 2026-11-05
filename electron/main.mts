@@ -5597,6 +5597,9 @@ type ShellShortcut =
         | 'new-private-window'
         | 'close-window'
         | 'clear-data'
+        | 'bookmark-page'
+        | 'bookmarks-bar'
+        | 'bookmarks'
         | 'zoom-in'
         | 'zoom-out'
         | 'zoom-reset'
@@ -5728,6 +5731,8 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'n') return { action: 'new-private-window' };
     if (key === 'w') return { action: 'close-window' };
     if (input.key === 'Delete') return { action: 'clear-data' };
+    if (key === 'b') return { action: 'bookmarks-bar' };
+    if (key === 'o') return { action: 'bookmarks' };
     return null;
   }
   if (input.control && !input.shift && !input.alt && !input.meta) {
@@ -5737,6 +5742,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'l') return { action: 'focus-address' };
     if (key === 'f') return { action: 'find' };
     if (key === 'u') return { action: 'view-source' };
+    if (key === 'd') return { action: 'bookmark-page' };
     if (key === 'r') return { action: 'reload', force: false };
     if (key === 'n') return { action: 'new-window' };
     if (/^[1-9]$/.test(input.key)) {
