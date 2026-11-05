@@ -33,6 +33,7 @@ import { execFile } from 'node:child_process';
 import { parsePalette } from './gtk-theme.mts';
 import { LIGHT_STYLE, lookRegistry } from './wine-theme.mts';
 import { sandboxed, windowsShellDir } from './wine-sandbox.mts';
+import { closeSystemNotification, notifyFromSystem } from './notifications.mts';
 
 export { windowsShellDir };
 
@@ -367,6 +368,20 @@ function linkDotnet(prefix: string): void {
   }
 }
 
+/** The notification shown while the prefix is built. */
+const SETUP_NOTICE = 'windows-setup';
+
+/**
+ * The line of a Wine tool's complaint worth showing: its last that isn't
+ * one of Wine's own debug channels' ("0024:err:..."), else its message.
+ */
+function lastLine(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const useful = lines.filter((line) => !/^[0-9a-f]{4}:(err|fixme|warn|trace):/i.test(line));
+  return (useful.at(-1) ?? lines.at(-1) ?? 'Wine failed').slice(0, 300);
+}
+
 /** Create and configure the prefix, once per session. */
 let prefixReady: Promise<void> | null = null;
 
@@ -415,15 +430,25 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
     delete env.WAYLAND_DISPLAY;
     if (!hasMonoAndGecko(wine)) env.WINEDLLOVERRIDES = 'mscoree=;mshtml=';
 
-    if (!fs.existsSync(path.join(prefix, 'system.reg'))) {
-      await run(wine, ['wineboot', '--init'], env);
+    // Building the prefix is half a minute of nothing on screen: say so,
+    // or the first program looks like it didn't open.
+    const fresh = !fs.existsSync(path.join(prefix, 'system.reg'));
+    if (fresh) {
+      notifyFromSystem(SETUP_NOTICE, 'Setting up Windows apps', 'The first Windows program takes about half a minute to open.');
     }
-    const script = path.join(prefix, 'din.reg');
-    fs.writeFileSync(script, PREFIX_REGISTRY);
-    await run(wine, ['regedit', '/S', script], env);
-    // Registry writes land when the wineserver flushes; wait for it so the
-    // first program starts with the settings in place.
-    await run(wineserverBinary(wine), ['-w'], env);
+    try {
+      if (fresh) await run(wine, ['wineboot', '--init'], env);
+      const script = path.join(prefix, 'din.reg');
+      fs.writeFileSync(script, PREFIX_REGISTRY);
+      await run(wine, ['regedit', '/S', script], env);
+      // Registry writes land when the wineserver flushes; wait for it so the
+      // first program starts with the settings in place.
+      await run(wineserverBinary(wine), ['-w'], env);
+    } catch (error) {
+      throw new Error(`Windows apps couldn’t be set up: ${lastLine(error)}`, { cause: error });
+    } finally {
+      if (fresh) closeSystemNotification(SETUP_NOTICE);
+    }
     fs.writeFileSync(marker, `${PREFIX_VERSION}\n`);
   }
 
