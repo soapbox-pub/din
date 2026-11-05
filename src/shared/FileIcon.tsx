@@ -57,7 +57,7 @@ export interface FileIconProps {
   symlink?: boolean;
   /** Box edge in px; icons are drawn at about 3/4 of it. */
   px: number;
-  /** Whether to try a thumbnail (images, video) or the file's own icon (AppImages). */
+  /** Whether to try a thumbnail (images, video) or the file's own icon (AppImages, .exes). */
   thumbnail?: boolean;
   className?: string;
 }

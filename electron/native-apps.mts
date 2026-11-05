@@ -34,9 +34,11 @@ import {
   ensurePrefix,
   isWindowsProgram,
   isWineCommand,
+  wineBinary,
   wineEnvironment,
   windowsProgramCommand,
 } from './windows-apps.mts';
+import { programInfo } from './pe-icon.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -794,7 +796,9 @@ function parentPid(pid: number): number | null {
 // AppImage's mount - rather than anywhere XDG looks. Its windows find that
 // entry through the process, so they get the app's name and icon (and a
 // Dock tile that can open it again) instead of the generic host's. A
-// program with no entry at all gets a tile named for its WM_CLASS.
+// Windows program opened from its .exe has no entry either: its name and
+// icon come from the .exe's resources (pe-icon.mts). A program with no
+// entry at all gets a tile named for its WM_CLASS.
 // ---------------------------------------------------------------------------
 
 /** An app known only because it's running, with its record for the shell. */
@@ -997,8 +1001,105 @@ function unlistedId(name: string): string {
   return `${NATIVE_PREFIX}${UNLISTED_MARK}${slug || 'app'}`;
 }
 
+/**
+ * The .exe a Wine process runs. Wine writes the program's Windows path over
+ * its command line (`H:\Downloads\PKHeX.exe`), and the prefix's dosdevices
+ * say which folder each drive letter is. Windows paths ignore case, so a
+ * name that isn't there as written is looked for in its folder.
+ */
+function windowsProgramFile(pid: number): { file: string; prefix: string } | null {
+  let argv0: string;
+  try {
+    argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
+  } catch {
+    return null;
+  }
+  const match = /^([a-z]):\\(.+\.exe)$/i.exec(argv0);
+  if (!match) return null;
+  const prefix = processEnv(pid, 'WINEPREFIX') || path.join(os.homedir(), '.wine');
+  if (!path.isAbsolute(prefix)) return null;
+  let file: string;
+  try {
+    file = fs.realpathSync(path.join(prefix, 'dosdevices', `${match[1].toLowerCase()}:`));
+  } catch {
+    return null;
+  }
+  for (const part of match[2].split('\\')) {
+    if (!part || part === '.' || part === '..') return null;
+    let next = path.join(file, part);
+    if (!fs.existsSync(next)) {
+      const lower = part.toLowerCase();
+      let found: string | undefined;
+      try {
+        found = fs.readdirSync(file).find((name) => name.toLowerCase() === lower);
+      } catch {
+        return null;
+      }
+      if (!found) return null;
+      next = path.join(file, found);
+    }
+    file = next;
+  }
+  try {
+    return fs.statSync(file).isFile() ? { file, prefix } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The unlisted app a Windows program's window belongs to: named and drawn
+ * from the .exe's own resources, as Windows' taskbar would, and opened
+ * again through Wine. Null for a process that isn't one.
+ */
+async function windowsProgramApp(pid: number): Promise<UnlistedApp | null> {
+  const program = windowsProgramFile(pid);
+  if (!program) return null;
+  const { file, prefix } = program;
+  const base = path.basename(file).replace(/\.exe$/i, '');
+  const info = await programInfo(file);
+  const name = info.name || base;
+  const wine = wineBinary();
+  const entry: DesktopEntry | null = wine
+    ? {
+        id: '',
+        name,
+        comment: null,
+        iconName: null,
+        argv: [wine, 'start', '/unix', file],
+        terminal: false,
+        categories: [],
+        keywords: [],
+        startupWmClass: null,
+        cwd: path.dirname(file),
+        env: { WINEPREFIX: prefix },
+        urlIndex: null,
+        schemes: [],
+      }
+    : null;
+  return {
+    entry,
+    app: {
+      id: unlistedId(`exe-${base}`),
+      desktopId: '',
+      name,
+      comment: null,
+      icon: info.icon ? `data:image/png;base64,${info.icon.toString('base64')}` : null,
+      iconGlyph: false,
+      categories: [],
+      keywords: [],
+      terminal: false,
+      schemes: [],
+    },
+  };
+}
+
 /** The unlisted app a window's process belongs to, from its bundle. */
 async function unlistedAppFor(pid: number, wmClass: string[]): Promise<UnlistedApp | null> {
+  // Wine's own store path has a desktop entry too (the program loader's),
+  // so a Windows program is told apart first.
+  const windows = await windowsProgramApp(pid);
+  if (windows) return windows;
   const bundle = programBundle(pid);
   const found = bundle && bundleEntry(bundle, wmClass);
   if (bundle && found) {

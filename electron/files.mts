@@ -17,6 +17,7 @@ import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { ipcMain, nativeImage, protocol } from 'electron';
+import { programInfo } from './pe-icon.mts';
 import { CommandError, runCommand } from './system.mts';
 
 const fsp = fs.promises;
@@ -1465,6 +1466,16 @@ function appImageIcon(file: string, stats: fs.Stats): Promise<AppImageIcon | nul
   return icon;
 }
 
+function isExeFile(file: string): boolean {
+  return file.toLowerCase().endsWith('.exe');
+}
+
+/** A Windows program's icon, from its resources (electron/pe-icon.mts). */
+async function exeIcon(file: string): Promise<AppImageIcon | null> {
+  const { icon } = await programInfo(file);
+  return icon && { data: icon, type: 'image/png' };
+}
+
 /** Content types for what the shell renders inline. */
 const MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
@@ -1524,9 +1535,13 @@ export async function serveLocalFile(request: Request, file: string, cors: Recor
       'x-content-type-options': 'nosniff',
     };
 
-    // <url>?icon: the icon a program carries inside it (an AppImage's).
+    // <url>?icon: the icon a program carries inside it (an AppImage's, an .exe's).
     if (new URL(request.url).searchParams.has('icon')) {
-      const icon = isAppImageFile(file) ? await appImageIcon(file, stats) : null;
+      const icon = isAppImageFile(file)
+        ? await appImageIcon(file, stats)
+        : isExeFile(file)
+          ? await exeIcon(file)
+          : null;
       if (!icon) return new Response(null, { status: 404, headers: cors });
       const headers = { ...cors, ...safety, 'content-type': icon.type, 'cache-control': 'no-cache', 'content-length': String(icon.data.length) };
       return new Response(request.method === 'HEAD' ? null : new Uint8Array(icon.data), { status: 200, headers });

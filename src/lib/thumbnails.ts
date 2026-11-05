@@ -3,7 +3,7 @@ import { extensionOf, hasOwnIcon, isPlayableVideo, isViewableImage } from '@/lib
 
 /**
  * Thumbnails for the Files app: small WebP renditions of images and video
- * frames, and AppImages' own icons, made in the renderer from din-file: URLs
+ * frames, and programs' own icons (AppImages', .exes'), made in the renderer from din-file: URLs
  * and cached as object URLs
  * for the session. Decoding is the expensive part, so only a few run at
  * once, and a thumbnail scrolled out of view before its turn is skipped.
@@ -70,7 +70,7 @@ async function imageThumb(src: ThumbSource): Promise<string | null> {
 }
 
 /**
- * A program's own icon (an AppImage's), which the file protocol pulls out
+ * A program's own icon (an AppImage's or an .exe's), which the file protocol pulls out
  * of it at `?icon`, already small enough to show as it is.
  */
 async function ownIcon(src: ThumbSource): Promise<string | null> {

@@ -82,10 +82,11 @@ export function hasThumbnail(name: string): boolean {
 
 /**
  * Whether a file carries its own icon, which Din shows instead of the
- * generic one: an AppImage, whose icon is inside it.
+ * generic one: an AppImage or a Windows .exe, whose icon is inside it.
  */
 export function hasOwnIcon(name: string): boolean {
-  return extensionOf(name) === 'appimage';
+  const ext = extensionOf(name);
+  return ext === 'appimage' || ext === 'exe';
 }
 
 export function isViewableImage(name: string): boolean {

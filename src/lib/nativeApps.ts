@@ -62,7 +62,7 @@ export interface NativeAppsBridge {
   /**
    * The app a window belongs to, by its owner's pid and WM_CLASS, or null
    * when it can't be matched. One that isn't installed (a `nix run`
-   * program, an AppImage, found by where its process runs from) comes with
+   * program, an AppImage, an .exe, found by where its process runs from) comes with
    * its record, for the desktop to register (`addUnlistedNativeApp`).
    */
   resolve(pid: number | null, wmClass: string[]): Promise<{ appId: string; app?: NativeApp } | null>;
@@ -105,8 +105,8 @@ export function isProgram(name: string): boolean {
 }
 
 // Apps known only because they're running: a program from `nix run`, an
-// AppImage. Their windows get the app's name and icon from the desktop
-// entry beside the program; the registry lists them, hidden from the
+// AppImage, a Windows .exe. Their windows get the app's name and icon from
+// the desktop entry beside the program (an .exe's from its resources); the registry lists them, hidden from the
 // launcher, for the rest of the session.
 
 let unlisted: readonly NativeApp[] = [];
