@@ -765,6 +765,55 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
   });
 }
 
+/**
+ * Every folder a conversation has worked in that's still there, most
+ * recently used first, once `enabled`: it reads through all the sessions'
+ * pages. A folder counts as there when its parent's listing has it, so the
+ * many gone ones (removed worktrees, another computer's home) don't each
+ * log a failed stat.
+ */
+export function useSessionFolders(enabled: boolean) {
+  const ready = useAssistantReady();
+  const fs = getFsBridge();
+  return useQuery({
+    queryKey: ['assistant', 'session-folders'],
+    queryFn: async () => {
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const page = await assistantApi.sessions({ limit: ASSISTANT_PAGE_MAX, cursor });
+        for (const session of page.sessions) seen.add(session.location.directory.replace(/(.)\/+$/, '$1'));
+        cursor = page.next ?? undefined;
+      } while (cursor);
+      const folders = [...seen];
+      if (!fs) return folders;
+
+      const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
+      // Each parent's folders, or null when its listing was cut short and can't say.
+      const listings = new Map<string, Promise<Set<string> | null>>();
+      for (const parent of new Set(folders.map(parentOf))) {
+        listings.set(
+          parent,
+          fs.readdir(parent).then(
+            (l) => (l.truncated ? null : new Set(l.entries.flatMap((e) => (e.kind === 'directory' ? [e.name] : [])))),
+            () => new Set<string>(),
+          ),
+        );
+      }
+      const there = await Promise.all(
+        folders.map(async (folder) => {
+          if (folder === '/') return true;
+          const names = await listings.get(parentOf(folder))!;
+          return names === null || names.has(folder.slice(folder.lastIndexOf('/') + 1));
+        }),
+      );
+      return folders.filter((_, i) => there[i]);
+    },
+    enabled: ready && enabled,
+    staleTime: 60_000,
+  });
+}
+
 /** A URL to load a local file from: an app's own (it has `fs`), or the desktop's. */
 function fileUrl(path: string): string {
   return window.din ? window.din.files.pathUrl(path) : localFileUrl(path);

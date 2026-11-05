@@ -1,17 +1,26 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
@@ -64,6 +73,7 @@ import {
   useRedoMessages,
   useRenameSession,
   useSendPrompt,
+  useSessionFolders,
   useSessionForms,
   useSessionPasswords,
   useSessionInbox,
@@ -1415,7 +1425,23 @@ function useRecentFolders(): string[] {
   );
 }
 
-/** The folder a new conversation works in: a recent one, or another from the file picker. */
+/**
+ * Every folder a conversation has worked in that's still there, loaded once
+ * `enabled`, most recent first; a worktree counts as its main checkout.
+ */
+function useAllFolders(enabled: boolean): { folders: string[]; loading: boolean } {
+  const { data, isPending } = useSessionFolders(enabled);
+  const directories = useMemo(() => data ?? [], [data]);
+  const mains = useMainCheckouts(directories);
+  const folders = useMemo(() => [...new Set(directories.map((d) => mains.get(d) ?? d))], [directories, mains]);
+  return { folders, loading: enabled && isPending };
+}
+
+/**
+ * The folder a new conversation works in: a recent one, any folder a
+ * conversation has worked in found by searching, or another from the file
+ * picker.
+ */
 function FolderPicker({
   value,
   home,
@@ -1427,39 +1453,96 @@ function FolderPicker({
   onChange: (directory: string) => void;
   onOther: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const searching = search.trim().length > 0;
   const recent = useRecentFolders();
-  const folders = value && !recent.includes(value) ? [value, ...recent] : recent;
+  // Loaded as it opens, so the search has them by the time anything's typed.
+  const all = useAllFolders(open);
+  const folders = useMemo(() => {
+    const listed = value && !recent.includes(value) ? [value, ...recent] : recent;
+    return searching ? [...new Set([...listed, ...all.folders])] : listed;
+  }, [value, recent, searching, all.folders]);
+
+  const pick = (folder: string) => {
+    setOpen(false);
+    setSearch('');
+    onChange(folder);
+  };
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-full" aria-label="Work in a folder">
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setSearch('');
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          role="combobox"
+          aria-expanded={open}
+          className="h-8 gap-1.5 rounded-full"
+          aria-label="Work in a folder"
+        >
           <Folder className="size-3.5" aria-hidden />
           <span className="max-w-60 truncate">{value ? tildify(value, home) : 'Home'}</span>
           <ChevronDown className="size-3 opacity-60" aria-hidden />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        {folders.length > 0 && (
-          <>
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Recent folders</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={value ?? ''} onValueChange={onChange}>
-              {folders.map((folder) => (
-                <DropdownMenuRadioItem key={folder} value={folder} title={folder}>
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="max-w-full shrink-0 truncate font-medium">{directoryName(folder, home)}</span>
-                    <span className="min-w-0 truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem onSelect={onOther}>
-          <FolderOpen aria-hidden /> Other folder…
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-0">
+        <Command>
+          <CommandInput placeholder="Search folders…" value={search} onValueChange={setSearch} className="h-9" />
+          <CommandList className="max-h-80">
+            <CommandEmpty className="py-4 text-center text-sm text-muted-foreground">
+              {all.loading ? 'Looking through your conversations…' : 'No conversation has worked in a folder like that.'}
+            </CommandEmpty>
+            {folders.length > 0 && (
+              <CommandGroup heading={searching ? 'Folders conversations worked in' : 'Recent folders'}>
+                {folders.map((folder) => (
+                  <CommandItem
+                    key={folder}
+                    value={folder}
+                    keywords={[directoryName(folder, home)]}
+                    onSelect={() => pick(folder)}
+                    title={folder}
+                    className="cursor-pointer gap-2"
+                  >
+                    <Check className={cn('size-4 shrink-0', folder === value ? 'opacity-100' : 'opacity-0')} aria-hidden />
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="max-w-full shrink-0 truncate font-medium">{directoryName(folder, home)}</span>
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {searching && all.loading && folders.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" aria-hidden /> Looking through your conversations…
+              </div>
+            )}
+            <CommandSeparator alwaysRender />
+            <CommandGroup forceMount>
+              <CommandItem
+                value="__other_folder__"
+                forceMount
+                onSelect={() => {
+                  setOpen(false);
+                  setSearch('');
+                  onOther();
+                }}
+                className="cursor-pointer gap-2"
+              >
+                <FolderOpen className="size-4" aria-hidden /> Other folder…
+              </CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
