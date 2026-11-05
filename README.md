@@ -618,9 +618,10 @@ Printers shows them and their queues, sets the
 default, prints a test page, and adds older USB printers with the best
 driver installed (gutenprint, brlaser).
 
-The print dialog is Din's own (`src/components/desktop/PrintDialog.tsx`):
-Chromium's would open a GTK window, which DinOS's compositor wouldn't
-show. `electron/print-preload.cjs` sends every page's `print()`, frames'
+The print dialog is Din's own, a window per document
+(`src/components/desktop/apps/PrintWindow.tsx`), not a modal, so the
+desktop stays usable while a job is sent: Chromium's would open a GTK
+window, which DinOS's compositor wouldn't show. `electron/print-preload.cjs` sends every page's `print()`, frames'
 included, there, and so do Ctrl+P, the browser's menu and right-click menu,
 and Print in Files and Preview. Whatever is printed goes to CUPS as a PDF
 laid out by Chromium, and the dialog previews that PDF's pages, drawn by

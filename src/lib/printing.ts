@@ -164,6 +164,12 @@ export function localPaperSize(): PaperSize {
   }
 }
 
+/**
+ * The print window (src/components/desktop/apps/PrintWindow.tsx), one per
+ * document, its launch params `{ document }`. Under Settings in the Dock.
+ */
+export const PRINT_WINDOW_APP_ID = 'print';
+
 /** Pages a print dialog was asked for, by whoever asked. */
 type OpenListener = (document: PrintDocument) => void;
 const openListeners = new Set<OpenListener>();

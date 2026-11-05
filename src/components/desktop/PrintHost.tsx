@@ -1,21 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { notify } from '@/lib/notificationCenter';
-import { getPrintingBridge, onShowPrintDialog, type PrintDocument } from '@/lib/printing';
-import { PrintDialog } from './PrintDialog';
+import { getPrintingBridge, onShowPrintDialog, PRINT_WINDOW_APP_ID, type PrintDocument } from '@/lib/printing';
 
 const SOURCE = { appId: 'settings', name: 'Printing' };
 
 /**
- * Desktop-lifetime host for printing: the print dialog, for pages that ask
- * (window.print(), Ctrl+P, the browser's menu) and files from Files and
- * Preview, one at a time; and a word when a printer stops with a job
- * waiting (out of paper, offline), and when that job prints after all.
+ * Desktop-lifetime host for printing: a print window for each page that
+ * asks (window.print(), Ctrl+P, the browser's menu) and each file from Files
+ * and Preview (src/components/desktop/apps/PrintWindow.tsx); and a word
+ * when a printer stops with a job waiting (out of paper, offline), and when
+ * that job prints after all.
  *
- * Renders nothing outside the Electron shell.
+ * Renders nothing; does nothing outside the Electron shell.
  */
 export function PrintHost() {
-  const [queue, setQueue] = useState<PrintDocument[]>([]);
   const { open } = useWindowActions();
   const openRef = useRef(open);
   useEffect(() => {
@@ -25,11 +24,11 @@ export function PrintHost() {
   useEffect(() => {
     const bridge = getPrintingBridge();
     if (!bridge) return;
-    // Dialogs from before a reload are gone.
+    // Print windows from before a reload are gone (they're never restored).
     void bridge.reset();
-    const add = (document: PrintDocument) => setQueue((q) => [...q, document]);
-    const offOpen = bridge.onOpen(add);
-    const offShow = onShowPrintDialog(add);
+    const show = (document: PrintDocument) => openRef.current(PRINT_WINDOW_APP_ID, { document });
+    const offOpen = bridge.onOpen(show);
+    const offShow = onShowPrintDialog(show);
     const offEvent = bridge.onEvent((event) => {
       const replaceKey = `print:${event.printer}:${event.title}`;
       if (event.type === 'problem') {
@@ -51,13 +50,5 @@ export function PrintHost() {
     };
   }, []);
 
-  const current = queue[0];
-  if (!current) return null;
-  return (
-    <PrintDialog
-      key={current.id}
-      document={current}
-      onClose={() => setQueue((q) => q.filter((d) => d.id !== current.id))}
-    />
-  );
+  return null;
 }
