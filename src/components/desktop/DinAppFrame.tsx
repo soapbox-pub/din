@@ -1094,6 +1094,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           s.fsGranted = true;
         }
       }
+      if (permissions.includes('camera')) {
+        await apps.grantCamera(webContentsId).catch((e: unknown) => console.error('din: granting camera:', e));
+      }
       if (permissions.includes('background')) {
         await apps
           .grantBackground(webContentsId, { notifications: permissions.includes('notifications') })

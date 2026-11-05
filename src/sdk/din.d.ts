@@ -765,6 +765,11 @@ export type Permission =
    */
   | 'capture'
   /**
+   * The camera and the microphone in the app's own page (getUserMedia),
+   * never the screen. Camera.
+   */
+  | 'camera'
+  /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
    * Preview (stepping through a folder, archives), Publisher (linked

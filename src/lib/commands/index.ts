@@ -16,6 +16,7 @@ import { mailArea } from './mail';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
 import { studioArea } from './studio';
+import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
@@ -41,6 +42,7 @@ export const AREAS: readonly Area[] = [
   openArea,
   screenshotArea,
   studioArea,
+  cameraArea,
   wifiArea,
   bluetoothArea,
   phoneArea,

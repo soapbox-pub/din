@@ -4042,6 +4042,12 @@ expose('apps', {
    */
   grantBackground: (webContentsId, options) => ipcRenderer.invoke('dinos-apps:grantBackground', webContentsId, options),
   /**
+   * `camera`: the app's page may use the camera and the microphone, not the screen.
+   * @param {number} webContentsId
+   * @returns {Promise<void>}
+   */
+  grantCamera: (webContentsId) => ipcRenderer.invoke('dinos-apps:grantCamera', webContentsId),
+  /**
    * An app's service worker opened a window (clients.openWindow: `url`) or
    * focused one (WindowClient.focus: `focus`), after a click on one of its
    * notifications. Returns an unsubscribe fn.

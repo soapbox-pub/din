@@ -255,6 +255,11 @@ export const APPS: readonly AppDefinition[] = [
   // live. One window; `{ action: 'record' | 'stop' | 'mark' | 'live', nonce }`
   // presses its buttons (`din studio`, the menu bar's stop button).
   dinApp('studio'),
+  // Photos and videos of yourself, Photo Booth style: effects, a countdown,
+  // the screen's flash, four-up sheets, kept in ~/Pictures/Camera. One
+  // window; `{ action: 'take' | 'record' | 'stop', mode, effect, countdown,
+  // nonce }` presses its shutter (`din camera`).
+  dinApp('camera'),
   // Conversations with OpenCode, the coding agent. One window, which
   // notifications and the menu bar's robot point at a conversation by
   // its `sessionID` launch param.
