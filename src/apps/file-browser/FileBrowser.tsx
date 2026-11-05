@@ -18,6 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ContentPane, SegmentedControl, StatusBar, ToolButton, Toolbar } from '@/shared/appChrome';
+import { focusRing, toolIcon } from '@/shared/appChromeStyles';
 import {
   cleanFsError,
   extractionWarning,
@@ -304,7 +306,7 @@ export function FileBrowser() {
   }, []);
 
   const header = (
-    <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pr-3 pl-2">
+    <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-3 pl-2">
       {bridge ? (
         <div className="flex min-w-0 flex-1 items-center self-stretch">
           <TabStrip
@@ -1502,19 +1504,19 @@ function FileBrowserTab({
       onBlurCapture={() => setFocused(false)}
     >
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/50 px-2 py-1.5">
+      <Toolbar aria-label="Files" className="gap-1 border-b-0">
         <ToolButton label="Back (Alt+Left)" disabled={historyIndex <= 0} onClick={() => go(-1)}>
-          <ArrowLeft className="size-4" />
+          <ArrowLeft {...toolIcon} />
         </ToolButton>
         <ToolButton
           label="Forward (Alt+Right)"
           disabled={historyIndex >= history.length - 1}
           onClick={() => go(1)}
         >
-          <ArrowRight className="size-4" />
+          <ArrowRight {...toolIcon} />
         </ToolButton>
         <ToolButton label="Up (Alt+Up)" disabled={cwd === null || cwd === '/'} onClick={goUp}>
-          <ArrowUp className="size-4" />
+          <ArrowUp {...toolIcon} />
         </ToolButton>
 
         {addressEdit !== null ? (
@@ -1542,7 +1544,7 @@ function FileBrowserTab({
               autoFocus
               spellCheck={false}
               autoComplete="off"
-              className="h-8 w-full rounded-md border border-ring/60 bg-background px-3 font-mono text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-9 w-full rounded-full bg-background px-4 font-mono text-sm text-foreground shadow-sm ring-1 ring-border outline-none"
             />
           </form>
         ) : (
@@ -1568,9 +1570,9 @@ function FileBrowserTab({
         {filter !== null ? (
           <div className="relative w-44 shrink-0 sm:w-56">
             {searching ? (
-              <Loader2 className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground motion-safe:animate-spin" aria-hidden />
+              <Loader2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground motion-safe:animate-spin" aria-hidden />
             ) : (
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
             )}
             <input
               ref={filterRef}
@@ -1593,8 +1595,8 @@ function FileBrowserTab({
                 }
               }}
               className={cn(
-                'h-8 w-full rounded-md border border-border/60 bg-background pl-7 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                isTrash ? 'pr-2' : 'pr-8',
+                'h-9 w-full rounded-full bg-foreground/[0.06] pl-8 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border',
+                isTrash ? 'pr-3' : 'pr-8',
               )}
             />
             {!isTrash && (
@@ -1606,11 +1608,11 @@ function FileBrowserTab({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setSearchContents((on) => !on)}
                 className={cn(
-                  'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full',
+                  focusRing,
                   searchContents
                     ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                    : 'text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground',
                 )}
               >
                 <FileText className="size-3.5" aria-hidden />
@@ -1625,41 +1627,26 @@ function FileBrowserTab({
               requestAnimationFrame(() => filterRef.current?.focus());
             }}
           >
-            <Search className="size-4" />
+            <Search {...toolIcon} />
           </ToolButton>
         )}
 
-        <div role="radiogroup" aria-label="View" className="flex shrink-0 rounded-md bg-foreground/5 p-0.5">
-          {(['list', 'grid'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={prefs.view === mode}
-              aria-label={mode === 'list' ? 'List view (Ctrl+1)' : 'Icon view (Ctrl+2)'}
-              title={mode === 'list' ? 'List view (Ctrl+1)' : 'Icon view (Ctrl+2)'}
-              onClick={() => setPrefs((p) => ({ ...p, view: mode }))}
-              className={cn(
-                'grid size-7 place-items-center rounded text-foreground/70',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                prefs.view === mode ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground',
-              )}
-            >
-              {mode === 'list' ? <List className="size-4" /> : <LayoutGrid className="size-4" />}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          size="md"
+          label="View"
+          value={prefs.view}
+          options={[
+            { value: 'list', label: <List />, title: 'List view (Ctrl+1)' },
+            { value: 'grid', label: <LayoutGrid />, title: 'Icon view (Ctrl+2)' },
+          ]}
+          onValueChange={(view) => setPrefs((p) => ({ ...p, view }))}
+        />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Menu"
-              title="Menu"
-              className="grid size-8 shrink-0 place-items-center rounded-md text-foreground/80 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-foreground/10"
-            >
-              <BarsStaggeredIcon className="size-4" />
-            </button>
+            <ToolButton label="Menu">
+              <BarsStaggeredIcon {...toolIcon} />
+            </ToolButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60" onCloseAutoFocus={(e) => {
             if (document.activeElement === document.body || !document.activeElement) {
@@ -1715,7 +1702,7 @@ function FileBrowserTab({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+      </Toolbar>
 
       <div className="relative flex min-h-0 flex-1">
         {prefs.sidebar && (
@@ -1740,7 +1727,7 @@ function FileBrowserTab({
           </div>
         )}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <ContentPane inset={prefs.sidebar} className="max-sm:m-0 max-sm:rounded-none">
           {isTrash && (
             <div className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-foreground/5 px-4 py-2 text-sm">
               <Trash2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -2017,7 +2004,61 @@ function FileBrowserTab({
               </ContextMenuContent>
             </ContextMenu>
           )}
-        </div>
+
+        {/* Status bar */}
+        <StatusBar className="gap-2">
+          <span className="shrink-0 tabular-nums">
+            {!listing.data
+              ? '…'
+              : selectedNames.length === 0
+                ? `${entries.length.toLocaleString()} item${entries.length === 1 ? '' : 's'}`
+                : selectedNames.length === 1
+                  ? `“${selectedNames[0]}” selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`
+                  : `${selectedNames.length.toLocaleString()} of ${entries.length.toLocaleString()} selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`}
+          </span>
+          {listing.data?.truncated && !filter && (
+            <span className="shrink-0 text-amber-600 dark:text-amber-400">
+              Showing the first {listing.data.entries.length.toLocaleString()} items.
+            </span>
+          )}
+          {searching && entries.length > 0 && <span className="shrink-0">Searching subfolders…</span>}
+          {foundCurrent && found.data.truncated && (
+            <span className="shrink-0 text-amber-600 dark:text-amber-400">Too many matches; showing some of them.</span>
+          )}
+          <span
+            role={status?.kind === 'error' ? 'alert' : 'status'}
+            className={cn(
+              'min-w-0 flex-1 truncate text-right',
+              status?.kind === 'error' && 'text-destructive',
+            )}
+          >
+            {status?.text}
+          </span>
+          {status && status.kind !== 'busy' && (
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setStatus(null)}
+              className="grid size-4 shrink-0 place-items-center rounded hover:bg-foreground/10"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+          {status?.kind === 'busy' && <RotateCw className="size-3 shrink-0 animate-spin" aria-hidden />}
+          {status?.kind === 'busy' && extractJob !== null && (
+            <button
+              type="button"
+              onClick={cancelExtract}
+              className="shrink-0 rounded px-1.5 hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Cancel
+            </button>
+          )}
+          {cwdDetails.data?.free != null && !status && (
+            <span className="shrink-0 tabular-nums">{formatBytes(cwdDetails.data.free)} free</span>
+          )}
+        </StatusBar>
+        </ContentPane>
 
         {quickLookEntry && cwd && (
           <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0">
@@ -2111,60 +2152,6 @@ function FileBrowserTab({
           />
         )}
       </div>
-
-      {/* Status bar */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-background/50 px-3 py-1 text-xs text-muted-foreground">
-        <span className="shrink-0 tabular-nums">
-          {!listing.data
-            ? '…'
-            : selectedNames.length === 0
-              ? `${entries.length.toLocaleString()} item${entries.length === 1 ? '' : 's'}`
-              : selectedNames.length === 1
-                ? `“${selectedNames[0]}” selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`
-                : `${selectedNames.length.toLocaleString()} of ${entries.length.toLocaleString()} selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`}
-        </span>
-        {listing.data?.truncated && !filter && (
-          <span className="shrink-0 text-amber-600 dark:text-amber-400">
-            Showing the first {listing.data.entries.length.toLocaleString()} items.
-          </span>
-        )}
-        {searching && entries.length > 0 && <span className="shrink-0">Searching subfolders…</span>}
-        {foundCurrent && found.data.truncated && (
-          <span className="shrink-0 text-amber-600 dark:text-amber-400">Too many matches; showing some of them.</span>
-        )}
-        <span
-          role={status?.kind === 'error' ? 'alert' : 'status'}
-          className={cn(
-            'min-w-0 flex-1 truncate text-right',
-            status?.kind === 'error' && 'text-destructive',
-          )}
-        >
-          {status?.text}
-        </span>
-        {status && status.kind !== 'busy' && (
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setStatus(null)}
-            className="grid size-4 shrink-0 place-items-center rounded hover:bg-foreground/10"
-          >
-            <X className="size-3" />
-          </button>
-        )}
-        {status?.kind === 'busy' && <RotateCw className="size-3 shrink-0 animate-spin" aria-hidden />}
-        {status?.kind === 'busy' && extractJob !== null && (
-          <button
-            type="button"
-            onClick={cancelExtract}
-            className="shrink-0 rounded px-1.5 hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Cancel
-          </button>
-        )}
-        {cwdDetails.data?.free != null && !status && (
-          <span className="shrink-0 tabular-nums">{formatBytes(cwdDetails.data.free)} free</span>
-        )}
-      </div>
     </div>
   );
 }
@@ -2240,7 +2227,7 @@ function Breadcrumbs({
   return (
     <div
       ref={scrollRef}
-      className="flex h-8 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-md border border-border/60 bg-secondary/60 px-1 [scrollbar-width:none]"
+      className="flex h-9 min-w-0 flex-1 cursor-text items-center overflow-x-auto rounded-full bg-foreground/[0.06] px-2 [scrollbar-width:none]"
       onClick={(e) => {
         if (e.target === e.currentTarget) onEdit();
       }}
@@ -2342,32 +2329,3 @@ function ListSkeleton() {
   );
 }
 
-function ToolButton({
-  label,
-  onClick,
-  disabled,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-        'hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
-      )}
-    >
-      {children}
-    </button>
-  );
-}

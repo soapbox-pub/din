@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Toast as ToastPrimitive } from 'radix-ui';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { glassPanel } from './appChromeStyles';
 import { onToast, type ToastMessage } from '@/shared/toast';
 
 /** The window's toasts (src/shared/toast.ts), and where they're placed. */
@@ -51,10 +52,10 @@ export function Toaster({ children }: { children: ReactNode }) {
             type={current.destructive ? 'foreground' : 'background'}
             duration={current.destructive ? 8000 : 4000}
             className={cn(
-              'group pointer-events-auto relative flex w-max max-w-full items-start gap-3 rounded-xl border py-3 pr-3 pl-4 shadow-lg',
+              'group pointer-events-auto relative flex w-max max-w-full items-start gap-3 py-3 pr-3 pl-4',
               current.destructive
-                ? 'border-destructive bg-destructive text-destructive-foreground'
-                : 'border-border bg-popover text-popover-foreground',
+                ? 'rounded-2xl border border-destructive bg-destructive text-destructive-foreground shadow-lg'
+                : cn(glassPanel, 'text-foreground'),
               'data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-safe:data-[state=open]:slide-in-from-bottom-2',
               'data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
               'data-[swipe=move]:translate-y-(--radix-toast-swipe-move-y) data-[swipe=cancel]:translate-y-0 motion-safe:data-[swipe=cancel]:transition-transform',

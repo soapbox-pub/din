@@ -79,6 +79,11 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-selected: var(--selected);
+  --color-window: var(--window);
+  --color-glass: var(--glass);
+  --color-ink-accent: var(--ink-accent);
+
   --color-md-heading: var(--md-heading);
   --color-md-strong: var(--md-strong);
   --color-md-emph: var(--md-emph);
@@ -153,6 +158,156 @@
   }
 }
 
+/* Clay volume as a shadow that still composes with Tailwind's rings, so a
+   clay control keeps its focus ring. */
+@utility clay {
+  --tw-shadow: var(--clay);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+
+@utility clay-pigment {
+  --tw-shadow: var(--clay-pigment);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+
+/* Glass, for what floats over the desktop (glass-surface): what it's made of
+   follows --glass-material on the root (src/lib/accessibility.ts), which apps
+   get with the theme, and a preview sets on a wrapper to show one.
+   Liquid: more see-through than frosted, the blur saturated and lit so what's
+   behind glows through it, a rim of light, its sheen where the pointer is
+   (--glass-x/--glass-y, the surface's own), and (with data-liquid,
+   src/shared/liquidGlass.ts) what's behind bent inward at the edge.
+   Frosted: the flat frosted pane Din had before. Solid: no glass at all. */
+@layer components {
+  .glass-surface {
+    border: 1px solid var(--glass-rim);
+    background-color: var(--glass);
+    background-image:
+      radial-gradient(320px circle at var(--glass-x, 18%) var(--glass-y, -12%), var(--glass-sheen), transparent 65%),
+      linear-gradient(to bottom, color-mix(in oklab, var(--glass-sheen) 40%, transparent), transparent 40%);
+    -webkit-backdrop-filter: blur(8px) saturate(1.9) brightness(1.05);
+    backdrop-filter: blur(8px) saturate(1.9) brightness(1.05);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 -1px 1px color-mix(in oklab, var(--glass-highlight) 25%, transparent),
+      inset 0 0 20px -8px var(--glass-glow),
+      0 14px 36px -14px rgb(0 0 0 / 0.42),
+      0 2px 8px -2px rgb(0 0 0 / 0.16);
+  }
+  @container style(--glass-material: liquid) {
+    :root[data-liquid] .glass-surface {
+      -webkit-backdrop-filter: url(#din-liquid) blur(8px) saturate(1.9) brightness(1.05);
+      backdrop-filter: url(#din-liquid) blur(8px) saturate(1.9) brightness(1.05);
+    }
+  }
+  @container style(--glass-material: frosted) {
+    .glass-surface {
+      border-color: color-mix(in oklab, var(--border) 60%, transparent);
+      background-color: color-mix(in oklab, color-mix(in oklab, var(--popover) 94%, var(--primary)) 74%, transparent);
+      background-image: none;
+      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(24px);
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+  }
+  @container style(--glass-material: solid) {
+    .glass-surface {
+      border-color: var(--border);
+      background-color: color-mix(in oklab, var(--popover) 94%, var(--primary));
+      background-image: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+  }
+}
+
+/* A window's frame (window-glass, under its title bar and sidebar; its
+   content pane stays solid), of the same material as the glass. Maximized or
+   snapped it eases, with the window's 250ms, to the near-opaque surface the
+   strip behind the menu bar has (windowSurface.ts), so the two match. No
+   lens: over a window's whole size it halved the frame rate of a drag. */
+@layer components {
+  .window-glass {
+    background-color: color-mix(in oklab, var(--window) 76%, transparent);
+    background-image: radial-gradient(600px circle at var(--glass-x, 25%) var(--glass-y, -20%), color-mix(in oklab, var(--glass-sheen) 60%, transparent), transparent 65%);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8) brightness(1.04);
+    backdrop-filter: blur(20px) saturate(1.8) brightness(1.04);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 0 28px -10px var(--glass-glow);
+    transition: background-color 250ms cubic-bezier(0.33, 1, 0.68, 1), box-shadow 250ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  @container style(--glass-material: frosted) {
+    .window-glass {
+      background-color: color-mix(in oklab, var(--window) 88%, transparent);
+      background-image: none;
+      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(24px);
+      box-shadow: none;
+    }
+  }
+  :root [data-window-flush] > .window-glass {
+    background-color: color-mix(in oklab, var(--window) 98%, transparent);
+    background-image: none;
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    box-shadow: none;
+  }
+  @container style(--glass-material: solid) {
+    :root .window-glass,
+    :root [data-window-flush] > .window-glass {
+      background-color: var(--window);
+      background-image: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      box-shadow: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .window-glass {
+      transition: none;
+    }
+  }
+}
+
+/* Tabs and search fields of Liquid glass (glass-control): a lit bead of the
+   glass, its sheen where the pointer is; the chosen tab and a field being
+   typed in raised out of it. Unlayered, so it wins over the controls' own
+   utilities, which are what Frosted and Solid keep. */
+@container style(--glass-material: liquid) {
+  .glass-control {
+    background-color: color-mix(in oklab, var(--foreground) 5%, transparent);
+    background-image: radial-gradient(140px circle at var(--glass-x, 30%) var(--glass-y, -60%), color-mix(in oklab, var(--glass-sheen) 80%, transparent), transparent 70%);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, var(--glass-highlight) 55%, transparent),
+      inset 0 0 0 1px var(--glass-rim);
+  }
+  .glass-control:hover {
+    background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+  }
+  .glass-control.glass-control-raised,
+  input.glass-control:focus-visible {
+    background-color: var(--glass-raised);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 0 0 1px var(--glass-rim),
+      0 1px 3px rgb(0 0 0 / 0.18);
+  }
+  input.glass-control:focus-visible {
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 0 0 1px var(--glass-rim),
+      0 0 0 2px color-mix(in oklab, var(--ring) 60%, transparent);
+  }
+}
+
+/* A lump of the theme's primary, flat, its volume the clay's (clay-pigment). */
+@utility bg-pigment {
+  background-color: var(--primary);
+}
+
 /* Container utility replacement for v4 (previously configured in tailwind.config) */
 @utility container {
   margin-inline: auto;
@@ -213,6 +368,29 @@
      pages get the same unless they choose their own (electron/main.mts). */
   --selection: #3b82f666;
 
+  /* The theme as pigment, worked into Din's own surfaces rather than painted
+     on top: derived from whatever colors the theme has (a profile theme sets
+     them inline on this element), so every theme gets them. What's chosen is
+     tinted with the primary; what's merely hovered stays neutral. */
+  --selected: color-mix(in oklab, var(--primary) 14%, transparent);
+  --window: color-mix(in oklab, var(--card) 94%, var(--primary));
+  /* The accent for icons on glass (sidebars' rows): the primary's hue, pulled
+     toward the text so it reads over whatever shows through. */
+  --ink-accent: color-mix(in oklab, var(--primary) 60%, var(--foreground));
+  --glass: color-mix(in oklab, color-mix(in oklab, var(--popover) 94%, var(--primary)) 68%, transparent);
+  --glass-material: liquid;
+  /* Light on the glass's curved surface: its rim, the bright line along its
+     top, the glow inside its edge, and a sheen across it. */
+  --glass-rim: rgb(255 255 255 / 0.5);
+  --glass-highlight: rgb(255 255 255 / 0.75);
+  --glass-glow: rgb(255 255 255 / 0.45);
+  --glass-sheen: rgb(255 255 255 / 0.35);
+  --glass-raised: rgb(255 255 255 / 0.62);
+
+  /* Clay: a control's soft volume, lit from above like Din's icons. */
+  --clay: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 1px 2px rgb(15 23 42 / 0.08), 0 3px 8px -3px rgb(15 23 42 / 0.12);
+  --clay-pigment: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(15 23 42 / 0.1), 0 3px 8px -3px color-mix(in oklab, var(--primary) 40%, transparent);
+
   /* Markdown in the assistant's replies, after GitHub Light like the
      Terminal and Code apps. */
   --md-heading: #8250df;
@@ -232,6 +410,11 @@
 
   --popover: hsl(222.2 84% 4.9%);
   --popover-foreground: hsl(210 40% 98%);
+  --glass-rim: rgb(255 255 255 / 0.14);
+  --glass-highlight: rgb(255 255 255 / 0.28);
+  --glass-glow: rgb(255 255 255 / 0.12);
+  --glass-sheen: rgb(255 255 255 / 0.1);
+  --glass-raised: rgb(255 255 255 / 0.13);
 
   --primary: hsl(210 40% 98%);
   --primary-foreground: hsl(222.2 47.4% 11.2%);
@@ -248,8 +431,10 @@
   --destructive: hsl(0 62.8% 30.6%);
   --destructive-foreground: hsl(210 40% 98%);
 
-  --border: hsl(217.2 32.6% 17.5%);
-  --input: hsl(217.2 32.6% 17.5%);
+  /* Lines a step lighter and greyer than the fills (muted, accent), so a
+     border never reads as a hovered row or a field. */
+  --border: hsl(217 19% 24%);
+  --input: hsl(217 19% 24%);
   --ring: hsl(212.7 26.8% 83.9%);
 
   --chart-1: hsl(220 70% 50%);
@@ -264,8 +449,11 @@
   --sidebar-primary-foreground: hsl(0 0% 100%);
   --sidebar-accent: hsl(240 3.7% 15.9%);
   --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-border: hsl(240 3.7% 22%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
+
+  --clay: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.4), 0 3px 8px -3px rgb(0 0 0 / 0.5);
+  --clay-pigment: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 2px rgb(0 0 0 / 0.4), 0 3px 8px -3px rgb(0 0 0 / 0.5);
 
   --md-heading: #d2a8ff;
   --md-strong: #ffa657;
@@ -352,6 +540,14 @@
 :root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-popover/"] {
   background-color: var(--popover) !important;
 }
+/* Glass and windows keep the theme's pigment, solid. */
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-glass"] {
+  background-color: color-mix(in oklab, var(--popover) 94%, var(--primary)) !important;
+}
+:root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-window/"] {
+  background-color: var(--window) !important;
+  background-image: none !important;
+}
 :root[data-reduce-transparency] [class*="backdrop-blur"][class*="bg-muted/"] {
   background-color: var(--muted) !important;
 }
@@ -427,9 +623,13 @@
   color: inherit;
 }
 
+/* As a Mac's: thin, on no track, and out of sight until the pointer is
+   over what scrolls (or focus is in it), with Increase contrast showing
+   it always. Chromium can't lay a styled scrollbar over the content, so
+   the gutter stays; it's kept narrow. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   background-color: transparent;
 }
 
@@ -439,15 +639,22 @@
 
 /* Transparent border + padding-box clip inset the thumb inside the gutter. */
 ::-webkit-scrollbar-thumb {
-  background-color: var(--border);
+  background-color: transparent;
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 9999px;
 }
 
+:hover::-webkit-scrollbar-thumb,
+:focus-within::-webkit-scrollbar-thumb,
+:root[data-increase-contrast] ::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--primary) 20%, color-mix(in oklab, var(--muted-foreground) 20%, transparent));
+}
+
 ::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:active {
-  background-color: color-mix(in oklab, var(--border), var(--foreground) 25%);
+  border-width: 1px;
+  background-color: color-mix(in oklab, var(--primary) 35%, color-mix(in oklab, var(--muted-foreground) 30%, transparent));
 }
 
 ::-webkit-scrollbar-corner {

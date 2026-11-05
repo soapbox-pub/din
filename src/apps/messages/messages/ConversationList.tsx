@@ -9,6 +9,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import type { PhoneConversation } from '@/lib/phone';
 import { cn } from '@/lib/utils';
+import { focusRing, listRowClass } from '@/shared/appChromeStyles';
 import { Avatar } from './Avatar';
 import { conversationKey, displayName, listTime, preview } from './format';
 
@@ -92,9 +93,9 @@ export function ConversationList({
                   }
                 }}
                 className={cn(
-                  'flex cursor-default items-center gap-3 rounded-xl px-2 py-2.5 outline-none',
-                  'focus-visible:ring-2 focus-visible:ring-ring',
-                  current ? 'bg-foreground/10' : 'hover:bg-foreground/5',
+                  'flex cursor-default items-center gap-3 rounded-lg px-2 py-2.5',
+                  focusRing,
+                  listRowClass({ selected: current }),
                 )}
               >
                 <div className="relative">

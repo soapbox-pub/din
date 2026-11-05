@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Download, FileArchive, FileImage, FileText, File as FileIcon, Forward, MailMinus, Loader2, MoreVertical, Pencil, Reply, ReplyAll, ShieldCheck, Star } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/compon
 import { toast } from '@/shared/toast';
 import { pickSaveFile, writeFile } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
+import { PillButton, ToolButton } from '@/shared/appChrome';
 import type { MailAddress, MailAttachmentInfo, MailLabel, MailMessage } from '@/lib/mail';
 import { LabelChip } from './LabelChip';
 import { useConversation, useMail, useMessage, type Item } from './api';
@@ -149,21 +150,6 @@ function ReaderSkeleton() {
 
 const unsubscribedOn = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
-function IconButton({ label, onClick, children, ...props }: ComponentProps<'button'> & { label: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      {...props}
-      className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      {children}
-    </button>
-  );
-}
-
 /** Who a message went to, in a few words: "to me, Sam". */
 function recipientLine(m: MailMessage, me: Set<string>): string {
   const names = [...m.to, ...m.cc].map((a) => (me.has(a.address.toLowerCase()) ? 'me' : displayName(a)));
@@ -194,17 +180,17 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item
             </time>
           </button>
           <div className="flex shrink-0 items-center">
-            <IconButton label={item.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(item.flagged ? 'unflag' : 'flag')}>
+            <ToolButton label={item.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(item.flagged ? 'unflag' : 'flag')}>
               <Star className={cn('size-4', item.flagged && 'fill-amber-400 text-amber-500')} strokeWidth={1.75} />
-            </IconButton>
-            <IconButton label="Reply" onClick={() => onPick('reply')}>
+            </ToolButton>
+            <ToolButton label="Reply" onClick={() => onPick('reply')}>
               <Reply className="size-4" strokeWidth={1.75} />
-            </IconButton>
+            </ToolButton>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton label="More">
+                <ToolButton label="More">
                   <MoreVertical className="size-4" strokeWidth={1.75} />
-                </IconButton>
+                </ToolButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownEntries entries={menu} onPick={onPick} />
@@ -249,13 +235,9 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item
 
 function AnswerButton({ onClick, icon: Icon, children }: { onClick: () => void; icon: LucideIcon; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex h-9 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium outline-none hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <Icon className="size-4" strokeWidth={1.75} /> {children}
-    </button>
+    <PillButton onClick={onClick} className="gap-2">
+      <Icon strokeWidth={1.75} /> {children}
+    </PillButton>
   );
 }
 
@@ -307,9 +289,9 @@ function Opened({
       <div className="rounded-xl border border-border/60 p-4 text-sm">
         <p className="font-medium">This message couldn’t be opened.</p>
         <p className="mt-1 text-muted-foreground">{query.error instanceof Error ? query.error.message : String(query.error)}</p>
-        <button type="button" onClick={() => void query.refetch()} className="mt-3 rounded-full bg-primary px-3 py-1.5 text-primary-foreground">
+        <PillButton variant="primary" size="sm" onClick={() => void query.refetch()} className="mt-3">
           Try Again
-        </button>
+        </PillButton>
       </div>
     );
   }
@@ -321,18 +303,18 @@ function Opened({
         {item.draft && (
           <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
             <span className="flex-1 text-muted-foreground">This message is a draft.</span>
-            <button type="button" onClick={() => onPick('open-draft')} className="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
-              <Pencil className="size-3.5" /> Edit
-            </button>
+            <PillButton size="sm" onClick={() => onPick('open-draft')}>
+              <Pencil /> Edit
+            </PillButton>
           </div>
         )}
         {m.html && hasRemote && !remote && (
           <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
             <ShieldCheck className="size-4 shrink-0 text-primary" />
             <span className="flex-1 text-muted-foreground">Remote content is hidden to keep the sender from seeing when you read this.</span>
-            <button type="button" onClick={() => setLoadRemote(true)} className="shrink-0 rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+            <PillButton size="sm" onClick={() => setLoadRemote(true)}>
               Load Remote Content
-            </button>
+            </PillButton>
           </div>
         )}
         {m.html ? <HtmlBody html={m.html} allowRemote={remote} onRemote={setHasRemote} onLink={openLink} /> : <TextBody text={m.text} onLink={openLink} />}

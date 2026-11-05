@@ -149,7 +149,7 @@ export function PackageStore({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {query ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader title={address ? `${capitalize(copy.noun)} at this address` : `Results for “${query}”`} />
@@ -213,7 +213,7 @@ function capitalize(text: string): string {
 
 function PackageGrid({ packages, handlers }: { packages: ThemePackage[]; handlers: PackageHandlers }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {packages.map((pkg) => (
         <PackageCard key={packageCoordinate(pkg)} pkg={pkg} handlers={handlers} />
       ))}
@@ -229,7 +229,7 @@ function PackageCard({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
     <PackageContextMenu pkg={pkg} handlers={handlers}>
       <div
         ref={ref}
-        className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
+        className="relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
       >
         <button
           type="button"
@@ -447,7 +447,7 @@ function PackageDetailPage({
   if (!pkg) {
     return (
       <div ref={ref} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none">
-        <div className="mx-auto max-w-5xl p-4 sm:p-6">
+        <div className="mx-auto max-w-5xl p-4 @2xl:p-6">
           {lookup.isPending ? (
             <div className="flex flex-col gap-4">
               <Skeleton className="h-48 w-full max-w-2xl rounded-2xl" />
@@ -466,9 +466,9 @@ function PackageDetailPage({
 
   return (
     <div ref={ref} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none" aria-label={`${pkg.title} details`}>
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
-          <div className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md lg:w-3/5">
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
+        <div className="flex flex-col gap-6 @5xl:flex-row @5xl:items-center">
+          <div className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md @5xl:w-3/5">
             <PackagePreview pkg={pkg} visible large className="min-h-48" />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-4">
@@ -514,7 +514,7 @@ function PackageDetailPage({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
+          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
             <InfoRow label="Download size">{pkg.size ? formatBytes(pkg.size) : 'Unknown'}</InfoRow>
             {pkg.type === 'cursor' ? (
               <InfoRow label="Cursors">{`${pkg.cursors.length.toLocaleString()}${pkg.links.length ? `, under ${(pkg.cursors.length + pkg.links.length).toLocaleString()} names` : ''}`}</InfoRow>
@@ -596,7 +596,7 @@ function TryCursors({ pkg }: { pkg: CursorPackage }) {
   return (
     <section className="flex flex-col gap-4" aria-label="Try it">
       <SectionHeader title="Try It" subtitle="Point at each to see it as your pointer." />
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-3 @2xl:grid-cols-6">
         {tries.isPending
           ? TRY_ROLES.map(({ label }) => <Skeleton key={label} className="h-24 rounded-xl" />)
           : tries.data?.map(({ label, src, css }) => (
@@ -623,9 +623,9 @@ export function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
   return (
     <section className="flex flex-col gap-4" aria-label="What it can do">
       <SectionHeader title="What It Can Do" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2">
         {sites.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="rounded-xl border border-border/70 bg-card p-4">
             <p className="mb-2 text-sm font-medium">Read and change data on</p>
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
               {sites.map((site) => (
@@ -635,7 +635,7 @@ export function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
           </div>
         )}
         {pkg.permissions.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="rounded-xl border border-border/70 bg-card p-4">
             <p className="mb-2 text-sm font-medium">Permissions</p>
             <ul className="flex flex-wrap gap-1.5">
               {pkg.permissions.map((permission) => (
@@ -662,9 +662,9 @@ export function InfoRow({ label, children }: { label: string; children: ReactNod
 
 function PackageGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div key={i} className="overflow-hidden rounded-xl border border-border/70 bg-card">
           <Skeleton className="h-28 rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">

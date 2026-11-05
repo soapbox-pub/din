@@ -65,6 +65,8 @@ export const AppConfigSchema = z.object({
   zoomLevel: z.number(),
   reduceMotion: z.boolean(),
   reduceTransparency: z.boolean(),
+  // Astra was a third material for a while; it's Liquid now.
+  glass: z.preprocess((v) => (v === 'astra' ? 'liquid' : v), z.enum(['liquid', 'frosted'])),
   increaseContrast: z.boolean(),
   textSize: z.number().min(100).max(200),
   screenZoomKeys: z.boolean(),

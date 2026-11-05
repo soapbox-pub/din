@@ -125,9 +125,9 @@ export function InfoList({ children }: { children: React.ReactNode }) {
 
 export function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 px-4 py-2.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+    <div className="flex flex-col gap-0.5 px-4 py-2.5 @2xl:flex-row @2xl:items-baseline @2xl:justify-between @2xl:gap-4">
       <dt className="shrink-0 text-sm text-foreground">{label}</dt>
-      <dd className="min-w-0 break-all text-sm text-muted-foreground select-text sm:text-right">{value}</dd>
+      <dd className="min-w-0 break-all text-sm text-muted-foreground select-text @2xl:text-right">{value}</dd>
     </div>
   );
 }

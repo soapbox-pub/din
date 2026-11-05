@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, MessageCircle, RefreshCw, Search, Smartphone, SquarePen, X } from 'lucide-react';
+import { ChevronLeft, MessageCircle, RefreshCw, Smartphone, SquarePen } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import { appLink, type Launch, useOnLaunch, windowLaunch } from '@/shared/launch';
 import { useDocumentVisible, useMediaQuery, useMenuBar, useWindowFocused, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
+import { ContentPane, SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { searchRow, toolIcon } from '@/shared/appChromeStyles';
 import { cleanPhoneError, formatAddress, phoneDigits } from '@/shared/phone';
 import { useContacts, useConversations, useMessages, usePhone, usePhoneState, usePhoneSync } from './messages/api';
 import { Avatar } from './messages/Avatar';
@@ -212,36 +214,19 @@ export function Messages() {
       {showList && (
         <aside
           aria-label="Conversations"
-          className={cn('flex min-w-0 shrink-0 flex-col border-r border-border/60 bg-background/60', narrow ? 'flex-1' : 'w-80')}
+          className={cn('flex min-w-0 shrink-0 flex-col', narrow ? 'flex-1' : 'w-80')}
         >
-          <WindowDragRegion className="flex h-13 shrink-0 items-center gap-1 pr-2 pl-4">
-            <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-[17px] font-bold">Messages</h1>
+          <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/messages.png" />} title="Messages">
             <ToolButton label="Check for new messages" onClick={refresh}>
-              <RefreshCw className="size-4" strokeWidth={1.75} />
+              <RefreshCw {...toolIcon} />
             </ToolButton>
             <ToolButton label="New message" onClick={startNew}>
-              <SquarePen className="size-4" strokeWidth={1.75} />
+              <SquarePen {...toolIcon} />
             </ToolButton>
             {narrow && <WindowControls />}
-          </WindowDragRegion>
-          <div className="px-3 pb-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                id="messages-search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Escape' && setSearch('')}
-                placeholder="Search"
-                aria-label="Search conversations"
-                className="h-8 w-full rounded-lg bg-foreground/[0.06] pr-7 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-              />
-              {search && (
-                <button type="button" aria-label="Clear search" onClick={() => setSearch('')} className="absolute top-1/2 right-2 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-muted-foreground/40 text-background">
-                  <X className="size-3" />
-                </button>
-              )}
-            </div>
+          </SidebarTitle>
+          <div className={searchRow}>
+            <SearchField className="flex-1" id="messages-search" size="sm" value={search} onValueChange={setSearch} placeholder="Search" aria-label="Search conversations" />
           </div>
           <PhoneStrip phones={phones} onSettings={() => void window.open(appLink('settings', { section: 'phone' }))} />
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -266,7 +251,7 @@ export function Messages() {
       )}
 
       {showPane && (
-        <main className="flex min-w-0 flex-1 flex-col bg-background">
+        <div className="flex min-w-0 flex-1 flex-col">
           {selection?.kind === 'new' ? (
             <NewMessage
               phones={phones}
@@ -294,15 +279,15 @@ export function Messages() {
             />
           ) : (
             <>
-              <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end px-3">
+              <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-3">
                 <WindowControls />
               </WindowDragRegion>
-              <div className="grid flex-1 place-items-center p-8 text-sm text-muted-foreground">
+              <ContentPane inset={!narrow} className="grid place-items-center p-8 text-sm text-muted-foreground">
                 {conversations.isPending ? '' : 'Pick a conversation, or start a new one.'}
-              </div>
+              </ContentPane>
             </>
           )}
-        </main>
+        </div>
       )}
 
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
@@ -357,10 +342,10 @@ function ConversationPane({
 
   return (
     <>
-      <WindowDragRegion className="flex h-13 shrink-0 items-center gap-2.5 border-b border-border/60 pr-3 pl-2">
+      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2.5 pr-3 pl-2">
         {narrow ? (
           <ToolButton label="Back to conversations" onClick={onBack}>
-            <ChevronLeft className="size-5" />
+            <ChevronLeft {...toolIcon} />
           </ToolButton>
         ) : (
           <span className="w-1" />
@@ -374,20 +359,22 @@ function ConversationPane({
         </div>
         <WindowControls />
       </WindowDragRegion>
-      <Thread
-        messages={messages.data ?? []}
-        loading={messages.isPending}
-        group={group}
-        nameOf={nameOf}
-        onRetry={onRetry}
-      />
-      <Composer
-        draftKey={`${conversation.phoneId}\u0000${conversation.threadId}`}
-        disabled={sendBlocked(phone)}
-        placeholder="Text Message"
-        onSend={onSend}
-        autoFocus
-      />
+      <ContentPane inset={!narrow}>
+        <Thread
+          messages={messages.data ?? []}
+          loading={messages.isPending}
+          group={group}
+          nameOf={nameOf}
+          onRetry={onRetry}
+        />
+        <Composer
+          draftKey={`${conversation.phoneId}\u0000${conversation.threadId}`}
+          disabled={sendBlocked(phone)}
+          placeholder="Text Message"
+          onSend={onSend}
+          autoFocus
+        />
+      </ContentPane>
     </>
   );
 }
@@ -415,15 +402,15 @@ function NewMessage({
   const phone = phones.find((p) => p.id === from);
   return (
     <>
-      <WindowDragRegion className="flex h-13 shrink-0 items-center gap-2 border-b border-border/60 pr-3 pl-2">
+      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-3 pl-2">
         {narrow ? (
           <ToolButton label="Back to conversations" onClick={onBack}>
-            <ChevronLeft className="size-5" />
+            <ChevronLeft {...toolIcon} />
           </ToolButton>
         ) : (
           <span className="w-2" />
         )}
-        <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold">New Message</h2>
+        <h2 className="min-w-0 truncate text-[15px] font-semibold">New Message</h2>
         {phones.length > 1 && (
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             From
@@ -440,18 +427,21 @@ function NewMessage({
             </select>
           </label>
         )}
+        <div className="min-w-2 flex-1" />
         <WindowControls />
       </WindowDragRegion>
-      <Recipients recipients={recipients} contacts={contacts.data ?? []} onChange={onRecipients} />
-      <div className="flex-1 p-6 text-center text-xs text-muted-foreground">
-        {recipients.length > 1 && 'The phone sends this to each of them separately.'}
-      </div>
-      <Composer
-        draftKey="new"
-        disabled={recipients.length === 0 ? 'Add who it’s to.' : sendBlocked(phone)}
-        placeholder="Text Message"
-        onSend={(text) => (from ? onSend(from, text) : Promise.reject(new Error('No phone')))}
-      />
+      <ContentPane inset={!narrow}>
+        <Recipients recipients={recipients} contacts={contacts.data ?? []} onChange={onRecipients} />
+        <div className="flex-1 p-6 text-center text-xs text-muted-foreground">
+          {recipients.length > 1 && 'The phone sends this to each of them separately.'}
+        </div>
+        <Composer
+          draftKey="new"
+          disabled={recipients.length === 0 ? 'Add who it’s to.' : sendBlocked(phone)}
+          placeholder="Text Message"
+          onSend={(text) => (from ? onSend(from, text) : Promise.reject(new Error('No phone')))}
+        />
+      </ContentPane>
     </>
   );
 }
@@ -469,7 +459,7 @@ function PhoneStrip({ phones, onSettings }: { phones: PhoneDevice[]; onSettings:
   const away = phones.filter((p) => p.status !== 'connected');
   if (away.length === 0) return null;
   return (
-    <div className="mx-3 mb-2 flex flex-col gap-1">
+    <div className="mx-2 mb-2 flex flex-col gap-1">
       {away.map((p) => (
         <button
           key={p.id}
@@ -491,7 +481,7 @@ function PhoneStrip({ phones, onSettings }: { phones: PhoneDevice[]; onSettings:
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <WindowDragRegion className="flex h-13 shrink-0 items-center justify-end px-3">
+      <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-3">
         <WindowControls />
       </WindowDragRegion>
       {children}
@@ -513,16 +503,3 @@ function Empty({ icon: Icon, title, children }: { icon: typeof Smartphone; title
   );
 }
 
-function ToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="grid size-8 place-items-center rounded-md text-foreground/80 hover:bg-foreground/[0.08] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      {children}
-    </button>
-  );
-}

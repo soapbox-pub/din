@@ -106,7 +106,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Appearance',
     name: 'Themes',
     icon: Palette,
-    search: ['Appearance', 'Sync with your profile theme', 'Your themes', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture'],
+    search: ['Appearance', 'Sync with your profile theme', 'Windows and menus', 'Glass', 'Solid', 'transparency', 'frosted', 'blur', 'Your themes', 'theme', 'dark mode', 'light mode', 'colors', 'fonts', 'background', 'wallpaper', 'desktop picture'],
   },
   {
     id: 'cursors',

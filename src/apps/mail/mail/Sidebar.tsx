@@ -4,6 +4,8 @@ import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { SidebarHeading, ToolButton } from '@/shared/appChrome';
+import { focusRing, sidebarHeadingClass, sidebarRowClass } from '@/shared/appChromeStyles';
 import { LABEL_COLORS, type LabelColor, type MailAccount, type MailboxInfo, type MailLabel, type MailLabels, type SpecialMailbox } from '@/lib/mail';
 import { sameSelection, type Selection } from './api';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS, SPECIAL_NAMES } from './mailboxes';
@@ -84,16 +86,14 @@ const Row = ({
         onDrop(e);
       } : undefined}
       className={cn(
-        'flex h-7 w-full items-center gap-2 rounded-md pr-2 text-left text-[13px] outline-none',
-        'focus-visible:ring-2 focus-visible:ring-ring/60',
-        selected ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5',
+        sidebarRowClass(selected),
         over && 'bg-primary/20 ring-2 ring-primary/60',
         disabled && 'opacity-50',
         className,
       )}
-      style={{ paddingLeft: 8 + depth * 14 }}
+      style={{ paddingLeft: 10 + depth * 16 }}
     >
-      <Icon className={cn('size-4 shrink-0', iconClassName ?? (tone === 'flag' ? 'text-amber-500' : 'text-primary'))} strokeWidth={1.75} />
+      <Icon className={cn('size-4.5 shrink-0', iconClassName ?? (tone === 'flag' ? 'text-amber-500' : 'text-ink-accent'))} strokeWidth={1.75} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count ? <span className={cn('shrink-0 text-xs tabular-nums', selected ? 'font-semibold' : 'text-muted-foreground')} title={count.toLocaleString()}>{shortCount(count)}</span> : null}
     </button>
@@ -141,14 +141,14 @@ function LabelRow({ label, count, selected, onPick, onDrop }: { label: MailLabel
       </ContextMenu>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={`More for ${label.name}`}
+          <ToolButton
+            size="xs"
+            label={`More for ${label.name}`}
             title="More"
-            className="absolute top-0.5 right-1 grid size-6 place-items-center rounded-md text-muted-foreground opacity-0 outline-none group-hover/label:opacity-100 hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:opacity-100"
+            className="absolute top-1 right-1 opacity-0 group-hover/label:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
           >
             <MoreHorizontal className="size-4" />
-          </button>
+          </ToolButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-52">
           <DropdownEntries entries={entries} onPick={onPick} />
@@ -164,7 +164,7 @@ function Section({ title, open, onToggle, children, menu }: { title: string; ope
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="group flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-[11px] font-semibold text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      className={cn('group w-full rounded-md text-left', sidebarHeadingClass, focusRing)}
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
       <ChevronRight className={cn('size-3.5 opacity-0 transition-transform group-hover:opacity-100 group-focus-visible:opacity-100', open && 'rotate-90')} />
@@ -180,7 +180,7 @@ function Section({ title, open, onToggle, children, menu }: { title: string; ope
       ) : (
         header
       )}
-      {open && <div className="space-y-px">{children}</div>}
+      {open && <div className="space-y-0.5">{children}</div>}
     </div>
   );
 }
@@ -356,18 +356,12 @@ export function Sidebar({
               })}
             {list && info && info.kind !== 'none' && (
               <div className="pt-2" role="group" aria-label={`${a.name} labels`}>
-                <div className="flex h-7 items-center pr-1 pl-2 text-[11px] font-semibold text-muted-foreground">
+                <SidebarHeading className="pr-1">
                   <span className="min-w-0 flex-1 truncate">Labels</span>
-                  <button
-                    type="button"
-                    aria-label={`New label in ${a.name}`}
-                    title="New label"
-                    onClick={() => onNewLabel(a.id)}
-                    className="grid size-6 place-items-center rounded-md outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                  >
+                  <ToolButton size="xs" label={`New label in ${a.name}`} title="New label" onClick={() => onNewLabel(a.id)}>
                     <Plus className="size-4" />
-                  </button>
-                </div>
+                  </ToolButton>
+                </SidebarHeading>
                 {info.labels.map((l) => {
                   const s: Selection = { kind: 'label', accountId: a.id, id: l.id };
                   const box = l.path ? boxes.get(a.id)?.find((b) => b.path === l.path) : undefined;
@@ -383,7 +377,7 @@ export function Sidebar({
                   );
                 })}
                 {!info.labels.length && (
-                  <button type="button" onClick={() => onNewLabel(a.id)} className="flex h-7 w-full items-center rounded-md px-2 text-left text-[13px] text-muted-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60">
+                  <button type="button" onClick={() => onNewLabel(a.id)} className={cn(sidebarRowClass(false), 'text-muted-foreground')}>
                     Create a label…
                   </button>
                 )}

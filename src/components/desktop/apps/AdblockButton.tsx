@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Shield, ShieldCheck, ShieldOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toolButtonClass } from '@/shared/appChromeStyles';
 import { getAdblockBridge } from '@/lib/adblock';
 import { useAdblockSettings, useBlockedCount } from '@/hooks/useAdblock';
 import { Button } from '@/components/ui/button';
@@ -67,14 +68,13 @@ export function AdblockButton({
           aria-label={label}
           title={label}
           className={cn(
-            'relative grid size-8 shrink-0 place-items-center rounded-md',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toolButtonClass,
+            'relative',
             blocking ? 'text-foreground/80' : 'text-foreground/50',
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <Icon className="size-4" aria-hidden />
+          <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
           {blocking && count > 0 && (
             <span
               aria-hidden

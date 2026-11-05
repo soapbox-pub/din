@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/overdrive-slider';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayHeader, trayRowClass, trayRuleBottom, trayRuleTop, trayTitle, trayTokenClass } from './trayPanel';
 import { useAudioDeviceMutations, useAudioDevices, useAudioMutations, useAudioStatus } from '@/hooks/useAudio';
 import { MAX_VOLUME, volumeText, type AudioDevice } from '@/lib/audio';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -83,8 +84,8 @@ export function VolumePopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <h2 className="text-sm font-medium text-foreground">Sound</h2>
+      <header className={trayHeader}>
+        <h2 className={trayTitle}>Sound</h2>
         <span className="text-xs tabular-nums text-muted-foreground">
           {muted ? 'Muted' : `${value}%`}
         </span>
@@ -92,7 +93,7 @@ export function VolumePopoverBody() {
 
       <NowPlaying />
 
-      <div className="flex items-center gap-2.5 px-3 py-3">
+      <div className="flex items-center gap-3 px-4 py-3">
         <Button
           variant="ghost"
           size="icon"
@@ -121,12 +122,12 @@ export function VolumePopoverBody() {
 
       <DeviceChoices />
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'sound' })}
           >
             <Settings2 aria-hidden />
@@ -153,10 +154,10 @@ function DeviceChoices() {
   ].filter((list) => list.devices.length > 1);
   if (lists.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1 border-t border-border/60 px-1.5 py-1.5">
+    <div className={cn(trayRuleTop, 'flex flex-col gap-2 p-2')}>
       {lists.map((list) => (
         <div key={list.kind} role="radiogroup" aria-label={`${list.label} device`}>
-          <p className="px-1.5 pb-0.5 pt-1 text-xs font-medium text-muted-foreground">{list.label}</p>
+          <p className="px-2.5 pt-1.5 pb-1 text-xs font-semibold text-muted-foreground">{list.label}</p>
           {list.devices.map((device) => (
             <DeviceChoice
               key={device.id}
@@ -189,17 +190,9 @@ function DeviceChoice({
       role="radio"
       aria-checked={device.isDefault}
       onClick={onSelect}
-      className={cn(
-        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm text-foreground',
-        'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-      )}
+      className={trayRowClass()}
     >
-      <span
-        className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-full',
-          device.isDefault ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-        )}
-      >
+      <span className={trayTokenClass(device.isDefault)}>
         <Icon className="size-4" aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
@@ -220,7 +213,7 @@ function NowPlaying() {
   const sources = useNowPlaying();
   if (sources.length === 0) return null;
   return (
-    <ul aria-label="Now playing" className="flex flex-col gap-1 border-b border-border/60 px-1.5 py-1.5">
+    <ul aria-label="Now playing" className={cn(trayRuleBottom, 'flex flex-col gap-1 p-2')}>
       {sources.slice(0, MAX_NOW_PLAYING).map((source) => (
         <NowPlayingItem key={source.id} source={source} />
       ))}
@@ -232,7 +225,7 @@ function NowPlayingItem({ source }: { source: MediaSource }) {
   const skippable = source.canPrevious || source.canNext;
   const buttonClass = 'size-8 shrink-0 text-foreground/90 hover:bg-foreground/10 hover:text-foreground';
   return (
-    <li className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5">
+    <li className="flex items-center gap-3 rounded-lg px-2.5 py-2">
       <Artwork source={source} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground" title={source.title}>
@@ -306,7 +299,7 @@ function Artwork({ source }: { source: MediaSource }) {
   const [failed, setFailed] = useState<string | null>(null);
   const Icon = source.kind === 'web' ? Globe : source.kind === 'app' ? AppWindow : Music;
   return (
-    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary text-muted-foreground clay">
       {src && failed !== src ? (
         <img src={src} alt="" className="size-full object-cover" onError={() => setFailed(src)} />
       ) : (

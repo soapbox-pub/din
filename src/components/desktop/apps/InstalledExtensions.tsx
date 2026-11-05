@@ -155,11 +155,11 @@ export function InstalledExtensions({
               No extensions installed yet. Get one below, or add your own.
             </p>
           ) : (
-            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-2 @2xl:grid-cols-2 @7xl:grid-cols-3">
               {extensions.map((extension) => (
                 <ContextMenu key={extension.id}>
                   <ContextMenuTrigger asChild>
-                    <li className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-sm">
+                    <li className="flex items-center gap-3 rounded-xl border border-border/70 bg-card p-3 shadow-sm">
                       <ExtensionIcon id={extension.id} />
                       <div className="min-w-0 flex-1">
                         <p className="flex items-center gap-2 text-sm font-medium">
@@ -205,7 +205,7 @@ export function InstalledExtensions({
       )}
 
       {userscripts !== null && (
-        <section className="rounded-2xl border border-border bg-card p-4 shadow-sm [&>div]:border-t-0 [&>div]:pt-0" aria-label="Userscripts">
+        <section className="rounded-xl border border-border/70 bg-card p-4 shadow-sm [&>div]:border-t-0 [&>div]:pt-0" aria-label="Userscripts">
           <UserscriptsSection
             scripts={userscripts}
             onSetEnabled={onSetUserscriptEnabled}

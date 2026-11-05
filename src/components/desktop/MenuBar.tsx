@@ -25,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Separator } from '@/components/ui/separator';
 import AuthDialog from '@/components/auth/AuthDialog';
 import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
 import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
@@ -80,18 +79,38 @@ import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
+import { trayFooterButton, trayHeader, trayRowClass, trayRuleBottom, trayRuleTop, traySeparator, trayTitle } from '@/components/desktop/trayPanel';
 import { themeColorTokens } from '@/lib/themeColor';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
-import { primaryArea } from '@/lib/monitors';
+import { EVEN_SPLIT, primaryArea, snapRect, underMenuBar, type Rect, type SnapSplit, type SnapZone, type WorkArea } from '@/lib/monitors';
+import { useWallpaperTone } from '@/hooks/useWallpaperTone';
 import type { AppDefinition } from '@/lib/apps';
 import { focusedWindow, isShown } from '@/hooks/useWindows';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import { APP_MIME } from '@/components/desktop/icons/wallpaper';
-import { useWallpaperTone } from '@/hooks/useWallpaperTone';
+
+/** Whether windows under the bar, maximized or snapped along the top, span the whole width of its work area between them. */
+function coversWidth(under: { maximized: boolean; snapped: SnapZone | null; split: SnapSplit | null }[], area: WorkArea): boolean {
+  const spans = under
+    .map((w) => (w.maximized ? area : w.snapped ? snapRect(area, w.snapped, w.split ?? EVEN_SPLIT) : null))
+    .filter((r): r is Rect => r !== null)
+    .map((r) => [r.x, r.x + r.width] as const)
+    .sort((a, b) => a[0] - b[0]);
+  let reach = area.x;
+  for (const [from, to] of spans) {
+    if (from > reach + 1) return false;
+    reach = Math.max(reach, to);
+  }
+  return reach >= area.x + area.width - 1;
+}
+
+/** How the bar's layers change: with the window that changes them (genie.ts's FLIP_DURATION_MS and its cubic ease-out). */
+const BAR_FADE = 'transition-opacity duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none';
 
 /** The bar's height (h-9), which is the strip of wallpaper its look follows. */
 const MENU_BAR_HEIGHT = 36;
@@ -121,57 +140,85 @@ const WALLPAPER_SCRIM: Record<'dark' | 'light', string> = {
  * wallpaper instead of the theme, as macOS's do: white over a dark scrim on a
  * dark one, black over a light scrim on a light one, the same along the whole
  * bar. The scrim is strong enough to keep that text legible over the parts of
- * the wallpaper that go the other way. A window maximized under it paints its title bar's
- * color up behind the bar (Window's bar strip) - its app's accent, the
- * default translucent chrome, or for a frameless window, whose title bar's
- * color isn't known, solid white or black - so the two read as one seamless
- * strip, and every animation of the window carries the color with it. The
- * scrim sits under the windows for the same reason.
+ * the wallpaper that go the other way.
+ *
+ * Windows under it - maximized, or snapped to halves or top quarters that
+ * between them span its width - give the whole bar the top one's title bar
+ * look, so the two read as one strip (one snapped half alone leaves the bar
+ * the wallpaper's, its text being the same color along the whole bar): its
+ * app's accent, the default frosted chrome, or for a frameless window, whose
+ * title bar's color isn't known, solid white or black. A maximized window
+ * paints that strip itself (Window's bar strip), so every animation of the
+ * window carries the color with it; for windows side by side the bar paints
+ * it, the whole width in the look of the one on top, rather than a patchwork
+ * of each window's own.
  */
 export function MenuBar() {
   // Subscribes to window state (for the maximized window's text colors), so
   // this re-renders on every window commit - all children are memoized so
   // the re-render stops at this component's own <header> element.
   const { windows } = useWindowManager();
-  // Only a window maximized beneath it - on the primary monitor - counts,
-  // and of several, the one on top.
-  const primaryId = primaryArea(useWorkAreas()).id;
-  const fullscreen = windows.reduce<(typeof windows)[number] | null>(
-    (top, w) =>
-      w.maximized && isShown(w) && (w.monitor === null || w.monitor === primaryId) &&
-      (!top || w.z > top.z)
-        ? w
-        : top,
-    null,
-  );
+  // Windows under it - maximized, or snapped to a half or quarter along the
+  // top, on the primary monitor - give it their look only once they cover
+  // its whole width, and of several, the one on top's; one snapped half
+  // leaves it the wallpaper's, as its text can't be both.
+  const area = primaryArea(useWorkAreas());
+  const primaryId = area.id;
+  const under = windows.filter((w) => underMenuBar(w) && isShown(w) && (w.monitor === null || w.monitor === primaryId));
+  const fullscreen = coversWidth(under, area)
+    ? under.reduce<(typeof under)[number] | null>((top, w) => (!top || w.z > top.z ? w : top), null)
+    : null;
   const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);
-  const pull = usePullDown(fullscreen?.id ?? null);
+  const pull = usePullDown(fullscreen?.maximized ? fullscreen.id : null);
   const tone = useWallpaperTone(MENU_BAR_HEIGHT);
-  // Under a maximized window the text goes with its title bar, not the wallpaper.
+  // Under a window the text goes with its title bar, not the wallpaper.
   const tokens = accent
     ? themeColorTokens(accent)
     : !fullscreen && tone && themeColorTokens(tone === 'dark' ? '#000000' : '#ffffff');
+  // Windows side by side under the bar: one strip across it, in the look of
+  // the one on top (a maximized window brings its own). The last look is
+  // kept, so the strip fades away in it rather than in nothing.
+  const sideBySide = fullscreen && !fullscreen.maximized ? fullscreen : null;
+  const [lastLook, setLastLook] = useState<{ frameless: boolean; accent: string | null }>({ frameless: false, accent: null });
+  const stripLook = sideBySide ? { frameless: sideBySide.frameless, accent } : lastLook;
+  if (stripLook !== lastLook && (stripLook.frameless !== lastLook.frameless || stripLook.accent !== lastLook.accent)) {
+    setLastLook(stripLook);
+  }
 
   return (
     <>
-    {/* Before the workspace, so under every window. It stays the wallpaper's
-        while a window maximizes or restores: the window's strip, near enough
-        opaque, covers it as it arrives, so changing it would only show as a
-        flash ahead of the window. */}
+    {/* Before the workspace, so under every window. Under windows it fades
+        away as their strip arrives, in the 250ms they take to get there, so
+        the strip blurs the same wallpaper the title bar below it does rather
+        than a shadow that leaves the bar a shade darker than the window. */}
     {tone ? (
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-12"
+        className={cn(BAR_FADE, 'pointer-events-none absolute inset-x-0 top-0 h-12', fullscreen && 'opacity-0')}
         style={{ background: WALLPAPER_SCRIM[tone] }}
       />
     ) : (
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-9 bg-gradient-to-b from-background/60 via-background/25 to-transparent"
+        className={cn(
+          BAR_FADE,
+          'pointer-events-none absolute inset-x-0 top-0 h-9 bg-gradient-to-b from-background/60 via-background/25 to-transparent',
+          fullscreen && 'opacity-0',
+        )}
       />
     )}
+    <div
+      aria-hidden
+      className={cn(
+        BAR_FADE,
+        'pointer-events-none absolute inset-x-0 top-0 h-9',
+        !sideBySide && 'opacity-0',
+        stripLook.frameless ? 'bg-white dark:bg-black' : !stripLook.accent && cn(WINDOW_SURFACE, 'backdrop-blur-xl'),
+      )}
+      style={stripLook.accent && !stripLook.frameless ? { backgroundColor: stripLook.accent } : undefined}
+    />
     <header
       aria-label="Menu bar"
       // Ctrl+F2 lands on the Apps button (src/lib/desktopFocus.ts), and the
@@ -398,7 +445,7 @@ export function AppLauncher({
     <div
       className={cn(
         'flex items-center gap-2.5 border-border/60 px-4 py-3',
-        searchAtBottom ? 'order-last border-t' : 'border-b',
+        searchAtBottom ? cn('order-last', trayRuleTop) : trayRuleBottom,
       )}
     >
       <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -484,7 +531,7 @@ function SettingsList({
               <button
                 type="button"
                 onClick={() => onOpen(section)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={trayRowClass()}
               >
                 <section.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-sm text-foreground">{section.name}</span>
@@ -558,7 +605,7 @@ const AppTile = memo(function AppTile({
               e.dataTransfer.setData(APP_MIME, app.id);
               e.dataTransfer.effectAllowed = 'copy';
             }}
-            className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex flex-col items-center gap-2 rounded-xl p-3 text-center transition-colors hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <AppIcon icon={app.icon} web={app.web} className="size-9 text-foreground" />
             <span className="line-clamp-2 text-xs leading-tight text-foreground">
@@ -968,7 +1015,7 @@ export function SystemButtons({ onPower }: { onPower: (action: PowerAction) => v
         variant="ghost"
         size="sm"
         onClick={onClick}
-        className="justify-start text-muted-foreground hover:text-foreground"
+        className={trayFooterButton}
       >
         {icon}
         {label}
@@ -977,7 +1024,7 @@ export function SystemButtons({ onPower }: { onPower: (action: PowerAction) => v
   );
   return (
     <>
-      <Separator />
+      <div role="separator" className={traySeparator} />
       <div className="flex flex-col gap-1 p-2">
         {canLock && item(<Lock aria-hidden />, 'Lock', () => void lockBridge?.lock())}
         {loginSession && item(<LogOut aria-hidden />, 'Log out…', () => onPower('logOut'))}
@@ -999,7 +1046,7 @@ function ComputerAccountButton({ pubkey, onSelect }: { pubkey: string; onSelect:
       <button
         type="button"
         onClick={onSelect}
-        className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={trayRowClass()}
       >
         <Avatar className="size-8" shape={getAvatarShape(metadata)}>
           <AvatarImage src={metadata?.picture} alt="" />
@@ -1062,7 +1109,7 @@ export const ClockMenuItem = memo(function ClockMenuItem() {
         {/* Side by side, as in GNOME, the notifications sit left of the
             calendar and scroll within its height instead of stretching the
             panel; on narrow screens they stack below it. */}
-        <div className="relative flex min-h-0 flex-1 flex-col border-t border-border/60 md:order-first md:w-96 md:flex-none md:border-t-0 md:border-r">
+        <div className="relative flex min-h-0 flex-1 flex-col before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 md:order-first md:w-96 md:flex-none md:before:hidden md:after:absolute md:after:inset-y-4 md:after:right-0 md:after:w-px md:after:bg-border/70">
           <NotificationsPanel
             onNavigate={() => setOpen(false)}
             className="min-h-0 flex-1 md:absolute md:inset-0"
@@ -1137,7 +1184,7 @@ function CalendarSection({ onOpenSettings }: { onOpenSettings: () => void }) {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start text-muted-foreground hover:text-foreground"
+          className={trayFooterButton}
           onClick={() => {
             onOpenSettings();
             open('calendar', { date: isoDate(today) });
@@ -1149,7 +1196,7 @@ function CalendarSection({ onOpenSettings }: { onOpenSettings: () => void }) {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start text-muted-foreground hover:text-foreground"
+          className={trayFooterButton}
           onClick={() => {
             onOpenSettings();
             open('settings', { section: 'datetime' });
@@ -1219,9 +1266,12 @@ function AccountPanel({
     const onComputer = nostrd?.accounts ?? [];
     return (
       <div className="flex flex-col">
+        <header className={trayHeader}>
+          <h2 className={trayTitle}>Account</h2>
+        </header>
         {onComputer.length > 0 && (
           <>
-            <p className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">
+            <p className="px-4 pt-2 pb-1 text-xs font-semibold text-muted-foreground">
               Sign in as
             </p>
             <div className="flex flex-col gap-1 p-2">
@@ -1233,7 +1283,7 @@ function AccountPanel({
                 />
               ))}
             </div>
-            <Separator />
+            <div role="separator" className={traySeparator} />
           </>
         )}
         <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
@@ -1336,7 +1386,7 @@ function AccountPanel({
         </div>
       </div>
 
-      <Separator />
+      <div role="separator" className={traySeparator} />
 
       <div className="flex flex-col gap-1 p-2">
         {otherUsers.map((user) => {
@@ -1348,7 +1398,7 @@ function AccountPanel({
                 <button
                   type="button"
                   onClick={() => void setLogin(user.id)}
-                  className="flex items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={trayRowClass()}
                 >
                   <Avatar className="size-7" shape={getAvatarShape(user.metadata)}>
                     <AvatarImage src={user.metadata.picture} alt="" />
@@ -1402,7 +1452,7 @@ function AccountPanel({
           variant="ghost"
           size="sm"
           onClick={onAddAccount}
-          className="justify-start text-muted-foreground hover:text-foreground"
+          className={trayFooterButton}
         >
           <UserPlus aria-hidden />
           Add another account
@@ -1413,7 +1463,7 @@ function AccountPanel({
               variant="ghost"
               size="sm"
               onClick={() => void signOut(currentUser.id)}
-              className="justify-start text-muted-foreground hover:text-foreground"
+              className={trayFooterButton}
             >
               <LogOut aria-hidden />
               Sign out

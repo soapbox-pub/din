@@ -14,10 +14,12 @@ import { connect } from '@/sdk';
 import { DinProvider } from '@/sdk/react';
 import { launchedFiles } from '@/shared/fileHandles';
 import { Toaster } from '@/shared/Toaster';
+import { installLiquidGlass } from '@/shared/liquidGlass';
 import '@fontsource-variable/inter/index.css';
 import '@/sdk/app.css';
 
 installCpuCanvas();
+installLiquidGlass();
 
 /** Connect to the desktop, then render the app into #root. */
 export async function startApp(render: () => ReactNode): Promise<void> {

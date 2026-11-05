@@ -74,8 +74,8 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
         className="border-b border-border"
         style={entry.manifest.theme_color ? { backgroundImage: `linear-gradient(to bottom, ${entry.manifest.theme_color}33, transparent)` } : undefined}
       >
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-6 sm:p-6">
-          <AppIcon icon={fileAppDefinition(entry).icon} className="size-24 shrink-0 drop-shadow-md sm:size-28" />
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 @2xl:flex-row @2xl:items-center @2xl:gap-6 @2xl:p-6">
+          <AppIcon icon={fileAppDefinition(entry).icon} className="size-24 shrink-0 drop-shadow-md @2xl:size-28" />
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <div className="min-w-0">
               <h1 className="break-words text-3xl font-bold tracking-tight">{name}</h1>
@@ -99,7 +99,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
         {entry.manifest.description ? (
           <p className="max-w-prose whitespace-pre-line text-base leading-relaxed">{entry.manifest.description}</p>
         ) : (
@@ -110,7 +110,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
           <SectionHeader title="What it may do" />
           {asks ? (
             <div className="flex max-w-prose flex-col gap-3">
-              <ul className="space-y-2 rounded-2xl border border-border bg-card p-4 text-sm">
+              <ul className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-sm">
                 {permissions.map((p) => (
                   <li key={p} className="flex gap-2">
                     <span aria-hidden className="text-muted-foreground">•</span>
@@ -188,7 +188,7 @@ export function FolderAppsSection({ onChose }: { onChose: (opened: OpenedFolder)
   return (
     <section className="flex flex-col gap-4" aria-label="Apps from your folders">
       <SectionHeader title="From Your Folders" subtitle="Make your own app, and use it as you work on it." />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2 @7xl:grid-cols-3">
         {[...fileApps].sort((a, b) => b.addedAt - a.addedAt).map((entry) => {
           const actions: Action[][] = [
             [{ label: 'Open', icon: FolderOpen, run: () => open(entry.appId) }],
@@ -208,7 +208,7 @@ export function FolderAppsSection({ onChose }: { onChose: (opened: OpenedFolder)
           type="button"
           onClick={() => void pick()}
           disabled={busy}
-          className="flex min-h-28 items-center gap-3 rounded-2xl border border-dashed border-border p-4 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className="flex min-h-28 items-center gap-3 rounded-xl border border-dashed border-border/70 p-4 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
         >
           <span className="grid size-14 shrink-0 place-items-center rounded-[28%] bg-gradient-to-br from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300">
             <FolderPlus className="size-6" aria-hidden />
@@ -228,7 +228,7 @@ function FolderAppCard({ entry, actions, onOpen }: { entry: FileAppEntry; action
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="relative flex min-h-28 items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md">
+        <div className="relative flex min-h-28 items-center gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md">
           <button
             type="button"
             onClick={onOpen}

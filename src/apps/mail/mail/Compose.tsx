@@ -7,6 +7,8 @@ import { appLink, saveState, useOnLaunch } from '@/shared/launch';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { pickFiles } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
+import { ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
 import type { MailAccount, MailAddress, MailAttachment, OutgoingMessage } from '@/lib/mail';
 import { useAccounts, useMail } from './api';
 import { rememberAddresses, suggestAddresses } from './contacts';
@@ -183,17 +185,9 @@ function withSignature(seed: ComposeSeed, account: MailAccount | undefined): str
 
 function FormatButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className={cn('grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground', active && 'bg-foreground/10 text-foreground')}
-    >
+    <ToolButton size="sm" label={label} pressed={!!active} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
       {children}
-    </button>
+    </ToolButton>
   );
 }
 
@@ -434,21 +428,20 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
   return (
     <div className="relative flex h-full flex-col bg-background text-foreground">
       <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 pr-3 pl-3">
-        <button
-          type="button"
+        <ToolButton
+          label="Send"
+          title="Send (Ctrl+Enter)"
           onClick={() => void send()}
           disabled={sending || !account}
-          aria-label="Send"
-          title="Send (Ctrl+Enter)"
-          className="grid size-8 place-items-center rounded-md text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
+          className="text-primary hover:bg-primary/10 hover:text-primary"
         >
-          {sending ? <Loader2 className="size-4.5 animate-spin motion-reduce:animate-none" /> : <Send className="size-4.5" />}
-        </button>
+          {sending ? <Loader2 className="size-4.5 animate-spin motion-reduce:animate-none" /> : <Send {...toolIcon} />}
+        </ToolButton>
+        <ToolButton label="Attach files" title="Attach Files" onClick={() => void attach()}>
+          <Paperclip {...toolIcon} />
+        </ToolButton>
         <div className="min-w-0 flex-1 truncate text-center text-[13px] font-semibold">{subject.trim() || 'New Message'}</div>
         {status && !dirty && <span className="text-xs text-muted-foreground">{status}</span>}
-        <button type="button" onClick={() => void attach()} aria-label="Attach files" title="Attach Files" className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground">
-          <Paperclip className="size-4" />
-        </button>
         <WindowControls />
       </WindowDragRegion>
 
@@ -513,16 +506,16 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
         </div>
       )}
 
-      <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/60 px-3" role="toolbar" aria-label="Formatting">
+      <Toolbar compact aria-label="Formatting">
         <FormatButton label="Bold" active={format?.bold} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold className="size-4" /></FormatButton>
         <FormatButton label="Italic" active={format?.italic} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic className="size-4" /></FormatButton>
         <FormatButton label="Underline" active={format?.underline} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline className="size-4" /></FormatButton>
         <FormatButton label="Strikethrough" active={format?.strike} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough className="size-4" /></FormatButton>
-        <span className="mx-1 h-4 w-px bg-border" />
+        <ToolbarDivider className="h-4" />
         <FormatButton label="Bulleted list" active={format?.bullet} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List className="size-4" /></FormatButton>
         <FormatButton label="Numbered list" active={format?.ordered} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered className="size-4" /></FormatButton>
         <FormatButton label="Quote" active={format?.quote} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote className="size-4" /></FormatButton>
-      </div>
+      </Toolbar>
 
       {error && (
         <div role="alert" className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-[13px] text-destructive">

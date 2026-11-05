@@ -191,7 +191,7 @@ export function SiteInfoButton({
           aria-label={label}
           title={title}
           className={cn(
-            'absolute left-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full',
+            'absolute left-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full',
             'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             warn ? 'text-destructive' : (tint ?? 'text-muted-foreground hover:text-foreground'),
             open && 'bg-foreground/10',

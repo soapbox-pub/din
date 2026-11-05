@@ -52,6 +52,7 @@ import {
   type BluetoothRequest,
 } from '@/lib/bluetooth';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayHeader, trayRowClass, trayTitle, trayTokenClass } from './trayPanel';
 
 const ICONS: Record<string, LucideIcon> = {
   'audio-headset': Headset,
@@ -178,8 +179,8 @@ export function BluetoothPopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <h2 className="text-sm font-medium text-foreground">Bluetooth</h2>
+      <header className={trayHeader}>
+        <h2 className={trayTitle}>Bluetooth</h2>
         <Switch
           aria-label="Bluetooth"
           checked={powered}
@@ -192,7 +193,7 @@ export function BluetoothPopoverBody() {
         />
       </header>
 
-      <div className="p-1.5">
+      <div className="p-2">
         {!powered ? (
           <p className="px-2 py-3 text-center text-sm text-muted-foreground">Bluetooth is off.</p>
         ) : paired.length === 0 ? (
@@ -208,22 +209,13 @@ export function BluetoothPopoverBody() {
                       onClick={() => toggle(device)}
                       disabled={device.busy !== null}
                       aria-label={device.connected ? `Disconnect ${device.name}` : `Connect ${device.name}`}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-                        'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        'disabled:opacity-70',
-                      )}
+                      className={cn(trayRowClass(), 'disabled:opacity-70')}
                     >
-                      <span
-                        className={cn(
-                          'grid size-7 shrink-0 place-items-center rounded-full',
-                          device.connected ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
-                        )}
-                      >
-                        <BluetoothDeviceIcon device={device} className="size-3.5" />
+                      <span className={trayTokenClass(device.connected)}>
+                        <BluetoothDeviceIcon device={device} className="size-4" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-foreground">{device.name}</span>
+                        <span className="block truncate">{device.name}</span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {describeDevice(device)}
                         </span>
@@ -263,12 +255,12 @@ export function BluetoothPopoverBody() {
         )}
       </div>
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={openSettings}
           >
             <Settings2 aria-hidden />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
@@ -246,18 +246,8 @@ function BarButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-        'hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-      )}
-    >
+    <ToolButton label={label} onClick={onClick}>
       {children}
-    </button>
+    </ToolButton>
   );
 }

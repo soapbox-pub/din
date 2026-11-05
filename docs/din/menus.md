@@ -78,7 +78,10 @@ null if it was dismissed.
 
 The right-click rules in `AGENTS.md` still hold: anything the user can act
 on gets a right-click menu mirroring its ⋯ menu, and text fields keep
-their native one.
+their own Cut, Copy and Paste menu. That one, like a web page's right-click
+menu, is built by Din's main process and drawn by the desktop as one of
+its own menus (`electron/menus.mts`, `src/components/desktop/MenuHost.tsx`),
+so the app doesn't build it and it looks like every other menu on Din.
 
 ## The window menu
 

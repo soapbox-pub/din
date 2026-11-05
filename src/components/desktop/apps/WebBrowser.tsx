@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toolButtonClass, toolIcon } from '@/shared/appChromeStyles';
 import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
 import { useTorStatus } from '@/hooks/useTor';
 import { useSiteLocations } from '@/hooks/useSiteLocations';
@@ -2003,16 +2004,16 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         // No background of its own: the title bar, tabs or not, takes the
         // window's, to run on into this one without a seam (see Window).
         data-titlebar-seamless=""
-        className="relative flex shrink-0 items-center gap-1.5 px-2.5 pt-0.5 pb-2"
+        className="relative flex h-12 shrink-0 items-center gap-1 px-2"
       >
         <NavButton label="Go back" disabled={!canBack} onClick={() => go(-1)}>
-          <ArrowLeft className="size-4" />
+          <ArrowLeft {...toolIcon} />
         </NavButton>
         <NavButton label="Go forward" disabled={!canForward} onClick={() => go(1)}>
-          <ArrowRight className="size-4" />
+          <ArrowRight {...toolIcon} />
         </NavButton>
         <NavButton label="Reload page" onClick={() => views.current.get(activeId)?.reload()}>
-          <RotateCw className={cn('size-4', activeTab.loading && 'animate-spin')} />
+          <RotateCw className={cn(toolIcon.className, activeTab.loading && 'animate-spin')} strokeWidth={toolIcon.strokeWidth} />
         </NavButton>
 
         <AddressBar
@@ -2447,7 +2448,7 @@ function AddressBar({
       {/* While the user types, the box is a search box; otherwise its icon
           speaks for the page that's open. */}
       {open || !site ? (
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/80" aria-hidden />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
       ) : (
         site
       )}
@@ -2494,7 +2495,7 @@ function AddressBar({
         spellCheck={false}
         autoComplete="off"
         className={cn(
-          'h-8 w-full rounded-full bg-secondary/80 pl-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border',
           showOnion && showNsite ? 'pr-36' : showOnion || showNsite ? 'pr-20' : 'pr-3',
         )}
       />
@@ -2681,8 +2682,7 @@ function FindBarButton({
         'grid size-6 shrink-0 place-items-center rounded-md text-foreground/80',
         'hover:bg-foreground/10 hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
-      )}
+              )}
     >
       {children}
     </button>
@@ -4235,7 +4235,7 @@ function NewTabPage({
     // The opaque bg-background matters: the gradient's translucent end would
     // otherwise blend with the white about:blank surface underneath, fading
     // to near-white even in dark mode.
-    <div className="absolute inset-0 flex flex-col items-center overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-16 text-foreground">
+    <div className="@container absolute inset-0 flex flex-col items-center overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-16 text-foreground">
       <div className="flex w-full max-w-xl flex-col items-center">
         <div className="mb-8 flex flex-col items-center gap-3">
           <div
@@ -4294,7 +4294,7 @@ function NewTabPage({
         {/* Top sites are omitted in private windows - a dashboard of where
             you've been clashes with the point of an ephemeral window. */}
         {!isPrivate && (
-          <div className="mt-10 grid w-full grid-cols-3 gap-4 sm:grid-cols-6">
+          <div className="mt-10 grid w-full grid-cols-3 gap-4 @2xl:grid-cols-6">
             {sites.map((link) => (
               <NewTabTile
                 key={link.url}
@@ -4439,13 +4439,11 @@ function BrowserMenu({
           aria-label="Browser menu"
           title="Menu"
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toolButtonClass,
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <BarsStaggeredIcon className="size-4" />
+          <BarsStaggeredIcon className="size-4.5" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-72 p-0">
@@ -4855,13 +4853,10 @@ function InstallSiteButton({
           title="Install site as app"
           disabled={!site}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
-          )}
+            toolButtonClass,
+                      )}
         >
-          <MonitorDown className="size-4" />
+          <MonitorDown {...toolIcon} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-80">
@@ -4961,11 +4956,8 @@ function NavButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-        'hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent',
-        pressed && 'bg-foreground/10 text-foreground',
+        toolButtonClass,
+                pressed && 'bg-foreground/10 text-foreground',
       )}
     >
       {children}

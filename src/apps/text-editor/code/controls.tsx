@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
 
-/** A square icon button for toolbars and panels. */
+/** An icon button for toolbars and panels: the shared one, 28px when `small`. */
 export function IconButton({
   label,
   onClick,
@@ -19,24 +20,9 @@ export function IconButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={pressed}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'grid shrink-0 place-items-center rounded-md text-foreground/75',
-        small ? 'size-7' : 'size-8',
-        'hover:bg-foreground/10 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        pressed && 'bg-foreground/10 text-foreground',
-        className,
-      )}
-    >
+    <ToolButton size={small ? 'sm' : 'md'} label={label} pressed={pressed} onClick={onClick} disabled={disabled} className={className}>
       {children}
-    </button>
+    </ToolButton>
   );
 }
 

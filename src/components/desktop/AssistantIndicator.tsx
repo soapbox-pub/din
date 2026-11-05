@@ -31,6 +31,7 @@ import {
   type SessionInfo,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayHeader, trayRowClass, trayTitle } from './trayPanel';
 
 const ASSISTANT_APP_ID = 'assistant';
 
@@ -101,9 +102,9 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="flex max-h-[min(36rem,80vh)] flex-col">
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
-        <img src="/icons/apps/assistant.png" alt="" className="size-5 object-contain" />
-        <p className="flex-1 text-sm font-semibold">Assistant</p>
+      <div className={cn(trayHeader, 'justify-start gap-2.5')}>
+        <img src="/icons/apps/assistant.png" alt="" className="size-6 object-contain" />
+        <h2 className={cn(trayTitle, 'flex-1')}>Assistant</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -193,16 +194,18 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
           <SessionSection title="Recent" sessions={recent} busy={busy} home={home} onShow={onShow} />
         )
       )}
-      <button
-        type="button"
-        onClick={() => {
-          onShow();
-          onDone();
-        }}
-        className="w-full border-t border-border/60 px-4 py-2.5 text-left text-sm font-medium text-primary hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-      >
-        All conversations
-      </button>
+      <div className={trayFooter}>
+        <button
+          type="button"
+          onClick={() => {
+            onShow();
+            onDone();
+          }}
+          className={cn(trayRowClass(), 'font-medium text-primary')}
+        >
+          All conversations
+        </button>
+      </div>
     </div>
   );
 }

@@ -3,15 +3,16 @@ import { Folder, FolderPlus, KeyRound, Lock, Pencil, Settings, ShieldCheck, Star
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { SidebarHeading, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { sidebarRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import type { PasswordList } from '@/lib/passwords';
-import { WindowDragRegion } from '@/sdk/react';
 import { itemsIn, sameSection, type Section } from './vault';
 
 /** A section's badge: a white glyph on a rounded square of its color. */
 function Badge({ icon: Icon, className }: { icon: ComponentType<{ className?: string }>; className: string }) {
   return (
-    <span aria-hidden className={cn('grid size-6 shrink-0 place-items-center rounded-md text-white shadow-sm', className)}>
-      <Icon className="size-3.5" />
+    <span aria-hidden className={cn('grid size-5 shrink-0 place-items-center rounded-[5px] text-white shadow-sm', className)}>
+      <Icon className="size-3" />
     </span>
   );
 }
@@ -45,14 +46,12 @@ function Row({
       aria-current={active ? 'page' : undefined}
       style={depth ? { paddingLeft: 8 + depth * 16 } : undefined}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active ? 'bg-primary/15 font-medium text-foreground' : 'text-foreground/85 hover:bg-foreground/10 hover:text-foreground',
+        sidebarRowClass(active),
       )}
     >
       {badge}
       <span className="min-w-0 flex-1 truncate">{name}</span>
-      {count > 0 && <span className="text-xs tabular-nums text-muted-foreground">{count}</span>}
+      {count > 0 && <span className={cn('text-xs tabular-nums', active ? 'font-semibold' : 'text-muted-foreground')}>{count}</span>}
     </button>
   );
 }
@@ -67,6 +66,7 @@ export function Sidebar({
   onEmptyTrash,
   onSettings,
   onLock,
+  actions,
   className,
 }: {
   list: PasswordList;
@@ -78,13 +78,17 @@ export function Sidebar({
   onEmptyTrash: () => void;
   onSettings: () => void;
   onLock: () => void;
+  /** The app's actions, beside its name. */
+  actions?: ReactNode;
   className?: string;
 }) {
   const folders = list.groups.filter((g) => !g.trash);
   const trashed = itemsIn(list, { type: 'trash' }).length;
   return (
-    <nav aria-label="Sections" className={cn('flex h-full w-56 shrink-0 flex-col border-r border-border/60 bg-muted/40', className)}>
-      <WindowDragRegion className="h-12 shrink-0" />
+    <nav aria-label="Sections" className={cn('flex h-full shrink-0 flex-col', sidebarWidthClass, className)}>
+      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/passwords.png" />} title="Passwords">
+        {actions}
+      </SidebarTitle>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-2">
         <div className="space-y-0.5">
           {FIXED.map(({ section: s, name, badge }) => (
@@ -93,12 +97,12 @@ export function Sidebar({
         </div>
 
         <div className="space-y-0.5">
-          <div className="flex items-center justify-between px-2 pb-1">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Folders</h2>
-            <Button variant="ghost" size="icon" className="size-6" aria-label="New folder" title="New folder" onClick={onNewFolder}>
-              <FolderPlus className="size-3.5" />
-            </Button>
-          </div>
+          <SidebarHeading className="pr-1">
+            <h2 className="flex-1">Folders</h2>
+            <ToolButton size="xs" label="New folder" onClick={onNewFolder}>
+              <FolderPlus className="size-4" />
+            </ToolButton>
+          </SidebarHeading>
           {folders.length === 0 && <p className="px-2 text-xs text-muted-foreground">Group items in folders of your own.</p>}
           {folders.map((folder) => (
             <ContextMenu key={folder.id}>
@@ -107,7 +111,7 @@ export function Sidebar({
                   <Row
                     active={section.type === 'folder' && section.id === folder.id}
                     onClick={() => onSection({ type: 'folder', id: folder.id })}
-                    badge={<Folder className="size-4 shrink-0 text-primary" aria-hidden />}
+                    badge={<Folder className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />}
                     name={folder.name || 'Untitled'}
                     count={itemsIn(list, { type: 'folder', id: folder.id }).length}
                     depth={folder.depth}
@@ -151,14 +155,14 @@ export function Sidebar({
           </ContextMenu>
         </div>
       </div>
-      <div className="flex items-center gap-1 border-t border-border/60 p-2">
+      <div className="flex items-center gap-1 p-2">
         <Button variant="ghost" size="sm" className="flex-1 justify-start" onClick={onLock}>
           <Lock className="size-4" aria-hidden />
           Lock
         </Button>
-        <Button variant="ghost" size="icon" className="size-8" aria-label="Passwords settings" title="Settings" onClick={onSettings}>
-          <Settings className="size-4" />
-        </Button>
+        <ToolButton label="Passwords settings" title="Settings" onClick={onSettings}>
+          <Settings {...toolIcon} />
+        </ToolButton>
       </div>
     </nav>
   );

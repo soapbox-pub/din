@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayList, trayRuleBottom, trayTitle } from './trayPanel';
 import {
   formatTimeRemaining,
   summarizePower,
@@ -112,7 +113,7 @@ export function BatteryPopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center gap-3 border-b border-border/60 px-3 py-3">
+      <header className={cn(trayRuleBottom, 'flex items-center gap-3 px-4 pt-4 pb-3')}>
         {status.isLoading || !summary ? (
           <>
             <Skeleton className="size-6 rounded bg-foreground/10" />
@@ -132,7 +133,7 @@ export function BatteryPopoverBody() {
               )}
             />
             <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground">
+              <p className={trayTitle}>
                 {summary.percent !== null ? `${summary.percent}%` : 'Battery'}
               </p>
               <p
@@ -154,7 +155,7 @@ export function BatteryPopoverBody() {
       {/* Per-battery breakdown, only when there's more than one pack. */}
       {data && data.batteries.length > 1 && (
         <ul
-          className={cn('flex flex-col gap-1 p-1.5', data.devices.length > 0 && 'border-b border-border/60')}
+          className={cn(trayList, data.devices.length > 0 && trayRuleBottom)}
           aria-label="Batteries"
         >
           {data.batteries.map((battery) => (
@@ -164,19 +165,19 @@ export function BatteryPopoverBody() {
       )}
 
       {data && data.devices.length > 0 && (
-        <ul className="flex flex-col gap-1 p-1.5" aria-label="Devices">
+        <ul className={trayList} aria-label="Devices">
           {data.devices.map((battery) => (
             <BatteryRow key={battery.name} battery={battery} />
           ))}
         </ul>
       )}
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'power' })}
           >
             <Settings2 aria-hidden />
@@ -192,7 +193,7 @@ export function BatteryPopoverBody() {
 function BatteryRow({ battery }: { battery: BatteryInfo }) {
   const charging = battery.status === 'charging';
   return (
-    <li className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
+    <li className="flex items-center gap-3 rounded-lg px-2.5 py-2">
       <BatteryGlyph
         percent={battery.percent}
         charging={charging}

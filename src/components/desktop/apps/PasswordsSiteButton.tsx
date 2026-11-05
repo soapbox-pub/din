@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { cn } from '@/lib/utils';
+import { toolButtonClass } from '@/shared/appChromeStyles';
 import { getPasswordsDesktopBridge, type CopyField, type PasswordSummary } from '@/lib/passwords';
 
 function useSiteLogins(url: string) {
@@ -72,13 +73,11 @@ export function PasswordsSiteButton({ url, wcId }: { url: string; wcId: number |
           aria-label={label}
           title={label}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toolButtonClass,
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <RectangleEllipsis className="size-4" aria-hidden />
+          <RectangleEllipsis className="size-4.5" strokeWidth={1.75} aria-hidden />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-80 space-y-2 p-2">

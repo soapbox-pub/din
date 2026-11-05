@@ -8,7 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Check, ChevronLeft, Copy, FolderPlus, Globe, RefreshCw, Search } from 'lucide-react';
+import { Brush, Check, ChevronLeft, Copy, FolderPlus, Globe, LayoutGrid, MousePointer2, Palette, RefreshCw, Shapes } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
 import { canonicalNsiteUrl } from '@/lib/nsite';
@@ -26,7 +27,8 @@ import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -44,9 +46,10 @@ import { parseThemeNaddr } from '@/lib/themeDefinition';
 import { parsePackageNaddr, type PackageAddress, type PackageType } from '@/lib/themePackages';
 import { isSkinFileName } from '@/lib/skinPackages';
 import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { ContentPane, SearchField, SidebarRow, SidebarTitle, ToolButton } from '@/shared/appChrome';
+import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
 
@@ -62,6 +65,15 @@ const TABS: { id: StoreTab; name: string; search: string }[] = [
   { id: 'icons', name: 'Icons', search: 'Search icon sets, or paste an address' },
   { id: 'skins', name: 'Skins', search: 'Search skins, or paste an address' },
 ];
+
+/** Each section's icon in the sidebar. */
+const TAB_ICONS: Record<StoreTab, LucideIcon> = {
+  apps: LayoutGrid,
+  themes: Palette,
+  cursors: MousePointer2,
+  icons: Shapes,
+  skins: Brush,
+};
 
 /** The tab each kind of published theme is in, and back. Extensions are the Web Browser's (about:extensions). */
 const PACKAGE_TABS: Record<Exclude<PackageType, 'extension'>, StoreTab> = { cursor: 'cursors', icon: 'icons', skin: 'skins' };
@@ -178,148 +190,105 @@ export function AppStore({ params }: AppComponentProps) {
 
   const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
 
-  // Search and refresh go in the window's own title bar, so there is one bar
-  // on top rather than two.
-  const setTitlebar = useWindowTitlebar();
-  const refetchCatalog = catalog.refresh;
-  const refetchFeatured = featured.refetch;
-  const refetchThemes = themes.refresh;
-  const refetchPackages = packages?.refresh;
   const refreshing = onThemes
     ? themes.refreshing
     : packages
       ? packages.refreshing
       : catalog.refreshing || featured.isRefetching;
   const refreshDisabled = (onThemes ? themes.isLoading : packages ? packages.isLoading : catalog.isLoading) || refreshing;
-  useEffect(() => {
-    setTitlebar(
-      <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
-        {detailOpen && (
-          <button
-            type="button"
-            data-window-no-drag
-            onClick={closeDetail}
-            aria-label={`Back to all ${(TABS.find((t) => t.id === tab)?.name ?? 'apps').toLowerCase()}`}
-            title="Back"
-            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronLeft className="size-4" aria-hidden />
-          </button>
-        )}
-        <AppIcon icon={APP_STORE_ICON} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
-          App Store
-        </span>
-        <div
-          data-window-no-drag
-          role="tablist"
-          aria-label="Categories"
-          className="mr-auto flex shrink-0 rounded-md bg-foreground/5 p-0.5"
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          {TABS.map(({ id, name }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
+  // A sidebar of sections, as Settings has, and over the content the
+  // section's title bar with the store's search across it, as Mail's.
+  useOwnWindowHeader();
+  const refreshAll = () => {
+    if (onThemes) {
+      void themes.refresh();
+      return;
+    }
+    if (packages) {
+      void packages.refresh();
+      return;
+    }
+    catalog.refresh();
+    void featured.refetch();
+  };
+  const sectionName = TABS.find((t) => t.id === tab)?.name ?? 'Apps';
+  const sidebar = (
+    <aside aria-label="App Store" className={cn('flex shrink-0 flex-col pb-2', sidebarWidthClass)}>
+      {/* The store's own actions beside its name, as the Assistant's and
+          Messages' are; the bar over the content holds only its search. */}
+      <SidebarTitle region={WindowDragRegion} icon={<AppIcon icon={APP_STORE_ICON} className="size-6 shrink-0 object-contain" />} title="App Store">
+          {tab === 'apps' && canAddFileApps() && (
+            <ToolButton
               onClick={() => {
-                if (tab === id) return;
-                setTab(id);
-                setSearch('');
-                setSelectedPackage(null);
+                void chooseAppFolder().then((opened) => {
+                  if (!opened) return;
+                  setSelected(null);
+                  setFolderApp(opened);
+                });
               }}
-              className={cn(
-                'rounded px-2.5 py-0.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                tab === id
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
+              disabled={choosingFolder}
+              label="Add an app from a folder"
+              title="Add an App from a Folder…"
             >
-              {name}
-            </button>
-          ))}
-        </div>
-        <div
-          data-window-no-drag
-          className="relative w-full max-w-64 min-w-0"
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <Search
-            className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+              <FolderPlus {...toolIcon} aria-hidden />
+            </ToolButton>
+          )}
+          <ToolButton onClick={refreshAll} disabled={refreshDisabled} label="Refresh catalog">
+            <RefreshCw className={cn(toolIcon.className, refreshing && 'animate-spin')} strokeWidth={toolIcon.strokeWidth} aria-hidden />
+          </ToolButton>
+      </SidebarTitle>
+      <nav aria-label="Sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2">
+        {TABS.map(({ id, name }) => (
+          <SidebarRow
+            key={id}
+            icon={TAB_ICONS[id]}
+            label={name}
+            selected={tab === id}
+            onClick={() => {
+              if (tab === id && !detailOpen) return;
+              setTab(id);
+              setSearch('');
               closeDetail();
             }}
-            placeholder={searchLabel}
-            aria-label={searchLabel}
-            autoComplete="off"
-            spellCheck={false}
-            className="h-7 pl-7 text-sm md:text-sm"
           />
-        </div>
-        {tab === 'apps' && canAddFileApps() && (
-          <button
-            type="button"
-            onClick={() => {
-              void chooseAppFolder().then((opened) => {
-                if (!opened) return;
-                setSelected(null);
-                setFolderApp(opened);
-              });
-            }}
-            disabled={choosingFolder}
-            aria-label="Add an app from a folder"
-            title="Add an App from a Folder…"
-            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-          >
-            <FolderPlus className="size-4" aria-hidden />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            if (onThemes) {
-              void refetchThemes();
-              return;
-            }
-            if (refetchPackages) {
-              void refetchPackages();
-              return;
-            }
-            refetchCatalog();
-            refetchFeatured();
-          }}
-          disabled={refreshDisabled}
-          aria-label="Refresh catalog"
-          title="Refresh catalog"
-          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-        >
-          <RefreshCw className={cn('size-4', refreshing && 'animate-spin')} aria-hidden />
-        </button>
-      </div>,
-    );
-  }, [
-    setTitlebar,
-    tab,
-    onThemes,
-    detailOpen,
-    search,
-    searchLabel,
-    refetchCatalog,
-    refetchFeatured,
-    refetchThemes,
-    refetchPackages,
-    refreshing,
-    refreshDisabled,
-    chooseAppFolder,
-    choosingFolder,
-  ]);
-  useEffect(() => () => setTitlebar(null), [setTitlebar]);
+        ))}
+      </nav>
+    </aside>
+  );
+  const header = (
+    <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-3 pl-2">
+      {detailOpen && (
+        <ToolButton onClick={closeDetail} label={`Back to all ${sectionName.toLowerCase()}`} title="Back">
+          <ChevronLeft {...toolIcon} aria-hidden />
+        </ToolButton>
+      )}
+      <SearchField
+        value={search}
+        onValueChange={(value) => {
+          setSearch(value);
+          closeDetail();
+        }}
+        placeholder={`Search ${sectionName.toLowerCase()}`}
+        aria-label={searchLabel}
+        title={searchLabel}
+        autoComplete="off"
+        spellCheck={false}
+        className={titleSearch}
+      />
+      <div className="min-w-2 flex-1" />
+      <WindowControls />
+    </WindowDragRegion>
+  );
+  /** The store's frame: the sidebar, and the section's title bar over its content. */
+  const frame = (body: ReactNode) => (
+    <div className="flex h-full w-full text-foreground">
+      {sidebar}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {header}
+        <ContentPane>{body}</ContentPane>
+      </div>
+    </div>
+  );
 
   const moreFromPublisher = useMemo(() => {
     if (!selected) return [];
@@ -334,8 +303,8 @@ export function AppStore({ params }: AppComponentProps) {
   }, [selected, featured.data, catalog.allApps]);
 
   if (packages && packageType) {
-    return (
-      <div className="flex h-full w-full flex-col bg-background text-foreground">
+    return frame(
+      <>
         <PackageStore
           key={tab}
           type={packageType}
@@ -345,27 +314,28 @@ export function AppStore({ params }: AppComponentProps) {
           onSelect={setSelectedPackage}
         />
         <PublishThemePackage target={publishing} onClose={() => setPublishing(null)} />
-      </div>
+      </>,
     );
   }
 
   if (onThemes) {
-    return (
-      <div className="flex h-full w-full flex-col bg-background text-foreground">
+    return frame(
+      <>
         <ThemeStore
           catalog={themes}
           search={search}
           selected={selectedTheme}
           onSelect={setSelectedTheme}
         />
-      </div>
+      </>,
     );
   }
 
   return (
     <SelectAppContext.Provider value={setSelected}>
+      {frame(
       <div
-        className="flex h-full w-full flex-col bg-background text-foreground"
+        className="flex min-h-0 flex-1 flex-col"
         onKeyDown={(e) => {
           if ((selected || folderApp) && e.key === 'Escape') {
             closeDetail();
@@ -378,7 +348,7 @@ export function AppStore({ params }: AppComponentProps) {
         {folderApp && !selected && <FolderAppDetail key={folderApp.appId} opened={folderApp} />}
         {/* Content */}
         <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp) && 'hidden')}>
-          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {searching ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader
@@ -431,7 +401,8 @@ export function AppStore({ params }: AppComponentProps) {
             )}
           </div>
         </div>
-      </div>
+      </div>,
+      )}
     </SelectAppContext.Provider>
   );
 }
@@ -540,9 +511,9 @@ function FeaturedHero({ app }: { app: StoreApp }) {
   const view = useStoreAppView(app);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/75 p-6 text-primary-foreground shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(135deg,color-mix(in_oklab,var(--primary)_22%,var(--card)),color-mix(in_oklab,var(--primary)_8%,var(--card)))] p-6 text-foreground clay">
       <CardLink app={app} name={view.name} />
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-foreground/70">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
         Featured
       </p>
       <div className="mt-4 flex items-center gap-4">
@@ -557,7 +528,7 @@ function FeaturedHero({ app }: { app: StoreApp }) {
             {view.name}
           </h2>
           {view.by && (
-            <p className="truncate text-sm text-primary-foreground/70" title={view.by}>
+            <p className="truncate text-sm text-muted-foreground" title={view.by}>
               by {view.by}
             </p>
           )}
@@ -565,7 +536,7 @@ function FeaturedHero({ app }: { app: StoreApp }) {
         <GetPill app={app} name={view.name} onHero />
       </div>
       {view.about && (
-        <p className="mt-4 line-clamp-2 max-w-prose text-sm text-primary-foreground/85">
+        <p className="mt-4 line-clamp-2 max-w-prose text-sm text-foreground/85">
           {view.about}
         </p>
       )}
@@ -581,7 +552,7 @@ const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="relative flex w-64 shrink-0 snap-start flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex w-64 shrink-0 snap-start flex-col gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md"
     >
       <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
@@ -631,7 +602,7 @@ const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="relative flex min-w-0 flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md"
     >
       <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
@@ -733,12 +704,12 @@ function AppDetail({
             : undefined
         }
       >
-        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-6 sm:p-6">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 @2xl:flex-row @2xl:items-center @2xl:gap-6 @2xl:p-6">
           <StoreAppIcon
             name={view.name}
             icon={view.icon}
             pending={view.iconPending}
-            className="size-24 shrink-0 text-4xl drop-shadow-md sm:size-28"
+            className="size-24 shrink-0 text-4xl drop-shadow-md @2xl:size-28"
           />
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <div className="min-w-0">
@@ -773,7 +744,7 @@ function AppDetail({
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
         <Screenshots app={app} name={view.name} />
 
         {view.about ? (
@@ -798,7 +769,7 @@ function AppDetail({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
+          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
             <InfoRow label="Publisher">{view.publisher ?? 'Unknown'}</InfoRow>
             <InfoRow label="Updated">{updated}</InfoRow>
             <InfoRow label="Files">{fileCount.toLocaleString()}</InfoRow>
@@ -951,7 +922,7 @@ function GetPill({
   app: StoreApp;
   /** What the card calls the app, for the button's label and the toast. */
   name: string;
-  /** Renders the inverted variant for the hero card's gradient background. */
+  /** The featured card's: a lump of the primary, on its tint of the primary. */
   onHero?: boolean;
   className?: string;
 }) {
@@ -1000,7 +971,7 @@ function GetPill({
       className={cn(
         'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
         onHero
-          ? 'bg-primary-foreground text-primary hover:bg-primary-foreground/90'
+          ? 'bg-pigment text-primary-foreground clay-pigment hover:bg-transparent hover:brightness-110'
           : 'bg-secondary text-primary hover:bg-secondary/80',
         className,
       )}
@@ -1013,7 +984,7 @@ function GetPill({
 function FeaturedSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-border bg-card p-6">
+      <div className="rounded-xl border border-border/70 bg-card p-6">
         <Skeleton className="h-3 w-20" />
         <div className="mt-4 flex items-center gap-4">
           <Skeleton className="size-20 shrink-0 rounded-[1.25rem]" />
@@ -1029,7 +1000,7 @@ function FeaturedSkeleton() {
         {Array.from({ length: 3 }, (_, i) => (
           <div
             key={i}
-            className="flex w-64 shrink-0 flex-col gap-3 rounded-2xl border border-border bg-card p-4"
+            className="flex w-64 shrink-0 flex-col gap-3 rounded-xl border border-border/70 bg-card p-4"
           >
             <div className="flex items-center gap-3">
               <Skeleton className="size-14 shrink-0 rounded-2xl" />
@@ -1056,7 +1027,7 @@ function CatalogSkeleton() {
       {Array.from({ length: 6 }, (_, i) => (
         <div
           key={i}
-          className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4"
+          className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="size-14 shrink-0 rounded-2xl" />

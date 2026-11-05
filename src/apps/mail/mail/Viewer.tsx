@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, Menu, MoreVertical, RefreshCw, Search, SquarePen, Star, Tag, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, MoreVertical, PanelLeft, RefreshCw, SquarePen, Star, Tag, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -28,6 +28,8 @@ import { AccountSetup } from './AccountSetup';
 import { AccountSettings } from './AccountSettings';
 import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
 import { DialogButton, Overlay } from '@/shared/dialogs';
+import { ContentPane, PillButton, SearchField, ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
+import { SIDEBAR_WIDTH, focusRing, searchRow, titleSearch } from '@/shared/appChromeStyles';
 import { toast } from '@/shared/toast';
 
 const SELECTION_KEY = 'din:mail:selection';
@@ -55,9 +57,10 @@ function loadSelection(): Selection {
 function loadSidebarWidth(): number {
   try {
     const w = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? 'null') as { sidebar?: number } | null;
-    return w?.sidebar ?? 232;
+    // 232 was the default, saved by any click on the splitter.
+    return w?.sidebar && w.sidebar !== 232 ? w.sidebar : SIDEBAR_WIDTH;
   } catch {
-    return 232;
+    return SIDEBAR_WIDTH;
   }
 }
 
@@ -74,14 +77,18 @@ function Splitter({ onDrag, onDone, label }: { onDrag: (dx: number) => void; onD
         const el = e.currentTarget;
         el.setPointerCapture(e.pointerId);
         let x = e.clientX;
+        let moved = false;
         const move = (ev: PointerEvent) => {
+          if (ev.clientX === x) return;
+          moved = true;
           onDrag(ev.clientX - x);
           x = ev.clientX;
         };
+        // A click that didn't drag keeps nothing.
         const up = () => {
           el.removeEventListener('pointermove', move);
           el.removeEventListener('pointerup', up);
-          onDone();
+          if (moved) onDone();
         };
         el.addEventListener('pointermove', move);
         el.addEventListener('pointerup', up);
@@ -90,29 +97,9 @@ function Splitter({ onDrag, onDone, label }: { onDrag: (dx: number) => void; onD
   );
 }
 
-function ToolButton({ label, onClick, disabled, children, className, ...props }: React.ComponentProps<'button'> & { label: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      {...props}
-      className={cn(
-        'grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none',
-        'hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-35',
-        className,
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 /** The row of buttons above an open message, or above messages chosen together. */
 function ActionBar({ children }: { children: ReactNode }) {
-  return <div className="flex h-12 shrink-0 items-center gap-0.5 border-b border-border/60 px-2">{children}</div>;
+  return <Toolbar aria-label="Message actions">{children}</Toolbar>;
 }
 
 function MoreMenu({ entries, onPick }: { entries: ReturnType<typeof messageMenu>; onPick: (pick: MenuPick) => void }) {
@@ -155,9 +142,9 @@ function Welcome({ onAdd }: { onAdd: () => void }) {
         <img src="/icons/apps/mail.png" alt="" className="mx-auto mb-4 size-28 drop-shadow-md" />
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Mail</h1>
         <p className="mt-2 text-[15px] text-muted-foreground">Read and send email from iCloud, Gmail, Fastmail, Yahoo or any account with IMAP.</p>
-        <button type="button" onClick={onAdd} className="mt-6 rounded-lg bg-primary px-4 py-2 text-[15px] font-medium text-primary-foreground shadow-sm outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring/60">
+        <PillButton variant="primary" onClick={onAdd} className="mt-6 h-10 px-5 text-[15px] shadow-sm">
           Add an Account
-        </button>
+        </PillButton>
       </div>
     </div>
   );
@@ -777,53 +764,60 @@ export function Viewer() {
 
   const noAccounts = accountsQuery.isSuccess && accounts.length === 0;
 
+  const sidebarToggle = !noAccounts && (
+    <ToolButton
+      label={sidebarFits ? (showSidebar ? 'Hide sidebar' : 'Show sidebar') : 'Mailboxes'}
+      aria-haspopup={sidebarFits ? undefined : 'menu'}
+      onClick={(e) => (sidebarFits ? toggleSidebar(!showSidebar) : void pickMailbox(e))}
+    >
+      <PanelLeft className="size-4.5" strokeWidth={1.75} />
+    </ToolButton>
+  );
+
+  /** Mail's search, across the title bar over its content, as it always was. */
+  const searchBox = (
+    <SearchField
+      ref={searchInput}
+      value={search}
+      onValueChange={onSearch}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          onSearch('');
+          listRef.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus();
+        } else if (e.key === 'Enter') {
+          setQuery(search.trim());
+        }
+      }}
+      placeholder={selection.kind === 'all' && selection.special === 'inbox' ? 'Search mail' : `Search ${title}`}
+      aria-label={`Search ${title}`}
+      className={titleSearch}
+    />
+  );
+
+  // As every app's: the app's icon and name over the sidebar, its toggle at
+  // their end; then Mail's search (titleSearch's width, as every app's).
   const header = (
-    <WindowDragRegion className="flex h-14 shrink-0 items-center gap-2 pr-3 pl-2">
-      <div className="flex shrink-0 items-center gap-1" style={showSidebar && !noAccounts ? { width: sidebarWidth - 8 } : undefined}>
-        {!noAccounts && (
-          <ToolButton
-            label={sidebarFits ? (showSidebar ? 'Hide sidebar' : 'Show sidebar') : 'Mailboxes'}
-            aria-haspopup={sidebarFits ? undefined : 'menu'}
-            onClick={(e) => (sidebarFits ? toggleSidebar(!showSidebar) : void pickMailbox(e))}
-          >
-            <Menu className="size-4.5" strokeWidth={1.75} />
-          </ToolButton>
-        )}
-        <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
-        {(showSidebar || noAccounts) && <span className="truncate pl-1 font-[family-name:var(--font-title)] text-lg text-foreground/90">Mail</span>}
-      </div>
-      {!noAccounts && (
-        <div className="relative max-w-3xl min-w-0 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            ref={searchInput}
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                onSearch('');
-                listRef.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus();
-              } else if (e.key === 'Enter') {
-                setQuery(search.trim());
-              }
-            }}
-            placeholder={selection.kind === 'all' && selection.special === 'inbox' ? 'Search mail' : `Search ${title}`}
-            aria-label={`Search ${title}`}
-            className="h-10 w-full rounded-full bg-foreground/[0.06] pr-10 pl-10 text-sm outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border"
-          />
-          {search && (
-            <button type="button" aria-label="Clear search" onClick={() => onSearch('')} className="absolute top-1/2 right-2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground">
-              <X className="size-4" />
-            </button>
-          )}
+    <WindowDragRegion className="flex h-12 shrink-0 items-center pr-3">
+      {showSidebar && !noAccounts ? (
+        <div className="flex h-full shrink-0 items-center gap-2 pr-2 pl-3.75" style={{ width: sidebarWidth }}>
+          <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
+          <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
+          {sidebarToggle}
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center gap-2 pl-2">
+          {sidebarToggle}
+          <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
+          <h1 className="truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
         </div>
       )}
-      <div className="min-w-2 flex-1" />
+      {!noAccounts && <div className="flex min-w-0 shrink pr-1 pl-2">{searchBox}</div>}
       {!showSidebar && !noAccounts && (
         <ToolButton label="New message" onClick={() => newMessage(defaultAccount)}>
           <SquarePen className="size-4.5" strokeWidth={1.75} />
         </ToolButton>
       )}
+      <div className="min-w-2 flex-1" />
       <WindowControls />
     </WindowDragRegion>
   );
@@ -834,7 +828,7 @@ export function Viewer() {
   const readerBar = current && (
     <ActionBar>
       <ToolButton label="Back to messages" onClick={backToList}><ArrowLeft className="size-4.5" strokeWidth={1.75} /></ToolButton>
-      <span className="mx-1 h-5 w-px bg-border" />
+      <ToolbarDivider />
       <ToolButton label="Archive" onClick={() => pickFor('archive', current.items)}><Archive className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Delete" onClick={() => pickFor('trash', current.items)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current.latest])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
@@ -894,7 +888,7 @@ export function Viewer() {
       )}
       {filter === 'unread' && !current && (
         <div className="flex shrink-0 items-center gap-2 px-4 pt-2 pb-1">
-          <button type="button" onClick={filterUnread} className="flex h-7 items-center gap-1.5 rounded-full bg-primary/12 pr-2 pl-3 text-xs font-medium outline-none hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring/60">
+          <button type="button" onClick={filterUnread} className={cn('flex h-7 items-center gap-1.5 rounded-full bg-primary/12 pr-2 pl-3 text-xs font-medium hover:bg-primary/20', focusRing)}>
             Unread only <X className="size-3.5" aria-label="Show all" />
           </button>
         </div>
@@ -960,11 +954,11 @@ export function Viewer() {
         {showSidebar && !noAccounts && (
           <>
             <aside className="flex shrink-0 flex-col" style={{ width: sidebarWidth }}>
-              <div className="shrink-0 px-2 pt-1 pb-3">
+              <div className={searchRow}>
                 <button
                   type="button"
                   onClick={() => newMessage(defaultAccount)}
-                  className="flex h-12 items-center gap-3 rounded-2xl bg-primary/15 pr-6 pl-4 text-sm font-medium outline-none hover:bg-primary/20 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className={cn('flex h-9 flex-1 items-center gap-2.5 rounded-full bg-primary/15 px-3.5 text-sm font-medium hover:bg-primary/20', focusRing)}
                 >
                   <SquarePen className="size-4.5" strokeWidth={1.75} /> Compose
                 </button>
@@ -994,7 +988,7 @@ export function Viewer() {
           </>
         )}
 
-        <main className={cn('flex min-w-0 flex-1 flex-col overflow-hidden bg-background', showSidebar && !noAccounts && 'mr-2 mb-2 rounded-2xl', !showSidebar && 'border-t border-border/60')}>
+        <ContentPane inset={showSidebar && !noAccounts} className={showSidebar && noAccounts ? 'border-t-0' : undefined}>
           {noAccounts ? (
             <Welcome onAdd={() => setDialog({ kind: 'setup' })} />
           ) : selection.kind === 'subscriptions' ? (
@@ -1027,7 +1021,7 @@ export function Viewer() {
           ) : (
             list
           )}
-        </main>
+        </ContentPane>
       </div>
 
       {dialog?.kind === 'setup' && (

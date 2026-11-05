@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { listRowClass } from '@/shared/appChromeStyles';
 import { formatBytes, isValidEntryName, joinPath } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
@@ -504,11 +505,7 @@ function itemTone({ selected, isCursor, focused, isDropTarget }: ItemProps) {
   return cn(
     isDropTarget
       ? 'bg-primary/25 ring-2 ring-primary'
-      : selected
-        ? focused
-          ? 'bg-primary/20'
-          : 'bg-foreground/10'
-        : 'hover:bg-foreground/5',
+      : listRowClass({ selected, inactive: !focused }),
     isCursor && focused && !isDropTarget && 'ring-1 ring-inset ring-primary/50',
   );
 }

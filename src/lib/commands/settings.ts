@@ -32,6 +32,7 @@ const SETTINGS: Setting[] = [
   { key: 'appearance.theme', field: 'theme', help: 'Light, dark, or as the system prefers', param: { type: 'string', choices: ['light', 'dark', 'system'] } },
   { key: 'appearance.custom-theme', field: 'customThemeEnabled', help: 'Wear a custom theme of colors, fonts and a background', param: bool },
   { key: 'appearance.sync-profile-theme', field: 'syncProfileTheme', help: 'The custom theme is your profile theme, rather than this computer’s', param: bool },
+  { key: 'appearance.glass', field: 'glass', help: 'Menus, panels and window frames of liquid or frosted glass (accessibility.reduce-transparency makes them solid)', param: { type: 'string', choices: ['liquid', 'frosted'] } },
   { key: 'appearance.wobbly-windows', field: 'wobblyWindows', help: 'Windows wobble as they’re dragged', param: bool },
   {
     key: 'appearance.minimize-effect', field: 'minimizeEffect', help: 'The effect windows minimize with',
@@ -80,7 +81,7 @@ const SETTINGS: Setting[] = [
   { key: 'taskbar.buttons', field: 'taskbarButtons', help: 'A taskbar button per app, its windows combined, or one per window', param: { type: 'string', choices: ['combine', 'separate'] } },
   { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent (reset for the display’s own)', param: { type: 'integer', min: 50, max: 200 } },
   { key: 'accessibility.reduce-motion', field: 'reduceMotion', help: 'Keep animation to what’s needed, in Din and its apps', param: bool },
-  { key: 'accessibility.reduce-transparency', field: 'reduceTransparency', help: 'Solid panels, menus and windows instead of frosted glass', param: bool },
+  { key: 'accessibility.reduce-transparency', field: 'reduceTransparency', help: 'Solid panels, menus and windows instead of frosted glass (Themes’ Glass or Solid)', param: bool },
   { key: 'accessibility.increase-contrast', field: 'increaseContrast', help: 'Stronger borders, secondary text and focus rings; also reduces transparency', param: bool },
   { key: 'accessibility.text-size', field: 'textSize', help: 'Text size in percent, without zooming the rest', param: { type: 'integer', min: 100, max: 200 } },
   { key: 'accessibility.zoom-keys', field: 'screenZoomKeys', help: 'Super+Alt+8, = and - zoom the screen (DinOS)', param: bool },

@@ -1,10 +1,10 @@
 import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { focusRing, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import type { VmInfo, VmInstall, VmState } from '@/lib/vms';
-import { WindowDragRegion } from '@/sdk/react';
 import { STATE_LABELS } from './bridge';
 import type { VmAction } from './actions';
 import { VmActionItems } from './ActionItems';
@@ -56,12 +56,12 @@ export function Sidebar({
   className?: string;
 }) {
   return (
-    <nav aria-label="Virtual machines" className={cn('flex h-full w-60 shrink-0 flex-col border-r border-border/60 bg-muted/40', className)}>
-      <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-2">
-        <Button variant="ghost" size="icon" className="size-8" aria-label="New virtual machine" title="New Virtual Machine" onClick={onNew}>
-          <Plus className="size-4" />
-        </Button>
-      </WindowDragRegion>
+    <nav aria-label="Virtual machines" className={cn('flex h-full shrink-0 flex-col', sidebarWidthClass, className)}>
+      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/virtual-machines.png" />} title="Virtual Machines">
+        <ToolButton label="New virtual machine" title="New Virtual Machine" onClick={onNew}>
+          <Plus {...toolIcon} />
+        </ToolButton>
+      </SidebarTitle>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
         {loading &&
           Array.from({ length: 3 }, (_, i) => (
@@ -82,8 +82,8 @@ export function Sidebar({
                 aria-current={vm.id === selected ? 'true' : undefined}
                 className={cn(
                   'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  vm.id === selected ? 'bg-primary/15' : 'hover:bg-foreground/10',
+                  focusRing,
+                  vm.id === selected ? 'bg-foreground/10' : 'hover:bg-foreground/5',
                 )}
               >
                 <OsBadge os={vm.config.os} system={vm.config.system} />

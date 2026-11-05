@@ -224,7 +224,7 @@ const StartMenu = memo(function StartMenu({ sizes }: { sizes: TaskbarSizes }) {
           side={side}
           align="start"
           sideOffset={4}
-          className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-xl p-0"
+          className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-2xl p-0"
           onOpenAutoFocus={(e) => {
             e.preventDefault();
             searchRef.current?.focus();

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, Loader2, Shield, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { trayRowClass, trayRuleTop, trayTokenClass } from './trayPanel';
 import { cleanVpnError, getVpnBridge, isWireGuard } from '@/lib/vpn';
 import type { VpnConnection } from '@/lib/vpn';
 import { useVpnConnections, useVpnMutations } from '@/hooks/useVpn';
@@ -45,9 +46,9 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="border-t border-border/60">
-        <p className="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">VPN</p>
-        <ul aria-label="VPN connections" className="flex flex-col gap-0.5 p-1.5 pt-0.5">
+      <div className={trayRuleTop}>
+        <p className="px-4 pt-3 pb-1 text-xs font-semibold text-muted-foreground">VPN</p>
+        <ul aria-label="VPN connections" className="flex flex-col gap-0.5 p-2 pt-0.5">
           {list.map((conn) => {
             const pending = isPending(conn);
             return (
@@ -60,26 +61,14 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
                     conn.active ? `Disconnect ${conn.name}` : `Connect ${conn.name}`
                   }
                   aria-pressed={conn.active}
-                  className={cn(
-                    'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-                    'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    'disabled:opacity-70',
-                    conn.active && 'bg-accent/60',
-                  )}
+                  className={cn(trayRowClass(conn.active), 'disabled:opacity-70')}
                 >
-                  {conn.active ? (
-                    <ShieldCheck className="size-4.5 shrink-0 text-primary" aria-hidden />
-                  ) : (
-                    <Shield className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
-                  )}
+                  <span className={trayTokenClass(conn.active)}>
+                    {conn.active ? <ShieldCheck className="size-4" aria-hidden /> : <Shield className="size-4" aria-hidden />}
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">{conn.name}</span>
-                    <span
-                      className={cn(
-                        'block text-xs',
-                        conn.active ? 'text-primary' : 'text-muted-foreground',
-                      )}
-                    >
+                    <span className="block truncate">{conn.name}</span>
+                    <span className="block text-xs text-muted-foreground">
                       {conn.active ? 'Connected' : typeLabel(conn)}
                     </span>
                   </span>
@@ -89,7 +78,7 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
                       aria-hidden
                     />
                   ) : (
-                    conn.active && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
+                    conn.active && <Check className="size-4 shrink-0 text-primary" aria-hidden />
                   )}
                 </button>
                 {opError?.name === conn.name && (
@@ -154,7 +143,7 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
               {opError?.name === conn.name && (
                 <p
                   role="alert"
-                  className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive"
+                  className="px-3 py-1.5 text-xs text-destructive"
                 >
                   {opError.message}
                 </p>

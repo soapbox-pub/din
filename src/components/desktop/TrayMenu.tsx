@@ -169,7 +169,7 @@ function TrayMenuContent({ item }: { item: TrayItem }) {
           <Skeleton className="h-4 w-28" />
         </div>
       ) : entries.length === 0 ? (
-        <p className="px-2 py-1.5 text-sm text-muted-foreground">No actions</p>
+        <p className="px-2 py-1 text-[13px] text-muted-foreground">No actions</p>
       ) : (
         <MenuEntries entries={entries} onPick={pick} />
       )}
@@ -178,6 +178,8 @@ function TrayMenuContent({ item }: { item: TrayItem }) {
 }
 
 function MenuEntries({ entries, onPick }: { entries: TrayMenuEntry[]; onPick: (entry: TrayMenuEntry) => void }) {
+  // Once one entry has an icon or a check, the others' labels line up with its.
+  const inset = entries.some((e) => e.type !== 'separator' && (e.icon || e.toggle === 'checkmark' || e.toggle === 'radio'));
   return (
     <>
       {entries.map((entry, index) => {
@@ -196,7 +198,7 @@ function MenuEntries({ entries, onPick }: { entries: TrayMenuEntry[]; onPick: (e
         if (entry.children.length > 0) {
           return (
             <DropdownMenuSub key={entry.id}>
-              <DropdownMenuSubTrigger disabled={!entry.enabled}>{content}</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger inset={inset && !entry.icon} disabled={!entry.enabled}>{content}</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="min-w-48 max-w-80">
                 <MenuEntries entries={entry.children} onPick={onPick} />
               </DropdownMenuSubContent>
@@ -227,6 +229,7 @@ function MenuEntries({ entries, onPick }: { entries: TrayMenuEntry[]; onPick: (e
         return (
           <DropdownMenuItem
             key={entry.id}
+            inset={inset && !entry.icon}
             disabled={!entry.enabled}
             onSelect={() => onPick(entry)}
           >

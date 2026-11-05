@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
+import { focusRing, sidebarHeadingClass, sidebarWidthClass } from '@/shared/appChromeStyles';
 import { joinPath } from '@/lib/fs';
 import { cleanVolumesError, getVolumesBridge, type Volume } from '@/lib/volumes';
 import { useDirectory } from '@/hooks/useFileSystem';
@@ -217,7 +219,7 @@ export function Sidebar({
   return (
     <nav
       aria-label="Places"
-      className="flex h-full w-48 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border/60 bg-background/30 px-2 py-3"
+      className={cn('flex h-full shrink-0 flex-col gap-3 overflow-y-auto px-2 pb-2', sidebarWidthClass)}
       onDragEnter={(e) => {
         if (favoriteDrop(e)) setOfferingFavorite(true);
       }}
@@ -280,9 +282,7 @@ export function Sidebar({
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
+      <p className={sidebarHeadingClass}>{label}</p>
       {children}
     </div>
   );
@@ -332,8 +332,8 @@ function SidebarItem({
             dropping
               ? 'bg-primary/20 text-foreground ring-2 ring-primary'
               : active
-                ? 'bg-primary/15 font-medium text-foreground'
-                : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
+                ? 'bg-foreground/10 font-medium text-foreground'
+                : 'hover:bg-foreground/5',
           )}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -348,12 +348,12 @@ function SidebarItem({
             title={place.path || volume?.needs || volume?.device}
             aria-current={active ? 'location' : undefined}
             className={cn(
-              'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'flex min-h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm',
+              focusRing,
               volume && !volume.mountPoint && 'text-muted-foreground',
             )}
           >
-            <place.icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+            <place.icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
             {volume?.needs ? (
               <span className="min-w-0">
                 <span className="block truncate">{place.name}</span>
@@ -375,19 +375,9 @@ function SidebarItem({
               <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
             </span>
           ) : (
-            <button
-              type="button"
-              onClick={() => onEject(volume)}
-              title={`Eject “${place.name}”`}
-              aria-label={`Eject ${place.name}`}
-              className={cn(
-                'mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground',
-                'hover:bg-foreground/10 hover:text-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
-            >
+            <ToolButton size="xs" label={`Eject ${place.name}`} title={`Eject “${place.name}”`} onClick={() => onEject(volume)} className="mr-0.5">
               <EjectIcon className="size-3.5" />
-            </button>
+            </ToolButton>
           ))}
         </div>
       </ContextMenuTrigger>

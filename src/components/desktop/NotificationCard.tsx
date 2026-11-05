@@ -19,6 +19,7 @@ import {
 import { getBrowserBridge } from '@/lib/browser';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { glassPanel } from '@/shared/appChromeStyles';
 
 /**
  * One notification, as a popup or a row of the notification center's list: who sent it,
@@ -72,7 +73,7 @@ export function NotificationCard({
           className={cn(
             'group relative flex flex-col gap-1.5 p-3',
             variant === 'popup' &&
-              'pointer-events-auto rounded-2xl border border-border/60 bg-background/85 shadow-lg backdrop-blur-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4',
+              'pointer-events-auto', glassPanel, 'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4',
             variant === 'list' && 'px-4 hover:bg-accent/60',
             variant === 'list' && !notification.read && 'bg-primary/5',
           )}

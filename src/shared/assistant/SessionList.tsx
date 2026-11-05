@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from 'react';
-import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, Search, SquarePen, SquarePlus, Trash2, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -11,14 +10,12 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { LoadMore } from '@/shared/assistant/LoadMore';
 import { OpenCodeUpdate } from '@/shared/assistant/OpenCodeUpdate';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { useAssistantHost } from '@/shared/assistant/host';
-import { WindowDragRegion } from '@/sdk/react';
 import {
   useAssistantSessions,
   useAssistantWork,
@@ -34,6 +31,8 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { focusRing, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass } from '@/shared/appChromeStyles';
 
 /** How many conversations a project shows before "Show more". */
 const PROJECT_LIMIT = 5;
@@ -347,57 +346,27 @@ export function SessionList({
       onPointerEnter={hold}
       onPointerLeave={() => !draggingRef.current && setHeld(null)}
       style={style}
-      className={cn('w-64 shrink-0 flex-col bg-muted/30', className)}>
+      className={cn(sidebarWidthClass, 'shrink-0 flex-col', className)}>
       {/* The window's title bar runs across the list's top, so it drags the window too. */}
-      <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pl-3 pr-2">
-        <img src="/icons/apps/assistant.png" alt="" aria-hidden draggable={false} className="size-4 shrink-0 object-contain" />
-        {/* In the theme's title font, like a window's title. */}
-        <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
-          Assistant
-        </span>
+      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/assistant.png" />} title="Assistant">
         {menu}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0"
-          aria-label="New conversation"
-          title="New conversation"
-          onClick={() => onNew()}
-        >
-          <SquarePen className="size-4" aria-hidden />
-        </Button>
-      </WindowDragRegion>
-      <div className="relative mx-2.5 mt-1 shrink-0">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-        <Input
+        <ToolButton label="New conversation" onClick={() => onNew()}>
+          <SquarePen className="size-4.5" strokeWidth={1.75} aria-hidden />
+        </ToolButton>
+      </SidebarTitle>
+      <div className={searchRow}>
+        <SearchField
           ref={searchRef}
+          size="sm"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Escape' || !filter) return;
-            e.stopPropagation();
-            setFilter('');
-          }}
+          onValueChange={setFilter}
           placeholder="Search"
           aria-label="Search conversations"
           title="Search conversations (Ctrl+K)"
-          className="h-8 rounded-full border-transparent bg-foreground/[0.06] pl-8 pr-8 text-sm shadow-none dark:bg-foreground/[0.08] md:text-sm focus-visible:border-transparent focus-visible:ring-2"
+          className="flex-1"
         />
-        {filter && (
-          <button
-            type="button"
-            // Focus stays in the field, if it was there.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setFilter('')}
-            aria-label="Clear search"
-            title="Clear search"
-            className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
-        )}
       </div>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {isLoading ? (
           <div className="space-y-2 p-2" aria-label="Loading conversations">
             <Skeleton className="h-3 w-1/3" />
@@ -416,7 +385,7 @@ export function SessionList({
             )
           ) : (
             <>
-              <ul className="space-y-px">
+              <ul className="space-y-0.5">
                 {matches.map((s) => row(s, projectOf.get(s.id)?.label ?? directoryName(mains.get(s.location.directory) ?? s.location.directory, home)))}
               </ul>
               {search.hasNextPage && (
@@ -440,11 +409,11 @@ export function SessionList({
           <div className="space-y-3">
             {needsYou.length > 0 && (
               <section aria-labelledby="assistant-needs-you">
-                <h3 id="assistant-needs-you" className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-primary">
-                  <span className="size-1.5 rounded-full bg-primary" aria-hidden />
+                <h3 id="assistant-needs-you" className={cn(sidebarHeadingClass, 'gap-1.5 text-primary')}>
                   Needs you
+                  <span className="mb-1 size-1.5 rounded-full bg-primary" aria-hidden />
                 </h3>
-                <ul className="space-y-px">{needsYou.map((s) => row(s, projectOf.get(s.id)?.label))}</ul>
+                <ul className="space-y-0.5">{needsYou.map((s) => row(s, projectOf.get(s.id)?.label))}</ul>
               </section>
             )}
             {projects.map((project) => {
@@ -491,14 +460,25 @@ export function SessionList({
                           aria-expanded={open}
                           onClick={() => toggleCollapsed(project.key)}
                           title={tildify(project.root, home)}
-                          className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          // The project's icon (a folder when it has none) on the
+                          // rows' line, then its name; the chevron at the end
+                          // only while pointed at or reached by keyboard, not
+                          // left showing by the click that collapsed it.
+                          className={cn('flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-xs font-semibold text-muted-foreground hover:text-foreground', focusRing)}
                         >
+                          <ProjectIcon
+                            src={icons.get(project.root)}
+                            className="size-4 shrink-0"
+                            fallback={<Folder className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />}
+                          />
+                          <span className="truncate">{project.label}</span>
                           <ChevronRight
-                            className={cn('size-3.5 shrink-0 motion-safe:transition-transform', open && 'rotate-90')}
+                            className={cn(
+                              'ml-auto size-3.5 shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 motion-safe:transition-transform',
+                              open && 'rotate-90',
+                            )}
                             aria-hidden
                           />
-                          <ProjectIcon src={icons.get(project.root)} />
-                          <span className="truncate">{project.label}</span>
                         </button>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
@@ -511,16 +491,14 @@ export function SessionList({
                         </ContextMenuItem>
                       </ContextMenuContent>
                     </ContextMenu>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      aria-label={`New conversation in ${project.label}`}
-                      title={`New conversation in ${project.label}`}
+                    <ToolButton
+                      size="xs"
+                      label={`New conversation in ${project.label}`}
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                       onClick={() => onNew(project.root)}
                     >
-                      <Plus className="size-3.5" aria-hidden />
-                    </Button>
+                      <Plus className="size-4" aria-hidden />
+                    </ToolButton>
                   </div>
                   {open && (
                     <ProjectSessions
@@ -604,7 +582,7 @@ function ProjectSessions({
   const more = 'w-full rounded-md px-2.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   return (
-    <ul className="space-y-px">
+    <ul className="space-y-0.5">
       {all.map((s) => row(s))}
       {expanded && (own.hasNextPage || own.isFetchingNextPage) && (
         <li>
@@ -662,8 +640,7 @@ function SessionRow({
       aria-current={selected ? 'page' : undefined}
       title={`${sessionTitle(session)}\n${where}`}
       className={cn(
-        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selected ? 'bg-foreground/10' : 'hover:bg-foreground/5',
+        sidebarRowClass(selected),
         dragged && 'opacity-50',
       )}
     >

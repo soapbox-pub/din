@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AppWindow, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toolButtonClass } from '@/shared/appChromeStyles';
 import { getPopupsBridge } from '@/lib/popups';
 import { useBlockedPopups, usePopupSettings } from '@/hooks/usePopups';
 import { Label } from '@/components/ui/label';
@@ -51,13 +52,12 @@ export function PopupBlockedButton({
           aria-label={label}
           title={label}
           className={cn(
-            'relative grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toolButtonClass,
+            'relative',
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          <AppWindow className="size-4" aria-hidden />
+          <AppWindow className="size-4.5" strokeWidth={1.75} aria-hidden />
           <span
             aria-hidden
             className="absolute right-1 top-1 size-2 rounded-full bg-destructive ring-2 ring-background"

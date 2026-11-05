@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { useTorStatus } from '@/hooks/useTor';
 import { cleanTorError, getTorBridge, torState, type TorStatus } from '@/lib/tor';
 import { cn } from '@/lib/utils';
+import { trayRuleTop } from './trayPanel';
 
 /** One line on where Tor stands. */
 function describe(status: TorStatus): string {
@@ -92,12 +93,12 @@ export function TorControls() {
             </span>
           </div>
         )}
-        <p className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
+        <p className={cn(trayRuleTop, 'px-4 py-2.5 text-xs text-muted-foreground')}>
           Only .onion addresses go through Tor. Everything else connects as usual, so this doesn't hide
           your IP address from other sites.
         </p>
         {error && (
-          <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+          <p role="alert" className="px-4 py-1.5 text-xs text-destructive">
             {error}
           </p>
         )}

@@ -77,6 +77,7 @@ export function TestApp({ children }: TestAppProps) {
     zoomLevel: 100,
     reduceMotion: false,
     reduceTransparency: false,
+    glass: 'liquid',
     increaseContrast: false,
     textSize: 100,
     screenZoomKeys: false,

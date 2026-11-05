@@ -140,14 +140,14 @@ function useAutoZoom(): number | null {
  * guests and Linux apps, and to din-shell for the screen.
  */
 function useApplyAccessibility(config: AppConfig) {
-  const { reduceMotion, reduceTransparency, increaseContrast, textSize } = config;
+  const { reduceMotion, reduceTransparency, increaseContrast, textSize, glass } = config;
   const { screenZoomKeys: zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys } = config;
   useEffect(() => {
     void getAccessibilityBridge()?.setScreen({ zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys }).catch(() => {});
   }, [zoomKeys, colorFilter, stickyKeys, slowKeys, bounceKeys]);
   useEffect(() => {
-    applyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize });
-  }, [reduceMotion, reduceTransparency, increaseContrast, textSize]);
+    applyAccessibility({ reduceMotion, reduceTransparency, increaseContrast, textSize, glass });
+  }, [reduceMotion, reduceTransparency, increaseContrast, textSize, glass]);
   useEffect(() => {
     void getAccessibilityBridge()?.set({ reduceMotion, reduceTransparency, highContrast: increaseContrast }).catch(() => {});
   }, [reduceMotion, reduceTransparency, increaseContrast]);

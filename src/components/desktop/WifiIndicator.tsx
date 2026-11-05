@@ -24,6 +24,7 @@ import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayHeader, trayRowClass, trayRuleBottom, trayTitle, trayTokenClass } from './trayPanel';
 import { cleanWifiError, isEnterprise, isEthernetConnected, isSecured, savedFor } from '@/lib/wifi';
 import type { WifiNetwork } from '@/lib/wifi';
 import {
@@ -71,8 +72,8 @@ export function WifiPopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <h2 className="text-sm font-medium text-foreground">Wi-Fi</h2>
+      <header className={trayHeader}>
+        <h2 className={trayTitle}>Wi-Fi</h2>
         <Switch
           aria-label="Wi-Fi radio"
           checked={radioEnabled}
@@ -82,14 +83,16 @@ export function WifiPopoverBody() {
       </header>
 
       {setRadio.isError && (
-        <p role="alert" className="border-b border-border/60 px-3 py-2 text-xs text-destructive">
+        <p role="alert" className={cn(trayRuleBottom, 'px-4 py-2 text-xs text-destructive')}>
           {cleanWifiError(setRadio.error)}
         </p>
       )}
 
       {ethernet && (
-        <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2">
-          <EthernetPort className="size-4.5 shrink-0 text-primary" aria-hidden />
+        <div className={cn('mx-2 mt-1 w-auto', trayRowClass(true))}>
+          <span className={trayTokenClass(true)}>
+            <EthernetPort className="size-4" aria-hidden />
+          </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-foreground">Ethernet</span>
             <span className="block text-xs text-primary">Connected</span>
@@ -98,7 +101,7 @@ export function WifiPopoverBody() {
         </div>
       )}
 
-      <div className="max-h-72 overflow-y-auto p-1.5">
+      <div className="max-h-80 overflow-y-auto p-2">
         {!radioEnabled ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             Wi-Fi is turned off.
@@ -150,12 +153,12 @@ export function WifiPopoverBody() {
 
       <VpnControls compact />
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'wifi' })}
           >
             <Settings2 aria-hidden />
@@ -207,32 +210,23 @@ function QuickNetworkRow({
                 ? `Disconnect from ${network.ssid}`
                 : `Connect to ${network.ssid}`
             }
-            className={cn(
-              'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
-              'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:opacity-70',
-              network.inUse && 'bg-accent/60',
-            )}
+            className={cn(trayRowClass(network.inUse), 'disabled:opacity-70')}
           >
-            <WifiSignalIcon
-              signal={network.signal}
-              className={cn(
-                'size-4.5 shrink-0',
-                network.inUse ? 'text-primary' : 'text-muted-foreground',
-              )}
-            />
+            <span className={trayTokenClass(network.inUse)}>
+              <WifiSignalIcon signal={network.signal} className="size-4" />
+            </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-foreground">{network.ssid}</span>
+              <span className="block truncate">{network.ssid}</span>
               {network.inUse && (
-                <span className="block text-xs text-primary">Connected</span>
+                <span className="block text-xs text-muted-foreground">Connected</span>
               )}
             </span>
             {pending ? (
               <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
             ) : network.inUse ? (
-              <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
+              <Check className="size-4 shrink-0 text-primary" aria-hidden />
             ) : (
-              secured && <Lock className="size-3 shrink-0 text-muted-foreground" aria-label="Secured" />
+              secured && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Secured" />
             )}
           </button>
         </ContextMenuTrigger>
@@ -328,8 +322,8 @@ function QuickListSkeleton() {
   return (
     <div className="flex flex-col gap-0.5" aria-hidden>
       {Array.from({ length: 3 }, (_, i) => (
-        <div key={i} className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
-          <Skeleton className="size-4.5 rounded bg-foreground/10" />
+        <div key={i} className="flex items-center gap-3 rounded-lg px-2.5 py-2">
+          <Skeleton className="size-8 rounded-full bg-foreground/10" />
           <Skeleton
             className="h-3.5 bg-foreground/10"
             style={{ width: `${40 + ((i * 27) % 35)}%` }}

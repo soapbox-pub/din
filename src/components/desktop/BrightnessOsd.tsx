@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import { glassPanel } from '@/shared/appChromeStyles';
 import { MIN_BRIGHTNESS, brightnessText, getBrightnessBridge } from '@/lib/brightness';
 import type { BrightnessStatus } from '@/lib/brightness';
 import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
@@ -62,7 +63,7 @@ export function BrightnessOsd() {
         visible ? 'opacity-100' : 'opacity-0',
       )}
     >
-      <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+      <div className={cn('flex items-center gap-3 px-4 py-3', glassPanel)}>
         <BrightnessGlyph
           brightness={status.brightness}
           className="size-6 shrink-0 text-foreground"

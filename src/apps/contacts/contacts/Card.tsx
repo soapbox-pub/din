@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
 import { displayName, type Contact, type PostalAddress } from '@/shared/vcard';
 import { Avatar } from './Avatar';
 import { addressLines, describeBirthday, labelText } from './format';
@@ -218,14 +219,8 @@ function Field({
 
 function IconButton({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
+    <ToolButton size="sm" label={label} onClick={onClick}>
       <Icon className="size-4" />
-    </button>
+    </ToolButton>
   );
 }

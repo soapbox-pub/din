@@ -126,28 +126,8 @@ export function WebAppFrame({
 
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {nsiteHost ? (
-          <NappInfoButton
-            host={nsiteHost}
-            name={name}
-            icon={icon}
-            favicon={favicon}
-            onReload={() => viewRef.current?.reload()}
-            className="mr-auto"
-            hoverClassName={hover}
-            iconClassName={muted}
-            textClassName={text}
-          />
-        ) : (
-          <>
-            <AppIcon icon={favicon ?? icon} className={cn('size-4 shrink-0', muted)} />
-            <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
-              {name}
-            </span>
-          </>
-        )}
-        {/* Carets to the right of the title, shown only when a move is
-            available (webview only reports history depth). */}
+        {/* Back and forward lead, as a browser's do, shown only when a move
+            is available (webview only reports history depth). */}
         {nav.canBack && (
           <NavButton
             label="Go back"
@@ -165,6 +145,26 @@ export function WebAppFrame({
           >
             <ChevronRight className="size-4" />
           </NavButton>
+        )}
+        {nsiteHost ? (
+          <NappInfoButton
+            host={nsiteHost}
+            name={name}
+            icon={icon}
+            favicon={favicon}
+            onReload={() => viewRef.current?.reload()}
+            className="mr-auto"
+            hoverClassName={hover}
+            iconClassName={muted}
+            textClassName={text}
+          />
+        ) : (
+          <>
+            <AppIcon icon={favicon ?? icon} className={cn('size-5 shrink-0', muted)} />
+            <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', text)}>
+              {name}
+            </span>
+          </>
         )}
       </div>,
     );

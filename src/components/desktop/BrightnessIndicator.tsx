@@ -6,6 +6,7 @@ import { OverdriveSlider, type OverdriveSliderProps } from '@/components/ui/over
 import { Switch } from '@/components/ui/switch';
 import { PopoverClose } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayHeader, trayRuleTop, trayTitle } from './trayPanel';
 import {
   setBrightnessPreview,
   useBrightnessMutations,
@@ -107,15 +108,15 @@ export function BrightnessPopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <h2 className="text-sm font-medium text-foreground">Display</h2>
+      <header className={trayHeader}>
+        <h2 className={trayTitle}>Display</h2>
         {backlightAvailable && (
           <span className="text-xs tabular-nums text-muted-foreground">{brightnessText(value)}</span>
         )}
       </header>
 
       {backlightAvailable && (
-        <div className="flex items-center gap-2.5 px-3 py-3">
+        <div className="flex items-center gap-3 px-4 py-3">
           <SunDim className="size-5 shrink-0 text-muted-foreground" aria-hidden />
           <BrightnessSlider
             aria-label="Brightness"
@@ -129,7 +130,7 @@ export function BrightnessPopoverBody() {
       )}
 
       {nightLight?.available && (
-        <div className={cn('flex flex-col gap-3 px-3 py-3', backlightAvailable && 'border-t border-border/60')}>
+        <div className={cn('flex flex-col gap-3 px-4 py-3', backlightAvailable && trayRuleTop)}>
           <div className="flex items-center gap-2.5">
             <Moon
               className={cn('size-5 shrink-0', nightLight.active ? 'text-foreground' : 'text-muted-foreground')}
@@ -165,12 +166,12 @@ export function BrightnessPopoverBody() {
         </div>
       )}
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'display' })}
           >
             <Settings2 aria-hidden />

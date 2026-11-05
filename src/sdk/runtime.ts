@@ -247,7 +247,9 @@ function applyTheme(theme: ThemeData, loadedFaces: Set<string>): void {
   const root = document.documentElement;
   root.classList.remove('light', 'dark');
   root.classList.add(theme.scheme);
-  root.style.colorScheme = theme.scheme;
+  // On the body, not the root: a dark root makes Chromium paint the page's
+  // canvas opaque dark, hiding the window's glass behind the app (app.css).
+  root.style.setProperty('--din-color-scheme', theme.scheme);
   for (const [name, value] of Object.entries(theme.tokens)) root.style.setProperty(`--${name}`, value);
   for (const face of theme.fontFaces) {
     const key = `${face.family}\u0000${face.url}`;
@@ -551,6 +553,14 @@ export function installDin(transport: Transport): void {
     if (p.type === 'state') {
       const snapped = state.snapped;
       state = p.state;
+      // For CSS: the window fills its part of the screen, so what's inset in
+      // it (appChrome's ContentPane) goes edge to edge, as on the desktop.
+      // The edges that are the screen's, as screenEdges (src/lib/monitors.ts) has them.
+      const whole = state.maximized || state.fullscreen;
+      const root = document.documentElement;
+      root.toggleAttribute('data-window-flush', whole || state.snapped !== null);
+      root.toggleAttribute('data-screen-right', whole || state.snapped === 'right' || state.snapped === 'top-right' || state.snapped === 'bottom-right');
+      root.toggleAttribute('data-screen-bottom', whole || state.snapped === 'left' || state.snapped === 'right' || state.snapped === 'bottom-left' || state.snapped === 'bottom-right');
       states.emit();
       if (state.snapped !== snapped) snaps.emit(state.snapped);
     } else if (p.type === 'frameStyle') {

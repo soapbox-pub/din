@@ -3,6 +3,8 @@ import { Check, Eye, EyeOff, Palette, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Calendar as MiniMonth } from '@/components/ui/calendar';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { SidebarHeading, ToolButton } from '@/shared/appChrome';
+import { focusRing, sidebarHeadingClass } from '@/shared/appChromeStyles';
 import { describeWhen } from '@/shared/calendar';
 import { FIRST_DAY, locale } from './dates';
 import { colorStyle } from './model';
@@ -66,19 +68,13 @@ export function Sidebar({
       />
 
       <section aria-labelledby="calendars-heading" className="px-2 pt-2">
-        <div className="flex items-center px-2 pb-1">
-          <h2 id="calendars-heading" className="flex-1 text-xs font-semibold text-muted-foreground">Calendars</h2>
-          <button
-            type="button"
-            aria-label="New calendar"
-            title="New calendar"
-            onClick={onNewCalendar}
-            className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </div>
-        <ul className="space-y-px">
+        <SidebarHeading className="pr-1">
+          <h2 id="calendars-heading" className="flex-1">Calendars</h2>
+          <ToolButton size="xs" label="New calendar" onClick={onNewCalendar}>
+            <Plus className="size-4" />
+          </ToolButton>
+        </SidebarHeading>
+        <ul className="space-y-0.5">
           {sources.filter((s) => s.local).map((s) => (
             <SourceRow
               key={s.id}
@@ -109,16 +105,16 @@ export function Sidebar({
 
       {awaiting.length > 0 && (
         <section aria-labelledby="awaiting-heading" className="px-2 pt-4 pb-3">
-          <h2 id="awaiting-heading" className="px-2 pb-1 text-xs font-semibold text-muted-foreground">
+          <h2 id="awaiting-heading" className={sidebarHeadingClass}>
             Waiting for your answer
           </h2>
-          <ul className="space-y-px">
+          <ul className="space-y-0.5">
             {awaiting.slice(0, 8).map((s) => (
               <li key={s.key}>
                 <button
                   type="button"
                   onClick={() => onOpen(s)}
-                  className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className={cn('flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-foreground/5', focusRing)}
                   style={colorStyle(s.color)}
                 >
                   <span className="mt-1.5 size-2 shrink-0 rounded-full bg-(--ev)" aria-hidden />
@@ -160,7 +156,7 @@ function SourceRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <li>
-          <label className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2 text-sm hover:bg-foreground/[0.05]">
+          <label className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-sm hover:bg-foreground/5">
             <input type="checkbox" checked={on} onChange={(e) => onToggle(s.id, e.target.checked)} className="peer sr-only" />
             <span
               aria-hidden

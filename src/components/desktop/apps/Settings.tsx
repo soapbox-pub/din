@@ -51,6 +51,8 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ContentPane, SearchField, SidebarTitle } from '@/shared/appChrome';
+import { SIDEBAR_WIDTH, sidebarHeadingClass, sidebarRowClass, titleSearch } from '@/shared/appChromeStyles';
 import { findMatches, parseQuery } from '@/lib/settingsSearch';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { AppComponentProps } from '@/lib/apps';
@@ -304,7 +306,7 @@ function paramSection(params: AppComponentProps['params']): SectionId | undefine
 }
 
 const SIDEBAR_WIDTH_KEY = 'din.settings.sidebar-width';
-const DEFAULT_SIDEBAR_WIDTH = 208;
+const DEFAULT_SIDEBAR_WIDTH = SIDEBAR_WIDTH;
 const MIN_SIDEBAR_WIDTH = 160;
 const MAX_SIDEBAR_WIDTH = 360;
 
@@ -312,7 +314,8 @@ const clampSidebarWidth = (width: number) => Math.min(MAX_SIDEBAR_WIDTH, Math.ma
 
 function loadSidebarWidth(): number {
   const width = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
-  return width ? clampSidebarWidth(width) : DEFAULT_SIDEBAR_WIDTH;
+  // 208 was the default, saved whether or not it was ever dragged.
+  return width && width !== 208 ? clampSidebarWidth(width) : DEFAULT_SIDEBAR_WIDTH;
 }
 
 export function Settings({ params, windowId }: AppComponentProps) {
@@ -321,7 +324,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
     () => paramSection(params) ?? 'wifi',
   );
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
-  useEffect(() => localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)), [sidebarWidth]);
+  // Only a width dragged to is kept, so the default can change.
+  useEffect(() => (sidebarWidth === DEFAULT_SIDEBAR_WIDTH ? localStorage.removeItem(SIDEBAR_WIDTH_KEY) : localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))), [sidebarWidth]);
   // Search: once the query has two letters or digits, the pane shows every
   // matching section, one after the other, with the matches highlighted.
   // Only matching sections mount, since opening one can start work (a
@@ -462,47 +466,22 @@ export function Settings({ params, windowId }: AppComponentProps) {
       {/* Section sidebar */}
       <div
         style={{ width: sidebarWidth }}
-        className="flex shrink-0 flex-col gap-2 border-r border-border/60 bg-muted/30 px-2 pb-2"
+        className="flex shrink-0 flex-col pb-2"
       >
         {/* The window's title bar runs across the sidebar's top, so it drags the window too. */}
-        <WindowDragRegion className="-mx-2 -mb-2 flex h-9 shrink-0 items-center gap-2 px-3">
-          <AppIcon icon="/icons/apps/settings.png" className="size-4 shrink-0 object-contain" />
-          <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">
-            Settings
-          </span>
-        </WindowDragRegion>
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            ref={searchRef}
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && query) {
-                e.stopPropagation();
-                setQuery('');
-              }
-            }}
-            placeholder="Search settings"
-            aria-label="Search settings"
-            className="h-8 pr-2 pl-8 text-sm [&:placeholder-shown::-webkit-search-cancel-button]:hidden"
-          />
-        </div>
-        <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+        <SidebarTitle
+          region={WindowDragRegion}
+          icon={<AppIcon icon="/icons/apps/settings.png" className="size-6 shrink-0 object-contain" />}
+          title="Settings"
+        />
+        <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2">
           {SECTIONS.map((s, i) => {
             const current = searching ? results.includes(s) : section === s.id;
             return (
               <Fragment key={s.id}>
                 {s.group !== SECTIONS[i - 1]?.group && (
                   <h3
-                    className={cn(
-                      'px-2 pb-1 text-xs font-medium text-muted-foreground',
-                      i > 0 && 'mt-3',
-                    )}
+                    className={cn(sidebarHeadingClass, i > 0 && 'mt-3')}
                   >
                     {s.group}
                   </h3>
@@ -514,16 +493,9 @@ export function Settings({ params, windowId }: AppComponentProps) {
                     setQuery('');
                   }}
                   aria-current={!searching && section === s.id ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    current
-                      ? 'bg-foreground/15 text-foreground'
-                      : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
-                    searching && !current && 'opacity-50',
-                  )}
+                  className={cn(sidebarRowClass(current), searching && !current && 'opacity-50')}
                 >
-                  <s.icon className="size-4 shrink-0" aria-hidden />
+                  <s.icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
                   <span className="truncate">{s.name}</span>
                   {s.id === 'about' && updatePending && (
                     <span className="ml-auto size-2 shrink-0 rounded-full bg-primary" aria-label="Update available" />
@@ -554,26 +526,31 @@ export function Settings({ params, windowId }: AppComponentProps) {
         className="z-30 -mx-1 w-2 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none"
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
-        <WindowDragRegion className="flex h-9 shrink-0 items-center justify-end pl-2 pr-3">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* The search across the title bar, as Mail's. */}
+        <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pl-2 pr-3">
+          <SearchField ref={searchRef} value={query} onValueChange={setQuery} placeholder="Search settings" aria-label="Search settings" className={titleSearch} />
+          <div className="min-w-2 flex-1" />
           <WindowControls />
         </WindowDragRegion>
-        <div ref={paneRef} className="min-h-0 flex-1 overflow-y-auto">
-          {!searching ? (
-            renderSection(section)
-          ) : results.length > 0 ? (
-            results.map((s) => (
-              <div key={s.id} className="border-b border-border/40 last:border-b-0">
-                {renderSection(s.id)}
+        <ContentPane>
+          <div ref={paneRef} className="min-h-0 flex-1 overflow-y-auto">
+            {!searching ? (
+              renderSection(section)
+            ) : results.length > 0 ? (
+              results.map((s) => (
+                <div key={s.id} className="border-b border-border/40 last:border-b-0">
+                  {renderSection(s.id)}
+                </div>
+              ))
+            ) : (
+              <div className="mx-auto max-w-2xl p-4">
+                <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
               </div>
-            ))
-          ) : (
-            <div className="mx-auto max-w-2xl p-4">
-              <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
-            </div>
-          )}
-        </div>
-      </main>
+            )}
+          </div>
+        </ContentPane>
+      </div>
     </div>
   );
 }
@@ -1860,7 +1837,7 @@ function NightLightSchedulePicker({ nightLight }: { nightLight: NightLightState 
 
   return (
     <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Night Light schedule">
+      <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-3" role="radiogroup" aria-label="Night Light schedule">
         {NIGHT_LIGHT_SCHEDULES.map((option) => {
           const checked = nightLight.schedule === option.value;
           return (
@@ -3490,10 +3467,53 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
 // Appearance
 // ---------------------------------------------------------------------------
 
+type GlassChoice = 'liquid' | 'frosted' | 'solid';
+
+const GLASS_CHOICES: { value: GlassChoice; name: string }[] = [
+  { value: 'liquid', name: 'Liquid' },
+  { value: 'frosted', name: 'Frosted' },
+  { value: 'solid', name: 'Solid' },
+];
+
+/** A menu of the given glass over shapes for it to blur and bend; the wrapper names the material, so it shows whatever's chosen. */
+function GlassPreview({ material }: { material: GlassChoice }) {
+  return (
+    <span className="absolute inset-0" style={{ '--glass-material': material } as React.CSSProperties}>
+      <span className="absolute top-1 left-2 size-8 rounded-full bg-amber-300" />
+      <span className="absolute right-3 bottom-1 h-6 w-12 rotate-12 rounded-md bg-emerald-300" />
+      <span className="absolute top-5 left-1/2 h-1.5 w-full -translate-x-1/2 -rotate-6 bg-white/70" />
+      <span className="glass-surface absolute inset-x-5 top-2.5 bottom-2.5 flex flex-col justify-center gap-1 rounded-lg px-2">
+        <span className="h-1 w-3/4 rounded-full bg-foreground/60" />
+        <span className="h-1 w-1/2 rounded-full bg-foreground/40" />
+        <span className="h-1 w-2/3 rounded-full bg-foreground/40" />
+      </span>
+    </span>
+  );
+}
+
 function ThemesSection() {
+  const { config, updateConfig } = useAppContext();
+  // Solid is Accessibility's Reduce transparency, which Increase contrast implies.
+  const material: GlassChoice = config.reduceTransparency || config.increaseContrast ? 'solid' : config.glass;
   return (
     <SectionShell title="Themes">
       <ThemeSettings />
+      <SubHeading>Glass</SubHeading>
+      <PicturedChoices
+        label="Glass"
+        options={GLASS_CHOICES}
+        value={material}
+        onChange={(value) =>
+          updateConfig((current) =>
+            value === 'solid' ? { ...current, reduceTransparency: true } : { ...current, reduceTransparency: false, glass: value },
+          )
+        }
+        preview={(value) => <GlassPreview material={value} />}
+      />
+      <p className="mt-2 text-xs text-muted-foreground">
+        What menus, popovers, notifications, the menu bar’s panels and windows’ frames are made of.
+        {config.increaseContrast && ' Solid while Increase contrast is on, in Accessibility.'}
+      </p>
     </SectionShell>
   );
 }

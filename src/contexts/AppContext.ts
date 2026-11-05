@@ -50,6 +50,9 @@ export interface BlossomServerMetadata {
   updatedAt: number;
 }
 
+/** Glass that bends, glows and catches the pointer's light (liquid), or the flat frosted panes Din had before. */
+export type GlassMaterial = 'liquid' | 'frosted';
+
 export interface AppConfig {
   /** Current theme */
   theme: Theme;
@@ -206,8 +209,10 @@ export interface AppConfig {
    * desktop and its apps.
    */
   reduceMotion: boolean;
-  /** Panels, menus and windows are solid instead of frosted glass. */
+  /** Panels, menus and windows are solid instead of glass (Themes' Solid). */
   reduceTransparency: boolean;
+  /** What menus, popovers and panels are made of, unless reduceTransparency makes them solid: liquid glass, or the frosted glass Din had before. */
+  glass: GlassMaterial;
   /** Stronger borders, secondary text and focus rings; implies reduceTransparency. */
   increaseContrast: boolean;
   /** Text size, as a percentage (100 = normal), without scaling the rest of the layout as zoom does. */

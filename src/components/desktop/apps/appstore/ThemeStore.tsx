@@ -165,7 +165,7 @@ export function ThemeStore({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
+          <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {query ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
                 <SectionHeader
@@ -243,7 +243,7 @@ function useThemeAuthor(pubkey: string | undefined) {
 
 function ThemeGrid({ themes, handlers }: { themes: ThemeDefinition[]; handlers: ThemeHandlers }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {themes.map((theme) => (
         <ThemeCard key={themeCoordinate(theme)} theme={theme} handlers={handlers} />
       ))}
@@ -259,7 +259,7 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
     <ThemeContextMenu theme={theme} handlers={handlers}>
       <div
         ref={ref}
-        className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
+        className="relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
       >
         <button
           type="button"
@@ -385,7 +385,7 @@ function ThemeDetailPage({
   if (!theme) {
     return (
       <div ref={ref} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none">
-        <div className="mx-auto max-w-5xl p-4 sm:p-6">
+        <div className="mx-auto max-w-5xl p-4 @2xl:p-6">
           {lookup.isPending ? (
             <div className="flex flex-col gap-4">
               <Skeleton className="aspect-video w-full max-w-2xl rounded-2xl" />
@@ -413,13 +413,13 @@ function ThemeDetailPage({
       className="min-h-0 flex-1 overflow-y-auto outline-none"
       aria-label={`${theme.title} details`}
     >
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-6">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
+        <div className="flex flex-col gap-6 @5xl:flex-row @5xl:items-center">
           <button
             type="button"
             onClick={() => handlers.use(theme)}
             aria-label={`Use ${theme.title}`}
-            className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:w-3/5"
+            className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 @5xl:w-3/5"
           >
             <ThemeSwatch theme={theme.theme} />
           </button>
@@ -463,7 +463,7 @@ function ThemeDetailPage({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
+          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
             <InfoRow label="Colors">
               <span className="flex items-center justify-end gap-2">
                 {(['background', 'text', 'primary'] as const).map((role) => (
@@ -542,9 +542,9 @@ function RevertBar({
 
 function ThemeGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div key={i} className="overflow-hidden rounded-xl border border-border/70 bg-card">
           <Skeleton className="aspect-video rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">

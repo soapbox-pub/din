@@ -273,6 +273,40 @@ export const SNAP_ZONES = ['left', 'right', 'top-left', 'top-right', 'bottom-lef
 export type SnapZone = (typeof SNAP_ZONES)[number];
 
 /**
+ * Which of a window's right and bottom edges are the screen's: maximized or
+ * full screen, both; snapped, those of its half or quarter that lie along
+ * the screen's edge rather than against another window. What's inset in the
+ * window (appChrome's ContentPane) meets the screen there and keeps its
+ * rounded inset elsewhere.
+ */
+export function screenEdges(w: { maximized: boolean; fullscreen?: boolean; snapped: SnapZone | null }): { right: boolean; bottom: boolean } {
+  if (w.maximized || w.fullscreen) return { right: true, bottom: true };
+  switch (w.snapped) {
+    case 'left':
+      return { right: false, bottom: true };
+    case 'right':
+      return { right: true, bottom: true };
+    case 'top-right':
+      return { right: true, bottom: false };
+    case 'bottom-left':
+      return { right: false, bottom: true };
+    case 'bottom-right':
+      return { right: true, bottom: true };
+    default:
+      return { right: false, bottom: false };
+  }
+}
+
+/**
+ * Whether a window reaches the top of its monitor's work area, up against
+ * the menu bar: maximized, or snapped to a half or a top quarter. Such a
+ * window carries its title bar's color up behind the bar.
+ */
+export function underMenuBar(w: { maximized: boolean; snapped: SnapZone | null }): boolean {
+  return w.maximized || w.snapped === 'left' || w.snapped === 'right' || w.snapped === 'top-left' || w.snapped === 'top-right';
+}
+
+/**
  * Where the borders between snapped windows sit, as fractions of the work
  * area: `x` between the left and right columns, `left` and `right` between
  * the top and bottom quarters of each column. Snapped windows on a monitor's

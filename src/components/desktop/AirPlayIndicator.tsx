@@ -19,6 +19,8 @@ import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { cleanAirPlayError, getAirPlayBridge, type AirPlayMode, type AirPlaySession } from '@/lib/airplay';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayHeader, trayTitle } from './trayPanel';
+import { glassPanel } from '@/shared/appChromeStyles';
 
 /** What a session is doing, in a few words. */
 function describeSession(session: AirPlaySession): string {
@@ -211,17 +213,17 @@ export function AirPlayPopoverBody() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <h2 className="text-sm font-medium text-foreground">Screen sharing</h2>
+      <header className={trayHeader}>
+        <h2 className={trayTitle}>Screen sharing</h2>
         <Airplay className="size-4 text-muted-foreground" aria-hidden />
       </header>
       {data?.available === false ? <AirPlayUnavailable /> : <AirPlayReceiverList className="p-3" />}
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'display' })}
           >
             <Settings2 aria-hidden />
@@ -278,7 +280,7 @@ export function AirPlayOsd() {
         visible ? 'opacity-100' : 'opacity-0',
       )}
     >
-      <div className="flex flex-col items-center gap-2 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+      <div className={cn('flex flex-col items-center gap-2 px-4 py-3', glassPanel)}>
         <p className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Airplay className="size-4 text-muted-foreground" aria-hidden />
           {change.name}

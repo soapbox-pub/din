@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, type ComponentProps, type KeyboardE
 import { Archive, Check, Mail, MailOpen, Minus, Paperclip, Star, Trash2 } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
+import { focusRing } from '@/shared/appChromeStyles';
 import type { MailboxInfo, MailLabels } from '@/lib/mail';
 import type { Conversation } from './conversations';
 import { labelsOfItems } from './labels';
@@ -14,20 +16,18 @@ import { ContextEntries } from './MenuEntries';
 
 function RowButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
   return (
-    <button
-      type="button"
+    <ToolButton
+      size="sm"
       tabIndex={-1}
-      aria-label={label}
-      title={label}
+      label={label}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
       onDoubleClick={(e) => e.stopPropagation()}
-      className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground"
     >
       {children}
-    </button>
+    </ToolButton>
   );
 }
 
@@ -46,7 +46,7 @@ export function SelectBox({ checked, label, onClick, className, ...props }: Omit
         onClick(e);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
-      className={cn('group/box grid size-7 shrink-0 place-items-center rounded-full outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/60', className)}
+      className={cn('group/box grid size-7 shrink-0 place-items-center rounded-full hover:bg-foreground/[0.07]', focusRing, className)}
     >
       <span
         className={cn(
@@ -111,7 +111,7 @@ const MessageRow = ({
       className={cn(
         'group relative flex cursor-default items-center gap-1 border-b border-border/50 py-1.5 pr-3 pl-1.5 text-[13px] select-none @2xl:h-10 @2xl:py-0',
         '[content-visibility:auto] [contain-intrinsic-size:auto_56px] @2xl:[contain-intrinsic-size:auto_40px]',
-        selected ? 'bg-primary/12' : unread ? 'bg-background hover:bg-foreground/[0.04]' : 'bg-foreground/[0.025] hover:bg-foreground/[0.06]',
+        selected ? 'bg-selected' : unread ? 'bg-background hover:bg-foreground/[0.04]' : 'bg-foreground/[0.025] hover:bg-foreground/[0.06]',
         cursor && 'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary',
         className,
       )}

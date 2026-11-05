@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useDin } from '@/sdk/react';
 import { cn } from '@/lib/utils';
+import { ToolButton } from '@/shared/appChrome';
 import { BreakError, Cas } from './calculator/cas';
 import { Basic, ViewSwitch } from './calculator/Basic';
 import { catalogEntry, HOME_MENUS, insertText } from './calculator/catalog';
@@ -718,19 +719,9 @@ function MenuTrigger({ fkey, label }: { fkey: string; label: string }) {
 
 function IconButton({ label, onClick, pressed, children }: { label: string; onClick: () => void; pressed?: boolean; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      aria-pressed={pressed}
-      title={label}
-      className={cn(
-        'grid size-8 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        pressed ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
-      )}
-    >
+    <ToolButton label={label} pressed={pressed} onClick={onClick}>
       {children}
-    </button>
+    </ToolButton>
   );
 }
 

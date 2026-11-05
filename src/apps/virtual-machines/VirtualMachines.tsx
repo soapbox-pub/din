@@ -16,6 +16,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/compon
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ContentPane, ToolButton } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
 import { cleanFsError, parentPath } from '@/lib/fs';
 import { cleanVmsError, type VmInfo, type VmInstallerId, type VmsBridge, type VmsStatus } from '@/lib/vms';
 import type { MenuItem } from '@/sdk';
@@ -60,9 +62,9 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8" aria-label={label} onClick={onClick} disabled={disabled}>
+        <ToolButton label={label} title={undefined} onClick={onClick} disabled={disabled}>
           {children}
-        </Button>
+        </ToolButton>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -282,7 +284,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   const working = vm ? pending.has(vm.id) : false;
 
   return (
-    <div className="flex h-full w-full bg-background text-foreground">
+    <div className="flex h-full w-full text-foreground">
       <Sidebar
         vms={vms}
         loading={isLoading}
@@ -292,41 +294,32 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         onAction={act}
         className="hidden sm:flex"
       />
-      <main className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <TitleBar>
           {vm && (
             <>
-              <div className="mr-2 flex min-w-0 items-center gap-2">
-                <h1 className="truncate text-sm font-semibold">{vm.config.name}</h1>
-                <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  <StateDot state={vm.state} />
-                  {STATE_LABELS[vm.state]}
-                </span>
-                {working && <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Working" />}
-              </div>
-              <div className="flex-1" />
               {isOn(vm) && (
                 <>
                   {vm.state === 'paused' ? (
                     <IconButton label="Resume" onClick={() => act(vm, 'resume')} disabled={working}>
-                      <Play className="size-4" />
+                      <Play {...toolIcon} />
                     </IconButton>
                   ) : (
                     <IconButton label="Pause" onClick={() => act(vm, 'pause')} disabled={working || vm.state !== 'running'}>
-                      <Pause className="size-4" />
+                      <Pause {...toolIcon} />
                     </IconButton>
                   )}
                   <IconButton label="Send Ctrl+Alt+Delete" onClick={() => consoleRef.current?.sendCtrlAltDel()} disabled={!on}>
-                    <Keyboard className="size-4" />
+                    <Keyboard {...toolIcon} />
                   </IconButton>
                   <IconButton label="Take Snapshot" onClick={() => act(vm, 'snapshot')} disabled={!on}>
-                    <Camera className="size-4" />
+                    <Camera {...toolIcon} />
                   </IconButton>
                   <IconButton label="Full Screen" onClick={() => consoleRef.current?.fullscreen()} disabled={!on}>
-                    <Expand className="size-4" />
+                    <Expand {...toolIcon} />
                   </IconButton>
                   <IconButton label="Shut Down" onClick={() => act(vm, 'shutdown')} disabled={working || !on}>
-                    <Power className="size-4" />
+                    <Power {...toolIcon} />
                   </IconButton>
                 </>
               )}
@@ -343,60 +336,73 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
               <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="New virtual machine" onClick={() => setGalleryOpen(true)}>
                 <Plus className="size-4" />
               </Button>
+              {/* The VM's state after what acts on it; its name only while the
+                  sidebar, whose chosen row names it, is hidden. */}
+              <div className="ml-2 flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-sm font-semibold sm:sr-only">{vm.config.name}</h1>
+                <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <StateDot state={vm.state} />
+                  {STATE_LABELS[vm.state]}
+                </span>
+                {working && <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Working" />}
+              </div>
+              <div className="flex-1" />
             </>
           )}
         </TitleBar>
 
-        {!vm ? (
-          isLoading ? (
-            <Skeleton className="m-auto h-40 w-80 rounded-xl" />
-          ) : (
-            <Empty status={status} onInstall={install} onCustom={custom} />
-          )
-        ) : vm.install && !(isOn(vm) && screens.has(vm.id)) ? (
-          <InstallCard
-            key={vm.id}
-            vm={vm}
-            onShowScreen={isOn(vm) ? () => toggleScreen(vm.id) : undefined}
-            onStart={() => act(vm, 'start')}
-            onRetry={() => void busy(vm.id, () => bridge.retryInstall(vm.id))}
-            onChooseIso={() => void pick(vm.install?.installer).then((file) => file && busy(vm.id, () => bridge.retryInstall(vm.id, { iso: file.path })))}
-            onCancel={() => act(vm, 'cancelInstall')}
-          />
-        ) : isOn(vm) ? (
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            <Console key={vm.id} ref={consoleRef} bridge={bridge} vmId={vm.id} scale={scale} />
-            {vm.state === 'paused' && (
-              <div className="absolute inset-0 grid place-items-center bg-black/50 backdrop-blur-[2px]">
-                <div className="space-y-3 text-center text-white">
-                  <p className="text-lg font-semibold">Paused</p>
-                  <Button onClick={() => act(vm, 'resume')} disabled={working}>
-                    <Play className="size-4" aria-hidden />
-                    Resume
-                  </Button>
+        <ContentPane className="max-sm:m-0 max-sm:rounded-none">
+          {!vm ? (
+            isLoading ? (
+              <Skeleton className="m-auto h-40 w-80 rounded-xl" />
+            ) : (
+              <Empty status={status} onInstall={install} onCustom={custom} />
+            )
+          ) : vm.install && !(isOn(vm) && screens.has(vm.id)) ? (
+            <InstallCard
+              key={vm.id}
+              vm={vm}
+              onShowScreen={isOn(vm) ? () => toggleScreen(vm.id) : undefined}
+              onStart={() => act(vm, 'start')}
+              onRetry={() => void busy(vm.id, () => bridge.retryInstall(vm.id))}
+              onChooseIso={() => void pick(vm.install?.installer).then((file) => file && busy(vm.id, () => bridge.retryInstall(vm.id, { iso: file.path })))}
+              onCancel={() => act(vm, 'cancelInstall')}
+            />
+          ) : isOn(vm) ? (
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <Console key={vm.id} ref={consoleRef} bridge={bridge} vmId={vm.id} scale={scale} />
+              {vm.state === 'paused' && (
+                <div className="absolute inset-0 grid place-items-center bg-black/50 backdrop-blur-[2px]">
+                  <div className="space-y-3 text-center text-white">
+                    <p className="text-lg font-semibold">Paused</p>
+                    <Button onClick={() => act(vm, 'resume')} disabled={working}>
+                      <Play className="size-4" aria-hidden />
+                      Resume
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-            {vm.install && (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="absolute right-3 top-3 shadow-md"
-                onClick={() => toggleScreen(vm.id)}
-              >
-                Show Progress
-              </Button>
-            )}
-            {vm.changesPending && (
-              <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs text-white">
-                Some settings take effect when it next starts.
-              </p>
-            )}
-          </div>
-        ) : (
-          <Details vm={vm} working={working} onAction={(action) => act(vm, action)} onError={fail} />
-        )}
-      </main>
+              )}
+              {vm.install && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="absolute right-3 top-3 shadow-md"
+                  onClick={() => toggleScreen(vm.id)}
+                >
+                  Show Progress
+                </Button>
+              )}
+              {vm.changesPending && (
+                <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-xs text-white">
+                  Some settings take effect when it next starts.
+                </p>
+              )}
+            </div>
+          ) : (
+            <Details vm={vm} working={working} onAction={(action) => act(vm, action)} onError={fail} />
+          )}
+        </ContentPane>
+      </div>
 
       <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
         <DialogContent className="sm:max-w-xl">

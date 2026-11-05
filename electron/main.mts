@@ -118,6 +118,7 @@ import {
   type NightLightState,
 } from './night-light.mts';
 import { registerTrayHandlers } from './tray.mts';
+import { registerMenuHandlers, showMenu } from './menus.mts';
 import { registerOpenUri } from './open-uri.mts';
 import { attachLaunchedGuest, registerDinLaunch, serveLaunched } from './din-launch.mts';
 import { registerDinFileApps } from './din-file-apps.mts';
@@ -3789,9 +3790,7 @@ function popupEditMenu(contents: Electron.WebContents, params: Electron.ContextM
     menu.append(new MenuItem({ role: 'selectAll' }));
   }
   if (menu.items.length === 0) return;
-  setImmediate(() => {
-    if (shellWindow && !shellWindow.isDestroyed()) menu.popup({ window: shellWindow });
-  });
+  setImmediate(() => showMenu(contents, menu, params.x, params.y));
 }
 
 function forwardGuestInput(contents: Electron.WebContents): void {
@@ -6032,6 +6031,7 @@ app.whenReady().then(() => {
   registerQuickShareHandlers({ assertShellSender, sendToShell });
   registerVmsHandlers({ assertShellSender, sendToShell });
   registerTrayHandlers({ assertShellSender, sendToShell });
+  registerMenuHandlers({ assertShellSender, sendToShell, shellWindow: () => shellWindow });
   registerOpenUri({ sendToShell });
   registerNotificationHandlers({
     isShellSender,
@@ -6983,11 +6983,7 @@ app.on('web-contents-created', (_event, contents) => {
     // menu opened mid-press dismisses itself instantly - the "right-click
     // menu flashes and never opens" glitch. Deferring lets the press finish
     // so the popup survives to be used.
-    setImmediate(() => {
-      if (shellWindow && !shellWindow.isDestroyed()) {
-        menu.popup({ window: shellWindow });
-      }
-    });
+    setImmediate(() => showMenu(contents, menu, params.x, params.y));
   });
 });
 

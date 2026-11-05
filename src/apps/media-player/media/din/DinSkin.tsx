@@ -33,12 +33,12 @@ function TitlebarTabs({ tab, showList }: { tab: DinTab; showList: boolean }) {
           </button>
         ))}
       </div>
-      <span className="flex-1" />
       {tab === 'now-playing' && (
-        <IconButton label={showList ? 'Hide list pane' : 'Show list pane'} aria-pressed={showList} onClick={() => setPrefs({ showList: !showList })} className="size-6 rounded-md">
+        <IconButton label={showList ? 'Hide list pane' : 'Show list pane'} aria-pressed={showList} onClick={() => setPrefs({ showList: !showList })} className="ml-1 size-6 rounded-md">
           <PanelRight className="size-4" />
         </IconButton>
       )}
+      <span className="flex-1" />
       <WindowControls className="ml-2" />
     </WindowDragRegion>
   );

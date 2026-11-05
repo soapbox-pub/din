@@ -551,8 +551,9 @@ export interface DinClipboard {
 
 /**
  * Light or dark is the web's `prefers-color-scheme`, which follows Din's
- * (a profile theme's too); the runtime also sets `color-scheme` and the
- * `dark` class on `:root`.
+ * (a profile theme's too); the runtime also sets the `dark` class on
+ * `:root`, and `color-scheme` on `body` (the root's stays normal, so the
+ * page's canvas is transparent and the window's glass shows through it).
  */
 export interface ThemeSnapshot {
   /**

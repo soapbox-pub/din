@@ -81,6 +81,7 @@ export function TileMenuContent({
           {appWindows.map((w, i) => (
             <ContextMenuItem
               key={w.id}
+              inset
               onSelect={() => focus(w.id)}
               className={cn(w.id === activeWindowId && 'font-semibold', w.minimized && 'text-muted-foreground')}
             >
@@ -93,7 +94,7 @@ export function TileMenuContent({
       {app.actions && app.actions.length > 0 && (
         <>
           {app.actions.map((action) => (
-            <ContextMenuItem key={action.label} onSelect={() => open(app.id, { ...action.params, actionAt: Date.now() })}>
+            <ContextMenuItem key={action.label} inset onSelect={() => open(app.id, { ...action.params, actionAt: Date.now() })}>
               {action.label}
             </ContextMenuItem>
           ))}

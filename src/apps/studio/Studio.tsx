@@ -613,10 +613,12 @@ export function Studio() {
           <Clapperboard className="size-4 text-muted-foreground" aria-hidden />
           <span className="hidden @2xl/studio:inline">Studio</span>
         </div>
-        <div className="absolute left-1/2 hidden -translate-x-1/2 @xl/studio:block">
-          <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} />
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+        {/* What sets up the recording follows the name, as every app's title
+            bar has what acts on its content at the left. */}
+        <div className="ml-2 flex items-center gap-2">
+          <div className="hidden @xl/studio:block">
+            <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} />
+          </div>
           <div className="@xl/studio:hidden">
             <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} iconOnly />
           </div>
@@ -631,8 +633,9 @@ export function Studio() {
           >
             <PanelRight className="size-4" />
           </button>
-          <WindowControls className="ml-2" />
         </div>
+        <div className="min-w-2 flex-1" />
+        <WindowControls className="ml-2" />
       </WindowDragRegion>
 
       <div className="flex min-h-0 flex-1">

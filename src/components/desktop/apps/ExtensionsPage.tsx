@@ -92,14 +92,14 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
     // Opaque, like the settings page: the surface underneath is a white
     // about:blank.
     <div
-      className="absolute inset-0 flex flex-col bg-background text-foreground"
+      className="@container absolute inset-0 flex flex-col bg-background text-foreground"
       onKeyDown={(e) => {
         if (e.key !== 'Escape' || !selected) return;
         e.stopPropagation();
         select(null);
       }}
     >
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border/60 px-4 py-3 sm:px-6">
+      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border/60 px-4 py-3 @2xl:px-6">
         <button
           type="button"
           onClick={() => {
@@ -127,7 +127,7 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
             )}
           </TopTab>
         </nav>
-        <div className="relative ml-auto w-full sm:w-80">
+        <div className="relative ml-auto w-full @2xl:w-80">
           <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <input
             type="search"
@@ -156,7 +156,7 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-6 sm:px-8 sm:py-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 py-6 @2xl:px-8 @2xl:py-8">
           {selected ? (
             <ExtensionDetail
               key={packageCoordinate(selected)}
@@ -413,14 +413,14 @@ function FeaturedSlide({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
   const shot = pkg.screenshots[0];
   return (
     <PackageContextMenu pkg={pkg} handlers={handlers}>
-      <div className="relative grid overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 motion-safe:animate-in motion-safe:fade-in md:grid-cols-[1fr_1.2fr]">
+      <div className="relative grid overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 motion-safe:animate-in motion-safe:fade-in @3xl:grid-cols-[1fr_1.2fr]">
         <button
           type="button"
           onClick={() => onSelect(pkg)}
           aria-label={`View ${pkg.title}`}
           className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         />
-        <div className="pointer-events-none relative flex flex-col justify-center gap-4 p-6 sm:p-10">
+        <div className="pointer-events-none relative flex flex-col justify-center gap-4 p-6 @2xl:p-10">
           <div className="flex items-center gap-3">
             <ExtensionIcon pkg={pkg} className="size-14" />
             <div className="min-w-0">
@@ -430,13 +430,13 @@ function FeaturedSlide({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
               {author.name && <p className="truncate text-sm text-muted-foreground">by {author.name}</p>}
             </div>
           </div>
-          <h2 className="text-3xl font-bold leading-tight tracking-tight sm:text-4xl">{pkg.title}</h2>
+          <h2 className="text-3xl font-bold leading-tight tracking-tight @2xl:text-4xl">{pkg.title}</h2>
           {pkg.summary && <p className="line-clamp-3 max-w-prose text-base text-muted-foreground">{pkg.summary}</p>}
           <div className="pointer-events-auto relative z-10">
             <AddButton pkg={pkg} handlers={handlers} />
           </div>
         </div>
-        <div className="pointer-events-none relative hidden min-h-64 items-center justify-center p-6 md:flex">
+        <div className="pointer-events-none relative hidden min-h-64 items-center justify-center p-6 @3xl:flex">
           {shot ? (
             <img
               src={shot}
@@ -456,7 +456,7 @@ function FeaturedSlide({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
 
 function CardGrid({ packages, handlers, onSelect }: { packages: ExtensionPackage[]; handlers: PackageHandlers; onSelect: (address: PackageAddress) => void }) {
   return (
-    <div className="grid grid-cols-1 gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-x-5 gap-y-8 @2xl:grid-cols-2 @5xl:grid-cols-3 @7xl:grid-cols-4">
       {packages.map((pkg) => (
         <ExtensionCard key={packageCoordinate(pkg)} pkg={pkg} handlers={handlers} onSelect={onSelect} />
       ))}
@@ -520,7 +520,7 @@ function ExtensionCard({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
 
 function CardGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-x-5 gap-y-8 @2xl:grid-cols-2 @5xl:grid-cols-3 @7xl:grid-cols-4">
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="flex flex-col gap-3">
           <Skeleton className="aspect-[16/10] rounded-2xl" />
@@ -605,7 +605,7 @@ function ExtensionDetail({
     <div ref={ref} tabIndex={-1} className="flex flex-col gap-10 outline-none" aria-label={`${pkg.title} details`}>
       <div className="flex flex-col gap-6">
         {back}
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-6 @2xl:flex-row @2xl:items-center">
           <ExtensionIcon pkg={pkg} className="size-20" />
           <div className="min-w-0 flex-1">
             <h1 className="break-words text-4xl font-bold tracking-tight">{pkg.title}</h1>
@@ -677,7 +677,7 @@ function ExtensionDetail({
 
       <section className="flex flex-col gap-4" aria-label="Details">
         <h2 className="text-xl font-semibold tracking-tight">Details</h2>
-        <dl className="grid grid-cols-1 divide-y divide-border rounded-2xl border border-border bg-card text-sm">
+        <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
           <InfoRow label="Version">{pkg.version || (loadingRelease ? '…' : 'Unknown')}</InfoRow>
           <InfoRow label="Updated">{updated}</InfoRow>
           <InfoRow label="Size">{pkg.size ? formatBytes(pkg.size) : loadingRelease ? '…' : 'Unknown'}</InfoRow>

@@ -16,12 +16,12 @@ export const tabListClass = 'flex min-w-0 flex-1 touch-none items-center gap-1 o
 
 /** The raised look of the active tab (and of one being dragged). */
 export const tabRaisedClass =
-  'bg-background text-foreground shadow-[0_0.5px_1px_rgb(0_0_0/0.07),0_0_0_0.5px_rgb(0_0_0/0.09)] dark:bg-foreground/[0.12] dark:shadow-[0_0.5px_1px_rgb(0_0_0/0.25)]';
+  'glass-control glass-control-raised bg-background text-foreground shadow-[0_0.5px_1px_rgb(0_0_0/0.07),0_0_0_0.5px_rgb(0_0_0/0.09)] dark:bg-foreground/[0.12] dark:shadow-[0_0.5px_1px_rgb(0_0_0/0.25)]';
 
 /** A tab. */
 export function tabClass({ active, dragging }: { active: boolean; dragging?: boolean }) {
   return cn(
-    'group relative flex h-7 cursor-default select-none items-center justify-center rounded-md text-xs transition-[background-color,color] duration-150',
+    'glass-control group relative flex h-7 cursor-default select-none items-center justify-center rounded-md text-xs transition-[background-color,color] duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     active
       ? tabRaisedClass

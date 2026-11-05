@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, Search, StickyNote } from 'lucide-react';
+import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, StickyNote } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +21,8 @@ import { cleanPasswordsError, type CopyField, type PasswordItem, type PasswordLi
 import { useOnLaunch, windowLaunch, type Launch } from '@/shared/launch';
 import { useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
+import { SearchField, ToolButton } from '@/shared/appChrome';
+import { flushPane, focusRing, listRowClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
 import { ImportDialog } from './passwords/ImportDialog';
 import { ItemDetail } from './passwords/ItemDetail';
 import { ItemEditor } from './passwords/ItemEditor';
@@ -236,12 +238,45 @@ function Vault({ state }: { state: PasswordsState }) {
     setSidebarOpen(false);
   };
 
+  // New (or, in Recently Deleted, Delete All): beside the name in the
+  // sidebar's title, or the search while the sidebar's hidden.
+  const newItem = section.type === 'trash' ? (
+    <Button variant="ghost" size="sm" disabled={items.length === 0} onClick={() => setEmptying(true)}>
+      Delete All
+    </Button>
+  ) : (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ToolButton label="New item" title="New item (Ctrl+N)">
+          <Plus {...toolIcon} />
+        </ToolButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => startNew('login')}>
+          <KeyRound className="size-4" aria-hidden />
+          New Password
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => startNew('note')}>
+          <StickyNote className="size-4" aria-hidden />
+          New Secure Note
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+          <FileUp className="size-4" aria-hidden />
+          Import Passwords…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const folderName = (id: string | null) => list?.groups.find((g) => g.id === id)?.name ?? '';
   const folderCount = (id: string) => (list ? itemsIn(list, { type: 'folder', id }).length : 0);
 
   return (
     <>
-      <div className="flex h-full w-full" onKeyDownCapture={onKeyDown}>
+      <div className="relative flex h-full w-full" onKeyDownCapture={onKeyDown}>
+        {/* The strip above the inset content still drags the window. */}
+        <WindowDragRegion className="absolute inset-x-0 top-0 h-2" />
         {list && (
           <Sidebar
             list={list}
@@ -253,9 +288,10 @@ function Vault({ state }: { state: PasswordsState }) {
             onEmptyTrash={() => setEmptying(true)}
             onSettings={() => setSettingsOpen(true)}
             onLock={() => void bridge.lock()}
+            actions={newItem}
             className={cn(
               sidebarOpen ? 'absolute inset-y-0 left-0 z-30 flex bg-background shadow-xl' : 'hidden',
-              '@3xl/passwords:static @3xl/passwords:flex @3xl/passwords:bg-muted/40 @3xl/passwords:shadow-none',
+              '@3xl/passwords:static @3xl/passwords:flex @3xl/passwords:bg-transparent @3xl/passwords:shadow-none',
             )}
           />
         )}
@@ -268,144 +304,116 @@ function Vault({ state }: { state: PasswordsState }) {
           />
         )}
 
-        <section
-          aria-label={sectionTitle(section, list)}
-          className={cn(
-            'flex min-w-0 flex-1 flex-col border-r border-border/60 @2xl/passwords:w-72 @2xl/passwords:flex-none',
-            showDetail && 'hidden @2xl/passwords:flex',
-          )}
-        >
-          <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1 pr-2 pl-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 @3xl/passwords:hidden"
-              aria-label="Show the sidebar"
-              onClick={() => setSidebarOpen(true)}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0">
+            <WindowDragRegion
+              className={cn(
+                'flex h-12 min-w-0 flex-1 shrink-0 items-center gap-2 pr-3 pl-3',
+                showDetail && 'hidden @2xl/passwords:flex',
+              )}
             >
-              <PanelLeft className="size-4" />
-            </Button>
-            <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{sectionTitle(section, list)}</h1>
-            {section.type === 'trash' ? (
-              <Button variant="ghost" size="sm" disabled={items.length === 0} onClick={() => setEmptying(true)}>
-                Delete All
-              </Button>
-            ) : (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="size-8" aria-label="New item" title="New item (Ctrl+N)">
-                    <Plus className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => startNew('login')}>
-                    <KeyRound className="size-4" aria-hidden />
-                    New Password
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => startNew('note')}>
-                    <StickyNote className="size-4" aria-hidden />
-                    New Secure Note
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => setImportOpen(true)}>
-                    <FileUp className="size-4" aria-hidden />
-                    Import Passwords…
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            <div className="@2xl/passwords:hidden">
-              <WindowControls />
-            </div>
-          </WindowDragRegion>
-          <div className="px-3 pb-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
+              <ToolButton label="Show the sidebar" className="@3xl/passwords:hidden" onClick={() => setSidebarOpen(true)}>
+                <PanelLeft {...toolIcon} />
+              </ToolButton>
+              {/* The search across the title bar, as Mail's. */}
+              <SearchField
                 ref={searchRef}
-                type="search"
-                aria-label="Search"
-                placeholder="Search"
+                aria-label={`Search ${sectionTitle(section, list)}`}
+                placeholder={`Search ${sectionTitle(section, list)}`}
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onValueChange={setSearch}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowDown') {
                     e.preventDefault();
                     moveSelection(1);
                   }
                 }}
-                className="h-8 bg-muted/60 pl-8"
+                className={titleSearch}
               />
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {!list ? (
-              <ListSkeleton />
-            ) : items.length === 0 ? (
-              <EmptyList section={section} searching={!!search.trim()} onNew={startNew} onImport={() => setImportOpen(true)} />
-            ) : (
-              <ul
-                ref={listRef}
-                className="space-y-0.5"
-                onKeyDown={(e) => {
-                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    moveSelection(e.key === 'ArrowDown' ? 1 : -1);
-                  }
+              {/* With the sidebar showing, New is in its title. */}
+              <div className="flex @3xl/passwords:hidden">{newItem}</div>
+              <div className="min-w-2 flex-1" />
+              <WindowControls />
+            </WindowDragRegion>
+            <TitleBar className={cn('min-w-0 flex-1 @2xl/passwords:hidden', !showDetail && 'hidden')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="@2xl/passwords:hidden"
+                onClick={() => {
+                  setEditing(null);
+                  setSelected(null);
                 }}
               >
-                {items.map((item) => (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    list={list}
-                    active={item.id === selected}
-                    onSelect={() => {
-                      setEditing(null);
-                      setSelected(item.id);
-                    }}
-                    actions={actions}
-                  />
-                ))}
-              </ul>
-            )}
+                <ChevronLeft className="size-4" aria-hidden />
+                {sectionTitle(section, list)}
+              </Button>
+            </TitleBar>
           </div>
-        </section>
+          <div className={cn('flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border/60 bg-background @3xl/passwords:mr-2 @3xl/passwords:mb-2 @3xl/passwords:rounded-2xl @3xl/passwords:border-t-0 @3xl/passwords:clay', flushPane)}>
+          <section
+            aria-label={sectionTitle(section, list)}
+            className={cn(
+              'flex min-w-0 flex-1 flex-col border-r border-border/60 @2xl/passwords:w-72 @2xl/passwords:flex-none',
+              showDetail && 'hidden @2xl/passwords:flex',
+            )}
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-2">
+              {!list ? (
+                <ListSkeleton />
+              ) : items.length === 0 ? (
+                <EmptyList section={section} searching={!!search.trim()} onNew={startNew} onImport={() => setImportOpen(true)} />
+              ) : (
+                <ul
+                  ref={listRef}
+                  className="space-y-0.5"
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      moveSelection(e.key === 'ArrowDown' ? 1 : -1);
+                    }
+                  }}
+                >
+                  {items.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      list={list}
+                      active={item.id === selected}
+                      onSelect={() => {
+                        setEditing(null);
+                        setSelected(item.id);
+                      }}
+                      actions={actions}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
 
-        <main className={cn('flex min-w-0 flex-1 flex-col', !showDetail && 'hidden @2xl/passwords:flex')}>
-          <TitleBar>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="@2xl/passwords:hidden"
-              onClick={() => {
-                setEditing(null);
-                setSelected(null);
-              }}
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-              {sectionTitle(section, list)}
-            </Button>
-          </TitleBar>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {list && editing ? (
-              <ItemEditor
-                key={editing.initial.id ?? 'new'}
-                initial={editing.initial}
-                list={list}
-                onCancel={() => setEditing(null)}
-                onSaved={(id) => {
-                  setEditing(null);
-                  setSelected(id);
-                }}
-              />
-            ) : list && selected ? (
-              <ItemDetail key={selected} id={selected} list={list} actions={actions} onEdit={(initial) => setEditing({ initial })} />
-            ) : (
-              <NothingSelected count={list?.items.filter((i) => !i.trashed).length ?? 0} autoUnlock={state.autoUnlock} />
-            )}
+          <main className={cn('flex min-w-0 flex-1 flex-col', !showDetail && 'hidden @2xl/passwords:flex')}>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {list && editing ? (
+                <ItemEditor
+                  key={editing.initial.id ?? 'new'}
+                  initial={editing.initial}
+                  list={list}
+                  onCancel={() => setEditing(null)}
+                  onSaved={(id) => {
+                    setEditing(null);
+                    setSelected(id);
+                  }}
+                />
+              ) : list && selected ? (
+                <ItemDetail key={selected} id={selected} list={list} actions={actions} onEdit={(initial) => setEditing({ initial })} />
+              ) : (
+                <NothingSelected count={list?.items.filter((i) => !i.trashed).length ?? 0} autoUnlock={state.autoUnlock} />
+              )}
+            </div>
+          </main>
           </div>
-        </main>
+        </div>
       </div>
 
       <SettingsDialog
@@ -524,14 +532,14 @@ function ItemRow({
             aria-current={active ? 'true' : undefined}
             className={cn(
               'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              active ? 'bg-primary text-primary-foreground' : 'hover:bg-foreground/10',
+              focusRing,
+              listRowClass({ selected: active }),
             )}
           >
             <ItemIcon item={item} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{displayTitle(item)}</span>
-              <span className={cn('block truncate text-xs', active ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+              <span className="block truncate text-xs text-muted-foreground">
                 {item.kind === 'note' ? 'Secure note' : item.username || siteHost(item.url) || 'No username'}
               </span>
             </span>

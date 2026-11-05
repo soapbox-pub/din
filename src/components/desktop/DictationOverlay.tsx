@@ -2,6 +2,7 @@ import { Loader2, Mic, MicOff, X } from 'lucide-react';
 import { useDictation } from '@/hooks/useDictation';
 import { cancelDictation } from '@/lib/dictation';
 import { cn } from '@/lib/utils';
+import { glassPanel } from '@/shared/appChromeStyles';
 
 /**
  * The bar that shows dictation listening: the microphone's level, what's
@@ -31,7 +32,7 @@ export function DictationOverlay() {
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-auto flex w-[min(36rem,100%)] items-center gap-3 rounded-2xl border border-border/60 bg-background/85 py-3 pl-3 pr-2 shadow-lg backdrop-blur-md"
+          className={cn('pointer-events-auto flex w-[min(36rem,100%)] items-center gap-3 py-3 pl-3 pr-2', glassPanel)}
         >
           <span className="relative grid size-10 shrink-0 place-items-center">
             {status === 'listening' && (

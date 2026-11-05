@@ -15,10 +15,14 @@ export interface AccessibilityPreferences {
   increaseContrast: boolean;
   /** A percentage; 100 is normal. */
   textSize: number;
+  /** The glass, unless reduceTransparency (or increaseContrast) makes it solid. */
+  glass: 'liquid' | 'frosted';
 }
 
 export const REDUCE_TRANSPARENCY_ATTRIBUTE = 'data-reduce-transparency';
 export const INCREASE_CONTRAST_ATTRIBUTE = 'data-increase-contrast';
+/** The root custom property naming what glass is made of (liquid, frosted or solid), which src/index.css's style queries follow; apps get it with the theme. */
+export const GLASS_MATERIAL_PROPERTY = '--glass-material';
 /** The root custom property every Tailwind text size is multiplied by. */
 export const TEXT_SCALE_PROPERTY = '--din-text-scale';
 
@@ -87,4 +91,5 @@ export function applyAccessibility(preferences: AccessibilityPreferences): void 
   // Always set, so apps that took a larger size from the theme's tokens take
   // the normal one back.
   root.style.setProperty(TEXT_SCALE_PROPERTY, String(clampTextSize(preferences.textSize) / 100));
+  root.style.setProperty(GLASS_MATERIAL_PROPERTY, preferences.reduceTransparency || preferences.increaseContrast ? 'solid' : preferences.glass);
 }

@@ -27,6 +27,8 @@ import { DialogButton, Overlay } from '@/shared/dialogs';
 import { droppedHandles, fileTypes, pickFiles, pickSaveFile, useLaunchFiles, writeFile } from '@/shared/fileHandles';
 import { DRAG_MIME } from '@/sdk';
 import { toast } from '@/shared/toast';
+import { ContentPane, SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
 import {
   blankContact,
   compareContacts,
@@ -117,6 +119,7 @@ export function Contacts() {
   });
   const anchor = useRef<string | null>(null);
   const [search, setSearch] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortByState] = useState<SortBy>(() => (localStorage.getItem(SORT_KEY) === 'given' ? 'given' : 'family'));
   const [editor, setEditor] = useState<{ draft: Contact; was: StoredContact | null } | null>(() =>
     'new' in windowLaunch().params && !wasReopened() ? { draft: blankContact(), was: null } : null,
@@ -487,7 +490,7 @@ export function Contacts() {
   };
 
   const header = (children: React.ReactNode, className?: string) => (
-    <WindowDragRegion className={cn('flex h-13 shrink-0 items-center gap-1', className)}>{children}</WindowDragRegion>
+    <WindowDragRegion className={cn('flex h-12 shrink-0 items-center gap-1', className)}>{children}</WindowDragRegion>
   );
 
   if (!fsAvailable) {
@@ -537,16 +540,15 @@ export function Contacts() {
   return (
     <div className="relative flex h-full text-foreground" onDragOver={(e) => !e.dataTransfer.types.includes(CONTACT_DRAG) && e.preventDefault()} onDrop={onDrop}>
       {showSidebar && (
-        <aside aria-label="Groups" className="flex w-56 shrink-0 flex-col border-r border-border/60 bg-background/60">
-          {header(
-            <>
-              <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-[17px] font-bold">Contacts</h1>
-              <ToolButton label="Hide sidebar" onClick={() => toggleSidebar(false)}>
-                <PanelLeft className="size-4" strokeWidth={1.75} />
-              </ToolButton>
-            </>,
-            'pr-2 pl-4',
-          )}
+        <aside aria-label="Groups" className={cn('flex shrink-0 flex-col', sidebarWidthClass)}>
+          <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/contacts.png" />} title="Contacts">
+            <ToolButton label="New contact" onClick={newContact}>
+              <Plus {...toolIcon} />
+            </ToolButton>
+            <ToolButton label="Hide sidebar" onClick={() => toggleSidebar(false)}>
+              <PanelLeft {...toolIcon} />
+            </ToolButton>
+          </SidebarTitle>
           <Sidebar
             source={source}
             onSource={showSource}
@@ -564,84 +566,110 @@ export function Contacts() {
         </aside>
       )}
 
-      {showList && (
-        <section aria-label={sourceTitle} className={cn('flex min-w-0 flex-col bg-background', twoPanes ? 'w-72 shrink-0 border-r border-border/60' : 'flex-1')}>
-          {header(
-            <>
-              {!showSidebar && sidebarFits && (
-                <ToolButton label="Show sidebar" onClick={() => toggleSidebar(true)}>
-                  <PanelLeft className="size-4" strokeWidth={1.75} />
-                </ToolButton>
-              )}
-              {!sidebarFits && <SourcePicker source={source} groups={groups} phones={phones} onSource={showSource} />}
-              {sidebarFits && <h2 className="min-w-0 flex-1 truncate pl-1 text-[15px] font-semibold">{sourceTitle}</h2>}
-              <span className="text-xs text-muted-foreground tabular-nums" aria-label={`${items.length} contacts`}>{listLoading ? '' : items.length}</span>
-              <ToolButton label="New contact" onClick={newContact}>
-                <Plus className="size-4.5" />
-              </ToolButton>
-              {!twoPanes && <WindowControls />}
-            </>,
-            showSidebar || !sidebarFits ? 'pr-2 pl-3' : 'pr-2 pl-2',
-          )}
-          <ContactList
-            title={sourceTitle}
-            items={items}
-            sortBy={sortBy}
-            selected={new Set(chosen.map((e) => e.key))}
-            onSelect={select}
-            menuFor={(key) => menuOf(rowTargets(key))}
-            onAction={(key, a) => act(rowTargets(key), a)}
-            search={search}
-            onSearch={setSearch}
-            loading={listLoading}
-            empty={emptyList}
-            dragKeys={source.kind === 'phone' ? undefined : (key) => rowTargets(key).map((e) => e.key)}
-          />
-        </section>
-      )}
-
-      {showPane && (
-        <main className="flex min-w-0 flex-1 flex-col bg-background">
-          {header(
-            <>
-              {!twoPanes && (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0">
+          {showList &&
+            header(
+              <>
+                {!showSidebar && sidebarFits && (
+                  <ToolButton label="Show sidebar" onClick={() => toggleSidebar(true)}>
+                    <PanelLeft {...toolIcon} />
+                  </ToolButton>
+                )}
+                {!sidebarFits && <SourcePicker source={source} groups={groups} phones={phones} onSource={showSource} />}
+                <SearchField
+                  id="contacts-search"
+                  value={search}
+                  onValueChange={setSearch}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      listRef.current?.focus();
+                      if (items[0] && !selected.length) select(items[0].key, { range: false, toggle: false });
+                    }
+                  }}
+                  placeholder={`Search ${sourceTitle}`}
+                  aria-label={`Search ${sourceTitle}`}
+                  className={titleSearch}
+                />
+                {/* With the sidebar showing, its title has New and its row the count. */}
+                {!showSidebar && (
+                  <>
+                    <span className="text-xs text-muted-foreground tabular-nums" aria-label={`${items.length} contacts`}>{listLoading ? '' : items.length}</span>
+                    <ToolButton label="New contact" onClick={newContact}>
+                      <Plus {...toolIcon} />
+                    </ToolButton>
+                  </>
+                )}
+                <div className="min-w-2 flex-1" />
+                <WindowControls />
+              </>,
+              cn('min-w-0 flex-1 gap-2', showSidebar || !sidebarFits ? 'pr-3 pl-3' : 'pr-3 pl-2'),
+            )}
+          {showPane && !twoPanes &&
+            header(
+              <>
                 <ToolButton label="Back" onClick={() => { setEditor(null); setSelected([]); }}>
-                  <ChevronLeft className="size-4.5" />
+                  <ChevronLeft {...toolIcon} />
                 </ToolButton>
-              )}
-              <h2 className="min-w-0 flex-1 truncate pl-1 text-[15px] font-semibold">{editor ? (editor.was ? 'Edit Contact' : 'New Contact') : ''}</h2>
-              <WindowControls />
-            </>,
-            'pr-3 pl-2',
+                <h2 className="min-w-0 flex-1 truncate pl-1 text-[15px] font-semibold">{editor ? (editor.was ? 'Edit Contact' : 'New Contact') : ''}</h2>
+                <WindowControls />
+              </>,
+              'min-w-0 flex-1 pr-3 pl-2',
+            )}
+        </div>
+
+        <ContentPane inset={showSidebar} className="flex-row">
+          {showList && (
+            <section aria-label={sourceTitle} className={cn('flex min-w-0 flex-col', twoPanes ? 'w-72 shrink-0 border-r border-border/60' : 'flex-1')}>
+              <ContactList
+                title={sourceTitle}
+                items={items}
+                sortBy={sortBy}
+                selected={new Set(chosen.map((e) => e.key))}
+                onSelect={select}
+                menuFor={(key) => menuOf(rowTargets(key))}
+                onAction={(key, a) => act(rowTargets(key), a)}
+                listRef={listRef}
+                loading={listLoading}
+                empty={emptyList}
+                dragKeys={source.kind === 'phone' ? undefined : (key) => rowTargets(key).map((e) => e.key)}
+              />
+            </section>
           )}
-          {editor ? (
-            <ContactEditor
-              key={editor.was?.uid ?? editor.draft.uid}
-              initial={editor.draft}
-              isNew={!editor.was}
-              groups={groups}
-              saving={saving}
-              onSave={(c) => void save(c)}
-              onCancel={() => setEditor(null)}
-            />
-          ) : current ? (
-            <ContactCard
-              key={current.key}
-              contact={current.contact}
-              menu={menuOf([current])}
-              onAction={(a) => act([current], a)}
-              fields={fields}
-              readOnly={current.phone ? { from: current.phone.name, inBook: !!current.phone.inBook } : undefined}
-            />
-          ) : chosen.length > 1 ? (
-            <Selection count={chosen.length} onExport={() => act(chosen, 'export')} onDelete={chosenStored.length ? () => setDeleting(chosenStored) : undefined} />
-          ) : (
-            <div className="grid flex-1 place-items-center p-8 text-center text-[15px] text-muted-foreground">
-              {items.length ? 'Choose someone to see their card.' : ''}
+
+          {showPane && (
+            <div className="flex min-w-0 flex-1 flex-col">
+              {editor ? (
+                <ContactEditor
+                  key={editor.was?.uid ?? editor.draft.uid}
+                  initial={editor.draft}
+                  isNew={!editor.was}
+                  groups={groups}
+                  saving={saving}
+                  onSave={(c) => void save(c)}
+                  onCancel={() => setEditor(null)}
+                />
+              ) : current ? (
+                <ContactCard
+                  key={current.key}
+                  contact={current.contact}
+                  menu={menuOf([current])}
+                  onAction={(a) => act([current], a)}
+                  fields={fields}
+                  readOnly={current.phone ? { from: current.phone.name, inBook: !!current.phone.inBook } : undefined}
+                />
+              ) : chosen.length > 1 ? (
+                <Selection count={chosen.length} onExport={() => act(chosen, 'export')} onDelete={chosenStored.length ? () => setDeleting(chosenStored) : undefined} />
+              ) : (
+                <div className="grid flex-1 place-items-center p-8 text-center text-[15px] text-muted-foreground">
+                  {items.length ? 'Choose someone to see their card.' : ''}
+                </div>
+              )}
             </div>
           )}
-        </main>
-      )}
+        </ContentPane>
+      </div>
 
       {naming && (
         <Overlay label={naming.from !== null ? 'Rename group' : 'New group'} onClose={() => setNaming(null)} className="max-w-sm">
@@ -775,16 +803,3 @@ function SourcePicker({ source, groups, phones, onSource }: { source: Source; gr
   );
 }
 
-function ToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="grid size-8 shrink-0 place-items-center rounded-md text-foreground/80 outline-none hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      {children}
-    </button>
-  );
-}

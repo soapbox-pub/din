@@ -21,6 +21,7 @@ import {
   type ScreenShareSource,
 } from '@/lib/screenShare';
 import { cn } from '@/lib/utils';
+import { trayHeader, trayList, trayTitle, trayTokenClass } from './trayPanel';
 
 /**
  * Desktop-lifetime host for web pages asking to share the screen
@@ -238,18 +239,14 @@ export const ScreenShareMenuItem = memo(function ScreenShareMenuItem() {
         </Button>
       </PopoverTrigger>
       <BarPopoverContent align="end" className="w-80 p-0">
-        <div className="border-b border-border/60 px-4 py-2.5">
-          <p className="text-sm font-semibold">Screen sharing</p>
-        </div>
-        <ul className="divide-y divide-border/60">
+        <header className={trayHeader}>
+          <h2 className={trayTitle}>Screen sharing</h2>
+        </header>
+        <ul className={trayList}>
           {shares.map((share) => (
-            <li key={share.id} className="flex items-center gap-3 px-4 py-3">
-              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-secondary">
-                {share.kind === 'screen' ? (
-                  <Monitor className="size-4 text-muted-foreground" aria-hidden />
-                ) : (
-                  <AppWindow className="size-4 text-muted-foreground" aria-hidden />
-                )}
+            <li key={share.id} className="flex items-center gap-3 rounded-lg px-2.5 py-2">
+              <span className={trayTokenClass(true)}>
+                {share.kind === 'screen' ? <Monitor className="size-4" aria-hidden /> : <AppWindow className="size-4" aria-hidden />}
               </span>
               <p className="min-w-0 flex-1 break-words text-sm">{describeShare(share)}</p>
               <Button size="sm" variant="destructive" onClick={() => stop(share.id)}>

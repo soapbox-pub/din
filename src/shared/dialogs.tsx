@@ -41,7 +41,7 @@ export function Overlay({
           if (e.key === 'Escape') onClose();
         }}
         className={cn(
-          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-popover text-popover-foreground shadow-2xl outline-none',
+          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-xl border border-foreground/10 bg-popover text-popover-foreground shadow-2xl outline-none',
           'motion-safe:animate-in motion-safe:zoom-in-95',
           className,
         )}
@@ -61,10 +61,10 @@ export function DialogButton({
     <button
       type="button"
       className={cn(
-        'h-8 rounded-md px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
-        variant === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary/90',
-        variant === 'secondary' && 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
-        variant === 'destructive' && 'bg-destructive text-white hover:bg-destructive/90',
+        'h-8 rounded-full px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50',
+        variant === 'primary' && 'bg-pigment text-primary-foreground clay-pigment hover:brightness-110',
+        variant === 'secondary' && 'bg-secondary text-foreground clay hover:bg-secondary/80',
+        variant === 'destructive' && 'bg-destructive text-white clay hover:bg-destructive/90',
         className,
       )}
       {...props}

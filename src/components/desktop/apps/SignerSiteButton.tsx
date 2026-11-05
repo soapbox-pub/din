@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Ban, KeyRound, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toolButtonClass } from '@/shared/appChromeStyles';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSignerGrants } from '@/hooks/useSignerGrants';
 import { grantRules, signerOriginOf } from '@/lib/signerPermissions';
@@ -37,13 +38,11 @@ export function SignerSiteButton({ url }: { url: string }) {
           aria-label={label}
           title={label}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-foreground/80',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            toolButtonClass,
             open && 'bg-foreground/10 text-foreground',
           )}
         >
-          {blocked ? <Ban className="size-4" aria-hidden /> : <KeyRound className="size-4" aria-hidden />}
+          {blocked ? <Ban className="size-4.5" strokeWidth={1.75} aria-hidden /> : <KeyRound className="size-4.5" strokeWidth={1.75} aria-hidden />}
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-80 space-y-4">

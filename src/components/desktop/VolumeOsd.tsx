@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Headphones, Mic, MicOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { glassPanel } from '@/shared/appChromeStyles';
 import { MAX_VOLUME, getAudioBridge } from '@/lib/audio';
 import type { AudioStatus } from '@/lib/audio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
@@ -80,7 +81,7 @@ export function VolumeOsd() {
     const MicIcon = status.muted ? MicOff : Mic;
     return (
       <div aria-hidden className={osdClass(visible)}>
-        <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+        <div className={cn('flex items-center gap-3 px-4 py-3', glassPanel)}>
           <MicIcon
             className={cn('size-6 shrink-0', status.muted ? 'text-muted-foreground' : 'text-foreground')}
           />
@@ -97,7 +98,7 @@ export function VolumeOsd() {
 
   return (
     <div aria-hidden className={osdClass(visible)}>
-      <div className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+      <div className={cn('flex flex-col gap-2 px-4 py-3', glassPanel)}>
         {device && (
           <p className="flex items-center justify-center gap-2 text-sm font-medium text-foreground">
             <Headphones className="size-4 shrink-0 text-muted-foreground" aria-hidden />

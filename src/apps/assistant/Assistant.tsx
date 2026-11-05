@@ -101,6 +101,8 @@ import {
   type AssistantTab,
 } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
+import { ContentPane, ToolButton } from '@/shared/appChrome';
+import { SIDEBAR_WIDTH, flushPane } from '@/shared/appChromeStyles';
 import { intentOf, type LaunchIntent } from './intents';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
 
@@ -156,7 +158,7 @@ function useSlashCommands(directory: string | undefined, own: SlashCommand[]): S
 const scrollPositions = new Map<string, { top: number; stuck: boolean }>();
 
 const LIST_WIDTH_KEY = 'din.assistant.list-width';
-const DEFAULT_LIST_WIDTH = 256;
+const DEFAULT_LIST_WIDTH = SIDEBAR_WIDTH;
 const MIN_LIST_WIDTH = 192;
 const MAX_LIST_WIDTH = 560;
 
@@ -164,7 +166,8 @@ const clampListWidth = (width: number) => Math.min(MAX_LIST_WIDTH, Math.max(MIN_
 
 function loadListWidth(): number {
   const width = Number(localStorage.getItem(LIST_WIDTH_KEY));
-  return width ? clampListWidth(width) : DEFAULT_LIST_WIDTH;
+  // 256 was the default, saved whether or not it was ever dragged.
+  return width && width !== 256 ? clampListWidth(width) : DEFAULT_LIST_WIDTH;
 }
 
 /** How many closed tabs Ctrl+Shift+T can bring back. */
@@ -292,7 +295,8 @@ function AssistantWindow() {
   const searchRef = useRef<HTMLInputElement>(null);
   const conversationRef = useRef<ConversationHandle>(null);
   const [listWidth, setListWidth] = useState(loadListWidth);
-  useEffect(() => localStorage.setItem(LIST_WIDTH_KEY, String(listWidth)), [listWidth]);
+  // Only a width dragged to is kept, so the default can change.
+  useEffect(() => (listWidth === DEFAULT_LIST_WIDTH ? localStorage.removeItem(LIST_WIDTH_KEY) : localStorage.setItem(LIST_WIDTH_KEY, String(listWidth))), [listWidth]);
 
   // Single instance: a relaunch (a notification, the menu bar) brings new
   // params. One with no session asks for a new one. Launch params are merged
@@ -555,7 +559,7 @@ function AssistantWindow() {
 
   return (
     <div
-      className="@container/assistant relative flex h-full w-full bg-background text-foreground"
+      className="@container/assistant relative flex h-full w-full text-foreground"
       onKeyDownCapture={onKeyDown}
     >
       <SessionList
@@ -571,7 +575,7 @@ function AssistantWindow() {
         style={{ width: listWidth }}
         className={cn(
           listOpen ? 'flex' : 'hidden',
-          'absolute inset-y-0 left-0 z-20 max-w-[85%] bg-background shadow-xl @2xl/assistant:static @2xl/assistant:bg-muted/30 @2xl/assistant:flex @2xl/assistant:max-w-none @2xl/assistant:shadow-none',
+          'absolute inset-y-0 left-0 z-20 max-w-[85%] bg-background shadow-xl @2xl/assistant:static @2xl/assistant:bg-transparent @2xl/assistant:flex @2xl/assistant:max-w-none @2xl/assistant:shadow-none',
         )}
       />
       <div
@@ -601,9 +605,9 @@ function AssistantWindow() {
           onClick={() => setListOpen(false)}
         />
       )}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* The title bar over the conversation; the list has its own part of it. */}
-        <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pl-2 pr-3">
+        <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pl-2 pr-3">
           <ListToggle onClick={() => setListOpen(true)} />
           <TabStrip
             tabs={stripTabs.map((t) => ({
@@ -656,30 +660,35 @@ function AssistantWindow() {
           />
           <WindowControls />
         </WindowDragRegion>
-        {activeTab.sessionID ? (
-          <Conversation
-            key={activeTab.sessionID}
-            ref={conversationRef}
-            sessionID={activeTab.sessionID}
-            passwordFocus={passwordFocus?.sessionID === activeTab.sessionID ? passwordFocus.key : undefined}
-            onPasswordFocused={() => setPasswordFocus(null)}
-            onRename={() => setRenaming(activeTab.sessionID)}
-            onNew={startNew}
-            onOpenSession={choose}
-            onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
-            onAddProvider={addProvider}
-          />
-        ) : (
-          <NewConversation
-            key={activeTab.id}
-            directory={activeTab.directory}
-            onDirectoryChange={(directory) => updateTab(activeTab.id, { directory })}
-            draftKey={newConversationDraftKey(activeTab.id)}
-            onStarted={(sessionID) => started(activeTab, sessionID)}
-            onAddProvider={addProvider}
-          />
-        )}
-      </main>
+        <ContentPane
+          inset={false}
+          className={cn('@2xl/assistant:mr-2 @2xl/assistant:mb-2 @2xl/assistant:rounded-2xl @2xl/assistant:border-t-0 @2xl/assistant:clay', flushPane)}
+        >
+          {activeTab.sessionID ? (
+            <Conversation
+              key={activeTab.sessionID}
+              ref={conversationRef}
+              sessionID={activeTab.sessionID}
+              passwordFocus={passwordFocus?.sessionID === activeTab.sessionID ? passwordFocus.key : undefined}
+              onPasswordFocused={() => setPasswordFocus(null)}
+              onRename={() => setRenaming(activeTab.sessionID)}
+              onNew={startNew}
+              onOpenSession={choose}
+              onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
+              onAddProvider={addProvider}
+            />
+          ) : (
+            <NewConversation
+              key={activeTab.id}
+              directory={activeTab.directory}
+              onDirectoryChange={(directory) => updateTab(activeTab.id, { directory })}
+              draftKey={newConversationDraftKey(activeTab.id)}
+              onStarted={(sessionID) => started(activeTab, sessionID)}
+              onAddProvider={addProvider}
+            />
+          )}
+        </ContentPane>
+      </div>
       <DeleteConversationDialog
         session={deleting ? sessions[sessionIDs.indexOf(deleting)]?.session : undefined}
         open={deleting !== null}
@@ -696,9 +705,9 @@ function AssistantMenu({ onAddProvider }: { onAddProvider: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="Assistant settings" title="Settings">
-          <Settings className="size-4" aria-hidden />
-        </Button>
+        <ToolButton label="Assistant settings" title="Settings">
+          <Settings className="size-4.5" strokeWidth={1.75} aria-hidden />
+        </ToolButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem onSelect={onAddProvider}>
@@ -1197,15 +1206,9 @@ function StatusLine({ session, home, context }: { session: SessionInfo; home?: s
 
 function ListToggle({ onClick }: { onClick: () => void }) {
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-8 shrink-0 @2xl/assistant:hidden"
-      aria-label="Show conversations"
-      onClick={onClick}
-    >
-      <PanelLeft className="size-4" aria-hidden />
-    </Button>
+    <ToolButton label="Show conversations" className="@2xl/assistant:hidden" onClick={onClick}>
+      <PanelLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
+    </ToolButton>
   );
 }
 

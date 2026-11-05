@@ -26,7 +26,14 @@ waits:
 
 Window `focus` and `blur` follow the desktop's focus: the page's own, which
 a click on the menu bar would send, are held back. `display-state` works
-in script only; a stylesheet's `@media` doesn't know it. For a width
+in script only; a stylesheet's `@media` doesn't know it. For CSS, `<html>`
+has `data-window-flush` while the window fills its part of the screen
+(maximized, snapped to a half or quarter, or full screen), and
+`data-screen-right` and `data-screen-bottom` while those edges of it are the
+screen's rather than another window's. `ContentPane`
+(`src/shared/appChrome.tsx`) runs to those edges, square there, and keeps its
+rounded inset where it meets the sidebar, the title bar or the window
+beside it: `[[data-screen-right]_&]:…` in Tailwind. For a width
 breakpoint, `useMediaQuery('(min-width: 680px)')` re-renders only when
 it's crossed.
 

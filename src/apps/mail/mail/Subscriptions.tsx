@@ -6,6 +6,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { toast } from '@/shared/toast';
 import { cn } from '@/lib/utils';
+import { PillButton, SegmentedControl, StatusPill, ToolButton } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
 import { UNSUBSCRIBE_METHODS, type MailAccount, type MailSubscription, type UnsubscribeMethod, type UnsubscribeResult } from '@/lib/mail';
 import { useMail, useMessage, useSubscriptions, type Item } from './api';
 import { Avatar } from './Avatar';
@@ -63,11 +65,11 @@ function MethodTag({ s }: { s: Pick<MailSubscription, 'method' | 'verified'> }) 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
       {!s.verified && (
-        <span title="Its sender couldn’t be checked" className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+        <StatusPill title="Its sender couldn’t be checked" className="bg-amber-500/15 text-amber-700 dark:text-amber-300">
           <ShieldAlert className="size-3" /> Unverified
-        </span>
+        </StatusPill>
       )}
-      <span className="rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{UNSUBSCRIBE_METHODS[s.method]}</span>
+      <StatusPill>{UNSUBSCRIBE_METHODS[s.method]}</StatusPill>
     </span>
   );
 }
@@ -83,9 +85,9 @@ function Outcome({ result, onOpen }: { result: UnsubscribeResult; onOpen: (url: 
   if (result.status === 'page' && result.url) {
     const url = result.url;
     return (
-      <button type="button" onClick={() => onOpen(url)} title={result.error ?? undefined} className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-xs font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60">
-        <ExternalLink className="size-3.5" /> Open Page to Finish
-      </button>
+      <PillButton size="sm" onClick={() => onOpen(url)} title={result.error ?? undefined} className="h-6 gap-1 px-2.5">
+        <ExternalLink /> Open Page to Finish
+      </PillButton>
     );
   }
   return (
@@ -293,28 +295,16 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
           <h1 className="truncate text-[15px] font-bold">Subscriptions</h1>
           <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
         </div>
-        <div role="group" aria-label="Sort" className="mr-1 flex rounded-md bg-foreground/[0.06] p-0.5 text-xs">
-          {(['count', 'recent'] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              aria-pressed={sort === k}
-              onClick={() => setSort(k)}
-              className={cn('rounded px-2 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/60', sort === k ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}
-            >
-              {k === 'count' ? 'Most Mail' : 'Most Recent'}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          aria-label="Look again"
-          title="Look again"
-          onClick={() => void qc.invalidateQueries({ queryKey: ['mail', 'subscriptions'] })}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
-          <RefreshCw className={cn('size-4', fetching && 'animate-spin motion-reduce:animate-none')} strokeWidth={1.75} />
-        </button>
+        <SegmentedControl
+          label="Sort"
+          value={sort}
+          options={[{ value: 'count', label: 'Most Mail' }, { value: 'recent', label: 'Most Recent' }]}
+          onValueChange={setSort}
+          className="mr-1"
+        />
+        <ToolButton label="Look again" onClick={() => void qc.invalidateQueries({ queryKey: ['mail', 'subscriptions'] })}>
+          <RefreshCw className={cn(toolIcon.className, fetching && 'animate-spin motion-reduce:animate-none')} strokeWidth={toolIcon.strokeWidth} />
+        </ToolButton>
       </div>
 
       {[...errors].map(([id, error]) => (

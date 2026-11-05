@@ -189,7 +189,7 @@ function TurnOnSharing({ name, platform, busy, onRetry }: { name: string; platfo
       <StepHeader step={2} title={`Let ${name} share its texts`}>
         <p>{name} didn’t let this computer read its messages yet.</p>
       </StepHeader>
-      <div className={cn('grid gap-3', platform === null && 'sm:grid-cols-2')}>
+      <div className={cn('grid gap-3', platform === null && '@2xl:grid-cols-2')}>
         {platform !== 'android' && (
           <div className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
             {platform === null && <p className="font-medium text-foreground">iPhone</p>}

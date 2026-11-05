@@ -32,6 +32,7 @@ import {
   WrapText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { StatusBar } from '@/shared/appChrome';
 import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
 import { invalidateListings } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
@@ -1004,7 +1005,7 @@ export function TextEditor() {
   const nameCounts = new Map<string, number>();
   for (const t of tabs) nameCounts.set(tabName(t), (nameCounts.get(tabName(t)) ?? 0) + 1);
   const header = (
-    <WindowDragRegion className="flex h-10 shrink-0 items-center gap-2 pr-3 pl-2">
+    <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-3 pl-2">
       {tabs.length > 0 ? (
         <div className="flex min-w-0 flex-1 items-center self-stretch">
           <TabStrip
@@ -1259,7 +1260,7 @@ export function TextEditor() {
         </main>
       </div>
 
-      <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border/60 bg-background/50 px-3 text-xs text-muted-foreground">
+      <StatusBar className="bg-background/50">
         <span
           role="status"
           className={cn('min-w-0 flex-1 truncate', status?.startsWith('Couldn’t') && 'text-destructive')}
@@ -1278,7 +1279,7 @@ export function TextEditor() {
             )}
           </>
         )}
-      </div>
+      </StatusBar>
 
       {palette && (
         <Palette

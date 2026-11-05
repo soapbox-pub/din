@@ -10,6 +10,8 @@ import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerCont
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { rectStyle } from '@/lib/monitors';
 import { cn } from '@/lib/utils';
+import { trayFooter, trayFooterButton, trayRuleBottom, trayTitle } from './trayPanel';
+import { glassPanel } from '@/shared/appChromeStyles';
 import { announce } from '@/lib/announce';
 
 /** One monitor's workspaces, as the indicator shows them. */
@@ -117,13 +119,13 @@ function WorkspacesPopoverBody({ tiling, monitors }: { tiling: boolean; monitors
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-3">
+      <div className={cn(trayRuleBottom, 'flex items-center gap-3 px-4 pt-4 pb-3')}>
         <LayoutDashboard
           className={cn('size-5 shrink-0', tiling ? 'text-foreground' : 'text-muted-foreground')}
           aria-hidden
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-sm text-foreground">Tiling</span>
+          <span className={trayTitle}>Tiling</span>
           <span className="text-xs text-muted-foreground">
             Windows share the screen instead of overlapping.
           </span>
@@ -170,12 +172,12 @@ function WorkspacesPopoverBody({ tiling, monitors }: { tiling: boolean; monitors
         ))}
       </div>
 
-      <footer className="border-t border-border/60 p-1.5">
+      <footer className={trayFooter}>
         <PopoverClose asChild>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            className={trayFooterButton}
             onClick={() => open('settings', { section: 'windows' })}
           >
             <Keyboard aria-hidden />
@@ -223,7 +225,7 @@ export function WorkspaceOsd() {
     >
       <div
         key={shown.key}
-        className="grid size-28 place-items-center rounded-3xl border border-border/60 bg-background/80 text-5xl font-semibold tabular-nums text-foreground shadow-lg backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90 motion-safe:animation-duration-150"
+        className={cn(glassPanel, 'grid size-28 place-items-center text-5xl font-semibold tabular-nums text-foreground motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90 motion-safe:animation-duration-150')}
       >
         {workspaceLabel(shown.n)}
       </div>

@@ -9,6 +9,7 @@ import {
   useNotificationCenter,
 } from '@/lib/notificationCenter';
 import { cn } from '@/lib/utils';
+import { trayHeader, trayTitle } from './trayPanel';
 
 /**
  * The notification center, shown in the menu-bar clock's panel.
@@ -36,8 +37,8 @@ export function NotificationsPanel({
 
   return (
     <div className={cn('flex flex-col', className)}>
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
-        <p className="text-sm font-semibold text-foreground">Notifications</p>
+      <div className={trayHeader}>
+        <h2 className={trayTitle}>Notifications</h2>
         <div className="flex items-center gap-1">
           {appNotifications.length > 0 && (
             <Button
@@ -68,7 +69,7 @@ export function NotificationsPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {appNotifications.length > 0 ? (
-          <ul className="divide-y divide-border/40" aria-label="Notifications">
+          <ul className="flex flex-col gap-1 p-2" aria-label="Notifications">
             {appNotifications.map((notification) => (
               <li key={notification.id}>
                 <NotificationCard notification={notification} variant="list" onActivated={onNavigate} />

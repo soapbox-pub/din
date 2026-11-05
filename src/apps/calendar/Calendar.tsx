@@ -11,7 +11,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
 import { useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import {
   calendarTemplate,
@@ -28,6 +27,8 @@ import {
 import { createCalendar, deleteCalendar, deleteLocalEvent, renameCalendar, saveLocalEvent, setCalendarColor, setNostrCalendar } from '@/shared/localCalendar';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { toast } from '@/shared/toast';
+import { ContentPane, PillButton, SegmentedControl, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import { locale, rangeOf, startOfDay, step, titleOf, type View } from './calendar/dates';
 import { EventDetails } from './calendar/EventDetails';
 import { EventEditor } from './calendar/EventEditor';
@@ -412,13 +413,12 @@ export function Calendar() {
     <ViewContext.Provider value={viewActions}>
       <div className="relative flex h-full text-foreground">
         {showSidebar && (
-          <aside aria-label="Calendars" className="flex w-64 shrink-0 flex-col border-r border-border/60 bg-background/60">
-            <WindowDragRegion className="flex h-13 shrink-0 items-center gap-1 pr-2 pl-4">
-              <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-[17px] font-bold">Calendar</h1>
+          <aside aria-label="Calendars" className={`flex shrink-0 flex-col ${sidebarWidthClass}`}>
+            <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/calendar.png" />} title="Calendar">
               <ToolButton label="Hide sidebar" onClick={() => { localStorage.setItem(SIDEBAR_KEY, 'hidden'); setSidebarOpen(false); }}>
-                <PanelLeft className="size-4" strokeWidth={1.75} />
+                <PanelLeft {...toolIcon} />
               </ToolButton>
-            </WindowDragRegion>
+            </SidebarTitle>
             <Sidebar
               date={date}
               today={today}
@@ -449,25 +449,27 @@ export function Calendar() {
           </aside>
         )}
 
-        <main className="flex min-w-0 flex-1 flex-col bg-background">
-          <WindowDragRegion className="flex h-13 shrink-0 items-center gap-1.5 border-b border-border/60 pr-3 pl-2">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1.5 pr-3 pl-2">
             {!showSidebar && sidebarFits && (
               <ToolButton label="Show sidebar" onClick={() => { localStorage.setItem(SIDEBAR_KEY, 'shown'); setSidebarOpen(true); }}>
-                <PanelLeft className="size-4" strokeWidth={1.75} />
+                <PanelLeft {...toolIcon} />
               </ToolButton>
             )}
-            <button
-              type="button"
-              onClick={goToday}
-              className="h-8 rounded-md border border-border px-3 text-sm font-medium outline-none hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
+            {/* What acts on the calendar first, as in every app's title bar;
+                then where it is, the date filling the rest. */}
+            <SegmentedControl size="md" label="View" value={view} options={VIEWS.map((v) => ({ value: v.id, label: v.label }))} onValueChange={setView} />
+            <ToolButton label="New event" onClick={newEvent}>
+              <Plus {...toolIcon} />
+            </ToolButton>
+            <PillButton onClick={goToday} className="ml-1.5 h-8">
               Today
-            </button>
+            </PillButton>
             <ToolButton label="Previous" onClick={() => go(-1)}>
-              <ChevronLeft className="size-4.5" />
+              <ChevronLeft {...toolIcon} />
             </ToolButton>
             <ToolButton label="Next" onClick={() => go(1)}>
-              <ChevronRight className="size-4.5" />
+              <ChevronRight {...toolIcon} />
             </ToolButton>
             <h2 className="ml-1 min-w-0 flex-1 truncate text-[17px] font-semibold" aria-live="polite">{titleOf(view, date)}</h2>
             {local.isFetching || (nostrOn && data.isFetching) ? (
@@ -481,35 +483,17 @@ export function Calendar() {
                 <RefreshCw className="size-3.5" /> Couldn’t reach your Nostr relays
               </button>
             ) : null}
-            <div role="radiogroup" aria-label="View" className="flex rounded-lg bg-foreground/[0.06] p-0.5">
-              {VIEWS.map((v) => (
-                <button
-                  key={v.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={view === v.id}
-                  onClick={() => setView(v.id)}
-                  className={cn(
-                    'h-7 rounded-md px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                    view === v.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {v.label}
-                </button>
-              ))}
-            </div>
-            <ToolButton label="New event" onClick={newEvent}>
-              <Plus className="size-4.5" />
-            </ToolButton>
             <WindowControls />
           </WindowDragRegion>
 
-          {view === 'month' ? (
-            <MonthView date={date} events={inRange} today={today} />
-          ) : (
-            <TimeGrid key={view} days={range.days} events={inRange} today={today} now={now} />
-          )}
-        </main>
+          <ContentPane inset={showSidebar}>
+            {view === 'month' ? (
+              <MonthView date={date} events={inRange} today={today} />
+            ) : (
+              <TimeGrid key={view} days={range.days} events={inRange} today={today} now={now} />
+            )}
+          </ContentPane>
+        </div>
 
         <Popover open={!!selectedShown && !!selected} onOpenChange={(o) => !o && setSelected(null)}>
           {selected && (
@@ -618,16 +602,3 @@ function sameMonthOrToday(view: View, date: Date, today: Date): Date {
   return today.getTime() >= from && today.getTime() < to ? today : view === 'month' ? new Date(date.getFullYear(), date.getMonth(), 1) : startOfDay(date);
 }
 
-function ToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="grid size-8 shrink-0 place-items-center rounded-md text-foreground/80 outline-none hover:bg-foreground/[0.08] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      {children}
-    </button>
-  );
-}

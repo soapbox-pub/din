@@ -3,6 +3,8 @@ import { BookUser, Download, Pencil, Plus, Smartphone, Tag, Trash2 } from 'lucid
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import type { PhoneDevice } from '@/lib/phone';
 import { cn } from '@/lib/utils';
+import { SidebarHeading, ToolButton } from '@/shared/appChrome';
+import { sidebarHeadingClass, sidebarRowClass } from '@/shared/appChromeStyles';
 import { CONTACT_DRAG, type Source } from './model';
 
 function Entry({
@@ -42,14 +44,13 @@ function Entry({
         onDrop(keys.split('\n'));
       } : undefined}
       className={cn(
-        'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-        active ? 'bg-foreground/[0.09] font-medium' : 'hover:bg-foreground/[0.05]',
+        sidebarRowClass(active),
         over && 'bg-primary/15 ring-2 ring-primary/50',
       )}
     >
-      <Icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} strokeWidth={1.75} />
+      <Icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count !== undefined && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
+      {count !== undefined && <span className={cn('text-xs tabular-nums', active ? 'font-semibold' : 'text-muted-foreground')}>{count}</span>}
     </button>
   );
 }
@@ -83,29 +84,23 @@ export function Sidebar({
 }) {
   return (
     <nav aria-label="Address book" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-3">
-      <ul className="space-y-px">
+      <ul className="space-y-0.5">
         <li>
           <Entry icon={BookUser} label="All Contacts" count={total} active={source.kind === 'all'} onClick={() => onSource({ kind: 'all' })} />
         </li>
       </ul>
 
       <section aria-labelledby="groups-heading">
-        <div className="flex items-center px-2 pb-1">
-          <h2 id="groups-heading" className="flex-1 text-xs font-semibold text-muted-foreground">Groups</h2>
-          <button
-            type="button"
-            aria-label="New group"
-            title="New group"
-            onClick={onNewGroup}
-            className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </div>
+        <SidebarHeading className="pr-1">
+          <h2 id="groups-heading" className="flex-1">Groups</h2>
+          <ToolButton size="xs" label="New group" onClick={onNewGroup}>
+            <Plus className="size-4" />
+          </ToolButton>
+        </SidebarHeading>
         {groups.length === 0 ? (
           <p className="px-2 text-xs text-muted-foreground">Family, Work, Book Club… Groups keep people together.</p>
         ) : (
-          <ul className="space-y-px">
+          <ul className="space-y-0.5">
             {groups.map((g) => (
               <ContextMenu key={g}>
                 <ContextMenuTrigger asChild>
@@ -140,8 +135,8 @@ export function Sidebar({
 
       {phones.length > 0 && (
         <section aria-labelledby="phones-heading">
-          <h2 id="phones-heading" className="px-2 pb-1 text-xs font-semibold text-muted-foreground">On Your Phone</h2>
-          <ul className="space-y-px">
+          <h2 id="phones-heading" className={sidebarHeadingClass}>On Your Phone</h2>
+          <ul className="space-y-0.5">
             {phones.map((p) => (
               <li key={p.id}>
                 <Entry

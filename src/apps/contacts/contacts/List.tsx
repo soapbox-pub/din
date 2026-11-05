@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { Search, X } from 'lucide-react';
+import { useEffect, useMemo, type RefObject } from 'react';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { listRowClass } from '@/shared/appChromeStyles';
 import { displayName, indexLetter, type Contact, type SortBy } from '@/shared/vcard';
 import { Avatar } from './Avatar';
 import type { ContactAction, MenuEntry } from './menu';
@@ -45,8 +45,7 @@ export function ContactList({
   onSelect,
   menuFor,
   onAction,
-  search,
-  onSearch,
+  listRef,
   loading,
   empty,
   header,
@@ -60,16 +59,14 @@ export function ContactList({
   /** The right-click menu for a row: the selection's, when the row is in it. */
   menuFor: (key: string) => MenuEntry[];
   onAction: (key: string, action: ContactAction) => void;
-  search: string;
-  onSearch: (q: string) => void;
+  /** The list itself, which the title bar's search hands the keys to. */
+  listRef: RefObject<HTMLDivElement | null>;
   loading: boolean;
   empty: React.ReactNode;
   header?: React.ReactNode;
   /** What dragging a row onto a group carries: the selection, when the row is in it. */
   dragKeys?: (key: string) => string[];
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
-
   const sections = useMemo(() => {
     const out: { letter: string; items: ListItem[] }[] = [];
     for (const it of items) {
@@ -86,7 +83,7 @@ export function ContactList({
   useEffect(() => {
     if (!lead) return;
     listRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(lead)}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [lead]);
+  }, [lead, listRef]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!items.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
@@ -101,40 +98,6 @@ export function ContactList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pt-1 pb-2">
-        <label className="relative block">
-          <span className="sr-only">Search {title}</span>
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <input
-            id="contacts-search"
-            type="search"
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && search) {
-                e.stopPropagation();
-                onSearch('');
-              } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                listRef.current?.focus();
-                if (items[0] && !lead) onSelect(items[0].key, { range: false, toggle: false });
-              }
-            }}
-            placeholder="Search"
-            className="h-8 w-full rounded-lg border border-transparent bg-foreground/[0.06] pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring/40 [&::-webkit-search-cancel-button]:hidden"
-          />
-          {search && (
-            <button
-              type="button"
-              aria-label="Clear search"
-              onClick={() => onSearch('')}
-              className="absolute top-1/2 right-1.5 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </label>
-      </div>
       {header}
 
       {loading ? (
@@ -190,13 +153,13 @@ export function ContactList({
                         onClick={(e) => onSelect(it.key, { range: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
                         className={cn(
                           'flex cursor-default items-center gap-3 rounded-lg px-2 py-1.5',
-                          on ? 'bg-primary text-primary-foreground' : 'hover:bg-foreground/[0.05]',
+                          listRowClass({ selected: on }),
                         )}
                       >
                         <Avatar contact={it.contact} className="size-9 text-[13px]" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[15px] font-normal"><RowName c={it.contact} sortBy={sortBy} /></div>
-                          {sub && <div className={cn('truncate text-xs', on ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{sub}</div>}
+                          {sub && <div className="truncate text-xs text-muted-foreground">{sub}</div>}
                         </div>
                       </div>
                     </ContextMenuTrigger>

@@ -404,7 +404,7 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   useEffect(() => {
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2 pl-1">
-        {app && <AppIcon icon={app.icon} className="size-4 shrink-0 text-muted-foreground" />}
+        {app && <AppIcon icon={app.icon} className="size-5 shrink-0 text-muted-foreground" />}
         <span className="flex-1 truncate text-sm font-medium text-foreground/90">
           {title || app?.name || 'Application'}
         </span>

@@ -24,6 +24,7 @@
 //   - window.dinos.accessibility: Settings → Accessibility, passed on to Linux apps
 //   - window.dinos.iconTheme: the icon theme, for Settings and Din's icons
 //   - window.dinos.tray: apps' status icons and their menus, for the menu bar
+//   - window.dinos.menus: web pages' and text fields' right-click menus, drawn by the desktop
 //   - window.dinos.systemNotifications: Linux apps' and web pages' notifications,
 //     for the notification center
 //   - window.dinos.installer: put DinOS on this computer's disk, for the
@@ -1200,6 +1201,36 @@ expose('indd', {
    * @param {string} name
    */
   convert: (bytes, name) => ipcRenderer.invoke('indd:convert', bytes, name),
+});
+
+// Menus bridge (window.dinos.menus), backed by electron/menus.mts: the
+// right-click menus of web pages and of text fields in apps, widgets and
+// the desktop, which main builds and the desktop draws as its own.
+expose('menus', {
+  /**
+   * A menu to draw. Returns an unsubscribe fn.
+   * @param {(menu: unknown) => void} callback
+   */
+  onShow: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} menu
+     */
+    const handler = (_event, menu) => callback(menu);
+    ipcRenderer.on('menus:show', handler);
+    return () => ipcRenderer.removeListener('menus:show', handler);
+  },
+  /**
+   * An item was chosen.
+   * @param {number} token
+   * @param {string} id
+   */
+  pick: (token, id) => ipcRenderer.send('menus:pick', token, id),
+  /**
+   * The menu closed with nothing chosen.
+   * @param {number} token
+   */
+  close: (token) => ipcRenderer.send('menus:close', token),
 });
 
 // Tray bridge (window.dinos.tray), backed by the tray:* handlers in

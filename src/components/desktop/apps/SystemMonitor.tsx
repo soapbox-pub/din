@@ -8,9 +8,7 @@ import {
   ChevronUp,
   Cog,
   OctagonX,
-  Search,
   TriangleAlert,
-  X,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -35,9 +33,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps, type InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import { SYSTEM_HISTORY_LENGTH, useSystemMonitor } from '@/hooks/useSystemMonitor';
@@ -56,6 +52,7 @@ import {
   type SystemSnapshot,
 } from '@/lib/systemMonitor';
 import { cn } from '@/lib/utils';
+import { SearchField, SegmentedControl, StatusBar } from '@/shared/appChrome';
 
 const ROW_HEIGHT = 40;
 const DIN_ICON = '/din-logo.svg';
@@ -925,60 +922,25 @@ export function SystemMonitor() {
 
   return (
     <div className="@container flex h-full w-full flex-col bg-background text-foreground">
-      <SystemHeader
-        snapshot={snapshot}
-        cpuHistory={cpuHistory}
-        memoryHistory={memoryHistory}
-        gpuHistory={gpuHistory}
-        diskHistory={diskHistory}
-      />
-
-      <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
-        <div className="relative min-w-40 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && query) {
-                e.stopPropagation();
-                setQuery('');
-              }
-            }}
-            placeholder="Search processes"
-            aria-label="Search processes"
-            className="h-8 pl-8 pr-8"
-          />
-          {query && (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              aria-label="Clear search"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X className="size-4" aria-hidden />
-            </button>
-          )}
-        </div>
-        <ToggleGroup
-          type="single"
-          variant="outline"
+      <div className="flex h-12 shrink-0 items-center gap-2 px-2">
+        <SearchField
           size="sm"
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search processes"
+          aria-label="Search processes"
+          className="min-w-40 flex-1"
+        />
+        <SegmentedControl
+          size="md"
+          label="Which processes to show"
           value={mineOnly ? 'mine' : 'all'}
-          onValueChange={(value) => value && setMineOnly(value === 'mine')}
-          aria-label="Which processes to show"
-        >
-          <ToggleGroupItem value="mine" className="px-3">
-            My processes
-          </ToggleGroupItem>
-          <ToggleGroupItem value="all" className="px-3">
-            All processes
-          </ToggleGroupItem>
-        </ToggleGroup>
+          options={[
+            { value: 'mine', label: 'My processes' },
+            { value: 'all', label: 'All processes' },
+          ]}
+          onValueChange={(value) => setMineOnly(value === 'mine')}
+        />
         <div className="flex">
           <Button
             size="sm"
@@ -1011,6 +973,14 @@ export function SystemMonitor() {
           </DropdownMenu>
         </div>
       </div>
+
+      <SystemHeader
+        snapshot={snapshot}
+        cpuHistory={cpuHistory}
+        memoryHistory={memoryHistory}
+        gpuHistory={gpuHistory}
+        diskHistory={diskHistory}
+      />
 
       <div
         role="treegrid"
@@ -1087,10 +1057,10 @@ export function SystemMonitor() {
         </ContextMenu>
       </div>
 
-      <p className="shrink-0 border-t border-border/60 px-4 py-1.5 text-xs text-muted-foreground" aria-live="off">
+      <StatusBar aria-live="off" className="px-4">
         {snapshot ? `${processCount} processes · ` : ''}
         CPU is a share of the whole computer: all cores busy is 100%.
-      </p>
+      </StatusBar>
 
       <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
         <AlertDialogContent>

@@ -12,6 +12,16 @@ body {
   background: transparent;
 }
 
+/* The scheme the desktop sends (runtime.ts) is the body's, so controls and
+   scrollbars follow it, while the root stays normal: a dark root's canvas is
+   painted opaque, and the window's glass wouldn't show through the app. */
+html {
+  color-scheme: normal;
+}
+body {
+  color-scheme: var(--din-color-scheme, normal);
+}
+
 #root {
   height: 100%;
 }

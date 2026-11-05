@@ -2,6 +2,7 @@ import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
@@ -52,6 +53,7 @@ import {
   EVEN_SPLIT,
   hasNeighbor,
   primaryArea,
+  screenEdges,
   snapRect,
   zoneRow,
   zoneSide,
@@ -1769,6 +1771,7 @@ export const Window = memo(function Window({
   // Maximized and edge-tiled windows sit flush against the workspace edges:
   // square corners, no floating shadow/ring.
   const flush = win.maximized || win.snapped !== null;
+  const edges = screenEdges(win);
   // Snapped beside others on the workspace its monitor shows: they share
   // their borders, which drag (and preview) through these attributes.
   const snapped = win.snapped !== null && !win.maximized && !win.closing && !win.away;
@@ -1859,6 +1862,11 @@ export const Window = memo(function Window({
         target.focus({ preventScroll: true });
       }}
       style={geometry}
+      // For CSS: what's inset in it (appChrome's ContentPane) meets the screen
+      // along the edges that are the screen's.
+      data-window-flush={flush || undefined}
+      data-screen-right={edges.right || undefined}
+      data-screen-bottom={edges.bottom || undefined}
       onAnimationEnd={(e) => {
         // The exit animation finished: remove the window for real. Guarded
         // by name and target so enter animations (this window's or a
@@ -1871,13 +1879,6 @@ export const Window = memo(function Window({
         // Not clipped, so the resize handles can reach past the edges; the
         // title bar and the content round their own corners instead.
         'absolute flex flex-col',
-        // The window's color is painted here once, under both the title bar
-        // and the content, which paint none of their own: two backgrounds
-        // meeting at an edge leave a sliver of whatever is beneath showing
-        // between them while the window is scaled (the open animation). An
-        // accent (inline, below) replaces it; otherwise it's the frosted
-        // card with the theme's background over it.
-        !frameless && !accent && 'bg-card/90 bg-linear-to-b from-background/80 to-background/80 backdrop-blur-xl',
         // Open/close animations: a quick macOS-style pop in (fade + zoom
         // from 95%) on mount, and its reverse on close - swapping the
         // classes restarts the element's animation as the exit. CSS
@@ -1893,9 +1894,16 @@ export const Window = memo(function Window({
           : win.closing
           ? 'pointer-events-none motion-safe:animate-out motion-safe:fade-out-0 motion-safe:zoom-out-95 motion-safe:animation-duration-150 motion-safe:fill-mode-forwards'
           : 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:animation-duration-200',
-        flush || frameless
+        // Maximizing or snapping, the corners square off, the edge and the
+        // shadow go, as the window gets there (genie.ts's FLIP_DURATION_MS
+        // and its cubic ease-out), not in its first frame. The border stays
+        // as a transparent one, so the content doesn't shift by its width.
+        frameless
           ? 'rounded-none'
-          : 'rounded-xl border border-border/60 shadow-2xl ring-1 ring-black/20 transition-shadow',
+          : cn(
+              'border transition-[border-radius,border-color,box-shadow] duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none',
+              flush ? 'rounded-none border-transparent shadow-none ring-0' : 'rounded-xl border-foreground/10 shadow-2xl ring-1 ring-black/20',
+            ),
         !flush && !frameless && isTop && 'ring-ring/50',
         // Tiles sit side by side, so the focused one needs a border that
         // shows, like Hyprland's active border.
@@ -1903,16 +1911,34 @@ export const Window = memo(function Window({
       )}
     >
       {/* The window's color behind the menu bar while it's maximized under
-          it (BAR_STRIP_PX): its frosted chrome, its accent, or for a window
+          it (BAR_STRIP_PX; for windows snapped side by side the bar paints
+          one strip itself): its frosted chrome, its accent, or for a window
           that draws its own title bar, solid white or black. The maximize
           animation grows it from nothing (inline styles, the FLIP effect's). */}
+      {/* The window's color, painted once under both the title bar and the
+          content, which paint none of their own: two backgrounds meeting at
+          an edge leave a sliver of whatever is beneath showing between them
+          while the window is scaled (the open animation). It's a layer of
+          its own, not the section's background, so that the section isn't a
+          backdrop root and the strip below blurs the wallpaper as this does;
+          otherwise the bar over a maximized window shows the wallpaper sharp
+          through it and the title bar blurred, a shade apart. Over the
+          border, as a background would be. It's the glass Settings → Themes
+          chooses (window-glass), near-opaque while maximized or snapped. An
+          accent (inline, on the section) replaces it. */}
+      {!frameless && !accent && (
+        <div aria-hidden className="window-glass pointer-events-none absolute -inset-px -z-10 rounded-[inherit]" />
+      )}
       <div
         ref={stripRef}
         aria-hidden
         className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-full h-9',
+          'pointer-events-none absolute bottom-full h-9',
+          // Over the window's (transparent) border, which it hangs from the
+          // inside of, so it reaches the top and sides of the screen.
+          frameless ? 'inset-x-0' : '-inset-x-px -translate-y-px',
           !(onBar && win.maximized) && 'hidden',
-          frameless ? 'bg-white dark:bg-black' : !accent && 'bg-card/90 bg-linear-to-b from-background/80 to-background/80',
+          frameless ? 'bg-white dark:bg-black' : !accent && cn(WINDOW_SURFACE, 'backdrop-blur-xl'),
         )}
         style={accent && !frameless ? { backgroundColor: accent } : undefined}
       />
@@ -1920,8 +1946,8 @@ export const Window = memo(function Window({
       {!frameless && !ownsHeader && (
         <WindowDragRegion
           className={cn(
-            // At least 36px; a tab strip makes it 40.
-            'flex min-h-9 shrink-0 items-center gap-2 rounded-t-[inherit] pr-3',
+            // 48px, as every app's own title bar is, tabs or not.
+            'flex min-h-12 shrink-0 items-center gap-2 rounded-t-[inherit] pr-3',
             titlebar ? 'pl-2' : 'pl-3',
           )}
         >
@@ -1935,7 +1961,7 @@ export const Window = memo(function Window({
             </div>
           ) : (
             <>
-              <AppIcon icon={win.icon ?? app.icon} className={cn('size-4 shrink-0', chromeMuted)} />
+              <AppIcon icon={win.icon ?? app.icon} className={cn('size-5 shrink-0', chromeMuted)} />
               {/* In the theme's title font, if it has one (else the var is unset and it inherits). */}
               <span className={cn('flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium', chromeText)}>
                 {title}
