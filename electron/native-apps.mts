@@ -560,7 +560,7 @@ async function launch(appId: string, uri?: string): Promise<void> {
   const env = await appEnvironment(display);
   if (isWineCommand(argv[0])) {
     // A program installed before the prefix had what it has now (.NET) gets
-    // it all the same.
+    // it all the same, and Din's colors as they are now.
     await ensurePrefix(env).catch((error: unknown) => console.warn('[native-apps] Windows prefix:', error));
     Object.assign(env, wineEnvironment());
   }

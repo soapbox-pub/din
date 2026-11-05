@@ -65,7 +65,8 @@ const COLOR_KEYS = [
   'card', 'cardFg', 'popover', 'popoverFg', 'accent', 'accentFg', 'destructive', 'destructiveFg', 'border',
 ] as const satisfies readonly (keyof NativePalette)[];
 
-function parsePalette(value: unknown): NativePalette | null {
+/** VALUE as a palette, or null if it isn't one (it comes from the renderer). */
+export function parsePalette(value: unknown): NativePalette | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   if (typeof record.dark !== 'boolean') return null;

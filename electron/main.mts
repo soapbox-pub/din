@@ -156,6 +156,7 @@ import { registerEyeDropperHandlers } from './eyedropper.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
 import { attachSelectionColor, setSelectionColor } from './selection-color.mts';
 import { setNativeColorScheme, setNativePalette } from './gtk-theme.mts';
+import { setWindowsPalette } from './windows-apps.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
@@ -5361,7 +5362,8 @@ function registerBrowserPreconnectHandler(): void {
 // nativeTheme passes it on to every web contents, browser tabs included.
 //
 // Where Din is the desktop, native apps get it too, and Din's colors with
-// it (gtk-theme.mts).
+// it (gtk-theme.mts); Windows programs get the mode as Windows' app mode
+// wherever Din runs them (windows-apps.mts), since the prefix is Din's own.
 // ---------------------------------------------------------------------------
 function registerThemeHandler(): void {
   ipcMain.on('theme:set', (event, source: unknown) => {
@@ -5373,6 +5375,7 @@ function registerThemeHandler(): void {
   ipcMain.on('theme:native', (event, palette: unknown) => {
     if (!isShellSender(event)) return;
     setNativePalette(palette);
+    setWindowsPalette(palette);
   });
   ipcMain.on('theme:selection', (event, color: unknown) => {
     if (!isShellSender(event)) return;

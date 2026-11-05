@@ -1603,6 +1603,20 @@ in
   fonts.packages = with pkgs; [
     # Din's interface font, for native apps too (font-name above).
     inter
+    # Microsoft's open stand-in for Segoe UI, Windows' UI font, with its
+    # metrics: Windows programs' UI font (electron/wine-theme.mts), so their
+    # layouts fit as designed. Not in nixpkgs.
+    (stdenvNoCC.mkDerivation {
+      pname = "selawik";
+      version = "1.01";
+      src = fetchzip {
+        url = "https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip";
+        stripRoot = false;
+        hash = "sha256-BbjXJ8HFXrRklMOnGXyZIZeQ5Oksda4AqQXHmNqN6AQ=";
+      };
+      installPhase = "install -Dm644 -t $out/share/fonts/truetype *.ttf";
+      meta.license = lib.licenses.ofl;
+    })
     noto-fonts
     noto-fonts-cjk-sans
     noto-fonts-cjk-serif

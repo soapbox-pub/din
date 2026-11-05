@@ -16,6 +16,8 @@
 //   - .NET is already installed: programs built on it (most C# ones since
 //     2020) start, instead of Microsoft's "You must install .NET Desktop
 //     Runtime" box. Wine Mono only stands in for the old .NET Framework.
+//   - Windows' own look, in Din's light/dark mode and Windows' UI font
+//     (wine-theme.mts).
 //
 // Installers need nothing extra: Wine writes ordinary XDG desktop entries
 // and icons for the Start-menu shortcuts they create, and native-apps.mts
@@ -25,6 +27,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { parsePalette } from './gtk-theme.mts';
+import { LIGHT_STYLE, lookRegistry } from './wine-theme.mts';
 
 /** File extensions Din runs through Wine when opened. */
 export const WINDOWS_PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk'];
@@ -135,6 +139,66 @@ const PREFIX_REGISTRY = `REGEDIT4
 [HKEY_CURRENT_USER\\Software\\Wine\\WineDbg]
 "ShowCrashDialog"=dword:00000000
 `;
+
+// ---------------------------------------------------------------------------
+// Windows' look (wine-theme.mts): Wine's own Light style and colors, the
+// app mode following Din's light/dark mode, Windows' UI font. Wine reads
+// them when a program starts, so they're written just before one does,
+// when they've changed: open programs keep theirs until reopened.
+// ---------------------------------------------------------------------------
+
+/** Bump when wine-theme.mts writes something new for the same mode. */
+const LOOK_VERSION = '4';
+
+/** Where an older Din kept the visual style it generated, from drive_c. */
+const OLD_STYLE_FOLDER = 'windows/resources/themes/din';
+
+/** Din's light/dark mode, once the desktop has said. */
+let darkMode: boolean | null = null;
+
+/** Din's palette (gtk-theme.mts): Windows programs take its light/dark mode. */
+export function setWindowsPalette(value: unknown): void {
+  darkMode = parsePalette(value)?.dark ?? darkMode;
+}
+
+/** One write at a time, each after the last. */
+let lookQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Give the prefix Windows' look in Din's mode if it hasn't it already.
+ * What was last written is kept beside the prefix, so a restart of Din
+ * doesn't write the same again.
+ */
+function applyLook(baseEnv: NodeJS.ProcessEnv): Promise<void> {
+  const task = lookQueue.then(async () => {
+    const dark = darkMode;
+    const wine = wineBinary();
+    if (dark === null || !wine) return;
+    const prefix = winePrefix();
+    const drive = path.join(prefix, 'drive_c');
+    // Without Wine's Light style (an older Wine), Windows' classic look.
+    const style = fs.existsSync(path.join(drive, LIGHT_STYLE)) ? `C:\\${LIGHT_STYLE.replaceAll('/', '\\')}` : null;
+    const script = lookRegistry(dark, style);
+    const marker = path.join(prefix, '.din-look');
+    const state = `${LOOK_VERSION}\n${script}`;
+    try {
+      if (fs.readFileSync(marker, 'utf8') === state) return;
+    } catch {
+      // Never written.
+    }
+    const file = path.join(prefix, 'din-look.reg');
+    fs.writeFileSync(file, script);
+    // With the program's own display: the first Wine process in a session
+    // starts the desktop process every window shares, on its display.
+    await run(wine, ['regedit', '/S', file], { ...baseEnv, ...wineEnvironment(), WINEPREFIX: prefix });
+    fs.writeFileSync(marker, state);
+    // What an older Din wrote for its own style.
+    for (const old of ['.din-colors', 'din-colors.reg']) fs.rmSync(path.join(prefix, old), { force: true });
+    fs.rmSync(path.join(drive, OLD_STYLE_FOLDER), { recursive: true, force: true });
+  });
+  lookQueue = task.catch(() => {});
+  return task;
+}
 
 /** The user-folder links Wine makes, Windows name -> home folder name. */
 const USER_FOLDERS = ['Desktop', 'Documents', 'Downloads', 'Music', 'Pictures', 'Videos'];
@@ -282,16 +346,21 @@ function linkDotnet(prefix: string): void {
 let prefixReady: Promise<void> | null = null;
 
 /**
- * Make sure Din's prefix exists and is configured, creating it if needed.
- * The first time takes half a minute or so (Wine builds a whole Windows
- * directory tree); afterwards it's a few filesystem checks.
+ * Make sure Din's prefix exists and is configured, creating it if needed,
+ * and has Windows' look in Din's mode. The first time takes half a minute
+ * or so (Wine builds a whole Windows directory tree); afterwards it's a few
+ * filesystem checks, and a second or so when Din's mode has changed.
  */
-export function ensurePrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
+export async function ensurePrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
   prefixReady ??= setUpPrefix(baseEnv).catch((error: unknown) => {
     prefixReady = null;
     throw error;
   });
-  return prefixReady;
+  await prefixReady;
+  // Without it a program still opens, as Wine left the prefix.
+  await applyLook(baseEnv).catch((error: unknown) => {
+    console.warn('[windows-apps] couldn’t give Windows programs their look:', error);
+  });
 }
 
 async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
