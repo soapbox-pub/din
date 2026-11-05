@@ -25,6 +25,12 @@ export interface AssistantHost {
   pickFiles(options: { title: string; confirmLabel: string }): Promise<string[]>;
   /** Din's file picker, for a folder: its path, or null if cancelled. */
   pickFolder(options: { title: string; confirmLabel: string; initialPath?: string }): Promise<string | null>;
+  /**
+   * The paths of Din's files a paste or drop brings (files copied or
+   * dragged in Files), or null when it brings none. Call it during the
+   * event: a drop's items can only be read then.
+   */
+  transferredPaths(data: DataTransfer, kind: 'paste' | 'drop'): Promise<string[]> | null;
   /** A short-lived message (a toast). */
   notify(message: { title: string; description?: string; destructive?: boolean }): void;
   /**

@@ -8,6 +8,7 @@ import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { appForFile } from '@/lib/fileTypes';
+import { getFileClipboard } from '@/lib/fileClipboard';
 import { parentPath } from '@/lib/fs';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
 
@@ -52,6 +53,12 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
       showInFolder: (path) => open('file-browser', { path: parentPath(path), select: path.slice(path.lastIndexOf('/') + 1) }),
       pickFiles: async (options) => (await pickFiles({ ...options, multiple: true }).catch(() => null))?.paths ?? [],
       pickFolder: (options) => pickFile({ ...options, directory: true }).catch(() => null),
+      // Din's file clipboard is the desktop's own; a drop of files from Files
+      // carries their file: URLs, which the composer reads itself.
+      transferredPaths: (_data, kind) => {
+        const paths = kind === 'paste' ? getFileClipboard()?.paths : undefined;
+        return paths?.length ? Promise.resolve(paths) : null;
+      },
       notify: ({ title, description, destructive }) =>
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,

@@ -103,6 +103,13 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
         const picked = await pickFolder({ title, startIn: await startIn(din, initialPath) });
         return picked ? din.files.path(picked) : null;
       },
+      transferredPaths: (data) => {
+        // Din's files come as items with a handle and no File (src/sdk/standards.ts).
+        const items = [...data.items].filter((item) => item.kind === 'file' && item.getAsFile() === null);
+        if (items.length === 0) return null;
+        const handles = items.map((item) => item.getAsFileSystemHandle().catch(() => null));
+        return Promise.all(handles).then((list) => list.flatMap((h) => (h ? [din.files.path(h)] : [])));
+      },
       notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
       useDictation: (ref) => useAppDictation(ref),
     }),

@@ -824,7 +824,12 @@ function FileBrowserTab({
   const copyOrCut = useCallback(
     (op: 'copy' | 'cut', names: string[]) => {
       if (names.length === 0) return;
-      Promise.all(pathsOf(names).map((p) => din.files.fromPath(p))).then(
+      const paths = pathsOf(names);
+      // Their paths as text too, written from here while this window has the
+      // keyboard (the desktop's own write can't be, without focus): a terminal
+      // pastes them, and a paste can tell the files from text copied since.
+      void navigator.clipboard?.writeText(paths.join('\n')).catch(() => {});
+      Promise.all(paths.map((p) => din.files.fromPath(p))).then(
         (handles) => {
           din.clipboard.writeFiles(handles, op === 'cut');
           setStatus({

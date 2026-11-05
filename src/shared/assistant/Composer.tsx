@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey, loadDraftFiles, saveDraftFiles } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
+import { DRAG_MIME } from '@/sdk';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { ToastViewport } from '@/shared/Toaster';
@@ -22,6 +23,25 @@ export interface ComposerHandle {
 /** A file:// URL for a path, each segment escaped. */
 function fileUri(path: string): string {
   return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Names of pictures, which are attached rather than written in as paths. */
+const IMAGE_NAME = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+
+/** The paths a `text/uri-list` names, when every URL in it is a local `file:` URL; else null. */
+function localPaths(list: string): string[] | null {
+  const lines = list.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const paths: string[] = [];
+  for (const line of lines) {
+    try {
+      const url = new URL(line);
+      if (url.protocol !== 'file:' || (url.host !== '' && url.host !== 'localhost')) return null;
+      paths.push(decodeURIComponent(url.pathname));
+    } catch {
+      return null;
+    }
+  }
+  return paths.length > 0 ? paths : null;
 }
 
 function readAsDataUrl(file: File): Promise<string> {
@@ -97,8 +117,10 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
 
 /**
  * Where the user writes to the agent. Enter sends and Shift+Enter starts a
- * new line. Files come from Din's file picker or are pasted in (pictures),
- * and go along with the message. While the agent works, a message sent
+ * new line. Files come from Din's file picker, or are pasted or dropped in
+ * (pictures, and files copied or dragged from Files: pictures among them
+ * are attached and other files written in as their paths), and go along
+ * with the message. While the agent works, a message sent
  * steers it, and Stop (or Escape twice) interrupts it. The mic button dictates into it, the
  * same as Super+H does anywhere. Shift+Tab switches agents, given
  * `onCycleAgent`.
@@ -287,10 +309,8 @@ export function Composer({
     ref.current?.focus();
   };
 
-  const onPaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const images = [...event.clipboardData.files].filter((f) => f.type.startsWith('image/') && f.size <= MAX_PASTE_BYTES);
-    if (images.length === 0) return;
-    event.preventDefault();
+  /** Pictures' bytes (copied from a page or Preview, dropped from a web page), attached. */
+  const attachImages = async (images: File[]) => {
     const added = await Promise.all(
       images.map(async (file, index) => ({
         uri: await readAsDataUrl(file),
@@ -300,12 +320,90 @@ export function Composer({
     setFiles((current) => [...current, ...added]);
   };
 
+  /** Text typed in at the cursor, as if from the keyboard (so Undo takes it back). */
+  const insertText = (value: string) => {
+    const textarea = ref.current;
+    if (!textarea || !value) return;
+    textarea.focus();
+    document.execCommand('insertText', false, value);
+  };
+
+  /**
+   * Files on this computer, pasted or dropped: pictures attached, as the
+   * paperclip attaches them, and anything else written in as its path.
+   */
+  const takePaths = (paths: string[]) => {
+    const name = (path: string) => path.split('/').pop() || path;
+    const images = paths.filter((path) => IMAGE_NAME.test(name(path)));
+    const others = paths.filter((path) => !images.includes(path));
+    if (images.length > 0) {
+      setFiles((current) => [
+        ...current,
+        ...images.filter((path) => !current.some((f) => f.uri === fileUri(path))).map((path) => ({ uri: fileUri(path), name: name(path) })),
+      ]);
+      ref.current?.focus();
+    }
+    if (others.length > 0) insertText(others.join('\n'));
+  };
+
+  const imagesIn = (data: DataTransfer) =>
+    [...data.files].filter((f) => f.type.startsWith('image/') && f.size <= MAX_PASTE_BYTES);
+
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const data = event.clipboardData;
+    const images = imagesIn(data);
+    const text = data.getData('text/plain');
+    // Files copied in Files: Din's clipboard keeps them until something else
+    // is copied, which the system clipboard shows. A picture or text there
+    // that isn't their paths was copied since, and is what's pasted.
+    const copied = host.transferredPaths(data, 'paste');
+    if (copied) {
+      event.preventDefault();
+      void copied.then((paths) => {
+        if (images.length > 0) void attachImages(images);
+        else if (paths.length > 0 && (!text || text === paths.join('\n'))) takePaths(paths);
+        else insertText(text);
+      });
+      return;
+    }
+    if (images.length === 0) return;
+    event.preventDefault();
+    void attachImages(images);
+  };
+
+  const takesDrop = (data: DataTransfer) => data.types.includes('Files') || data.types.includes('text/uri-list') || data.types.includes(DRAG_MIME);
+
+  const onDrop = (event: React.DragEvent) => {
+    if (disabled) return;
+    const data = event.dataTransfer;
+    // Files from Files (or a native file manager) by their file: URLs; from
+    // another app, by the handles Din grants for the drop.
+    const listed = localPaths(data.getData('text/uri-list'));
+    const dropped = listed ? Promise.resolve(listed) : host.transferredPaths(data, 'drop');
+    if (dropped) {
+      event.preventDefault();
+      void dropped.then(takePaths);
+      return;
+    }
+    const images = imagesIn(data);
+    if (images.length === 0) return;
+    event.preventDefault();
+    void attachImages(images);
+  };
+
   return (
     <div
       className={cn(
         'relative flex flex-col gap-2 rounded-2xl border border-border/60 bg-card p-2 shadow-sm transition-shadow focus-within:shadow-md',
         className,
       )}
+      // The whole box takes files, not just the text in it.
+      onDragOver={(event) => {
+        if (disabled || !takesDrop(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={onDrop}
     >
       {/* In an app, its toasts sit just above where the user writes. */}
       <ToastViewport className="absolute inset-x-0 bottom-full mb-2" />
@@ -363,7 +461,7 @@ export function Composer({
         ref={ref}
         value={text}
         onChange={(event) => setText(event.target.value)}
-        onPaste={(event) => void onPaste(event)}
+        onPaste={onPaste}
         onKeyDown={(event) => {
           if (menuKey(event)) {
             event.preventDefault();
