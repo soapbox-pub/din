@@ -36,9 +36,6 @@
       "vs code",
       "programming",
       "develop"
-    ],
-    "migrateStorage": [
-      "din:text-editor:*"
     ]
   }
 }

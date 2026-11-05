@@ -43,17 +43,19 @@ a missing or bad argument).
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
 | `notifications` | List, send, click, dismiss, clear |
-| `browser` | The Web Browser's site data: delete one site's cookies and storage, as its site info does |
+| `browser` | The Web Browser: its bookmarks, as the star, the bookmarks bar and `about:bookmarks` have them (list, add, make folders, edit, move, remove, import and export `bookmarks.html` files, show the bar under every page), and its site data: delete one site's cookies and storage, as its site info does |
 | `extensions` | The Web Browser's extensions: list, load one from a folder (asks on screen first), install one from a `.crx` file (shows what it can do and asks first), reload, publish to Nostr (asks on screen first), find on `about:extensions` (`store`), install one by its address (shows what it can do and asks first, as Get does), remove |
 | `open`, `screenshot`, `lock` | Open files, folders and links as the desktop does; save or record the screen; lock it |
 | `wifi`, `bluetooth`, `vpn`, `tor` | Networks and devices, as Settings and the menu bar's menus do |
+| `firewall` | The ports other devices may connect to, as Settings → Firewall (DinOS): the firewall's status and the ports let in, letting one or a range in (asks on screen first), and shutting it again |
 | `phone` | Phones in Settings → Phone and their texts, as Messages has them: list phones and conversations, read one, send a text, mark read, connect or disconnect a phone, whether it can send files here, add one paired in Bluetooth or forget one |
 | `mail` | Mail's accounts, marking a mailbox (the inbox by default) all read (asks on screen first), whether senders' pictures are looked up, each account's labels (Gmail's own, or IMAP keywords elsewhere): list, make, rename or recolor, and delete them (asks on screen first), which inbox tabs are shown and whether only Primary's new mail notifies, the senders moved to a tab and moving one, and the mailing lists in their inboxes as Mail's Subscriptions shows them: list them (most mail first, how each is left, whether its sender checks out, ones still mailing after unsubscribing), unsubscribe from some (asks on screen first), optionally moving their mail to the Trash |
 | `calendar` | Calendar's calendars, kept on this computer as .ics files, and the public Nostr calendar (NIP-52): what's coming up, adding an event (to Nostr only with `--calendar nostr`, which asks on screen first, optionally inviting people), answering an invitation, deleting an event (asks on screen first), making, renaming, recolouring and deleting calendars, showing and hiding the Nostr calendar, and opening Calendar on a day |
 | `contacts` | The address book Contacts keeps on this computer: list (or search) people, show someone's card, add and edit them, delete one (asks on screen first), groups (list, put someone in or out, rename, delete), import a .vcf file (merging people already there), export everyone, a group or one person to one, and open Contacts on someone |
 | `sound`, `display`, `brightness`, `keyboard`, `printers`, `power`, `datetime` | Settings' Devices and System sections |
 | `disks` | How full the home disk is, as System Monitor's Disk tile shows; and removable disks and phones plugged in by USB, as Files' sidebar has them: list them (with what a phone is waiting on), mount, unlock an encrypted one with its passphrase, eject |
-| `studio` | Studio: its takes in ~/Videos/Studio, recording one (start, stop, mark a highlight or a retake), transcribing one again, and going live (asks on screen first) or ending the stream |
+| `studio` | Studio: its projects in ~/Videos/Studio (list, show, start, rename) and their takes and clips (list, arrange: in or left out, order, the part to use, a note; bring files in as clips), recording into one (start, stop, mark a highlight or a retake), transcribing a take again, and going live (asks on screen first) or ending the stream |
+| `camera` | Camera: the photos and videos in ~/Pictures/Camera (list), its effects (list), and taking a photo or four as one picture, or recording a video (start, stop), with an effect and with or without the countdown, printing where it was saved |
 | `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
 | `assistant` | OpenCode, the agent behind the Assistant, as Settings → Assistant: its status, checking for and installing a newer release (restarting its server, which stops what the agent is doing), restarting it, and Claude for it (`claude`, `connect-claude`: installing Claude Code, signing it in and connecting it) |
 | `nostr` | Who's signed in, and the relay and Blossom server lists (published, as Settings does) |
@@ -69,10 +71,10 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), publishing a cursor theme,
+installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), deleting a folder of bookmarks (`din browser remove-bookmark`), replacing a file with exported bookmarks (`din browser export-bookmarks`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
-(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on
+(`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), letting a port through the firewall (`din firewall allow`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on
 screen and wait for the answer, and fail if the user says no. Giving trust
 away, the password, what sudo asks for, and the signer's connected apps
 aren't commands; the user changes those in Settings. `din update erase`
@@ -155,8 +157,7 @@ size and frame, shortcuts, `launch_handler`, and asks for:
   them, and offers **Open Without**, which runs the app as a plain web
   page. For a named origin the answer is remembered until the folder or
   the request changes.
-- Never honored: `migrateStorage`, `migrateRecentFiles`, `migrateFiles`,
-  `dockAs`, `hidden`, file and protocol handlers.
+- Never honored: `dockAs`, `hidden`, file and protocol handlers.
 
 Files are served only from inside the folder named (symlinks out of it
 don't count), and a folder holding Din's own profile is refused. A path

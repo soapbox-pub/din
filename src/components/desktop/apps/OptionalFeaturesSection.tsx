@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AppWindow, Ban, Boxes, Download, EllipsisVertical, Globe, Loader2, Mic, Monitor, PackagePlus, Trash2, TriangleAlert } from 'lucide-react';
+import { AppWindow, Ban, Boxes, Download, EllipsisVertical, Globe, Loader2, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +26,7 @@ import {
   removalConsequence,
   type FeatureState,
 } from '@/lib/features';
+import { resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { cn } from '@/lib/utils';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -46,6 +47,7 @@ export function OptionalFeaturesSection() {
   const features = useFeatures();
   const { toast } = useToast();
   const [removing, setRemoving] = useState<FeatureState | null>(null);
+  const [resettingWindows, setResettingWindows] = useState(false);
 
   const list = features.data?.features ?? [];
   const missing = list.filter((f) => !f.installed && !f.busy);
@@ -62,6 +64,12 @@ export function OptionalFeaturesSection() {
   };
   const remove = (feature: FeatureState) => {
     bridge?.remove(feature.id).catch(failed(`Couldn’t remove ${feature.title}`));
+  };
+  const resetWindows = () => {
+    resetWindowsApps().then(
+      () => toast({ title: 'Windows apps start over', description: 'The next Windows program you open sets them up anew.' }),
+      failed('Couldn’t reset Windows apps'),
+    );
   };
   // One that comes with the computer and hasn't downloaded: nothing to lose, so no question.
   const decline = (feature: FeatureState) => {
@@ -113,6 +121,7 @@ export function OptionalFeaturesSection() {
               live={features.data?.live ?? false}
               onInstall={() => install(feature)}
               onRemove={() => (feature.installed ? setRemoving(feature) : decline(feature))}
+              onReset={feature.id === 'windows' && feature.installed ? () => setResettingWindows(true) : undefined}
             />
           ))}
         </ul>
@@ -140,6 +149,27 @@ export function OptionalFeaturesSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={resettingWindows} onOpenChange={setResettingWindows}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset Windows apps?</AlertDialogTitle>
+            <AlertDialogDescription>{WINDOWS_RESET_CONSEQUENCE}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                resetWindows();
+                setResettingWindows(false);
+              }}
+            >
+              Reset
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
@@ -149,11 +179,14 @@ function FeatureRow({
   live,
   onInstall,
   onRemove,
+  onReset,
 }: {
   feature: FeatureState;
   live: boolean;
   onInstall: () => void;
   onRemove: () => void;
+  /** Windows apps': start them over. */
+  onReset?: () => void;
 }) {
   const Icon = ICONS[feature.id] ?? PackagePlus;
   const busy = feature.busy;
@@ -214,7 +247,7 @@ function FeatureRow({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <FeatureMenuItems feature={feature} Item={DropdownMenuItem} onInstall={onInstall} onRemove={onRemove} />
+                    <FeatureMenuItems feature={feature} Item={DropdownMenuItem} onInstall={onInstall} onRemove={onRemove} onReset={onReset} />
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -227,7 +260,7 @@ function FeatureRow({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <FeatureMenuItems feature={feature} Item={ContextMenuItem} onInstall={onInstall} onRemove={onRemove} />
+          <FeatureMenuItems feature={feature} Item={ContextMenuItem} onInstall={onInstall} onRemove={onRemove} onReset={onReset} />
         </ContextMenuContent>
       </ContextMenu>
     </li>
@@ -240,11 +273,13 @@ function FeatureMenuItems({
   Item,
   onInstall,
   onRemove,
+  onReset,
 }: {
   feature: FeatureState;
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
   onInstall: () => void;
   onRemove: () => void;
+  onReset?: () => void;
 }) {
   const busy = feature.busy !== null;
   return (
@@ -259,6 +294,12 @@ function FeatureMenuItems({
         <Item disabled={busy} onSelect={onRemove}>
           <Ban aria-hidden />
           Don’t Download
+        </Item>
+      )}
+      {onReset && (
+        <Item variant="destructive" disabled={busy} onSelect={onReset}>
+          <RotateCcw aria-hidden />
+          Reset Windows Apps…
         </Item>
       )}
       {feature.installed && (

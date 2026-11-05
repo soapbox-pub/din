@@ -1206,6 +1206,9 @@ function onWaylandMessage(message: unknown): void {
   const m = message as { type?: string; id?: number; kind?: string; image?: unknown };
   if (m.type === 'popup' && m.kind && MENU_KINDS.has(m.kind) && m.id) waylandMenus.add(m.id);
   if (m.type === 'close' && m.id) waylandMenus.delete(m.id);
+  // The X tray's icons (native/din-compositor/src/tray.rs) are the main
+  // process's, which has the tray (tray.mts).
+  if (m.type === 'tray-icon' || m.type === 'tray-gone') return toMain(message);
   // Images cross the pipe as base64; the shell gets bytes.
   if (m.type === 'clipboard' && typeof m.image === 'string') {
     return toShell({ ...m, image: new Uint8Array(Buffer.from(m.image, 'base64')) });
@@ -1281,6 +1284,8 @@ process.parentPort.on('message', (event) => {
     );
   } else if (data.type === 'keymap' && data.keymap) {
     setKeymap(data.keymap);
+  } else if (data.type === 'tray-click') {
+    wayland?.send(data);
   } else if (data.type === 'port' && event.ports[0]) {
     if (ready) connectShell(event.ports[0]);
     else pendingPort = event.ports[0];

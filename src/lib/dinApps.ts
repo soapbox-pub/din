@@ -28,6 +28,8 @@ export interface AppsBridge {
    * may notify (electron/din-app-workers.mts).
    */
   grantBackground(webContentsId: number, options: { notifications: boolean }): Promise<void>;
+  /** `camera`: the app's page may use the camera and the microphone, not the screen. */
+  grantCamera(webContentsId: number): Promise<void>;
   /** An app's worker opened (`url`) or focused (`focus`) a window, after a click on one of its notifications. */
   onWorkerOpen(callback: (request: { appId: string; url: string | null; focus: boolean }) => void): () => void;
   /** Another folder an app's scoped fs grant reaches. */
@@ -229,31 +231,6 @@ export function onAppPort(webContentsId: number, listener: (port: AppPort) => vo
 }
 
 // ---------------------------------------------------------------------------
-// Settings apps kept on the desktop's origin before they moved out.
-// ---------------------------------------------------------------------------
-
-function matches(key: string, patterns: string[]): boolean {
-  return patterns.some((p) => (p.endsWith('*') ? key.startsWith(p.slice(0, -1)) : key === p));
-}
-
-/** The desktop's localStorage entries an app's manifest claims, or null for none. */
-export function storageToMigrate(manifest: DinManifest): Record<string, string> | null {
-  const patterns = manifest.din.migrateStorage ?? [];
-  if (patterns.length === 0) return null;
-  const out: Record<string, string> = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key !== null && matches(key, patterns)) out[key] = localStorage.getItem(key) ?? '';
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-/** The app has its copies: the desktop's go. */
-export function forgetMigratedStorage(entries: Record<string, string>): void {
-  for (const key of Object.keys(entries)) localStorage.removeItem(key);
-}
-
-// ---------------------------------------------------------------------------
 // Handles apps keep across restarts, in their IndexedDB (src/sdk/standards.ts'
 // installStoredHandles), as tokens for grants kept here.
 // ---------------------------------------------------------------------------
@@ -318,42 +295,6 @@ export function releaseGrant(appId: string, token: string): void {
   if (all[token]?.appId !== appId) return;
   delete all[token];
   localStorage.setItem(PERSIST_KEY, JSON.stringify(all));
-}
-
-/**
- * Recent-file lists an app kept here as `{ path, time }` (its manifest's
- * `migrateRecentFiles`), rewritten for the app's own storage: each entry
- * gets a persisted grant, so the app can reopen it without paths. Files
- * that are gone are dropped. Null when there's nothing to move.
- */
-export async function recentFilesToMigrate(
-  appId: string,
-  manifest: DinManifest,
-  exists: (path: string) => Promise<'file' | 'directory' | null>,
-): Promise<Record<string, string> | null> {
-  const out: Record<string, string> = {};
-  for (const key of manifest.din.migrateRecentFiles ?? []) {
-    const raw = localStorage.getItem(key);
-    if (raw === null) continue;
-    let list: unknown;
-    try {
-      list = JSON.parse(raw);
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(list)) continue;
-    const entries = [];
-    for (const item of list as { path?: unknown; time?: unknown }[]) {
-      if (typeof item?.path !== 'string' || typeof item.time !== 'number') continue;
-      const kind = await exists(item.path);
-      if (!kind) continue;
-      const token = persistGrant(null, { appId, path: item.path, kind, writable: true });
-      const name = item.path.replace(/\/+$/, '').split('/').pop() || item.path;
-      entries.push({ token, key: appKeyOf(appId, item.path), name, path: item.path, time: item.time });
-    }
-    out[key] = JSON.stringify(entries);
-  }
-  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** A stable, opaque key for a path, per app (a grant's key, which isSameEntry compares). */

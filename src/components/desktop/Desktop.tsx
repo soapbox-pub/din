@@ -19,6 +19,7 @@ import { WorkspaceOsd } from './WorkspacesIndicator';
 import { Announcer } from './Announcer';
 import { DictationOverlay } from './DictationOverlay';
 import { BrightnessOsd } from './BrightnessOsd';
+import { KeyboardLayoutOsd } from './KeyboardIndicator';
 import { ScreenDimmer } from './ScreenDimmer';
 import { NotificationPopups } from './NotificationPopups';
 import { SystemNotificationsHost } from './SystemNotificationsHost';
@@ -322,6 +323,7 @@ function DesktopSession() {
                       <VolumeOsd />
                       <WorkspaceOsd />
                       <BrightnessOsd />
+                      <KeyboardLayoutOsd />
                       <AirPlayOsd />
                       <DictationOverlay />
                       <ScreenDimmer />

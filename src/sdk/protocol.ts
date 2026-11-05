@@ -17,6 +17,7 @@ import type {
   AssistantSettings,
   Edge,
   RelatedApplication,
+  OpenWithApp,
 } from '@/sdk/din';
 import type { StoredHandle } from '@/sdk/standards';
 
@@ -144,18 +145,6 @@ export interface Hello {
   theme: ThemeData;
   permissions: Permission[];
   /**
-   * localStorage entries the app kept on the desktop's origin before it
-   * moved out (its manifest's `migrateStorage`), to seed its own storage
-   * with once. Null when there's nothing to move.
-   */
-  storage: Record<string, string> | null;
-  /**
-   * Recent-file lists the app kept on the desktop's origin, as JSON arrays of
-   * `{ token, key, name, path, time }` (the manifest's `migrateRecentFiles`),
-   * merged into the app's own under the same keys.
-   */
-  recentFiles: Record<string, string> | null;
-  /**
    * Handles the desktop keeps for the app that its IndexedDB doesn't have
    * yet (kept before handles went there), to put in its `din-handles`
    * database under their tokens.
@@ -187,7 +176,10 @@ export interface Requests {
    * or with `self` a new window of this app, with files for its `launchQueue`.
    */
   'app.open': [{ url: string; self: boolean; handles?: string[] }, void];
-  'app.openFiles': [{ handles: string[] }, void];
+  /** Open files in the desktop's app for them, or `app`, one of `app.openWithApps`'. */
+  'app.openFiles': [{ handles: string[]; app?: string }, void];
+  /** The installed apps that open a file, by its type (Open With). */
+  'app.openWithApps': [{ handle: string }, OpenWithApp[]];
   'app.openUrl': [{ url: string }, void];
   /** The manifest's `related_applications` that can be opened now. */
   'app.relatedApps': [void, RelatedApplication[]];
@@ -199,7 +191,6 @@ export interface Requests {
   'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
   'assistant.follow': [{ sessionID: string }, void];
   'assistant.viewing': [{ sessionID: string | null }, void];
-  'storage.migrated': [void, void];
 
   'window.setTitle': [{ title: string | null }, void];
   'window.setIcon': [{ url: string | null }, void];

@@ -34,12 +34,6 @@
       "document",
       "letter",
       "write"
-    ],
-    "migrateStorage": [
-      "din:word:*"
-    ],
-    "migrateRecentFiles": [
-      "din:office:recent:word"
     ]
   }
 }

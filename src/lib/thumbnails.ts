@@ -1,9 +1,10 @@
 import { fileUrl } from '@/lib/fs';
-import { extensionOf, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
+import { extensionOf, hasOwnIcon, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 
 /**
  * Thumbnails for the Files app: small WebP renditions of images and video
- * frames, made in the renderer from din-file: URLs and cached as object URLs
+ * frames, and programs' own icons (AppImages', .exes'), made in the renderer from din-file: URLs
+ * and cached as object URLs
  * for the session. Decoding is the expensive part, so only a few run at
  * once, and a thumbnail scrolled out of view before its turn is skipped.
  */
@@ -68,6 +69,16 @@ async function imageThumb(src: ThumbSource): Promise<string | null> {
   }
 }
 
+/**
+ * A program's own icon (an AppImage's or an .exe's), which the file protocol pulls out
+ * of it at `?icon`, already small enough to show as it is.
+ */
+async function ownIcon(src: ThumbSource): Promise<string | null> {
+  const response = await fetch(`${await fileUrl(src.path)}?icon`);
+  if (!response.ok) return null;
+  return URL.createObjectURL(await response.blob());
+}
+
 function videoThumb(src: ThumbSource): Promise<string | null> {
   return new Promise((resolve) => {
     const video = document.createElement('video');
@@ -105,7 +116,8 @@ function videoThumb(src: ThumbSource): Promise<string | null> {
 export function getThumbnail(src: ThumbSource, wanted: () => boolean): Promise<string | null> {
   const name = src.path.slice(src.path.lastIndexOf('/') + 1);
   const isImage = isViewableImage(name);
-  if (!isImage && !isPlayableVideo(name)) return Promise.resolve(null);
+  const isIcon = hasOwnIcon(name);
+  if (!isImage && !isIcon && !isPlayableVideo(name)) return Promise.resolve(null);
   const key = `${src.path}\0${src.mtimeMs ?? ''}\0${src.size ?? ''}`;
   const cached = cache.get(key);
   if (cached) return cached;
@@ -120,7 +132,7 @@ export function getThumbnail(src: ThumbSource, wanted: () => boolean): Promise<s
         return false;
       },
       run: () =>
-        (isImage ? imageThumb(src) : videoThumb(src))
+        (isImage ? imageThumb(src) : isIcon ? ownIcon(src) : videoThumb(src))
           .catch(() => null)
           .then(resolve),
     });

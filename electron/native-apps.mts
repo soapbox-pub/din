@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
 import { forgetIconIndex, resolveAppIcon } from './icon-theme.mts';
 import {
@@ -31,11 +31,22 @@ import {
   type EmbeddedDisplay,
 } from './native-display.mts';
 import {
+  ensurePrefix,
   isWindowsProgram,
   isWineCommand,
+  wineBinary,
+  wineCommand,
   wineEnvironment,
+  winePrefix,
+  programForProgId,
+  programForShortcut,
+  resetWindowsApps,
+  runUninstaller,
+  unixPathOf,
   windowsProgramCommand,
+  windowsShellDir,
 } from './windows-apps.mts';
+import { programInfo } from './pe-icon.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -58,6 +69,8 @@ export interface NativeApp {
   terminal: boolean;
   /** URL schemes it opens (MimeType=x-scheme-handler/…), e.g. ["nostr"]. */
   schemes: string[];
+  /** A Windows program installed in Din's prefix, which Din can uninstall. */
+  uninstallable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +98,29 @@ interface DesktopEntry {
   urlIndex: number | null;
   /** URL schemes it opens, from MimeType; empty unless it takes a URL. */
   schemes: string[];
+  /**
+   * It runs a program in Din's Windows prefix, so in its sandbox
+   * (wine-sandbox.mts): a shortcut of a program installed there, or a
+   * Windows program's own window's.
+   */
+  windows?: boolean;
+  /** The file it was read from, when it's one. */
+  file?: string;
+  /** Where in argv a file goes (Exec's %f or %F), or null when it takes none. */
+  fileIndex: number | null;
+  /** The MIME types it opens (MimeType), links' x-scheme-handler ones aside. */
+  mimeTypes: string[];
+  /**
+   * Kept out of the launcher (NoDisplay): only there to open files, as
+   * Wine's entries for the file types Windows programs register are.
+   */
+  hidden: boolean;
 }
 
 /** Stands in argv for Exec's %u / %U until a URL is given. */
 const URL_ARG = '\u0000url';
+/** Stands in argv for Exec's %f / %F until a file is given. */
+const FILE_ARG = '\u0000file';
 
 /** `$XDG_DATA_HOME`, per the base-directory spec. */
 function dataHome(): string {
@@ -117,11 +149,17 @@ function dataDirs(): string[] {
 function applicationDirs(): string[] {
   const dirs = [
     path.join(dataHome(), 'applications'),
+    windowsShellApplications(),
     ...dataDirs().map((dir) => path.join(dir, 'applications')),
     path.join(dataHome(), 'flatpak/exports/share/applications'),
     '/var/lib/flatpak/exports/share/applications',
   ];
   return [...new Set(dirs)];
+}
+
+/** Where the Start-menu shortcuts of programs installed in Din's prefix are. */
+function windowsShellApplications(): string {
+  return path.join(windowsShellDir(), 'applications');
 }
 
 /** The language codes to try for localized keys, most specific first. */
@@ -155,10 +193,10 @@ function unescapeValue(value: string): string {
  * Split an Exec value into argv, honoring the spec's quoting and dropping
  * field codes (%f, %U, ...).
  *
- * Field codes stand for files or URLs to open; Din launches apps with no
- * files, so they're simply removed - except %% which is a literal '%', and
- * a %u or %U argument of its own, which becomes URL_ARG so a link can be
- * passed there.
+ * Field codes stand for files or URLs to open; launched alone, an app gets
+ * none, so they're removed - except %% which is a literal '%', a %u or %U
+ * argument of its own, which becomes URL_ARG so a link (or a file) can be
+ * passed there, and a %f or %F one, FILE_ARG, for a file.
  */
 function parseExec(exec: string): string[] {
   const argv: string[] = [];
@@ -206,13 +244,19 @@ function parseExec(exec: string): string[] {
     .map((arg) =>
       arg === '%u' || arg === '%U'
         ? URL_ARG
-        : arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')),
+        : arg === '%f' || arg === '%F'
+          ? FILE_ARG
+          : arg.replace(/%(.)/g, (_match, code: string) => (code === '%' ? '%' : '')),
     )
     .filter((arg, index) => arg.length > 0 || index === 0);
 }
 
-/** Parse a .desktop file, or null when it isn't a launchable application. */
-function parseDesktopFile(file: string, id: string): DesktopEntry | null {
+/**
+ * Parse a .desktop file, or null when it isn't a launchable application.
+ * `running` is for the entry of a program already running, which is there
+ * whether or not its TryExec is on Din's PATH.
+ */
+function parseDesktopFile(file: string, id: string, running = false, windowsShell = false): DesktopEntry | null {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -249,7 +293,9 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
   const flag = (key: string): boolean => values.get(key) === 'true';
 
   if ((values.get('Type') ?? 'Application') !== 'Application') return null;
-  if (flag('NoDisplay') || flag('Hidden')) return null;
+  if (flag('Hidden')) return null;
+  // NoDisplay ones only open files: read on, and kept only if they do.
+  const hidden = flag('NoDisplay');
 
   const name = get('Name');
   const exec = values.get('Exec');
@@ -258,7 +304,7 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
   // TryExec names a binary whose absence means the app isn't really
   // installed (common for entries shipped by a meta-package).
   const tryExec = values.get('TryExec');
-  if (tryExec && !which(tryExec)) return null;
+  if (tryExec && !running && !which(tryExec)) return null;
 
   // Exec is a string value like any other: its escapes (\\ -> \) come off
   // before the quoting rules apply.
@@ -275,10 +321,31 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
     }
     argv = argv.slice(i);
   }
-  const urlAt = argv.indexOf(URL_ARG);
-  argv = argv.filter((arg) => arg !== URL_ARG);
+  // What a Windows program wrote (windowsShellDir) only ever runs Wine, in
+  // Din's prefix and its sandbox: its Exec's own program and variables are
+  // the program's say, and count for nothing.
+  const windows = windowsShell || (isWineCommand(argv[0] ?? '') && isDinPrefix(env.WINEPREFIX));
+  if (windowsShell) {
+    if (!isWineCommand(argv[0] ?? '')) return null;
+    argv = ['wine', ...argv.slice(1)];
+    for (const name of Object.keys(env)) delete env[name];
+    // Wine never takes away an entry when its program's uninstaller takes
+    // away the shortcut it made it for; one whose shortcut is gone is too.
+    const shortcut = argv.find((arg) => /^[a-z]:\\.+\.lnk$/i.test(arg));
+    if (shortcut && !unixPathOf(shortcut)) return null;
+  }
+  let urlIndex: number | null = null;
+  let fileIndex: number | null = null;
+  const clean: string[] = [];
+  for (const arg of argv) {
+    if (arg === URL_ARG) urlIndex ??= clean.length;
+    else if (arg === FILE_ARG) fileIndex ??= clean.length;
+    else clean.push(arg);
+  }
+  argv = clean;
   if (argv.length === 0 || !argv[0]) return null;
-  const urlIndex = urlAt > 0 ? urlAt : null;
+  if (urlIndex === 0) urlIndex = null;
+  if (fileIndex === 0) fileIndex = null;
 
   const list = (key: string): string[] =>
     (get(key) ?? '')
@@ -292,6 +359,11 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
           .filter((type) => type.toLowerCase().startsWith('x-scheme-handler/'))
           .map((type) => type.slice('x-scheme-handler/'.length).toLowerCase())
           .filter((scheme) => /^[a-z][a-z0-9+.-]*$/.test(scheme));
+  const takesFile = fileIndex !== null || urlIndex !== null;
+  const mimeTypes = takesFile
+    ? list('MimeType').map((type) => type.toLowerCase()).filter((type) => /^[a-z0-9.+-]+\/[a-z0-9.+_-]+$/.test(type) && !type.startsWith('x-scheme-handler/'))
+    : [];
+  if (hidden && mimeTypes.length === 0) return null;
 
   return {
     id,
@@ -307,7 +379,17 @@ function parseDesktopFile(file: string, id: string): DesktopEntry | null {
     env,
     urlIndex,
     schemes,
+    windows,
+    file,
+    fileIndex,
+    mimeTypes,
+    hidden,
   };
+}
+
+/** Whether a WINEPREFIX names Din's prefix. */
+function isDinPrefix(prefix: string | undefined): boolean {
+  return !!prefix && path.resolve(prefix) === winePrefix();
 }
 
 /** Resolve a command against PATH (absolute paths are checked directly). */
@@ -360,7 +442,7 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
   // Entries may nest in subdirectories; the id then joins them with '-'.
   // Wine nests Start-menu folders as wine/Programs/<Vendor>/<Product>/, so
   // the walk goes several levels down.
-  const walk = async (current: string, prefix: string, depth: number): Promise<void> => {
+  const walk = async (current: string, prefix: string, depth: number, windowsShell: boolean): Promise<void> => {
     let dirents: fs.Dirent[];
     try {
       dirents = fs.readdirSync(current, { withFileTypes: true });
@@ -370,14 +452,14 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
     for (const dirent of dirents) {
       if (dirent.isDirectory()) {
         if (depth > 0) {
-          await walk(path.join(current, dirent.name), `${prefix}${dirent.name}-`, depth - 1);
+          await walk(path.join(current, dirent.name), `${prefix}${dirent.name}-`, depth - 1, windowsShell);
         }
         continue;
       }
       if (!dirent.name.endsWith('.desktop')) continue;
       const id = `${prefix}${dirent.name}`;
       if (entries.has(id)) continue;
-      const entry = parseDesktopFile(path.join(current, dirent.name), id);
+      const entry = parseDesktopFile(path.join(current, dirent.name), id, false, windowsShell);
       if (entry) entries.set(id, entry);
       sinceBreath += 1;
       if (sinceBreath >= BATCH) {
@@ -386,7 +468,8 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
       }
     }
   };
-  for (const dir of applicationDirs()) await walk(dir, '', 6);
+  const shell = windowsShellApplications();
+  for (const dir of applicationDirs()) await walk(dir, '', 6, dir === shell);
   return entries;
 }
 
@@ -406,6 +489,8 @@ let entryCache: { at: number; entries: Map<string, DesktopEntry> } | null = null
 let wmClassIndex = new Map<string, string>();
 /** pid -> app id, for every app Din has launched this session. */
 const launchedPids = new Map<number, string>();
+/** pid -> the AppImage it runs, for every AppImage file Din has opened, until it exits. */
+const launchedAppImages = new Map<number, string>();
 
 /** In-flight scan, so concurrent callers share one pass over the disk. */
 let entryScan: Promise<Map<string, DesktopEntry>> | null = null;
@@ -445,7 +530,7 @@ function buildWmClassIndex(scanned: Map<string, DesktopEntry>): Map<string, stri
     if (!normalized || index.has(normalized)) return;
     index.set(normalized, appId);
   };
-  const all = [...scanned.values()];
+  const all = [...scanned.values()].filter((entry) => !entry.hidden);
   const appIdOf = (entry: DesktopEntry) => NATIVE_PREFIX + entry.id.replace(/\.desktop$/, '');
 
   for (const entry of all) add(entry.startupWmClass, appIdOf(entry));
@@ -467,7 +552,7 @@ async function listApps(): Promise<NativeApp[]> {
   const scanned = [...(await entries()).values()];
   const apps: NativeApp[] = [];
   for (const entry of scanned) {
-    if (isUninstaller(entry)) continue;
+    if (entry.hidden || isUninstaller(entry)) continue;
     const { icon, glyph } = await resolveAppIcon(entry.iconName);
     apps.push({
       id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
@@ -480,6 +565,7 @@ async function listApps(): Promise<NativeApp[]> {
       keywords: entry.keywords,
       terminal: entry.terminal,
       schemes: entry.schemes,
+      ...(entry.windows ? { uninstallable: true } : {}),
     });
     if (apps.length % BATCH === 0) await breathe();
   }
@@ -535,24 +621,51 @@ function entryCwd(entry: DesktopEntry): string {
  * its Terminal (see terminalAppCommand). A `uri` is passed where the entry's
  * Exec takes one, and only for a scheme the entry says it opens.
  */
-async function launch(appId: string, uri?: string): Promise<void> {
+async function launch(appId: string, uri?: string, file?: string): Promise<void> {
   const entry = await entryFor(appId);
   if (entry.terminal) throw new Error(`${entry.name} runs in the Terminal`);
   const scheme = uri?.slice(0, uri.indexOf(':')).toLowerCase();
   if (uri !== undefined && (entry.urlIndex === null || !scheme || !entry.schemes.includes(scheme))) {
     throw new Error(`${entry.name} doesn't open ${scheme ?? ''}: links`);
   }
+  // A file goes where its Exec takes one (%f), else a link (%u: a path is
+  // one too), and only a file of a type it says it opens.
+  const fileAt = entry.fileIndex ?? entry.urlIndex;
+  if (file !== undefined) {
+    const types = mimeTypesFor(file);
+    if (fileAt === null || !entry.mimeTypes.some((type) => types.includes(type))) {
+      throw new Error(`${entry.name} doesn't open ${path.basename(file)}`);
+    }
+  }
   const display = await requireDisplay();
 
   const argv =
-    uri !== undefined && entry.urlIndex !== null
-      ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
-      : entry.argv;
+    file !== undefined && fileAt !== null
+      ? [...entry.argv.slice(0, fileAt), file, ...entry.argv.slice(fileAt)]
+      : uri !== undefined && entry.urlIndex !== null
+        ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
+        : entry.argv;
   const env = await appEnvironment(display);
-  if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
+  if (entry.windows) {
+    // A program installed before the prefix had what it has now (.NET) gets
+    // it all the same, and Din's colors as they are now.
+    await ensurePrefix(env);
+    const wine = wineBinary();
+    if (!wine) throw new Error(`${entry.name} needs Windows apps: install it in Settings → Optional Features`);
+    const cwd = entry.cwd ?? undefined;
+    const share = [...(cwd ? [cwd] : []), ...(file !== undefined ? [file] : [])];
+    const command = await wineCommand([wine, ...argv.slice(1)], env, { cwd, share });
+    const { pid } = spawnDetached(command.argv, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), command.env);
+    if (pid) launchedPids.set(pid, appId);
+    return;
+  }
+  if (isWineCommand(argv[0])) {
+    // Another Wine prefix than Din's, someone's own: as they set it up.
+    Object.assign(env, wineEnvironment());
+  }
   Object.assign(env, entry.env);
 
-  const pid = spawnDetached(argv, entryCwd(entry), env);
+  const { pid } = spawnDetached(argv, entryCwd(entry), env);
   if (pid) launchedPids.set(pid, appId);
 }
 
@@ -597,14 +710,14 @@ export async function terminalEnvironment(): Promise<NodeJS.ProcessEnv> {
 }
 
 /** Start a process detached from the shell, returning its pid. */
-function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): number | undefined {
+function spawnDetached(argv: string[], cwd: string, env: NodeJS.ProcessEnv): ChildProcess {
   const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true, stdio: 'ignore' });
   // Detached and unreferenced: never holds the event loop open.
   child.unref();
   child.on('error', () => {
     if (child.pid) launchedPids.delete(child.pid);
   });
-  return child.pid;
+  return child;
 }
 
 /**
@@ -616,7 +729,7 @@ async function runWindowsProgram(file: string): Promise<void> {
   const display = await requireDisplay();
   const env = await appEnvironment(display);
   const command = await windowsProgramCommand(file, env);
-  spawnDetached(command.argv, path.dirname(file), { ...env, ...command.env });
+  spawnDetached(command.argv, path.dirname(file), command.env);
 }
 
 /** Whether a file is an AppImage, which Din runs when it's opened. */
@@ -641,7 +754,17 @@ async function runAppImage(file: string): Promise<void> {
     const { mode } = fs.statSync(file);
     fs.chmodSync(file, mode | 0o100);
   }
-  spawnDetached(appImageArgv(file), path.dirname(file), env);
+  const child = spawnDetached(appImageArgv(file), path.dirname(file), env);
+  // Its windows' processes may not say which AppImage they run (see
+  // programBundle), but they descend from this one, which does.
+  const { pid } = child;
+  if (!pid) return;
+  launchedAppImages.set(pid, file);
+  const forget = (): void => {
+    launchedAppImages.delete(pid);
+  };
+  child.once('exit', forget);
+  child.once('error', forget);
 }
 
 /**
@@ -656,6 +779,157 @@ export async function runProgram(file: string): Promise<void> {
   }
   if (isAppImage(file)) await runAppImage(file);
   else await runWindowsProgram(file);
+}
+
+// ---------------------------------------------------------------------------
+// Opening files in installed apps: what Open With offers, and what a file
+// Din has no app of its own for opens in. Types are by extension, through
+// the shared MIME database's globs (and the types Windows programs
+// register, which Wine writes as packages beside their entries).
+// ---------------------------------------------------------------------------
+
+/** Extension (lower-case, no dot) -> MIME types, rebuilt with the entries. */
+let globCache: { at: number; types: Map<string, Set<string>> } | null = null;
+
+/** The MIME types a file's name says it is. */
+function mimeTypesFor(file: string): string[] {
+  if (!globCache || Date.now() - globCache.at > SCAN_TTL_MS || !entryCache) {
+    const types = new Map<string, Set<string>>();
+    const add = (pattern: string, type: string) => {
+      const match = /^\*\.([^*?[\]/]+)$/.exec(pattern.trim());
+      if (!match) return;
+      const ext = match[1].toLowerCase();
+      if (!types.has(ext)) types.set(ext, new Set());
+      types.get(ext)!.add(type.toLowerCase());
+    };
+    const mimeDirs = [path.join(dataHome(), 'mime'), path.join(windowsShellDir(), 'mime'), ...dataDirs().map((dir) => path.join(dir, 'mime'))];
+    for (const dir of mimeDirs) {
+      try {
+        for (const line of fs.readFileSync(path.join(dir, 'globs2'), 'utf8').split('\n')) {
+          if (line.startsWith('#')) continue;
+          const [, type, pattern] = line.split(':');
+          if (type && pattern) add(pattern, type);
+        }
+      } catch {
+        // No database here.
+      }
+    }
+    // Wine's packages, where nothing has made a database of them.
+    const packages = path.join(windowsShellDir(), 'mime/packages');
+    try {
+      for (const name of fs.readdirSync(packages)) {
+        if (!name.endsWith('.xml')) continue;
+        const xml = fs.readFileSync(path.join(packages, name), 'utf8').slice(0, 64 * 1024);
+        for (const block of xml.matchAll(/<mime-type\s+type="([^"]+)"[^>]*>([\s\S]*?)<\/mime-type>/g)) {
+          for (const glob of block[2].matchAll(/<glob\s+pattern="([^"]+)"/g)) add(glob[1], block[1]);
+        }
+      }
+    } catch {
+      // None.
+    }
+    globCache = { at: Date.now(), types };
+  }
+  const dot = path.basename(file).lastIndexOf('.');
+  if (dot <= 0) return [];
+  return [...(globCache.types.get(path.basename(file).slice(dot + 1).toLowerCase()) ?? [])];
+}
+
+/**
+ * The installed apps that open a file, by its type: Windows programs'
+ * first (what a file of a Windows program's own type is for), then by
+ * name. An entry for another Wine prefix than Din's is left out: its
+ * prefix may be long gone.
+ */
+async function handlerEntries(file: string): Promise<DesktopEntry[]> {
+  const types = new Set(mimeTypesFor(file));
+  if (types.size === 0) return [];
+  const seen = new Set<string>();
+  const found: DesktopEntry[] = [];
+  for (const entry of (await entries()).values()) {
+    if (entry.terminal || !entry.mimeTypes.some((type) => types.has(type))) continue;
+    if (isWineCommand(entry.argv[0]) && !entry.windows) continue;
+    const key = `${entry.name}\u0000${entry.argv.join('\u0000')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(entry);
+  }
+  return found.sort((a, b) => Number(!!b.windows) - Number(!!a.windows) || a.name.localeCompare(b.name));
+}
+
+/** Open With's apps for a file, as the shell lists them. */
+async function fileHandlers(file: string): Promise<NativeApp[]> {
+  const apps: NativeApp[] = [];
+  for (const entry of await handlerEntries(file)) {
+    let { icon, glyph } = await resolveAppIcon(entry.iconName);
+    let name = entry.name;
+    // Wine names the entries for file types by their program's file name
+    // ("hh"); the program's own name and icon are better, as its windows have.
+    const progIdAt = entry.windows ? entry.argv.findIndex((arg) => arg.toLowerCase() === '/progidopen') : -1;
+    const program = progIdAt > 0 && entry.argv[progIdAt + 1] ? programForProgId(entry.argv[progIdAt + 1]) : null;
+    if (program) {
+      const info = await programInfo(program).catch(() => null);
+      if (info?.name) name = info.name;
+      if (info?.icon) {
+        icon = `data:image/png;base64,${info.icon.toString('base64')}`;
+        glyph = false;
+      }
+    }
+    apps.push({
+      id: NATIVE_PREFIX + entry.id.replace(/\.desktop$/, ''),
+      desktopId: entry.id,
+      name,
+      comment: entry.comment,
+      icon,
+      iconGlyph: glyph,
+      categories: entry.categories,
+      keywords: entry.keywords,
+      terminal: false,
+      schemes: [],
+    });
+  }
+  return apps;
+}
+
+/** Tell the shell the installed apps changed, set by registerNativeAppHandlers. */
+let appsChanged: () => void = () => {};
+
+/** Forget the scanned entries and tell the shell to list apps again. */
+function rescan(): void {
+  entryCache = null;
+  forgetIconIndex();
+  appsChanged();
+}
+
+/**
+ * Uninstall a Windows program, as Windows' Apps & Features does: by its
+ * own uninstaller, which asks what it asks and takes away its shortcuts,
+ * then its entries go from the list. One with none (a program that only
+ * made a shortcut) loses its shortcut. Resolves once that's done.
+ */
+async function uninstall(appId: string): Promise<'uninstalled' | 'removed'> {
+  const entry = await entryFor(appId);
+  if (!entry.windows || !entry.file) throw new Error(`${entry.name} can’t be uninstalled here`);
+  const program = programForShortcut({ name: entry.name, folder: entry.cwd });
+  if (program) {
+    const display = await requireDisplay();
+    await runUninstaller(program, await appEnvironment(display));
+    rescan();
+    // An uninstaller that hands over to a copy of itself (NSIS's) returns
+    // at once; look again once that has likely finished.
+    for (const delay of [10_000, 60_000]) setTimeout(rescan, delay).unref();
+    return 'uninstalled';
+  }
+  // No uninstaller: its shortcut, Windows' and Wine's entry for it.
+  const shortcut = entry.argv.find((arg) => /^[a-z]:\\.+\.lnk$/i.test(arg));
+  const lnk = shortcut ? unixPathOf(shortcut) : null;
+  if (lnk && lnk.startsWith(`${winePrefix()}${path.sep}`)) fs.rmSync(lnk, { force: true });
+  const shell = windowsShellApplications();
+  const own = path.join(dataHome(), 'applications');
+  if (entry.file.startsWith(`${shell}${path.sep}`) || entry.file.startsWith(`${own}${path.sep}`)) {
+    fs.rmSync(entry.file, { force: true });
+  }
+  rescan();
+  return 'removed';
 }
 
 /**
@@ -689,8 +963,8 @@ async function forceQuit(pid: number): Promise<void> {
  * Watch where user installs land, and report changes so the shell's app list
  * follows along without waiting out the scan cache:
  *
- *   - the user's applications folder, where installers - Wine's Start-menu
- *     shortcuts above all - drop new entries;
+ *   - the user's applications folder, where installers drop new entries,
+ *     and the Windows sandbox's, where Wine puts Start-menu shortcuts;
  *   - the user's Nix profiles folder, where `nix profile add/remove/upgrade`
  *     repoints the `profile` symlink behind ~/.nix-profile. Nothing under
  *     ~/.nix-profile/share/applications changes in place (it's a store path),
@@ -724,12 +998,14 @@ function watchUserApplications(onChange: () => void): void {
     }
   };
 
-  try {
-    fs.mkdirSync(applications, { recursive: true });
-  } catch {
-    // Watching below fails too, and is handled there.
+  for (const dir of [applications, windowsShellApplications()]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      // Watching below fails too, and is handled there.
+    }
+    watch(dir, true);
   }
-  watch(applications, true);
   // Only where Nix has made it; non-Nix systems have nothing to watch.
   if (fs.existsSync(nixProfiles)) watch(nixProfiles, false);
 }
@@ -772,7 +1048,9 @@ function parentPid(pid: number): number | null {
 // AppImage's mount - rather than anywhere XDG looks. Its windows find that
 // entry through the process, so they get the app's name and icon (and a
 // Dock tile that can open it again) instead of the generic host's. A
-// program with no entry at all gets a tile named for its WM_CLASS.
+// Windows program opened from its .exe has no entry either: its name and
+// icon come from the .exe's resources (pe-icon.mts). A program with no
+// entry at all gets a tile named for its WM_CLASS.
 // ---------------------------------------------------------------------------
 
 /** An app known only because it's running, with its record for the shell. */
@@ -798,6 +1076,43 @@ interface ProgramBundle {
   binDirs: string[];
   /** The AppImage it runs from, which opens it again. */
   appImage: string | null;
+  /** The AppImage's folder, mounted or extracted, when it runs from one. */
+  appDir: string | null;
+}
+
+/** Folders above a binary looked through for the AppImage folder it's in. */
+const MAX_APPDIR_DEPTH = 6;
+
+/**
+ * The AppImage folder a binary is in: the nearest folder above it with the
+ * AppRun every AppImage starts from and a desktop entry beside it. Not the
+ * Nix store, whose programs aren't AppImages.
+ */
+function appDirOf(exe: string): string | null {
+  if (exe.startsWith('/nix/store/')) return null;
+  let dir = path.dirname(exe);
+  for (let depth = 0; depth < MAX_APPDIR_DEPTH && dir !== path.dirname(dir); depth++) {
+    try {
+      if (fs.statSync(path.join(dir, 'AppRun')).isFile() && fs.readdirSync(dir).some((n) => n.endsWith('.desktop'))) {
+        return dir;
+      }
+    } catch {
+      // Not this one.
+    }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/** The AppImage Din opened that a process descends from, if any. */
+function launchedAppImageFor(pid: number): string | null {
+  let current: number | null = pid;
+  for (let depth = 0; current && current > 1 && depth < 12; depth += 1) {
+    const file = launchedAppImages.get(current);
+    if (file) return file;
+    current = parentPid(current);
+  }
+  return null;
 }
 
 /** A process's environment variable, or null. */
@@ -825,25 +1140,33 @@ function isDirectory(dir: string): boolean {
  * from Din, whose own store path has a desktop entry.
  */
 function programBundle(pid: number): ProgramBundle | null {
-  // An AppImage's runtime says where it mounted (or extracted) itself.
-  const appDir = processEnv(pid, 'APPDIR');
-  if (appDir && path.isAbsolute(appDir) && isDirectory(appDir)) {
+  let exe: string | null;
+  try {
+    exe = fs.realpathSync(`/proc/${pid}/exe`);
+  } catch {
+    exe = null;
+  }
+  // An AppImage's runtime says where it mounted (or extracted) itself. A
+  // Chromium (Electron) program writes its process title over its
+  // environment, though, leaving /proc's copy blank, so the folder is also
+  // found from where its binary is.
+  let appDir = processEnv(pid, 'APPDIR');
+  if (!appDir || !path.isAbsolute(appDir) || !isDirectory(appDir)) appDir = exe && appDirOf(exe);
+  if (appDir) {
     const usrShare = path.join(appDir, 'usr/share');
-    const appImage = processEnv(pid, 'APPIMAGE');
+    const appImage = [processEnv(pid, 'APPIMAGE'), launchedAppImageFor(pid)].find(
+      (file): file is string => !!file && path.isAbsolute(file) && fs.existsSync(file),
+    );
     return {
       entryDirs: [appDir, path.join(usrShare, 'applications')],
       iconDirs: [appDir, path.join(usrShare, 'icons'), path.join(usrShare, 'pixmaps')],
       binDirs: [path.join(appDir, 'usr')],
-      appImage: appImage && path.isAbsolute(appImage) && fs.existsSync(appImage) ? appImage : null,
+      appImage: appImage ?? null,
+      appDir,
     };
   }
   // A Nix package: the store path its binary is in.
-  let exe: string;
-  try {
-    exe = fs.realpathSync(`/proc/${pid}/exe`);
-  } catch {
-    return null;
-  }
+  if (!exe) return null;
   const store = /^\/nix\/store\/[^/]+/.exec(exe)?.[0];
   if (!store) return null;
   const share = path.join(store, 'share');
@@ -852,6 +1175,7 @@ function programBundle(pid: number): ProgramBundle | null {
     iconDirs: [path.join(share, 'icons'), path.join(share, 'pixmaps')],
     binDirs: [store],
     appImage: null,
+    appDir: null,
   };
 }
 
@@ -888,7 +1212,8 @@ function bundleEntry(bundle: ProgramBundle, wmClass: string[]): DesktopEntry | n
       continue;
     }
     for (const name of names) {
-      const entry = parseDesktopFile(path.join(dir, name), name);
+      // Its TryExec names a binary on the bundle's own PATH, not Din's.
+      const entry = parseDesktopFile(path.join(dir, name), name, true);
       if (entry && !found.has(name)) found.set(name, entry);
     }
   }
@@ -907,26 +1232,122 @@ function appImageArgv(file: string): string[] {
   return runner ? [runner, file] : [file];
 }
 
+/**
+ * The command that runs an AppImage appimage-run extracted, when which
+ * AppImage it was isn't known (one started outside Din, whose environment
+ * Chromium wrote over): appimage-run runs the folder it keeps, which, unlike
+ * a runtime's mount, stays. Null for any other folder.
+ */
+function extractedAppDirArgv(appDir: string): string[] | null {
+  const runner = which('appimage-run');
+  const cache = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'appimage-run');
+  // <cache>/<sha256>, or <cache>/<sha256>/squashfs-root from older versions.
+  const hashDir = path.basename(appDir) === 'squashfs-root' ? path.dirname(appDir) : appDir;
+  if (!runner || path.dirname(hashDir) !== cache) return null;
+  return [runner, '-w', appDir];
+}
+
 /** A registry id for an unlisted app, from a name that may be anything. */
 function unlistedId(name: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
   return `${NATIVE_PREFIX}${UNLISTED_MARK}${slug || 'app'}`;
 }
 
+/**
+ * The .exe a Wine process runs. Wine writes the program's Windows path over
+ * its command line (`H:\Downloads\PKHeX.exe`), and the prefix's dosdevices
+ * say which folder each drive letter is. Windows paths ignore case, so a
+ * name that isn't there as written is looked for in its folder.
+ */
+function windowsProgramFile(pid: number): { file: string; prefix: string } | null {
+  let argv0: string;
+  try {
+    argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
+  } catch {
+    return null;
+  }
+  if (!/^[a-z]:\\.+\.exe$/i.test(argv0)) return null;
+  const prefix = processEnv(pid, 'WINEPREFIX') || path.join(os.homedir(), '.wine');
+  if (!path.isAbsolute(prefix)) return null;
+  const file = unixPathOf(argv0, prefix);
+  try {
+    return file && fs.statSync(file).isFile() ? { file, prefix } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The unlisted app a Windows program's window belongs to: named and drawn
+ * from the .exe's own resources, as Windows' taskbar would, and opened
+ * again through Wine. Null for a process that isn't one.
+ */
+async function windowsProgramApp(pid: number): Promise<UnlistedApp | null> {
+  const program = windowsProgramFile(pid);
+  if (!program) return null;
+  const { file, prefix } = program;
+  const base = path.basename(file).replace(/\.exe$/i, '');
+  const info = await programInfo(file);
+  const name = info.name || base;
+  const wine = wineBinary();
+  const entry: DesktopEntry | null = wine
+    ? {
+        id: '',
+        name,
+        comment: null,
+        iconName: null,
+        argv: [wine, 'start', '/unix', file],
+        terminal: false,
+        categories: [],
+        keywords: [],
+        startupWmClass: null,
+        cwd: path.dirname(file),
+        env: { WINEPREFIX: prefix },
+        urlIndex: null,
+        schemes: [],
+        windows: isDinPrefix(prefix),
+        fileIndex: null,
+        mimeTypes: [],
+        hidden: false,
+      }
+    : null;
+  return {
+    entry,
+    app: {
+      id: unlistedId(`exe-${base}`),
+      desktopId: '',
+      name,
+      comment: null,
+      icon: info.icon ? `data:image/png;base64,${info.icon.toString('base64')}` : null,
+      iconGlyph: false,
+      categories: [],
+      keywords: [],
+      terminal: false,
+      schemes: [],
+    },
+  };
+}
+
 /** The unlisted app a window's process belongs to, from its bundle. */
 async function unlistedAppFor(pid: number, wmClass: string[]): Promise<UnlistedApp | null> {
+  // Wine's own store path has a desktop entry too (the program loader's),
+  // so a Windows program is told apart first.
+  const windows = await windowsProgramApp(pid);
+  if (windows) return windows;
   const bundle = programBundle(pid);
   const found = bundle && bundleEntry(bundle, wmClass);
   if (bundle && found) {
     // Its Exec names a program on the bundle's own PATH, which isn't Din's;
     // an AppImage opens again from the AppImage, since its mount goes away.
     let argv = found.argv;
+    const extracted = !bundle.appImage && bundle.appDir ? extractedAppDirArgv(bundle.appDir) : null;
     if (bundle.appImage) argv = appImageArgv(bundle.appImage);
+    else if (extracted) argv = extracted;
     else if (!path.isAbsolute(argv[0])) {
       const bin = bundle.binDirs.map((dir) => path.join(dir, 'bin', argv[0])).find(isExecutable);
       if (bin) argv = [bin, ...argv.slice(1)];
     }
-    const entry: DesktopEntry = { ...found, argv, urlIndex: bundle.appImage ? null : found.urlIndex };
+    const entry: DesktopEntry = { ...found, argv, urlIndex: bundle.appImage || extracted ? null : found.urlIndex };
     const iconFile = found.iconName ? bundleIconFile(found.iconName, bundle) : null;
     const { icon, glyph } = iconFile
       ? { icon: (await resolveAppIcon(iconFile)).icon, glyph: false }
@@ -1012,7 +1433,8 @@ export function registerNativeAppHandlers(options: {
 }): void {
   const { assertShellSender } = options;
 
-  watchUserApplications(() => options.shell()?.send('native-apps:changed'));
+  appsChanged = () => options.shell()?.send('native-apps:changed');
+  watchUserApplications(appsChanged);
 
   // Apps are listed even where the display can't run: terminal apps don't
   // need it, and launching any other says what's missing, where an empty
@@ -1038,6 +1460,31 @@ export function registerNativeAppHandlers(options: {
     assertShellSender(event);
     if (typeof file !== 'string') throw new Error('A file path is required');
     await runProgram(file);
+  });
+
+  ipcMain.handle('native-apps:file-handlers', async (event, file) => {
+    assertShellSender(event);
+    if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('A file path is required');
+    return fileHandlers(file);
+  });
+
+  ipcMain.handle('native-apps:open-file', async (event, appId, file) => {
+    assertShellSender(event);
+    if (typeof appId !== 'string') throw new Error('An app id is required');
+    if (typeof file !== 'string' || !path.isAbsolute(file) || !fs.statSync(file).isFile()) throw new Error('Not a file');
+    await launch(appId, undefined, file);
+  });
+
+  ipcMain.handle('native-apps:uninstall', async (event, appId) => {
+    assertShellSender(event);
+    if (typeof appId !== 'string') throw new Error('An app id is required');
+    return uninstall(appId);
+  });
+
+  ipcMain.handle('native-apps:reset-windows', async (event) => {
+    assertShellSender(event);
+    await resetWindowsApps({ ...process.env });
+    rescan();
   });
 
   ipcMain.handle('native-apps:force-quit', async (event, pid) => {

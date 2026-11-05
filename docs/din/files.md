@@ -109,13 +109,6 @@ keys that the app keeps where it likes (the office apps', CAD's and Media
 Player's lists keep them in localStorage, as `token`). Din's own Recent
 (Files', the Dock's) doesn't take entries from apps yet.
 
-An app that kept a recent list on the desktop's origin before it moved,
-as `{ path, time }` entries, lists the keys in its manifest's
-`migrateRecentFiles`: on its first launch the desktop turns each entry it
-can still find into `{ token, key, name, path, time }`, the token a key in
-`src/shared/handleStore.ts`' database, and merges them into
-the app's own list under the same key.
-
 ## The file clipboard
 
 Text and images use `navigator.clipboard`, as on the web. Files use Din's
@@ -198,13 +191,8 @@ Some state names files by path that the user never handed over this time:
 songs a playlist lists elsewhere, the folders a library watches.
 `din.files.requestAccess(paths, reason)` asks for them and resolves with
 handles for those granted (with `file-folders`, their folders come into
-reach). Paths the app's own saved state named when it moved out of the
-desktop are granted without asking, on that first launch (the state it
-kept in the desktop's storage, and files its manifest's `migrateFiles`
-copied in): the app had them then. That state must name the path
-exactly, as a whole string (JSON is looked into, `~/` read as home); a
-prefix of a longer path doesn't count. Anything else not already in the
-app's reach, the desktop asks the user, showing the paths and `reason`.
+reach). For any not already in the app's reach, the desktop asks the
+user, showing the paths and `reason`.
 
 The desktop doesn't decide what's in reach itself: it asks main
 (`dinos.apps.reaches`), which checks a path as it checks the app's own

@@ -737,7 +737,9 @@ update_features() {
           [[ $(readlink "$dir/$name" || true) != "$path" ]] || continue
           url=$(jq -r --arg n "$name" ".[\$n].url // empty" <<<"$parts")
           if [[ -n $url ]]; then
-            nix store prefetch-file --name "$(jq -r --arg n "$name" ".[\$n].name" <<<"$parts")" \
+            unpack=()
+            [[ $(jq -r --arg n "$name" ".[\$n].unpack // false" <<<"$parts") != true ]] || unpack=(--unpack)
+            nix store prefetch-file "${unpack[@]}" --name "$(jq -r --arg n "$name" ".[\$n].name" <<<"$parts")" \
               --expected-hash "$(jq -r --arg n "$name" ".[\$n].hash" <<<"$parts")" "$url"
           fi
           nix build --out-link "$dir/$name" "$path"

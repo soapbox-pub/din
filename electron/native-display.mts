@@ -38,6 +38,8 @@ import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_proces
 import { app, ipcMain, MessageChannelMain, screen, utilityProcess } from 'electron';
 import { chromiumRenderNode, connectGpuBuffers, dinFd } from './native-gpu.mts';
 import { keyboardKeymap, onKeymapChange } from './keyboard.mts';
+import { settingsOwner } from './desktop-settings.mts';
+import { startXSettings } from './xsettings.mts';
 
 // .mts in development, the compiled .mjs in a build (scripts/build-electron.mjs).
 const WORKER = path.join(import.meta.dirname, `native-display-worker${path.extname(import.meta.filename)}`);
@@ -201,6 +203,25 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
   return { display: `:${displayNumber}`, xauthority, wayland: null, xwayland: null };
 }
 
+/** What the compositor's X tray says (native/din-compositor/src/tray.rs). */
+export type XTrayMessage =
+  | { type: 'tray-icon'; tray: number; width: number; height: number; bgra: string; class: string }
+  | { type: 'tray-gone'; tray: number }
+  /** The display went away, and every icon with it. */
+  | { type: 'tray-reset' };
+
+let xTrayListener: ((message: XTrayMessage) => void) | null = null;
+
+/** Hear of the X tray's icons (tray.mts). */
+export function onXTray(listener: (message: XTrayMessage) => void): void {
+  xTrayListener = listener;
+}
+
+/** Click an X tray icon, at a point on the screen, with button 1, 2 or 3. */
+export function clickXTray(tray: number, button: number, x: number, y: number): void {
+  worker?.postMessage({ type: 'tray-click', tray, button, x, y });
+}
+
 /** Fork the window manager / compositor against the server. */
 async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
   const keymap = await keyboardKeymap();
@@ -234,6 +255,7 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
         console.error('native-display:', message.message);
         resolve(false);
       }
+      if (message?.type === 'tray-icon' || message?.type === 'tray-gone') xTrayListener?.(message as XTrayMessage);
     });
     child.once('exit', () => resolve(false));
     // The compositor renders on the GPU only if this process can receive
@@ -249,6 +271,7 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
   if (!ok) return false;
   child.once('exit', () => {
     if (worker === child) worker = null;
+    xTrayListener?.({ type: 'tray-reset' });
   });
   worker = child;
   return true;
@@ -283,6 +306,12 @@ export function embeddedDisplay(): Promise<EmbeddedDisplay | null> {
       current = display;
       // The shell connected before there was a display: hand it the port.
       if (shellWantsPort) sendPortToShell();
+      // X apps' theme, icons, pointer and fonts (xsettings.mts), where
+      // GSettings holds the desktop's: not under KDE and the like, whose
+      // own settings these would contradict.
+      if (settingsOwner() !== 'other') {
+        void startXSettings(display.xwayland ?? display.display, display.xwayland ? null : display.xauthority);
+      }
       await publishToSession(display);
       return display;
     } finally {
@@ -406,6 +435,11 @@ export async function embeddedDisplayEnv(display: EmbeddedDisplay): Promise<Node
     });
     delete env.WAYLAND_DISPLAY;
   }
+  // Qt apps look like GTK ones, so like Din (gtk-theme.mts): Qt's own GTK 3
+  // platform theme, in every qtbase, takes GTK's colors, font, icons and
+  // light/dark mode, where GSettings holds the desktop's. Qt picks it by
+  // desktop name, which Din's isn't one of. A theme the user set is theirs.
+  if (!env.QT_QPA_PLATFORMTHEME && settingsOwner() !== 'other') env.QT_QPA_PLATFORMTHEME = 'gtk3';
   return env;
 }
 

@@ -41,6 +41,24 @@ let
   # three per session; the firewall lets them in (below).
   airplayPorts = { from = 7010; to = 7039; };
 
+  # LocalSend's port, TCP and UDP, which the firewall lets in (below).
+  localSendPort = 53317;
+
+  # pkexec inside appimage-run's sandbox, where the real one can't work (see
+  # programs.appimage, below): the user's systemd runs the real one outside.
+  # In here /run/wrappers/bin/pkexec is this script; out there it's pkexec.
+  appimagePkexec = pkgs.writeShellApplication {
+    name = "pkexec";
+    text = ''
+      env=()
+      for name in DISPLAY XAUTHORITY WAYLAND_DISPLAY; do
+        if [[ -n "''${!name:-}" ]]; then env+=(-E "$name"); fi
+      done
+      exec ${pkgs.systemd}/bin/systemd-run --user --pipe --wait --quiet --collect \
+        "''${env[@]}" -- /run/wrappers/bin/pkexec "$@"
+    '';
+  };
+
   # Optional features: parts of the system that aren't in it until someone
   # turns them on, in Settings → Optional Features or with `din features`
   # (electron/features.mts). Each is a few packages from the system's own
@@ -52,7 +70,9 @@ let
   # ~/.local/state/din/features/<id>/<part> that keeps it from being
   # collected. A part that's a plain download (the Whisper model, from
   # Hugging Face) gives its URL and hash, and lands where fetchurl would put
-  # it. Everything that uses one finds it through those links (the
+  # it; one with `unpack` (the .NET runtime) is an archive unpacked in the
+  # store, as `nix store prefetch-file --unpack` and fetchzip both make it,
+  # a lone top folder taken off. Everything that uses one finds it through those links (the
   # launcher's PATH and DIN_* variables, below, and nix-ld's library path),
   # so it works the moment it's installed, and is simply missing until then.
   # System updates bring installed ones up to date (os/din-update.sh).
@@ -67,16 +87,51 @@ let
     url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
     hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
   };
+  # .NET, the runtime most Windows programs written in C# since 2020 need
+  # (its WinForms and WPF in the Desktop part), which Wine Mono, standing in
+  # for the old .NET Framework, isn't: without it they open Microsoft's
+  # "You must install .NET Desktop Runtime" box. MIT-licensed, and
+  # Microsoft's builds are free to pass on. Its zips, from the release
+  # metadata (builds.dotnet.microsoft.com/dotnet/release-metadata/<major>/
+  # releases.json, whose SHA-512s they were checked against), unpacked;
+  # each part's hash is its unpacked tree's (nix store prefetch-file
+  # --unpack --name <name> <url>). electron/windows-apps.mts links them into
+  # the prefix's C:\Program Files\dotnet (DIN_WINE_DOTNET, below).
+  dotnetVersion = "10.0.14";
+  dotnetPart = { kind, file, arch, hash }: {
+    name = "${file}-${dotnetVersion}-win-${arch}";
+    url = "https://builds.dotnet.microsoft.com/dotnet/${kind}/${dotnetVersion}/${file}-${dotnetVersion}-win-${arch}.zip";
+    unpack = true;
+    inherit hash;
+  };
   dinFeatures = {
     # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
     # runs 32- and 64-bit programs without 32-bit host libraries. The Full
     # variant is the one that embeds the Wine Mono and Gecko installers (.NET
-    # and the HTML engine), so a new prefix gets them with no download prompt.
+    # Framework and the HTML engine), so a new prefix gets them with no
+    # download prompt. Then .NET (above), 64- and 32-bit, and Direct3D on
+    # Vulkan, which games need to run well, or at all: DXVK (Direct3D 8 to
+    # 11, nixpkgs' MinGW builds) and vkd3d-proton (12, its own release,
+    # since nixpkgs has no Windows build of it; LGPL-2.1).
     windows = {
       title = "Windows apps";
       description = "Wine, which runs Windows programs like apps of their own.";
-      size = 850;
-      parts.wine = pkgs.wineWow64Packages.stableFull;
+      size = 1240;
+      parts = {
+        wine = pkgs.wineWow64Packages.stableFull;
+        dotnet-x64 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x64"; hash = "sha256-Zid4ksYbIcV9zfRVCOlnxn8xdKbGSyUHonQ4KtGnMbs="; };
+        dotnet-desktop-x64 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x64"; hash = "sha256-oBmXmfy+ccpJXX49pTOGyMvUn8MNRn2PquXstvOFI8M="; };
+        dotnet-x86 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x86"; hash = "sha256-tfadfuGzK/tl8VqfRPYbV2oWrGgFTtkI3tejlcdYJoA="; };
+        dotnet-desktop-x86 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x86"; hash = "sha256-pKKDN17zi0biQx1XG1HfXcOEJJkU9uQm326ViV076RA="; };
+        dxvk-x64 = pkgs.dxvk.dxvk64;
+        dxvk-x86 = pkgs.dxvk.dxvk32;
+        vkd3d = {
+          name = "vkd3d-proton-2.14.1";
+          url = "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v2.14.1/vkd3d-proton-2.14.1.tar.zst";
+          unpack = true;
+          hash = "sha256-eOP8F9NCDf+fe6/2fF7REvLL2wXEpu7WetmnVRWK2jU=";
+        };
+      };
     };
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
@@ -116,10 +171,26 @@ let
       parts = { podman = config.virtualisation.podman.package; distrobox = pkgs.distrobox; };
     };
   };
-  # A part is a package, or a download ({ name, url, hash }).
+  # A part is a package, or a download ({ name, url, hash }, and `unpack`).
   isDownload = part: part ? url;
+  # An unpacked one as `nix store prefetch-file --unpack` makes it, which is
+  # what installing it runs: one folder at the top is taken off, several
+  # things are left as they are.
+  fetchPart = part: if part.unpack or false
+    then pkgs.fetchzip {
+      inherit (part) name url hash;
+      stripRoot = false;
+      postFetch = ''
+        shopt -s dotglob
+        top=("$out"/*)
+        if [ ''${#top[@]} = 1 ] && [ -d "''${top[0]}" ]; then
+          mv "''${top[0]}" "$TMPDIR/top" && rmdir "$out" && mv "$TMPDIR/top" "$out"
+        fi
+      '';
+    }
+    else pkgs.fetchurl { inherit (part) name url hash; };
   partPath = part: builtins.unsafeDiscardStringContext
-    (if isDownload part then (pkgs.fetchurl part).outPath else part.outPath);
+    (if isDownload part then (fetchPart part).outPath else part.outPath);
   # A feature's part, as everything that uses it finds it.
   featurePart = id: part: "${featuresDir}/${id}/${part}";
   # What Settings and the updater read: each feature's parts, by the paths
@@ -131,7 +202,7 @@ let
       size = f.size * 1000 * 1000;
       default = f.default or false;
       parts = lib.mapAttrs (name: part: { path = partPath part; }
-        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; }) f.parts;
+        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; unpack = part.unpack or false; }) f.parts;
     })
     dinFeatures));
   # Their programs, for PATH: whatever isn't installed is a folder that
@@ -204,6 +275,15 @@ let
     name = "din-wifi";
     runtimeInputs = with pkgs; [ coreutils gnused kmod ];
     text = builtins.readFile ./din-wifi.sh;
+  };
+
+  # The privileged half of Settings → Firewall, which lets the ports the
+  # user chooses through the firewall (see the script, and
+  # electron/firewall.mts). It's the firewall's own iptables.
+  din-firewall = pkgs.writeShellApplication {
+    name = "din-firewall";
+    runtimeInputs = [ pkgs.coreutils config.networking.firewall.package ];
+    text = builtins.readFile ./din-firewall.sh;
   };
 
   # Adds and removes the interface Quick Share's Wi-Fi hotspot runs on (see
@@ -356,6 +436,17 @@ let
     [ -n "$1" ] && [ "$loader" = "$(echo "$1" | ${pkgs.coreutils}/bin/tr A-F a-f)" ]
   '';
 
+  # libmtp marks MTP devices ID_MTP_DEVICE, which electron/phone-usb.mts looks
+  # for: its hwdb lists the devices it knows, and its rules probe the rest.
+  # Both are in libmtp's `out` output, but services.udev.packages keeps only
+  # each package's `bin` output (lib.getBin), which has neither, so they're
+  # named from `out` itself.
+  libmtpUdevRules = pkgs.runCommand "libmtp-udev-rules" { } ''
+    mkdir -p $out/lib/udev/rules.d $out/lib/udev/hwdb.d
+    ln -s ${pkgs.libmtp.out}/lib/udev/rules.d/69-libmtp.rules $out/lib/udev/rules.d/
+    ln -s ${pkgs.libmtp.out}/lib/udev/hwdb.d/69-libmtp.hwdb $out/lib/udev/hwdb.d/
+  '';
+
   # Launcher: Electron running the Din host on Wayland (din-shell provides
   # the compositor), GPU-accelerated. `extraFlags` exists so the QEMU demo
   # variant below can swap in software rendering.
@@ -370,18 +461,19 @@ let
   # embedded display native Linux apps run on (electron/native-display.mts)
   # and Xvfb for its fallback, setxkbmap plus xkeyboard-config's rules for
   # their keyboard layout (electron/keyboard.mts), gsettings (glib) for the
-  # pointer's theme and size (electron/cursor.mts), bsdtar (libarchive), 7-Zip (the free build, without unRAR),
+  # pointer's theme and size (electron/cursor.mts), xsettingsd for X apps'
+  # settings (electron/xsettings.mts), bsdtar (libarchive), 7-Zip (the free build, without unRAR),
   # unar plus gzip/xz/bzip2/zstd for the Files app's archives, and
   # bubblewrap to sandbox them (electron/files.mts), CUPS's tools and poppler's
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
   # jmtpfs, ifuse and libimobiledevice's tools for phones plugged in by USB
   # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
   # the Installer's, the updater's, the keyboard layout's, the time zone's,
-  # Tor's, the WiFi reset's and Quick Share's hotspot's helpers, and for checking the password
+  # Tor's, the WiFi reset's, Quick Share's hotspot's and the firewall's helpers, and for checking the password
   # Din takes for sudo (electron/askpass.mts). Last, the optional features'
   # programs (Wine's, for Windows programs' Start-menu entries).
   makeDinLauncher = extraFlags: pkgs.writeShellScriptBin "din" ''
-    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH:${featuresPath}
+    export PATH=${pkgs.python3}/bin:${pkgs.networkmanager}/bin:${pkgs.brightnessctl}/bin:${pkgs.gammastep}/bin:${pkgs.wireplumber}/bin:${pkgs.pipewire}/bin:${pkgs.pulseaudio}/bin:${pkgs.wlr-randr}/bin:${pkgs.xwayland}/bin:${pkgs.xvfb}/bin:${pkgs.setxkbmap}/bin:${pkgs.glib.bin}/bin:${pkgs.xsettingsd}/bin:${lib.makeBinPath [ pkgs.libarchive pkgs._7zz pkgs.unar pkgs.bubblewrap pkgs.gzip pkgs.xz pkgs.bzip2 pkgs.zstd config.services.printing.package pkgs.poppler-utils pkgs.jmtpfs pkgs.ifuse pkgs.libimobiledevice ]}:/run/wrappers/bin:$PATH:${featuresPath}
     export XKB_CONFIG_ROOT=${pkgs.xkeyboard_config}/share/X11/xkb
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
@@ -396,6 +488,7 @@ let
     export DIN_TOR=${din-tor}/bin/din-tor
     export DIN_WIFI=${din-wifi}/bin/din-wifi
     export DIN_HOTSPOT=${din-hotspot}/bin/din-hotspot
+    export DIN_FIREWALL=${din-firewall}/bin/din-firewall
     export DIN_QUICKSHARE_PYTHON=${quickshare-python}/bin/python3
     export DIN_FWUPDMGR=${config.services.fwupd.package}/bin/fwupdmgr
     export DIN_LOCK=${din-lock}/bin/din-lock
@@ -418,6 +511,19 @@ let
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
+    # .NET for Windows programs (electron/windows-apps.mts): each
+    # architecture's parts, merged into C:\Program Files\dotnet and
+    # C:\Program Files (x86)\dotnet, the Desktop one (its unpacked
+    # Microsoft.WindowsDesktop.App) in its shared folder.
+    export DIN_WINE_DOTNET_X64=${featurePart "windows" "dotnet-x64"}:shared=${featurePart "windows" "dotnet-desktop-x64"}
+    export DIN_WINE_DOTNET_X86=${featurePart "windows" "dotnet-x86"}:shared=${featurePart "windows" "dotnet-desktop-x86"}
+    # Direct3D on Vulkan for Windows programs (electron/windows-apps.mts):
+    # DXVK's 9-11 and vkd3d-proton's 12, linked into the prefix's system32
+    # and syswow64.
+    export DIN_WINE_DXVK_X64=${featurePart "windows" "dxvk-x64"}/bin
+    export DIN_WINE_DXVK_X86=${featurePart "windows" "dxvk-x86"}/bin
+    export DIN_WINE_VKD3D_X64=${featurePart "windows" "vkd3d"}/x64
+    export DIN_WINE_VKD3D_X86=${featurePart "windows" "vkd3d"}/x86
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
@@ -665,7 +771,29 @@ in
   # Quick Share's port (PORT in electron/quickshare.mts), for a phone
   # sharing over Bluetooth that moves to the hotspot. Nothing listens on it
   # unless one of the user's phones has opened its share sheet.
-  networking.firewall.allowedTCPPorts = [ 47331 ];
+  #
+  # LocalSend (localsend.org), the file sharing app on every platform, on
+  # 53317: its HTTP server, and the multicast its devices find each other
+  # with (allowedUDPPorts, below). Without them other devices can't send to
+  # this computer, and mostly can't see it. Nothing listens unless the user
+  # runs it, and it asks before it takes a file unless the user has turned
+  # on its Quick Save.
+  networking.firewall.allowedTCPPorts = [ 47331 localSendPort ];
+  # The ports the user lets in in Settings → Firewall (os/din-firewall.sh):
+  # a chain of their own, ahead of the refusal that ends nixos-fw, filled
+  # from what's saved each time the firewall starts or reloads. They stay
+  # off the hotspot, whose table drops them first (below). A firewall whose
+  # start fails stops altogether, letting everything in, so a failure here
+  # leaves just the user's ports shut.
+  networking.firewall.extraCommands = ''
+    ip46tables -N din-fw 2>/dev/null || true
+    ip46tables -A nixos-fw -j din-fw
+    ${din-firewall}/bin/din-firewall apply || echo "din-firewall: the ports let in in Settings → Firewall weren't" >&2
+  '';
+  networking.firewall.extraStopCommands = ''
+    ip46tables -F din-fw 2>/dev/null || true
+    ip46tables -X din-fw 2>/dev/null || true
+  '';
   # The hotspot a phone sharing over Bluetooth moves to (din-hotspot,
   # electron/quickshare-hotspot.mts): NetworkManager's DHCP and DNS for it.
   networking.firewall.interfaces.dinqs0.allowedUDPPorts = [ 53 67 ];
@@ -772,6 +900,9 @@ in
       "${din-wifi}/bin/din-wifi reset"
       "${din-hotspot}/bin/din-hotspot up"
       "${din-hotspot}/bin/din-hotspot down"
+      # Settings → Firewall. What it opens is only reachable by what's
+      # listening there, which the user's programs could be anyway.
+      "${din-firewall}/bin/din-firewall"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
       # It checks the old password itself.
@@ -986,7 +1117,7 @@ in
   # it.
   services.udev.packages = [
     pkgs.brightnessctl
-    pkgs.libmtp
+    libmtpUdevRules
     (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
     '')
@@ -1175,7 +1306,7 @@ in
       libdrm libgbm libglvnd libGL vulkan-loader wayland libxkbcommon
       libx11 libxcb libxext libxfixes libxrandr libxrender libxi libxcursor
       libxcomposite libxdamage libxtst libxscrnsaver libxshmfence libxkbfile
-      alsa-lib libpulseaudio pipewire SDL2
+      alsa-lib libpulseaudio pipewire SDL2 zstd
     ];
   };
   environment.sessionVariables.NIX_LD_LIBRARY_PATH =
@@ -1186,12 +1317,48 @@ in
     binfmt = true;
     # The AppImage environment's locales are the system's (i18n), not glibc's
     # full set: that's another 220 MiB of every language there is.
+    #
+    # pkexec can't raise privileges in there: bubblewrap always sets
+    # no_new_privs, so setuid does nothing, and an AppImage that runs part of
+    # itself as root (`pkexec $APPIMAGE --daemon`, System76's Keyboard
+    # Configurator) fails with "pkexec must be setuid root". In its place is
+    # one that asks the user's systemd to run the real pkexec, outside, with
+    # the same input, output and exit status; polkit asks for the password in
+    # Din as for any other, and an AppImage it names runs through binfmt.
+    #
+    # appimage-run says what it's doing ("… installed in …") on standard
+    # output, which is the program's: a daemon that answers its app there
+    # opens its replies with appimage-run's line, which the app can't read.
+    # It says it on standard error instead.
+    #
+    # AppImages leave out what every ordinary distribution has, but the
+    # environment nixpkgs gives them hasn't all of it: libzstd above all,
+    # which bundled Qt, libtiff and libsystemd link against (Solarus Editor
+    # and Buzz wouldn't start without it), and a few more that bundled
+    # libraries name.
     package = pkgs.appimage-run.override {
-      buildFHSEnv = pkgs.buildFHSEnv.override {
+      extraPkgs = pkgs: with pkgs; [
+        zstd libbsd libdecor libdeflate libpng libwebp libxau libxdmcp
+        elfutils libffi
+      ];
+      appimageTools = pkgs.appimageTools // {
+        appimage-exec = pkgs.runCommand "appimage-exec.sh" { } ''
+          mkdir -p $out/bin
+          sed 's/\becho /echo >\&2 /' ${pkgs.appimageTools.appimage-exec}/bin/appimage-exec.sh \
+            > $out/bin/appimage-exec.sh
+          chmod +x $out/bin/appimage-exec.sh
+          ! grep -n '\becho [^>]' $out/bin/appimage-exec.sh
+        '';
+      };
+      buildFHSEnv = args: (pkgs.buildFHSEnv.override {
         callPackage = fn: args: pkgs.callPackage fn (args // {
           pkgs = pkgs // { glibcLocales = config.i18n.glibcLocales; };
         });
-      };
+      }) (args // {
+        extraBwrapArgs = (args.extraBwrapArgs or [ ]) ++ [
+          "--ro-bind" "${appimagePkexec}/bin/pkexec" "/run/wrappers/bin/pkexec"
+        ];
+      });
     };
   };
 
@@ -1319,6 +1486,9 @@ in
     # Pointer themes: Adwaita (GTK's own default) and the others Settings
     # offers; and the icon themes it offers.
     ++ [ adwaita-icon-theme din-cursor-themes din-icon-themes ]
+    # GTK 3 apps' theme: libadwaita's look, as GTK 4 apps have it, in Din's
+    # colors and light/dark mode (electron/gtk-theme.mts).
+    ++ [ adw-gtk3 ]
     # xdg-open, and Din as the handler for the links it opens (see
     # xdg.mime.defaultApplications below).
     ++ [
@@ -1331,10 +1501,20 @@ in
       (writeTextDir "share/applications/din-open.desktop" ''
         [Desktop Entry]
         Type=Application
-        Name=Din Web Browser
+        Name=Din
         Exec=din-open %U
-        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;inode/directory;
         NoDisplay=true
+      '')
+      # The defaults' mimeapps.list in the system profile's etc/xdg too, which
+      # is on XDG_CONFIG_DIRS: appimage-run's sandbox (Signal) puts its own
+      # /etc/xdg over the system's, so there xdg-open never sees
+      # /etc/xdg/mimeapps.list, and opened links in whatever mimeinfo.cache
+      # lists first (a Flatpak browser) or not at all. /run, and the profile
+      # in it, comes through.
+      (runCommand "din-mimeapps" { } ''
+        mkdir -p $out/etc/xdg
+        ln -s ${config.environment.etc."xdg/mimeapps.list".source} $out/etc/xdg/mimeapps.list
       '')
     ];
   # Podman's configuration, as virtualisation.podman would make it, for the
@@ -1394,8 +1574,11 @@ in
   # nostr: links too, which Din opens in the app chosen for them.
   # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
   # portal's OpenURI; both start the default handler, din-open, which hands
-  # the links to Din over the session bus.
+  # the links to Din over the session bus. Folders too, which open in Files:
+  # an Electron app's "Show in Folder" asks org.freedesktop.FileManager1,
+  # which Din answers, and xdg-opens the folder when that isn't there yet.
   xdg.mime.defaultApplications = {
+    "inode/directory" = "din-open.desktop";
     "x-scheme-handler/http" = "din-open.desktop";
     "x-scheme-handler/https" = "din-open.desktop";
     "x-scheme-handler/nsite" = "din-open.desktop";
@@ -1423,14 +1606,22 @@ in
   # (electron/cursor.mts). The themes are din-cursor-themes, above.
   # DinOS's default is Capitaine at 40 (which shows its 36px images), set
   # in the system's dconf database, under whatever the user picks. The icon
-  # theme is GSettings' too (icon-theme), and Din's own by default.
+  # theme is GSettings' too (icon-theme), and Din's own by default, and so
+  # is GTK 3's theme, adw-gtk3 (above).
   programs.dconf.enable = true;
   programs.dconf.profiles.user.databases = [
     {
       settings."org/gnome/desktop/interface" = {
         cursor-theme = "capitaine-cursors";
         icon-theme = "Din";
+        gtk-theme = "adw-gtk3";
+        # Din's own interface font (Inter, below), at its text size (14px).
+        font-name = "Inter 10.5";
         cursor-size = lib.gvariant.mkInt32 40;
+      };
+      # Native apps' title bars have the buttons Din's windows do.
+      settings."org/gnome/desktop/wm/preferences" = {
+        button-layout = "appmenu:minimize,maximize,close";
       };
     }
   ];
@@ -1438,6 +1629,22 @@ in
   # Emoji and broad Unicode coverage for web content. noto-fonts has no
   # Chinese, Japanese or Korean, which otherwise render as boxes.
   fonts.packages = with pkgs; [
+    # Din's interface font, for native apps too (font-name above).
+    inter
+    # Microsoft's open stand-in for Segoe UI, Windows' UI font, with its
+    # metrics: Windows programs' UI font (electron/wine-theme.mts), so their
+    # layouts fit as designed. Not in nixpkgs.
+    (stdenvNoCC.mkDerivation {
+      pname = "selawik";
+      version = "1.01";
+      src = fetchzip {
+        url = "https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip";
+        stripRoot = false;
+        hash = "sha256-BbjXJ8HFXrRklMOnGXyZIZeQ5Oksda4AqQXHmNqN6AQ=";
+      };
+      installPhase = "install -Dm644 -t $out/share/fonts/truetype *.ttf";
+      meta.license = lib.licenses.ofl;
+    })
     noto-fonts
     noto-fonts-cjk-sans
     noto-fonts-cjk-serif
@@ -2181,7 +2388,8 @@ in
   # network would otherwise stop together, and Wi-Fi was gone before deckmon
   # got to say goodbye. Ordering it after network.target stops it first.
   systemd.services."user@".after = [ "network.target" ];
-  networking.firewall.allowedUDPPorts = [ 5353 ];
+  # mDNS, for finding receivers, and LocalSend's discovery (above).
+  networking.firewall.allowedUDPPorts = [ 5353 localSendPort ];
   networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
   # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to

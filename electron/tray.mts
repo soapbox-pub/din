@@ -11,9 +11,13 @@
 //
 // Items are drawn by the shell (src/components/desktop/TrayMenu.tsx): their
 // icons as images, their menus (com.canonical.dbusmenu) as Din menus. Clicks
-// go back to the app as Activate/ContextMenu/menu events. The old XEmbed
-// tray protocol (_NET_SYSTEM_TRAY) isn't hosted: apps that speak only that
-// get no icon.
+// go back to the app as Activate/ContextMenu/menu events.
+//
+// The old XEmbed tray (_NET_SYSTEM_TRAY), the only one Wine speaks, is
+// hosted by the compositor on Xwayland (native/din-compositor/src/tray.rs),
+// which sends each icon's pixels here; its items are listed with the
+// rest, and a click on one goes back as the X click a real tray would give
+// it, where the user clicked, so a Windows program's own menu opens there.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -24,7 +28,7 @@ import { app, ipcMain, nativeImage } from 'electron';
 import { DBusConnection, DBusError, unwrap, Variant, type MethodCall, type Message } from './dbus.mts';
 import { resolveIcon } from './icon-theme.mts';
 import { appIdForPid } from './native-apps.mts';
-import { sessionBusAddress } from './native-display.mts';
+import { clickXTray, onXTray, sessionBusAddress, type XTrayMessage } from './native-display.mts';
 
 const WATCHER = 'org.kde.StatusNotifierWatcher';
 const WATCHER_PATH = '/StatusNotifierWatcher';
@@ -569,7 +573,47 @@ async function menuOf(item: Item): Promise<TrayMenuEntry[] | null> {
 // ---------------------------------------------------------------------------
 
 function list(): TrayItem[] {
-  return [...items.values()].map((item) => item.public);
+  return [...[...items.values()].map((item) => item.public), ...xItems.values()];
+}
+
+// ---------------------------------------------------------------------------
+// The X tray's icons
+// ---------------------------------------------------------------------------
+
+/** Their items, by key ("x11:<window>"), as the compositor reports them. */
+const xItems = new Map<string, TrayItem>();
+const X_PREFIX = 'x11:';
+
+function onXTrayMessage(message: XTrayMessage): void {
+  if (message.type === 'tray-reset') {
+    if (xItems.size === 0) return;
+    xItems.clear();
+    changed();
+    return;
+  }
+  const key = `${X_PREFIX}${message.tray}`;
+  if (message.type === 'tray-gone') {
+    if (xItems.delete(key)) changed();
+    return;
+  }
+  const { width, height } = message;
+  const pixels = Buffer.from(message.bgra, 'base64');
+  if (width < 1 || height < 1 || width > MAX_PIXMAP_SIDE || height > MAX_PIXMAP_SIDE || pixels.length !== width * height * 4) return;
+  if (!xItems.has(key) && items.size + xItems.size >= MAX_ITEMS) return;
+  const icon = nativeImage.createFromBitmap(pixels, { width, height }).toDataURL();
+  // Wine's explorer draws every Windows program's icon, so which program
+  // one is for isn't known.
+  const windows = message.class.toLowerCase() === 'explorer.exe';
+  const title = windows ? 'Windows program' : message.class.slice(0, MAX_TEXT) || 'App';
+  xItems.set(key, { id: key, appId: null, title, tooltip: title, status: 'Active', icon: icon.length <= MAX_ICON_BYTES * 2 ? icon : null, menu: false, itemIsMenu: false });
+  changed();
+}
+
+/** Click an X tray icon: Activate is button 1, SecondaryActivate 2, ContextMenu 3. */
+function clickX(key: string, button: number, x: unknown, y: unknown): boolean {
+  if (!xItems.has(key)) return false;
+  clickXTray(Number(key.slice(X_PREFIX.length)), button, int(x), int(y));
+  return true;
 }
 
 /** Tell the shell, once per burst of changes. */
@@ -583,6 +627,10 @@ function changed(): void {
 
 /** Call a method on an item; resolves whether the app took it. */
 async function callItem(key: unknown, member: string, signature: string, body: unknown[]): Promise<boolean> {
+  if (typeof key === 'string' && key.startsWith(X_PREFIX)) {
+    const button = { Activate: 1, SecondaryActivate: 2, ContextMenu: 3 }[member];
+    return button !== undefined && clickX(key, button, body[0], body[1]);
+  }
   const item = typeof key === 'string' ? items.get(key) : undefined;
   if (!item || !bus) return false;
   try {
@@ -649,6 +697,7 @@ export function registerTrayHandlers(options: {
       .catch(() => {});
   });
 
+  onXTray(onXTrayMessage);
   // Up before the user can launch anything: apps look for a tray once, as
   // they start.
   void start();

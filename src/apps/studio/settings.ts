@@ -24,6 +24,8 @@ export interface StudioSettings {
   destination: string;
   /** Record a take while live. */
   recordWhileLive: boolean;
+  /** The project takes go into, by its folder; '' for a new one with the next take. */
+  project: string;
 }
 
 const KEY = 'din:studio:settings';
@@ -43,6 +45,7 @@ const DEFAULTS: StudioSettings = {
   hideWhileRecording: true,
   destination: '',
   recordWhileLive: false,
+  project: '',
 };
 
 function load(): StudioSettings {

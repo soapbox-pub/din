@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { AppWindow, ClipboardCopy, FolderOpen, Pencil, SquareArrowOutUpRight, Trash2 } from 'lucide-react';
 import {
   ContextMenu,
@@ -21,6 +22,9 @@ import { DESKTOP_ICON_SIZES, type Rect } from '@/lib/desktopIcons';
 import { dockTakes } from '@/lib/dockDrop';
 import { cleanFsError, localFileUrl } from '@/lib/fs';
 import { entryApp } from '@/lib/openPath';
+import type { AppDefinition } from '@/lib/apps';
+import { NATIVE_APP_ICON } from '@/lib/appIcons';
+import { getNativeAppsBridge, isProgram } from '@/lib/nativeApps';
 import { cn } from '@/lib/utils';
 import { FileIcon } from '@/shared/FileIcon';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
@@ -288,20 +292,14 @@ function DesktopIconTile({
           <SquareArrowOutUpRight aria-hidden /> Open
           <ContextMenuShortcut>Enter</ContextMenuShortcut>
         </ContextMenuItem>
-        {openWithApps.length > 0 && (
-          <ContextMenuSub>
-            <ContextMenuSubTrigger className="gap-2">
-              <AppWindow aria-hidden /> Open With
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-52">
-              {openWithApps.map((app) => (
-                <ContextMenuItem key={app.id} onSelect={() => icons.openWith(app.id, [icon.name])}>
-                  <AppIcon icon={app.icon} web={app.web} className="size-4" /> {app.name}
-                </ContextMenuItem>
-              ))}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-        )}
+        <OpenWithSub
+          apps={openWithApps}
+          path={single && !icon.entry && !folder && !isProgram(icon.name) ? icon.path : null}
+          onOpen={(appId) => icons.openWith(appId, [icon.name])}
+          onOpenInstalled={(appId) =>
+            void getNativeAppsBridge()?.openFile(appId, icon.path).catch(fail(`Couldn’t open ${icon.label}`))
+          }
+        />
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => icons.showInFiles(targets())}>
           <FolderOpen aria-hidden /> Show in Files
@@ -458,5 +456,50 @@ function RenameField({ icon, onDone }: { icon: DesktopIcon; onDone: (to: string 
       onDoubleClick={(e) => e.stopPropagation()}
       className="w-full resize-none rounded border border-primary bg-background px-1 text-center text-xs leading-tight text-foreground outline-none"
     />
+  );
+}
+
+/**
+ * Open With: Din's apps that take the item, then the installed apps (Linux
+ * apps, Windows programs) for a file's type, asked for when the menu opens.
+ */
+function OpenWithSub({
+  apps,
+  path,
+  onOpen,
+  onOpenInstalled,
+}: {
+  apps: AppDefinition[];
+  path: string | null;
+  onOpen: (appId: string) => void;
+  onOpenInstalled: (appId: string) => void;
+}) {
+  const installed = useQuery({
+    queryKey: ['desktop', 'open-with', path],
+    queryFn: () => getNativeAppsBridge()?.fileHandlers(path!) ?? [],
+    enabled: path !== null && getNativeAppsBridge() !== undefined,
+    staleTime: 30_000,
+  });
+  const native = installed.data ?? [];
+  if (apps.length === 0 && native.length === 0) return null;
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger className="gap-2">
+        <AppWindow aria-hidden /> Open With
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className="w-52">
+        {apps.map((app) => (
+          <ContextMenuItem key={app.id} onSelect={() => onOpen(app.id)}>
+            <AppIcon icon={app.icon} web={app.web} className="size-4" /> {app.name}
+          </ContextMenuItem>
+        ))}
+        {apps.length > 0 && native.length > 0 && <ContextMenuSeparator />}
+        {native.map((app) => (
+          <ContextMenuItem key={app.id} onSelect={() => onOpenInstalled(app.id)}>
+            <AppIcon icon={app.icon ?? NATIVE_APP_ICON} className="size-4" /> {app.name}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   );
 }

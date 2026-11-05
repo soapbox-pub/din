@@ -3,6 +3,9 @@ import {
   ArrowLeft,
   ArrowRight,
   AtSign,
+  Bookmark as BookmarkGlyph,
+  BookmarkCheck,
+  Library,
   Puzzle,
   ChevronDown,
   ChevronRight,
@@ -52,7 +55,14 @@ import {
   EXTENSIONS_URL,
   extensionAddressOf,
   PREFERENCES_URL,
+  BOOKMARKS_URL,
 } from '@/lib/internalPages';
+import { addBookmark, bookmarksOfUrl, getBookmarks, isBookmarkableUrl } from '@/lib/browserBookmarks';
+import { useBookmarkFiles, useBookmarksBarShown } from '@/hooks/useBrowserBookmarks';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { BookmarkStarButton, BookmarksBar } from '@/components/desktop/apps/BrowserBookmarks';
+import type { BookmarkOpeners } from '@/components/desktop/apps/bookmarkMenus';
+import { BookmarksPage, type BookmarksPageProps } from '@/components/desktop/apps/BookmarksPage';
 import { getCrxBridge, isAllowedTabUrl } from '@/lib/crx';
 import { getUserscriptsBridge, isUserscriptUrl } from '@/lib/userscripts';
 import { getDevtoolsBridge } from '@/lib/devtools';
@@ -551,6 +561,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   useEffect(() => {
     historyRef.current = addressSuggestions;
   }, [addressSuggestions]);
+  // Bookmarks, on this device only. The bar shows under every page when the
+  // user asked for it, and on the new-tab page anyway, as Chrome's does.
+  const { user } = useCurrentUser();
+  const bookmarksOwner = user?.pubkey ?? 'local';
+  const [bookmarksBarShown, setBookmarksBarShown] = useBookmarksBarShown();
+  const { importFile: importBookmarks, exportFile: exportBookmarks } = useBookmarkFiles();
+  // The tab whose star popover is open (Ctrl+D opens it too); switching tabs closes it.
+  const [starTab, setStarTab] = useState<string | null>(null);
   const newTabSites = useMemo(
     () => topSites(browsingHistory, NEW_TAB_LINKS, NEW_TAB_SITE_COUNT),
     [browsingHistory],
@@ -1626,6 +1644,37 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const openPreferences = useCallback(() => openInternalPage(PREFERENCES_URL), [openInternalPage]);
   /** about:extensions, the same way. */
   const openExtensions = useCallback(() => openInternalPage(EXTENSIONS_URL), [openInternalPage]);
+  /** about:bookmarks, the same way. */
+  const openBookmarks = useCallback(() => openInternalPage(BOOKMARKS_URL), [openInternalPage]);
+
+  /**
+   * Bookmark the page in front (onto the bookmarks bar, unless it's
+   * bookmarked already) and open the star's popover to name and file it:
+   * the star, and Ctrl+D.
+   */
+  const bookmarkPage = useCallback(() => {
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!tab || !isBookmarkableUrl(tab.url)) return;
+    if (!bookmarksOfUrl(getBookmarks(bookmarksOwner), tab.url).length) {
+      addBookmark(bookmarksOwner, { url: tab.url, title: tab.title, icon: tab.favicon });
+    }
+    setStarTab(tab.id);
+  }, [bookmarksOwner]);
+
+  // Where bookmarks open: the bookmarks bar and about:bookmarks.
+  const bookmarkOpeners = useMemo<BookmarkOpeners>(
+    () => ({
+      open: (url) => navigateTab(activeIdRef.current, url),
+      openInNewTab: (url, background) => void openTab(url, !background, null, activeIdRef.current),
+      openInNewWindow: isPrivate ? undefined : openInNewWindow,
+    }),
+    [navigateTab, openTab, openInNewWindow, isPrivate],
+  );
+  // What about:bookmarks renders; memoized like `preferences` below.
+  const bookmarksPage = useMemo<BookmarksPageProps>(
+    () => ({ openers: bookmarkOpeners, onImport: importBookmarks, onExport: exportBookmarks }),
+    [bookmarkOpeners, importBookmarks, exportBookmarks],
+  );
 
   /** Move a tab through its history by `delta` (-1 back, +1 forward). */
   const goTab = useCallback(
@@ -1743,11 +1792,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'clear-data':
           if (!isPrivate) setClearDataOpen(true);
           return true;
+        case 'bookmark-page':
+          bookmarkPage();
+          return true;
+        case 'bookmarks-bar':
+          setBookmarksBarShown(!bookmarksBarShown);
+          return true;
+        case 'bookmarks':
+          openBookmarks();
+          return true;
         default:
           return false;
       }
     },
-    [reopenTab, openWindow, closeWindow, windowId, isPrivate],
+    [reopenTab, openWindow, closeWindow, windowId, isPrivate, bookmarkPage, setBookmarksBarShown, bookmarksBarShown, openBookmarks],
   );
 
   const canBack = webviewMode ? activeTab.canBack : activeTab.cursor > 0;
@@ -1765,8 +1823,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       onTreeTabsChange: setTreeTabs,
       showClearData: !isPrivate,
       onClearBrowsingData: () => setClearDataOpen(true),
+      onOpenBookmarks: openBookmarks,
+      onImportBookmarks: importBookmarks,
+      onExportBookmarks: exportBookmarks,
     }),
-    [treeTabs, setTreeTabs, isPrivate],
+    [treeTabs, setTreeTabs, isPrivate, openBookmarks, importBookmarks, exportBookmarks],
   );
 
   // What about:extensions needs to manage the installed ones, memoized for
@@ -2028,6 +2089,17 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onOpenLocation={(url) => openTab(url, true, null, activeId)}
           onionLocation={onionLocation}
           nsiteLocation={siteLocations.nsite}
+          end={
+            isBookmarkableUrl(activeTab.url) ? (
+              <BookmarkStarButton
+                url={activeTab.url}
+                open={starTab === activeId}
+                onOpenChange={(open) => setStarTab(open ? activeId : null)}
+                onBookmark={bookmarkPage}
+                onOpenManager={openBookmarks}
+              />
+            ) : null
+          }
           site={
             /^(https?|nsite):\/\//i.test(activeTab.url) ? (
               <SiteInfoButton
@@ -2128,6 +2200,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           showClearData={!isPrivate}
           onClearBrowsingData={() => setClearDataOpen(true)}
           onOpenPreferences={openPreferences}
+          onOpenBookmarks={openBookmarks}
+          bookmarksBarShown={bookmarksBarShown}
+          onToggleBookmarksBar={() => setBookmarksBarShown(!bookmarksBarShown)}
           showExtensions={!isPrivate && (!!crx || !!userscriptsBridge)}
           onOpenExtensions={openExtensions}
         />
@@ -2139,6 +2214,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           />
         )}
       </form>
+
+      {(bookmarksBarShown || activeTab.url === '') && (
+        <BookmarksBar
+          openers={bookmarkOpeners}
+          onOpenManager={openBookmarks}
+          onImport={() => void importBookmarks()}
+          style={toolbarTint}
+        />
+      )}
 
       {/* Body: the tree-tabs sidebar (when enabled) beside the page surface,
           both sitting below the full-width toolbar. In the horizontal-strip
@@ -2183,6 +2267,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             // Non-null only for the settings tab, where it both selects the
             // about:preferences overlay and supplies what it renders.
             preferences={tab.url === PREFERENCES_URL ? preferences : null}
+            bookmarksPage={tab.url === BOOKMARKS_URL ? bookmarksPage : null}
             nostrUri={isNostrUri(tab.url) && !extensionAddressOf(tab.url) ? tab.url : null}
             // about:extensions, or a nostr: link to one extension on it.
             extensionsPage={tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? tab.url : null}
@@ -2325,6 +2410,7 @@ function AddressBar({
   onionLocation,
   nsiteLocation,
   site,
+  end,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   /** Active tab id; switching tabs dismisses the dropdown. */
@@ -2346,6 +2432,8 @@ function AddressBar({
   nsiteLocation?: string | null;
   /** The page's site info button, shown in place of the search icon. */
   site?: React.ReactNode;
+  /** At the end of the bar, after the badges: the bookmark star. */
+  end?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   /** Keyboard highlight: -1 is the raw typed text, 0.. a suggestion. */
@@ -2496,10 +2584,15 @@ function AddressBar({
         autoComplete="off"
         className={cn(
           'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border',
-          showOnion && showNsite ? 'pr-36' : showOnion || showNsite ? 'pr-20' : 'pr-3',
+          // Room for what sits at the end: each badge, and the star.
+          [
+            ['pr-3', 'pr-9'],
+            ['pr-20', 'pr-28'],
+            ['pr-36', 'pr-44'],
+          ][Number(showOnion) + Number(showNsite)][end ? 1 : 0],
         )}
       />
-      {(showOnion || showNsite) && (
+      {(showOnion || showNsite || end) && (
         // Keep a click from selecting the address first.
         <div
           className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1"
@@ -2535,6 +2628,7 @@ function AddressBar({
               onion
             </button>
           )}
+          {end}
         </div>
       )}
       {show && (
@@ -3762,6 +3856,7 @@ const TabSurface = memo(function TabSurface({
   isNewTab,
   topSites: sites,
   preferences,
+  bookmarksPage,
   nostrUri,
   extensionsPage,
   installedExtensions,
@@ -3803,6 +3898,8 @@ const TabSurface = memo(function TabSurface({
   topSites: TopSite[];
   /** Settings to render over the surface, or null for a non-settings tab. */
   preferences: PreferencesProps | null;
+  /** about:bookmarks' props for the bookmarks tab, or null for any other. */
+  bookmarksPage: BookmarksPageProps | null;
   /** The nostr: link this tab previews, or null. */
   nostrUri: string | null;
   /** The URL of the about:extensions page (or a nostr: link to an extension) this tab shows, or null. */
@@ -3968,6 +4065,8 @@ const TabSurface = memo(function TabSurface({
       )}
       {/* about:preferences, over the same kind of parked blank surface. */}
       {preferences && <PreferencesPage {...preferences} />}
+      {/* about:bookmarks, the same way. */}
+      {bookmarksPage && <BookmarksPage {...bookmarksPage} />}
       {/* A nostr: link's preview, the same way. */}
       {nostrUri && <NostrPage uri={nostrUri} />}
       {extensionsPage && (
@@ -4338,7 +4437,9 @@ function tabLabel(tab: Tab): string {
 function TabGlyph({ tab, className }: { tab: Tab; className?: string }) {
   const Icon = tab.url === PREFERENCES_URL
     ? Settings
-    : tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? Puzzle : isNostrUri(tab.url) ? AtSign : Globe;
+    : tab.url === BOOKMARKS_URL
+      ? BookmarkGlyph
+      : tab.url === EXTENSIONS_URL || extensionAddressOf(tab.url) ? Puzzle : isNostrUri(tab.url) ? AtSign : Globe;
   return <Icon className={className} aria-hidden />;
 }
 
@@ -4394,6 +4495,9 @@ function BrowserMenu({
   showClearData,
   onClearBrowsingData,
   onOpenPreferences,
+  onOpenBookmarks,
+  bookmarksBarShown,
+  onToggleBookmarksBar,
   showExtensions,
   onOpenExtensions,
 }: {
@@ -4419,6 +4523,11 @@ function BrowserMenu({
   onClearBrowsingData: () => void;
   /** Open the about:preferences tab. */
   onOpenPreferences: () => void;
+  /** Open the about:bookmarks tab. */
+  onOpenBookmarks: () => void;
+  /** Whether the bookmarks bar shows under every page. */
+  bookmarksBarShown: boolean;
+  onToggleBookmarksBar: () => void;
   /** Show the Extensions item (extensions never run in private windows). */
   showExtensions: boolean;
   /** Open the about:extensions tab. */
@@ -4459,6 +4568,19 @@ function BrowserMenu({
             label="New private window"
             shortcut="Ctrl+Shift+N"
             onClick={() => run(onNewPrivateWindow)}
+          />
+          <BrowserMenuItem
+            icon={Library}
+            label="Bookmarks"
+            shortcut="Ctrl+Shift+O"
+            onClick={() => run(onOpenBookmarks)}
+          />
+          <BrowserMenuItem
+            icon={BookmarkCheck}
+            label="Show bookmarks bar"
+            shortcut="Ctrl+Shift+B"
+            active={bookmarksBarShown}
+            onClick={() => run(onToggleBookmarksBar)}
           />
           {showFind && (
             <BrowserMenuItem

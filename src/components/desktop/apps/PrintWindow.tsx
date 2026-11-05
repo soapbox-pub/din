@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, Loader2, Minus, Plus, Printer as PrinterIcon, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,6 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useFilePicker } from '@/contexts/FilePickerContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import type { AppComponentProps } from '@/lib/apps';
+import { notify } from '@/lib/notificationCenter';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { usePrinterCapabilities, usePrinters } from '@/hooks/usePrinting';
@@ -39,13 +42,39 @@ const PAPER_LABELS: Record<PaperSize, string> = {
   A5: 'A5',
 };
 
+const SOURCE = { appId: 'settings', name: 'Printing' };
+
+/** The document a print window's launch params name, or null. */
+function paramDocument(params: AppComponentProps['params']): PrintDocument | null {
+  const d = params?.document as Partial<PrintDocument> | undefined;
+  if (!d || typeof d.id !== 'string' || typeof d.title !== 'string' || typeof d.kind !== 'string') return null;
+  return { id: d.id, title: d.title, kind: d.kind };
+}
+
 /**
- * Din's print dialog, for a page, a frame, or a file: where it goes (a
- * printer, or a PDF file), how many, which pages, and how it's laid out, next
- * to a preview of the very PDF that will be sent (see electron/printing.mts).
+ * Din's print window (PRINT_WINDOW_APP_ID, opened by PrintHost), one per
+ * document: a window, not a dialog, so the rest of the desktop stays usable
+ * while a printer is chosen or a job is being sent. Its launch params'
+ * `document` is what's printed; closing the window lets it go, unless a
+ * job is on its way, which then finishes on its own and says how it went.
+ */
+export function PrintWindow({ windowId, params }: AppComponentProps) {
+  const { close } = useWindowActions();
+  const document = useMemo(() => paramDocument(params), [params]);
+  useWindowTitle(document ? `Print “${document.title}”` : 'Print');
+  if (!document || !getPrintingBridge()) {
+    return <PreviewMessage>Nothing to print.</PreviewMessage>;
+  }
+  return <PrintForm key={document.id} document={document} onClose={() => close(windowId)} />;
+}
+
+/**
+ * The print form, for a page, a frame, or a file: where it goes (a printer,
+ * or a PDF file), how many, which pages, and how it's laid out, next to a
+ * preview of the very PDF that will be sent (see electron/printing.mts).
  * Printers on the network appear in the list on their own.
  */
-export function PrintDialog({ document, onClose }: { document: PrintDocument; onClose: () => void }) {
+function PrintForm({ document, onClose }: { document: PrintDocument; onClose: () => void }) {
   const bridge = getPrintingBridge()!;
   const { toast } = useToast();
   const { pickFiles } = useFilePicker();
@@ -76,9 +105,25 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
   const [background, setBackground] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Hidden while the save dialog is up, so the two don't fight over focus. */
-  const [hidden, setHidden] = useState(false);
   const printButton = useRef<HTMLButtonElement>(null);
+  /** A job (or save) under way, and whether the window closed meanwhile. */
+  const sending = useRef(false);
+  const gone = useRef(false);
+
+  // Enter prints, as soon as the window is up.
+  useEffect(() => {
+    printButton.current?.focus();
+  }, []);
+
+  // The window closing (its close button, Escape, Cancel) lets the document
+  // go, unless it's being sent: then the job finishes and submit cleans up.
+  useEffect(
+    () => () => {
+      gone.current = true;
+      if (!sending.current) void bridge.close(document.id);
+    },
+    [bridge, document.id],
+  );
 
   const paperSizes = toPdf || !caps ? [...PAPER_SIZES] : caps.paperSizes;
   const paper: PaperSize =
@@ -105,18 +150,13 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
   const pagesValid = allPages || PAGE_RANGES.test(pages);
   const ready = destination !== null && pagesValid && !busy && (toPdf || printer !== null);
 
-  const close = () => {
-    void bridge.close(document.id);
-    onClose();
-  };
-
   const submit = async () => {
     if (!ready) return;
     setError(null);
     setBusy(true);
+    sending.current = true;
     try {
       if (toPdf) {
-        setHidden(true);
         const base = (document.title || 'Untitled').replace(/\.pdf$/i, '').replace(/[/\\:*?"<>|]+/g, ' ').trim();
         const name = `${base.slice(0, 120) || 'Untitled'}.pdf`;
         const result = await pickFiles({
@@ -128,7 +168,7 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
         });
         const target = result?.paths[0];
         if (!target) {
-          setHidden(false);
+          if (gone.current) void bridge.close(document.id);
           return;
         }
         await bridge.savePdf(document.id, layout, target);
@@ -146,27 +186,33 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
         setLastDestination(printer!.name);
         toast({ title: `Sent to ${printer!.displayName}`, description: document.title });
       }
-      onClose();
+      if (!gone.current) onClose();
     } catch (e) {
-      setHidden(false);
-      setError(cleanPrintingError(e));
+      const message = cleanPrintingError(e);
+      if (gone.current) {
+        // The window was closed while it was sending: say so where it's seen.
+        void bridge.close(document.id);
+        notify({ source: SOURCE, title: `Couldn’t print “${document.title}”`, body: message });
+      } else {
+        setError(message);
+      }
     } finally {
-      setBusy(false);
+      sending.current = false;
+      if (!gone.current) setBusy(false);
     }
   };
 
   return (
-    <Dialog open={!hidden} onOpenChange={(open) => !open && !busy && close()}>
-      <DialogContent
-        // Clear of the menu bar and the dock, which sit above dialogs.
-        className="flex h-[min(720px,calc(100%-10rem))] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl md:flex-row"
-        onEscapeKeyDown={(e) => busy && e.preventDefault()}
-        // Enter prints, as soon as the dialog is up.
-        onOpenAutoFocus={(e) => {
+    <div
+      className="flex h-full flex-col overflow-hidden bg-background md:flex-row"
+      onKeyDown={(e) => {
+        // Not an Escape that closes a menu (portalled, so outside this div).
+        if (e.key === 'Escape' && !busy && e.currentTarget.contains(e.target as Node)) {
           e.preventDefault();
-          printButton.current?.focus();
-        }}
-      >
+          onClose();
+        }
+      }}
+    >
         <PreviewPane
           pages={preview.data?.pages ?? null}
           pageCount={preview.data?.pageCount ?? null}
@@ -184,12 +230,12 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
           }}
         >
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-            <div className="min-w-0 pr-8">
-              <DialogTitle className="text-lg">Print</DialogTitle>
-              <DialogDescription className="truncate" title={document.title}>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold">Print</h2>
+              <p className="truncate text-sm text-muted-foreground" title={document.title}>
                 {document.title}
                 {preview.data?.pageCount ? ` · ${preview.data.pageCount} ${preview.data.pageCount === 1 ? 'page' : 'pages'}` : ''}
-              </DialogDescription>
+              </p>
             </div>
 
             <Field label="Printer" htmlFor="print-destination">
@@ -365,7 +411,7 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" disabled={busy} onClick={close}>
+              <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
                 Cancel
               </Button>
               <Button ref={printButton} type="submit" disabled={!ready}>
@@ -375,8 +421,7 @@ export function PrintDialog({ document, onClose }: { document: PrintDocument; on
             </div>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }
 

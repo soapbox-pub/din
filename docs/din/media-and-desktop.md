@@ -138,21 +138,21 @@ app, which fills in only its fields:
 const nonce = Date.now();
 window.open(appLink('assistant', {
   intent: 'studio.edit',
-  directory: take.path,        // the conversation works here
+  directory: project.path,     // the conversation works here
   prompt: 'A vertical clip with captions',
-  title: take.title,
+  title: project.title,
   nonce, intentNonce: nonce,   // this launch's own (params merge into the last launch's)
 }));
 ```
 
 The conversation starts at once, with the intent's context ahead of the
-request (shown in it as "From Studio: Take 3"), only when `din.app.opener`
+request (shown in it as "From Studio: How I set up my desk"), only when `din.app.opener`
 is an app the intent trusts. For any other app, a new conversation opens in
 the folder with the request in the composer, for the user to send.
 
 | Intent | Trusts | Fields |
 |---|---|---|
-| `studio.edit` | Studio | `directory` (a take's folder), `prompt`, `title`; the agent is pointed at the `studio` skill |
+| `studio.edit` | Studio | `directory` (a project's folder), `prompt`, `title`; the agent is pointed at the `studio` skill |
 
 ## `din.system.capture` (permission `capture`)
 
@@ -162,7 +162,7 @@ with the camera, the microphone and the screen the permission gives it,
 and hands the bytes to main as they come:
 
 ```ts
-const { take } = await capture.begin({ scene, aspect, canvas, screen: { audio: false } });
+const { take, project } = await capture.begin({ project: current.path, scene, aspect, canvas, screen: { audio: false } });
 const writer = await capture.open(take, '.program.webm');
 recorder.ondataavailable = async (e) => capture.write(writer, new Uint8Array(await e.data.arrayBuffer()));
 // …
@@ -170,12 +170,23 @@ await capture.close(writer);
 const saved = await capture.end({ startedAt, durationMs, tracks: { program: { file: '.program.webm', start: startedAt } }, switches, markers });
 ```
 
-`begin` makes the take's folder and starts recording the screen (with its
-pointer, by wf-recorder) and resolves once its first frame is in, with
-when that was. `end` stops it, turns the WebM tracks into MP4s, writes
+Takes go into **projects**: `~/Videos/Studio/<date> <title>/`, with
+`project.json` listing its takes and clips in order, which to use, and the
+user's trims and notes (`projects`, `project`, `createProject`,
+`updateProject`), each take a folder in its `takes/`, and `edits/` for
+what the Assistant makes. `begin` makes the take's folder in the project
+it names (a new project when it names none, and `openProject` first for a
+take from before projects, which sat right in `~/Videos/Studio`) and
+starts recording the screen (with its pointer, by wf-recorder) and
+resolves once its first frame is in, with when that was. `end` stops it, turns the WebM tracks into MP4s, writes
 `take.json` with every track's place on the take's clock, and starts the
-transcript. The take's format is the `studio` skill's to explain
-(`os/opencode/skills/studio`).
+transcript. A clip, a file the user hands Studio, comes in the same way
+the tracks do: `importBegin(project, name)` makes its take folder,
+`open`/`write`/`close` write the file Studio read from its handle, and
+`importEnd` reads what's in it, gives it a poster and transcribes it (the
+desktop's `importFile` copies one by path, for `din studio import`; apps
+don't have it). `onChanged` and `onProjectChanged` say what changed. The
+format is the `studio` skill's to explain (`os/opencode/skills/studio`).
 
 Going live: `streamStart(destination)`, then `streamWrite` the WebM
 (H.264 and Opus) as it's encoded; main copies the picture and turns the

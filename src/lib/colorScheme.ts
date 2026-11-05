@@ -8,6 +8,8 @@
  * OS decides.
  */
 
+import type { NativePalette } from '@/lib/nativePalette';
+
 export interface ColorSchemeBridge {
   set(source: 'light' | 'dark' | 'system'): void;
   /**
@@ -15,6 +17,8 @@ export interface ColorSchemeBridge {
    * choose their own, and the accent native apps take from it.
    */
   setSelection(color: string): void;
+  /** Give native apps (GTK) the desktop's colors (see nativePalette.ts). */
+  setNativePalette(palette: NativePalette): void;
   /**
    * Subscribe to "Set Image as Desktop Background" in a page's right-click
    * menu, with the image's https URL. Returns an unsubscribe fn.

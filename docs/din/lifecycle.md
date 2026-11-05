@@ -121,6 +121,8 @@ window.open(appLink('paint', { width: 800, height: 600 }));   // the same, from 
 window.open(appLink(null));                          // a new window of this app (its own URL)
 await din.app.launch(appLink(null), [handle]);      // the same, handed files for its launchQueue
 await din.app.openFiles([handle]);                   // whichever app the desktop has for it
+await din.app.openWithApps(handle);                  // the installed apps for its type (fs)
+await din.app.openFiles([handle], app.id);           // in one of those
 window.open('https://example.com');                  // as links open anywhere on the desktop
 await navigator.getInstalledRelatedApps();          // the related apps installed (and, the Assistant, switched on)
 ```
@@ -158,7 +160,13 @@ its own) and nothing else, so a message for one names it by its
 `openFiles` runs a Windows program (`.exe`) through Wine instead of
 opening it, for an app with the `fs` permission; any other gets a
 `DinPermissionError`, so an app that can write a folder can't make a
-program there and run it.
+program there and run it. Opening a file in an installed app (a Linux
+app, a Windows program), which reaches whatever the user can, takes `fs`
+too: `openWithApps` lists them for a file's type, Windows programs' own
+types first, for an Open With menu, and `openFiles(files, app)` opens in
+one. For an app with `fs`, a kind of file Din has no app of its own for
+opens in the first of them (a Windows program's project file in the
+program), and in Preview where there's none.
 
 Apps can't open hidden system apps (the Installer) or pass files they
 don't hold.

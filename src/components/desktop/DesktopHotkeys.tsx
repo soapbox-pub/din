@@ -424,6 +424,8 @@ export function DesktopHotkeys() {
         else if (key === 'n') publish({ action: 'new-private-window' });
         else if (key === 'w') publish({ action: 'close-window' });
         else if (e.key === 'Delete') publish({ action: 'clear-data' });
+        else if (key === 'b') publish({ action: 'bookmarks-bar' });
+        else if (key === 'o') publish({ action: 'bookmarks' });
         return;
       }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
@@ -434,6 +436,7 @@ export function DesktopHotkeys() {
         else if (key === 'f') publish({ action: 'find' });
         else if (key === 'u') publish({ action: 'view-source' });
         else if (key === 'p') publish({ action: 'print' });
+        else if (key === 'd') publish({ action: 'bookmark-page' });
         else if (key === 'r') publish({ action: 'reload' });
         else if (key === 'n') publish({ action: 'new-window' });
         else if (/^[1-9]$/.test(e.key)) {

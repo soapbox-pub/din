@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileArchive, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -22,6 +22,9 @@ const TEXT_MAX_BYTES = 1024 * 1024;
 /** Never render more text than this (keeps the DOM responsive). */
 const TEXT_MAX_CHARS = 512 * 1024;
 
+/** pdf.js is big: it's loaded the first time a PDF is shown. */
+const PdfView = lazy(() => import('@/shared/PdfView'));
+
 export interface FileViewerBodyProps {
   path: string;
   /** Size and mtime from the listing, when known (for thumbnails, headers). */
@@ -39,7 +42,7 @@ export interface FileViewerBodyProps {
 
 /**
  * What a file looks like inside: the picture, the video, the song, the
- * text, the archive's listing, the cursor theme's cursors. Shared by the Preview window and Files'
+ * PDF, the text, the archive's listing, the cursor theme's cursors. Shared by the Preview window and Files'
  * Quick Look (Space).
  */
 export function FileViewerBody({
@@ -52,7 +55,8 @@ export function FileViewerBody({
   onUseCursor,
 }: FileViewerBodyProps) {
   const name = path.slice(path.lastIndexOf('/') + 1);
-  const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) ? path : null);
+  const category = fileCategory(name, 'file');
+  const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) || category === 'pdf' ? path : null);
   // Bust Chromium's media cache when the file changes under the same name.
   const url = base && `${base}${mtimeMs ? `?v=${Math.floor(mtimeMs)}` : ''}`;
 
@@ -74,10 +78,16 @@ export function FileViewerBody({
       </div>
     );
   }
+  if (category === 'pdf') {
+    return (
+      <Suspense fallback={null}>
+        {url && <PdfView key={url} url={url} />}
+      </Suspense>
+    );
+  }
   if (isCursorTheme(name)) return <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />;
   if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
-  const category = fileCategory(name, 'file');
-  if (category === 'pdf' || category === 'document' || category === 'disk' || category === 'program' || category === 'image' || category === 'video') {
+  if (category === 'document' || category === 'disk' || category === 'program' || category === 'image' || category === 'video') {
     return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;
   }
   return (

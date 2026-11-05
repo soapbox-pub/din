@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useDesktopTheme } from '@/hooks/useDesktopTheme';
 import { useAppContext } from '@/hooks/useAppContext';
 import { getColorSchemeBridge } from '@/lib/colorScheme';
+import { NATIVE_CURSOR_VAR } from '@/lib/nativeDisplay';
+import { readNativePalette } from '@/lib/nativePalette';
 import { DEFAULT_SELECTION_COLOR, deriveThemeTokens, isDarkTheme, selectionColor } from '@/lib/profileTheme';
 import { setThemeFontFaces } from '@/lib/themeFontFaces';
 import { setPaintedScheme } from '@/lib/rootScheme';
@@ -42,6 +44,44 @@ export function ProfileThemeApplier() {
   useEffect(() => {
     getColorSchemeBridge()?.setSelection(selection);
   }, [selection]);
+
+  // And native apps the desktop's colors, as painted: whatever sets them
+  // (this theme, the light/dark class, high contrast) changes <html>'s
+  // class or style, which is when they're read again.
+  const accent = theme?.colors.primary ?? null;
+  useEffect(() => {
+    const bridge = getColorSchemeBridge();
+    if (!bridge?.setNativePalette) return;
+    const root = document.documentElement;
+    let frame = 0;
+    let sent = '';
+    // What the colors could depend on: not the native pointer, which is
+    // also on <html> and changes all the time over a native window.
+    let read = '';
+    const looks = () =>
+      [root.className, root.style.cssText.replace(new RegExp(`${NATIVE_CURSOR_VAR}:[^;]*;?`), '')].join('|');
+    const send = () => {
+      frame = 0;
+      const now = looks();
+      if (now === read) return;
+      read = now;
+      const palette = readNativePalette(root, accent);
+      const key = JSON.stringify(palette);
+      if (!palette || key === sent) return;
+      sent = key;
+      bridge.setNativePalette(palette);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(send);
+    };
+    schedule();
+    const observer = new MutationObserver(schedule);
+    observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [accent]);
 
   // Apply color tokens.
   useEffect(() => {

@@ -1258,6 +1258,13 @@ impl State {
                 }
             }
             "drag-end" => self.drag_end(true),
+            "tray-click" => {
+                if let Some(tray) = self.tray.as_mut() {
+                    let button = num("button").clamp(1.0, 3.0) as u8;
+                    let (x, y) = (num("x").clamp(-30000.0, 30000.0) as i16, num("y").clamp(-30000.0, 30000.0) as i16);
+                    tray.click(num("tray") as u32, button, x, y);
+                }
+            }
             _ => {}
         }
     }

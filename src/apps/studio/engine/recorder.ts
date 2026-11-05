@@ -66,6 +66,8 @@ export interface TakeSources {
 }
 
 export interface TakeOptions {
+  /** The project to record into; a new one when null. */
+  project: string | null;
   scene: StudioScene;
   aspect: StudioAspect;
   canvas: { width: number; height: number };
@@ -78,6 +80,7 @@ export interface TakeOptions {
 export class TakeRecorder {
   readonly take: string;
   readonly title: string;
+  readonly project: string;
   readonly startedAt: number;
   private bridge: CaptureBridge;
   private tracks: { name: 'program' | 'camera' | 'mic'; recorder: ChunkRecorder; writer: string; start: TrackStart }[];
@@ -89,6 +92,7 @@ export class TakeRecorder {
     bridge: CaptureBridge,
     take: string,
     title: string,
+    project: string,
     startedAt: number,
     tracks: TakeRecorder['tracks'],
     poster: () => Promise<Blob | null>,
@@ -96,6 +100,7 @@ export class TakeRecorder {
     this.bridge = bridge;
     this.take = take;
     this.title = title;
+    this.project = project;
     this.startedAt = startedAt;
     this.tracks = tracks;
     // A frame from a moment in, once the picture has settled.
@@ -103,7 +108,7 @@ export class TakeRecorder {
   }
 
   static async start(bridge: CaptureBridge, sources: TakeSources, options: TakeOptions): Promise<TakeRecorder> {
-    const begun = await bridge.begin({ scene: options.scene, aspect: options.aspect, canvas: options.canvas, screen: options.screen });
+    const begun = await bridge.begin({ ...(options.project ? { project: options.project } : {}), scene: options.scene, aspect: options.aspect, canvas: options.canvas, screen: options.screen });
     const planned: { name: 'program' | 'camera' | 'mic'; stream: MediaStream; options: RecorderOptions; file: string; meta: Partial<TrackStart> }[] = [];
     planned.push({
       name: 'program',
@@ -149,7 +154,7 @@ export class TakeRecorder {
       track.start.start = startedAt;
       track.recorder.start(1000);
     }
-    return new TakeRecorder(bridge, begun.take, begun.title, startedAt, tracks, options.poster);
+    return new TakeRecorder(bridge, begun.take, begun.title, begun.project, startedAt, tracks, options.poster);
   }
 
   /** The layout changed: written down, so the Assistant knows what was on screen when. */

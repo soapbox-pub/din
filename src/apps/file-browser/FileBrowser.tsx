@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AppWindow,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -156,6 +157,38 @@ function launchTab(din: Din): TabSpec {
 /** What a Files tab carries to another window: its directory. */
 function isFilesTabTransfer(value: unknown): value is { path: string } {
   return typeof value === 'object' && value !== null && typeof (value as { path?: unknown }).path === 'string';
+}
+
+/**
+ * Open With: the installed apps (Linux apps, Windows programs) that open a
+ * file, asked for when the menu opens; nothing until there are some.
+ */
+function OpenWithMenu({ path, onError }: { path: string; onError: (error: unknown) => void }) {
+  const din = useDin();
+  const apps = useQuery({
+    queryKey: ['files', 'open-with', path],
+    queryFn: async () => din.app.openWithApps(await din.files.fromPath(path)),
+    staleTime: 30_000,
+  });
+  if (!apps.data?.length) return null;
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>Open With</ContextMenuSubTrigger>
+      <ContextMenuSubContent className="w-56">
+        {apps.data.map((app) => (
+          <ContextMenuItem
+            key={app.id}
+            onSelect={() => {
+              din.files.fromPath(path).then((handle) => din.app.openFiles([handle], app.id)).catch(onError);
+            }}
+          >
+            {app.icon ? <img src={app.icon} alt="" className="size-4 shrink-0" /> : <AppWindow className="size-4 shrink-0" aria-hidden />}
+            {app.name}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
 }
 
 /** Open a folder, or files, in a new window of an app. */
@@ -1837,6 +1870,12 @@ function FileBrowserTab({
                       <ContextMenuItem onSelect={() => setQuickLook(true)}>
                         Quick Look <ContextMenuShortcut>Space</ContextMenuShortcut>
                       </ContextMenuItem>
+                    )}
+                    {single?.kind === 'file' && !isTrash && !isProgram(single.name) && (
+                      <OpenWithMenu
+                        path={pathsOf([single.name])[0]}
+                        onError={(error) => setStatus({ kind: 'error', text: cleanFsError(error) })}
+                      />
                     )}
                     {single?.kind === 'file' && !isTrash && !isTextFile(single.name) && (
                       <ContextMenuItem onSelect={() => openIn('text-editor', pathsOf([single.name]))}>

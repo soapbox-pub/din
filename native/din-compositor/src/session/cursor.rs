@@ -22,7 +22,7 @@ use smithay::{
 use tracing::{info, warn};
 use xcursor::{CursorTheme, parser::parse_xcursor};
 
-use super::{accessibility, mouse, state::State};
+use super::{accessibility, layouts, mouse, state::State};
 
 /// The file Din tells the pointer's settings in, in XDG_RUNTIME_DIR.
 const SETTINGS_FILE: &str = "din-shell-pointer";
@@ -162,6 +162,7 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
     state.read_pointer_settings(&dir.join(SETTINGS_FILE));
     state.read_mouse_settings(&dir.join(mouse::SETTINGS_FILE));
     state.read_accessibility_settings(&dir.join(accessibility::SETTINGS_FILE));
+    state.read_keyboard_settings(&dir.join(layouts::SETTINGS_FILE));
     let Ok(cdir) = CString::new(dir.as_os_str().as_encoded_bytes()) else { return };
     // SAFETY: plain syscalls; the fd is owned from here on.
     let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
@@ -180,6 +181,7 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
         let mut changed = false;
         let mut mouse_changed = false;
         let mut accessibility_changed = false;
+        let mut keyboard_changed = false;
         loop {
             // SAFETY: reading into a buffer of the size given.
             let n = unsafe { libc::read(fd.as_fd().as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
@@ -195,6 +197,7 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
                 changed |= name == SETTINGS_FILE.as_bytes();
                 mouse_changed |= name == mouse::SETTINGS_FILE.as_bytes();
                 accessibility_changed |= name == accessibility::SETTINGS_FILE.as_bytes();
+                keyboard_changed |= name == layouts::SETTINGS_FILE.as_bytes();
                 at += header + len;
             }
         }
@@ -206,6 +209,9 @@ pub fn watch_settings(handle: &LoopHandle<'static, State>, state: &mut State) {
         }
         if accessibility_changed {
             state.read_accessibility_settings(&dir.join(accessibility::SETTINGS_FILE));
+        }
+        if keyboard_changed {
+            state.read_keyboard_settings(&dir.join(layouts::SETTINGS_FILE));
         }
         Ok(PostAction::Continue)
     });

@@ -40,9 +40,6 @@
       "nautilus",
       "directory",
       "trash"
-    ],
-    "migrateStorage": [
-      "din:files:*"
     ]
   }
 }

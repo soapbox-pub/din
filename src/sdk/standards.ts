@@ -1374,15 +1374,15 @@ export function installStoredHandles(host: StoredHandlesHost): void {
 const DIN_PERMISSIONS: Record<Permission, true> = {
   nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
   assistant: true, 'assistant-sudo': true, indd: true, volumes: true, mail: true, phone: true, passwords: true, vms: true,
-  capture: true, 'file-folders': true,
+  capture: true, camera: true, 'file-folders': true,
 };
 
-/** The web's permission names whose powers a Din permission grants. */
-const WEB_PERMISSIONS: Record<string, Permission> = {
-  'periodic-background-sync': 'background',
-  camera: 'capture',
-  microphone: 'capture',
-  'display-capture': 'capture',
+/** The web's permission names whose powers Din permissions grant (any one of them). */
+const WEB_PERMISSIONS: Record<string, Permission[]> = {
+  'periodic-background-sync': ['background'],
+  camera: ['camera', 'capture'],
+  microphone: ['camera', 'capture'],
+  'display-capture': ['capture'],
 };
 
 export interface PermissionsHost {
@@ -1410,14 +1410,14 @@ export function installPermissionsQuery(host: PermissionsHost): void {
     writable: true,
     value: async (descriptor: { name: string }) => {
       const name = String(descriptor?.name);
-      const din = Object.hasOwn(DIN_PERMISSIONS, name) ? (name as Permission) : WEB_PERMISSIONS[name];
+      const din = Object.hasOwn(WEB_PERMISSIONS, name) ? WEB_PERMISSIONS[name]! : Object.hasOwn(DIN_PERMISSIONS, name) ? [name as Permission] : null;
       if (!din) return query(descriptor as PermissionDescriptor);
       await host.ready;
       const status = new EventTarget();
       if (Status) Object.setPrototypeOf(status, Status.prototype);
       Object.defineProperties(status, {
         name: { value: name, enumerable: true },
-        state: { value: host.has(din) ? 'granted' : 'denied', enumerable: true },
+        state: { value: din.some((p) => host.has(p)) ? 'granted' : 'denied', enumerable: true },
         onchange: { value: null, writable: true, enumerable: true },
       });
       return status as PermissionStatus;

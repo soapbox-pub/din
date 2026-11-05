@@ -379,6 +379,16 @@ export function sortEntriesBy(
   return [...entries].sort(compareEntriesBy(key, descending));
 }
 
+/**
+ * Whether a filesystem time is one worth showing. Filesystems that don't keep
+ * times report 0, and some transports (MTP over FUSE, for one) report values
+ * beyond the range a `Date` can hold; either way it's unknown, not 1970, and
+ * formatting it would show a date from the epoch or throw "Invalid time value".
+ */
+export function isKnownTime(ms: number | null): ms is number {
+  return ms !== null && ms > 0 && Number.isFinite(new Date(ms).getTime());
+}
+
 /** Human-readable byte size (e.g. "4.2 MB"). */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

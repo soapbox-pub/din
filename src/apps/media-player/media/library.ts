@@ -94,26 +94,19 @@ class Library {
     return home ? joinPath(home, '.local/share/din/media-library/library.json') : null;
   }
 
-  private reading: Promise<{ saved: SavedLibrary; moved: boolean } | null> | null = null;
+  private reading: Promise<SavedLibrary | null> | null = null;
 
-  /**
-   * The saved index, read once: from its folder, or where it was before it
-   * had one (the desktop copies it over with the manifest's migrateFiles;
-   * read there too should it ever be reachable and the copy not).
-   */
-  private readIndex(home: string): Promise<{ saved: SavedLibrary; moved: boolean } | null> {
+  /** The saved index, read once from its folder. */
+  private readIndex(home: string): Promise<SavedLibrary | null> {
     this.reading ??= (async () => {
       const fs = getFsBridge();
       if (!fs) return null;
-      const path = joinPath(home, '.local/share/din/media-library/library.json');
-      for (const at of [path, joinPath(home, '.local/share/din/media-library.json')]) {
-        try {
-          const { data } = await fs.readFile(at, 64 * 1024 * 1024);
-          const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
-          if (saved.version === 1 && Array.isArray(saved.items)) return { saved, moved: at !== path };
-        } catch {
-          // No index there.
-        }
+      try {
+        const { data } = await fs.readFile(joinPath(home, '.local/share/din/media-library/library.json'), 64 * 1024 * 1024);
+        const saved = JSON.parse(new TextDecoder().decode(data)) as SavedLibrary;
+        if (saved.version === 1 && Array.isArray(saved.items)) return saved;
+      } catch {
+        // No index yet.
       }
       return null;
     })();
@@ -123,7 +116,7 @@ class Library {
   /** The watched folders the saved index names (before it's loaded); none if there's no index. */
   async savedFolders(home: string): Promise<string[]> {
     const index = await this.readIndex(home);
-    return Array.isArray(index?.saved.folders) ? index.saved.folders : [];
+    return Array.isArray(index?.folders) ? index.folders : [];
   }
 
   /** Load the saved index, then bring it up to date in the background. */
@@ -139,8 +132,8 @@ class Library {
       let folders = [joinPath(home, 'Music'), joinPath(home, 'Videos')];
       const index = await this.readIndex(home);
       if (index) {
-        folders = Array.isArray(index.saved.folders) ? index.saved.folders : folders;
-        this.set({ items: index.saved.items, folders }, index.moved);
+        folders = Array.isArray(index.folders) ? index.folders : folders;
+        this.set({ items: index.items, folders });
       }
       this.reading = null;
       this.set({ folders, loaded: true });

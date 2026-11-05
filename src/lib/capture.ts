@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Typed access to Studio's capture bridge (electron/capture.mts): takes in
- * ~/Videos/Studio, written as Studio records them, and live streams. The
+ * Typed access to Studio's capture bridge (electron/capture.mts): projects
+ * in ~/Videos/Studio, each a folder of takes (written as Studio records them)
+ * and clips (files brought in), and live streams. The
  * desktop has it as `window.dinos.capture` (the menu bar's indicators,
  * `din studio`); Studio has it as `din.system.capture`, with the
  * `capture` permission.
@@ -36,7 +37,7 @@ export interface LiveStatus {
 }
 
 export interface CaptureState {
-  recording: { take: string; title: string; startedAt: number } | null;
+  recording: { take: string; title: string; project: string; startedAt: number } | null;
   live: LiveStatus | null;
 }
 
@@ -58,8 +59,12 @@ export type TranscriptState = 'none' | 'working' | 'done' | 'failed';
 
 export interface TakeInfo {
   path: string;
-  /** The folder's name, "2026-11-01 Take 3". */
+  /** The folder's name, "Take 3". */
   name: string;
+  /** The project's folder, or null for a take from before projects. */
+  project: string | null;
+  /** Recorded in Studio, or a file the user brought in. */
+  kind: 'recording' | 'clip';
   title: string;
   /** ISO 8601. */
   created: string;
@@ -76,7 +81,45 @@ export interface TakeInfo {
   edits: string[];
 }
 
+export interface ProjectItem {
+  take: TakeInfo;
+  /** In the edit; false for one the user set aside. */
+  keep: boolean;
+  /** What the user said about it, for the Assistant. */
+  note: string;
+  /** The part to use, in seconds on the take's clock; null for its start or end. */
+  in: number | null;
+  out: number | null;
+}
+
+export interface ProjectInfo {
+  /** ~/Videos/Studio/<date> <title> */
+  path: string;
+  name: string;
+  title: string;
+  /** ISO 8601. */
+  created: string;
+  /** When a take was last added, ISO 8601. */
+  updated: string;
+  /** Its takes and clips, in the order they go. */
+  items: ProjectItem[];
+  /** What the Assistant made from it. */
+  edits: string[];
+  /** A take from before projects, made into a project when it's opened (`openProject`). */
+  single: boolean;
+}
+
+export interface ProjectChange {
+  title?: string;
+  /** Every take's folder name, in the new order. */
+  order?: string[];
+  /** One take's place in the edit, by its folder name; a null `in` or `out` clears it. */
+  item?: { name: string; keep?: boolean; note?: string; in?: number | null; out?: number | null };
+}
+
 export interface TakeStart {
+  /** The project to record into; a new one when left out. */
+  project?: string;
   title?: string;
   scene: StudioScene;
   aspect: StudioAspect;
@@ -167,12 +210,25 @@ export interface CaptureBridge {
    * there's no theme to read.
    */
   pointerImage(): Promise<PointerImage | null>;
-  /** The takes, newest first. */
-  takes(): Promise<TakeInfo[]>;
+  /** Every take, newest first; or one project's, in its order. */
+  takes(project?: string): Promise<TakeInfo[]>;
+  /** The projects, the one added to last first. */
+  projects(): Promise<ProjectInfo[]>;
+  project(path: string): Promise<ProjectInfo | null>;
+  createProject(title?: string): Promise<ProjectInfo>;
+  /** A project to work in: a take from before projects is made into one first. */
+  openProject(path: string): Promise<ProjectInfo>;
+  updateProject(path: string, change: ProjectChange): Promise<ProjectInfo>;
+  /** Make a clip's folder in a project; write its file with `open`, `write` and `close`, then `importEnd`. */
+  importBegin(project: string, name: string): Promise<{ take: string; file: string }>;
+  /** The clip's file is written (or, with `discard`, abandoned): it's read, given a poster and transcribed. */
+  importEnd(take: string, discard?: boolean): Promise<TakeInfo | null>;
+  /** The desktop's alone: copy a file into a project by its path. */
+  importFile?(project: string, file: string): Promise<TakeInfo | null>;
   take(path: string): Promise<TakeInfo | null>;
   rename(take: string, title: string): Promise<void>;
   /** Make a take's folder and start its screen track; the app starts its own recorders once this resolves. */
-  begin(request: TakeStart): Promise<{ take: string; title: string; screen: { start: number; width: number; height: number } | null }>;
+  begin(request: TakeStart): Promise<{ take: string; title: string; project: string; screen: { start: number; width: number; height: number } | null }>;
   /** Stop the screen track, finish the files and write take.json; null when discarded. */
   end(request: TakeEnd): Promise<TakeInfo | null>;
   /** Open one of the take's files to write as it's recorded; resolves with a writer id. */
@@ -194,6 +250,8 @@ export interface CaptureBridge {
   onState(callback: (state: CaptureState) => void): () => void;
   /** A take changed (or `removed`). */
   onChanged(callback: (take: TakeInfo | { path: string; removed: true }) => void): () => void;
+  /** A project changed: a take added, set aside, moved, renamed (or `removed`). */
+  onProjectChanged(callback: (project: ProjectInfo | { path: string; removed: true }) => void): () => void;
   onStreamEnded(callback: (ended: StreamEnded) => void): () => void;
 }
 

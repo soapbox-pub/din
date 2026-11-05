@@ -77,7 +77,16 @@ export function isTextFile(name: string): boolean {
 /** Whether Din can draw a picture of this file for its icon. */
 export function hasThumbnail(name: string): boolean {
   const ext = extensionOf(name);
-  return VIEWABLE_IMAGE.has(ext) || PLAYABLE_VIDEO.has(ext);
+  return VIEWABLE_IMAGE.has(ext) || PLAYABLE_VIDEO.has(ext) || hasOwnIcon(name);
+}
+
+/**
+ * Whether a file carries its own icon, which Din shows instead of the
+ * generic one: an AppImage or a Windows .exe, whose icon is inside it.
+ */
+export function hasOwnIcon(name: string): boolean {
+  const ext = extensionOf(name);
+  return ext === 'appimage' || ext === 'exe';
 }
 
 export function isViewableImage(name: string): boolean {
@@ -133,6 +142,15 @@ export function isMediaPlayerFile(name: string): boolean {
 export function isVCard(name: string): boolean {
   const ext = extensionOf(name);
   return ext === 'vcf' || ext === 'vcard';
+}
+
+/**
+ * Whether a file is a kind Din's own apps open. One that isn't opens in the
+ * installed app for its type, when there is one (a Windows program's own
+ * files in it), else in Preview.
+ */
+export function dinOpens(name: string): boolean {
+  return fileCategory(name, 'file') !== 'other';
 }
 
 /** The built-in app that opening a file starts, as Files does on double-click. */
@@ -205,6 +223,8 @@ export function typeLabel(name: string, kind: FsEntryKind): string {
   if (kind === 'file' && isCursorTheme(name)) return 'Cursor theme';
   const category = fileCategory(name, kind);
   const ext = extensionOf(name);
+  // The one program that isn't Windows's: a Linux app in a single file.
+  if (category === 'program' && ext === 'appimage') return 'AppImage';
   if (category === 'folder' || category === 'pdf' || category === 'program' || !ext) {
     return CATEGORY_LABEL[category];
   }

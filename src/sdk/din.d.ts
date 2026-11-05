@@ -154,16 +154,29 @@ export interface DinApp {
    */
   launch(url: string | URL, files: FileSystemHandle[]): Promise<void>;
   /**
-   * Open files in whichever app the desktop has for them (Files' default).
-   * A Windows program (.exe) runs, through Wine, for an app with `fs`;
-   * others get a DinPermissionError.
+   * Open files in whichever app the desktop has for them (Files' default),
+   * or in `app`, one of `openWithApps`' (an installed Linux or Windows
+   * app). A Windows program (.exe) runs, through Wine. For an app with
+   * `fs`, a kind of file Din has no app of its own for opens in the
+   * installed app for its type, when there is one. Running a program, or
+   * opening in an installed app, takes `fs`; others get a DinPermissionError.
    */
-  openFiles(files: FileSystemHandle[]): Promise<void>;
+  openFiles(files: FileSystemHandle[], app?: string): Promise<void>;
   /**
-   * localStorage keys this app kept on the desktop's origin before it moved
-   * out are copied in before the app's code runs (the manifest's
-   * `migrateStorage`); nothing to call.
+   * The installed apps (Linux's, and Windows programs') that open a file,
+   * by its type, for an Open With menu: Windows programs' own types'
+   * first. Takes `fs`.
    */
+  openWithApps(file: FileSystemHandle): Promise<OpenWithApp[]>;
+}
+
+/** An installed app that opens a file (`din.app.openWithApps`). */
+export interface OpenWithApp {
+  /** What `din.app.openFiles` takes to open the file in it. */
+  id: string;
+  name: string;
+  /** Its icon, as a data: URL, when it has one. */
+  icon: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -748,10 +761,15 @@ export type Permission =
   /**
    * The camera, the microphone and the whole screen in the app's own page
    * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
-   * takes in ~/Videos/Studio, the screen recorded with its pointer, live
+   * projects of takes and clips in ~/Videos/Studio, the screen recorded with its pointer, live
    * streams over RTMP. Studio.
    */
   | 'capture'
+  /**
+   * The camera and the microphone in the app's own page (getUserMedia),
+   * never the screen. Camera.
+   */
+  | 'camera'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
@@ -848,30 +866,10 @@ export interface DinManifest {
     /** Windows go under this app's Dock tile. */
     dockAs?: string;
     /**
-     * localStorage keys (a trailing `*` matches a prefix) the app kept on the
-     * desktop's origin before it moved out. The desktop copies them into the
-     * app's storage before its first launch, once.
-     */
-    migrateStorage?: string[];
-    /**
      * Folders the app reaches by path through `din.system.fs` without the
      * whole filesystem: `~/Music`, `~/.local/share/din/skins`. Created if
      * missing. Media Player.
      */
     folders?: string[];
-    /**
-     * Recent-file lists the app kept on the desktop's origin, as JSON arrays
-     * of `{ path, time }` under these keys. The desktop turns each entry it
-     * can still find into `{ token, key, name, path, time }` in the app's
-     * storage, once, the token its key in `src/shared/handleStore.ts`.
-     */
-    migrateRecentFiles?: string[];
-    /**
-     * Files the app kept elsewhere before it moved, to copy once into its
-     * folders: `{ "~/.local/share/din/x.json": "~/.local/share/din/app/x.json" }`.
-     * Copied on a launch when the destination is missing; paths they name
-     * count as the app's saved state for `din.files.requestAccess`.
-     */
-    migrateFiles?: Record<string, string>;
   };
 }

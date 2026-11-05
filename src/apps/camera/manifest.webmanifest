@@ -1,0 +1,43 @@
+{
+  "name": "Camera",
+  "description": "Photos and videos of yourself from the computer's camera, with a countdown, a flash, four-up sheets and effects that tint, bend and twist the picture.",
+  "icons": [
+    {
+      "src": "/icons/apps/camera.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0a0a0a",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "din": {
+    "permissions": [
+      "camera"
+    ],
+    "folders": [
+      "~/Pictures/Camera"
+    ],
+    "window": {
+      "size": {
+        "width": 960,
+        "height": 760
+      },
+      "frame": "custom"
+    },
+    "keywords": [
+      "photo booth",
+      "webcam",
+      "selfie",
+      "photo",
+      "picture",
+      "snapshot",
+      "cheese",
+      "video",
+      "effects",
+      "filters"
+    ]
+  }
+}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { cleanFsError, formatBytes, getFsBridge, isValidEntryName, joinPath, parentPath } from '@/lib/fs';
+import { cleanFsError, formatBytes, getFsBridge, isKnownTime, isValidEntryName, joinPath, parentPath } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
 import { typeLabel } from '@/lib/fileTypes';
 import { useDiskUsage, useFsDetails } from '@/hooks/useFileSystem';
@@ -249,9 +249,11 @@ function SingleProperties({ path }: { path: string }) {
             {d.trashOrigin.deletedAt && <Row label="Trashed">{DATE_FORMAT.format(new Date(d.trashOrigin.deletedAt))}</Row>}
           </>
         )}
-        <Row label="Modified">{DATE_FORMAT.format(d.mtimeMs)}</Row>
-        <Row label="Accessed">{DATE_FORMAT.format(d.atimeMs)}</Row>
-        {d.birthtimeMs !== null && <Row label="Created">{DATE_FORMAT.format(d.birthtimeMs)}</Row>}
+        <Row label="Modified">{isKnownTime(d.mtimeMs) ? DATE_FORMAT.format(d.mtimeMs) : '—'}</Row>
+        <Row label="Accessed">{isKnownTime(d.atimeMs) ? DATE_FORMAT.format(d.atimeMs) : '—'}</Row>
+        {d.birthtimeMs !== null && (
+          <Row label="Created">{isKnownTime(d.birthtimeMs) ? DATE_FORMAT.format(d.birthtimeMs) : '—'}</Row>
+        )}
         {d.free !== null && d.total !== null && (
           <Row label="Free space">
             {formatBytes(d.free)} of {formatBytes(d.total)}

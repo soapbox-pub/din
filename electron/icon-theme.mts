@@ -151,6 +151,9 @@ function iconRoots(): string[] {
   return [
     ...new Set([
       path.join(dataHome(), 'icons'),
+      // Icons of the programs installed in Din's Windows prefix, which Wine
+      // writes in its sandbox (wine-sandbox.mts, windowsShellDir).
+      path.join(dataHome(), 'din/windows-shell/icons'),
       path.join(os.homedir(), '.icons'),
       ...dataDirs().map((dir) => path.join(dir, 'icons')),
       path.join(dataHome(), 'flatpak/exports/share/icons'),

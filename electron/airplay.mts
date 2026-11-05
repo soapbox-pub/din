@@ -55,6 +55,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { app, ipcMain } from 'electron';
+import { activeNetworks } from './active-networks.mts';
 import { runCommand } from './system.mts';
 
 const SCAN_INTERVAL_MS = 30_000;
@@ -259,23 +260,6 @@ function saveMode(target: string, mode: AirPlayMode): void {
 function isLocalHost(host: string): boolean {
   const h = host.toLowerCase();
   return h === '' || h === 'localhost' || h === '::1' || /^127\./.test(h) || /^169\.254\./.test(h) || /^fe[89ab][0-9a-f]:/.test(h);
-}
-
-/** The networks the computer is on: NetworkManager's active Wi-Fi and wired connections, by UUID. */
-async function activeNetworks(): Promise<string[]> {
-  try {
-    const { stdout } = await runCommand('nmcli', ['-t', '-f', 'UUID,TYPE,STATE', 'connection', 'show', '--active'], {
-      timeout: REQUEST_TIMEOUT_MS,
-    });
-    return stdout
-      .split('\n')
-      .map((line) => line.split(':'))
-      .filter(([uuid, type, active]) => uuid && /^802-(11-wireless|3-ethernet)$/.test(type) && active === 'activated')
-      .map(([uuid]) => uuid)
-      .sort();
-  } catch {
-    return [];
-  }
 }
 
 function toSession(raw: DeckmonSession): AirPlaySession | null {

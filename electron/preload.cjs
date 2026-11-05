@@ -10,6 +10,8 @@
 //   - window.dinos.vpn: VPN/WireGuard profile toggles for the network selector
 //   - window.dinos.tor: Tor's status and on/off switch for Settings, and the
 //     onion services pages name, for the Web Browser
+//   - window.dinos.firewall: the ports the user lets through the firewall,
+//     for Settings → Firewall (DinOS)
 //   - window.dinos.display: multi-output arrangement (wlr-randr/xrandr) for the
 //     Settings app
 //   - window.dinos.pageFullscreen: fits a fullscreen web page to its monitor
@@ -656,6 +658,47 @@ expose('tor', {
   },
 });
 
+/**
+ * @typedef {{ protocol: 'tcp' | 'udp' | 'both', from: number, to: number, name: string }} FirewallRule
+ * @typedef {{ canChange: boolean, active: boolean | null, rules: FirewallRule[] }} FirewallStatus
+ */
+
+// Firewall bridge (window.dinos.firewall), backed by the firewall:* handlers
+// in electron/firewall.mts: the ports the user has let other devices connect
+// to, on DinOS.
+expose('firewall', {
+  /** @returns {Promise<FirewallStatus>} */
+  status: () => ipcRenderer.invoke('firewall:status'),
+
+  /**
+   * Let other devices connect to a port, or a range of them.
+   * @param {FirewallRule} rule
+   * @returns {Promise<FirewallStatus>}
+   */
+  allow: (rule) => ipcRenderer.invoke('firewall:allow', rule),
+
+  /**
+   * Stop letting them in.
+   * @param {{ protocol: FirewallRule['protocol'], from: number, to: number }} rule
+   * @returns {Promise<FirewallStatus>}
+   */
+  remove: (rule) => ipcRenderer.invoke('firewall:remove', rule),
+
+  /**
+   * Subscribe to changes. Returns an unsubscribe fn.
+   * @param {(status: FirewallStatus) => void} callback
+   */
+  onStatus: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {FirewallStatus} status
+     */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('firewall:status', listener);
+    return () => ipcRenderer.removeListener('firewall:status', listener);
+  },
+});
+
 // Site locations bridge (window.dinos.siteLocations), backed by
 // electron/site-locations.mts: the onion service (Onion-Location) and nsite
 // (Nsite-Location) browser tabs' pages name.
@@ -816,6 +859,33 @@ expose('nativeApps', {
   forceQuit: (pid) => ipcRenderer.invoke('native-apps:force-quit', pid),
 
   /**
+   * Uninstall a Windows program installed in Din's prefix, by its own
+   * uninstaller, or take away its shortcut where it has none.
+   * @param {string} appId
+   */
+  uninstall: (appId) => ipcRenderer.invoke('native-apps:uninstall', appId),
+
+  /**
+   * Start Windows apps over: close every Windows program and delete Din's
+   * Windows installation, every program installed in it, and their
+   * settings. Files in the folders it shares with home stay.
+   */
+  resetWindows: () => ipcRenderer.invoke('native-apps:reset-windows'),
+
+  /**
+   * The installed apps that open a file, by its type (Open With).
+   * @param {string} file
+   */
+  fileHandlers: (file) => ipcRenderer.invoke('native-apps:file-handlers', file),
+
+  /**
+   * Open a file in one of its fileHandlers.
+   * @param {string} appId
+   * @param {string} file
+   */
+  openFile: (appId, file) => ipcRenderer.invoke('native-apps:open-file', appId, file),
+
+  /**
    * Subscribe to "the installed apps changed" (a program was installed or
    * removed). Returns an unsubscribe fn.
    * @param {() => void} callback
@@ -839,6 +909,22 @@ expose('nativeApps', {
     const handler = (_event, url) => callback(url);
     ipcRenderer.on('open-uri:open', handler);
     return () => ipcRenderer.removeListener('open-uri:open', handler);
+  },
+
+  /**
+   * Subscribe to folders and files native apps open or ask to show
+   * (xdg-open, org.freedesktop.FileManager1; electron/open-uri.mts).
+   * Returns an unsubscribe fn.
+   * @param {(request: { path: string, kind: 'directory' | 'file', select?: boolean }) => void} callback
+   */
+  onOpenPath: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ path: string, kind: 'directory' | 'file', select?: boolean }} request
+     */
+    const handler = (_event, request) => callback(request);
+    ipcRenderer.on('open-uri:path', handler);
+    return () => ipcRenderer.removeListener('open-uri:path', handler);
   },
 });
 
@@ -962,10 +1048,15 @@ expose('nativeDisplay', {
 });
 
 // Keyboard bridge (window.dinos.keyboard), backed by the keyboard:* handlers in
-// electron/keyboard.mts: the system's keyboard layout, which Settings shows
-// and, where Din knows how, changes to one from xkeyboard-config's list.
+// electron/keyboard.mts: the system's keyboard layouts, which Settings shows
+// and, where Din knows how, changes to ones from xkeyboard-config's list, and
+// the one typing, which the menu bar switches.
 expose('keyboard', {
-  /** The system's layout ({ layout, variant, name }), whether it can be changed, and whether Din needs a restart for it. */
+  /**
+   * The system's layouts ({ layout, variant, name }[]), the one typing,
+   * whether they can be changed and switched between, and whether Din needs
+   * a restart for them.
+   */
   status: () => ipcRenderer.invoke('keyboard:status'),
 
   /** Every layout and variant there is: { layout, variant, name }[]. */
@@ -976,6 +1067,33 @@ expose('keyboard', {
    * @param {{ layout: string, variant: string }} choice
    */
   set: (choice) => ipcRenderer.invoke('keyboard:set', choice),
+
+  /**
+   * Make these the system's layouts, one to four, the first the default.
+   * @param {{ layout: string, variant: string }[]} choices
+   */
+  setLayouts: (choices) => ipcRenderer.invoke('keyboard:setLayouts', choices),
+
+  /**
+   * Type with the system's layout at this index.
+   * @param {number} index
+   */
+  select: (index) => ipcRenderer.invoke('keyboard:select', index),
+
+  /**
+   * Hear of every change to the layouts or the one typing (Ctrl+Space's
+   * included), with the new status. Returns an unsubscribe fn.
+   * @param {(status: unknown) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} status
+     */
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('keyboard:changed', handler);
+    return () => ipcRenderer.removeListener('keyboard:changed', handler);
+  },
 
   /** Restart Din, so its own windows take a changed layout (DinOS). */
   restart: () => ipcRenderer.invoke('keyboard:restart'),
@@ -1412,6 +1530,11 @@ expose('theme', {
    * @param {string} color `#rrggbbaa`
    */
   setSelection: (color) => ipcRenderer.send('theme:selection', color),
+  /**
+   * Give native apps (GTK) the desktop's colors.
+   * @param {Record<string, string | boolean>} palette `#rrggbb` colors and `dark`
+   */
+  setNativePalette: (palette) => ipcRenderer.send('theme:native', palette),
   /**
    * Subscribe to "Set Image as Desktop Background" in a page's right-click
    * menu. Returns an unsubscribe fn.
@@ -3836,6 +3959,7 @@ expose('screenRecorder', {
 const capture = {};
 for (const method of [
   'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+  'projects', 'project', 'createProject', 'openProject', 'updateProject', 'importBegin', 'importEnd', 'importFile',
   'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
 ]) {
   capture[method] = (...args) => ipcRenderer.invoke(`capture:${method}`, ...args);
@@ -3857,6 +3981,8 @@ expose('capture', {
   onState: (callback) => listen('capture:state', callback),
   /** @param {(take: unknown) => void} callback */
   onChanged: (callback) => listen('capture:changed', callback),
+  /** @param {(project: unknown) => void} callback */
+  onProjectChanged: (callback) => listen('capture:projectChanged', callback),
   /** @param {(ended: unknown) => void} callback */
   onStreamEnded: (callback) => listen('capture:streamEnded', callback),
 });
@@ -3946,6 +4072,12 @@ expose('apps', {
    * @returns {Promise<void>}
    */
   grantBackground: (webContentsId, options) => ipcRenderer.invoke('dinos-apps:grantBackground', webContentsId, options),
+  /**
+   * `camera`: the app's page may use the camera and the microphone, not the screen.
+   * @param {number} webContentsId
+   * @returns {Promise<void>}
+   */
+  grantCamera: (webContentsId) => ipcRenderer.invoke('dinos-apps:grantCamera', webContentsId),
   /**
    * An app's service worker opened a window (clients.openWindow: `url`) or
    * focused one (WindowClient.focus: `focus`), after a click on one of its

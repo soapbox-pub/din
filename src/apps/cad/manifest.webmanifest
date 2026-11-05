@@ -36,14 +36,8 @@
       "floor plan",
       "technical drawing"
     ],
-    "migrateStorage": [
-      "din:cad:*"
-    ],
     "folders": [
       "~/.cache/din/cad-assistant"
-    ],
-    "migrateRecentFiles": [
-      "din:cad:recent"
     ]
   }
 }

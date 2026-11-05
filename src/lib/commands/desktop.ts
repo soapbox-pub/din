@@ -13,10 +13,12 @@ import {
 } from '@/lib/screenRecorder';
 import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSize } from '@/lib/widgets';
 import { websiteLabel } from '@/lib/nsiteApps';
+import { getNativeAppsBridge, resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
+import { bookmarkCommands } from './bookmarks';
 
 /**
  * `din apps`, `din windows`, `din workspace`, `din widgets`, `din desktop-icons`,
@@ -67,11 +69,24 @@ export const appsArea: Area = {
     command('apps', 'open', 'Open an app, with files if you like', [
       { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
       { name: 'files', type: 'path', positional: true, rest: true, help: 'Files to open in it' },
-    ], (args, ctx) => {
+    ], async (args, ctx) => {
       const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
       const files = args.list('files');
+      // An installed app (Linux's, a Windows program) opens each file itself, as Open With does.
+      if (app.native && files.length > 0) {
+        const native = need(getNativeAppsBridge(), 'Installed apps');
+        for (const file of files) await call(native.openFile(app.id, file));
+        return { text: `Opened ${files.length === 1 ? files[0] : `${files.length} files`} in ${app.name}` };
+      }
       const id = ctx.actions.open(app.id, files.length === 1 ? { path: files[0] } : files.length > 1 ? { paths: files } : undefined);
       return { data: { window: id ?? null }, text: id ? `Opened ${app.name} (${id})` : `Started ${app.name}` };
+    }),
+    command('apps', 'open-with', 'The installed apps (Linux apps, Windows programs) that open a file, as Open With lists them', [
+      { name: 'file', type: 'path', positional: true, help: 'The file' },
+    ], async (args) => {
+      const native = need(getNativeAppsBridge(), 'Installed apps');
+      const apps = await call(native.fileHandlers(args.string('file')));
+      return { data: apps.map((app) => ({ id: app.id, name: app.name })), text: apps.map((app) => `${app.id}\t${app.name}`).join('\n') || 'No installed app opens it' };
     }),
     command('apps', 'install', 'Install a website as an app', [
       { name: 'url', type: 'string', positional: true, help: 'Its https URL' },
@@ -103,6 +118,17 @@ export const appsArea: Area = {
       if (!ctx.apps.canUninstall(app.id)) throw new CommandError(`${app.name} can’t be removed`);
       ctx.apps.uninstallApp(app.id);
       return { text: `Removed ${app.name}` };
+    }),
+    command('apps', 'reset-windows', 'Start Windows apps over: delete every Windows program installed, and its settings', [], async (_args, ctx) => {
+      const ok = await ctx.confirm({
+        title: 'Reset Windows apps?',
+        description: `A command asked to reset them. ${WINDOWS_RESET_CONSEQUENCE}`,
+        action: 'Reset',
+        destructive: true,
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await resetWindowsApps();
+      return { text: 'Windows apps start over: the next Windows program sets them up anew' };
     }),
     command('apps', 'links', 'Websites whose links an installed nsite opens, because the website names it as its own', [], (_args, ctx) => ({
       data: ctx.apps.linkedWebsites.map((website) => ({
@@ -437,8 +463,9 @@ export const screenshotArea: Area = {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser’s site data',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar) and site data',
   commands: [
+    ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
       { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
     ], async (args, ctx) => {

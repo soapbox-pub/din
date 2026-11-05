@@ -40,6 +40,9 @@
  *   - Ctrl+N / Ctrl+Shift+N   -> { action: 'new-window' | 'new-private-window', wcId }
  *   - Ctrl+Shift+W            -> { action: 'close-window', wcId }
  *   - Ctrl+Shift+Delete       -> { action: 'clear-data', wcId }
+ *   - Ctrl+D                  -> { action: 'bookmark-page', wcId }
+ *   - Ctrl+Shift+B / Ctrl+Shift+O
+ *                             -> { action: 'bookmarks-bar' | 'bookmarks', wcId }
  *   - Ctrl+= / Ctrl+- / Ctrl+0 -> { action: 'zoom-in' | 'zoom-out' | 'zoom-reset', wcId }
  *   - F11 in a browser tab    -> { action: 'fullscreen', wcId }
  *
@@ -198,8 +201,9 @@ export type ShellShortcut =
        * Window and page keys pressed inside a browser tab: Ctrl+Shift+T
        * (reopen a closed tab), Ctrl+N / Ctrl+Shift+N (new normal / private
        * window), Ctrl+Shift+W (close the window), Ctrl+Shift+Delete (clear
-       * browsing data), Ctrl+= / Ctrl+- / Ctrl+0 (page zoom), and F11 (the
-       * page in full screen).
+       * browsing data), Ctrl+D (bookmark the page), Ctrl+Shift+B (the
+       * bookmarks bar), Ctrl+Shift+O (the bookmarks), Ctrl+= / Ctrl+- /
+       * Ctrl+0 (page zoom), and F11 (the page in full screen).
        */
       action:
         | 'reopen-tab'
@@ -207,6 +211,9 @@ export type ShellShortcut =
         | 'new-private-window'
         | 'close-window'
         | 'clear-data'
+        | 'bookmark-page'
+        | 'bookmarks-bar'
+        | 'bookmarks'
         | 'zoom-in'
         | 'zoom-out'
         | 'zoom-reset'

@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
+import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
 
@@ -25,6 +26,9 @@ const Settings = lazy(() =>
 );
 const ProviderWindow = lazy(() =>
   import('@/components/desktop/apps/ProviderWindow').then((m) => ({ default: m.ProviderWindow })),
+);
+const PrintWindow = lazy(() =>
+  import('@/components/desktop/apps/PrintWindow').then((m) => ({ default: m.PrintWindow })),
 );
 const Screenshot = lazy(() =>
   import('@/components/desktop/apps/Screenshot').then((m) => ({ default: m.Screenshot })),
@@ -251,6 +255,11 @@ export const APPS: readonly AppDefinition[] = [
   // live. One window; `{ action: 'record' | 'stop' | 'mark' | 'live', nonce }`
   // presses its buttons (`din studio`, the menu bar's stop button).
   dinApp('studio'),
+  // Photos and videos of yourself, Photo Booth style: effects, a countdown,
+  // the screen's flash, four-up sheets, kept in ~/Pictures/Camera. One
+  // window; `{ action: 'take' | 'record' | 'stop', mode, effect, countdown,
+  // nonce }` presses its shutter (`din camera`).
+  dinApp('camera'),
   // Conversations with OpenCode, the coding agent. One window, which
   // notifications and the menu bar's robot point at a conversation by
   // its `sessionID` launch param.
@@ -283,6 +292,19 @@ export const APPS: readonly AppDefinition[] = [
     floating: true,
     hidden: true,
     singleInstance: true,
+    dockAs: 'settings',
+  },
+  {
+    // Printing a page or a file: a window per document, beside the rest of
+    // the desktop rather than over it. Hidden from the launcher; PrintHost
+    // opens it with the document in its launch params.
+    id: PRINT_WINDOW_APP_ID,
+    name: 'Print',
+    icon: '/icons/apps/settings.png',
+    component: PrintWindow,
+    defaultSize: { width: 880, height: 640 },
+    floating: true,
+    hidden: true,
     dockAs: 'settings',
   },
   {

@@ -45,6 +45,8 @@ export interface NativeApp {
   terminal?: boolean;
   /** URL schemes it opens (its desktop entry's x-scheme-handler types), e.g. ["nostr"]. */
   schemes?: string[];
+  /** A Windows program installed in Din's prefix, which Din can uninstall. */
+  uninstallable?: boolean;
 }
 
 /** What `list()` reports. */
@@ -62,7 +64,7 @@ export interface NativeAppsBridge {
   /**
    * The app a window belongs to, by its owner's pid and WM_CLASS, or null
    * when it can't be matched. One that isn't installed (a `nix run`
-   * program, an AppImage, found by where its process runs from) comes with
+   * program, an AppImage, an .exe, found by where its process runs from) comes with
    * its record, for the desktop to register (`addUnlistedNativeApp`).
    */
   resolve(pid: number | null, wmClass: string[]): Promise<{ appId: string; app?: NativeApp } | null>;
@@ -74,10 +76,40 @@ export interface NativeAppsBridge {
   runProgram(file: string): Promise<void>;
   /** Force quit the program owning a window, by pid (apps on Din's display only). */
   forceQuit(pid: number): Promise<void>;
+  /**
+   * Uninstall an `uninstallable` Windows program: run its own uninstaller,
+   * in a window of its own, resolving once it's done ('uninstalled'), or,
+   * for one without, take away its shortcut ('removed').
+   */
+  uninstall(appId: string): Promise<'uninstalled' | 'removed'>;
+  /**
+   * Start Windows apps over: close every Windows program and delete Din's
+   * Windows installation (WINDOWS_RESET_CONSEQUENCE).
+   */
+  resetWindows(): Promise<void>;
+  /**
+   * The installed apps that open a file, by its type (Open With): Windows
+   * programs' own types' first, then by name.
+   */
+  fileHandlers(file: string): Promise<NativeApp[]>;
+  /** Open a file in one of its `fileHandlers`. */
+  openFile(appId: string, file: string): Promise<void>;
   /** Subscribe to installed-app changes. Returns an unsubscribe fn. */
   onChanged(callback: () => void): () => void;
   /** Subscribe to links native apps open. Returns an unsubscribe fn. */
   onOpenUrl(callback: (url: string) => void): () => void;
+  /**
+   * Subscribe to folders and files native apps open (xdg-open) or ask to
+   * show in a file manager ("Show in Folder"). Returns an unsubscribe fn.
+   */
+  onOpenPath(callback: (request: NativeOpenPath) => void): () => void;
+}
+
+/** A folder or file a native app opened, or asked to show `select`ed in its folder. */
+export interface NativeOpenPath {
+  path: string;
+  kind: 'directory' | 'file';
+  select?: boolean;
 }
 
 /**
@@ -93,8 +125,8 @@ export function isProgram(name: string): boolean {
 }
 
 // Apps known only because they're running: a program from `nix run`, an
-// AppImage. Their windows get the app's name and icon from the desktop
-// entry beside the program; the registry lists them, hidden from the
+// AppImage, a Windows .exe. Their windows get the app's name and icon from
+// the desktop entry beside the program (an .exe's from its resources); the registry lists them, hidden from the
 // launcher, for the rest of the session.
 
 let unlisted: readonly NativeApp[] = [];
@@ -176,6 +208,66 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       history: true,
     });
   });
+}
+
+/**
+ * Open a file in the installed app for its type when Din has no app of its
+ * own for it (`opensItself` false): a Windows program's project file in
+ * that program, say. Resolves false when there's none, or no bridge.
+ */
+export async function openInInstalledApp(file: string): Promise<boolean> {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) return false;
+  const [app] = await bridge.fileHandlers(file).catch(() => []);
+  if (!app) return false;
+  try {
+    await bridge.openFile(app.id, file);
+  } catch (error) {
+    throw new Error(cleanNativeAppError(error), { cause: error });
+  }
+  return true;
+}
+
+/** What resetting Windows apps does, for whatever asks first. */
+export const WINDOWS_RESET_CONSEQUENCE =
+  'Every Windows program closes, and every one installed is deleted, with its settings. Files in your Desktop, Documents, Downloads, Music, Pictures and Videos stay.';
+
+/** Start Windows apps over (`resetWindows`), once the user has agreed to. */
+export async function resetWindowsApps(): Promise<void> {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) throw new Error('Windows apps run only in Din’s desktop app');
+  try {
+    await bridge.resetWindows();
+  } catch (error) {
+    throw new Error(cleanNativeAppError(error), { cause: error });
+  }
+}
+
+/**
+ * Uninstall a Windows program (`uninstallable`), notifying the user of what
+ * came of it: its uninstaller's window says the rest.
+ */
+export function uninstallNativeApp(app: { id: string; name: string }): void {
+  const bridge = getNativeAppsBridge();
+  if (!bridge) return;
+  bridge.uninstall(app.id).then(
+    (result) => {
+      if (result !== 'removed') return;
+      notify({
+        source: { name: 'Din' },
+        title: `Removed ${app.name}`,
+        body: 'It had no uninstaller, so only its shortcut is gone.',
+        history: true,
+      });
+    },
+    (error: unknown) =>
+      notify({
+        source: { name: 'Din' },
+        title: `Couldn’t uninstall ${app.name}`,
+        body: cleanNativeAppError(error),
+        history: true,
+      }),
+  );
 }
 
 /** Install Xvfb, then open the app it was missing for. */

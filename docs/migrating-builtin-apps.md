@@ -52,7 +52,7 @@ replaced as below. `src/apps/calculator/` is the model.
 | `useCurrentUser`, `useNostrPublish` | `window.nostr` (permission `nostr`) with the app's own Nostrify pool |
 | `registerMediaSource` (now playing) | `navigator.mediaSession` |
 | `registerDictationTarget` | Nothing: dictation reaches a guest's focused field with `insertText`, as for web pages, and that includes xterm's, so Terminal needed no hook. An app's own mic button uses `SpeechRecognition` |
-| `useLocalStorage` | Unchanged; it's the app's own origin now. List old keys in `migrateStorage` |
+| `useLocalStorage` | Unchanged; it's the app's own origin now, starting empty |
 
 ## Code the apps share
 
@@ -129,14 +129,14 @@ first broke, and what restored it:
 | Terminal tabs moving between windows | `din.system.pty.release`/`adopt` (main holds the pty's output meanwhile), the screen carried with `@xterm/addon-serialize`, `useDinTabTransfer` |
 | Files' tab drops picking the right window, the drop marker | `din.window.tabDragMove`/`tabDragEnd` (the desktop finds the frontmost window of the app, shows the label), `onTabHover` |
 | Files' undo history shared by its windows | A SharedWorker (`src/shared/appSession.ts`) |
-| Office and CAD Recent lists from before the move, Show in Files, Copy Path | `migrateRecentFiles`, `din.files.path(handle)` for every app, `din.files.release` |
+| Show in Files, Copy Path | `din.files.path(handle)` for every app, `din.files.release` |
 | Links from apps opening in installed web apps, `nostr:` links | `window.open` answered with the desktop's `useOpenUrl` |
 | Photo Editor's Quick Export beside the document | `file-folders` |
 | A drag out of an app showing what's dragged | The desktop's drag overlay (`drag.over`) |
 | Settling after a move begun in an app | `din.window.beginMove` resolves when the move ends |
 | Media Player's play key while stopped | A `play` handler with no metadata |
 | The Assistant's notifications (quiet only while you look at that conversation), its settings and model | `din.assistant` (`follow`, `setViewing`, settings) |
-| Preview, Publisher, Media Player and CAD holding the whole filesystem | Scoped `fs`: `file-folders`, the manifest's `folders`; `requestAccess` and `migrateFiles` for paths their old state named |
+| Preview, Publisher, Media Player and CAD holding the whole filesystem | Scoped `fs`: `file-folders`, the manifest's `folders`; `requestAccess` for paths their state names |
 
 Apps that keep the whole filesystem, because working on any folder by path
 is their job: Files, Text Editor, Terminal (through its shell), the
@@ -150,7 +150,6 @@ Assistant.
       `@/hooks/useWindows` or `window.dinos`; a lint rule enforces this
       for `src/apps/`.
 - [ ] Permissions in the manifest are the fewest that work.
-- [ ] Old `localStorage` keys listed in `migrateStorage`.
 - [ ] Launch params, file opening from Files, and Dock shortcuts work.
 - [ ] Close with unsaved changes asks; force quit while busy works.
 - [ ] Right-click menus still match the ⋯ menus.

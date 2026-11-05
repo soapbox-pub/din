@@ -32,9 +32,6 @@
       "bash",
       "zsh",
       "tty"
-    ],
-    "migrateStorage": [
-      "din.terminal.fontSize"
     ]
   }
 }

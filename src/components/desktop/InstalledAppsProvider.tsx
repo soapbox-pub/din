@@ -6,7 +6,7 @@ import { NATIVE_APP_ICON, nsiteIconName, WEB_APP_ICON, webIconName } from '@/lib
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { useIsLiveBoot } from '@/hooks/useInstaller';
-import { subscribeUnlistedNativeApps, unlistedNativeApps, type NativeApp } from '@/lib/nativeApps';
+import { subscribeUnlistedNativeApps, uninstallNativeApp, unlistedNativeApps, type NativeApp } from '@/lib/nativeApps';
 import {
   createWebApp,
   DEFAULT_WEB_APPS,
@@ -376,6 +376,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         );
       },
       canUninstall: (id) =>
+        nativeApps.some((app) => app.id === id && app.uninstallable) ||
         webApps.some((webApp) => webApp.id === id) ||
         nsiteEntryFor(id) !== undefined ||
         fileApps.some((entry) => entry.appId === id),
@@ -413,6 +414,11 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         return webApp;
       },
       uninstallApp: (id) => {
+        const native = nativeApps.find((app) => app.id === id && app.uninstallable);
+        if (native) {
+          uninstallNativeApp(native);
+          return;
+        }
         if (fileApps.some((e) => e.appId === id)) {
           setStoredFileApps((prev: unknown) => parseFileApps(prev).filter((e) => e.appId !== id));
           void getAppsBridge()?.closeFolder(id);

@@ -38,9 +38,6 @@
       "magazine",
       "brochure",
       "flyer"
-    ],
-    "migrateStorage": [
-      "din:publisher:*"
     ]
   }
 }

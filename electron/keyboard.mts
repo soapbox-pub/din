@@ -336,13 +336,26 @@ function layoutCatalog(): Promise<LayoutEntry[]> {
 }
 
 // ---------------------------------------------------------------------------
-// The keymap in effect, and changing it
+// The layouts, and the one typing
 // ---------------------------------------------------------------------------
+
+/** The most layouts a keymap holds: XKB's groups. */
+const MAX_LAYOUTS = 4;
+
+/** Whether Din is on din-shell, which names its Wayland socket so (session/mod.rs). */
+const onShell = process.env.WAYLAND_DISPLAY === 'din-shell' && !!process.env.XDG_RUNTIME_DIR;
+
+/** Where din-shell is told the keymap and the layout typing (session/layouts.rs). */
+const SHELL_FILE = 'din-shell-keyboard';
 
 let system: Keymap | null = null;
 let effective: Keymap = DEFAULT_KEYMAP;
 let loaded: Promise<void> | null = null;
 const listeners = new Set<(keymap: Keymap) => void>();
+const statusListeners = new Set<() => void>();
+
+/** The layout typing, and those typed with before it, most recent first. */
+let recent: LayoutChoice[] = [];
 
 function parseChoice(value: unknown): LayoutChoice | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -351,18 +364,116 @@ function parseChoice(value: unknown): LayoutChoice | null {
   return { layout, variant };
 }
 
+function sameChoice(a: LayoutChoice, b: LayoutChoice): boolean {
+  return a.layout === b.layout && a.variant === b.variant;
+}
+
 function sameLayout(a: Keymap, b: Keymap): boolean {
   return a.layout === b.layout && a.variant === b.variant;
 }
 
-/** Whether Settings can change the system's layout here. */
+/** A keymap's layouts, one per XKB group. */
+function groupsOf(keymap: Keymap): LayoutChoice[] {
+  const variants = keymap.variant.split(',');
+  return keymap.layout
+    .split(',')
+    .map((layout, i) => ({ layout: layout.trim(), variant: (variants[i] ?? '').trim() }))
+    .filter((group) => group.layout)
+    .slice(0, MAX_LAYOUTS);
+}
+
+/** KEYMAP with GROUPS for its layouts. */
+function withGroups(keymap: Keymap, groups: LayoutChoice[]): Keymap {
+  return {
+    ...keymap,
+    layout: groups.map((group) => group.layout).join(','),
+    variant: groups.some((group) => group.variant) ? groups.map((group) => group.variant).join(',') : '',
+  };
+}
+
+/** The system's layouts. */
+function systemGroups(): LayoutChoice[] {
+  return groupsOf(system ?? DEFAULT_KEYMAP);
+}
+
+/** Which of GROUPS is typing: the most recent one still there. */
+function activeIndex(groups: LayoutChoice[]): number {
+  for (const choice of recent) {
+    const index = groups.findIndex((group) => sameChoice(group, choice));
+    if (index >= 0) return index;
+  }
+  return 0;
+}
+
+/** Whether Settings can change the system's layouts here. */
 function canChange(): boolean {
   return Boolean(HELPER) || isGnome();
 }
 
-/** Recompute the keymap in effect and tell listeners if it changed. */
+/** Whether Din switches between the layouts: on din-shell, with more than one. */
+function canSwitch(groups: LayoutChoice[]): boolean {
+  return onShell && groups.length > 1;
+}
+
+const recentFile = () => path.join(app.getPath('userData'), 'keyboard-recent.json');
+
+async function loadRecent(): Promise<void> {
+  try {
+    const raw: unknown = JSON.parse(await fs.readFile(recentFile(), 'utf8'));
+    if (Array.isArray(raw)) recent = raw.map(parseChoice).filter((choice): choice is LayoutChoice => choice !== null);
+  } catch {
+    recent = [];
+  }
+}
+
+function saveRecent(): void {
+  const file = recentFile();
+  const temp = `${file}.${process.pid}`;
+  void fs.writeFile(temp, JSON.stringify(recent))
+    .then(() => fs.rename(temp, file))
+    .catch((error) => console.error('keyboard: saving the layout in use failed:', error));
+}
+
+/** Tell din-shell the keymap and the layout typing; renamed into place, so it never reads half. */
+async function tellShell(keymap: Keymap, group: number): Promise<void> {
+  if (!onShell) return;
+  const file = path.join(process.env.XDG_RUNTIME_DIR!, SHELL_FILE);
+  const temp = `${file}.${process.pid}`;
+  const text = [
+    `rules=${keymap.rules}`,
+    `model=${keymap.model}`,
+    `layout=${keymap.layout}`,
+    `variant=${keymap.variant}`,
+    `options=${keymap.options}`,
+    `group=${group}`,
+  ].join('\n');
+  try {
+    await fs.writeFile(temp, `${text}\n`);
+    await fs.rename(temp, file);
+  } catch (error) {
+    console.error('keyboard: telling din-shell the layout failed:', error);
+  }
+}
+
+let told = '';
+
+/**
+ * Recompute the keymap in effect and tell everyone who needs it: din-shell
+ * the system's keymap and which group is typing; the embedded display's
+ * servers (native-display.mts) a keymap with the layout typing first, as
+ * they hear only physical keys; and Settings and the menu bar.
+ */
 function update(): void {
-  const next = system ?? DEFAULT_KEYMAP;
+  const current = system ?? DEFAULT_KEYMAP;
+  const groups = groupsOf(current);
+  const active = activeIndex(groups);
+  const shell = JSON.stringify([current, active]);
+  if (shell !== told) {
+    told = shell;
+    void tellShell(current, active);
+    for (const listener of statusListeners) listener();
+  }
+  const next = withGroups(current, [groups[active], ...groups.filter((_, i) => i !== active)].filter(Boolean));
   if (JSON.stringify(next) === JSON.stringify(effective)) return;
   effective = next;
   for (const listener of listeners) listener(next);
@@ -373,16 +484,46 @@ async function refreshSystem(): Promise<void> {
   update();
 }
 
-async function setSystemLayout(choice: LayoutChoice): Promise<void> {
+/** The choices as din-keyboard takes them: LAYOUT or LAYOUT:VARIANT. */
+function helperArgs(choices: LayoutChoice[]): string[] {
+  return choices.map((choice) => (choice.variant ? `${choice.layout}:${choice.variant}` : choice.layout));
+}
+
+/** GNOME's input sources: CHOICES, then the input methods it had (ibus). */
+async function setGnomeLayouts(choices: LayoutChoice[]): Promise<void> {
+  const others = parseSources(await gsettings('sources')).filter(([type]) => type !== 'xkb');
+  const sources = [
+    ...choices.map((choice): [string, string] => ['xkb', choice.variant ? `${choice.layout}+${choice.variant}` : choice.layout]),
+    ...others,
+  ];
+  const value = `[${sources.map(([type, name]) => `('${type}', '${name}')`).join(', ')}]`;
+  await runCommand('gsettings', ['set', GNOME_SCHEMA, 'sources', value], { timeout: 3_000 });
+}
+
+async function setSystemLayouts(choices: LayoutChoice[]): Promise<void> {
   if (HELPER) {
-    const args = ['-n', HELPER, 'set', choice.layout];
-    if (choice.variant) args.push(choice.variant);
-    await runCommand('sudo', args, { timeout: 15_000 });
+    await runCommand('sudo', ['-n', HELPER, 'set', ...helperArgs(choices)], { timeout: 15_000 });
   } else if (isGnome()) {
-    await setGnomeLayout(choice);
+    await setGnomeLayouts(choices);
   } else {
     throw new Error('Din can\'t change the keyboard layout on this system');
   }
+}
+
+/** Make a layout the system's only one; on GNOME, its first, keeping the others. */
+async function setSystemLayout(choice: LayoutChoice): Promise<void> {
+  if (!HELPER && isGnome()) await setGnomeLayout(choice);
+  else await setSystemLayouts([choice]);
+}
+
+/** Type with GROUPS[INDEX] from now on. */
+function select(index: number): void {
+  const groups = systemGroups();
+  const choice = groups[index];
+  if (!choice) throw new Error('No such keyboard layout');
+  recent = [choice, ...recent.filter((other) => !sameChoice(other, choice))].slice(0, 16);
+  saveRecent();
+  update();
 }
 
 /**
@@ -411,12 +552,13 @@ async function migrateOldSelection(): Promise<void> {
 function load(): Promise<void> {
   loaded ??= (async () => {
     await migrateOldSelection();
+    await loadRecent();
     await refreshSystem();
   })();
   return loaded;
 }
 
-/** The keymap native apps should use: the system's. */
+/** The keymap native apps should use: the system's, with the layout typing first. */
 export async function keyboardKeymap(): Promise<Keymap> {
   await load();
   return effective;
@@ -427,33 +569,121 @@ export function onKeymapChange(listener: (keymap: Keymap) => void): void {
   listeners.add(listener);
 }
 
-/** A layout's display name; for several groups, the first one's. */
-async function describe(keymap: Keymap): Promise<LayoutEntry> {
-  const layout = keymap.layout.split(',')[0];
-  const variant = keymap.variant.split(',')[0] ?? '';
+/** A layout's display name. */
+async function describe(choice: LayoutChoice): Promise<LayoutEntry> {
+  const { layout, variant } = choice;
   const entries = await layoutCatalog();
   const entry = entries.find((e) => e.layout === layout && e.variant === variant)
     ?? entries.find((e) => e.layout === layout && e.variant === '');
   return { layout, variant, name: entry?.name ?? (variant ? `${layout} (${variant})` : layout) };
 }
 
+async function status() {
+  await load();
+  const current = system ?? DEFAULT_KEYMAP;
+  const groups = groupsOf(current);
+  const layouts = await Promise.all(groups.map(describe));
+  const active = activeIndex(groups);
+  return {
+    layout: layouts[active] ?? (await describe({ layout: 'us', variant: '' })),
+    layouts,
+    active,
+    canChange: canChange(),
+    canSwitch: canSwitch(groups),
+    // Off din-shell, its compositor still has the layout it started with
+    // (and passed down to Din); din-shell itself takes a new one at once.
+    restartNeeded: Boolean(HELPER) && !onShell && !sameLayout(current, fromEnvironment() ?? DEFAULT_KEYMAP),
+  };
+}
+
+/** Choices from the renderer, each one xkeyboard-config knows. */
+async function knownChoices(raw: unknown): Promise<LayoutChoice[]> {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_LAYOUTS) {
+    throw new Error(`One to ${MAX_LAYOUTS} keyboard layouts`);
+  }
+  const catalog = await layoutCatalog();
+  const choices: LayoutChoice[] = [];
+  for (const item of raw) {
+    const choice = parseChoice(item);
+    const known = choice && catalog.some((entry) => sameChoice(entry, choice));
+    if (!choice || !known) throw new Error('Unknown keyboard layout');
+    if (!choices.some((other) => sameChoice(other, choice))) choices.push({ layout: choice.layout, variant: choice.variant });
+  }
+  return choices;
+}
+
+// ---------------------------------------------------------------------------
+// Switching from the keyboard
+// ---------------------------------------------------------------------------
+
+/**
+ * Ctrl+Space and Ctrl+Alt+Space, as a Mac's Control-Space and
+ * Control-Option-Space: back to the layout typed with before, and on to the
+ * next one in the list. Pressing Space again with Ctrl still held goes on
+ * back through the layouts in the order they were used, as a Mac does. The
+ * keys are only taken when there are layouts to switch between, so with one
+ * they're the page's, as they are on a Mac.
+ */
+let chain: { order: number[]; at: number } | null = null;
+
+function switchKey(input: Electron.Input): 'previous' | 'next' | null {
+  if (input.code !== 'Space' || !input.control || input.meta || input.shift) return null;
+  return input.alt ? 'next' : 'previous';
+}
+
+function switchFromKeyboard(direction: 'previous' | 'next'): void {
+  const groups = systemGroups();
+  if (!canSwitch(groups)) return;
+  const active = activeIndex(groups);
+  if (direction === 'next') {
+    chain = null;
+    select((active + 1) % groups.length);
+    return;
+  }
+  if (!chain) {
+    // Most recent first, then any never used, in the list's order.
+    const used = recent
+      .map((choice) => groups.findIndex((group) => sameChoice(group, choice)))
+      .filter((index, i, all) => index >= 0 && all.indexOf(index) === i);
+    const order = [...used, ...groups.map((_, i) => i).filter((i) => !used.includes(i))];
+    chain = { order, at: 0 };
+  }
+  // select() reorders recent; the run keeps the order it started with.
+  chain.at = (chain.at + 1) % chain.order.length;
+  select(chain.order[chain.at]);
+}
+
+/** Take the switching keys in CONTENTS: the shell's, or any guest's that has focus. */
+export function attachLayoutKeys(contents: Electron.WebContents): void {
+  contents.on('before-input-event', (event, input) => {
+    // Letting go of Ctrl ends a run of Ctrl+Space presses.
+    if (!input.control || (input.type === 'keyUp' && input.key === 'Control')) chain = null;
+    const direction = switchKey(input);
+    if (!direction || !canSwitch(systemGroups())) return;
+    event.preventDefault();
+    if (input.type === 'keyDown' && !input.isAutoRepeat) switchFromKeyboard(direction);
+  });
+}
+
 export function registerKeyboardHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
+  send: (channel: string, payload?: unknown) => void;
 }): void {
-  const { assertShellSender } = options;
+  const { assertShellSender, send } = options;
+
+  // Settings and the menu bar hear of every switch, the keyboard's included.
+  statusListeners.add(() => {
+    void status().then((next) => send('keyboard:changed', next)).catch(() => {});
+  });
+  // din-shell starts typing with the first layout; tell it the one in use.
+  void load();
 
   ipcMain.handle('keyboard:status', async (event) => {
     assertShellSender(event);
     await load();
     // The OS may have changed since; Settings is where anyone would look.
     await refreshSystem();
-    const current = system ?? DEFAULT_KEYMAP;
-    return {
-      layout: await describe(current),
-      canChange: canChange(),
-      // din-shell still has the layout it started with (and passed down to Din).
-      restartNeeded: Boolean(HELPER) && !sameLayout(current, fromEnvironment() ?? DEFAULT_KEYMAP),
-    };
+    return status();
   });
 
   ipcMain.handle('keyboard:layouts', async (event) => {
@@ -463,14 +693,26 @@ export function registerKeyboardHandlers(options: {
 
   ipcMain.handle('keyboard:set', async (event, raw) => {
     assertShellSender(event);
-    const choice = parseChoice(raw);
-    const known = choice && (await layoutCatalog()).some(
-      (entry) => entry.layout === choice.layout && entry.variant === choice.variant,
-    );
-    if (!choice || !known) throw new Error('Unknown keyboard layout');
+    const [choice] = await knownChoices([raw]);
     await load();
-    await setSystemLayout({ layout: choice.layout, variant: choice.variant });
+    await setSystemLayout(choice);
     await refreshSystem();
+  });
+
+  ipcMain.handle('keyboard:setLayouts', async (event, raw) => {
+    assertShellSender(event);
+    const choices = await knownChoices(raw);
+    await load();
+    await setSystemLayouts(choices);
+    await refreshSystem();
+  });
+
+  ipcMain.handle('keyboard:select', async (event, index) => {
+    assertShellSender(event);
+    await load();
+    if (typeof index !== 'number' || !Number.isInteger(index)) throw new Error('No such keyboard layout');
+    if (!canSwitch(systemGroups())) throw new Error('Din can\'t switch keyboard layouts here');
+    select(index);
   });
 
   ipcMain.handle('keyboard:restart', async (event) => {

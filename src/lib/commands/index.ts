@@ -7,6 +7,7 @@ import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
 import { extensionsArea } from './extensions';
 import { featuresArea } from './features';
+import { firewallArea } from './firewall';
 import { installerArea } from './installer';
 import { cursorsArea, iconsArea, skinsArea } from './looks';
 import { brightnessArea, datetimeArea, displayArea, keyboardArea, powerArea, printersArea, soundArea } from './devices';
@@ -15,6 +16,7 @@ import { mailArea } from './mail';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
 import { studioArea } from './studio';
+import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
@@ -40,6 +42,7 @@ export const AREAS: readonly Area[] = [
   openArea,
   screenshotArea,
   studioArea,
+  cameraArea,
   wifiArea,
   bluetoothArea,
   phoneArea,
@@ -48,6 +51,7 @@ export const AREAS: readonly Area[] = [
   contactsArea,
   vpnArea,
   torArea,
+  firewallArea,
   soundArea,
   displayArea,
   brightnessArea,
@@ -74,6 +78,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   wifi: 'wifi',
   bluetooth: 'bluetooth',
   phone: 'phone',
+  firewall: 'firewall',
   themes: 'settings',
   cursors: 'settings',
   icons: 'icons',

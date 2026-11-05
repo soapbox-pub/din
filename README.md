@@ -434,9 +434,15 @@ Apps type with the system's keyboard layout (`electron/keyboard.mts` reads it
 from `XKB_DEFAULT_*`, GNOME or KDE settings, the host X server, or the system
 keyboard config). Din sends them physical keys and both servers apply the
 layout; the Xvfb fallback needs `setxkbmap` for it. Settings → Keyboard shows
-the layout and changes it on DinOS and GNOME. DinOS keeps it in
-`/var/lib/din/keyboard`, which Din's compositor reads when it starts (`os/din-keyboard.sh`
-writes it as root), so Din's own windows switch after Din restarts.
+the layouts (up to four, XKB's groups) and changes them on DinOS and GNOME.
+DinOS keeps them in `/var/lib/din/keyboard` (`os/din-keyboard.sh` writes it as
+root), which din-shell starts with; Din tells it a changed list and the layout
+typing in `$XDG_RUNTIME_DIR/din-shell-keyboard`
+(`native/din-compositor/src/session/layouts.rs`), so a change takes effect at
+once. With more than one, the menu bar shows the layout typing and switches
+it, and so do Ctrl+Space (back to the last one) and Ctrl+Alt+Space (the next),
+as Control-Space and Control-Option-Space on a Mac; the embedded display's
+servers get the keymap with the layout typing first.
 
 Settings → Date & Time shows the system's time zone and clock, read from
 systemd-timedated (`electron/datetime.mts`), and on DinOS changes them
@@ -463,9 +469,75 @@ need no help: the Start-menu shortcuts they create become desktop entries,
 which appear in the launcher as soon as the install finishes (Uninstall
 shortcuts are left out). See `electron/windows-apps.mts`.
 
+Every Wine process runs in a bubblewrap sandbox (`electron/wine-sandbox.mts`).
+It gets the system read-only, plus the GPU, sound, controllers and the
+network. It also gets the prefix and the folders Windows has too: Desktop,
+Documents, Downloads, Music, Pictures and Videos. Nothing else of home is
+visible: no dotfiles, Din data, session bus, `din` socket or key agents. A
+program or document opened from somewhere else (a USB stick) brings its
+folder along. Wine's Start-menu entries, icons and file types go to
+`~/.local/share/din/windows-shell` instead of `~/.local/share`. Din lists
+them without trusting them: an entry from there only ever runs Wine, in the
+prefix and the sandbox. All sandboxes share one `/tmp` (under
+`$XDG_RUNTIME_DIR/din-windows`), where the prefix's wineserver keeps its
+socket. Where bubblewrap is missing or can't make namespaces, programs run
+unsandboxed.
+
+An installed Windows program has Uninstall in its right-click menus (and
+`din apps remove`), as in Windows' Apps & Features. Din finds the program
+in the prefix registry's Uninstall keys: first by place (the shortcut's
+folder inside its InstallLocation or its icon's folder), then by name
+("Foo 2.1 (64-bit)" for "Foo", never "Foobar"). It then runs `wine uninstaller --remove <key>`, which opens
+the program's own uninstaller. A program without one only loses its
+shortcut. Wine never takes away an entry whose shortcut an uninstaller
+deleted, so Din hides those. Wine's `.desktop` copies of desktop shortcuts
+go to a folder out of sight, since the `.lnk` on the Desktop is the same
+icon.
+
+Windows programs' notification-area icons appear in Din's tray. Wine only
+speaks the old XEmbed tray (`_NET_SYSTEM_TRAY`), so the compositor hosts
+one on its Xwayland (`native/din-compositor/src/tray.rs`). It offers a
+32-bit visual, so icons keep their transparency. Each docked icon sits in a
+hidden container off every screen, under every other window, and the
+compositor never shows it. The icon is redirected and its pixmap read every
+half second; a changed icon is sent to `electron/tray.mts`, which lists it
+with the StatusNotifierItems. A click comes back as the X button press and
+release a real tray's icon gets: Activate is button 1, ContextMenu
+button 3, both at the point clicked. The container moves under that point
+first, so the program's own menu opens under Din's icon. Wine's explorer
+draws every program's icon, so an icon can't say which program it's for.
+
+Files' and the desktop's right-click menus have Open With for the
+installed apps that open a file (`din apps open-with`), by its type. Types
+come from the shared MIME database's globs, plus the types Windows programs
+register, which Wine writes as packages beside their entries. Wine's entries
+for those types are `NoDisplay`, so Din keeps NoDisplay entries only for
+opening files. They're named and drawn from their program's own version
+info and icon, found through the ProgID's open command in the registry. A
+file of a kind Din has no app for opens in the first of them: Windows
+programs' own types first, then by name.
+
 On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.
+
+The feature also brings Direct3D on Vulkan, which games need to run well or
+at all. DXVK covers Direct3D 8 to 11 (nixpkgs' MinGW builds,
+`pkgs.dxvk.dxvk64`/`dxvk32`). vkd3d-proton covers Direct3D 12 (its own
+release tarball, since nixpkgs has no Windows build of it). Din links their
+DLLs over Wine's in `system32` and `syswow64` (`$DIN_WINE_DXVK_X64` and
+the rest) and sets them to load Windows' first, then Wine's (the
+`native,builtin` override). Links left dangling by a removed feature are
+taken away, so Wine's own OpenGL ones load again.
+
+Wine Mono only stands in for the old .NET Framework, so the feature also
+brings .NET (the runtime and its Windows Desktop part, 64- and 32-bit,
+Microsoft's MIT-licensed builds, unpacked in the store), which Din links
+into the prefix's `C:\Program Files\dotnet` and `C:\Program Files
+(x86)\dotnet` (`$DIN_WINE_DOTNET_X64`, `$DIN_WINE_DOTNET_X86`), beside any
+.NET installed there already. Programs built for an older .NET run on it
+(`DOTNET_ROLL_FORWARD=Major`). A new .NET is `dotnetVersion` and the parts'
+hashes in `os/configuration.nix`.
 
 ### AirPlay
 
@@ -610,14 +682,18 @@ printer on the network, or one plugged in that speaks IPP over USB, appears
 in the print dialog as soon as it's on. The first time Din prints to one (or
 makes it the default) it gives it a driverless queue of its own, so it's
 still there after a restart. Din reads the printer list in the background
-once it starts, so the print dialog doesn't wait on the network. Settings →
+once it starts, so the print dialog doesn't wait on the network, and
+remembers the network printers found on each Wi-Fi or wired network
+(`printers.json` in Din's config), so they're listed again as soon as the
+computer is back on it, before CUPS has found them. Settings →
 Printers shows them and their queues, sets the
 default, prints a test page, and adds older USB printers with the best
 driver installed (gutenprint, brlaser).
 
-The print dialog is Din's own (`src/components/desktop/PrintDialog.tsx`):
-Chromium's would open a GTK window, which DinOS's compositor wouldn't
-show. `electron/print-preload.cjs` sends every page's `print()`, frames'
+The print dialog is Din's own, a window per document
+(`src/components/desktop/apps/PrintWindow.tsx`), not a modal, so the
+desktop stays usable while a job is sent: Chromium's would open a GTK
+window, which DinOS's compositor wouldn't show. `electron/print-preload.cjs` sends every page's `print()`, frames'
 included, there, and so do Ctrl+P, the browser's menu and right-click menu,
 and Print in Files and Preview. Whatever is printed goes to CUPS as a PDF
 laid out by Chromium, and the dialog previews that PDF's pages, drawn by

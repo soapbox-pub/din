@@ -33,8 +33,7 @@ when the app is published as an nsite, and Din reads ordinary members
   ],
   "din": {
     "window": { "size": { "width": 960, "height": 700 }, "frame": "standard" },
-    "keywords": ["mspaint", "kid pix", "draw", "pixel art", "sprite"],
-    "migrateStorage": ["din:paint:*"]
+    "keywords": ["mspaint", "kid pix", "draw", "pixel art", "sprite"]
   }
 }
 ```
@@ -130,18 +129,7 @@ Nostr & Storage, or with `din apps links` and `din apps open-links`.
 | `keywords` | `keywords` | Launcher search terms |
 | `hidden` | `hidden` | Openable by id, not listed (Preview, Developer Tools) |
 | `dockAs` | `dockAs` | Windows go under another app's Dock tile |
-| `migrateStorage` | | See below |
-| `migrateRecentFiles` | | Recent lists of `{ path, time }` turned into handles kept in IndexedDB once ([files.md](files.md#recent-files)) |
-| `migrateFiles` | | Files kept elsewhere before the move, copied once into the app's folders ([files.md](files.md#paths-nothing-granted)) |
 | `folders` | | Fixed folders `din.system.fs` reaches by path, without `fs` ([files.md](files.md#some-folders-by-path)) |
-
-## Moving settings out of the desktop
-
-Apps that ran in the desktop kept their settings in its `localStorage`
-(`app://din`). A new origin starts empty, so `migrateStorage` lists the
-keys (a trailing `*` matches a prefix) the desktop should copy into the
-app's own storage before its first launch. It happens once per app; the
-desktop then deletes its copies. Remove the field a release or two later.
 
 ## Where manifests live and how Din finds them
 

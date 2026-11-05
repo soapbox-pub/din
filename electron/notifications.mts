@@ -210,6 +210,11 @@ export function notifyFromSystem(key: string, title: string, body: string): void
   sendToShell('notifications:show', notification);
 }
 
+/** Take down a notification notifyFromSystem showed, when it's no longer so. */
+export function closeSystemNotification(key: string): void {
+  sendToShell('notifications:close', `din:${key}`);
+}
+
 /** An icon name, absolute path or file:// URI, as a data URL. */
 async function iconFrom(icon: string): Promise<string | null> {
   if (!icon) return null;

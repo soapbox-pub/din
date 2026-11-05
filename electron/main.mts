@@ -79,10 +79,11 @@ import {
 import { parseCanonicalHost } from './nsite-store.mts';
 import { isProgram, registerNativeAppHandlers, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
-import { registerKeyboardHandlers } from './keyboard.mts';
+import { attachLayoutKeys, registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
 import { refreshWifiProxy, registerVpnHandlers, registerWifiHandlers } from './network.mts';
 import { isOnionProxyCertificate } from './onion-proxy.mts';
+import { registerFirewallHandlers } from './firewall.mts';
 import {
   isOnionUrl,
   keepTorSession,
@@ -134,7 +135,7 @@ import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
-import { cleanUpPrinting, registerPrintingHandlers, requestPagePrint } from './printing.mts';
+import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
@@ -155,6 +156,8 @@ import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.
 import { registerEyeDropperHandlers } from './eyedropper.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
 import { attachSelectionColor, setSelectionColor } from './selection-color.mts';
+import { setNativeColorScheme, setNativePalette } from './gtk-theme.mts';
+import { setWindowsPalette } from './windows-apps.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
@@ -2771,6 +2774,8 @@ function registerSystemEvents(): void {
         if (topic === 'network') torNetworkChanged();
         // A network just joined has its AirPlay receivers looked for at once.
         if (topic === 'network') airplayNetworkChanged();
+        // And its printers are listed again, before CUPS has browsed for them.
+        if (topic === 'network') printingNetworkChanged();
       }, SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };
@@ -5355,38 +5360,21 @@ function registerBrowserPreconnectHandler(): void {
 // Din is the desktop here: the shell reports its own light/dark mode and
 // nativeTheme passes it on to every web contents, browser tabs included.
 //
-// Where Din is the desktop, native apps get it too, through GSettings:
-// color-scheme is what the settings portal answers (libadwaita, Qt 6,
-// Electron and Flatpak apps), and GTK 3 only knows dark as a theme, so
-// Adwaita flips to Adwaita-dark. Another theme the user picked is theirs.
+// Where Din is the desktop, native apps get it too, and Din's colors with
+// it (gtk-theme.mts); Windows programs get the mode as Windows' app mode
+// wherever Din runs them (windows-apps.mts), since the prefix is Din's own.
 // ---------------------------------------------------------------------------
-let nativeColorScheme: 'light' | 'dark' | null = null;
-
-async function setNativeColorScheme(scheme: 'light' | 'dark'): Promise<void> {
-  if (process.env.DIN_DESKTOP_SESSION !== '1' || scheme === nativeColorScheme) return;
-  nativeColorScheme = scheme;
-  const gsettings = async (...args: string[]) =>
-    (await runCommand('gsettings', args, { timeout: 3_000 })).stdout.trim();
-  const schema = 'org.gnome.desktop.interface';
-  try {
-    await gsettings('set', schema, 'color-scheme', scheme === 'dark' ? 'prefer-dark' : 'default');
-    const theme = (await gsettings('get', schema, 'gtk-theme')).replace(/^'|'$/g, '');
-    const want = scheme === 'dark' ? 'Adwaita-dark' : 'Adwaita';
-    if ((theme === 'Adwaita' || theme === 'Adwaita-dark') && theme !== want) {
-      await gsettings('set', schema, 'gtk-theme', want);
-    }
-  } catch (error) {
-    nativeColorScheme = null;
-    console.warn('Could not pass the color scheme on to native apps:', error);
-  }
-}
-
 function registerThemeHandler(): void {
   ipcMain.on('theme:set', (event, source: unknown) => {
     if (!isShellSender(event)) return;
     if (source !== 'light' && source !== 'dark' && source !== 'system') return;
     nativeTheme.themeSource = source;
-    if (source !== 'system') void setNativeColorScheme(source);
+    if (source !== 'system') setNativeColorScheme(source);
+  });
+  ipcMain.on('theme:native', (event, palette: unknown) => {
+    if (!isShellSender(event)) return;
+    setNativePalette(palette);
+    setWindowsPalette(palette);
   });
   ipcMain.on('theme:selection', (event, color: unknown) => {
     if (!isShellSender(event)) return;
@@ -5608,6 +5596,9 @@ type ShellShortcut =
         | 'new-private-window'
         | 'close-window'
         | 'clear-data'
+        | 'bookmark-page'
+        | 'bookmarks-bar'
+        | 'bookmarks'
         | 'zoom-in'
         | 'zoom-out'
         | 'zoom-reset'
@@ -5739,6 +5730,8 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'n') return { action: 'new-private-window' };
     if (key === 'w') return { action: 'close-window' };
     if (input.key === 'Delete') return { action: 'clear-data' };
+    if (key === 'b') return { action: 'bookmarks-bar' };
+    if (key === 'o') return { action: 'bookmarks' };
     return null;
   }
   if (input.control && !input.shift && !input.alt && !input.meta) {
@@ -5748,6 +5741,7 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
     if (key === 'l') return { action: 'focus-address' };
     if (key === 'f') return { action: 'find' };
     if (key === 'u') return { action: 'view-source' };
+    if (key === 'd') return { action: 'bookmark-page' };
     if (key === 'r') return { action: 'reload', force: false };
     if (key === 'n') return { action: 'new-window' };
     if (/^[1-9]$/.test(input.key)) {
@@ -5976,6 +5970,7 @@ app.whenReady().then(() => {
   });
   registerVpnHandlers({ assertShellSender });
   registerTorHandlers({ assertShellSender, sendToShell });
+  registerFirewallHandlers({ assertShellSender, sendToShell });
   registerSiteLocationHandlers({ assertShellSender, sendToShell });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
@@ -6016,7 +6011,7 @@ app.whenReady().then(() => {
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
   });
-  registerKeyboardHandlers({ assertShellSender });
+  registerKeyboardHandlers({ assertShellSender, send: sendToShell });
   registerDateTimeHandlers({ assertShellSender });
   registerCursorHandlers({ assertShellSender });
   registerMouseHandlers({ assertShellSender, sendToShell });
@@ -6534,6 +6529,8 @@ app.on('web-contents-created', (_event, contents) => {
   // Brightness and volume keys arrive as ordinary keyboard input to whichever
   // contents holds focus (shell or any guest), so hook them everywhere.
   attachMediaKeys(contents);
+  // Ctrl+Space and Ctrl+Alt+Space switch keyboard layouts, wherever focus is.
+  attachLayoutKeys(contents);
 
   // Holding Super lets the shell drag windows from anywhere, but it can't
   // see the key while focus is inside a guest, so forward its presses (not
@@ -6885,7 +6882,9 @@ app.on('web-contents-created', (_event, contents) => {
           ? chromeExtensions.getContextMenuItems(contents, params)
           : [],
       openLink: (url, disposition) => {
-        if (/^(https|chrome-extension):\/\//i.test(url)) {
+        // What a tab can load (isAllowedTabUrl): plain http too, since the
+        // user picked it (a dev server's images, say), and nsite: pages'.
+        if (/^(https?|nsite|chrome-extension):\/\//i.test(url)) {
           // "Open link/image in new tab" (disposition 'default') opens in the
           // background like Chrome; "Open in new window" stays foreground.
           sendToShell('crx:openTab', {

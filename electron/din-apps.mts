@@ -69,7 +69,7 @@ const SYSTEM_PERMISSIONS = {
   passwords: /^passwords:(state|create|createWithComputerPassword|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|import|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
-  capture: /^capture:(status|pointer|pointerImage|takes|take|rename|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
+  capture: /^capture:(status|pointer|pointerImage|takes|take|rename|projects|project|createProject|openProject|updateProject|importBegin|importEnd|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -87,7 +87,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   phone: /^phone:(changed|messages|incoming)$/,
   // A screen's bytes go to the sender that opened it.
   vms: /^vms:changed$/,
-  capture: /^capture:(state|changed|streamEnded)$/,
+  capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
 };
 
 /**
@@ -167,13 +167,27 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   // Apps get what a document app needs and nothing that would prompt. An
   // app granted capture (Studio) has the camera, the microphone and the
   // screen too: the whole screen, as the shell draws it, with no picker,
-  // since choosing to record in the app is the choice.
+  // since choosing to record in the app is the choice. One granted camera
+  // (Camera) has the camera and the microphone, never the screen:
+  // getDisplayMedia arrives as 'media' naming no device, so a request must
+  // name only video and audio.
   const allowed = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
   const captures = (contents: Electron.WebContents | null | undefined) => !!contents && grants.get(contents.id)?.has('capture') === true;
-  s.setPermissionRequestHandler((contents, permission, callback) =>
-    callback(allowed.has(permission) || ((permission === 'media' || permission === 'display-capture') && captures(contents))),
+  const cameras = (contents: Electron.WebContents | null | undefined) => !!contents && cameraGrants.has(contents.id);
+  const devicesOnly = (types: readonly string[]) => types.length > 0 && types.every((t) => t === 'video' || t === 'audio');
+  s.setPermissionRequestHandler((contents, permission, callback, details) =>
+    callback(
+      allowed.has(permission) ||
+        ((permission === 'media' || permission === 'display-capture') && captures(contents)) ||
+        (permission === 'media' && cameras(contents) && devicesOnly('mediaTypes' in details ? (details.mediaTypes ?? []) : [])),
+    ),
   );
-  s.setPermissionCheckHandler((contents, permission) => allowed.has(permission) || (permission === 'media' && captures(contents)));
+  s.setPermissionCheckHandler(
+    (contents, permission, _origin, details) =>
+      allowed.has(permission) ||
+      (permission === 'media' && captures(contents)) ||
+      (permission === 'media' && cameras(contents) && (details.mediaType === 'video' || details.mediaType === 'audio')),
+  );
   s.setDisplayMediaRequestHandler((request, callback) => {
     const requester = request.frame ? webContents.fromFrame(request.frame) : undefined;
     const shell = opts.shell();
@@ -235,6 +249,15 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     if (!appId) throw new Error('Not an app');
     const notifications = (grantOptions as { notifications?: unknown } | null)?.notifications === true;
     backgroundGrants.set(contents.id, { appId, notifications });
+  });
+
+  // `camera`: the camera and the microphone in the app's page. No port: the
+  // permission handlers above check it.
+  ipcMain.handle('dinos-apps:grantCamera', (event, wcId) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    cameraGrants.add(contents.id);
   });
 
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
@@ -316,7 +339,10 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
 /** Per-guest policy, from main's web-contents-created. */
 export function attachAppGuest(contents: Electron.WebContents, src: string, send: (channel: string, payload: unknown) => void): void {
   const appId = appIdOf(src);
-  const home = (url: string) => appId !== null && appIdOf(url) === appId;
+  // A blob: URL the app made is its own too (blob:din://<id>/<uuid>): a
+  // frame showing a file it holds, as printFile prints a PDF or a picture.
+  const home = (url: string) =>
+    appId !== null && (appIdOf(url) === appId || (/^blob:/i.test(url) && appIdOf(url.slice(5)) === appId));
   // Pinned to its own origin: scheme and host, top frame and subframes.
   contents.on('will-frame-navigate', (event) => {
     if (home(event.url)) return;
@@ -467,6 +493,9 @@ const grants = new Map<number, Map<SystemPermission, Grant>>();
 
 /** Windows the desktop granted `background`, by webContents id. */
 const backgroundGrants = new Map<number, { appId: string; notifications: boolean }>();
+
+/** Windows the desktop granted `camera`, by webContents id. */
+const cameraGrants = new Set<number>();
 
 /** What the desktop granted an app window for its worker, or null without `background`. */
 export function backgroundGrant(wcId: number): { appId: string; notifications: boolean } | null {
@@ -809,6 +838,7 @@ function revoke(wcId: number, permission: SystemPermission): void {
 function revokeAll(wcId: number): void {
   for (const permission of Object.keys(SYSTEM_PERMISSIONS) as SystemPermission[]) revoke(wcId, permission);
   backgroundGrants.delete(wcId);
+  cameraGrants.delete(wcId);
   for (const [token, grant] of fileUrls) {
     if (grant.wcId === wcId) fileUrls.delete(token);
   }

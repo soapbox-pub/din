@@ -1780,6 +1780,12 @@ export const Window = memo(function Window({
   // no title bar, border, shadow or background, and resize handles only
   // outside it.
   const frameless = win.frameless;
+  // A Linux app drawing its own title bar is told it's tiled (see the
+  // compositor's state.rs), so it draws square corners and no shadow of its
+  // own; floating, Din gives it the corners and shadow every window has,
+  // clipping the app to them. Other frameless windows (a media player
+  // skin) are their own shape and get none.
+  const nativeFrameless = frameless && typeof win.params?.xid === 'number';
 
   // Sanitized chrome accent. Theme tokens can't guarantee contrast against
   // an arbitrary page color, so tinted chrome flips its foregrounds to plain
@@ -1898,12 +1904,20 @@ export const Window = memo(function Window({
         // shadow go, as the window gets there (genie.ts's FLIP_DURATION_MS
         // and its cubic ease-out), not in its first frame. The border stays
         // as a transparent one, so the content doesn't shift by its width.
-        frameless
+        // A native app that draws its own title bar gets the corners, shadow
+        // and ring of every Din window, with no border.
+        frameless && !nativeFrameless
           ? 'rounded-none'
+          : frameless
+          ? cn(
+              'transition-[border-radius,box-shadow] duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none',
+              flush ? 'rounded-none shadow-none ring-0' : 'rounded-xl shadow-2xl ring-1 ring-black/20',
+            )
           : cn(
               'border transition-[border-radius,border-color,box-shadow] duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none',
               flush ? 'rounded-none border-transparent shadow-none ring-0' : 'rounded-xl border-foreground/10 shadow-2xl ring-1 ring-black/20',
             ),
+        !flush && nativeFrameless && isTop && 'ring-ring/50',
         !flush && !frameless && isTop && 'ring-ring/50',
         // Tiles sit side by side, so the focused one needs a border that
         // shows, like Hyprland's active border.
@@ -1975,7 +1989,7 @@ export const Window = memo(function Window({
       <div
         className={cn(
           'relative flex-1 overflow-hidden',
-          ownsHeader ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
+          ownsHeader || frameless ? 'rounded-[inherit]' : 'rounded-b-[inherit]',
         )}
       >
         <WindowOwnHeaderContext.Provider value={setOwnHeader}>

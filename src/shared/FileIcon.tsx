@@ -15,7 +15,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FsEntryKind } from '@/lib/fs';
-import { fileCategory, hasThumbnail } from '@/lib/fileTypes';
+import { fileCategory, hasOwnIcon, hasThumbnail } from '@/lib/fileTypes';
 import type { FileCategory } from '@/lib/fileTypes';
 import { getThumbnail } from '@/lib/thumbnails';
 import { FILE_ICON_NAMES, themeIcon, useThemeIcons } from '@/shared/themeIcons';
@@ -57,7 +57,7 @@ export interface FileIconProps {
   symlink?: boolean;
   /** Box edge in px; icons are drawn at about 3/4 of it. */
   px: number;
-  /** Whether to try a thumbnail (images, video). */
+  /** Whether to try a thumbnail (images, video) or the file's own icon (AppImages, .exes). */
   thumbnail?: boolean;
   className?: string;
 }
@@ -103,7 +103,16 @@ export function FileIcon({
       style={{ width: px, height: px }}
       aria-hidden
     >
-      {url ? (
+      {url && hasOwnIcon(name) ? (
+        // A program's own icon: drawn like the theme's, not framed like a picture.
+        <img
+          src={url}
+          alt=""
+          draggable={false}
+          className="object-contain motion-safe:animate-in motion-safe:fade-in-0"
+          style={{ width: themedPx, height: themedPx }}
+        />
+      ) : url ? (
         <img
           src={url}
           alt=""

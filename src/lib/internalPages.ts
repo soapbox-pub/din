@@ -26,10 +26,14 @@ export const PREFERENCES_URL = 'about:preferences';
 /** Extensions published to Nostr, to find and get (src/components/desktop/apps/ExtensionsPage.tsx). */
 export const EXTENSIONS_URL = 'about:extensions';
 
+/** The bookmark manager (src/components/desktop/apps/BookmarksPage.tsx). */
+export const BOOKMARKS_URL = 'about:bookmarks';
+
 /** Every fixed internal page, by URL. */
 const INTERNAL_PAGES: Record<string, { title: string }> = {
   [PREFERENCES_URL]: { title: 'Settings' },
   [EXTENSIONS_URL]: { title: 'Extensions' },
+  [BOOKMARKS_URL]: { title: 'Bookmarks' },
 };
 
 /** Tab labels for a `nostr:` page, by what it names. */

@@ -523,7 +523,11 @@ export function installDin(transport: Transport): void {
       if (!target) throw new TypeError(`Not an app's URL: ${String(url)}`);
       await request('app.open', { ...target, handles: await idsOf(files) });
     },
-    openFiles: async (files) => request('app.openFiles', { handles: (await idsOf(files)) ?? [] }),
+    openFiles: async (files, app) => request('app.openFiles', { handles: (await idsOf(files)) ?? [], ...(app ? { app } : {}) }),
+    openWithApps: async (file) => {
+      const [handle] = (await idsOf([file])) ?? [];
+      return handle ? request('app.openWithApps', { handle }) : [];
+    },
   };
 
   // ---- window ----
@@ -1075,30 +1079,6 @@ export function installDin(transport: Transport): void {
   void helloArrived.then(async (hello) => {
     h = hello;
 
-    // Settings this app kept on the desktop's origin, before anything reads storage.
-    if (hello.storage) {
-      for (const [key, value] of Object.entries(hello.storage)) {
-        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
-      }
-      tell('storage.migrated');
-    }
-    if (hello.recentFiles) {
-      for (const [key, value] of Object.entries(hello.recentFiles)) {
-        const parse = (text: string | null): { key?: unknown }[] => {
-          try {
-            const list: unknown = JSON.parse(text ?? '[]');
-            return Array.isArray(list) ? list : [];
-          } catch {
-            return [];
-          }
-        };
-        const mine = parse(localStorage.getItem(key));
-        const known = new Set(mine.map((e) => e?.key));
-        localStorage.setItem(key, JSON.stringify([...mine, ...parse(value).filter((e) => !known.has(e?.key))]));
-      }
-      tell('storage.migrated');
-    }
-
     // Handles kept from before they went in IndexedDB, put there now.
     if (hello.unstoredHandles.length > 0) {
       void seedHandles(hello.unstoredHandles.map((s) => [s.token, s]))
@@ -1209,6 +1189,7 @@ export function installDin(transport: Transport): void {
         const c: Record<string, unknown> = {};
         for (const m of [
           'status', 'pointer', 'pointerImage', 'takes', 'take', 'rename', 'begin', 'end', 'open', 'write', 'close', 'transcribe',
+          'projects', 'project', 'createProject', 'openProject', 'updateProject', 'importBegin', 'importEnd',
           'destinations', 'saveDestination', 'removeDestination', 'streamStart', 'streamStop',
         ]) {
           c[m] = (...args: unknown[]) => sys.call('capture', `capture:${m}`, args);
@@ -1216,6 +1197,7 @@ export function installDin(transport: Transport): void {
         c.streamWrite = (...args: unknown[]) => sys.send('capture', 'capture:streamWrite', args);
         c.onState = (cb: (state: unknown) => void) => sys.on('capture', 'capture:state', (s) => cb(s));
         c.onChanged = (cb: (take: unknown) => void) => sys.on('capture', 'capture:changed', (t) => cb(t));
+        c.onProjectChanged = (cb: (project: unknown) => void) => sys.on('capture', 'capture:projectChanged', (p) => cb(p));
         c.onStreamEnded = (cb: (ended: unknown) => void) => sys.on('capture', 'capture:streamEnded', (e) => cb(e));
         system.capture = c as unknown as CaptureBridge;
       }

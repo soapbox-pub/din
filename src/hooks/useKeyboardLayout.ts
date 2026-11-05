@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getKeyboardBridge } from '@/lib/keyboard';
 import type { KeyboardLayout, KeyboardLayoutChoice, KeyboardStatus } from '@/lib/keyboard';
@@ -10,10 +11,21 @@ function requireBridge() {
   return keyboard;
 }
 
-/** The system's layout, and whether it can be changed here. */
+const STATUS_KEY = ['keyboard', 'status'] as const;
+
+/**
+ * The system's layouts, the one typing, and what can be done with them here.
+ * Kept current as they change, Ctrl+Space's switches included.
+ */
 export function useKeyboardStatus() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const bridge = getKeyboardBridge();
+    if (!bridge?.onChanged) return;
+    return bridge.onChanged((status) => queryClient.setQueryData(STATUS_KEY, status));
+  }, [queryClient]);
   return useQuery<KeyboardStatus>({
-    queryKey: ['keyboard', 'status'],
+    queryKey: STATUS_KEY,
     queryFn: () => requireBridge().status(),
     enabled: getKeyboardBridge() !== undefined,
     retry: false,
@@ -31,12 +43,30 @@ export function useKeyboardLayouts() {
   });
 }
 
-/** Make a layout the system's. */
+/** Make a layout the system's only one. */
 export function useSetKeyboardLayout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (choice: KeyboardLayoutChoice) => requireBridge().set(choice),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['keyboard', 'status'] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: STATUS_KEY }),
+  });
+}
+
+/** Make these the system's layouts, the first the default. */
+export function useSetKeyboardLayouts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (choices: KeyboardLayoutChoice[]) => requireBridge().setLayouts(choices),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: STATUS_KEY }),
+  });
+}
+
+/** Type with the system's layout at an index. */
+export function useSelectKeyboardLayout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (index: number) => requireBridge().select(index),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: STATUS_KEY }),
   });
 }
 
