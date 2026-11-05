@@ -882,6 +882,22 @@ expose('nativeApps', {
     ipcRenderer.on('open-uri:open', handler);
     return () => ipcRenderer.removeListener('open-uri:open', handler);
   },
+
+  /**
+   * Subscribe to folders and files native apps open or ask to show
+   * (xdg-open, org.freedesktop.FileManager1; electron/open-uri.mts).
+   * Returns an unsubscribe fn.
+   * @param {(request: { path: string, kind: 'directory' | 'file', select?: boolean }) => void} callback
+   */
+  onOpenPath: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ path: string, kind: 'directory' | 'file', select?: boolean }} request
+     */
+    const handler = (_event, request) => callback(request);
+    ipcRenderer.on('open-uri:path', handler);
+    return () => ipcRenderer.removeListener('open-uri:path', handler);
+  },
 });
 
 // Embedded display (src/lib/nativeDisplay.ts): pixels and input travel on a

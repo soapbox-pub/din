@@ -78,6 +78,18 @@ export interface NativeAppsBridge {
   onChanged(callback: () => void): () => void;
   /** Subscribe to links native apps open. Returns an unsubscribe fn. */
   onOpenUrl(callback: (url: string) => void): () => void;
+  /**
+   * Subscribe to folders and files native apps open (xdg-open) or ask to
+   * show in a file manager ("Show in Folder"). Returns an unsubscribe fn.
+   */
+  onOpenPath(callback: (request: NativeOpenPath) => void): () => void;
+}
+
+/** A folder or file a native app opened, or asked to show `select`ed in its folder. */
+export interface NativeOpenPath {
+  path: string;
+  kind: 'directory' | 'file';
+  select?: boolean;
 }
 
 /**
