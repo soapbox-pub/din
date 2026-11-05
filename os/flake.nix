@@ -77,10 +77,10 @@
       # rather than the system, so a new computer has it from the first boot
       # (and the Installer copies it with /home), it updates itself from
       # there, and system updates don't carry it. Bump now and then.
-      opencode = pkgs.runCommand "opencode-home-2.1.4" {
+      opencode = pkgs.runCommand "opencode-home-2.2.5" {
         src = pkgs.fetchurl {
-          url = "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.1.4.tgz";
-          hash = "sha256-zgWr4tzhBBORyOyM242gZvZA/UcecqyEbcsInEQeEeE=";
+          url = "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.2.5.tgz";
+          hash = "sha256-kmkO7gemgNPLdgygK6Q4eN6eqxtOXV366HlVGMU2KPQ=";
         };
       } ''
         tar -xzf $src package/bin/opencode
