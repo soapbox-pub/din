@@ -70,7 +70,9 @@ let
   # ~/.local/state/din/features/<id>/<part> that keeps it from being
   # collected. A part that's a plain download (the Whisper model, from
   # Hugging Face) gives its URL and hash, and lands where fetchurl would put
-  # it. Everything that uses one finds it through those links (the
+  # it; one with `unpack` (the .NET runtime) is an archive unpacked in the
+  # store, as `nix store prefetch-file --unpack` and fetchzip both make it,
+  # a lone top folder taken off. Everything that uses one finds it through those links (the
   # launcher's PATH and DIN_* variables, below, and nix-ld's library path),
   # so it works the moment it's installed, and is simply missing until then.
   # System updates bring installed ones up to date (os/din-update.sh).
@@ -85,16 +87,40 @@ let
     url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin";
     hash = "sha256-OUIhcJzVrR9AxG5gMcphvOiJMebgiMGIKUxtWlX/p+I=";
   };
+  # .NET, the runtime most Windows programs written in C# since 2020 need
+  # (its WinForms and WPF in the Desktop part), which Wine Mono, standing in
+  # for the old .NET Framework, isn't: without it they open Microsoft's
+  # "You must install .NET Desktop Runtime" box. MIT-licensed, and
+  # Microsoft's builds are free to pass on. Its zips, from the release
+  # metadata (builds.dotnet.microsoft.com/dotnet/release-metadata/<major>/
+  # releases.json, whose SHA-512s they were checked against), unpacked;
+  # each part's hash is its unpacked tree's (nix store prefetch-file
+  # --unpack --name <name> <url>). electron/windows-apps.mts links them into
+  # the prefix's C:\Program Files\dotnet (DIN_WINE_DOTNET, below).
+  dotnetVersion = "10.0.14";
+  dotnetPart = { kind, file, arch, hash }: {
+    name = "${file}-${dotnetVersion}-win-${arch}";
+    url = "https://builds.dotnet.microsoft.com/dotnet/${kind}/${dotnetVersion}/${file}-${dotnetVersion}-win-${arch}.zip";
+    unpack = true;
+    inherit hash;
+  };
   dinFeatures = {
     # Wine, for Windows programs (electron/windows-apps.mts). The WoW64 build
     # runs 32- and 64-bit programs without 32-bit host libraries. The Full
     # variant is the one that embeds the Wine Mono and Gecko installers (.NET
-    # and the HTML engine), so a new prefix gets them with no download prompt.
+    # Framework and the HTML engine), so a new prefix gets them with no
+    # download prompt. Then .NET (above), 64- and 32-bit.
     windows = {
       title = "Windows apps";
       description = "Wine, which runs Windows programs like apps of their own.";
-      size = 850;
-      parts.wine = pkgs.wineWow64Packages.stableFull;
+      size = 1190;
+      parts = {
+        wine = pkgs.wineWow64Packages.stableFull;
+        dotnet-x64 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x64"; hash = "sha256-Zid4ksYbIcV9zfRVCOlnxn8xdKbGSyUHonQ4KtGnMbs="; };
+        dotnet-desktop-x64 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x64"; hash = "sha256-oBmXmfy+ccpJXX49pTOGyMvUn8MNRn2PquXstvOFI8M="; };
+        dotnet-x86 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x86"; hash = "sha256-tfadfuGzK/tl8VqfRPYbV2oWrGgFTtkI3tejlcdYJoA="; };
+        dotnet-desktop-x86 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x86"; hash = "sha256-pKKDN17zi0biQx1XG1HfXcOEJJkU9uQm326ViV076RA="; };
+      };
     };
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
@@ -134,10 +160,26 @@ let
       parts = { podman = config.virtualisation.podman.package; distrobox = pkgs.distrobox; };
     };
   };
-  # A part is a package, or a download ({ name, url, hash }).
+  # A part is a package, or a download ({ name, url, hash }, and `unpack`).
   isDownload = part: part ? url;
+  # An unpacked one as `nix store prefetch-file --unpack` makes it, which is
+  # what installing it runs: one folder at the top is taken off, several
+  # things are left as they are.
+  fetchPart = part: if part.unpack or false
+    then pkgs.fetchzip {
+      inherit (part) name url hash;
+      stripRoot = false;
+      postFetch = ''
+        shopt -s dotglob
+        top=("$out"/*)
+        if [ ''${#top[@]} = 1 ] && [ -d "''${top[0]}" ]; then
+          mv "''${top[0]}" "$TMPDIR/top" && rmdir "$out" && mv "$TMPDIR/top" "$out"
+        fi
+      '';
+    }
+    else pkgs.fetchurl { inherit (part) name url hash; };
   partPath = part: builtins.unsafeDiscardStringContext
-    (if isDownload part then (pkgs.fetchurl part).outPath else part.outPath);
+    (if isDownload part then (fetchPart part).outPath else part.outPath);
   # A feature's part, as everything that uses it finds it.
   featurePart = id: part: "${featuresDir}/${id}/${part}";
   # What Settings and the updater read: each feature's parts, by the paths
@@ -149,7 +191,7 @@ let
       size = f.size * 1000 * 1000;
       default = f.default or false;
       parts = lib.mapAttrs (name: part: { path = partPath part; }
-        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; }) f.parts;
+        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; unpack = part.unpack or false; }) f.parts;
     })
     dinFeatures));
   # Their programs, for PATH: whatever isn't installed is a folder that
@@ -458,6 +500,12 @@ let
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
+    # .NET for Windows programs (electron/windows-apps.mts): each
+    # architecture's parts, merged into C:\Program Files\dotnet and
+    # C:\Program Files (x86)\dotnet, the Desktop one (its unpacked
+    # Microsoft.WindowsDesktop.App) in its shared folder.
+    export DIN_WINE_DOTNET_X64=${featurePart "windows" "dotnet-x64"}:shared=${featurePart "windows" "dotnet-desktop-x64"}
+    export DIN_WINE_DOTNET_X86=${featurePart "windows" "dotnet-x86"}:shared=${featurePart "windows" "dotnet-desktop-x86"}
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and

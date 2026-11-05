@@ -13,6 +13,9 @@
 //     drive exposing the whole root filesystem in every file dialog.
 //   - A crashed program just closes, as it would on Windows, instead of
 //     raising winedbg's crash dialog.
+//   - .NET is already installed: programs built on it (most C# ones since
+//     2020) start, instead of Microsoft's "You must install .NET Desktop
+//     Runtime" box. Wine Mono only stands in for the old .NET Framework.
 //
 // Installers need nothing extra: Wine writes ordinary XDG desktop entries
 // and icons for the Start-menu shortcuts they create, and native-apps.mts
@@ -82,10 +85,13 @@ export function winePrefix(): string {
 
 /**
  * Environment every Wine process Din starts gets: debug output off (it's
- * megabytes of noise nobody reads, and slows some programs down).
+ * megabytes of noise nobody reads, and slows some programs down), and .NET
+ * programs built for an older .NET than the one Din has run on it: .NET
+ * otherwise only moves a program up to a newer minor version, never a major
+ * one, and asks for the old runtime to be downloaded.
  */
 export function wineEnvironment(): Record<string, string> {
-  return { WINEDEBUG: '-all' };
+  return { WINEDEBUG: '-all', DOTNET_ROLL_FORWARD: 'Major' };
 }
 
 /**
@@ -172,6 +178,106 @@ function arrangeDrives(prefix: string): void {
   }
 }
 
+/**
+ * Where .NET goes for each architecture, and the variable that lists its
+ * parts there (os/configuration.nix): Program Files\dotnet is where a
+ * program's launcher looks first after the registry, which needs nothing
+ * then.
+ */
+const DOTNET_INSTALLS = [
+  { variable: 'DIN_WINE_DOTNET_X64', folder: 'Program Files/dotnet' },
+  { variable: 'DIN_WINE_DOTNET_X86', folder: 'Program Files (x86)/dotnet' },
+];
+
+/**
+ * The trees a DIN_WINE_DOTNET_* variable merges into one folder, by name at
+ * its top: `<path>` puts what's in the path there, `<sub>=<path>` puts the
+ * path itself there as <sub> (the Desktop part, unpacked as
+ * Microsoft.WindowsDesktop.App, goes in shared).
+ */
+function dotnetSources(list: string): Map<string, string[]> {
+  const top = new Map<string, string[]>();
+  const add = (name: string, source: string) => top.set(name, [...(top.get(name) ?? []), source]);
+  for (const item of list.split(':').filter(Boolean)) {
+    const at = item.indexOf('=');
+    if (at > 0) {
+      add(item.slice(0, at), item.slice(at + 1));
+      continue;
+    }
+    let names: string[];
+    try {
+      names = fs.readdirSync(item);
+    } catch {
+      continue; // Not installed.
+    }
+    for (const name of names) add(name, path.join(item, name));
+  }
+  return top;
+}
+
+/** Whether a path is a folder, following links. */
+function isDirectory(file: string): boolean {
+  try {
+    return fs.statSync(file).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Link each entry into a folder: one source is a link to it; several, all
+ * folders, a folder of the merge of theirs. What's there already and real
+ * (a .NET someone installed with Microsoft's installer) stays, and gets
+ * Din's beside it; links left pointing at nothing (from a .NET since
+ * updated, or removed) go.
+ */
+function linkTree(folder: string, entries: Map<string, string[]>): void {
+  fs.mkdirSync(folder, { recursive: true });
+  for (const name of fs.readdirSync(folder)) {
+    const file = path.join(folder, name);
+    if (fs.lstatSync(file).isSymbolicLink() && !fs.existsSync(file) && !entries.has(name)) fs.rmSync(file);
+  }
+  for (const [name, sources] of entries) {
+    const file = path.join(folder, name);
+    const existing = fs.lstatSync(file, { throwIfNoEntry: false });
+    const merge = sources.length > 1 || (existing !== undefined && !existing.isSymbolicLink());
+    if (!merge) {
+      if (existing?.isSymbolicLink() && fs.readlinkSync(file) === sources[0]) continue;
+      fs.rmSync(file, { force: true });
+      fs.symlinkSync(sources[0], file);
+      continue;
+    }
+    // A real file is someone else's; only folders merge.
+    if (existing && !existing.isSymbolicLink() && !existing.isDirectory()) continue;
+    if (!sources.every(isDirectory)) continue;
+    if (existing?.isSymbolicLink()) fs.rmSync(file);
+    const children = new Map<string, string[]>();
+    for (const source of sources) {
+      for (const child of fs.readdirSync(source)) {
+        children.set(child, [...(children.get(child) ?? []), path.join(source, child)]);
+      }
+    }
+    linkTree(file, children);
+  }
+}
+
+/**
+ * Put .NET in the prefix, where DinOS has it (the Windows apps feature's
+ * runtime parts). Links, not copies: they go through the feature's own
+ * links, so an update or removal of the feature carries straight through.
+ */
+function linkDotnet(prefix: string): void {
+  for (const { variable, folder } of DOTNET_INSTALLS) {
+    const list = process.env[variable];
+    if (!list) continue;
+    try {
+      linkTree(path.join(prefix, 'drive_c', folder), dotnetSources(list));
+    } catch (error) {
+      console.warn(`[windows-apps] couldn't link .NET into ${folder}:`, error);
+    }
+  }
+}
+
 /** Create and configure the prefix, once per session. */
 let prefixReady: Promise<void> | null = null;
 
@@ -228,6 +334,7 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
   }
 
   arrangeDrives(prefix);
+  linkDotnet(prefix);
 }
 
 /**

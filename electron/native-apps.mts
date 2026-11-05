@@ -31,6 +31,7 @@ import {
   type EmbeddedDisplay,
 } from './native-display.mts';
 import {
+  ensurePrefix,
   isWindowsProgram,
   isWineCommand,
   wineEnvironment,
@@ -555,7 +556,12 @@ async function launch(appId: string, uri?: string): Promise<void> {
       ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
       : entry.argv;
   const env = await appEnvironment(display);
-  if (isWineCommand(argv[0])) Object.assign(env, wineEnvironment());
+  if (isWineCommand(argv[0])) {
+    // A program installed before the prefix had what it has now (.NET) gets
+    // it all the same.
+    await ensurePrefix(env).catch((error: unknown) => console.warn('[native-apps] Windows prefix:', error));
+    Object.assign(env, wineEnvironment());
+  }
   Object.assign(env, entry.env);
 
   const { pid } = spawnDetached(argv, entryCwd(entry), env);

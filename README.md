@@ -467,6 +467,15 @@ On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.
 
+Wine Mono only stands in for the old .NET Framework, so the feature also
+brings .NET (the runtime and its Windows Desktop part, 64- and 32-bit,
+Microsoft's MIT-licensed builds, unpacked in the store), which Din links
+into the prefix's `C:\Program Files\dotnet` and `C:\Program Files
+(x86)\dotnet` (`$DIN_WINE_DOTNET_X64`, `$DIN_WINE_DOTNET_X86`), beside any
+.NET installed there already. Programs built for an older .NET run on it
+(`DOTNET_ROLL_FORWARD=Major`). A new .NET is `dotnetVersion` and the parts'
+hashes in `os/configuration.nix`.
+
 ### AirPlay
 
 The menu bar's AirPlay item (once a receiver is nearby) and Settings →

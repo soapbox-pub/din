@@ -6,8 +6,8 @@
 // by os/configuration.nix): for each, its parts, by the store paths they
 // are, none of which is in the system. Installing one downloads each part
 // as the user, through the Nix daemon - a package from the binary cache, a
-// plain download (the Whisper model) from its URL, checked against its
-// hash - with a link at DIN_FEATURES_DIR/<id>/<part>: the links are both
+// plain download (the Whisper model, or the .NET runtime's zips, unpacked)
+// from its URL, checked against its hash - with a link at DIN_FEATURES_DIR/<id>/<part>: the links are both
 // what keeps them from being collected and where everything that uses them
 // looks (the launcher's PATH and DIN_* variables), so it works as soon as
 // they're there. Removing one takes its links away and deletes what only
@@ -52,12 +52,17 @@ const ORDER = ['windows', 'vms', 'dictation', 'containers', 'webkit'];
 
 const STORE_PATH = /^\/nix\/store\/[0-9a-z]{32}-[^/]+$/;
 
-/** A part: a package in the binary cache, or a plain download (`url`, its `name` and `hash`). */
+/**
+ * A part: a package in the binary cache, or a plain download (`url`, its
+ * `name` and `hash`), which with `unpack` is an archive unpacked in the
+ * store (the .NET runtime).
+ */
 interface Part {
   path: string;
   url?: string;
   name?: string;
   hash?: string;
+  unpack?: boolean;
 }
 
 interface ManifestEntry {
@@ -147,7 +152,7 @@ function readParts(raw: unknown): Record<string, Part> | null {
     if (v.url === undefined) {
       parts[name] = { path: v.path };
     } else if (typeof v.url === 'string' && /^https:\/\//.test(v.url) && typeof v.name === 'string' && typeof v.hash === 'string') {
-      parts[name] = { path: v.path, url: v.url, name: v.name, hash: v.hash };
+      parts[name] = { path: v.path, url: v.url, name: v.name, hash: v.hash, unpack: v.unpack === true };
     } else {
       return null;
     }
@@ -392,7 +397,7 @@ async function fetchParts(id: string, entry: ManifestEntry): Promise<void> {
     await nixWithProgress(id, ['build', '--no-link', ...packages.map(([, part]) => part.path)], failed);
   }
   for (const [, part] of missing.filter(([, p]) => p.url !== undefined)) {
-    const out = await nixWithProgress(id, ['store', 'prefetch-file', '--json', '--name', part.name ?? '', '--expected-hash', part.hash ?? '', part.url ?? ''], failed);
+    const out = await nixWithProgress(id, ['store', 'prefetch-file', '--json', ...(part.unpack ? ['--unpack'] : []), '--name', part.name ?? '', '--expected-hash', part.hash ?? '', part.url ?? ''], failed);
     let storePath: unknown;
     try {
       storePath = (JSON.parse(out) as { storePath?: unknown }).storePath;
