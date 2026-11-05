@@ -316,7 +316,10 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
 /** Per-guest policy, from main's web-contents-created. */
 export function attachAppGuest(contents: Electron.WebContents, src: string, send: (channel: string, payload: unknown) => void): void {
   const appId = appIdOf(src);
-  const home = (url: string) => appId !== null && appIdOf(url) === appId;
+  // A blob: URL the app made is its own too (blob:din://<id>/<uuid>): a
+  // frame showing a file it holds, as printFile prints a PDF or a picture.
+  const home = (url: string) =>
+    appId !== null && (appIdOf(url) === appId || (/^blob:/i.test(url) && appIdOf(url.slice(5)) === appId));
   // Pinned to its own origin: scheme and host, top frame and subframes.
   contents.on('will-frame-navigate', (event) => {
     if (home(event.url)) return;
