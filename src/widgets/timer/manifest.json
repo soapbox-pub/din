@@ -4,5 +4,6 @@
   "icon": "timer",
   "domains": ["theme", "storage"],
   "size": "medium",
-  "sizes": ["small", "medium", "large"]
+  "sizes": ["small", "medium", "large"],
+  "surface": "glass"
 }

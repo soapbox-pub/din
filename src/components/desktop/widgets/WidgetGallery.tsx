@@ -29,6 +29,7 @@ import {
   spanPixels,
   WIDGET_SIZES,
   WIDGETS_PARTITION,
+  widgetOnGlass,
   widgetUrl,
   type FileSource,
   type NappletSource,
@@ -38,6 +39,7 @@ import {
 } from '@/lib/widgets';
 import { BuiltinIcon, NappletIcon, PermissionRow } from './permissions';
 import { useNappletHost } from './useNappletHost';
+import { WidgetGlass } from './WidgetFrame';
 
 
 /** Each napplet once, its newest manifest, of those that check out. */
@@ -251,6 +253,7 @@ function WidgetPreview({ id, size }: { id: string; size: WidgetSize }) {
   const { width, height } = spanPixels(WIDGET_SIZES[size]);
   return (
     <div className="pointer-events-none relative" style={{ width, height }}>
+      {guestsAvailable() && widgetOnGlass(widget.source) && <WidgetGlass />}
       {guestsAvailable() ? (
         <GuestSurface
           src={widgetUrl(widget.source)}

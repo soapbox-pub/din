@@ -131,9 +131,13 @@ in (`followShape`: `small`, `wide` or `large`).
 | Profile | glass: your picture, name, address, bio and follows | `identity`, `resource`, `theme` |
 
 "Clear" widgets are white over the wallpaper with a soft shadow; "glass"
-ones a pane tinted light or dark with the desktop's theme (`.glass` and
-`data-scheme` in `src/widgets/shared/`). A widget can't blur what's behind
-it: that's another process's pixels.
+ones sit on a pane of Din's glass, the material Settings → Themes chooses
+(Liquid, Frosted or Solid) tinted with the theme, as menus and panels are.
+A widget can't blur what's behind it, as that's another process's pixels,
+so the desktop draws the pane behind its frame when its manifest says
+`"surface": "glass"` (`widgetOnGlass` in `src/lib/widgets.ts`), and the
+widget's page stays clear over it, its text light or dark with the theme
+(`.glass` and `data-scheme` in `src/widgets/shared/`).
 
 `scripts/build-widgets.mjs` builds each into one self-contained file,
 `dist/widgets/<id>/index.html`, script, styles and fonts inlined (a napplet

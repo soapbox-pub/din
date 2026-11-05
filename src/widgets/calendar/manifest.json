@@ -4,5 +4,6 @@
   "icon": "calendar",
   "domains": ["theme"],
   "size": "medium",
-  "sizes": ["small", "medium", "large"]
+  "sizes": ["small", "medium", "large"],
+  "surface": "glass"
 }

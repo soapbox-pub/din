@@ -4,7 +4,7 @@ import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import { guestsAvailable } from '@/platform/guest';
 import { APP_BLOSSOM_SERVERS } from '@/lib/appBlossom';
-import { getWidgetsBridge, parseFileWidget, spanPixels, WIDGET_MIN_SPAN, WIDGETS_PARTITION, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
+import { getWidgetsBridge, parseFileWidget, spanPixels, WIDGET_MIN_SPAN, WIDGETS_PARTITION, widgetOnGlass, widgetTitle, widgetUrl, type PlacedWidget } from '@/lib/widgets';
 import { useWidgets } from '@/contexts/WidgetsContext';
 import { cn } from '@/lib/utils';
 import { useNappletHost } from './useNappletHost';
@@ -63,9 +63,19 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * The pane of Din's glass behind a widget whose manifest asks for one
+ * (widgetOnGlass): the material Settings → Themes chooses, tinted with the
+ * theme, as menus and panels are. The widget can't draw it, as what's behind
+ * it is another process's pixels; its page is clear over this.
+ */
+export function WidgetGlass() {
+  return <div aria-hidden className="glass-surface pointer-events-none absolute inset-0 rounded-3xl" />;
+}
+
+/**
  * One widget on the desktop: its guest and its menu. Din draws nothing
- * behind it: a widget is as transparent as its own page, cut to rounded
- * corners.
+ * behind it unless it asks for glass (WidgetGlass): a widget is as
+ * transparent as its own page, cut to rounded corners.
  */
 export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, onAbout, onPublish, onRemove }: WidgetFrameProps) {
   const { editing, setEditing, resize, refresh } = useWidgets();
@@ -211,6 +221,7 @@ export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, on
               editing && 'bg-white/5 outline-2 outline-offset-2 outline-white/50 outline-dashed',
             )}
           >
+            {ready && widgetOnGlass(widget.source) && <WidgetGlass />}
             {ready ? (
               <GuestSurface
                 key={`${generation}:${(widget.denied ?? []).join()}`}

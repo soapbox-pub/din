@@ -1006,13 +1006,14 @@ function DockSurface({
   size: number;
 } & React.ComponentProps<'div'>) {
   if (variant === 'modern') {
-    // macOS since Big Sur: a frosted, rounded panel with a hairline edge.
+    // macOS since Big Sur: a frosted, rounded panel with a hairline edge, or
+    // of Liquid glass when that's the desktop's (bar-glass, index.css).
     return (
       <div
         {...props}
         style={{ borderRadius: size * 0.275, ...style }}
         className={cn(
-          'absolute inset-x-0 top-0 bottom-1',
+          'bar-glass bar-glass-lens absolute inset-x-0 top-0 bottom-1',
           'border border-white/30 bg-white/25 ring-1 ring-black/10 backdrop-blur-2xl backdrop-saturate-150',
           'shadow-[0_8px_32px_rgb(0_0_0/0.2)] dark:border-white/15 dark:bg-neutral-900/40 dark:ring-black/40',
           className,

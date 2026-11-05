@@ -150,6 +150,13 @@ export interface BuiltinManifest {
   domains: Domain[];
   size: WidgetSize;
   sizes: WidgetSize[];
+  /**
+   * What the desktop draws behind it: a pane of Din's glass (Settings →
+   * Themes' material, tinted with the theme), which a widget can't draw for
+   * itself since what's behind it is another process's pixels; or, left
+   * out, nothing, for a widget that's clear over the wallpaper.
+   */
+  surface?: 'glass';
 }
 
 const RAW = import.meta.glob<BuiltinManifest>('/src/widgets/*/manifest.json', { eager: true, import: 'default' });
@@ -185,6 +192,11 @@ export function widgetDescription(source: WidgetSource): string {
 /** The sizes a widget comes in. */
 export function widgetSizes(source: WidgetSource): WidgetSize[] {
   return source.type === 'builtin' ? (BUILTINS.get(source.id)?.sizes ?? ['small']) : ['small', 'medium', 'large'];
+}
+
+/** Whether the desktop draws a pane of glass behind a widget (BuiltinManifest's surface). */
+export function widgetOnGlass(source: WidgetSource): boolean {
+  return source.type === 'builtin' && BUILTINS.get(source.id)?.surface === 'glass';
 }
 
 /** The domains a widget declared, of what Din answers. */

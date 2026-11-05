@@ -138,7 +138,8 @@ export function Taskbar() {
           'z-20 flex shrink-0 cursor-default select-none items-stretch gap-1 tracking-tight',
           sizes.bar,
           sizes.glass,
-          'border-border/60 backdrop-blur-2xl backdrop-saturate-150',
+          // Liquid glass when that's the desktop's (bar-glass, index.css).
+          'bar-glass border-border/60 backdrop-blur-2xl backdrop-saturate-150',
           // Glass catching the light along its top or outer edge.
           'before:pointer-events-none before:absolute before:from-foreground/[0.06] before:to-transparent',
           vertical

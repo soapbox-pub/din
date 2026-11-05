@@ -83,10 +83,30 @@ const LIGHT_THEME = {
 const selectionOf = (tokens: Record<string, string> | undefined) =>
   tokens?.selection && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(tokens.selection) ? tokens.selection : undefined;
 
-const terminalTheme = (dark: boolean, selection = currentSelection) => {
+const terminalTheme = (dark: boolean, selection = currentSelection, glass = currentGlass) => {
   const palette = dark ? DARK_THEME : LIGHT_THEME;
-  return selection ? { ...palette, selectionBackground: selection } : palette;
+  return {
+    ...palette,
+    ...(selection ? { selectionBackground: selection } : {}),
+    // On glass the cells are clear, and the window's tinted glass shows
+    // through them. Still the palette's color with no alpha, so a program
+    // asking for the background (OSC 11) hears the same light or dark.
+    ...(glass ? { background: `${palette.background}00` } : {}),
+  };
 };
+
+/**
+ * Whether Din's windows are glass (Settings → Themes' Liquid or Frosted),
+ * so the terminal is too, its color laid over the glass, or solid (Solid,
+ * Reduce transparency, Increase contrast), the terminal's own color.
+ */
+const isGlass = (tokens: Record<string, string> | undefined) => {
+  const material = tokens?.['glass-material']?.trim();
+  return material === 'liquid' || material === 'frosted';
+};
+
+/** How much of the terminal's color is laid over the window's glass: enough to keep text on it readable whatever's behind. */
+const GLASS_TINT = 72;
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
@@ -99,13 +119,16 @@ const DARK_QUERY = '(prefers-color-scheme: dark)';
 let currentDark = matchMedia(DARK_QUERY).matches;
 /** Selected text's color on the desktop, which the terminal's selection takes too. */
 let currentSelection = selectionOf(window.din?.theme.current.tokens);
+/** Whether the window is glass, which the terminal's cells are clear over. */
+let currentGlass = isGlass(window.din?.theme.current.tokens);
 const darkListeners = new Set<(dark: boolean, schemeChanged: boolean) => void>();
 
-function setDinLook(dark: boolean, selection: string | undefined) {
-  if (dark === currentDark && selection === currentSelection) return;
+function setDinLook(dark: boolean, selection: string | undefined, glass: boolean) {
+  if (dark === currentDark && selection === currentSelection && glass === currentGlass) return;
   const schemeChanged = dark !== currentDark;
   currentDark = dark;
   currentSelection = selection;
+  currentGlass = glass;
   for (const listener of darkListeners) listener(dark, schemeChanged);
 }
 
@@ -475,18 +498,21 @@ export function Terminal() {
   const theme = useDinTheme();
   const dark = useMediaQuery(DARK_QUERY);
   const selection = selectionOf(theme.tokens);
-  useLayoutEffect(() => setDinLook(dark, selection), [dark, selection]);
+  const glass = isGlass(theme.tokens);
+  useLayoutEffect(() => setDinLook(dark, selection, glass), [dark, selection, glass]);
   // The whole window is the terminal's color: the header's tokens follow its
   // palette, and the accent carries it to the window controls and to the
-  // menu bar over a fullscreen window.
-  const palette = terminalTheme(dark);
+  // menu bar over a fullscreen window. On glass the color is laid over the
+  // window's glass instead (no accent, so the window keeps it), and goes
+  // near-opaque with it while maximized or snapped.
+  const palette = terminalTheme(dark, selection, false);
   const surface = {
-    background: palette.background,
+    background: glass ? `color-mix(in oklab, ${palette.background} ${GLASS_TINT}%, transparent)` : palette.background,
     '--background': palette.background,
     '--foreground': palette.foreground,
     '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
   } as CSSProperties;
-  useWindowAccent(palette.background);
+  useWindowAccent(glass ? null : palette.background);
   const closeWindow = useCallback(() => window.close(), []);
 
   // A window opened for a tab torn off another one starts empty, and gets
@@ -1036,6 +1062,8 @@ function paneSession(
       "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
     scrollback: 5000,
     theme: terminalTheme(currentDark),
+    // Clear cells on glass (terminalTheme); the renderer needs to know first.
+    allowTransparency: true,
     // The graphemes addon needs the proposed `unicode` API.
     allowProposedApi: true,
     // A moved pane starts at its old size, so its screen lands as it was

@@ -4,5 +4,6 @@
   "icon": "user-round",
   "domains": ["identity", "theme", "resource"],
   "size": "medium",
-  "sizes": ["small", "medium", "large"]
+  "sizes": ["small", "medium", "large"],
+  "surface": "glass"
 }
