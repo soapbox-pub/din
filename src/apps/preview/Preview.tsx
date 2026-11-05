@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
 import { ToolButton } from '@/shared/appChrome';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
@@ -13,10 +13,31 @@ import { useDin, usePermission, useWindowIcon, useWindowTitle } from '@/sdk/reac
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { onLaunchFiles, windowLaunchFiles } from '@/shared/fileHandles';
 import { appLink } from '@/shared/launch';
+import { toast } from '@/shared/toast';
 
 const isMedia = (name: string) => isViewableImage(name) || isPlayableVideo(name);
 
 /** Open an app on a path, as a handle it's granted (paths in params are dropped). */
+/** The picture at `url` drawn into a PNG, at its own size. */
+async function pngOf(url: string): Promise<Blob> {
+  // Read as a blob of this page's own, so the canvas isn't tainted.
+  const local = URL.createObjectURL(await (await fetch(url)).blob());
+  try {
+    const img = new Image();
+    img.src = local;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d')!.drawImage(img, 0, 0);
+    return await new Promise((resolve, reject) =>
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Couldn’t draw the picture'))), 'image/png'),
+    );
+  } finally {
+    URL.revokeObjectURL(local);
+  }
+}
+
 async function openWith(din: Din, appId: string, path: string, params: Record<string, unknown> = {}): Promise<void> {
   await din.app.launch(appLink(appId, params), [await din.files.fromPath(path)]);
 }
@@ -111,7 +132,17 @@ export function Preview() {
   }, [din, path]);
 
   const image = isViewableImage(name);
+  // The picture as it's saved, as a PNG (the one picture type the clipboard takes).
+  const copyImage = useCallback(() => {
+    if (!path) return;
+    const png = pngOf(din.files.pathUrl(path));
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(
+      () => toast('Image copied'),
+      () => toast('Couldn’t copy the image', { destructive: true }),
+    );
+  }, [din, path]);
   const tools: { label: string; icon: React.ReactNode; run: () => void }[] = path ? [
+    ...(image ? [{ label: 'Copy Image', icon: <Copy className="size-4" />, run: copyImage }] : []),
     ...(image ? [{ label: 'Edit in Paint', icon: <Paintbrush className="size-4" />, run: () => void openWith(din, 'paint', path) }] : []),
     ...(isPhotoEditable(name) ? [{ label: 'Edit in Photo Editor', icon: <Layers className="size-4" />, run: () => void openWith(din, 'photo-editor', path) }] : []),
     ...(image ? [{
@@ -158,6 +189,12 @@ export function Preview() {
         }
         const target = e.target as HTMLElement;
         if (target.closest('textarea, input, video, audio')) return;
+        // Ctrl+C copies the picture, unless some text is selected.
+        if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && key === 'c' && image && !window.getSelection()?.toString()) {
+          e.preventDefault();
+          copyImage();
+          return;
+        }
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
           e.preventDefault();
