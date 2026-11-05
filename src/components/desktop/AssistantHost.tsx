@@ -367,7 +367,7 @@ const QuickPrompt = memo(function QuickPrompt() {
           className="fixed left-1/2 top-[18%] z-50 w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
         >
           <DialogPrimitive.Title className="sr-only">Ask the assistant</DialogPrimitive.Title>
-          <div className="rounded-3xl border border-border/70 bg-background/95 p-2 shadow-2xl backdrop-blur-xl">
+          <div className="glass-surface rounded-3xl p-2">
             <div className="flex items-center gap-2 px-3 pb-1 pt-2">
               <img src="/icons/apps/assistant.png" alt="" className="size-6 object-contain" />
               <p className="text-sm font-medium text-muted-foreground">Ask the assistant</p>

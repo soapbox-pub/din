@@ -121,7 +121,7 @@ export function KeyboardLayoutOsd() {
         visible ? 'opacity-100' : 'opacity-0',
       )}
     >
-      <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-background/80 px-4 py-3 shadow-lg backdrop-blur-md">
+      <div className="flex items-center gap-3 glass-surface rounded-2xl px-4 py-3">
         <Keyboard className="size-6 shrink-0 text-foreground" />
         <span className="text-sm font-medium text-foreground">{shown}</span>
       </div>

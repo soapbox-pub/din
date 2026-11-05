@@ -278,7 +278,7 @@ function SuggestionList({
       // Clicks here mustn't take the keyboard from the page's field.
       onMouseDown={(e) => e.preventDefault()}
       style={{ left, top, width }}
-      className="fixed z-[10000] overflow-hidden rounded-xl border border-border/60 bg-popover p-1 text-popover-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95"
+      className="fixed z-[10000] overflow-hidden glass-surface rounded-xl p-1 text-popover-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95"
     >
       {suggestion.locked ? (
         <Row
@@ -404,7 +404,7 @@ function OfferBubble({
         }
       }}
       style={{ left, top, width }}
-      className="fixed z-[10000] space-y-3 rounded-xl border border-border/60 bg-popover p-4 text-popover-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2"
+      className="fixed z-[10000] glass-surface space-y-3 rounded-xl p-4 text-popover-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2"
     >
       <div className="flex items-start gap-3">
         <img src="/icons/apps/passwords.png" alt="" className="size-9 shrink-0" />

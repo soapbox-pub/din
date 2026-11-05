@@ -146,7 +146,7 @@ export function WidgetLayer() {
         );
       })}
       {editing && primary && (
-        <div className="pointer-events-auto absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-background/80 p-1 pl-4 shadow-lg backdrop-blur-xl" style={{ top: primary.y + BAR_TOP }}>
+        <div className="pointer-events-auto absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 glass-surface rounded-full p-1 pl-4" style={{ top: primary.y + BAR_TOP }}>
           <span className="text-sm text-muted-foreground">Drag widgets to arrange them, or their edges to resize them</span>
           <Button size="sm" className="rounded-full" onClick={() => setEditing(false)}>
             Done

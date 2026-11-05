@@ -79,7 +79,7 @@ export function CaptureOverlay({
       <ScreenLayer aria-live="polite" className="pointer-events-none z-[10000]">
         <div
           style={hintStyle}
-          className="absolute -translate-x-1/2 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
+          className="absolute -translate-x-1/2 glass-surface rounded-full px-3 py-1 text-xs text-foreground"
         >
           {session.recording ? 'Recording' : 'Capturing'} in <span className="font-semibold tabular-nums">{session.left}</span>s
           <span className="text-muted-foreground"> &middot; Esc to cancel</span>
@@ -172,7 +172,7 @@ export function CaptureOverlay({
       {!drag && (
         <div
           style={hintStyle}
-          className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
+          className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap glass-surface rounded-full px-3 py-1 text-xs text-foreground"
         >
           Drag to select an area<span className="text-muted-foreground"> &middot; Esc to cancel</span>
         </div>

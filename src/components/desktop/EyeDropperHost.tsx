@@ -273,7 +273,7 @@ function EyeDropperOverlay({ session, onAnswer }: { session: Session; onAnswer: 
       <div
         role="status"
         style={{ left: primary.x + primary.width / 2, top: primary.y + 20 }}
-        className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-foreground shadow-lg backdrop-blur"
+        className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap glass-surface rounded-full px-3 py-1 text-xs text-foreground"
       >
         Click to pick a color for {host}
         <span className="text-muted-foreground"> &middot; Esc to cancel</span>

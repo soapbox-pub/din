@@ -876,7 +876,7 @@ const DockItem = memo(function DockItem({
         data-dock-label=""
         className={cn(
           'pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap',
-          'rounded-md border border-border/40 bg-background/80 px-2 py-0.5 shadow-sm backdrop-blur-xl',
+          'glass-surface rounded-md px-2 py-0.5',
           'text-xs font-medium text-foreground opacity-0 transition-opacity',
           'group-hover/dock-item:opacity-100 group-focus-within/dock-item:opacity-100',
         )}

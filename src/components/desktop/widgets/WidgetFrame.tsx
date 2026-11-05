@@ -274,7 +274,7 @@ export function WidgetFrame({ widget, rect, onArrange, onArrangeEnd, onGuest, on
 /** What shows instead of a widget's page: on a card of Din's own, since there's no page to draw one. */
 function WidgetStatus({ title, failed, unavailable, onRetry }: { title: string; failed: string | null; unavailable: boolean; onRetry: () => void }) {
   return (
-    <div className="h-full w-full overflow-hidden rounded-3xl border border-foreground/10 bg-background/70 text-foreground backdrop-blur-xl">
+    <div className="glass-surface h-full w-full overflow-hidden rounded-3xl text-foreground">
       <WidgetStatusBody title={title} failed={failed} unavailable={unavailable} onRetry={onRetry} />
     </div>
   );
