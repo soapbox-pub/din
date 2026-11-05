@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { portalContainer } from '@/lib/portalContainer';
@@ -51,6 +51,28 @@ export function CaptureOverlay({
   const { primary } = useMonitors();
   // Hints sit at the top middle of the primary monitor.
   const hintStyle = { left: primary.x + primary.width / 2, top: primary.y + 20 };
+
+  // The selection takes the keyboard, so Esc reaches the desktop. Started
+  // from the box-select key, which the Electron host hears itself, focus was
+  // still in the app on top (a guest webview, or a native window's host,
+  // which forwards keys to the app): Esc went there until a click on the
+  // overlay moved it. Whatever had it gets it back afterwards.
+  const layerRef = useRef<HTMLDivElement>(null);
+  const selecting = session.phase === 'select';
+  useEffect(() => {
+    if (!selecting) return;
+    const returnFocus = document.activeElement;
+    const layer = layerRef.current;
+    layer?.focus({ preventScroll: true });
+    return () => {
+      // Unless something else has taken it since (a click on a thumbnail).
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== layer) return;
+      if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+        returnFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [selecting]);
 
   if (session.phase === 'countdown') {
     return createPortal(
@@ -106,10 +128,12 @@ export function CaptureOverlay({
 
   return createPortal(
     <ScreenLayer
+      ref={layerRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label="Select an area to capture"
-      className="z-[10000] cursor-crosshair touch-none select-none"
+      className="z-[10000] cursor-crosshair touch-none select-none outline-none"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
