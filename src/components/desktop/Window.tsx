@@ -606,8 +606,16 @@ export const Window = memo(function Window({
   // and arrow keys pick up where they left off. A focused <webview> guest
   // registers through GuestInputHost's focusin.
   const lastFocused = useRef<HTMLElement | null>(null);
+  // Raised by a press in a page: the press gives the page the keyboard
+  // itself, and focusing its <webview> again under the held button cancels
+  // the drag it may be starting (a file dragged from Files would only go on
+  // the second try).
+  const raisedByGuestPress = useRef(false);
   useEffect(() => {
     if (!isTop) return;
+    const pressed = raisedByGuestPress.current;
+    raisedByGuestPress.current = false;
+    if (pressed) return;
     const section = sectionRef.current;
     const el = lastFocused.current;
     if (!section || !el?.isConnected || section.contains(document.activeElement)) return;
@@ -1857,7 +1865,10 @@ export const Window = memo(function Window({
       data-snap-zone={snapped ? (win.snapped ?? undefined) : undefined}
       data-snap-split={snapped ? `${split.x},${split.left},${split.right}` : undefined}
       data-app-name={app?.name}
-      onPointerDown={() => focus(win.id)}
+      onPointerDown={(e) => {
+        raisedByGuestPress.current = !isTop && isGuestElement(e.target as Element);
+        focus(win.id);
+      }}
       // Raise when focus lands anywhere inside the window (React's onFocus is
       // the bubbling focusin), so keyboard users tabbing into a window's
       // content bring it forward. Note this does NOT cover clicks into
