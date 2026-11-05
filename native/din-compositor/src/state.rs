@@ -366,6 +366,8 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     /// What was last put on (or read from) the X clipboard.
     pub x11_clipboard: Option<Arc<Contents>>,
+    /// The X tray, hosted for Xwayland's apps (tray.rs).
+    pub tray: Option<crate::tray::Tray>,
     /// Files being dragged in from the shell (they stay readable after the
     /// drop, until the app has them), and whether the drag is under way.
     pub drag: Option<Arc<Contents>>,
@@ -485,6 +487,7 @@ impl State {
             xwayland_shell_state,
             xwm: None,
             x11_clipboard: None,
+            tray: None,
             drag: None,
             dragging: false,
             pointer_focus: None,

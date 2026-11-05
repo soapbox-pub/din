@@ -488,6 +488,19 @@ deleted, so Din hides those. Wine's `.desktop` copies of desktop shortcuts
 go to a folder out of sight, since the `.lnk` on the Desktop is the same
 icon.
 
+Windows programs' notification-area icons appear in Din's tray. Wine only
+speaks the old XEmbed tray (`_NET_SYSTEM_TRAY`), so the compositor hosts
+one on its Xwayland (`native/din-compositor/src/tray.rs`). It offers a
+32-bit visual, so icons keep their transparency. Each docked icon sits in a
+hidden container off every screen, under every other window, and the
+compositor never shows it. The icon is redirected and its pixmap read every
+half second; a changed icon is sent to `electron/tray.mts`, which lists it
+with the StatusNotifierItems. A click comes back as the X button press and
+release a real tray's icon gets: Activate is button 1, ContextMenu
+button 3, both at the point clicked. The container moves under that point
+first, so the program's own menu opens under Din's icon. Wine's explorer
+draws every program's icon, so an icon can't say which program it's for.
+
 Files' and the desktop's right-click menus have Open With for the
 installed apps that open a file (`din apps open-with`), by its type. Types
 come from the shared MIME database's globs, plus the types Windows programs

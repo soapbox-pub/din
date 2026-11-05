@@ -78,6 +78,8 @@ pub fn start(state: &mut State) -> Option<u32> {
                     Ok(xwm) => state.xwm = Some(xwm),
                     Err(error) => eprintln!("din-compositor: X11 window manager failed: {error}"),
                 }
+                // Wine's notification-area icons, and old apps' (tray.rs).
+                state.tray = crate::tray::Tray::start(display);
             }
             XWaylandEvent::Error => eprintln!("din-compositor: Xwayland failed to start"),
         })
@@ -106,6 +108,18 @@ impl State {
         }
         if let Some(index) = self.x11_popup(window) {
             self.remove_popup(index);
+        }
+    }
+
+    /// Hand Din what the X tray has seen since last time (tray.rs).
+    pub fn poll_tray(&mut self) {
+        let Some(tray) = self.tray.as_mut() else { return };
+        let Some(events) = tray.poll() else {
+            self.tray = None;
+            return;
+        };
+        for event in events {
+            self.wire.json(event.to_json());
         }
     }
 
@@ -158,7 +172,8 @@ impl XwmHandler for State {
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        if self.x11_popup(&window).is_some() {
+        // The tray's own containers, which nobody sees (tray.rs).
+        if self.x11_popup(&window).is_some() || self.tray.as_ref().is_some_and(|tray| tray.owns(window.window_id())) {
             return;
         }
         let id = self.allocate_id();

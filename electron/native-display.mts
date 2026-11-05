@@ -203,6 +203,25 @@ async function startServer(): Promise<EmbeddedDisplay | null> {
   return { display: `:${displayNumber}`, xauthority, wayland: null, xwayland: null };
 }
 
+/** What the compositor's X tray says (native/din-compositor/src/tray.rs). */
+export type XTrayMessage =
+  | { type: 'tray-icon'; tray: number; width: number; height: number; bgra: string; class: string }
+  | { type: 'tray-gone'; tray: number }
+  /** The display went away, and every icon with it. */
+  | { type: 'tray-reset' };
+
+let xTrayListener: ((message: XTrayMessage) => void) | null = null;
+
+/** Hear of the X tray's icons (tray.mts). */
+export function onXTray(listener: (message: XTrayMessage) => void): void {
+  xTrayListener = listener;
+}
+
+/** Click an X tray icon, at a point on the screen, with button 1, 2 or 3. */
+export function clickXTray(tray: number, button: number, x: number, y: number): void {
+  worker?.postMessage({ type: 'tray-click', tray, button, x, y });
+}
+
 /** Fork the window manager / compositor against the server. */
 async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
   const keymap = await keyboardKeymap();
@@ -236,6 +255,7 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
         console.error('native-display:', message.message);
         resolve(false);
       }
+      if (message?.type === 'tray-icon' || message?.type === 'tray-gone') xTrayListener?.(message as XTrayMessage);
     });
     child.once('exit', () => resolve(false));
     // The compositor renders on the GPU only if this process can receive
@@ -251,6 +271,7 @@ async function startWorker(display: EmbeddedDisplay): Promise<boolean> {
   if (!ok) return false;
   child.once('exit', () => {
     if (worker === child) worker = null;
+    xTrayListener?.({ type: 'tray-reset' });
   });
   worker = child;
   return true;
