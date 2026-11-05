@@ -1627,7 +1627,10 @@ const TerminalSession = memo(function TerminalSession({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="relative h-full w-full">
-          <div ref={containerRef} className="h-full w-full pl-2 pt-1" />
+          {/* xterm.css paints its viewport black, under the cells; clear,
+              so cells clear on glass (terminalTheme) show the window's glass,
+              and opaque ones cover it as before. */}
+          <div ref={containerRef} className="h-full w-full pl-2 pt-1 [&_.xterm-viewport]:bg-transparent!" />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent
