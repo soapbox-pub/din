@@ -109,17 +109,28 @@ let
     # runs 32- and 64-bit programs without 32-bit host libraries. The Full
     # variant is the one that embeds the Wine Mono and Gecko installers (.NET
     # Framework and the HTML engine), so a new prefix gets them with no
-    # download prompt. Then .NET (above), 64- and 32-bit.
+    # download prompt. Then .NET (above), 64- and 32-bit, and Direct3D on
+    # Vulkan, which games need to run well, or at all: DXVK (Direct3D 8 to
+    # 11, nixpkgs' MinGW builds) and vkd3d-proton (12, its own release,
+    # since nixpkgs has no Windows build of it; LGPL-2.1).
     windows = {
       title = "Windows apps";
       description = "Wine, which runs Windows programs like apps of their own.";
-      size = 1190;
+      size = 1240;
       parts = {
         wine = pkgs.wineWow64Packages.stableFull;
         dotnet-x64 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x64"; hash = "sha256-Zid4ksYbIcV9zfRVCOlnxn8xdKbGSyUHonQ4KtGnMbs="; };
         dotnet-desktop-x64 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x64"; hash = "sha256-oBmXmfy+ccpJXX49pTOGyMvUn8MNRn2PquXstvOFI8M="; };
         dotnet-x86 = dotnetPart { kind = "Runtime"; file = "dotnet-runtime"; arch = "x86"; hash = "sha256-tfadfuGzK/tl8VqfRPYbV2oWrGgFTtkI3tejlcdYJoA="; };
         dotnet-desktop-x86 = dotnetPart { kind = "WindowsDesktop"; file = "windowsdesktop-runtime"; arch = "x86"; hash = "sha256-pKKDN17zi0biQx1XG1HfXcOEJJkU9uQm326ViV076RA="; };
+        dxvk-x64 = pkgs.dxvk.dxvk64;
+        dxvk-x86 = pkgs.dxvk.dxvk32;
+        vkd3d = {
+          name = "vkd3d-proton-2.14.1";
+          url = "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v2.14.1/vkd3d-proton-2.14.1.tar.zst";
+          unpack = true;
+          hash = "sha256-eOP8F9NCDf+fe6/2fF7REvLL2wXEpu7WetmnVRWK2jU=";
+        };
       };
     };
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
@@ -506,6 +517,13 @@ let
     # Microsoft.WindowsDesktop.App) in its shared folder.
     export DIN_WINE_DOTNET_X64=${featurePart "windows" "dotnet-x64"}:shared=${featurePart "windows" "dotnet-desktop-x64"}
     export DIN_WINE_DOTNET_X86=${featurePart "windows" "dotnet-x86"}:shared=${featurePart "windows" "dotnet-desktop-x86"}
+    # Direct3D on Vulkan for Windows programs (electron/windows-apps.mts):
+    # DXVK's 9-11 and vkd3d-proton's 12, linked into the prefix's system32
+    # and syswow64.
+    export DIN_WINE_DXVK_X64=${featurePart "windows" "dxvk-x64"}/bin
+    export DIN_WINE_DXVK_X86=${featurePart "windows" "dxvk-x86"}/bin
+    export DIN_WINE_VKD3D_X64=${featurePart "windows" "vkd3d"}/x64
+    export DIN_WINE_VKD3D_X86=${featurePart "windows" "vkd3d"}/x86
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and

@@ -41,7 +41,7 @@ export { windowsShellDir };
 export const WINDOWS_PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk'];
 
 /** Bump when configurePrefix() changes, to re-apply it to existing prefixes. */
-const PREFIX_VERSION = '1';
+const PREFIX_VERSION = '2';
 
 /** Whether a file is something Din opens as a Windows program. */
 export function isWindowsProgram(file: string): boolean {
@@ -81,12 +81,6 @@ export function wineBinary(): string | null {
 const NO_WINE = process.env.DIN_FEATURES
   ? 'Windows programs need Windows apps, an optional feature: install it in Settings → Optional Features'
   : 'Windows programs need Wine, which isn’t installed';
-
-/** The wineserver beside a Wine loader (it isn't always on PATH). */
-function wineserverBinary(wine: string): string {
-  const sibling = path.join(path.dirname(fs.realpathSync(wine)), 'wineserver');
-  return fs.existsSync(sibling) ? sibling : 'wineserver';
-}
 
 /** Din's Wine prefix: the hidden "Windows installation" every program shares. */
 export function winePrefix(): string {
@@ -154,16 +148,25 @@ export async function wineCommand(
   return sandboxed(argv, { ...baseEnv, ...wineEnvironment(), WINEPREFIX: prefix }, { prefix, cwd, share: options.share });
 }
 
+/** The DLLs Direct3D on Vulkan replaces, which load Windows' first (PREFIX_REGISTRY, linkDirect3D). */
+const DIRECT3D_DLLS = ['d3d8', 'd3d9', 'd3d10core', 'd3d11', 'dxgi', 'd3d12', 'd3d12core'];
+
 /**
  * Settings Din applies to its prefix, as a regedit script.
  *
  * ShowCrashDialog=0 makes a crashing program exit quietly, like on Windows,
  * instead of opening winedbg's "program error" window.
+ *
+ * The Direct3D DLLs load Windows' first (DXVK's and vkd3d-proton's, which
+ * linkDirect3D puts in the system folders), Wine's own where there are none.
  */
 const PREFIX_REGISTRY = `REGEDIT4
 
 [HKEY_CURRENT_USER\\Software\\Wine\\WineDbg]
 "ShowCrashDialog"=dword:00000000
+
+[HKEY_CURRENT_USER\\Software\\Wine\\DllOverrides]
+${DIRECT3D_DLLS.map((name) => `"${name}"="native,builtin"`).join('\n')}
 `;
 
 // ---------------------------------------------------------------------------
@@ -382,6 +385,58 @@ function lastLine(error: unknown): string {
   return (useful.at(-1) ?? lines.at(-1) ?? 'Wine failed').slice(0, 300);
 }
 
+/**
+ * Direct3D on Vulkan: DXVK's 8 to 11 and vkd3d-proton's 12, each
+ * architecture's DLLs (os/configuration.nix) for its system folder.
+ * Wine's own, on OpenGL, is slow, and many games don't start on it.
+ */
+const DIRECT3D_INSTALLS = [
+  { variables: ['DIN_WINE_DXVK_X64', 'DIN_WINE_VKD3D_X64'], folder: 'windows/system32' },
+  { variables: ['DIN_WINE_DXVK_X86', 'DIN_WINE_VKD3D_X86'], folder: 'windows/syswow64' },
+];
+
+/**
+ * Link DXVK and vkd3d-proton's DLLs over Wine's in the prefix, where DinOS
+ * has them. Links, so an update of the feature carries through; Wine's
+ * own, put back once they're gone (the feature removed), are what's loaded
+ * then, since the registry asks for Windows' DLL first and Wine's after.
+ */
+function linkDirect3D(prefix: string): void {
+  for (const { variables, folder } of DIRECT3D_INSTALLS) {
+    const target = path.join(prefix, 'drive_c', folder);
+    if (!isDirectory(target)) continue;
+    for (const variable of variables) {
+      const source = process.env[variable];
+      if (!source || !isDirectory(source)) continue;
+      for (const name of fs.readdirSync(source)) {
+        if (!DIRECT3D_DLLS.includes(name.toLowerCase().replace(/\.dll$/, ''))) continue;
+        const file = path.join(target, name);
+        const link = path.join(source, name);
+        try {
+          if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink() && fs.readlinkSync(file) === link) continue;
+          fs.rmSync(file, { force: true });
+          fs.symlinkSync(link, file);
+        } catch (error) {
+          console.warn(`[windows-apps] couldn't link ${name} into ${folder}:`, error);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Take away links to a removed feature's Direct3D DLLs: with none in the
+ * system folder, Wine loads its own from where it's installed.
+ */
+function forgetDirect3D(prefix: string): void {
+  for (const { folder } of DIRECT3D_INSTALLS) {
+    for (const name of DIRECT3D_DLLS) {
+      const file = path.join(prefix, 'drive_c', folder, `${name}.dll`);
+      if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink() && !fs.existsSync(file)) fs.rmSync(file);
+    }
+  }
+}
+
 /** Create and configure the prefix, once per session. */
 let prefixReady: Promise<void> | null = null;
 
@@ -440,10 +495,10 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
       if (fresh) await run(wine, ['wineboot', '--init'], env);
       const script = path.join(prefix, 'din.reg');
       fs.writeFileSync(script, PREFIX_REGISTRY);
+      // The wineserver has them as soon as regedit returns, and every
+      // program after asks it; it saves them when the last one exits. (Not
+      // `wineserver -w`, which waits for programs already open to close.)
       await run(wine, ['regedit', '/S', script], env);
-      // Registry writes land when the wineserver flushes; wait for it so the
-      // first program starts with the settings in place.
-      await run(wineserverBinary(wine), ['-w'], env);
     } catch (error) {
       throw new Error(`Windows apps couldn’t be set up: ${lastLine(error)}`, { cause: error });
     } finally {
@@ -454,6 +509,8 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
 
   arrangeDrives(prefix);
   linkDotnet(prefix);
+  forgetDirect3D(prefix);
+  linkDirect3D(prefix);
 }
 
 /**

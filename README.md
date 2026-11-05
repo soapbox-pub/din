@@ -481,6 +481,15 @@ On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.
 
+The feature also brings Direct3D on Vulkan, which games need to run well or
+at all. DXVK covers Direct3D 8 to 11 (nixpkgs' MinGW builds,
+`pkgs.dxvk.dxvk64`/`dxvk32`). vkd3d-proton covers Direct3D 12 (its own
+release tarball, since nixpkgs has no Windows build of it). Din links their
+DLLs over Wine's in `system32` and `syswow64` (`$DIN_WINE_DXVK_X64` and
+the rest) and sets them to load Windows' first, then Wine's (the
+`native,builtin` override). Links left dangling by a removed feature are
+taken away, so Wine's own OpenGL ones load again.
+
 Wine Mono only stands in for the old .NET Framework, so the feature also
 brings .NET (the runtime and its Windows Desktop part, 64- and 32-bit,
 Microsoft's MIT-licensed builds, unpacked in the store), which Din links
