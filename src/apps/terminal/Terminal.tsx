@@ -8,7 +8,7 @@ import { SquareTerminal } from 'lucide-react';
 import { getPtyBridge, type PtyBridge } from '@/lib/pty';
 import { moveItem } from '@/hooks/useDragReorder';
 import type { Din } from '@/sdk';
-import { useDin, useDinTheme, useMediaQuery, useWindowAccent, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
+import { useDin, useDinTheme, useMediaQuery, useSnapped, useWindowAccent, useWindowFocused, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { restoredState, saveState, windowLaunch } from '@/shared/launch';
 import { TabStrip } from '@/shared/TabStrip';
 import { dinWindowMove } from '@/shared/dinWindowMove';
@@ -511,12 +511,19 @@ export function Terminal() {
   // while maximized or snapped), and the page and its cells are clear over it.
   const palette = terminalTheme(dark, selection, false);
   const surface = {
-    background: glass ? 'transparent' : palette.background,
+    // A color, not the `background` shorthand: glass-sheen's light is the
+    // background's image.
+    backgroundColor: glass ? 'transparent' : palette.background,
     '--background': palette.background,
     '--foreground': palette.foreground,
     '--muted-foreground': dark ? 'rgb(229 229 229 / 0.7)' : 'rgb(31 35 40 / 0.7)',
   } as CSSProperties;
   useWindowAccent(glass ? `${palette.background}${GLASS_ALPHA}` : palette.background);
+  // Liquid glass's light on it (glass-sheen), while it's glass: not while
+  // maximized or snapped, when the window is solid.
+  const maximized = useMediaQuery('(display-state: maximized)');
+  const snapped = useSnapped();
+  const sheen = glass && !maximized && !snapped ? 'glass-sheen' : undefined;
   const closeWindow = useCallback(() => window.close(), []);
 
   // A window opened for a tab torn off another one starts empty, and gets
@@ -800,7 +807,7 @@ export function Terminal() {
 
   if (!bridge) {
     return (
-      <div className="flex h-full w-full flex-col rounded-[inherit] text-foreground" style={surface}>
+      <div className={cn('flex h-full w-full flex-col rounded-[inherit] text-foreground', sheen)} style={surface}>
         {header}
         <div className="grid flex-1 place-items-center p-6">
           <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
@@ -817,7 +824,7 @@ export function Terminal() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col rounded-[inherit] text-foreground" style={surface}>
+    <div className={cn('flex h-full w-full flex-col rounded-[inherit] text-foreground', sheen)} style={surface}>
       {header}
       {/* overflow-clip: background tabs park outside it (see TerminalTab). */}
       <div className="relative min-h-0 w-full flex-1 overflow-clip rounded-b-[inherit]">

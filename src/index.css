@@ -337,6 +337,23 @@
   }
 }
 
+/* Liquid glass's light, for a page that is glass itself (glass-sheen: the
+   Terminal on its frosted window): the sheen along its top and the spotlight
+   where the pointer is, which the page's own followPointer moves, since the
+   desktop drawing the window can't see the pointer over the page. Under the
+   page's content, as window-glass's is; nothing under Frosted or Solid. */
+@container style(--glass-material: liquid) {
+  .glass-sheen {
+    background-image:
+      radial-gradient(600px circle at var(--glass-x, 25%) var(--glass-y, -20%), color-mix(in oklab, var(--glass-sheen) 60%, transparent), transparent 65%),
+      linear-gradient(to bottom, color-mix(in oklab, var(--glass-sheen) 35%, transparent), transparent 96px);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 0 0 1px color-mix(in oklab, var(--glass-rim) 50%, transparent),
+      inset 0 0 28px -10px var(--glass-glow);
+  }
+}
+
 /* A lump of the theme's primary, flat, its volume the clay's (clay-pigment). */
 @utility bg-pigment {
   background-color: var(--primary);

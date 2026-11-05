@@ -90,7 +90,7 @@ function followPointer(): void {
   const update = () => {
     frame = 0;
     if (document.documentElement.style.getPropertyValue('--glass-material').trim() !== 'liquid') return;
-    for (const el of document.querySelectorAll<HTMLElement>('.glass-surface, .window-glass, .glass-control, .bar-glass')) {
+    for (const el of document.querySelectorAll<HTMLElement>('.glass-surface, .window-glass, .glass-control, .bar-glass, .glass-sheen')) {
       const r = el.getBoundingClientRect();
       el.style.setProperty('--glass-x', `${Math.round(x - r.left)}px`);
       el.style.setProperty('--glass-y', `${Math.round(y - r.top)}px`);
