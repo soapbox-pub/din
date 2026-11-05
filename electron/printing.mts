@@ -248,6 +248,19 @@ function describeReasons(alerts: string): string | null {
   return null;
 }
 
+/**
+ * Why a stopped queue stopped, from the printer-state-message on the line
+ * under lpstat's header. Din only ever pauses a queue without a reason, so an
+ * empty one (lpstat's placeholder "reason unknown") or "Paused" is a pause,
+ * and anything else is CUPS stopping it when a job failed ("universal filter
+ * failed.", "Unable to add document to print job.", a filter's exception),
+ * which means nothing to the person at the printer.
+ */
+function stoppedBecause(message: string | null): string {
+  if (!message || message === 'Paused' || message === 'reason unknown') return 'Paused';
+  return 'Stopped after a print job failed';
+}
+
 /** `lpstat -l -p`: the printers that have queues, with their state. */
 function parsePrinters(text: string): Map<string, Omit<Printer, 'isDefault' | 'configured'>> {
   const printers = new Map<string, Omit<Printer, 'isDefault' | 'configured'>>();
@@ -257,7 +270,7 @@ function parsePrinters(text: string): Map<string, Omit<Printer, 'isDefault' | 'c
     if (!current) return;
     const { message, description, ...printer } = current;
     printer.displayName = displayName(printer.name, description);
-    if (printer.state === 'stopped' && !printer.problem) printer.problem = message && message !== 'Paused' ? message : 'Paused';
+    if (printer.state === 'stopped' && !printer.problem) printer.problem = stoppedBecause(message);
     printers.set(printer.name, printer);
   };
   for (const line of text.split('\n')) {
