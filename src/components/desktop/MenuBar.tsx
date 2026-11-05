@@ -363,14 +363,18 @@ export function AppLauncher({
   // Native apps also match on their desktop entry's Keywords and Categories,
   // so "browser" finds Firefox and "photo" finds an image editor.
   const needle = query.trim().toLowerCase();
-  const launcherApps = apps.filter((app) => {
-    if (app.hidden) return false;
-    if (!needle) return true;
-    return (
-      app.name.toLowerCase().includes(needle) ||
-      (app.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle))
-    );
-  });
+  // Apps whose name matches come before those found by a keyword (Camera
+  // before Studio for "camera"), names that start with it first; otherwise
+  // in launcher order.
+  const rank = (app: (typeof apps)[number]) => {
+    const name = app.name.toLowerCase();
+    if (name.startsWith(needle)) return 0;
+    if (name.includes(needle)) return 1;
+    return (app.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle)) ? 2 : -1;
+  };
+  const launcherApps = apps
+    .filter((app) => !app.hidden && (!needle || rank(app) >= 0))
+    .sort((a, b) => (needle ? rank(a) - rank(b) : 0));
   // Din's own apps lead; the host system's installed apps follow in their own
   // section, since there are typically hundreds of them.
   const dinApps = launcherApps.filter((app) => !app.native);
