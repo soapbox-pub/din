@@ -102,6 +102,11 @@ export interface AssistantBridge {
   /** Stop a sign-in under way. */
   claudeCancel(): Promise<void>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
+  /**
+   * Git for the Assistant's side panel (electron/assistant-git.mts, typed in
+   * src/lib/assistantGit.ts). Only the Assistant app may call it.
+   */
+  git(op: string, directory: string, arg?: unknown): Promise<unknown>;
   /** sudo's password and approval requests from the agent's commands. */
   passwords(): Promise<PasswordRequest[]>;
   /**

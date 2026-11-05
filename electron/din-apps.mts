@@ -59,7 +59,7 @@ export function appOrigin(appId: string): string {
 const SYSTEM_PERMISSIONS = {
   fs: /^fs:[a-zA-Z]+$/,
   pty: /^pty:(spawn|write|resize|kill|release|adopt)$/,
-  assistant: /^assistant:(status|setEnabled|install|restart|checkUpdate|upgrade|recentModels|request|claude|claudeInstall|claudeLogin|claudeCode|claudeCancel)$/,
+  assistant: /^assistant:(status|setEnabled|install|restart|checkUpdate|upgrade|recentModels|request|claude|claudeInstall|claudeLogin|claudeCode|claudeCancel|git)$/,
   // Answering sudo in a conversation: the Assistant's own cards, never an app
   // that only talks to the agent (askpass.mts).
   'assistant-sudo': /^assistant:(passwords|answerPassword|approve)$/,

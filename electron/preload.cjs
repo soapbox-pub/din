@@ -2511,6 +2511,15 @@ expose('assistant', {
   claudeCancel: () => ipcRenderer.invoke('assistant:claudeCancel'),
 
   /**
+   * Git for the Assistant's side panel (electron/assistant-git.mts): `status`,
+   * `log`, `commit`, or `fetch`, `pull`, `push`, `sync`, `forcePull`, `forcePush`.
+   * @param {string} op
+   * @param {string} directory Absolute; the repository it's in.
+   * @param {unknown} [arg] The log's page, or a commit's hash.
+   */
+  git: (op, directory, arg) => ipcRenderer.invoke('assistant:git', op, directory, arg),
+
+  /**
    * One request to the server's API.
    * @param {string} method
    * @param {string} path Under /api/, with its query.

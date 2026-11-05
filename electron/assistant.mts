@@ -38,6 +38,7 @@ import path from 'node:path';
 import { ipcMain } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
 import { revokeSudoGrant } from './askpass.mts';
+import { assistantGit } from './assistant-git.mts';
 import { cancelClaudeLogin, claudeStatus, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
 
 const INSTALL_DIR = path.join(os.homedir(), '.opencode/bin');
@@ -650,6 +651,13 @@ export function registerAssistantHandlers(options: {
   ipcMain.handle('assistant:claudeCancel', (event) => {
     assertShellSender(event);
     cancelClaudeLogin();
+  });
+
+  // Git for the Assistant's side panel (assistant-git.mts). Only the Assistant
+  // app and the desktop reach it (din-apps.mts).
+  ipcMain.handle('assistant:git', async (event, op: unknown, directory: unknown, arg: unknown) => {
+    assertShellSender(event);
+    return assistantGit(await serverEnvironment(), op, directory, arg);
   });
 
   ipcMain.handle('assistant:request', (event, method: unknown, apiPath: unknown, body: unknown) => {

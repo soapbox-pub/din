@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -114,6 +116,7 @@ import { cn } from '@/lib/utils';
 import { ContentPane, ToolButton } from '@/shared/appChrome';
 import { SIDEBAR_WIDTH, flushPane } from '@/shared/appChromeStyles';
 import { intentOf, type LaunchIntent } from './intents';
+import { GitBranchChip, GitPanel } from './GitPanel';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 const SUGGESTIONS = [
@@ -178,6 +181,17 @@ function loadListWidth(): number {
   const width = Number(localStorage.getItem(LIST_WIDTH_KEY));
   // 256 was the default, saved whether or not it was ever dragged.
   return width && width !== 256 ? clampListWidth(width) : DEFAULT_LIST_WIDTH;
+}
+
+const GIT_OPEN_KEY = 'din.assistant.git';
+const GIT_WIDTH_KEY = 'din.assistant.git-width';
+const MIN_GIT_WIDTH = 224;
+
+const clampGitWidth = (width: number) => Math.min(MAX_LIST_WIDTH, Math.max(MIN_GIT_WIDTH, width));
+
+function loadGitWidth(): number {
+  const width = Number(localStorage.getItem(GIT_WIDTH_KEY));
+  return width ? clampGitWidth(width) : SIDEBAR_WIDTH;
 }
 
 /** How many closed tabs Ctrl+Shift+T can bring back. */
@@ -307,6 +321,13 @@ function AssistantWindow() {
   const [listWidth, setListWidth] = useState(loadListWidth);
   // Only a width dragged to is kept, so the default can change.
   useEffect(() => (listWidth === DEFAULT_LIST_WIDTH ? localStorage.removeItem(LIST_WIDTH_KEY) : localStorage.setItem(LIST_WIDTH_KEY, String(listWidth))), [listWidth]);
+  // The Git panel at the right, open or not across restarts, and its width.
+  const [gitOpen, setGitOpen] = useState(() => localStorage.getItem(GIT_OPEN_KEY) === '1');
+  useEffect(() => (gitOpen ? localStorage.setItem(GIT_OPEN_KEY, '1') : localStorage.removeItem(GIT_OPEN_KEY)), [gitOpen]);
+  const toggleGit = () => setGitOpen((open) => !open);
+  const [gitWidth, setGitWidth] = useState(loadGitWidth);
+  useEffect(() => (gitWidth === SIDEBAR_WIDTH ? localStorage.removeItem(GIT_WIDTH_KEY) : localStorage.setItem(GIT_WIDTH_KEY, String(gitWidth))), [gitWidth]);
+  const defaultDirectory = useAssistantDirectory();
 
   // Single instance: a relaunch (a notification, the menu bar) brings new
   // params. One with no session asks for a new one. Launch params are merged
@@ -416,6 +437,11 @@ function AssistantWindow() {
   const ownHeader = ready || !status;
   useEffect(() => din.window.setChrome({ frame: ownHeader ? 'custom' : 'standard' }), [din, ownHeader]);
   useWindowTitle(activeTab.sessionID ? (stripTabs.find((t) => t.id === activeTab.id)?.title ?? null) : null);
+
+  // The folder the selected tab's conversation works in, whose repository the Git panel shows.
+  const activeDirectory = activeTab.sessionID
+    ? sessions[sessionIDs.indexOf(activeTab.sessionID)]?.session?.location.directory
+    : (activeTab.directory ?? defaultDirectory);
 
   const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
 
@@ -537,6 +563,7 @@ function AssistantWindow() {
     } else if (key === 'w' && !e.shiftKey) closeTab(activeTab.id);
     else if (key === 'Tab') cycle(e.shiftKey ? -1 : 1);
     else if ((key === 'PageUp' || key === 'PageDown') && !e.shiftKey) cycle(key === 'PageUp' ? -1 : 1);
+    else if (key === 'g' && e.shiftKey) toggleGit();
     else if (key === 'f' && !e.shiftKey && conversationRef.current) conversationRef.current.find();
     else if ((key === 'f' || key === 'k') && !e.shiftKey) {
       // Search the list, sliding it out first in a narrow window. Ctrl+F
@@ -549,14 +576,18 @@ function AssistantWindow() {
     e.stopPropagation();
   };
 
-  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+  /** Drag a sidebar's edge: the list's (`1`, growing rightward) or the Git panel's (`-1`). */
+  const startResize = (e: React.PointerEvent<HTMLDivElement>, side: 1 | -1 = 1) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = listWidth;
+    const startWidth = side === 1 ? listWidth : gitWidth;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => setListWidth(clampListWidth(startWidth + ev.clientX - startX));
+    const move = (ev: PointerEvent) =>
+      side === 1
+        ? setListWidth(clampListWidth(startWidth + ev.clientX - startX))
+        : setGitWidth(clampGitWidth(startWidth - (ev.clientX - startX)));
     const up = () => {
       target.removeEventListener('pointermove', move);
       target.removeEventListener('pointerup', up);
@@ -580,7 +611,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
-        menu={<AssistantMenu onAddProvider={addProvider} />}
+        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitOpen} onToggleGit={toggleGit} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -668,11 +699,18 @@ function AssistantWindow() {
                 : null
             }
           />
-          <WindowControls />
+          {/* With the Git panel open, the window's controls are at its top instead. */}
+          {!gitOpen && <WindowControls />}
         </WindowDragRegion>
         <ContentPane
           inset={false}
-          className={cn('@2xl/assistant:mr-2 @2xl/assistant:mb-2 @2xl/assistant:rounded-2xl @2xl/assistant:border-t-0 @2xl/assistant:clay', flushPane)}
+          className={cn(
+            '@2xl/assistant:mr-2 @2xl/assistant:mb-2 @2xl/assistant:rounded-2xl @2xl/assistant:border-t-0 @2xl/assistant:clay',
+            // Beside the Git panel, it meets the panel, not the screen, at its right.
+            gitOpen
+              ? '@5xl/assistant:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:rounded-tr-none @max-5xl/assistant:[[data-screen-right]_&]:rounded-br-none [[data-screen-bottom]_&]:mb-0 [[data-screen-bottom]_&]:rounded-bl-none [[data-screen-bottom]_&]:rounded-br-none'
+              : flushPane,
+          )}
         >
           {activeTab.sessionID ? (
             <Conversation
@@ -686,6 +724,8 @@ function AssistantWindow() {
               onOpenSession={choose}
               onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
               onAddProvider={addProvider}
+              gitOpen={gitOpen}
+              onToggleGit={toggleGit}
             />
           ) : (
             <NewConversation
@@ -699,6 +739,43 @@ function AssistantWindow() {
           )}
         </ContentPane>
       </div>
+      {gitOpen && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the Git panel"
+            aria-valuenow={gitWidth}
+            aria-valuemin={MIN_GIT_WIDTH}
+            aria-valuemax={MAX_LIST_WIDTH}
+            tabIndex={0}
+            title="Drag to resize, double-click to reset"
+            onPointerDown={(e) => startResize(e, -1)}
+            onDoubleClick={() => setGitWidth(SIDEBAR_WIDTH)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') setGitWidth((w) => clampGitWidth(w + 16));
+              else if (e.key === 'ArrowRight') setGitWidth((w) => clampGitWidth(w - 16));
+              else return;
+              e.preventDefault();
+            }}
+            className="z-30 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none @5xl/assistant:block"
+          />
+          {/* Narrower, it slides over the conversation, as the list does. */}
+          <button
+            type="button"
+            aria-label="Hide Git"
+            className="absolute inset-0 z-10 bg-background/40 @5xl/assistant:hidden"
+            onClick={() => setGitOpen(false)}
+          />
+          <GitPanel
+            key={activeDirectory}
+            directory={activeDirectory}
+            onClose={() => setGitOpen(false)}
+            style={{ width: gitWidth }}
+            className="absolute inset-y-0 right-0 z-20 max-w-[85%] bg-background shadow-xl @5xl/assistant:static @5xl/assistant:max-w-none @5xl/assistant:bg-transparent @5xl/assistant:shadow-none"
+          />
+        </>
+      )}
       <DeleteConversationDialog
         session={deleting ? sessions[sessionIDs.indexOf(deleting)]?.session : undefined}
         open={deleting !== null}
@@ -709,8 +786,16 @@ function AssistantWindow() {
   );
 }
 
-/** The app’s menu, in the list’s title bar: Add Provider, and Settings → Assistant (providers among it) for the rest. */
-function AssistantMenu({ onAddProvider }: { onAddProvider: () => void }) {
+/** The app’s menu, in the list’s title bar: Add Provider, the Git panel, and Settings → Assistant (providers among it) for the rest. */
+function AssistantMenu({
+  onAddProvider,
+  gitOpen,
+  onToggleGit,
+}: {
+  onAddProvider: () => void;
+  gitOpen: boolean;
+  onToggleGit: () => void;
+}) {
   const { openApp } = useAssistantHost();
   return (
     <DropdownMenu>
@@ -723,6 +808,10 @@ function AssistantMenu({ onAddProvider }: { onAddProvider: () => void }) {
         <DropdownMenuItem onSelect={onAddProvider}>
           <Plus aria-hidden /> Add Provider…
         </DropdownMenuItem>
+        <DropdownMenuCheckboxItem checked={gitOpen} onCheckedChange={onToggleGit}>
+          Git Panel
+          <DropdownMenuShortcut>Ctrl+Shift+G</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openApp('settings', { section: 'assistant' })}>
           <Settings aria-hidden /> Assistant Settings…
@@ -774,6 +863,8 @@ function Conversation({
   onOpenSession,
   onFork,
   onAddProvider,
+  gitOpen,
+  onToggleGit,
 }: {
   ref?: Ref<ConversationHandle>;
   sessionID: string;
@@ -789,6 +880,9 @@ function Conversation({
   onFork: (message?: UserMessage) => void;
   /** /connect: add an AI provider. */
   onAddProvider: () => void;
+  /** The Git panel, which the branch under the composer shows. */
+  gitOpen: boolean;
+  onToggleGit: () => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
   const { data: transcript, isLoading, loadEarlier, loadingEarlier, earlierFailed } = useSessionMessages(sessionID);
@@ -1143,7 +1237,13 @@ function Conversation({
           />
         </div>
         {session && (
-          <StatusLine session={session} home={home} context={messages ? contextUsage(messages, models) : null} />
+          <StatusLine
+            session={session}
+            home={home}
+            context={messages ? contextUsage(messages, models) : null}
+            gitOpen={gitOpen}
+            onToggleGit={onToggleGit}
+          />
         )}
       </div>
     </div>
@@ -1193,13 +1293,28 @@ function UndoneNotice({
   );
 }
 
-/** Under the composer: where the conversation works, what it has cost, and how full the model's context is. */
-function StatusLine({ session, home, context }: { session: SessionInfo; home?: string; context: number | null }) {
+/** Under the composer: where the conversation works and its branch, what it has cost, and how full the model's context is. */
+function StatusLine({
+  session,
+  home,
+  context,
+  gitOpen,
+  onToggleGit,
+}: {
+  session: SessionInfo;
+  home?: string;
+  context: number | null;
+  gitOpen: boolean;
+  onToggleGit: () => void;
+}) {
   const cost = formatCost(session.cost);
   return (
     <div className="flex h-4 items-center gap-3 px-1 text-xs text-muted-foreground">
-      <span className="min-w-0 flex-1 truncate" title={session.location.directory}>
-        {tildify(session.location.directory, home)}
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 shrink truncate" title={session.location.directory}>
+          {tildify(session.location.directory, home)}
+        </span>
+        <GitBranchChip directory={session.location.directory} open={gitOpen} onToggle={onToggleGit} />
       </span>
       {cost && <span className="shrink-0" aria-label="Cost so far">{cost}</span>}
       {context !== null && (
