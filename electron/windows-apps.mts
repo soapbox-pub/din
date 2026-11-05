@@ -18,10 +18,13 @@
 //     Runtime" box. Wine Mono only stands in for the old .NET Framework.
 //   - Windows' own look, in Din's light/dark mode and Windows' UI font
 //     (wine-theme.mts).
+//   - A sandbox (wine-sandbox.mts): programs see the prefix and the
+//     folders Windows has too, never the rest of home.
 //
 // Installers need nothing extra: Wine writes ordinary XDG desktop entries
-// and icons for the Start-menu shortcuts they create, and native-apps.mts
-// picks those up like any other installed app.
+// and icons for the Start-menu shortcuts they create, into the sandbox's
+// own folder for them (windowsShellDir), and native-apps.mts lists those
+// like any other installed app's.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,6 +32,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { parsePalette } from './gtk-theme.mts';
 import { LIGHT_STYLE, lookRegistry } from './wine-theme.mts';
+import { sandboxed, windowsShellDir } from './wine-sandbox.mts';
+
+export { windowsShellDir };
 
 /** File extensions Din runs through Wine when opened. */
 export const WINDOWS_PROGRAM_EXTENSIONS = ['.exe', '.msi', '.bat', '.cmd', '.lnk'];
@@ -113,19 +119,38 @@ function hasMonoAndGecko(wine: string): boolean {
   return has('mono') && has('gecko');
 }
 
-/** Run a Wine tool to completion, rejecting with its output on failure. */
-function run(
+/** Run a Wine tool to completion in the sandbox, rejecting with its output on failure. */
+async function run(
   file: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   timeout = 180_000,
-): Promise<void> {
+): Promise<string> {
+  // In C: once there is one: Wine complains of a folder no drive has.
+  const drive = path.join(winePrefix(), 'drive_c');
+  const cwd = fs.existsSync(drive) ? drive : winePrefix();
+  const command = await sandboxed([file, ...args], env, { prefix: winePrefix(), cwd });
   return new Promise((resolve, reject) => {
-    execFile(file, args, { env, timeout, cwd: os.homedir() }, (error, _stdout, stderr) => {
+    execFile(command.argv[0], command.argv.slice(1), { env: command.env, timeout, cwd, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) reject(new Error(stderr.trim() || error.message));
-      else resolve();
+      else resolve(stdout);
     });
   });
+}
+
+/**
+ * The command that runs a Wine command line (`[wine, ...]`, from a desktop
+ * entry or Din) in Din's prefix, in the sandbox: with Wine's environment,
+ * and `share`, a file opened from elsewhere, shown to it.
+ */
+export async function wineCommand(
+  argv: string[],
+  baseEnv: NodeJS.ProcessEnv,
+  options: { cwd?: string; share?: string[] } = {},
+): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
+  const prefix = winePrefix();
+  const cwd = options.cwd && fs.existsSync(options.cwd) ? options.cwd : path.join(prefix, 'drive_c');
+  return sandboxed(argv, { ...baseEnv, ...wineEnvironment(), WINEPREFIX: prefix }, { prefix, cwd, share: options.share });
 }
 
 /**
@@ -417,12 +442,9 @@ async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
 export async function windowsProgramCommand(
   file: string,
   baseEnv: NodeJS.ProcessEnv,
-): Promise<{ argv: string[]; env: Record<string, string> }> {
+): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
   await ensurePrefix(baseEnv);
   const wine = wineBinary();
   if (!wine) throw new Error(NO_WINE);
-  return {
-    argv: [wine, 'start', '/unix', file],
-    env: { ...wineEnvironment(), WINEPREFIX: winePrefix() },
-  };
+  return wineCommand([wine, 'start', '/unix', file], baseEnv, { cwd: path.dirname(file), share: [file] });
 }

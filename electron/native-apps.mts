@@ -35,8 +35,11 @@ import {
   isWindowsProgram,
   isWineCommand,
   wineBinary,
+  wineCommand,
   wineEnvironment,
+  winePrefix,
   windowsProgramCommand,
+  windowsShellDir,
 } from './windows-apps.mts';
 import { programInfo } from './pe-icon.mts';
 
@@ -88,6 +91,12 @@ interface DesktopEntry {
   urlIndex: number | null;
   /** URL schemes it opens, from MimeType; empty unless it takes a URL. */
   schemes: string[];
+  /**
+   * It runs a program in Din's Windows prefix, so in its sandbox
+   * (wine-sandbox.mts): a shortcut of a program installed there, or a
+   * Windows program's own window's.
+   */
+  windows?: boolean;
 }
 
 /** Stands in argv for Exec's %u / %U until a URL is given. */
@@ -120,11 +129,17 @@ function dataDirs(): string[] {
 function applicationDirs(): string[] {
   const dirs = [
     path.join(dataHome(), 'applications'),
+    windowsShellApplications(),
     ...dataDirs().map((dir) => path.join(dir, 'applications')),
     path.join(dataHome(), 'flatpak/exports/share/applications'),
     '/var/lib/flatpak/exports/share/applications',
   ];
   return [...new Set(dirs)];
+}
+
+/** Where the Start-menu shortcuts of programs installed in Din's prefix are. */
+function windowsShellApplications(): string {
+  return path.join(windowsShellDir(), 'applications');
 }
 
 /** The language codes to try for localized keys, most specific first. */
@@ -219,7 +234,7 @@ function parseExec(exec: string): string[] {
  * `running` is for the entry of a program already running, which is there
  * whether or not its TryExec is on Din's PATH.
  */
-function parseDesktopFile(file: string, id: string, running = false): DesktopEntry | null {
+function parseDesktopFile(file: string, id: string, running = false, windowsShell = false): DesktopEntry | null {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -282,6 +297,15 @@ function parseDesktopFile(file: string, id: string, running = false): DesktopEnt
     }
     argv = argv.slice(i);
   }
+  // What a Windows program wrote (windowsShellDir) only ever runs Wine, in
+  // Din's prefix and its sandbox: its Exec's own program and variables are
+  // the program's say, and count for nothing.
+  const windows = windowsShell || (isWineCommand(argv[0] ?? '') && isDinPrefix(env.WINEPREFIX));
+  if (windowsShell) {
+    if (!isWineCommand(argv[0] ?? '')) return null;
+    argv = ['wine', ...argv.slice(1)];
+    for (const name of Object.keys(env)) delete env[name];
+  }
   const urlAt = argv.indexOf(URL_ARG);
   argv = argv.filter((arg) => arg !== URL_ARG);
   if (argv.length === 0 || !argv[0]) return null;
@@ -314,7 +338,13 @@ function parseDesktopFile(file: string, id: string, running = false): DesktopEnt
     env,
     urlIndex,
     schemes,
+    windows,
   };
+}
+
+/** Whether a WINEPREFIX names Din's prefix. */
+function isDinPrefix(prefix: string | undefined): boolean {
+  return !!prefix && path.resolve(prefix) === winePrefix();
 }
 
 /** Resolve a command against PATH (absolute paths are checked directly). */
@@ -367,7 +397,7 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
   // Entries may nest in subdirectories; the id then joins them with '-'.
   // Wine nests Start-menu folders as wine/Programs/<Vendor>/<Product>/, so
   // the walk goes several levels down.
-  const walk = async (current: string, prefix: string, depth: number): Promise<void> => {
+  const walk = async (current: string, prefix: string, depth: number, windowsShell: boolean): Promise<void> => {
     let dirents: fs.Dirent[];
     try {
       dirents = fs.readdirSync(current, { withFileTypes: true });
@@ -377,14 +407,14 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
     for (const dirent of dirents) {
       if (dirent.isDirectory()) {
         if (depth > 0) {
-          await walk(path.join(current, dirent.name), `${prefix}${dirent.name}-`, depth - 1);
+          await walk(path.join(current, dirent.name), `${prefix}${dirent.name}-`, depth - 1, windowsShell);
         }
         continue;
       }
       if (!dirent.name.endsWith('.desktop')) continue;
       const id = `${prefix}${dirent.name}`;
       if (entries.has(id)) continue;
-      const entry = parseDesktopFile(path.join(current, dirent.name), id);
+      const entry = parseDesktopFile(path.join(current, dirent.name), id, false, windowsShell);
       if (entry) entries.set(id, entry);
       sinceBreath += 1;
       if (sinceBreath >= BATCH) {
@@ -393,7 +423,8 @@ async function scanDesktopEntries(): Promise<Map<string, DesktopEntry>> {
       }
     }
   };
-  for (const dir of applicationDirs()) await walk(dir, '', 6);
+  const shell = windowsShellApplications();
+  for (const dir of applicationDirs()) await walk(dir, '', 6, dir === shell);
   return entries;
 }
 
@@ -558,10 +589,20 @@ async function launch(appId: string, uri?: string): Promise<void> {
       ? [...entry.argv.slice(0, entry.urlIndex), uri, ...entry.argv.slice(entry.urlIndex)]
       : entry.argv;
   const env = await appEnvironment(display);
-  if (isWineCommand(argv[0])) {
+  if (entry.windows) {
     // A program installed before the prefix had what it has now (.NET) gets
     // it all the same, and Din's colors as they are now.
-    await ensurePrefix(env).catch((error: unknown) => console.warn('[native-apps] Windows prefix:', error));
+    await ensurePrefix(env);
+    const wine = wineBinary();
+    if (!wine) throw new Error(`${entry.name} needs Windows apps: install it in Settings → Optional Features`);
+    const cwd = entry.cwd ?? undefined;
+    const command = await wineCommand([wine, ...argv.slice(1)], env, { cwd, share: cwd ? [cwd] : [] });
+    const { pid } = spawnDetached(command.argv, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), command.env);
+    if (pid) launchedPids.set(pid, appId);
+    return;
+  }
+  if (isWineCommand(argv[0])) {
+    // Another Wine prefix than Din's, someone's own: as they set it up.
     Object.assign(env, wineEnvironment());
   }
   Object.assign(env, entry.env);
@@ -630,7 +671,7 @@ async function runWindowsProgram(file: string): Promise<void> {
   const display = await requireDisplay();
   const env = await appEnvironment(display);
   const command = await windowsProgramCommand(file, env);
-  spawnDetached(command.argv, path.dirname(file), { ...env, ...command.env });
+  spawnDetached(command.argv, path.dirname(file), command.env);
 }
 
 /** Whether a file is an AppImage, which Din runs when it's opened. */
@@ -713,8 +754,8 @@ async function forceQuit(pid: number): Promise<void> {
  * Watch where user installs land, and report changes so the shell's app list
  * follows along without waiting out the scan cache:
  *
- *   - the user's applications folder, where installers - Wine's Start-menu
- *     shortcuts above all - drop new entries;
+ *   - the user's applications folder, where installers drop new entries,
+ *     and the Windows sandbox's, where Wine puts Start-menu shortcuts;
  *   - the user's Nix profiles folder, where `nix profile add/remove/upgrade`
  *     repoints the `profile` symlink behind ~/.nix-profile. Nothing under
  *     ~/.nix-profile/share/applications changes in place (it's a store path),
@@ -748,12 +789,14 @@ function watchUserApplications(onChange: () => void): void {
     }
   };
 
-  try {
-    fs.mkdirSync(applications, { recursive: true });
-  } catch {
-    // Watching below fails too, and is handled there.
+  for (const dir of [applications, windowsShellApplications()]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      // Watching below fails too, and is handled there.
+    }
+    watch(dir, true);
   }
-  watch(applications, true);
   // Only where Nix has made it; non-Nix systems have nothing to watch.
   if (fs.existsSync(nixProfiles)) watch(nixProfiles, false);
 }
@@ -1075,6 +1118,7 @@ async function windowsProgramApp(pid: number): Promise<UnlistedApp | null> {
         env: { WINEPREFIX: prefix },
         urlIndex: null,
         schemes: [],
+        windows: isDinPrefix(prefix),
       }
     : null;
   return {

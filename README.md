@@ -463,6 +463,20 @@ need no help: the Start-menu shortcuts they create become desktop entries,
 which appear in the launcher as soon as the install finishes (Uninstall
 shortcuts are left out). See `electron/windows-apps.mts`.
 
+Every Wine process runs in a bubblewrap sandbox (`electron/wine-sandbox.mts`).
+It gets the system read-only, plus the GPU, sound, controllers and the
+network. It also gets the prefix and the folders Windows has too: Desktop,
+Documents, Downloads, Music, Pictures and Videos. Nothing else of home is
+visible: no dotfiles, Din data, session bus, `din` socket or key agents. A
+program or document opened from somewhere else (a USB stick) brings its
+folder along. Wine's Start-menu entries, icons and file types go to
+`~/.local/share/din/windows-shell` instead of `~/.local/share`. Din lists
+them without trusting them: an entry from there only ever runs Wine, in the
+prefix and the sandbox. All sandboxes share one `/tmp` (under
+`$XDG_RUNTIME_DIR/din-windows`), where the prefix's wineserver keeps its
+socket. Where bubblewrap is missing or can't make namespaces, programs run
+unsandboxed.
+
 On DinOS, Wine (`wineWow64Packages.stableFull`, which includes Wine Mono
 and Gecko) is the Windows apps optional feature (below). Elsewhere Din uses
 the system's `wine`, or `$DIN_WINE`.
