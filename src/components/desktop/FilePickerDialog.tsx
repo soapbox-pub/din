@@ -36,7 +36,8 @@ import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
 import { FileIcon } from '@/shared/FileIcon';
 import { USER_DIRS } from '@/shared/userDirs';
-import { Button } from '@/components/ui/button';
+import { ContentPane, PillButton, SidebarHeading, SidebarRow, ToolButton } from '@/shared/appChrome';
+import { focusRing, listRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -545,7 +546,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
 
   return (
     <div
-      className="fixed inset-0 z-[1000] grid place-items-center bg-black/50 p-6"
+      className="fixed inset-0 z-[1000] grid place-items-center bg-black/30 p-6"
       onPointerDown={(e) => {
         // Click on the backdrop (not the dialog) cancels.
         if (e.target === e.currentTarget) onCancel();
@@ -557,7 +558,10 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="flex h-[600px] max-h-full w-[900px] max-w-full flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-2xl outline-none"
+        // Made as a window is, as Files is: a frame of the glass Settings →
+        // Themes chooses (window-glass) under the sidebar and toolbar, and
+        // the list on a solid pane inset from it.
+        className="relative isolate flex h-[600px] max-h-full w-[960px] max-w-full overflow-hidden rounded-2xl shadow-2xl ring-1 ring-black/20 outline-none"
         onKeyDown={(e) => {
           const typing = e.target instanceof HTMLInputElement;
           // Keys from menus and lists portaled out of the picker (a row's
@@ -590,77 +594,20 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
           }
         }}
       >
-        {/* Header / toolbar */}
-        <header className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2">
-          <h2 className="mr-2 truncate text-sm font-semibold text-foreground">{title}</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            aria-label="Parent folder"
-            disabled={!folder || folder === '/'}
-            onClick={goUp}
-          >
-            <ArrowUp className="size-4" aria-hidden />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            aria-label="Refresh"
-            onClick={() => query.refetch()}
-          >
-            <RotateCw className={cn('size-4', query.isFetching && 'animate-spin')} aria-hidden />
-          </Button>
-          <div className="ml-1 min-w-0 flex-1 truncate rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {inRecent ? 'Recent' : (location ?? 'Loading…')}
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            aria-label={favorite ? 'Remove from Favorites' : 'Add to Favorites'}
-            aria-pressed={favorite}
-            title={favorite ? 'Remove from Favorites' : 'Add to Favorites'}
-            disabled={folder === null}
-            onClick={() => {
-              if (!folder) return;
-              if (favorite) bookmarks.remove(folder);
-              else bookmarks.add(folder);
-            }}
-          >
-            <Star className={cn('size-4', favorite && 'fill-current text-primary')} aria-hidden />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            aria-label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
-            aria-pressed={showHidden}
-            title="Show hidden files (Ctrl+H)"
-            disabled={inRecent}
-            onClick={toggleHidden}
-          >
-            {showHidden ? <Eye className="size-4" aria-hidden /> : <EyeOff className="size-4" aria-hidden />}
-          </Button>
-        </header>
+        <div aria-hidden className="window-glass pointer-events-none absolute inset-0 -z-10 rounded-[inherit]" />
 
-        <div className="flex min-h-0 flex-1">
-          {/* Places sidebar */}
-          <nav
-            aria-label="Places"
-            className="hidden w-44 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border/60 bg-muted/20 p-2 sm:flex"
-          >
+        {/* Places sidebar, on the glass, its title where an app's name is */}
+        <nav aria-label="Places" className={cn('hidden min-h-0 shrink-0 flex-col sm:flex', sidebarWidthClass)}>
+          <div className="flex h-12 shrink-0 items-center pr-2 pl-3.75">
+            <h2 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">
+              {title}
+            </h2>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2">
             {sections.map((section) =>
               section.places.length === 0 ? null : (
                 <div key={section.label} className="flex flex-col gap-0.5">
-                  <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {section.label}
-                  </p>
+                  <SidebarHeading>{section.label}</SidebarHeading>
                   {section.places.map((place) => {
                     const active = location === place.path;
                     const real = place.path !== RECENT;
@@ -668,25 +615,14 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
                     return (
                       <ContextMenu key={place.path}>
                         <ContextMenuTrigger asChild>
-                          <button
-                            type="button"
+                          <SidebarRow
+                            icon={place.icon}
+                            label={place.name}
+                            selected={active}
                             title={real ? place.path : undefined}
                             aria-current={active ? 'location' : undefined}
                             onClick={() => navigate(place.path)}
-                            className={cn(
-                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                              active
-                                ? 'bg-primary/15 font-medium text-foreground'
-                                : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
-                            )}
-                          >
-                            <place.icon
-                              className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
-                              aria-hidden
-                            />
-                            <span className="truncate">{place.name}</span>
-                          </button>
+                          />
                         </ContextMenuTrigger>
                         <ContextMenuContent className="z-[1001]">
                           <ContextMenuItem onSelect={() => navigate(place.path)}>
@@ -710,71 +646,109 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
                 </div>
               ),
             )}
-          </nav>
-
-          {/* File list */}
-          <div className="min-w-0 flex-1 overflow-hidden">{body}</div>
-        </div>
-
-        {/* Footer */}
-        <footer className="space-y-2 border-t border-border/60 bg-muted/30 px-3 py-2">
-          {saving && (
-            <label className="flex items-center gap-2 text-sm">
-              <span className="shrink-0 text-muted-foreground">Name</span>
-              <Input
-                ref={nameRef}
-                value={name}
-                aria-invalid={name.includes('/') || undefined}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setReplacing(null);
-                }}
-                className="h-8"
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </label>
-          )}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground" aria-live="polite">
-              {status}
-            </p>
-            <div className="flex items-center gap-2">
-              {filters.length > 1 && (
-                <Select
-                  value={String(filterIndex)}
-                  onValueChange={(value) => {
-                    setFilterIndex(Number(value));
-                    setSelected(new Set());
-                  }}
-                >
-                  <SelectTrigger size="sm" className="h-8 max-w-48" aria-label="File type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="z-[1001]">
-                    {filters.map((f, i) => (
-                      <SelectItem key={i} value={String(i)}>
-                        {f.name || 'Files'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={replacing ? 'destructive' : 'default'}
-                disabled={!canConfirm}
-                onClick={confirm}
-              >
-                {confirmLabel}
-              </Button>
-            </div>
           </div>
-        </footer>
+        </nav>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* The title bar over the content: where the picker is, and its tools */}
+          <header className="flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-2 sm:pl-0">
+            <h2 className="mr-2 max-w-40 shrink-0 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90 sm:hidden">
+              {title}
+            </h2>
+            <ToolButton label="Parent folder" disabled={!folder || folder === '/'} onClick={goUp}>
+              <ArrowUp {...toolIcon} aria-hidden />
+            </ToolButton>
+            <ToolButton label="Refresh" onClick={() => query.refetch()}>
+              <RotateCw {...toolIcon} className={cn(toolIcon.className, query.isFetching && 'animate-spin')} aria-hidden />
+            </ToolButton>
+            <div
+              className="glass-control mx-1 flex h-9 min-w-0 flex-1 items-center truncate rounded-full bg-foreground/[0.06] px-4 text-sm text-muted-foreground"
+              title={folder ?? undefined}
+            >
+              <span className="truncate">{inRecent ? 'Recent' : (location ?? 'Loading…')}</span>
+            </div>
+            <ToolButton
+              label={favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+              pressed={favorite}
+              disabled={folder === null}
+              onClick={() => {
+                if (!folder) return;
+                if (favorite) bookmarks.remove(folder);
+                else bookmarks.add(folder);
+              }}
+            >
+              <Star {...toolIcon} className={cn(toolIcon.className, favorite && 'fill-current text-ink-accent')} aria-hidden />
+            </ToolButton>
+            <ToolButton
+              label={showHidden ? 'Hide hidden files (Ctrl+H)' : 'Show hidden files (Ctrl+H)'}
+              pressed={showHidden}
+              disabled={inRecent}
+              onClick={toggleHidden}
+            >
+              {showHidden ? <Eye {...toolIcon} aria-hidden /> : <EyeOff {...toolIcon} aria-hidden />}
+            </ToolButton>
+          </header>
+
+          {/* File list, on the solid pane */}
+          <ContentPane className="mb-0 ml-2 sm:ml-0">{body}</ContentPane>
+
+          {/* Footer, back on the glass */}
+          <footer className="shrink-0 space-y-2 px-3 py-3">
+            {saving && (
+              <label className="flex items-center gap-2 text-sm">
+                <span className="shrink-0 text-muted-foreground">Name</span>
+                <Input
+                  ref={nameRef}
+                  value={name}
+                  aria-invalid={name.includes('/') || undefined}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setReplacing(null);
+                  }}
+                  className="h-9 rounded-full px-4"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground" aria-live="polite">
+                {status}
+              </p>
+              <div className="flex items-center gap-2">
+                {filters.length > 1 && (
+                  <Select
+                    value={String(filterIndex)}
+                    onValueChange={(value) => {
+                      setFilterIndex(Number(value));
+                      setSelected(new Set());
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="h-9 max-w-48 rounded-full" aria-label="File type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[1001]">
+                      {filters.map((f, i) => (
+                        <SelectItem key={i} value={String(i)}>
+                          {f.name || 'Files'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <PillButton onClick={onCancel}>Cancel</PillButton>
+                <PillButton
+                  variant="primary"
+                  disabled={!canConfirm}
+                  onClick={confirm}
+                  className={cn(replacing && 'bg-destructive text-destructive-foreground')}
+                >
+                  {confirmLabel}
+                </PillButton>
+              </div>
+            </div>
+          </footer>
+        </div>
       </div>
     </div>
   );
@@ -922,7 +896,7 @@ const PickerList = memo(function PickerList({
               className={cn(
                 col.className,
                 'flex items-center gap-1 rounded-sm font-medium hover:text-foreground',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                focusRing,
                 col.align === 'right' && 'justify-end',
                 active && 'text-foreground',
               )}
@@ -1037,11 +1011,8 @@ const PickerRow = memo(function PickerRow({
             onClick={dim ? undefined : (e) => onClick(item, e)}
             onDoubleClick={dim ? undefined : () => onOpen(item)}
             className={cn(
-              'flex h-full w-full cursor-default select-none items-center gap-3 rounded-md px-3 text-left text-sm',
-              isSelected
-                ? 'bg-primary/15 text-foreground'
-                : 'text-foreground',
-              !isSelected && !dim && 'hover:bg-foreground/5',
+              'flex h-full w-full cursor-default select-none items-center gap-3 rounded-md px-3 text-left text-sm text-foreground',
+              (isSelected || !dim) && listRowClass({ selected: isSelected }),
               isCursor && 'group-focus/list:ring-2 group-focus/list:ring-inset group-focus/list:ring-ring',
               dim && 'opacity-40',
             )}
