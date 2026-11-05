@@ -167,6 +167,29 @@ async function geometry(region: RecordingStart['region']): Promise<Electron.Rect
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+/**
+ * The area trimmed to whole H.264 macroblocks (16 pixels). Mesa's VA-API
+ * H.264 encoder (radeonsi, seen in Mesa 26.1.8) can spin forever in
+ * vl_rbsp_ue writing the stream's header when the picture is cropped both
+ * ways, its width and height both not multiples of 16 (1688x1078, 1690x1080):
+ * wf-recorder then never writes a frame, can't finish on SIGINT, and leaves a
+ * 48-byte MP4. Sizes cropped one way only, or not at all, encode. So an area
+ * dragged out loses up to 15 pixels a side, evenly off both edges, and a
+ * whole display, whose size nobody picked, only its height, and only when
+ * both would need cropping.
+ */
+export function macroblockAligned(area: Electron.Rectangle, wholeDisplay: boolean): Electron.Rectangle {
+  const trim = (start: number, size: number) => {
+    const aligned = Math.max(16, size - (size % 16));
+    return { start: start + Math.floor((size - aligned) / 2), size: aligned };
+  };
+  const unaligned = (n: number) => n % 16 !== 0;
+  if (wholeDisplay && !(unaligned(area.width) && unaligned(area.height))) return area;
+  const across = wholeDisplay ? { start: area.x, size: area.width } : trim(area.x, area.width);
+  const down = trim(area.y, area.height);
+  return { x: across.start, y: down.start, width: across.size, height: down.size };
+}
+
 export function recorderArgs(area: Electron.Rectangle, file: string, audio: RecordingAudio, gpu: boolean): string[] {
   const args = ['-y', '-g', `${area.x},${area.y} ${area.width}x${area.height}`];
   if (gpu) args.push('-c', 'h264_vaapi', '-d', RENDER_NODE);
@@ -222,7 +245,7 @@ async function start(request: RecordingStart): Promise<RecorderStatus> {
   const binary = findRecorder();
   if (!binary || !process.env.WAYLAND_DISPLAY) throw new Error('Screen recording isn’t available here');
   const audio: RecordingAudio = request.audio === 'system' || request.audio === 'microphone' ? request.audio : 'none';
-  const area = await geometry(request.region);
+  const area = macroblockAligned(await geometry(request.region), !request.region);
   let file: string;
   if (typeof request.path === 'string' && request.path) {
     if (!path.isAbsolute(request.path)) throw new Error('An absolute path is required');
@@ -276,16 +299,25 @@ async function stop(): Promise<FinishedRecording | null> {
   running.stopping = true;
   publish();
   running.child.kill('SIGINT');
-  const killer = setTimeout(() => running.child.kill('SIGKILL'), STOP_TIMEOUT_MS);
+  let killed = false;
+  const killer = setTimeout(() => {
+    killed = true;
+    running.child.kill('SIGKILL');
+  }, STOP_TIMEOUT_MS);
   await running.exited;
   clearTimeout(killer);
   current = null;
   publish();
-  const finished: FinishedRecording = {
-    path: fileSize(running.path) > 0 ? running.path : null,
-    durationMs: Date.now() - running.startedAt,
-  };
-  if (!finished.path) finished.error = 'Nothing was recorded';
+  const durationMs = Date.now() - running.startedAt;
+  let finished: FinishedRecording;
+  if (killed) {
+    // Killed before it wrote the MP4's index, so what's there won't play.
+    fs.rmSync(running.path, { force: true });
+    finished = { path: null, durationMs, error: 'The recorder stopped responding, so the video couldn’t be saved' };
+  } else {
+    finished = { path: fileSize(running.path) > 0 ? running.path : null, durationMs };
+    if (!finished.path) finished.error = 'Nothing was recorded';
+  }
   options?.sendToShell('screen-recorder:finished', finished);
   return finished;
 }
