@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, PanelRightOpen, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
@@ -197,6 +197,24 @@ function loadGitWidth(): number {
   return width ? clampGitWidth(width) : SIDEBAR_WIDTH;
 }
 
+/** The window's width (px) from which the Git panel sits beside the conversation: `@5xl/assistant`. */
+const GIT_BESIDE_WIDTH = 1024;
+
+/** A ref for an element, and whether it's at least `min` px wide (the window's width until it's measured). */
+function useWideEnough(min: number): [(el: HTMLElement | null) => void, boolean] {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [wide, setWide] = useState(() => window.innerWidth >= min);
+  useLayoutEffect(() => {
+    if (!el) return;
+    const measure = () => setWide(el.offsetWidth >= min);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, min]);
+  return [setEl, wide];
+}
+
 /** How many closed tabs Ctrl+Shift+T can bring back. */
 const CLOSED_TABS_LIMIT = 20;
 
@@ -325,9 +343,17 @@ function AssistantWindow() {
   // Only a width dragged to is kept, so the default can change.
   useEffect(() => (listWidth === DEFAULT_LIST_WIDTH ? localStorage.removeItem(LIST_WIDTH_KEY) : localStorage.setItem(LIST_WIDTH_KEY, String(listWidth))), [listWidth]);
   // The Git panel at the right, open or not across restarts, and its width.
+  // It sits beside the conversation only in a window wide enough for both;
+  // narrower, it hides by itself, and opening it slides it over the
+  // conversation until it's closed, leaving the setting as it was.
   const [gitOpen, setGitOpen] = useState(() => localStorage.getItem(GIT_OPEN_KEY) === '1');
   useEffect(() => (gitOpen ? localStorage.setItem(GIT_OPEN_KEY, '1') : localStorage.removeItem(GIT_OPEN_KEY)), [gitOpen]);
-  const toggleGit = () => setGitOpen((open) => !open);
+  const [rootRef, wide] = useWideEnough(GIT_BESIDE_WIDTH);
+  const [gitOver, setGitOver] = useState(false);
+  if (wide && gitOver) setGitOver(false);
+  const gitShown = wide ? gitOpen : gitOver;
+  const setGitShown = wide ? setGitOpen : setGitOver;
+  const toggleGit = () => setGitShown((open) => !open);
   const [gitWidth, setGitWidth] = useState(loadGitWidth);
   useEffect(() => (gitWidth === SIDEBAR_WIDTH ? localStorage.removeItem(GIT_WIDTH_KEY) : localStorage.setItem(GIT_WIDTH_KEY, String(gitWidth))), [gitWidth]);
   const defaultDirectory = useAssistantDirectory();
@@ -603,6 +629,7 @@ function AssistantWindow() {
 
   return (
     <div
+      ref={rootRef}
       className="@container/assistant relative flex h-full w-full text-foreground"
       onKeyDownCapture={onKeyDown}
     >
@@ -614,7 +641,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
-        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitOpen} onToggleGit={toggleGit} />}
+        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitShown} onToggleGit={toggleGit} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -702,15 +729,21 @@ function AssistantWindow() {
                 : null
             }
           />
+          {/* In a window wide enough for it, the Git panel can always be shown from here. */}
+          {wide && !gitShown && (
+            <ToolButton label="Show Git (Ctrl+Shift+G)" onClick={() => setGitOpen(true)}>
+              <PanelRightOpen className="size-4.5" strokeWidth={1.75} aria-hidden />
+            </ToolButton>
+          )}
           {/* With the Git panel open, the window's controls are at its top instead. */}
-          {!gitOpen && <WindowControls />}
+          {!gitShown && <WindowControls />}
         </WindowDragRegion>
         <ContentPane
           inset={false}
           className={cn(
             '@2xl/assistant:mr-2 @2xl/assistant:mb-2 @2xl/assistant:rounded-2xl @2xl/assistant:border-t-0 @2xl/assistant:clay',
             // Beside the Git panel, it meets the panel, not the screen, at its right.
-            gitOpen
+            gitShown
               ? '@5xl/assistant:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:rounded-tr-none @max-5xl/assistant:[[data-screen-right]_&]:rounded-br-none [[data-screen-bottom]_&]:mb-0 [[data-screen-bottom]_&]:rounded-bl-none [[data-screen-bottom]_&]:rounded-br-none'
               : flushPane,
           )}
@@ -727,7 +760,7 @@ function AssistantWindow() {
               onOpenSession={choose}
               onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
               onAddProvider={addProvider}
-              gitOpen={gitOpen}
+              gitOpen={gitShown}
               onToggleGit={toggleGit}
             />
           ) : (
@@ -742,7 +775,7 @@ function AssistantWindow() {
           )}
         </ContentPane>
       </div>
-      {gitOpen && (
+      {gitShown && (
         <>
           <div
             role="separator"
@@ -768,12 +801,12 @@ function AssistantWindow() {
             type="button"
             aria-label="Hide Git"
             className="absolute inset-0 z-10 bg-background/40 @5xl/assistant:hidden"
-            onClick={() => setGitOpen(false)}
+            onClick={() => setGitShown(false)}
           />
           <GitPanel
             key={activeDirectory}
             directory={activeDirectory}
-            onClose={() => setGitOpen(false)}
+            onClose={() => setGitShown(false)}
             style={{ width: gitWidth }}
             className="absolute inset-y-0 right-0 z-20 max-w-[85%] bg-background shadow-xl @5xl/assistant:static @5xl/assistant:max-w-none @5xl/assistant:bg-transparent @5xl/assistant:shadow-none"
           />
