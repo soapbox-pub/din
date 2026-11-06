@@ -504,9 +504,9 @@ interface ItemProps {
 function itemTone({ selected, isCursor, focused, isDropTarget }: ItemProps) {
   return cn(
     isDropTarget
-      ? 'bg-primary/25 ring-2 ring-primary'
+      ? 'bg-selected ring-2 ring-ring/60'
       : listRowClass({ selected, inactive: !focused }),
-    isCursor && focused && !isDropTarget && 'ring-1 ring-inset ring-primary/50',
+    isCursor && focused && !isDropTarget && 'ring-1 ring-inset ring-ring/60',
   );
 }
 

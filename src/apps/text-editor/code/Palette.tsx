@@ -204,18 +204,18 @@ export function Palette({
       <div
         role="dialog"
         aria-label={mode.kind === 'pick' ? mode.placeholder : 'Command palette'}
-        className="flex h-fit max-h-[70%] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
+        className="flex h-fit max-h-[70%] w-full max-w-xl flex-col overflow-hidden rounded-xl glass-surface text-popover-foreground shadow-2xl"
         onKeyDown={onKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border px-3">
           {kind === 'commands' ? (
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <ChevronRight className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
           ) : kind === 'line' ? (
-            <Hash className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <Hash className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
           ) : filesLoading && kind === 'files' ? (
             <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />
           ) : (
-            <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <FileText className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
           )}
           <input
             ref={inputRef}
@@ -243,7 +243,7 @@ export function Palette({
                 onClick={() => accept(i)}
                 className={cn(
                   'flex cursor-default items-center gap-3 rounded-md px-3 py-1.5 text-sm',
-                  i === selected && 'bg-sidebar-ring/20',
+                  i === selected && 'bg-selected',
                 )}
               >
                 {row.path ? <PathLabel label={row.label} positions={row.positions} /> : <Highlighted text={row.label} positions={row.positions} offset={0} className="min-w-0 flex-1 truncate" />}
@@ -281,7 +281,7 @@ function Highlighted({ text, positions, offset, className }: { text: string; pos
   for (let i = 0; i <= text.length; i++) {
     const mark = marks.has(i);
     if (i === text.length || mark !== bold) {
-      if (run) parts.push(bold ? <b key={i} className="font-semibold text-sidebar-ring">{run}</b> : run);
+      if (run) parts.push(bold ? <b key={i} className="font-semibold text-ink-accent">{run}</b> : run);
       run = '';
       bold = mark;
     }

@@ -17,6 +17,9 @@ import { getEraseBridge, type EraseStatus } from '@/lib/erase';
 import { cleanInstallerError } from '@/lib/installer';
 import { cleanLockError } from '@/lib/lock';
 import { DEFAULT_UPDATE_BRANCH, DEFAULT_UPDATE_URL, getUpdaterBridge, type UpdateState } from '@/lib/updater';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 /**
  * Settings → About's Erase All Content and Settings (window.dinos.erase):
@@ -48,8 +51,8 @@ export function EraseSection({ request }: { request?: unknown }) {
 
   return (
     <>
-      <h3 className="mt-2 text-sm font-medium text-muted-foreground">Erase This Computer</h3>
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+      <SettingsSubHeading>Erase This Computer</SettingsSubHeading>
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 p-4')}>
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Erase All Content and Settings</p>
           <p className="text-xs text-muted-foreground">
@@ -164,18 +167,18 @@ function EraseDialog({
         {step === 'summary' && (
           <div className="flex flex-col gap-6">
             <DialogHeader className="items-center gap-3 text-center sm:text-center">
-              <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-b from-primary/25 to-primary/10 text-primary">
+              <span className="grid size-16 place-items-center rounded-2xl bg-pigment text-primary-foreground clay-pigment">
                 <Laptop className="size-8" aria-hidden />
               </span>
               <DialogTitle className="text-xl">Erase All Content and Settings</DialogTitle>
               <DialogDescription>These will be removed, and DinOS reset to how it came.</DialogDescription>
             </DialogHeader>
 
-            <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-foreground/[0.03]">
+            <ul className={settingsGroup}>
               {REMOVED.map(({ icon: Icon, title, detail }) => (
                 <li key={title} className="flex items-center gap-3 px-4 py-3">
-                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground/80">
-                    <Icon className="size-4" aria-hidden />
+                  <span className="grid size-8 shrink-0 place-items-center rounded-full bg-foreground/10 text-foreground/75 clay">
+                    <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-foreground">{title}</span>
@@ -307,7 +310,7 @@ function OfficialNotice({
 }) {
   const updating = update?.phase === 'updating';
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+    <div className="flex flex-col gap-3 rounded-xl bg-amber-500/10 p-4">
       <div>
         <p className="text-sm font-medium text-foreground">Official DinOS first</p>
         <p className="text-xs text-muted-foreground">

@@ -417,7 +417,7 @@ function NewMessage({
             <select
               value={from ?? ''}
               onChange={(e) => onFrom(e.target.value)}
-              className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="rounded-lg bg-foreground/[0.06] px-1.5 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {phones.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -480,11 +480,11 @@ function PhoneStrip({ phones, onSettings }: { phones: PhoneDevice[]; onSettings:
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
+    <div className="flex h-full flex-col text-foreground">
       <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-3">
         <WindowControls />
       </WindowDragRegion>
-      {children}
+      <div className="flex min-h-0 flex-1 flex-col bg-background">{children}</div>
     </div>
   );
 }

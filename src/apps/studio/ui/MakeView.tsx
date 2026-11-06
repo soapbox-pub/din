@@ -22,24 +22,24 @@ function EditRow({ path, onOpen, onReveal }: { path: string; onOpen: () => void;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent/60">
-          <Film className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <li className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-foreground/5">
+          <Film strokeWidth={1.75} className="size-4.5 shrink-0 text-ink-accent" aria-hidden />
           <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-sm outline-none focus-visible:underline">
             {name}
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" aria-label={`More for ${name}`} className="grid size-7 place-items-center rounded-md text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-background focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100">
-                <MoreHorizontal className="size-4" />
+              <button type="button" aria-label={`More for ${name}`} className="grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-foreground/[0.07] focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:opacity-100">
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={onOpen}>
-                <Play className="size-4" aria-hidden />
+                <Play className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Open
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={onReveal}>
-                <FolderOpen className="size-4" aria-hidden />
+                <FolderOpen className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Show in Files
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -48,11 +48,11 @@ function EditRow({ path, onOpen, onReveal }: { path: string; onOpen: () => void;
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onOpen}>
-          <Play className="size-4" aria-hidden />
+          <Play className="size-4.5" strokeWidth={1.75} aria-hidden />
           Open
         </ContextMenuItem>
         <ContextMenuItem onSelect={onReveal}>
-          <FolderOpen className="size-4" aria-hidden />
+          <FolderOpen className="size-4.5" strokeWidth={1.75} aria-hidden />
           Show in Files
         </ContextMenuItem>
       </ContextMenuContent>
@@ -123,11 +123,11 @@ export function MakeView({
   const reveal = (path: string) => void din.files.fromPath(path.slice(0, path.lastIndexOf('/'))).then((h) => din.app.openFiles([h]));
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [&>*]:shrink-0">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-6">
         <div>
-          <button type="button" onClick={onBack} className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-            <ArrowLeft className="size-4" aria-hidden />
+          <button type="button" onClick={onBack} className="flex h-8 items-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+            <ArrowLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
             Back to recording
           </button>
         </div>
@@ -152,7 +152,7 @@ export function MakeView({
                 </div>
                 <p className="mt-1 truncate text-sm font-medium">{item.take.title}</p>
                 <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                  {item.take.kind === 'clip' && <span className="rounded bg-muted px-1 font-medium">Clip</span>}
+                  {item.take.kind === 'clip' && <span className="rounded-full bg-foreground/[0.07] px-1.5 font-medium">Clip</span>}
                   <span className="tabular-nums">{formatTime(usedLength(item) * 1000)}</span>
                   {(item.in !== null || item.out !== null) && <Scissors className="size-3" aria-label="Trimmed" />}
                   {item.note && <StickyNote className="size-3" aria-label="Has a note" />}
@@ -162,9 +162,9 @@ export function MakeView({
           </ol>
         )}
 
-        <section aria-labelledby="studio-make" className="rounded-2xl border bg-card p-4 shadow-sm">
+        <section aria-labelledby="studio-make" className="rounded-2xl bg-card p-4 clay">
           <h2 id="studio-make" className="flex items-center gap-2 text-base font-semibold">
-            <Sparkles className="size-4 text-primary" aria-hidden />
+            <Sparkles className="size-4.5 text-ink-accent" strokeWidth={1.75} aria-hidden />
             Make with Assistant
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -172,7 +172,7 @@ export function MakeView({
           </p>
           {canAssist ? (
             <>
-              <div className="mt-3 flex items-end gap-2 rounded-xl border bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
+              <div className="mt-3 flex items-end gap-2 rounded-xl bg-foreground/[0.06] p-2 focus-within:ring-2 focus-within:ring-ring/60">
                 <textarea
                   ref={composer}
                   value={prompt}
@@ -197,9 +197,9 @@ export function MakeView({
                   onClick={send}
                   disabled={!prompt.trim() || !ready}
                   aria-label="Send to the Assistant"
-                  className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                  className="grid size-9 shrink-0 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-30"
                 >
-                  <ArrowUp className="size-4" />
+                  <ArrowUp className="size-4.5" strokeWidth={1.75} />
                 </button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -213,7 +213,7 @@ export function MakeView({
                       setSent(false);
                       composer.current?.focus();
                     }}
-                    className="h-8 rounded-full bg-muted px-3 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                    className="h-8 rounded-full bg-foreground/[0.06] px-3 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
                   >
                     {s}
                   </button>
@@ -229,9 +229,9 @@ export function MakeView({
         <section aria-labelledby="studio-edits">
           <h2 id="studio-edits" className="mb-2 text-sm font-semibold text-muted-foreground">Made from this project</h2>
           {project.edits.length === 0 ? (
-            <div className="rounded-xl border border-dashed px-6 py-8 text-center text-sm text-muted-foreground">Nothing yet. What the Assistant makes is saved in the project’s edits folder.</div>
+            <div className="rounded-xl px-6 py-8 text-center text-sm text-muted-foreground">Nothing yet. What the Assistant makes is saved in the project’s edits folder.</div>
           ) : (
-            <ul className="flex flex-col gap-0.5 rounded-xl border p-1">
+            <ul className="flex flex-col gap-0.5 rounded-xl bg-card p-1 clay">
               {project.edits.map((path) => (
                 <EditRow key={path} path={path} onOpen={() => openFile(path)} onReveal={() => reveal(path)} />
               ))}

@@ -176,7 +176,7 @@ function LayoutPicker() {
           <div
             role="radiogroup"
             aria-label="Keyboard layout"
-            className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-2xl border border-white/20 bg-white/[0.06] p-1"
+            className="flex max-h-64 flex-col gap-0.5 overflow-y-auto rounded-2xl border border-white/20 bg-white/[0.06] p-1 [&>*]:shrink-0"
           >
             {layouts.isLoading ? (
               <p className="px-4 py-3 text-base text-white/60">Loading layouts…</p>

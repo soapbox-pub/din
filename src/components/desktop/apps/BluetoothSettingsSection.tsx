@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Bluetooth, BluetoothConnected, BluetoothOff, Link2, Loader2, Settings2, Trash2 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import {
   ActionButton,
@@ -25,6 +24,11 @@ import { Switch } from '@/components/ui/switch';
 import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
 import { cleanBluetoothBridgeError, describeDevice, deviceKind, getBluetoothBridge, sortDevices } from '@/lib/bluetooth';
 import type { BluetoothDevice } from '@/lib/bluetooth';
+import { SettingsFallback as Fallback, SettingsSection as Shell, SettingsSubHeading as SubHeading } from '@/shared/settingsSection';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsToken } from '@/shared/settingsChrome';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 
 /**
  * Settings → Bluetooth: the adapter's on/off switch, then, as Android lays
@@ -89,23 +93,15 @@ export function BluetoothSettingsSection() {
     onDetails: () => setViewing(device.path),
   });
 
+  const power = (on: boolean) => {
+    setOpError(null);
+    setPowered.mutate(on, {
+      onError: (error) => setOpError({ path: '', message: cleanBluetoothBridgeError(error) }),
+    });
+  };
+
   return (
-    <Shell
-      title="Bluetooth"
-      actions={
-        <Switch
-          aria-label="Bluetooth"
-          checked={powered}
-          disabled={!adapter || setPowered.isPending}
-          onCheckedChange={(on) => {
-            setOpError(null);
-            setPowered.mutate(on, {
-              onError: (error) => setOpError({ path: '', message: cleanBluetoothBridgeError(error) }),
-            });
-          }}
-        />
-      }
-    >
+    <Shell title="Bluetooth">
       {opError?.path === '' && (
         <p role="alert" className="text-xs text-destructive">
           {opError.message}
@@ -123,17 +119,34 @@ export function BluetoothSettingsSection() {
       ) : !adapter ? (
         <Fallback icon={Bluetooth}>No Bluetooth adapter was found on this computer.</Fallback>
       ) : !powered ? (
-        <Fallback icon={Bluetooth}>Bluetooth is turned off.</Fallback>
+        <Fallback
+          icon={BluetoothOff}
+          action={
+            <Button disabled={setPowered.isPending} onClick={() => power(true)}>
+              {setPowered.isPending && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+              Turn Bluetooth On
+            </Button>
+          }
+        >
+          Bluetooth is off.
+        </Fallback>
       ) : (
         <div className="flex flex-col gap-4">
-          <p className="text-xs text-muted-foreground">
-            Devices see this computer as “{adapter.name}”.
-          </p>
+          <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
+            <SettingsToken icon={Bluetooth} active />
+            <div className="min-w-0 flex-1">
+              <Label htmlFor="bluetooth-power" className="cursor-pointer text-sm">
+                Bluetooth
+              </Label>
+              <p className="truncate text-xs text-muted-foreground">Devices see this computer as “{adapter.name}”.</p>
+            </div>
+            <Switch id="bluetooth-power" checked disabled={setPowered.isPending} onCheckedChange={power} />
+          </div>
 
           {connected.length > 0 && (
             <div className="flex flex-col gap-2">
               <SubHeading>Connected devices</SubHeading>
-              <ul className="flex flex-col gap-1" aria-label="Connected devices">
+              <ul className={settingsGroup} aria-label="Connected devices">
                 {connected.map((device) => (
                   <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
                 ))}
@@ -144,7 +157,7 @@ export function BluetoothSettingsSection() {
           {saved.length > 0 && (
             <div className="flex flex-col gap-2">
               <SubHeading>Saved devices</SubHeading>
-              <ul className="flex flex-col gap-1" aria-label="Saved devices">
+              <ul className={settingsGroup} aria-label="Saved devices">
                 {saved.map((device) => (
                   <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
                 ))}
@@ -160,13 +173,13 @@ export function BluetoothSettingsSection() {
               )}
             </div>
             {nearby.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                 {adapter.discovering
                   ? 'Looking for devices… Put the one you want to pair in pairing mode.'
                   : 'No devices found nearby.'}
               </div>
             ) : (
-              <ul className="flex flex-col gap-1" aria-label="Devices nearby">
+              <ul className={settingsGroup} aria-label="Devices nearby">
                 {nearby.map((device) => (
                   <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
                 ))}
@@ -206,7 +219,7 @@ function BluetoothDeviceRow({
   const busy = device.busy !== null;
 
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40">
+    <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
@@ -228,7 +241,7 @@ function BluetoothDeviceRow({
                   title="Device details"
                   onClick={onDetails}
                 >
-                  <Settings2 className="size-4" />
+                  <Settings2 className="size-4.5" strokeWidth={1.75} />
                 </Button>
               )
             }
@@ -268,7 +281,7 @@ function BluetoothDeviceRow({
       </ContextMenu>
 
       {error !== null && (
-        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+        <p role="alert" className="px-4 pb-2 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -349,44 +362,11 @@ function BluetoothDeviceDetails({ device, onBack }: { device: BluetoothDevice | 
   );
 }
 
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
-function Shell({
-  title,
-  actions,
-  children,
-}: {
-  title: string;
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">{title}</h2>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Fallback({ icon: Icon, children }: { icon?: LucideIcon; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
-      {Icon && <Icon className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />}
-      <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
-    </div>
-  );
-}
-
 function DeviceListSkeleton() {
   return (
-    <div className="flex flex-col gap-1" aria-hidden>
+    <div className={settingsGroup} aria-hidden>
       {Array.from({ length: 4 }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
+        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
           <Skeleton className="size-5 rounded bg-foreground/10" />
           <div className="flex-1 space-y-1.5">
             <Skeleton className="h-3.5 bg-foreground/10" style={{ width: `${30 + ((i * 23) % 35)}%` }} />

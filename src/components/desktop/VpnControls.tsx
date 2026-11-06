@@ -6,6 +6,8 @@ import { trayRowClass, trayRuleTop, trayTokenClass } from './trayPanel';
 import { cleanVpnError, getVpnBridge, isWireGuard } from '@/lib/vpn';
 import type { VpnConnection } from '@/lib/vpn';
 import { useVpnConnections, useVpnMutations } from '@/hooks/useVpn';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 /** Human label for a profile's transport. */
 function typeLabel(conn: VpnConnection): string {
@@ -64,7 +66,7 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
                   className={cn(trayRowClass(conn.active), 'disabled:opacity-70')}
                 >
                   <span className={trayTokenClass(conn.active)}>
-                    {conn.active ? <ShieldCheck className="size-4" aria-hidden /> : <Shield className="size-4" aria-hidden />}
+                    {conn.active ? <ShieldCheck className="size-4.5" strokeWidth={1.75} aria-hidden /> : <Shield className="size-4.5" strokeWidth={1.75} aria-hidden />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{conn.name}</span>
@@ -78,7 +80,7 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
                       aria-hidden
                     />
                   ) : (
-                    conn.active && <Check className="size-4 shrink-0 text-primary" aria-hidden />
+                    conn.active && <Check className="size-4 shrink-0 text-ink-accent" aria-hidden />
                   )}
                 </button>
                 {opError?.name === conn.name && (
@@ -96,20 +98,20 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="mt-6">
-      <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-        <Shield className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <h3 className="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-foreground/90">
+        <Shield className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
         VPN
       </h3>
-      <ul className="flex flex-col gap-1" aria-label="VPN connections">
+      <ul className={settingsGroup} aria-label="VPN connections">
         {list.map((conn) => {
           const pending = isPending(conn);
           return (
-            <li key={conn.name} className="rounded-lg border border-border/60 bg-background/40">
-              <div className="flex items-center gap-3 px-3 py-2">
+            <li key={conn.name}>
+              <div className="flex items-center gap-3 px-4 py-2.5">
                 {conn.active ? (
-                  <ShieldCheck className="size-5 shrink-0 text-primary" aria-hidden />
+                  <SettingsToken icon={ShieldCheck} active />
                 ) : (
-                  <Shield className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                  <SettingsToken icon={Shield} />
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-foreground">{conn.name}</p>
@@ -117,7 +119,7 @@ export function VpnControls({ compact = false }: { compact?: boolean }) {
                 </div>
 
                 {conn.active && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-primary">
+                  <span className="flex items-center gap-1 text-xs font-medium text-ink-accent">
                     <Check className="size-3.5" aria-hidden />
                     Connected
                   </span>

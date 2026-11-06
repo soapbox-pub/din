@@ -8,6 +8,7 @@ import { cleanBluetoothBridgeError, getBluetoothBridge, type BluetoothDevice } f
 import { getPhoneDesktopBridge, type PhoneDevice, type PhonePlatform, type PhoneState } from '@/lib/phone';
 import { cleanPhoneError } from '@/shared/phone';
 import { cn } from '@/lib/utils';
+import { settingsAlert, settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
 
 type Step =
   | { kind: 'pair' }
@@ -48,7 +49,7 @@ export function PhoneSetupWizard({ onClose, onOpenMessages }: { onClose: () => v
           type="button"
           aria-label={previous ? 'Back' : 'Back to my phones'}
           onClick={() => (previous ? setStep(previous) : onClose())}
-          className="-ml-1.5 grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="-ml-1.5 grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <ChevronLeft className="size-5" aria-hidden />
         </button>
@@ -161,7 +162,7 @@ function PairStep({ onPaired }: { onPaired: (address: string, name: string, plat
         <div className="flex flex-col gap-3">
           <DeviceList label="Nearby" busy={adapter.discovering}>
             {nearby.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-center text-sm text-muted-foreground">
+              <p className="px-4 py-4 text-center text-sm text-muted-foreground">
                 Looking for your phone…
               </p>
             ) : (
@@ -191,7 +192,7 @@ function TurnOnSharing({ name, platform, busy, onRetry }: { name: string; platfo
       </StepHeader>
       <div className={cn('grid gap-3', platform === null && '@2xl:grid-cols-2')}>
         {platform !== 'android' && (
-          <div className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
+          <div className={cn(settingsCard, 'flex flex-col gap-1.5 px-4 py-3 text-sm')}>
             {platform === null && <p className="font-medium text-foreground">iPhone</p>}
             <ol className="flex list-decimal flex-col gap-1 pl-5 text-foreground/90">
               <li>Open <span className="font-medium">Settings → Bluetooth</span>.</li>
@@ -201,7 +202,7 @@ function TurnOnSharing({ name, platform, busy, onRetry }: { name: string; platfo
           </div>
         )}
         {platform !== 'iphone' && (
-          <div className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
+          <div className={cn(settingsCard, 'flex flex-col gap-1.5 px-4 py-3 text-sm')}>
             {platform === null && <p className="font-medium text-foreground">Android</p>}
             <p className="text-foreground/90">
               When you try again, the phone asks to allow access to your <span className="font-medium">messages</span> and{' '}
@@ -302,13 +303,13 @@ function DoneStep({
   return (
     <>
       <div className="flex flex-col items-center gap-3 pt-6 text-center">
-        <span className="grid size-14 place-items-center rounded-full bg-primary/15 text-primary">
+        <span className="grid size-14 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment">
           <Check className="size-7" strokeWidth={2.5} aria-hidden />
         </span>
         <h3 className="text-base font-semibold text-foreground">{phone ? `${phone.name} is connected` : 'Your phone is connected'}</h3>
         <p className="text-sm text-muted-foreground">Here’s what you can do now.</p>
       </div>
-      <ul className="mx-auto flex w-full max-w-md flex-col gap-2">
+      <ul className={cn(settingsGroup, 'mx-auto w-full max-w-md')}>
         <Feature icon={MessageCircle} title="Text from this computer">
           New texts show up in Messages and as notifications you can reply to. Pictures and group conversations don’t come over
           Bluetooth.
@@ -331,9 +332,9 @@ function DoneStep({
 
 function Feature({ icon: Icon, title, children }: { icon: typeof Bluetooth; title: string; children: React.ReactNode }) {
   return (
-    <li className="flex gap-3 rounded-lg border border-border/60 bg-background/40 p-3">
-      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-        <Icon className="size-4" aria-hidden />
+    <li className="flex gap-3 px-4 py-3">
+      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-foreground/10 text-ink-accent clay">
+        <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
       </span>
       <div className="flex min-w-0 flex-col gap-0.5 text-sm">
         <p className="font-medium text-foreground">{title}</p>
@@ -350,19 +351,19 @@ function Feature({ icon: Icon, title, children }: { icon: typeof Bluetooth; titl
 function DeviceList({ label, busy, children }: { label: string; busy?: boolean; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <h4 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+      <h4 className="flex items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground">
         {label}
         {busy && <Loader2 className="size-3 animate-spin" aria-label="Searching" />}
       </h4>
-      <ul className="flex flex-col gap-1">{children}</ul>
+      <ul className={settingsGroup}>{children}</ul>
     </div>
   );
 }
 
 function DeviceRow({ device, children }: { device: BluetoothDevice; children: React.ReactNode }) {
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-      <BluetoothDeviceIcon device={device} className="size-5 shrink-0 text-muted-foreground" />
+    <li className="flex items-center gap-3 py-2 pr-2 pl-4">
+      <BluetoothDeviceIcon device={device} className="size-5 shrink-0 text-ink-accent" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{device.name}</span>
       {children}
     </li>
@@ -384,8 +385,8 @@ function Notice({
     <div
       role={tone === 'error' ? 'alert' : undefined}
       className={cn(
-        'flex items-center gap-2 rounded-lg border px-3 py-3 text-sm',
-        tone === 'error' ? 'border-destructive/50 text-destructive' : 'border-dashed border-border/60 text-muted-foreground',
+        'flex items-center gap-2 rounded-xl px-4 py-3 text-sm',
+        tone === 'error' ? cn(settingsAlert, 'text-destructive') : 'text-muted-foreground',
       )}
     >
       <Icon className={cn('size-4 shrink-0', spin && 'animate-spin motion-reduce:animate-none')} aria-hidden />

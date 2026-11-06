@@ -144,7 +144,7 @@ export function Stage({
             className={cn(
               'group absolute cursor-grab outline-none active:cursor-grabbing',
               layout.shape === 'circle' ? 'rounded-full' : 'rounded-[18%]',
-              'hover:ring-2 hover:ring-white/60 focus-visible:ring-2 focus-visible:ring-ring',
+              'hover:ring-2 hover:ring-white/60 focus-visible:ring-2 focus-visible:ring-ring/60',
             )}
             style={{ left: rect.x * scale, top: rect.y * scale, width: rect.width * scale, height: rect.height * scale }}
           >

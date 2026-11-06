@@ -234,7 +234,7 @@ function ArchiveView({ path, onExtract }: { path: string; onExtract?: () => void
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3">
-        <FileArchive className="size-8 shrink-0 text-orange-500" strokeWidth={1.5} aria-hidden />
+        <FileArchive className="size-8 shrink-0 text-warning" strokeWidth={1.5} aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">
             {path.slice(path.lastIndexOf('/') + 1)}
@@ -251,7 +251,7 @@ function ArchiveView({ path, onExtract }: { path: string; onExtract?: () => void
           <button
             type="button"
             onClick={onExtract}
-            className="h-8 shrink-0 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-8 shrink-0 rounded-md bg-pigment clay-pigment px-3 text-sm font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Extract Here
           </button>
@@ -270,7 +270,7 @@ function ArchiveView({ path, onExtract }: { path: string; onExtract?: () => void
               return (
                 <li key={i} className="flex items-center gap-2 px-4 py-0.5 font-mono text-xs text-foreground/90">
                   {dir ? (
-                    <Folder className="size-3.5 shrink-0 text-primary" aria-hidden />
+                    <Folder className="size-3.5 shrink-0 text-ink-accent" aria-hidden />
                   ) : (
                     <span className="size-3.5 shrink-0" />
                   )}
@@ -356,7 +356,7 @@ function TextView({
   return (
     <div className="h-full overflow-auto">
       {truncated && (
-        <p className="border-b border-border/60 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <p className="border-b border-border/60 bg-warning/10 px-4 py-1.5 text-xs text-warning">
           This file is too big to show in full - here’s the beginning.
         </p>
       )}
@@ -440,7 +440,7 @@ function TextEditor({
           type="button"
           disabled={!dirty || saving}
           onClick={() => void save()}
-          className="h-7 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+          className="h-7 rounded-md bg-pigment clay-pigment px-3 font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>

@@ -36,6 +36,8 @@ import { useThemeActions, useThemeLibrary } from '@/hooks/useThemes';
 import { sameThemeLook } from '@/lib/profileTheme';
 import { themeCoordinate, themeNaddr, type ThemeDefinition } from '@/lib/themeDefinition';
 import { cn } from '@/lib/utils';
+import { settingsChoiceClass, settingsEmpty } from '@/shared/settingsChromeStyles';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 interface ThemeAction {
   label: string;
@@ -57,8 +59,8 @@ export function YourThemes({ onEdit }: { onEdit: () => void }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">Your themes</p>
+      <div className="flex items-center justify-between gap-4 pl-1">
+        <SettingsSubHeading className="mt-0 px-0">Your themes</SettingsSubHeading>
         <Button
           type="button"
           variant="ghost"
@@ -72,8 +74,8 @@ export function YourThemes({ onEdit }: { onEdit: () => void }) {
       {library.isLoading && themes.length === 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
           {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="overflow-hidden rounded-lg border">
-              <Skeleton className="aspect-video rounded-none" />
+            <div key={i} className="p-1.5">
+              <Skeleton className="aspect-video rounded-lg" />
               <div className="p-2">
                 <Skeleton className="h-4 w-3/5" />
               </div>
@@ -81,8 +83,8 @@ export function YourThemes({ onEdit }: { onEdit: () => void }) {
           ))}
         </div>
       ) : themes.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-6 py-8 text-center">
-          <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+        <div className={settingsEmpty}>
+          <p className="mx-auto max-w-sm">
             Themes you save from a custom theme, and ones you get in the App Store, show up here.
           </p>
         </div>
@@ -190,25 +192,22 @@ function ThemeTile({ theme, onEdit }: { theme: ThemeDefinition; onEdit: () => vo
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            className={cn(
-              'group relative overflow-hidden rounded-lg border bg-card',
-              worn ? 'border-primary ring-1 ring-primary' : 'border-border/60',
-            )}
+            className={cn(settingsChoiceClass(worn), 'group relative p-1.5 text-foreground')}
           >
             <button
               type="button"
               onClick={apply}
               aria-pressed={worn}
               aria-label={`Use ${theme.title}`}
-              className="absolute inset-0 z-[1] rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="absolute inset-0 z-[1] rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             />
-            <ThemeSwatch theme={theme.theme} className="border-b border-border/60" />
+            <ThemeSwatch theme={theme.theme} className="rounded-lg" />
             {worn && (
-              <span className="absolute left-2 top-2 grid size-5 place-items-center rounded-full bg-primary text-primary-foreground shadow">
+              <span className="absolute top-3 left-3 grid size-5 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment">
                 <Check className="size-3.5" aria-hidden />
               </span>
             )}
-            <div className="flex items-center gap-1 py-1.5 pl-2.5 pr-1">
+            <div className="flex items-center gap-1 pt-1.5 pr-0 pl-1">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium" title={theme.title}>
                   {theme.title}
@@ -222,9 +221,9 @@ function ThemeTile({ theme, onEdit }: { theme: ThemeDefinition; onEdit: () => vo
                   <button
                     type="button"
                     aria-label={`More actions for ${theme.title}`}
-                    className="relative z-[2] grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="relative z-[2] grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
-                    <MoreHorizontal className="size-4" aria-hidden />
+                    <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-60">

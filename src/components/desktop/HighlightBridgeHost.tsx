@@ -84,7 +84,7 @@ function hostOf(url: string): string {
 function HighlightQuote({ text, context }: { text: string; context?: string }) {
   const at = context && context !== text ? context.indexOf(text) : -1;
   return (
-    <blockquote className="max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-primary/70 bg-primary/5 px-4 py-3">
+    <blockquote className="max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-ink-accent/60 bg-selected px-4 py-3">
       <p className="font-serif text-base leading-relaxed break-words whitespace-pre-wrap">
         {context && at >= 0 ? (
           <>
@@ -142,7 +142,7 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={post} className="flex min-w-0 flex-col gap-4">
           <DialogHeader className="flex-row items-center gap-3 text-left">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment">
               <Highlighter className="size-5" aria-hidden />
             </span>
             <div className="min-w-0 space-y-1">

@@ -27,18 +27,17 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { QRCodeCanvas } from '@/components/ui/qrcode';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { settingsCard, settingsGroup, settingsRowButton, settingsTokenClass } from '@/shared/settingsChromeStyles';
+import { SettingsSection, SettingsSubHeading } from '@/shared/settingsSection';
+import { SegmentedControl } from '@/shared/appChrome';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import type { AppComponentProps } from '@/lib/apps';
+import { CONNECT_APP_APP_ID, connectAppParams } from '@/lib/settingsWindows';
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
@@ -84,7 +83,7 @@ function RuleList({ rules, onRevoke }: { rules: Rule[]; onRevoke: (rule: Rule) =
                 className={cn(
                   'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
                   rule.decision === 'allow'
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                    ? 'bg-success/15 text-success'
                     : 'bg-destructive/15 text-destructive',
                 )}
               >
@@ -95,7 +94,7 @@ function RuleList({ rules, onRevoke }: { rules: Rule[]; onRevoke: (rule: Rule) =
                 type="button"
                 aria-label={`Forget: ${ruleLabel(rule.method, rule.kind)}`}
                 onClick={() => onRevoke(rule)}
-                className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <X className="size-3.5" aria-hidden />
               </button>
@@ -129,13 +128,13 @@ function Row({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border bg-muted/20">
+    <Collapsible open={open} onOpenChange={setOpen}>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex w-full items-center gap-3 rounded-md p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(settingsRowButton, 'py-3')}
             >
               <span aria-hidden className="shrink-0">{icon}</span>
               <span className="min-w-0 flex-1">
@@ -155,13 +154,13 @@ function Row({
           {menu}
         </ContextMenuContent>
       </ContextMenu>
-      <CollapsibleContent className="space-y-3 border-t border-border/60 p-3">{children}</CollapsibleContent>
+      <CollapsibleContent className="space-y-3 px-4 pt-1 pb-3 pl-16">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
 
 function Tile({ children }: { children: React.ReactNode }) {
-  return <span className="grid size-9 place-items-center rounded-lg bg-secondary text-muted-foreground">{children}</span>;
+  return <span className={cn(settingsTokenClass(), 'size-9')}>{children}</span>;
 }
 
 /** A site or installed app, under the name and icon it has on the desktop. */
@@ -183,11 +182,11 @@ function SiteRow({
     <Row
       icon={
         blocked ? (
-          <Tile><Ban className="size-4" /></Tile>
+          <Tile><Ban className="size-4.5" strokeWidth={1.75} /></Tile>
         ) : identity.icon ? (
           <AppIcon icon={identity.icon} className="size-9 rounded-lg" />
         ) : (
-          <Tile><Globe className="size-4" /></Tile>
+          <Tile><Globe className="size-4.5" strokeWidth={1.75} /></Tile>
         )
       }
       title={identity.name}
@@ -223,7 +222,7 @@ function CopyLink({ uri }: { uri: string }) {
     <div className="flex items-center gap-2">
       <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">{uri}</code>
       <Button variant="outline" size="sm" onClick={() => copy(uri)}>
-        <Copy className="size-4" aria-hidden />
+        <Copy className="size-4.5" strokeWidth={1.75} aria-hidden />
         Copy
       </Button>
     </div>
@@ -246,19 +245,25 @@ function BunkerLinkView({ connection }: { connection: BunkerConnection }) {
   );
 }
 
-function ConnectAppDialog({
-  open,
-  onOpenChange,
-  initialLink,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  initialLink: string;
-}) {
+/**
+ * Settings → Connected apps → Connect an app, in a window of its own
+ * (src/lib/settingsWindows.ts): make a bunker:// link for an app to connect
+ * with, or take the nostrconnect:// link an app gave (its `link` launch
+ * param, when a page opened one) and show the app it's for, connecting it
+ * only when the user says so. Its `at` launch param starts it over.
+ */
+export function ConnectAppWindow({ windowId, params }: AppComponentProps) {
+  useWindowTitle('Connect an App');
+  const link = typeof params?.link === 'string' ? params.link : '';
+  return <ConnectApp key={`${String(params?.at)}:${link}`} windowId={windowId} initialLink={link} />;
+}
+
+function ConnectApp({ windowId, initialLink }: { windowId: string; initialLink: string }) {
+  const { close } = useWindowActions();
   const { user } = useCurrentUser();
   const { config } = useAppContext();
   const connections = useBunkerConnections();
-  const [tab, setTab] = useState(initialLink ? 'paste' : 'show');
+  const [mode, setMode] = useState<'show' | 'paste'>(initialLink ? 'paste' : 'show');
   const [created, setCreated] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [link, setLink] = useState(initialLink);
@@ -276,7 +281,17 @@ function ConnectAppDialog({
   const parsed: NostrConnectLink | null = trimmed ? (parse.data ?? null) : null;
   const shownError = error ?? (trimmed && parse.error ? bunkerErrorMessage(parse.error) : null);
 
-  if (!bridge || !user) return null;
+  if (!bridge || !user) {
+    return (
+      <div className="h-full bg-background p-4">
+        <div className="px-8 py-12 text-center">
+          <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+            {bridge ? 'Log in to connect apps to your Nostr account.' : 'Connecting apps needs the Din desktop shell.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
   const connection = connections?.find((c) => c.id === created) ?? null;
 
   const createLink = async () => {
@@ -297,7 +312,7 @@ function ConnectAppDialog({
     setAccepting(true);
     try {
       await bridge.accept({ account: user.pubkey, uri: link.trim() });
-      onOpenChange(false);
+      close(windowId);
     } catch (e) {
       setError(bunkerErrorMessage(e));
     } finally {
@@ -308,89 +323,91 @@ function ConnectAppDialog({
   const perms = parsed ? grantRules(parsed.grants) : [];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Connect an app</DialogTitle>
-          <DialogDescription>
-            Apps on your phone or other computers can use your Nostr account through Din (NIP-46). Din asks you before they sign or decrypt anything.
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="show">Give the app a link</TabsTrigger>
-            <TabsTrigger value="paste">Paste the app's link</TabsTrigger>
-          </TabsList>
-          <TabsContent value="show" className="space-y-3 pt-2">
-            {connection?.uri ? (
-              <BunkerLinkView connection={connection} />
-            ) : connection ? (
-              <p className="text-sm text-muted-foreground">Connected. You can close this.</p>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Make a bunker:// link to scan or paste into the app's “log in with a remote signer” option.
-                </p>
-                <Button onClick={createLink} disabled={creating}>
-                  {creating && <Loader2 className="size-4 animate-spin" aria-hidden />}
-                  Make a link
-                </Button>
-              </>
-            )}
-          </TabsContent>
-          <TabsContent value="paste" className="space-y-3 pt-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="nostrconnect-link">nostrconnect:// link</Label>
-              <Input
-                id="nostrconnect-link"
-                value={link}
-                onChange={(e) => {
-                  setLink(e.target.value);
-                  setError(null);
-                }}
-                placeholder="nostrconnect://…"
-                autoComplete="off"
-                spellCheck={false}
-                aria-invalid={Boolean(shownError)}
-              />
-            </div>
-            {parsed && (
-              <div className="space-y-2 rounded-md border bg-muted/20 p-3 text-sm">
-                <div className="flex items-center gap-3">
-                  <Avatar className="size-9 rounded-lg">
-                    {parsed.image && <AvatarImage src={parsed.image} alt="" />}
-                    <AvatarFallback className="rounded-lg">
-                      <Smartphone className="size-4" aria-hidden />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{parsed.name || 'An app'}</p>
-                    <p className="truncate text-xs text-muted-foreground">{parsed.url ?? 'It gave no website'}</p>
-                  </div>
+    <div className="flex h-full flex-col gap-4 overflow-y-auto bg-background p-4 [&>*]:shrink-0">
+      <p className="px-1 text-sm text-muted-foreground">
+        Apps on your phone or other computers can use your Nostr account through Din (NIP-46). Din asks you before they
+        sign or decrypt anything.
+      </p>
+      <SegmentedControl
+        label="How to connect"
+        size="md"
+        value={mode}
+        options={[
+          { value: 'show', label: 'Give the app a link' },
+          { value: 'paste', label: 'Paste the app’s link' },
+        ]}
+        onValueChange={setMode}
+        className="self-center"
+      />
+      {mode === 'show' ? (
+        <div className="space-y-3">
+          {connection?.uri ? (
+            <BunkerLinkView connection={connection} />
+          ) : connection ? (
+            <p className="text-sm text-muted-foreground">Connected. You can close this.</p>
+          ) : (
+            <>
+              <p className="px-1 text-sm text-muted-foreground">
+                Make a bunker:// link to scan or paste into the app’s “log in with a remote signer” option.
+              </p>
+              <Button onClick={createLink} disabled={creating}>
+                {creating && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+                Make a link
+              </Button>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="nostrconnect-link">nostrconnect:// link</Label>
+            <Input
+              id="nostrconnect-link"
+              value={link}
+              onChange={(e) => {
+                setLink(e.target.value);
+                setError(null);
+              }}
+              placeholder="nostrconnect://…"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(shownError)}
+            />
+          </div>
+          {parsed && (
+            <div className={cn(settingsCard, 'space-y-2 px-4 py-3 text-sm')}>
+              <div className="flex items-center gap-3">
+                <Avatar className="size-9 rounded-lg">
+                  {parsed.image && <AvatarImage src={parsed.image} alt="" />}
+                  <AvatarFallback className="rounded-lg">
+                    <Smartphone className="size-4.5" strokeWidth={1.75} aria-hidden />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{parsed.name || 'An app'}</p>
+                  <p className="truncate text-xs text-muted-foreground">{parsed.url ?? 'It gave no website'}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {perms.length > 0
-                    ? `Connecting allows it, without asking: ${perms.map((p) => ruleLabel(p.method, p.kind)).join(', ')}.`
-                    : 'It will ask before signing or decrypting anything.'}
-                </p>
               </div>
-            )}
-            {shownError && <p className="text-sm text-destructive">{shownError}</p>}
-          </TabsContent>
-        </Tabs>
-        {tab === 'paste' && (
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <p className="text-xs text-muted-foreground">
+                {perms.length > 0
+                  ? `Connecting allows it, without asking: ${perms.map((p) => ruleLabel(p.method, p.kind)).join(', ')}.`
+                  : 'It will ask before signing or decrypting anything.'}
+              </p>
+            </div>
+          )}
+          {shownError && <p className="px-1 text-sm text-destructive">{shownError}</p>}
+          <div className="mt-auto flex justify-end gap-2">
+            <Button variant="outline" onClick={() => close(windowId)}>
               Cancel
             </Button>
             <Button onClick={accept} disabled={!parsed || accepting}>
-              {accepting && <Loader2 className="size-4 animate-spin" aria-hidden />}
+              {accepting && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
               Connect
             </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -400,27 +417,13 @@ function ConnectAppDialog({
  * asking. Things can only be taken away here; granting happens in the prompt,
  * where the user can see what is being asked.
  */
-export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: string; nonce?: unknown }) {
+export function ConnectedAppsSection() {
   const { user } = useCurrentUser();
   const { grants, disconnect, revoke } = useSignerGrants();
   const connections = useBunkerConnections();
   const bridge = getBunkerBridge();
   const copyLink = useCopyLink();
-  const [connecting, setConnecting] = useState(Boolean(nostrconnect));
-  const [dialogKey, setDialogKey] = useState(0);
-  const [initialLink, setInitialLink] = useState(nostrconnect ?? '');
-
-  // A nostrconnect:// link opened from a page: show it, connect nothing yet.
-  const linkRequest = nostrconnect ? `${String(nonce)}:${nostrconnect}` : null;
-  const [seenRequest, setSeenRequest] = useState(linkRequest);
-  if (linkRequest !== seenRequest) {
-    setSeenRequest(linkRequest);
-    if (nostrconnect) {
-      setInitialLink(nostrconnect);
-      setDialogKey((k) => k + 1);
-      setConnecting(true);
-    }
-  }
+  const { open } = useWindowActions();
 
   const sites = Object.entries(grants).sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
   const remote = (connections ?? [])
@@ -428,26 +431,22 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
     .sort((a, b) => (b.lastUsed ?? b.createdAt) - (a.lastUsed ?? a.createdAt));
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-foreground">Connected apps</h2>
-        {bridge && user && (
+    <SettingsSection
+      title="Connected apps"
+      actions={
+        bridge && user && (
           <Button
             size="sm"
-            onClick={() => {
-              setInitialLink('');
-              setDialogKey((k) => k + 1);
-              setConnecting(true);
-            }}
+            onClick={() => open(CONNECT_APP_APP_ID, connectAppParams())}
           >
-            <Plus className="size-4" aria-hidden />
+            <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
             Connect an app
           </Button>
-        )}
-      </header>
-
+        )
+      }
+    >
       {!user ? (
-        <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+        <div className="px-8 py-12 text-center">
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">Log in to connect sites and apps to your Nostr account.</p>
         </div>
       ) : (
@@ -457,88 +456,89 @@ export function ConnectedAppsSection({ nostrconnect, nonce }: { nostrconnect?: s
           </p>
 
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-foreground">Sites and installed apps</h3>
+            <SettingsSubHeading>Sites and installed apps</SettingsSubHeading>
             {sites.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border px-8 py-8 text-center">
+              <div className="px-8 py-8 text-center">
                 <p className="mx-auto max-w-sm text-sm text-muted-foreground">No site has connected to your account yet.</p>
               </div>
             ) : (
-              sites.map(([origin, grant]) => (
-                <SiteRow key={origin} origin={origin} grant={grant} onDisconnect={disconnect} onRevoke={revoke} />
-              ))
+              <div className={settingsGroup}>
+                {sites.map(([origin, grant]) => (
+                  <SiteRow key={origin} origin={origin} grant={grant} onDisconnect={disconnect} onRevoke={revoke} />
+                ))}
+              </div>
             )}
           </div>
 
           {bridge && (
-            <div className="space-y-2 border-t border-border/60 pt-4">
-              <h3 className="text-sm font-medium text-foreground">Apps connected with a link</h3>
+            <div className="space-y-2">
+              <SettingsSubHeading>Apps connected with a link</SettingsSubHeading>
               {connections === null ? (
-                <div className="h-14 animate-pulse rounded-md bg-muted/40" />
+                <Skeleton className="h-14 rounded-xl" />
               ) : remote.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border px-8 py-8 text-center">
+                <div className="px-8 py-8 text-center">
                   <p className="mx-auto max-w-sm text-sm text-muted-foreground">
                     No apps yet. Use “Connect an app” to sign in to an app on another device with this account.
                   </p>
                 </div>
               ) : (
-                remote.map((c) => {
-                  const rules = grantRules(c.grants);
-                  const waiting = !c.client;
-                  return (
-                    <Row
-                      key={c.id}
-                      icon={
-                        c.image ? (
-                          <Avatar className="size-9 rounded-lg">
-                            <AvatarImage src={c.image} alt="" />
-                            <AvatarFallback className="rounded-lg">
-                              <Smartphone className="size-4" />
-                            </AvatarFallback>
-                          </Avatar>
-                        ) : (
-                          <Tile>{waiting ? <Link2 className="size-4" /> : <Smartphone className="size-4" />}</Tile>
-                        )
-                      }
-                      title={waiting ? 'Waiting for an app to connect' : c.name || 'An app'}
-                      subtitle={
-                        waiting
-                          ? `Link made ${ago(c.createdAt)}`
-                          : `${summary(rules)} · ${ago(c.lastUsed ?? c.createdAt)}`
-                      }
-                      menu={
-                        <>
-                          {waiting && c.uri && (
-                            <ContextMenuItem onSelect={() => c.uri && copyLink(c.uri)}>
-                              <Copy aria-hidden />
-                              Copy link
+                <div className={settingsGroup}>
+                  {remote.map((c) => {
+                    const rules = grantRules(c.grants);
+                    const waiting = !c.client;
+                    return (
+                      <Row
+                        key={c.id}
+                        icon={
+                          c.image ? (
+                            <Avatar className="size-9 rounded-lg">
+                              <AvatarImage src={c.image} alt="" />
+                              <AvatarFallback className="rounded-lg">
+                                <Smartphone className="size-4.5" strokeWidth={1.75} />
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : (
+                            <Tile>{waiting ? <Link2 className="size-4.5" strokeWidth={1.75} /> : <Smartphone className="size-4.5" strokeWidth={1.75} />}</Tile>
+                          )
+                        }
+                        title={waiting ? 'Waiting for an app to connect' : c.name || 'An app'}
+                        subtitle={
+                          waiting
+                            ? `Link made ${ago(c.createdAt)}`
+                            : `${summary(rules)} · ${ago(c.lastUsed ?? c.createdAt)}`
+                        }
+                        menu={
+                          <>
+                            {waiting && c.uri && (
+                              <ContextMenuItem onSelect={() => c.uri && copyLink(c.uri)}>
+                                <Copy aria-hidden />
+                                Copy link
+                              </ContextMenuItem>
+                            )}
+                            <ContextMenuItem variant="destructive" onSelect={() => bridge.remove(c.id)}>
+                              {waiting ? <X aria-hidden /> : <Unplug aria-hidden />}
+                              {waiting ? 'Delete link' : 'Disconnect'}
                             </ContextMenuItem>
-                          )}
-                          <ContextMenuItem variant="destructive" onSelect={() => bridge.remove(c.id)}>
-                            {waiting ? <X aria-hidden /> : <Unplug aria-hidden />}
-                            {waiting ? 'Delete link' : 'Disconnect'}
-                          </ContextMenuItem>
-                        </>
-                      }
-                    >
-                      {c.url && <p className="break-all text-xs text-muted-foreground">{c.url}</p>}
-                      <p className="break-all text-xs text-muted-foreground">Relays: {c.relays.join(', ')}</p>
-                      {waiting && <BunkerLinkView connection={c} />}
-                      <RuleList rules={rules} onRevoke={(r) => bridge.revoke({ id: c.id, method: r.method, kind: r.kind })} />
-                      <Button variant="outline" size="sm" onClick={() => bridge.remove(c.id)}>
-                        {waiting ? 'Delete link' : 'Disconnect'}
-                      </Button>
-                    </Row>
-                  );
-                })
+                          </>
+                        }
+                      >
+                        {c.url && <p className="break-all text-xs text-muted-foreground">{c.url}</p>}
+                        <p className="break-all text-xs text-muted-foreground">Relays: {c.relays.join(', ')}</p>
+                        {waiting && <BunkerLinkView connection={c} />}
+                        <RuleList rules={rules} onRevoke={(r) => bridge.revoke({ id: c.id, method: r.method, kind: r.kind })} />
+                        <Button variant="outline" size="sm" onClick={() => bridge.remove(c.id)}>
+                          {waiting ? 'Delete link' : 'Disconnect'}
+                        </Button>
+                      </Row>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
         </>
       )}
 
-      {connecting && (
-        <ConnectAppDialog key={dialogKey} open={connecting} onOpenChange={setConnecting} initialLink={initialLink} />
-      )}
-    </section>
+    </SettingsSection>
   );
 }

@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { getWebPushHost, type WebPushStatus } from '@/lib/webPush';
+import { settingsCard } from '@/shared/settingsChromeStyles';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 const QUERY_KEY = ['web-push', 'status'];
 
@@ -35,16 +37,16 @@ export function PushServiceSetting() {
   if (!host) return null;
 
   return (
-    <div className="border-t border-border/60 pt-4">
-      <h3 className="text-sm font-medium text-foreground">Push service</h3>
-      <p className="mb-3 text-xs text-muted-foreground">
+    <div>
+      <SettingsSubHeading>Push service</SettingsSubHeading>
+      <p className="mb-3 px-1 text-xs text-muted-foreground">
         Websites send their notifications through this service while they’re closed. Mozilla’s, the one Firefox
         uses, is the default.
       </p>
       {status ? (
         <ServerForm key={status.url} status={status} />
       ) : (
-        <div className="space-y-2 rounded-md border bg-muted/20 p-3" aria-hidden>
+        <div className={cn(settingsCard, 'space-y-2 px-4 py-3')} aria-hidden>
           <Skeleton className="h-3.5 w-48" />
           <Skeleton className="h-9 w-full" />
         </div>
@@ -67,7 +69,7 @@ function ServerForm({ status }: { status: WebPushStatus }) {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
+      className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}
       onSubmit={(event) => {
         event.preventDefault();
         if (edited) save.mutate(url.trim());
@@ -118,9 +120,9 @@ function StatusLine({ status }: { status: WebPushStatus }) {
   const sites = status.subscriptions === 1 ? '1 subscription' : `${status.subscriptions} subscriptions`;
   const [dot, label] =
     status.state === 'ready'
-      ? ['bg-emerald-500', 'Connected']
+      ? ['bg-success', 'Connected']
       : status.state === 'connecting'
-        ? ['bg-amber-500', 'Connecting…']
+        ? ['bg-warning', 'Connecting…']
         : status.subscriptions === 0
           ? ['bg-muted-foreground/50', 'Connects when a site subscribes']
           : ['bg-destructive', status.lastError ? `Not connected (${status.lastError})` : 'Not connected'];

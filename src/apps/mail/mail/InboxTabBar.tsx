@@ -7,7 +7,7 @@ import { TAB_ICONS } from './tabs';
 
 /** Each tab's own color, as Gmail's: its underline and its count of new mail. */
 const TAB_COLORS: Record<MailCategory, { line: string; text: string; count: string }> = {
-  primary: { line: 'bg-primary', text: 'text-primary', count: 'bg-primary text-primary-foreground' },
+  primary: { line: 'bg-primary', text: 'text-ink-accent', count: 'bg-pigment text-primary-foreground clay-pigment' },
   promotions: { line: 'bg-emerald-600', text: 'text-emerald-700 dark:text-emerald-400', count: 'bg-emerald-700 text-white' },
   social: { line: 'bg-blue-600', text: 'text-blue-700 dark:text-blue-400', count: 'bg-blue-700 text-white' },
   updates: { line: 'bg-orange-600', text: 'text-orange-700 dark:text-orange-400', count: 'bg-orange-700 text-white' },

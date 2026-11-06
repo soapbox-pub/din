@@ -47,10 +47,10 @@ export function OptionToggle({
       onClick={onToggle}
       onMouseDown={(e) => e.preventDefault()}
       className={cn(
-        'grid h-6 min-w-6 shrink-0 place-items-center rounded px-1 font-mono text-xs text-foreground/70',
+        'grid h-6 min-w-6 shrink-0 place-items-center rounded-md px-1 font-mono text-xs text-foreground/70',
         'hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        pressed && 'bg-sidebar-ring/25 text-foreground ring-1 ring-sidebar-ring/60',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        pressed && 'bg-selected text-foreground',
       )}
     >
       {children}
@@ -71,9 +71,9 @@ export function FieldBox({
   return (
     <div
       className={cn(
-        'flex h-8 min-w-0 items-center gap-0.5 rounded-md border border-border bg-background/70 pr-1',
-        'focus-within:ring-2 focus-within:ring-ring',
-        invalid && 'border-destructive',
+        'flex h-8 min-w-0 items-center gap-0.5 rounded-lg bg-foreground/[0.06] pr-1',
+        'focus-within:ring-2 focus-within:ring-ring/60',
+        invalid && 'ring-2 ring-destructive/40',
         className,
       )}
     >
@@ -104,9 +104,9 @@ export function TextButton({
       disabled={disabled}
       title={title}
       className={cn(
-        'h-8 shrink-0 rounded-md px-3 text-sm text-foreground/85',
-        'hover:bg-foreground/10 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'h-8 shrink-0 rounded-full px-3 text-sm text-foreground/85',
+        'hover:bg-foreground/[0.07] hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
       )}
     >
       {children}

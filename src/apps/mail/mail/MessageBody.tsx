@@ -74,7 +74,7 @@ function linkify(text: string, onLink: (href: string) => void): ReactNode[] {
           e.preventDefault();
           onLink(href);
         }}
-        className="text-primary underline-offset-2 hover:underline"
+        className="text-ink-accent underline-offset-2 hover:underline"
       >
         {href}
       </a>,
@@ -103,7 +103,7 @@ export function TextBody({ text, onLink }: { text: string; onLink: (href: string
     <div className="px-6 pt-5 pb-8 text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text">
       {blocks.map((b, i) =>
         b.depth ? (
-          <blockquote key={i} className="my-1 border-l-2 border-primary/70 pl-3 text-muted-foreground" style={{ marginLeft: (b.depth - 1) * 12 }}>
+          <blockquote key={i} className="my-1 border-l-2 border-ink-accent/60 pl-3 text-muted-foreground" style={{ marginLeft: (b.depth - 1) * 12 }}>
             {linkify(b.lines.join('\n'), onLink)}
           </blockquote>
         ) : (

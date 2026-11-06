@@ -22,6 +22,9 @@ import {
   type LoginSessionRelease,
   type LoginSessionStatus,
 } from '@/lib/session';
+import { settingsCard, settingsNotice } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 /** How the login screen names some sessions people come from. */
 const SESSION_NAMES: Record<string, string> = {
@@ -68,8 +71,8 @@ type Confirm = 'return' | 'uninstall' | null;
 function SystemSessionCard({ title, children }: { title: string; children: ReactNode }) {
   return (
     <>
-      <h3 className="mt-2 text-sm font-medium text-muted-foreground">Login screen</h3>
-      <div className="flex items-start gap-3 rounded-xl border border-border/60 p-4">
+      <SettingsSubHeading>Login screen</SettingsSubHeading>
+      <div className={cn(settingsCard, 'flex items-start gap-3 p-4')}>
         <LogIn className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">{title}</p>
@@ -169,10 +172,10 @@ export function LoginSessionSection() {
 
   return (
     <>
-      <h3 className="mt-2 text-sm font-medium text-muted-foreground">Login screen</h3>
+      <SettingsSubHeading>Login screen</SettingsSubHeading>
 
       {!status.installed ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-border/60 p-4">
+        <div className={cn(settingsCard, 'flex flex-col gap-3 p-4')}>
           <div className="flex items-start gap-3">
             <MonitorCog className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
             <div className="min-w-0">
@@ -207,7 +210,7 @@ export function LoginSessionSection() {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 rounded-xl border border-border/60 p-4">
+        <div className={cn(settingsCard, 'flex flex-col gap-3 p-4')}>
           <div className="flex items-start gap-3">
             <LogIn className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
             <div className="min-w-0 flex-1">
@@ -226,7 +229,7 @@ export function LoginSessionSection() {
           </div>
 
           {checkout && hasNewer(status) && (
-            <div className="flex items-center justify-between gap-4 rounded-md border border-primary/40 bg-primary/10 p-3">
+            <div className={cn(settingsNotice, 'flex items-center justify-between gap-4 px-4 py-3')}>
               <p className="min-w-0 text-xs text-foreground">
                 The checkout has changes since: commit{' '}
                 <span className="font-mono">{shortRevision(checkout.commit)}</span>
@@ -236,14 +239,14 @@ export function LoginSessionSection() {
                 {action === 'update' ? (
                   <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />
                 ) : (
-                  <RotateCw className="size-4" aria-hidden />
+                  <RotateCw className="size-4.5" strokeWidth={1.75} aria-hidden />
                 )}
                 Update
               </Button>
             </div>
           )}
           {!status.systemFilesCurrent && !hasNewer(status) && (
-            <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+            <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
               <p className="min-w-0 text-xs text-muted-foreground">The login screen’s files are out of date.</p>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform('update')}>
                 Update
@@ -254,25 +257,25 @@ export function LoginSessionSection() {
           <div className="flex flex-wrap gap-2">
             {status.previous && (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform('rollback')}>
-                <History className="size-4" aria-hidden />
+                <History className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Roll back
               </Button>
             )}
             {isDefault ? (
               running ? (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirm('return')}>
-                  <Undo2 className="size-4" aria-hidden />
+                  <Undo2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                   Return to {previous}
                 </Button>
               ) : (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform('restore')}>
-                  <Undo2 className="size-4" aria-hidden />
+                  <Undo2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                   Log in to {previous} by default
                 </Button>
               )
             ) : (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform('default')}>
-                <Star className="size-4" aria-hidden />
+                <Star className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Log in to Din by default
               </Button>
             )}
@@ -283,7 +286,7 @@ export function LoginSessionSection() {
               disabled={busy}
               onClick={() => setConfirm('uninstall')}
             >
-              <Trash2 className="size-4" aria-hidden />
+              <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
               Remove from login screen…
             </Button>
           </div>
@@ -298,7 +301,7 @@ export function LoginSessionSection() {
           ref={logRef}
           aria-live="polite"
           aria-label="What the installer printed"
-          className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs text-muted-foreground"
+          className="max-h-48 overflow-auto whitespace-pre-wrap rounded-xl bg-foreground/[0.04] p-3 font-mono text-xs text-muted-foreground"
         >
           {lines.join('\n') || 'Starting…'}
         </pre>

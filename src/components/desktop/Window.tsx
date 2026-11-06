@@ -901,6 +901,7 @@ export const Window = memo(function Window({
       img.style.pointerEvents = 'none';
       img.style.willChange = 'transform';
       img.style.zIndex = String(effectZ);
+      img.dataset.windowEffect = '';
       parent.appendChild(img);
 
       el.style.visibility = 'hidden';

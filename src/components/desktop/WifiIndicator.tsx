@@ -88,20 +88,20 @@ export function WifiPopoverBody() {
         </p>
       )}
 
-      {ethernet && (
-        <div className={cn('mx-2 mt-1 w-auto', trayRowClass(true))}>
-          <span className={trayTokenClass(true)}>
-            <EthernetPort className="size-4" aria-hidden />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-foreground">Ethernet</span>
-            <span className="block text-xs text-primary">Connected</span>
-          </span>
-          <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
-        </div>
-      )}
-
+      {/* One scroller for Ethernet and the networks, so they share its gutter and line up. */}
       <div className="max-h-80 overflow-y-auto p-2">
+        {ethernet && (
+          <div className={cn(trayRowClass(true), 'mb-0.5')}>
+            <span className={trayTokenClass(true)}>
+              <EthernetPort className="size-4" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-foreground">Ethernet</span>
+              <span className="block text-xs text-muted-foreground">Connected</span>
+            </span>
+            <Check className="size-4 shrink-0 text-ink-accent" aria-hidden />
+          </div>
+        )}
         {!radioEnabled ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             Wi-Fi is turned off.
@@ -224,7 +224,7 @@ function QuickNetworkRow({
             {pending ? (
               <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden />
             ) : network.inUse ? (
-              <Check className="size-4 shrink-0 text-primary" aria-hidden />
+              <Check className="size-4 shrink-0 text-ink-accent" aria-hidden />
             ) : (
               secured && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Secured" />
             )}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, StickyNote } from 'lucide-react';
 import {
   AlertDialog,
@@ -21,15 +21,15 @@ import { cleanPasswordsError, type CopyField, type PasswordItem, type PasswordLi
 import { useOnLaunch, windowLaunch, type Launch } from '@/shared/launch';
 import { useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { toast } from '@/shared/toast';
-import { SearchField, ToolButton } from '@/shared/appChrome';
+import { ContentPane, SearchField, ToolButton } from '@/shared/appChrome';
 import { flushPane, focusRing, listRowClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
-import { ImportDialog } from './passwords/ImportDialog';
+import { ImportWindow } from './passwords/ImportWindow';
 import { ItemDetail } from './passwords/ItemDetail';
 import { ItemEditor } from './passwords/ItemEditor';
 import { ItemIcon } from './passwords/ItemIcon';
 import { ItemMenuItems, type ItemActions } from './passwords/ItemActions';
 import { LockScreen, SetupScreen } from './passwords/LockScreen';
-import { SettingsDialog } from './passwords/SettingsDialog';
+import { SettingsWindow } from './passwords/SettingsWindow';
 import { Sidebar } from './passwords/Sidebar';
 import {
   blankItem,
@@ -39,17 +39,24 @@ import {
   matchesSearch,
   sectionTitle,
   siteHost,
+  openPasswordsWindow,
   useBridge,
+  useImported,
   useVaultEvents,
   useVaultList,
   useVaultState,
   type BlankItem,
+  type PasswordsWindow,
   type Section,
 } from './passwords/vault';
 
 /** What a launch asks for: an item to show (the browser's "Open in Passwords"). */
 function launchedItem({ params }: Launch): string | null {
   return typeof params.item === 'string' ? params.item : null;
+}
+
+function windowKind({ params }: Launch): PasswordsWindow | null {
+  return params.window === 'settings' || params.window === 'import' ? params.window : null;
 }
 
 function TitleBar({ children, className }: { children?: React.ReactNode; className?: string }) {
@@ -75,9 +82,11 @@ function TitleBar({ children, className }: { children?: React.ReactNode; classNa
  */
 export function Passwords() {
   useVaultEvents();
-  useWindowTitle('Passwords');
   const bridge = useBridge();
   const { data: state, isLoading } = useVaultState();
+  // A window opened for the app's settings or an import, rather than the vault.
+  const [kind] = useState(() => windowKind(windowLaunch()));
+  useWindowTitle(kind === 'settings' ? 'Passwords Settings' : kind === 'import' ? 'Import Passwords' : 'Passwords');
 
   let body: React.ReactNode;
   if (!bridge) {
@@ -93,17 +102,25 @@ export function Passwords() {
     body = <SetupScreen computerPassword={state.computerPassword} />;
   } else if (state.locked) {
     body = <LockScreen />;
+  } else if (kind === 'settings') {
+    return <SettingsWindow state={state} />;
+  } else if (kind === 'import') {
+    return <ImportWindow />;
   } else {
     return (
-      <div className="@container/passwords relative flex h-full w-full bg-background text-foreground">
+      // No background of its own: the sidebar sits on the window's glass, and
+      // the list and item on the solid pane beside it.
+      <div className="@container/passwords relative flex h-full w-full text-foreground">
         <Vault state={state} />
       </div>
     );
   }
   return (
-    <div className="@container/passwords flex h-full w-full flex-col bg-background text-foreground">
+    <div className="@container/passwords flex h-full w-full flex-col text-foreground">
       <TitleBar />
-      {body}
+      <ContentPane inset={false} className="border-t-0">
+        {body}
+      </ContentPane>
     </div>
   );
 }
@@ -137,8 +154,6 @@ function Vault({ state }: { state: PasswordsState }) {
   const [editing, setEditing] = useState<Editing>(null);
   const [search, setSearch] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [emptying, setEmptying] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
@@ -237,6 +252,16 @@ function Vault({ state }: { state: PasswordsState }) {
     setEditing(null);
     setSidebarOpen(false);
   };
+  // An import done in its window shows what came in.
+  const selectRef = useRef(selectSection);
+  useEffect(() => {
+    selectRef.current = selectSection;
+  });
+  useImported(
+    useCallback((result) => {
+      if (result.added > 0) selectRef.current(result.folderId ? { type: 'folder', id: result.folderId } : { type: 'all' });
+    }, []),
+  );
 
   // New (or, in Recently Deleted, Delete All): beside the name in the
   // sidebar's title, or the search while the sidebar's hidden.
@@ -253,16 +278,16 @@ function Vault({ state }: { state: PasswordsState }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={() => startNew('login')}>
-          <KeyRound className="size-4" aria-hidden />
+          <KeyRound className="size-4.5" strokeWidth={1.75} aria-hidden />
           New Password
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => startNew('note')}>
-          <StickyNote className="size-4" aria-hidden />
+          <StickyNote className="size-4.5" strokeWidth={1.75} aria-hidden />
           New Secure Note
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => setImportOpen(true)}>
-          <FileUp className="size-4" aria-hidden />
+        <DropdownMenuItem onSelect={() => openPasswordsWindow('import')}>
+          <FileUp className="size-4.5" strokeWidth={1.75} aria-hidden />
           Import Passwords…
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -286,7 +311,7 @@ function Vault({ state }: { state: PasswordsState }) {
             onRenameFolder={(id) => setFolderPrompt({ mode: 'rename', id, name: folderName(id) })}
             onDeleteFolder={(id) => (folderCount(id) > 0 ? setDeletingFolder(id) : void bridge.deleteGroup(id).catch(fail))}
             onEmptyTrash={() => setEmptying(true)}
-            onSettings={() => setSettingsOpen(true)}
+            onSettings={() => openPasswordsWindow('settings')}
             onLock={() => void bridge.lock()}
             actions={newItem}
             className={cn(
@@ -345,7 +370,7 @@ function Vault({ state }: { state: PasswordsState }) {
                   setSelected(null);
                 }}
               >
-                <ChevronLeft className="size-4" aria-hidden />
+                <ChevronLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
                 {sectionTitle(section, list)}
               </Button>
             </TitleBar>
@@ -354,7 +379,7 @@ function Vault({ state }: { state: PasswordsState }) {
           <section
             aria-label={sectionTitle(section, list)}
             className={cn(
-              'flex min-w-0 flex-1 flex-col border-r border-border/60 @2xl/passwords:w-72 @2xl/passwords:flex-none',
+              'relative flex min-w-0 flex-1 flex-col @2xl/passwords:w-72 @2xl/passwords:flex-none @2xl/passwords:after:absolute @2xl/passwords:after:inset-y-3 @2xl/passwords:after:right-0 @2xl/passwords:after:w-px @2xl/passwords:after:bg-border/70',
               showDetail && 'hidden @2xl/passwords:flex',
             )}
           >
@@ -362,7 +387,7 @@ function Vault({ state }: { state: PasswordsState }) {
               {!list ? (
                 <ListSkeleton />
               ) : items.length === 0 ? (
-                <EmptyList section={section} searching={!!search.trim()} onNew={startNew} onImport={() => setImportOpen(true)} />
+                <EmptyList section={section} searching={!!search.trim()} onNew={startNew} onImport={() => openPasswordsWindow('import')} />
               ) : (
                 <ul
                   ref={listRef}
@@ -415,25 +440,6 @@ function Vault({ state }: { state: PasswordsState }) {
           </div>
         </div>
       </div>
-
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        state={state}
-        onImport={() => {
-          setSettingsOpen(false);
-          setImportOpen(true);
-        }}
-      />
-
-      <ImportDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onImported={(result) => {
-          if (result.added === 0) return;
-          selectSection(result.folderId ? { type: 'folder', id: result.folderId } : { type: 'all' });
-        }}
-      />
 
       <FolderDialog
         prompt={folderPrompt}
@@ -576,17 +582,17 @@ function EmptyList({
             ? 'Keep things like recovery codes and Wi-Fi passwords in secure notes.'
             : 'Passwords you save in the Web Browser, or add here, appear in this list.';
   return (
-    <div className="m-2 rounded-xl border border-dashed border-border px-4 py-10 text-center">
+    <div className="m-2 rounded-xl px-4 py-10 text-center">
       <p className="mx-auto max-w-xs text-sm text-muted-foreground">{text}</p>
       {!searching && section.type !== 'trash' && section.type !== 'codes' && (
         <Button variant="secondary" size="sm" className="mt-4" onClick={() => onNew(section.type === 'notes' ? 'note' : 'login')}>
-          <Plus className="size-4" aria-hidden />
+          <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
           {section.type === 'notes' ? 'New Secure Note' : 'New Password'}
         </Button>
       )}
       {!searching && section.type === 'all' && (
         <Button variant="ghost" size="sm" className="mt-2 ml-2" onClick={onImport}>
-          <FileUp className="size-4" aria-hidden />
+          <FileUp className="size-4.5" strokeWidth={1.75} aria-hidden />
           Import…
         </Button>
       )}
@@ -600,7 +606,7 @@ function NothingSelected({ count, autoUnlock }: { count: number; autoUnlock: boo
       <img src="/icons/apps/passwords.png" alt="" className="size-20 opacity-90" />
       <p className="text-lg font-medium">{count === 1 ? '1 item' : `${count} items`}</p>
       <p className="flex max-w-xs items-center gap-1.5 text-sm text-muted-foreground">
-        <Lock className="size-3.5 shrink-0" aria-hidden />
+        <Lock className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
         {autoUnlock ? 'Unlocks when you sign in to this computer.' : 'Asks for its password each time.'}
       </p>
     </div>

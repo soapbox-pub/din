@@ -229,7 +229,7 @@ function PrintForm({ document, onClose }: { document: PrintDocument; onClose: ()
             void submit();
           }}
         >
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold">Print</h2>
               <p className="truncate text-sm text-muted-foreground" title={document.title}>
@@ -270,7 +270,7 @@ function PrintForm({ document, onClose }: { document: PrintDocument; onClose: ()
                 </p>
               )}
               {printer?.problem && (
-                <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <p className="flex items-center gap-1.5 text-xs text-warning">
                   <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
                   {printer.problem}
                 </p>

@@ -29,7 +29,7 @@ function pubkeyFrom(input: string): Participant | null {
   return null;
 }
 
-const field = 'h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 aria-invalid:border-destructive';
+const field = 'h-9 w-full rounded-lg bg-foreground/[0.06] px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 aria-invalid:border-destructive';
 
 /** Making or changing an event. */
 export function EventEditor({
@@ -258,7 +258,7 @@ export function EventEditor({
             rows={4}
             value={draft.description}
             onChange={(e) => set({ description: e.target.value })}
-            className="w-full resize-y rounded-md border border-input bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+            className="w-full resize-y rounded-lg bg-foreground/[0.06] px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
           />
         </div>
         <div className="flex items-center gap-2 border-t border-border/60 px-5 py-3">

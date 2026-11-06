@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { describeZone, getDateTimeBridge, zoneOffset, type ZonePlace } from '@/lib/datetime';
 import { WORLD_LAND_PATH } from '@/lib/worldMap';
+import { settingsCard } from '@/shared/settingsChromeStyles';
 
 /**
  * Settings → Date & Time's map of the world: click where you are, and the
@@ -112,7 +113,7 @@ export function TimeZoneMap({
   const hoverZone = hover?.zone ?? null;
 
   return (
-    <div className={cn('relative overflow-hidden rounded-md border bg-muted/20', disabled && 'opacity-80')}>
+    <div className={cn(settingsCard, 'relative overflow-hidden', disabled && 'opacity-80')}>
       <svg
         ref={svgRef}
         viewBox={VIEW_BOX}
@@ -146,7 +147,7 @@ export function TimeZoneMap({
       </svg>
       {hover && hoverZone && (
         <div
-          className="pointer-events-none absolute z-10 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm"
+          className="pointer-events-none absolute z-10 whitespace-nowrap rounded-lg glass-surface px-2 py-1 text-xs text-popover-foreground"
           style={{
             left: `${hover.fx * 100}%`,
             top: `${hover.fy * 100}%`,

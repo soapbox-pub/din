@@ -755,9 +755,9 @@ export function Viewer() {
 
   if (!mail) {
     return (
-      <div className="flex h-full flex-col bg-background">
+      <div className="flex h-full flex-col">
         <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-3"><WindowControls /></WindowDragRegion>
-        <div className="grid flex-1 place-items-center p-8 text-center text-muted-foreground">Mail needs the Din desktop app to reach mail servers.</div>
+        <div className="grid flex-1 place-items-center bg-background p-8 text-center text-muted-foreground">Mail needs the Din desktop app to reach mail servers.</div>
       </div>
     );
   }
@@ -888,7 +888,7 @@ export function Viewer() {
       )}
       {filter === 'unread' && !current && (
         <div className="flex shrink-0 items-center gap-2 px-4 pt-2 pb-1">
-          <button type="button" onClick={filterUnread} className={cn('flex h-7 items-center gap-1.5 rounded-full bg-primary/12 pr-2 pl-3 text-xs font-medium hover:bg-primary/20', focusRing)}>
+          <button type="button" onClick={filterUnread} className={cn('flex h-7 items-center gap-1.5 rounded-full bg-selected pr-2 pl-3 text-xs font-medium hover:bg-foreground/[0.07]', focusRing)}>
             Unread only <X className="size-3.5" aria-label="Show all" />
           </button>
         </div>
@@ -898,7 +898,7 @@ export function Viewer() {
       ) : messages.isError ? (
         <div className="p-6 text-center text-[13px] text-muted-foreground">
           <p>{messages.error instanceof Error ? messages.error.message : 'Mail couldn’t load this mailbox.'}</p>
-          <button type="button" onClick={() => void messages.refetch()} className="mt-3 text-primary hover:underline">Try Again</button>
+          <button type="button" onClick={() => void messages.refetch()} className="mt-3 text-ink-accent hover:underline">Try Again</button>
         </div>
       ) : !conversations.length ? (
         <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-foreground">
@@ -958,7 +958,7 @@ export function Viewer() {
                 <button
                   type="button"
                   onClick={() => newMessage(defaultAccount)}
-                  className={cn('flex h-9 flex-1 items-center gap-2.5 rounded-full bg-primary/15 px-3.5 text-sm font-medium hover:bg-primary/20', focusRing)}
+                  className={cn('flex h-9 flex-1 items-center gap-2.5 rounded-full bg-selected px-3.5 text-sm font-medium hover:bg-foreground/[0.07]', focusRing)}
                 >
                   <SquarePen className="size-4.5" strokeWidth={1.75} /> Compose
                 </button>

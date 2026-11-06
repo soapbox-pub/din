@@ -98,5 +98,25 @@ export function themeColorTokens(color: string): Record<string, string> {
     '--muted-foreground': dark ? 'rgb(255 255 255 / 0.8)' : 'rgb(0 0 0 / 0.7)',
     '--border': dark ? 'rgb(255 255 255 / 0.2)' : 'rgb(0 0 0 / 0.15)',
     '--background': dark ? 'rgb(0 0 0 / 0.25)' : 'rgb(255 255 255 / 0.5)',
+    // What the root derives from the theme (src/index.css) keeps the root's
+    // values unless it's re-pointed here too.
+    '--raised': dark ? 'rgb(0 0 0 / 0.25)' : 'rgb(255 255 255 / 0.5)',
+    '--secondary': dark ? 'rgb(255 255 255 / 0.15)' : 'rgb(0 0 0 / 0.06)',
+    '--ink-accent': dark ? '#ffffff' : '#000000',
+    '--selected': dark ? 'rgb(255 255 255 / 0.18)' : 'rgb(0 0 0 / 0.08)',
+    '--success': dark ? 'hsl(152 70% 72%)' : 'hsl(152 75% 22%)',
+    '--warning': dark ? 'hsl(40 95% 72%)' : 'hsl(30 95% 28%)',
   };
 }
+
+/** The token names themeColorTokens re-points. */
+const TINTED = ['foreground', 'muted-foreground', 'border', 'background', 'raised', 'secondary', 'ink-accent', 'selected', 'success', 'warning'];
+
+/**
+ * For what floats over tinted chrome in Din's own glass (a list under the
+ * address bar): `untintedSource` on an untinted ancestor keeps the theme's
+ * tokens under other names, and `untintedTokens` on the floating thing puts
+ * them back, so its text matches its glass rather than the page's color.
+ */
+export const untintedSource: Record<string, string> = Object.fromEntries(TINTED.map((t) => [`--untinted-${t}`, `var(--${t})`]));
+export const untintedTokens: Record<string, string> = Object.fromEntries(TINTED.map((t) => [`--${t}`, `var(--untinted-${t})`]));

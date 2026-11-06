@@ -44,6 +44,8 @@ import {
   proxySummary,
   shownMac,
 } from '@/lib/wifiForm';
+import { settingsCard } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
 
 /**
  * One saved network, the way Android shows it: what it's connected with
@@ -79,7 +81,7 @@ export function WifiNetworkDetails({
       {details.isLoading ? (
         <DetailsSkeleton />
       ) : details.isError || !data ? (
-        <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center text-sm text-muted-foreground">
+        <div className="px-8 py-12 text-center text-sm text-muted-foreground">
           {details.isError ? cleanWifiError(details.error) : 'This network is no longer saved.'}
         </div>
       ) : (
@@ -469,7 +471,7 @@ function ShareDialog({ details, onClose }: { details: WifiDetails; onClose: () =
         {state === null ? (
           <Skeleton className="mx-auto size-56 rounded-lg" />
         ) : state.error || !payload ? (
-          <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {state.error ?? "This network's password isn't saved, so it can't be shared."}
           </p>
         ) : (
@@ -478,7 +480,7 @@ function ShareDialog({ details, onClose }: { details: WifiDetails; onClose: () =
               <QRCodeCanvas value={payload} size={224} />
             </div>
             {!open && state.password && (
-              <div className="flex w-full items-center gap-2 rounded-lg border border-border/60 px-3 py-2">
+              <div className={cn(settingsCard, 'flex w-full items-center gap-2 px-3 py-2')}>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-muted-foreground">Wi-Fi password</p>
                   <p className="break-all font-mono text-sm text-foreground select-text">{state.password}</p>
@@ -492,7 +494,7 @@ function ShareDialog({ details, onClose }: { details: WifiDetails; onClose: () =
                     void navigator.clipboard.writeText(state.password).then(() => setCopied(true));
                   }}
                 >
-                  {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  {copied ? <Check className="size-4.5" strokeWidth={1.75} /> : <Copy className="size-4.5" strokeWidth={1.75} />}
                 </Button>
               </div>
             )}

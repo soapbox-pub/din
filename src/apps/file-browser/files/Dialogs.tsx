@@ -99,7 +99,7 @@ export function CompressDialog({
             onFocus={(e) => e.currentTarget.select()}
             spellCheck={false}
             autoComplete="off"
-            className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-8 min-w-0 flex-1 rounded-lg bg-foreground/[0.06] px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <span className="shrink-0 font-mono text-sm text-muted-foreground">{ext}</span>
         </div>
@@ -111,7 +111,7 @@ export function CompressDialog({
                 key={f.ext}
                 className={cn(
                   'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm',
-                  ext === f.ext ? 'bg-primary/15 text-foreground' : 'text-foreground/80 hover:bg-foreground/5',
+                  ext === f.ext ? 'bg-selected text-foreground' : 'text-foreground/80 hover:bg-foreground/5',
                 )}
               >
                 <input
@@ -264,7 +264,7 @@ function SingleProperties({ path }: { path: string }) {
         </Row>
       </dl>
 
-      <div className="mt-3 rounded-lg border border-border/60 p-3">
+      <div className="mt-3 rounded-xl bg-card clay p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <p className="text-sm font-medium text-foreground">Permissions</p>
           <span className="font-mono text-xs text-muted-foreground">{d.mode.toString(8).padStart(4, '0')}</span>

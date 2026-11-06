@@ -394,7 +394,7 @@ export function Composer({
   return (
     <div
       className={cn(
-        'relative flex flex-col gap-2 rounded-2xl border border-border/60 bg-card p-2 shadow-sm transition-shadow focus-within:shadow-md',
+        'relative flex flex-col gap-2 rounded-2xl bg-card clay p-2 transition-shadow focus-within:shadow-md',
         className,
       )}
       // The whole box takes files, not just the text in it.
@@ -419,7 +419,7 @@ export function Composer({
           id={menuID}
           role="listbox"
           aria-label="Commands"
-          className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-64 overflow-y-auto rounded-xl glass-surface p-1 text-popover-foreground shadow-lg"
         >
           {matches.map((command, index) => (
             <li
@@ -521,7 +521,7 @@ export function Composer({
             title={dictating ? 'Stop dictating' : 'Dictate (Super+H)'}
             className={cn(
               'size-8 rounded-full text-muted-foreground hover:text-foreground',
-              dictating && 'bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary',
+              dictating && 'bg-selected text-foreground hover:bg-foreground/[0.07] hover:text-ink-accent',
             )}
           >
             <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />

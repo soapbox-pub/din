@@ -18,6 +18,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
 import { normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 interface Relay {
   url: string;
@@ -181,14 +183,12 @@ export function RelayListManager() {
   return (
     <div className="space-y-4">
       {/* Relay List */}
-      <div className="space-y-2">
+      <div className={settingsGroup}>
         {relays.map((relay) => (
           <ContextMenu key={relay.url}>
             <ContextMenuTrigger asChild>
-              <div
-                className="flex items-center gap-3 p-3 rounded-md border bg-muted/20"
-              >
-                <Wifi className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex items-center gap-3 py-2 pr-2 pl-4">
+                <SettingsToken icon={Wifi} />
                 <span className="font-mono text-sm flex-1 truncate" title={relay.url}>
                   {renderRelayUrl(relay.url)}
                 </span>
@@ -199,9 +199,10 @@ export function RelayListManager() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-5 text-muted-foreground hover:text-foreground shrink-0"
+                      className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label={`Settings for ${renderRelayUrl(relay.url)}`}
                     >
-                      <Settings className="h-4 w-4" />
+                      <Settings className="size-4.5" strokeWidth={1.75} />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-48" align="end">
@@ -214,7 +215,6 @@ export function RelayListManager() {
                           id={`read-${relay.url}`}
                           checked={relay.read}
                           onCheckedChange={() => handleToggleRead(relay.url)}
-                          className="data-[state=checked]:bg-green-500 scale-75"
                         />
                       </div>
                       <div className="flex items-center justify-between">
@@ -225,7 +225,6 @@ export function RelayListManager() {
                           id={`write-${relay.url}`}
                           checked={relay.write}
                           onCheckedChange={() => handleToggleWrite(relay.url)}
-                          className="data-[state=checked]:bg-blue-500 scale-75"
                         />
                       </div>
                     </div>
@@ -237,10 +236,11 @@ export function RelayListManager() {
                   variant="ghost"
                   size="icon"
                   onClick={() => handleRemoveRelay(relay.url)}
-                  className="size-5 text-muted-foreground hover:text-destructive hover:bg-transparent shrink-0"
+                  className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label={`Remove ${renderRelayUrl(relay.url)}`}
                   disabled={relays.length <= 1}
                 >
-                  <X className="h-4 w-4" />
+                  <X className="size-4.5" strokeWidth={1.75} />
                 </Button>
               </div>
             </ContextMenuTrigger>

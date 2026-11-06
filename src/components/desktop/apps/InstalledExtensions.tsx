@@ -25,6 +25,7 @@ import { CRX_EXTENSIONS_KEY, useCrxExtensions } from '@/hooks/useThemePackages';
 import { useToast } from '@/hooks/useToast';
 import { crxIconUrl, getCrxBridge, type CrxExtension } from '@/lib/crx';
 import type { Userscript } from '@/lib/userscripts';
+import { ToolButton } from '@/shared/appChrome';
 
 /** Where the Chrome Web Store's extensions come from. */
 const WEB_STORE_URL = 'https://chromewebstore.google.com/';
@@ -151,7 +152,7 @@ export function InstalledExtensions({
             </div>
           </div>
           {extensions == null ? null : extensions.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+            <p className="rounded-2xl px-4 py-6 text-center text-sm text-muted-foreground">
               No extensions installed yet. Get one below, or add your own.
             </p>
           ) : (
@@ -159,7 +160,7 @@ export function InstalledExtensions({
               {extensions.map((extension) => (
                 <ContextMenu key={extension.id}>
                   <ContextMenuTrigger asChild>
-                    <li className="flex items-center gap-3 rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+                    <li className="flex items-center gap-3 rounded-xl bg-card clay p-3">
                       <ExtensionIcon id={extension.id} />
                       <div className="min-w-0 flex-1">
                         <p className="flex items-center gap-2 text-sm font-medium">
@@ -174,15 +175,9 @@ export function InstalledExtensions({
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8 shrink-0"
-                            aria-label={`More for ${extension.name}`}
-                            title="More"
-                          >
-                            <MoreHorizontal className="size-4" aria-hidden />
-                          </Button>
+                          <ToolButton size="sm" label={`More for ${extension.name}`}>
+                            <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />
+                          </ToolButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-52">
                           {actions(extension).map((action) => (
@@ -205,7 +200,7 @@ export function InstalledExtensions({
       )}
 
       {userscripts !== null && (
-        <section className="rounded-xl border border-border/70 bg-card p-4 shadow-sm [&>div]:border-t-0 [&>div]:pt-0" aria-label="Userscripts">
+        <section aria-label="Userscripts">
           <UserscriptsSection
             scripts={userscripts}
             onSetEnabled={onSetUserscriptEnabled}
@@ -256,8 +251,8 @@ function ExtensionIcon({ id }: { id: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary">
-        <Puzzle className="size-5 text-muted-foreground" aria-hidden />
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground/10 text-foreground/75 clay">
+        <Puzzle className="size-4.5" strokeWidth={1.75} aria-hidden />
       </span>
     );
   }

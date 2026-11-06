@@ -87,7 +87,7 @@ const Row = ({
       } : undefined}
       className={cn(
         sidebarRowClass(selected),
-        over && 'bg-primary/20 ring-2 ring-primary/60',
+        over && 'bg-selected ring-2 ring-ring/60',
         disabled && 'opacity-50',
         className,
       )}

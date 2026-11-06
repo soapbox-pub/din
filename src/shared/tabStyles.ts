@@ -16,13 +16,13 @@ export const tabListClass = 'flex min-w-0 flex-1 touch-none items-center gap-1 o
 
 /** The raised look of the active tab (and of one being dragged). */
 export const tabRaisedClass =
-  'glass-control glass-control-raised bg-background text-foreground shadow-[0_0.5px_1px_rgb(0_0_0/0.07),0_0_0_0.5px_rgb(0_0_0/0.09)] dark:bg-foreground/[0.12] dark:shadow-[0_0.5px_1px_rgb(0_0_0/0.25)]';
+  'glass-control glass-control-raised bg-raised text-foreground shadow-[0_0.5px_1px_rgb(0_0_0/0.07),0_0_0_0.5px_rgb(0_0_0/0.09)] dark:shadow-[0_0.5px_1px_rgb(0_0_0/0.25)]';
 
 /** A tab. */
 export function tabClass({ active, dragging }: { active: boolean; dragging?: boolean }) {
   return cn(
     'glass-control group relative flex h-7 cursor-default select-none items-center justify-center rounded-md text-xs transition-[background-color,color] duration-150',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
     active
       ? tabRaisedClass
       : 'bg-foreground/[0.05] text-muted-foreground hover:bg-foreground/[0.09] hover:text-foreground',
@@ -52,12 +52,12 @@ export const tabCloseClass = cn(
   'absolute right-1 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-foreground/60',
   'opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
   '@max-[3.25rem]:left-1/2 @max-[3.25rem]:-translate-x-1/2',
-  'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
 );
 
 /** The new-tab button after the last tab. */
 export const newTabButtonClass = cn(
   'ml-1 grid size-7 shrink-0 place-items-center rounded-md text-foreground/70',
   'hover:bg-foreground/[0.08] hover:text-foreground',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
 );

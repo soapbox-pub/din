@@ -65,7 +65,7 @@ function MethodTag({ s }: { s: Pick<MailSubscription, 'method' | 'verified'> }) 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
       {!s.verified && (
-        <StatusPill title="Its sender couldn’t be checked" className="bg-amber-500/15 text-amber-700 dark:text-amber-300">
+        <StatusPill title="Its sender couldn’t be checked" className="bg-warning/15 text-warning">
           <ShieldAlert className="size-3" /> Unverified
         </StatusPill>
       )}
@@ -77,7 +77,7 @@ function MethodTag({ s }: { s: Pick<MailSubscription, 'method' | 'verified'> }) 
 function Outcome({ result, onOpen }: { result: UnsubscribeResult; onOpen: (url: string) => void }) {
   if (result.status === 'done') {
     return (
-      <span className="flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+      <span className="flex items-center gap-1 text-xs font-medium text-success">
         <CircleCheck className="size-3.5" /> Unsubscribed{result.trashed ? `, ${plural(result.trashed, 'email')} to Trash` : ''}
       </span>
     );
@@ -136,7 +136,7 @@ const Row = ({
           </span>
           {s.unsubscribed && !result && (
             s.since > 0 ? (
-              <span className="flex items-center gap-1 truncate font-medium text-amber-700 dark:text-amber-300">
+              <span className="flex items-center gap-1 truncate font-medium text-warning">
                 <CircleAlert className="size-3.5 shrink-0" /> Still mailing: {plural(s.since, 'email')} since you unsubscribed
               </span>
             ) : (
@@ -318,12 +318,12 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
         <ListSkeleton />
       ) : !total ? (
         <div className="grid flex-1 place-items-center p-8">
-          <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <div className="max-w-sm rounded-xl px-8 py-12 text-center">
             <MailMinus className="mx-auto mb-3 size-10 text-muted-foreground/60" strokeWidth={1.25} />
             <p className="text-[15px] font-medium">No mailing lists</p>
             <p className="mt-1 text-[13px] text-muted-foreground">Nothing in your inbox from the last {months >= 12 ? plural(months / 12, 'year') : `${months} months`} says how to unsubscribe.</p>
             {span < SPANS.length - 1 && (
-              <button type="button" onClick={() => setSpan(span + 1)} className="mt-4 text-[13px] font-medium text-primary outline-none hover:underline focus-visible:underline">
+              <button type="button" onClick={() => setSpan(span + 1)} className="mt-4 text-[13px] font-medium text-ink-accent outline-none hover:underline focus-visible:underline">
                 Look Further Back
               </button>
             )}
@@ -352,7 +352,7 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
             <div className="mt-4 flex items-center justify-center gap-2 px-5 text-xs text-muted-foreground">
               <span>Mail looked at your inbox from the last {months >= 12 ? plural(months / 12, 'year') : `${months} months`}.</span>
               {span < SPANS.length - 1 && (
-                <button type="button" onClick={() => setSpan(span + 1)} disabled={fetching} className="font-medium text-primary outline-none hover:underline focus-visible:underline disabled:opacity-50">
+                <button type="button" onClick={() => setSpan(span + 1)} disabled={fetching} className="font-medium text-ink-accent outline-none hover:underline focus-visible:underline disabled:opacity-50">
                   Look Further Back
                 </button>
               )}
@@ -447,7 +447,7 @@ export function UnsubscribeDialog({ item, onClose }: { item: Item; onClose: () =
       <>
         <p className="text-[13px] text-muted-foreground">{way}</p>
         {!info.verified && (
-          <p className="flex gap-2 text-[13px] text-amber-700 dark:text-amber-300">
+          <p className="flex gap-2 text-[13px] text-warning">
             <ShieldAlert className="mt-0.5 size-4 shrink-0" /> This message couldn’t be checked as coming from who it says. If it’s spam, move it to Junk instead: unsubscribing tells a spammer your address is read.
           </p>
         )}

@@ -54,7 +54,10 @@ itself, not both.
 With `"launch_handler": { "client_mode": "focus-existing" }` in the
 manifest, launching a running app focuses its window and gives
 `launchQueue`'s consumer the new launch there, instead of opening a new
-window:
+window. The app's own `window.open(appLink(null, params))` still opens
+another window of it, for what doesn't belong in a dialog (its settings, an
+import, a form), named by a `window` launch parameter (`{ window: 'settings' }`):
+only launches from elsewhere go to the window it has, the one without one.
 
 ```ts
 useOnLaunch(({ params }) => {

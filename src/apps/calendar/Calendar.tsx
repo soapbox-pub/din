@@ -544,7 +544,7 @@ export function Calendar() {
                 placeholder="Work, Family, Meetups…"
                 value={naming.title}
                 onChange={(e) => setNaming({ ...naming, title: e.target.value })}
-                className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                className="h-9 w-full rounded-lg bg-foreground/[0.06] px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
               />
               <div className="flex justify-end gap-2">
                 <DialogButton onClick={() => setNaming(null)}>Cancel</DialogButton>

@@ -78,7 +78,7 @@ export function AdblockButton({
           {blocking && count > 0 && (
             <span
               aria-hidden
-              className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground"
+              className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-pigment clay-pigment px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground"
             >
               {badgeText(count)}
             </span>
@@ -89,10 +89,8 @@ export function AdblockButton({
         <div className="flex items-center gap-3">
           <div
             className={cn(
-              'grid size-10 shrink-0 place-items-center rounded-xl ring-1',
-              blocking
-                ? 'bg-primary/10 text-primary ring-primary/20'
-                : 'bg-muted text-muted-foreground ring-border',
+              'grid size-10 shrink-0 place-items-center rounded-full',
+              blocking ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/75 clay',
             )}
           >
             <Icon className="size-5" aria-hidden />

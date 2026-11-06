@@ -45,7 +45,7 @@ function Entry({
       } : undefined}
       className={cn(
         sidebarRowClass(active),
-        over && 'bg-primary/15 ring-2 ring-primary/50',
+        over && 'bg-selected ring-2 ring-ring/60',
       )}
     >
       <Icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} />
@@ -83,7 +83,7 @@ export function Sidebar({
   onDropOnGroup: (group: string, keys: string[]) => void;
 }) {
   return (
-    <nav aria-label="Address book" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-3">
+    <nav aria-label="Address book" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-3 [&>*]:shrink-0">
       <ul className="space-y-0.5">
         <li>
           <Entry icon={BookUser} label="All Contacts" count={total} active={source.kind === 'all'} onClick={() => onSource({ kind: 'all' })} />

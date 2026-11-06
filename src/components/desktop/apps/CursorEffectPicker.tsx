@@ -37,6 +37,7 @@ import type { Rgb } from '@/lib/cursorEffects/sprites';
 import type { CursorEffectPackageInfo } from '@/lib/systemCursor';
 import { useCursorEffectTint } from '@/components/desktop/useCursorEffectTint';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsChoiceClass } from '@/shared/settingsChromeStyles';
 
 interface Choice {
   id: string;
@@ -125,7 +126,7 @@ export function CursorEffectsSettings() {
         onChange={(cursorClick) => updateConfig((current) => ({ ...current, cursorClick }))}
         onRemove={remove}
       />
-      <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
         <div className="min-w-0 flex-1">
           <Label htmlFor="cursor-theme-color" className="cursor-pointer text-sm">
             Match theme color
@@ -141,7 +142,7 @@ export function CursorEffectsSettings() {
         />
       </div>
       {shellPointer && (
-        <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+        <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
           <div className="min-w-0 flex-1">
             <Label htmlFor="cursor-shake-to-find" className="cursor-pointer text-sm">
               Shake to find the pointer
@@ -259,7 +260,7 @@ function EffectCarousel({
   };
 
   return (
-    <div ref={card} className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+    <div ref={card} className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p id={labelId} className="text-sm font-medium">{label}</p>
@@ -350,12 +351,9 @@ function EffectTile({
             tabIndex={tabbable ? 0 : -1}
             onClick={onChoose}
             className={cn(
-              'group flex w-36 flex-col gap-2 rounded-xl border p-2 text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              settingsChoiceClass(selected),
+              'group flex w-36 flex-col gap-2 p-2 text-left',
               'motion-safe:transition-colors',
-              selected
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
             )}
           >
             <div className="relative aspect-[8/5] w-full overflow-hidden rounded-lg bg-muted">
@@ -365,7 +363,7 @@ function EffectTile({
                 <EffectPicture kind={kind} id={choice.id} tint={tint} />
               )}
               {selected && (
-                <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-pigment text-primary-foreground clay-pigment">
                   <Check className="size-3.5" aria-hidden />
                 </span>
               )}
@@ -464,12 +462,12 @@ function PluginRow({
   const row = useRef<HTMLDivElement>(null);
   const id = `cursor-${kind}`;
   return (
-    <div ref={row} className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+    <div ref={row} className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
       <button
         type="button"
         onClick={() => previewOver(row, kind, kind)}
         aria-label={`Preview ${title}`}
-        className="aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         <EffectPicture kind={kind} id={kind} tint={tint} />
       </button>

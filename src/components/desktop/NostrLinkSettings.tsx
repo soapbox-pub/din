@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/context-menu';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { getKindLabel } from '@/lib/kindLabels';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /**
  * The apps nostr: links open in without asking, one per kind, as chosen with
@@ -26,24 +27,24 @@ export function NostrLinkSettings() {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-medium text-foreground">Nostr links</h3>
-        <p className="text-xs text-muted-foreground">
+        <h3 className="px-1 text-sm font-semibold text-foreground/90">Nostr links</h3>
+        <p className="px-1 text-xs text-muted-foreground">
           Where nostr: links open. Without a default, Din shows what a link points to and lets you pick an app.
         </p>
       </div>
 
       {rows.length === 0 ? (
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+        <p className="px-4 py-3 text-xs text-muted-foreground">
           {handlers.length === 0
             ? 'No installed app opens nostr: links yet. Apps that do say so in their web app manifest.'
             : `${handlers.length === 1 ? '1 installed app opens' : `${handlers.length} installed apps open`} nostr: links. Choose “Always” when you open one to make it the default for that kind of link.`}
         </p>
       ) : (
-        <ul className="divide-y rounded-md border">
+        <ul className={settingsGroup}>
           {rows.map(({ kind, app }) => (
             <ContextMenu key={kind}>
               <ContextMenuTrigger asChild>
-                <li className="flex items-center gap-3 px-3 py-2">
+                <li className="flex items-center gap-3 py-2 pr-2 pl-4">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-foreground">{getKindLabel(kind)}</p>
                     <p className="text-xs text-muted-foreground">Kind {kind}</p>

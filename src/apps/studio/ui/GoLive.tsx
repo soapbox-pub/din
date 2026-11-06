@@ -194,8 +194,8 @@ function DestinationRow({
             }
           }}
           className={cn(
-            'group flex cursor-default items-center gap-3 rounded-xl border p-3 outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring',
-            selected && 'border-primary bg-primary/5',
+            'group flex cursor-default items-center gap-3 rounded-xl p-3 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60',
+            selected && 'bg-selected',
           )}
         >
           <ServiceBadge service={destination.service} />
@@ -203,26 +203,26 @@ function DestinationRow({
             <p className="truncate text-sm font-medium">{destination.name}</p>
             <p className="truncate text-xs text-muted-foreground">{destination.hasKey || destination.service === 'custom' ? hostOf(destination.server) : 'No stream key yet'}</p>
           </div>
-          {selected && <Check className="size-4 text-primary" aria-hidden />}
+          {selected && <Check className="size-4.5 text-ink-accent" strokeWidth={1.75} aria-hidden />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 aria-label={`More for ${destination.name}`}
                 onClick={(e) => e.stopPropagation()}
-                className="grid size-7 place-items-center rounded-md text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-background focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100"
+                className="grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-foreground/[0.07] focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:opacity-100"
               >
-                <MoreHorizontal className="size-4" />
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={onEdit}>
-                <Pencil className="size-4" aria-hidden />
+                <Pencil className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Edit
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onSelect={onRemove}>
-                <Trash2 className="size-4" aria-hidden />
+                <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Remove
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -231,12 +231,12 @@ function DestinationRow({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onEdit}>
-          <Pencil className="size-4" aria-hidden />
+          <Pencil className="size-4.5" strokeWidth={1.75} aria-hidden />
           Edit
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onSelect={onRemove}>
-          <Trash2 className="size-4" aria-hidden />
+          <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
           Remove
         </ContextMenuItem>
       </ContextMenuContent>
@@ -348,10 +348,10 @@ export function GoLiveDialog({
               ))}
             </div>
             <Button variant="ghost" className="self-start" onClick={() => setForm({ editing: null })}>
-              <Plus className="size-4" aria-hidden />
+              <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
               Add a place to stream
             </Button>
-            <div className="flex items-center justify-between gap-4 rounded-xl bg-muted/60 px-4 py-3">
+            <div className="flex items-center justify-between gap-4 rounded-xl bg-card px-4 py-3 clay">
               <Label htmlFor="studio-record-live" className="flex-1 text-sm font-normal">
                 Save a take of the stream too
                 {recording && <span className="block text-xs text-muted-foreground">A take is already being recorded.</span>}
@@ -364,7 +364,7 @@ export function GoLiveDialog({
                 Cancel
               </Button>
               <Button onClick={() => void go()} disabled={!chosen || starting || (!chosen.hasKey && chosen.service !== 'custom')} className="bg-red-600 text-white hover:bg-red-700">
-                {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Radio className="size-4" aria-hidden />}
+                {starting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Radio className="size-4.5" strokeWidth={1.75} aria-hidden />}
                 Go Live{chosen ? ` on ${chosen.name}` : ''}
               </Button>
             </DialogFooter>

@@ -32,7 +32,8 @@ import {
   WrapText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { StatusBar } from '@/shared/appChrome';
+import { ContentPane, SidebarTitleIcon, StatusBar } from '@/shared/appChrome';
+import { SIDEBAR_WIDTH } from '@/shared/appChromeStyles';
 import { cleanFsError, getFsBridge, parentPath, type FsBridge, type FsSearchOptions, type FsSearchResult } from '@/lib/fs';
 import { invalidateListings } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
@@ -246,7 +247,7 @@ export function TextEditor() {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(launch.expanded));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarView, setSidebarView] = useState<'explorer' | 'search'>('explorer');
-  const [sidebarWidth, setSidebarWidth] = useState(() => readSetting(SIDEBAR_KEY, 256, isWidth));
+  const [sidebarWidth, setSidebarWidth] = useState(() => readSetting(SIDEBAR_KEY, SIDEBAR_WIDTH, isWidth));
   const [wrap, setWrap] = useState(() => readSetting(WRAP_KEY, false, isBoolean));
   const [minimap, setMinimap] = useState(() => readSetting(MINIMAP_KEY, true, isBoolean));
   const [fontSize, setFontSize] = useState(() => readSetting(FONT_SIZE_KEY, DEFAULT_FONT_SIZE, isFontSize));
@@ -1057,8 +1058,8 @@ export function TextEditor() {
         </div>
       ) : (
         <>
-          <img src="/icons/apps/text-editor.png" alt="" className="size-4 shrink-0" />
-          <span className="flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium">{windowTitle}</span>
+          <SidebarTitleIcon src="/icons/apps/text-editor.png" />
+          <span className="flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">{windowTitle}</span>
         </>
       )}
       <WindowControls />
@@ -1110,19 +1111,19 @@ export function TextEditor() {
         {sidebarOpen && (
           <>
             <aside
-              className="flex shrink-0 flex-col border-r border-border/60 bg-foreground/[0.02]"
+              className="flex shrink-0 flex-col"
               style={{ width: sidebarWidth }}
               aria-label={sidebarView === 'explorer' ? 'Explorer' : 'Search'}
             >
-              <div className="flex h-10 shrink-0 items-center gap-0.5 px-2">
+              <div className="flex h-12 shrink-0 items-center gap-0.5 px-2">
                 <SidebarTab active={sidebarView === 'explorer'} onClick={() => setSidebarView('explorer')} label="Explorer (Ctrl+Shift+E)">
-                  <Files className="size-4" />
+                  <Files className="size-4.5" strokeWidth={1.75} />
                 </SidebarTab>
                 <SidebarTab active={sidebarView === 'search'} onClick={showSearch} label="Search (Ctrl+Shift+F)">
-                  <Search className="size-4" />
+                  <Search className="size-4.5" strokeWidth={1.75} />
                 </SidebarTab>
                 <span
-                  className="ml-2 min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                  className="ml-2 min-w-0 flex-1 truncate text-xs font-semibold text-muted-foreground"
                   title={folder ?? undefined}
                 >
                   {sidebarView === 'search' ? 'Search' : folder ? basename(folder) || folder : 'Explorer'}
@@ -1130,16 +1131,16 @@ export function TextEditor() {
                 {sidebarView === 'explorer' && folder && (
                   <>
                     <IconButton label="New File…" small onClick={() => setTreeRequest((r) => ({ kind: 'file', token: (r?.token ?? 0) + 1 }))}>
-                      <FilePlus className="size-4" />
+                      <FilePlus className="size-4.5" strokeWidth={1.75} />
                     </IconButton>
                     <IconButton label="New Folder…" small onClick={() => setTreeRequest((r) => ({ kind: 'folder', token: (r?.token ?? 0) + 1 }))}>
-                      <FolderPlus className="size-4" />
+                      <FolderPlus className="size-4.5" strokeWidth={1.75} />
                     </IconButton>
                     <IconButton label="Refresh" small onClick={() => void invalidateListings(queryClient, folder)}>
-                      <RefreshCw className="size-4" />
+                      <RefreshCw className="size-4.5" strokeWidth={1.75} />
                     </IconButton>
                     <IconButton label="Collapse Folders" small onClick={() => setExpanded(new Set())}>
-                      <ListCollapse className="size-4" />
+                      <ListCollapse className="size-4.5" strokeWidth={1.75} />
                     </IconButton>
                   </>
                 )}
@@ -1183,19 +1184,21 @@ export function TextEditor() {
               aria-valuemax={MAX_SIDEBAR}
               tabIndex={0}
               onPointerDown={startResize}
+              onDoubleClick={() => setSidebarWidth(SIDEBAR_WIDTH)}
+              title="Drag to resize, double-click to reset"
               onKeyDown={(e) => {
                 if (e.key === 'ArrowLeft') setSidebarWidth((w) => Math.max(MIN_SIDEBAR, w - 16));
                 else if (e.key === 'ArrowRight') setSidebarWidth((w) => Math.min(MAX_SIDEBAR, w + 16));
               }}
-              className="-ml-1 w-1 shrink-0 cursor-col-resize hover:bg-sidebar-ring/40 focus-visible:bg-sidebar-ring/60 focus-visible:outline-none"
+              className="-ml-1 w-1 shrink-0 cursor-col-resize hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none"
             />
           </>
         )}
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 px-2">
+        <ContentPane inset={sidebarOpen}>
+          <div className="flex h-12 shrink-0 items-center gap-1 px-2">
             <IconButton label="Toggle Sidebar (Ctrl+B)" small pressed={sidebarOpen} onClick={() => setSidebarOpen((o) => !o)}>
-              <PanelLeft className="size-4" />
+              <PanelLeft className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <nav aria-label="Path" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden px-1 text-sm text-muted-foreground">
               {relative?.split('/').map((part, i, parts) => (
@@ -1206,22 +1209,22 @@ export function TextEditor() {
               ))}
             </nav>
             <IconButton label="Open Folder… (Ctrl+K Ctrl+O)" small onClick={() => void openFolderDialog()}>
-              <FolderOpen className="size-4" />
+              <FolderOpen className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Save (Ctrl+S)" small disabled={!activeTab || activeTab.loading || saving} onClick={() => run('file.save')}>
-              <Save className="size-4" />
+              <Save className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Find and Replace (Ctrl+F)" small disabled={!editorReady} onClick={() => run('find.find')}>
-              <Search className="size-4" />
+              <Search className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Word Wrap (Alt+Z)" small pressed={wrap} onClick={() => setWrap((w) => !w)}>
-              <WrapText className="size-4" />
+              <WrapText className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Minimap" small pressed={minimap} onClick={() => setMinimap((m) => !m)}>
-              <MapIcon className="size-4" />
+              <MapIcon className="size-4.5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Command Palette (Ctrl+Shift+P)" small onClick={() => setPalette({ kind: 'quick', initial: '>' })}>
-              <Command className="size-4" />
+              <Command className="size-4.5" strokeWidth={1.75} />
             </IconButton>
           </div>
 
@@ -1257,29 +1260,28 @@ export function TextEditor() {
               />
             )}
           </div>
-        </main>
-      </div>
-
-      <StatusBar className="bg-background/50">
-        <span
-          role="status"
-          className={cn('min-w-0 flex-1 truncate', status?.startsWith('Couldn’t') && 'text-destructive')}
-        >
-          {saving ? 'Saving…' : status}
-        </span>
-        {editorReady && activeTab && (
-          <>
-            <CaretStatus store={caretStore} onClick={() => setPalette({ kind: 'quick', initial: ':' })} />
-            <StatusButton title="Change Indentation" onClick={pickIndent}>{describeIndent(activeTab.indent)}</StatusButton>
-            <StatusButton title="Change Language Mode" onClick={pickLanguage}>{activeTab.language ?? 'Plain Text'}</StatusButton>
-            {fontSize !== DEFAULT_FONT_SIZE && (
-              <StatusButton title="Reset Zoom (Ctrl+0)" onClick={() => zoom(0)}>
-                {Math.round((fontSize / DEFAULT_FONT_SIZE) * 100)}%
-              </StatusButton>
+          <StatusBar className="border-t-0">
+            <span
+              role="status"
+              className={cn('min-w-0 flex-1 truncate', status?.startsWith('Couldn’t') && 'text-destructive')}
+            >
+              {saving ? 'Saving…' : status}
+            </span>
+            {editorReady && activeTab && (
+              <>
+                <CaretStatus store={caretStore} onClick={() => setPalette({ kind: 'quick', initial: ':' })} />
+                <StatusButton title="Change Indentation" onClick={pickIndent}>{describeIndent(activeTab.indent)}</StatusButton>
+                <StatusButton title="Change Language Mode" onClick={pickLanguage}>{activeTab.language ?? 'Plain Text'}</StatusButton>
+                {fontSize !== DEFAULT_FONT_SIZE && (
+                  <StatusButton title="Reset Zoom (Ctrl+0)" onClick={() => zoom(0)}>
+                    {Math.round((fontSize / DEFAULT_FONT_SIZE) * 100)}%
+                  </StatusButton>
+                )}
+              </>
             )}
-          </>
-        )}
-      </StatusBar>
+          </StatusBar>
+        </ContentPane>
+      </div>
 
       {palette && (
         <Palette
@@ -1381,8 +1383,8 @@ function SidebarTab({ active, onClick, label, children }: { active: boolean; onC
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60 hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'grid size-7 shrink-0 place-items-center rounded-full text-foreground/60 hover:bg-foreground/10 hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         active && 'bg-foreground/10 text-foreground',
       )}
     >
@@ -1397,7 +1399,7 @@ function StatusButton({ title, onClick, children }: { title: string; onClick: ()
       type="button"
       title={title}
       onClick={onClick}
-      className="shrink-0 rounded px-1 tabular-nums hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="shrink-0 rounded px-1 tabular-nums hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       {children}
     </button>
@@ -1446,7 +1448,7 @@ function Welcome({
             key={label}
             type="button"
             onClick={action}
-            className="flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <span>{label}</span>
             <kbd className="font-sans text-xs text-muted-foreground">{keys}</kbd>

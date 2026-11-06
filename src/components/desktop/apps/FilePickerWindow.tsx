@@ -655,7 +655,7 @@ function FilePicker({ options, onConfirm, onCancel }: FilePickerProps) {
         {/* Places sidebar, on the glass, its title where an app's name is */}
         <nav aria-label="Places" className={cn('hidden min-h-0 shrink-0 flex-col @2xl:flex', sidebarWidthClass)}>
           <SidebarTitle region={WindowDragRegion} icon={<SidebarTitleIcon src={FILES_ICON} />} title={title} />
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2 [&>*]:shrink-0">
             {sections.map((section) =>
               section.places.length === 0 ? null : (
                 <div key={section.label} className="flex flex-col gap-0.5">
@@ -923,7 +923,7 @@ const PickerList = memo(function PickerList({
       ref={containerRef}
       onScroll={onScroll}
       data-picker-scroll
-      className="@container flex h-full flex-col overflow-y-auto"
+      className="@container flex h-full flex-col overflow-y-auto [&>*]:shrink-0"
     >
       {/* In the scroll area, so its columns line up with the rows' beside the scrollbar. */}
       <div

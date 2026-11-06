@@ -64,7 +64,7 @@ export function Recipients({
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-sm text-muted-foreground">To:</span>
         {recipients.map((r) => (
-          <span key={r.address} className="flex items-center gap-1 rounded-full bg-primary/15 py-0.5 pr-1 pl-2.5 text-sm text-foreground">
+          <span key={r.address} className="flex items-center gap-1 rounded-full bg-selected py-0.5 pr-1 pl-2.5 text-sm text-foreground">
             {r.name}
             <button
               type="button"
@@ -111,7 +111,7 @@ export function Recipients({
         <ul
           id="recipient-suggestions"
           role="listbox"
-          className="absolute top-full right-4 left-4 z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border/60 bg-popover p-1 shadow-lg"
+          className="absolute top-full right-4 left-4 z-20 mt-1 max-h-72 overflow-y-auto rounded-xl glass-surface p-1 shadow-lg"
         >
           {matches.map((m, i) => (
             <li

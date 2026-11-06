@@ -109,7 +109,7 @@ export function CursorEffectsLayer() {
   }, [width, height]);
 
   return createPortal(
-    <ScreenLayer ref={host} aria-hidden className="pointer-events-none z-[2147483000] overflow-hidden" style={{ contain: 'strict' }} />,
+    <ScreenLayer ref={host} aria-hidden data-cursor-effects="" className="pointer-events-none z-[2147483000] overflow-hidden" style={{ contain: 'strict' }} />,
     portalContainer(),
   );
 }

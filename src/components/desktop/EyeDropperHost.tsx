@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { portalContainer } from '@/lib/portalContainer';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
-import { getScreenshotBridge, isScreenshotSessionActive, type Screenshot } from '@/lib/screenshot';
+import { captureDesktop, getScreenshotBridge, isScreenshotSessionActive, type Screenshot } from '@/lib/screenshot';
 import { getEyeDropperBridge, hexColor, type EyeDropperRequest } from '@/lib/eyeDropper';
 
 /** Screen pixels across the magnifier, an odd number so one is in the middle. */
@@ -48,7 +48,7 @@ export function EyeDropperHost() {
       busy.current = true;
       void (async () => {
         try {
-          const shot = await screenshot.capture();
+          const shot = await captureDesktop(screenshot);
           const pixels = await decode(shot);
           if (!busy.current) return;
           setSession({ request, shot, pixels });

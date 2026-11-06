@@ -18,3 +18,11 @@ export function popupWindowSize(popup: CrxPopupFeatures): { width: number; heigh
     height: Math.min(popup.height + CHROME_HEIGHT + BORDER, window.innerHeight - 96),
   };
 }
+
+/** The Web Browser's window for reviewing and installing a userscript. */
+export const USERSCRIPT_INSTALL_APP_ID = 'install-userscript';
+
+/** Its launch params: the script's source, and the *.user.js URL it came from. `at` starts it over. */
+export function userscriptInstallParams(code: string, url?: string): Record<string, unknown> {
+  return { code, url, at: Date.now() };
+}

@@ -10,6 +10,7 @@ import { parseTotp } from '@/shared/totp';
 import { GeneratorButton } from './Generator';
 import { ItemIcon } from './ItemIcon';
 import { useBridge, type BlankItem } from './vault';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 function Row({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
   return (
@@ -95,7 +96,7 @@ export function ItemEditor({
       </header>
 
       {kind === 'login' && (
-        <div className="divide-y divide-border/60 rounded-xl border border-border/60 bg-card/60">
+        <div className={settingsGroup}>
           <Row label="Username" htmlFor="edit-username">
             <Input id="edit-username" autoComplete="off" value={draft.username} onChange={(e) => set('username', e.target.value)} />
           </Row>
@@ -118,7 +119,7 @@ export function ItemEditor({
               aria-pressed={showPassword}
               onClick={() => setShowPassword((s) => !s)}
             >
-              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              {showPassword ? <EyeOff className="size-4.5" strokeWidth={1.75} /> : <Eye className="size-4.5" strokeWidth={1.75} />}
             </Button>
             <GeneratorButton
               onUse={(password) => {
@@ -150,7 +151,7 @@ export function ItemEditor({
         </div>
       )}
 
-      <div className="divide-y divide-border/60 rounded-xl border border-border/60 bg-card/60">
+      <div className={settingsGroup}>
         {draft.fields.map((field, index) => (
           <div key={index} className="flex items-center gap-1 px-4 py-3">
             <Input
@@ -180,7 +181,7 @@ export function ItemEditor({
               title={field.protected ? 'Hidden like a password' : 'Shown'}
               onClick={() => setField(index, { protected: !field.protected })}
             >
-              {field.protected ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+              {field.protected ? <Lock className="size-4.5" strokeWidth={1.75} /> : <LockOpen className="size-4.5" strokeWidth={1.75} />}
             </Button>
             <Button
               type="button"
@@ -190,16 +191,16 @@ export function ItemEditor({
               aria-label={`Remove ${field.name || 'this field'}`}
               onClick={() => setDraft((d) => ({ ...d, fields: d.fields.filter((_, i) => i !== index) }))}
             >
-              <X className="size-4" />
+              <X className="size-4.5" strokeWidth={1.75} />
             </Button>
           </div>
         ))}
         <button
           type="button"
           onClick={() => setDraft((d) => ({ ...d, fields: [...d.fields, { name: '', value: '', protected: false }] }))}
-          className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left text-sm text-primary hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left text-sm text-ink-accent hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <Plus className="size-4" aria-hidden />
+          <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
           Add Field
         </button>
       </div>

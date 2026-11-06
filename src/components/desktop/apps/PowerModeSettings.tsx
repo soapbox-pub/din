@@ -4,6 +4,8 @@ import { Switch } from '@/components/ui/switch';
 import { EffectPicture } from '@/components/desktop/apps/CursorEffectPicker';
 import { useAppContext } from '@/hooks/useAppContext';
 import { previewPowerMode } from '@/lib/powerMode';
+import { settingsCard } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
 
 /** Power mode, for Settings → Effects: its switch, and whether it shakes windows. */
 export function PowerModeSettings() {
@@ -55,12 +57,12 @@ function PowerModeRow({
     previewPowerMode({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }, getComputedStyle(el).color, win);
   };
   return (
-    <div ref={row} className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+    <div ref={row} className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
       <button
         type="button"
         onClick={preview}
         aria-label={`Preview ${title}`}
-        className="aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="aspect-[8/5] w-24 shrink-0 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         <EffectPicture kind={kind} id={kind} tint={null} />
       </button>

@@ -73,7 +73,7 @@ export function YEditor({
             onClick={() => onKind(k)}
             className={cn(
               'flex-1 rounded-md px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              k === kind ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+              k === kind ? 'bg-pigment text-primary-foreground clay-pigment' : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
             )}
           >
             {KIND_LABELS[k][0]}
@@ -86,7 +86,7 @@ export function YEditor({
           const names = plotNames(kind, index);
           const error = errors.get(plot.id);
           return (
-            <li key={plot.id} className="group rounded-lg border border-border/50 bg-background p-1.5 shadow-xs">
+            <li key={plot.id} className="group rounded-xl bg-card clay p-1.5 shadow-xs">
               {plot.exprs.map((expr, i) => (
                 <PlotField
                   key={i}
@@ -123,7 +123,7 @@ export function YEditor({
           <button
             type="button"
             onClick={add}
-            className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex w-full items-center justify-center gap-1 bg-foreground/[0.04] rounded-lg py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus className="size-3.5" aria-hidden /> Add
           </button>
@@ -290,7 +290,7 @@ export function NumberField({ label, value, onCommit }: { label: string; value: 
         }}
         aria-invalid={invalid}
         spellCheck={false}
-        className="h-7 rounded-md border border-input bg-background px-1.5 font-mono text-xs text-foreground outline-none focus:border-ring aria-[invalid=true]:border-destructive"
+        className="h-7 rounded-lg bg-foreground/[0.06] px-1.5 font-mono text-xs text-foreground outline-none focus:border-ring aria-[invalid=true]:border-destructive"
       />
     </label>
   );

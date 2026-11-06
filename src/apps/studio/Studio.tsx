@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, Monitor, MonitorSmartphone, PanelRight, RectangleHorizontal, RectangleVertical, Square, User } from 'lucide-react';
+import { Monitor, MonitorSmartphone, PanelRight, RectangleHorizontal, RectangleVertical, Square, User } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,7 +11,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type ProjectChange, type ProjectInfo, type ProjectItem, type StudioAspect, type StudioScene } from '@/lib/capture';
-import { cn } from '@/lib/utils';
+import { SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
 import { canOpenApp, onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCloseGuard, useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { AudioMixer } from './engine/audio';
@@ -46,15 +47,15 @@ const CLIP_TYPES = [
 const CLIP_CHUNK = 8 * 1024 * 1024;
 
 const SCENES: { value: StudioScene; label: string; icon: React.ReactNode }[] = [
-  { value: 'screen-camera', label: 'Screen and Camera', icon: <MonitorSmartphone className="size-4" aria-hidden /> },
-  { value: 'camera', label: 'Camera', icon: <User className="size-4" aria-hidden /> },
-  { value: 'screen', label: 'Screen', icon: <Monitor className="size-4" aria-hidden /> },
+  { value: 'screen-camera', label: 'Screen and Camera', icon: <MonitorSmartphone className="size-4.5" strokeWidth={1.75} aria-hidden /> },
+  { value: 'camera', label: 'Camera', icon: <User className="size-4.5" strokeWidth={1.75} aria-hidden /> },
+  { value: 'screen', label: 'Screen', icon: <Monitor className="size-4.5" strokeWidth={1.75} aria-hidden /> },
 ];
 
 const ASPECTS: { value: StudioAspect; label: string; icon: React.ReactNode }[] = [
-  { value: '16:9', label: 'Landscape 16:9, for YouTube', icon: <RectangleHorizontal className="size-4" aria-hidden /> },
-  { value: '9:16', label: 'Portrait 9:16, for TikTok, Reels and Shorts', icon: <RectangleVertical className="size-4" aria-hidden /> },
-  { value: '1:1', label: 'Square 1:1', icon: <Square className="size-4" aria-hidden /> },
+  { value: '16:9', label: 'Landscape 16:9, for YouTube', icon: <RectangleHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden /> },
+  { value: '9:16', label: 'Portrait 9:16, for TikTok, Reels and Shorts', icon: <RectangleVertical className="size-4.5" strokeWidth={1.75} aria-hidden /> },
+  { value: '1:1', label: 'Square 1:1', icon: <Square className="size-4.5" strokeWidth={1.75} aria-hidden /> },
 ];
 
 /** What Studio was asked to do from outside: `din studio`, the menu bar's stop button. */
@@ -824,11 +825,11 @@ export function Studio() {
   }
 
   return (
-    <div className="@container/studio flex h-full flex-col bg-background text-foreground">
-      <WindowDragRegion className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <div className="flex items-center gap-2 pl-1 text-sm font-semibold">
-          <Clapperboard className="size-4 text-muted-foreground" aria-hidden />
-          <span className="hidden @4xl/studio:inline">Studio</span>
+    <div className="@container/studio flex h-full flex-col text-foreground">
+      <WindowDragRegion className="relative flex h-12 shrink-0 items-center gap-2 px-3">
+        <div className="flex items-center gap-2 pl-0.5">
+          <SidebarTitleIcon src="/icons/apps/studio.png" />
+          <span className="hidden font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90 @4xl/studio:inline">Studio</span>
         </div>
         <ProjectSwitcher projects={projects} current={project} disabled={phase !== 'idle'} onSelect={selectProject} onNew={() => void newProject()} />
         {/* What sets up the recording follows the name, as every app's title
@@ -841,22 +842,16 @@ export function Studio() {
             <Segmented label="What to record" value={settings.scene} onChange={setScene} segments={SCENES} iconOnly />
           </div>
           <Segmented label="Shape of the picture" value={settings.aspect} onChange={setAspect} segments={ASPECTS} disabled={busy} iconOnly />
-          <button
-            type="button"
-            onClick={() => setShowProject((s) => !s)}
-            aria-pressed={showProject}
-            aria-label="Project"
-            title="Project (Ctrl+T)"
-            className={cn('grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring', showProject && 'bg-accent text-foreground')}
-          >
-            <PanelRight className="size-4" />
-          </button>
+          <ToolButton label="Project (Ctrl+T)" pressed={showProject} onClick={() => setShowProject((s) => !s)}>
+            <PanelRight {...toolIcon} />
+          </ToolButton>
         </div>
         <div className="min-w-2 flex-1" />
         <WindowControls className="ml-2" />
       </WindowDragRegion>
 
-      <div className="flex min-h-0 flex-1">
+      {/* The title bar on the window's glass; everything under it solid. */}
+      <div className="flex min-h-0 flex-1 bg-background">
         <main className="relative flex min-w-0 flex-1 flex-col">
           {openItem && phase === 'idle' ? (
             <TakeView

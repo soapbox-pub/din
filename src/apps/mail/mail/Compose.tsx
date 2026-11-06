@@ -76,7 +76,7 @@ function RecipientField({ label, value, onChange, autoFocus, trailing }: { label
             <span
               key={`${a.address}-${i}`}
               title={formatAddress(a)}
-              className={cn('flex max-w-60 items-center gap-0.5 rounded-full py-0.5 pr-1 pl-2.5 text-[13px]', valid ? 'bg-primary/12 text-primary' : 'bg-destructive/12 text-destructive')}
+              className={cn('flex max-w-60 items-center gap-0.5 rounded-full py-0.5 pr-1 pl-2.5 text-[13px]', valid ? 'bg-selected text-foreground' : 'bg-destructive/12 text-destructive')}
             >
               <span className="truncate">{a.name || a.address}</span>
               <button type="button" aria-label={`Remove ${a.name || a.address}`} onClick={() => onChange(value.filter((_, j) => j !== i))} className="grid size-4 place-items-center rounded-full opacity-60 hover:opacity-100">
@@ -112,7 +112,7 @@ function RecipientField({ label, value, onChange, autoFocus, trailing }: { label
       </div>
       {trailing}
       {suggestions.length > 0 && (
-        <ul id={`${id}-list`} role="listbox" className="absolute top-full left-14 z-20 mt-1 w-80 overflow-hidden rounded-lg border border-border/70 bg-popover py-1 shadow-lg">
+        <ul id={`${id}-list`} role="listbox" className="absolute top-full left-14 z-20 mt-1 w-80 overflow-hidden rounded-xl glass-surface py-1 shadow-lg">
           {suggestions.map((s, i) => (
             <li
               key={s.address}
@@ -122,7 +122,7 @@ function RecipientField({ label, value, onChange, autoFocus, trailing }: { label
                 e.preventDefault();
                 pick(s);
               }}
-              className={cn('cursor-default px-3 py-1.5 text-[13px]', i === index && 'bg-primary text-primary-foreground')}
+              className={cn('cursor-default px-3 py-1.5 text-[13px]', i === index && 'bg-pigment text-primary-foreground clay-pigment')}
             >
               <span className="font-medium">{s.name || s.address}</span>
               {s.name && <span className={cn('ml-2', i === index ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{s.address}</span>}
@@ -433,7 +433,7 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
           title="Send (Ctrl+Enter)"
           onClick={() => void send()}
           disabled={sending || !account}
-          className="text-primary hover:bg-primary/10 hover:text-primary"
+          className="text-ink-accent hover:bg-foreground/[0.07] hover:text-ink-accent"
         >
           {sending ? <Loader2 className="size-4.5 animate-spin motion-reduce:animate-none" /> : <Send {...toolIcon} />}
         </ToolButton>
@@ -531,7 +531,7 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
       {attached.length > 0 && (
         <div className="flex max-h-32 shrink-0 flex-wrap gap-2 overflow-y-auto border-t border-border/60 px-4 py-3">
           {attached.map((a) => (
-            <span key={a.id} className="flex max-w-64 items-center gap-2 rounded-lg border border-border/70 bg-card py-1.5 pr-1.5 pl-3 text-[13px]">
+            <span key={a.id} className="flex max-w-64 items-center gap-2 rounded-xl bg-card clay py-1.5 pr-1.5 pl-3 text-[13px]">
               {a.file ? <Paperclip className="size-3.5 shrink-0 text-muted-foreground" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />}
               <span className="min-w-0 truncate">{a.name}</span>
               {a.size > 0 && <span className="shrink-0 text-xs text-muted-foreground">{fileSize(a.size)}</span>}

@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { VmInfo, VmSnapshot } from '@/lib/vms';
 import { formatBytes, isOn, useBridge, useSnapshots } from './bridge';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -133,11 +134,11 @@ export function SnapshotList({ vm, onTake, onError }: { vm: VmInfo; onTake: () =
           <Skeleton className="h-12 w-full rounded-lg" />
         </div>
       ) : !snapshots?.length ? (
-        <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-lg px-4 py-6 text-center text-sm text-muted-foreground">
           Take a snapshot before trying something risky, and come back to it if it goes wrong.
         </p>
       ) : (
-        <ul className="divide-y divide-border/60 rounded-lg border border-border/70">
+        <ul className={settingsGroup}>
           {snapshots.map((s) => (
             <ContextMenu key={s.name}>
               <ContextMenuTrigger asChild>

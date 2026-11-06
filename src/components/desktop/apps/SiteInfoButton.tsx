@@ -127,9 +127,9 @@ export function SiteInfoButton({
   // nsites and onions wear the colors of their address-bar badges.
   const tint =
     security === 'verified'
-      ? 'text-emerald-700 dark:text-emerald-400'
+      ? 'text-success'
       : security === 'onion'
-        ? 'text-violet-700 dark:text-violet-400'
+        ? 'text-foreground'
         : null;
   // An nsite's host is a key; it goes by the name and icon its files give it.
   const site = identity.nsite ? identity.name : siteName(url);
@@ -192,9 +192,9 @@ export function SiteInfoButton({
           title={title}
           className={cn(
             'absolute left-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full',
-            'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'hover:bg-foreground/[0.07] outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
             warn ? 'text-destructive' : (tint ?? 'text-muted-foreground hover:text-foreground'),
-            open && 'bg-foreground/10',
+            open && 'bg-foreground/[0.07]',
             open && !warn && !tint && 'text-foreground',
           )}
         >
@@ -215,7 +215,7 @@ export function SiteInfoButton({
             {identity.icon ? (
               <AppIcon icon={identity.icon} className="size-8 shrink-0 rounded-md" />
             ) : (
-              <span className={cn('grid size-8 shrink-0 place-items-center rounded-md bg-secondary', tint)}>
+              <span className={cn('grid size-8 shrink-0 place-items-center rounded-full bg-foreground/10 clay', tint)}>
                 <NsiteIcon className="size-4" />
               </span>
             )}
@@ -234,8 +234,8 @@ export function SiteInfoButton({
           <div className="flex items-start gap-3">
             <span
               className={cn(
-                'grid size-8 shrink-0 place-items-center rounded-md',
-                warn ? 'bg-destructive/15 text-destructive' : cn('bg-secondary', tint ?? 'text-muted-foreground'),
+                'grid size-8 shrink-0 place-items-center rounded-full clay',
+                warn ? 'bg-destructive/15 text-destructive' : cn('bg-foreground/10', tint ?? 'text-muted-foreground'),
               )}
             >
               {warn ? (
@@ -335,11 +335,11 @@ export function SiteInfoButton({
                 className="w-full"
                 onClick={() => setDeleting('confirm')}
               >
-                <Trash2 className="size-3.5" aria-hidden />
+                <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Delete site data
               </Button>
             ) : (
-              <div role="alertdialog" aria-labelledby="site-data-confirm" className="space-y-3 rounded-lg bg-destructive/10 p-3">
+              <div role="alertdialog" aria-labelledby="site-data-confirm" className="space-y-3 rounded-xl bg-destructive/10 p-3">
                 <p id="site-data-confirm" className="text-xs">
                   This signs you out of {site} and deletes everything it saved on this computer. It can't be undone.
                 </p>
@@ -371,7 +371,7 @@ export function SiteInfoButton({
         )}
 
         {changed && (
-          <div className="flex items-center gap-3 rounded-lg bg-secondary/60 p-3">
+          <div className="flex items-center gap-3 rounded-xl bg-selected p-3">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
               Reload this page to apply your changes.
             </p>
@@ -385,7 +385,7 @@ export function SiteInfoButton({
                 setOpen(false);
               }}
             >
-              <RotateCw className="size-3.5" aria-hidden />
+              <RotateCw className="size-4.5" strokeWidth={1.75} aria-hidden />
               Reload
             </Button>
           </div>

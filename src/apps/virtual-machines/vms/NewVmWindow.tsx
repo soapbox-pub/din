@@ -2,12 +2,14 @@ import { useState, type FormEvent } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cleanVmsError, vmDefaults, type NewVm, type VmInfo, type VmInstallerId, type VmOs, type VmsStatus } from '@/lib/vms';
 import { guessName, guessOs, OS_LABELS, useBridge, usePickDiscImage } from './bridge';
 import { CdromField, CpuField, Field, MemoryField, OsBadge, OsPicker, SliderField, SwitchRow } from './fields';
+import { Gallery } from './Gallery';
 import { SYSTEMS } from './systems';
+import { announce } from './windows';
+import { FormWindow } from '@/shared/appChrome';
 
 function defaultsFor(os: VmOs, status: VmsStatus, system: VmInstallerId | null = null): Omit<NewVm, 'name' | 'cdrom'> {
   const d = { ...vmDefaults(os), system };
@@ -29,20 +31,17 @@ function defaultsFor(os: VmOs, status: VmsStatus, system: VmInstallerId | null =
  * With a `system`, it's Custom Install: that system, installed hands-free
  * like its tile does, from a disc image of the user's or Din's download.
  */
-export function NewVmDialog({
-  open,
-  onOpenChange,
+export function NewVmForm({
   status,
   existing,
-  onCreated,
+  onBack,
   system = null,
 }: {
   system?: VmInstallerId | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   status: VmsStatus;
   existing: VmInfo[];
-  onCreated: (vm: VmInfo, start: boolean) => void;
+  /** Back to the systems to pick from, when it came from them. */
+  onBack?: () => void;
 }) {
   const bridge = useBridge()!;
   const pick = usePickDiscImage();
@@ -55,15 +54,6 @@ export function NewVmDialog({
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const reset = () => {
-    setCdrom(null);
-    setName('');
-    setNameEdited(false);
-    setVm(defaultsFor(systemOs, status, system));
-    setAdvanced(false);
-    setError(null);
-  };
 
   const uniqueName = (base: string) => {
     const taken = new Set(existing.map((v) => v.id.toLowerCase()));
@@ -94,13 +84,13 @@ export function NewVmDialog({
       if (system) {
         const { memoryMiB, cpus, diskGiB } = vm;
         // It starts by itself once its disc image is ready.
-        onCreated(await bridge.install(system, { iso: cdrom ?? undefined, name: shownName.trim(), memoryMiB, cpus, diskGiB }), false);
+        announce({ type: 'created', id: (await bridge.install(system, { iso: cdrom ?? undefined, name: shownName.trim(), memoryMiB, cpus, diskGiB })).id });
       } else {
         const created = await bridge.create({ ...vm, name: shownName.trim(), cdrom });
-        onCreated(created, !!cdrom);
+        if (cdrom) await bridge.start(created.id);
+        announce({ type: 'created', id: created.id });
       }
-      onOpenChange(false);
-      reset();
+      window.close();
     } catch (err) {
       setError(cleanVmsError(err));
     } finally {
@@ -114,29 +104,34 @@ export function NewVmDialog({
       : null;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!busy) onOpenChange(o);
-        if (!o && !busy) reset();
-      }}
-    >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <form onSubmit={submit} className="space-y-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3">
-              {system && <OsBadge os={vm.os} system={system} />}
-              {systemName ? `Install ${systemName}` : 'New Virtual Machine'}
-            </DialogTitle>
-            <DialogDescription>
-              {system === 'macos'
-                ? 'It installs by itself; at the end, macOS’s Setup Assistant asks you a few questions. Everything here can be changed later in Settings.'
-                : systemName
-                ? `It sets itself up without asking anything. Everything here can be changed later in Settings.`
-                : 'Choose the installer’s disc image, and the machine is set up to suit it.'}
-            </DialogDescription>
-          </DialogHeader>
-
+    <form onSubmit={submit} className="contents">
+      <FormWindow
+        title={
+          <span className="flex items-center gap-2">
+            {system && <OsBadge os={vm.os} system={system} />}
+            {systemName ? `Install ${systemName}` : 'New Virtual Machine'}
+          </span>
+        }
+        description={
+          system === 'macos'
+            ? 'It installs by itself; at the end, macOS’s Setup Assistant asks you a few questions. Everything here can be changed later in Settings.'
+            : systemName
+              ? 'It sets itself up without asking anything. Everything here can be changed later in Settings.'
+              : 'Choose the installer’s disc image, and the machine is set up to suit it.'
+        }
+        className="gap-6"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={onBack ?? (() => window.close())} disabled={busy}>
+              {onBack ? 'Back' : 'Cancel'}
+            </Button>
+            <Button type="submit" disabled={busy || !shownName.trim()}>
+              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+              {system ? 'Install' : cdrom ? 'Create and Start' : 'Create'}
+            </Button>
+          </>
+        }
+      >
           <CdromField
             path={cdrom}
             onChoose={() => void chooseImage()}
@@ -187,7 +182,7 @@ export function NewVmDialog({
           {!system && <Collapsible open={advanced} onOpenChange={setAdvanced}>
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost" size="sm" className="-ml-2 gap-1 text-muted-foreground">
-                <ChevronDown className={advanced ? 'size-4 rotate-180 transition-transform' : 'size-4 transition-transform'} aria-hidden />
+                <ChevronDown className={advanced ? 'size-4.5 rotate-180 transition-transform' : 'size-4.5 transition-transform'} strokeWidth={1.75} aria-hidden />
                 Firmware and devices
               </Button>
             </CollapsibleTrigger>
@@ -217,20 +212,52 @@ export function NewVmDialog({
             </CollapsibleContent>
           </Collapsible>}
 
-          {windowsWarning && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">{windowsWarning}</p>}
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {windowsWarning && <p className="rounded-xl bg-warning/10 px-3 py-2 text-xs text-warning">{windowsWarning}</p>}
+          {error && <p role="alert" className="px-1 text-sm text-destructive">{error}</p>}
+      </FormWindow>
+    </form>
+  );
+}
 
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy || !shownName.trim()}>
-              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              {system ? 'Install' : cdrom ? 'Create and Start' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+/**
+ * A new machine, in a window of its own: the systems Din sets up by
+ * itself, a tile installing one at once (and the window closing), its
+ * right-click or Other going on to the form.
+ */
+export function NewVmWindow({
+  status,
+  existing,
+  system: launched,
+  other,
+}: {
+  status: VmsStatus;
+  existing: VmInfo[];
+  system?: VmInstallerId;
+  other?: boolean;
+}) {
+  const bridge = useBridge()!;
+  /** undefined while picking, null for Other, else Custom Install of that system. */
+  const [form, setForm] = useState<VmInstallerId | null | undefined>(launched ?? (other ? null : undefined));
+  const [error, setError] = useState<string | null>(null);
+  const fromGallery = launched === undefined && !other;
+
+  if (form !== undefined) {
+    return <NewVmForm key={form ?? 'other'} system={form} status={status} existing={existing} onBack={fromGallery ? () => setForm(undefined) : undefined} />;
+  }
+
+  const install = async (system: VmInstallerId) => {
+    try {
+      announce({ type: 'created', id: (await bridge.install(system)).id });
+      window.close();
+    } catch (err) {
+      setError(cleanVmsError(err));
+    }
+  };
+
+  return (
+    <FormWindow title="New Virtual Machine" description="Pick a system and Din sets it all up. Right-click one to choose its settings first.">
+      <Gallery available={status.installers} onInstall={install} onCustom={setForm} />
+      {error && <p role="alert" className="px-1 text-sm text-destructive">{error}</p>}
+    </FormWindow>
   );
 }

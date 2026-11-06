@@ -113,17 +113,11 @@ export function WebAppFrame({
       setTitlebar(null);
       return;
     }
-    const accent = normalizeThemeColor(pageColor);
-    const dark = accent !== null && isDarkThemeColor(accent);
-    const muted = accent
-      ? dark ? 'text-white/80' : 'text-black/70'
-      : 'text-foreground/80';
-    const hover = accent
-      ? dark ? 'hover:bg-white/15' : 'hover:bg-black/10'
-      : 'hover:bg-foreground/10';
-    const text = accent
-      ? dark ? 'text-white' : 'text-black'
-      : 'text-foreground';
+    // The Window tints this slot with the page's color and its tokens
+    // (themeColorTokens), so the theme's classes read on it.
+    const muted = 'text-muted-foreground';
+    const hover = 'hover:bg-foreground/[0.07]';
+    const text = 'text-foreground';
 
     setTitlebar(
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -237,7 +231,7 @@ export function WebAppFrame({
       {ready && loading && (
         <span
           aria-hidden
-          className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-primary"
+          className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-ink-accent"
         />
       )}
     </div>

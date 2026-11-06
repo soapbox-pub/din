@@ -62,13 +62,13 @@ export function SignerSiteButton({ url }: { url: string }) {
               {rules.map((rule) => (
                 <li
                   key={`${rule.method}:${rule.kind ?? ''}`}
-                  className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-foreground/5"
+                  className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-foreground/5"
                 >
                   <span
                     className={cn(
                       'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
                       rule.decision === 'allow'
-                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                        ? 'bg-success/15 text-success'
                         : 'bg-destructive/15 text-destructive',
                     )}
                   >
@@ -79,7 +79,7 @@ export function SignerSiteButton({ url }: { url: string }) {
                     type="button"
                     aria-label={`Forget: ${ruleLabel(rule.method, rule.kind)}`}
                     onClick={() => revoke(origin, rule.method, rule.kind)}
-                    className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <X className="size-3.5" aria-hidden />
                   </button>

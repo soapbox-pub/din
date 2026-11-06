@@ -54,7 +54,7 @@ export function Sidebar({
   const nostr = sources.find((s) => s.id === NOSTR);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [&>*]:shrink-0">
       <MiniMonth
         mode="single"
         required

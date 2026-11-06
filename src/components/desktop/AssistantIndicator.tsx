@@ -76,7 +76,7 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
           title={label}
           className={cn(
             'relative size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
-            working || waiting > 0 ? 'text-primary' : missing ? 'text-muted-foreground' : 'text-foreground/90',
+            working || waiting > 0 ? 'text-ink-accent' : missing ? 'text-muted-foreground' : 'text-foreground/90',
           )}
         >
           <Bot className={cn('size-4.5', working && waiting === 0 && 'motion-safe:animate-pulse')} />
@@ -201,7 +201,7 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
             onShow();
             onDone();
           }}
-          className={cn(trayRowClass(), 'font-medium text-primary')}
+          className={cn(trayRowClass(), 'font-medium text-ink-accent')}
         >
           All conversations
         </button>
@@ -236,7 +236,7 @@ function SessionSection({
               className="flex w-full items-center gap-2.5 px-4 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
             >
               {busy.has(session.id) ? (
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-label="Working" />
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-ink-accent" aria-label="Working" />
               ) : (
                 <ProjectIcon
                   src={icons.get(session.location.directory)}

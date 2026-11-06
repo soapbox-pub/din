@@ -18,7 +18,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { AppComponentProps } from '@/lib/apps';
-import { Button } from '@/components/ui/button';
+import { EmptyState, PillButton, SegmentedControl, ToolButton } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -28,6 +30,7 @@ import { getFsBridge, cleanFsError, localFileUrl, parentPath } from '@/lib/fs';
 import {
   cleanScreenshotError,
   copyScreenshot,
+  captureDesktop,
   cropCapture,
   getScreenshotBridge,
   paintSettled,
@@ -68,6 +71,9 @@ const SOUNDS = [
   { id: 'microphone', name: 'Mic', icon: Mic },
 ] as const satisfies readonly { id: RecordingAudio; name: string; icon: LucideIcon }[];
 
+/** A recording's button: the red of recording, not the theme's. */
+const stopClass = 'bg-destructive text-white';
+
 /** Seconds to wait between selection and capture, so hover states and menus can be arranged. */
 const DELAYS = [0, 3, 5] as const;
 type Delay = (typeof DELAYS)[number];
@@ -92,45 +98,27 @@ async function awaitWindowHidden(root: HTMLElement | null): Promise<void> {
   await paintSettled();
 }
 
-/** A row of mutually exclusive choices. */
-function Segmented<T extends string | number>({
-  label,
-  options,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  options: readonly { id: T; name: string; icon?: LucideIcon; disabled?: boolean; title?: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  disabled?: boolean;
-}) {
+/** One choice of the launcher's: what it's for, then its segments. */
+function ChoiceRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-1 rounded-lg bg-muted p-1" role="group" aria-label={label}>
-      {options.map(({ id, name, icon: Icon, disabled: off, title }) => (
-        <button
-          key={id}
-          type="button"
-          onClick={() => onChange(id)}
-          disabled={disabled || off}
-          aria-pressed={value === id}
-          title={title}
-          className={cn(
-            'flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            'disabled:opacity-50',
-            value === id
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
-          <span className="truncate">{name}</span>
-        </button>
-      ))}
+    <div className="flex min-h-12 items-center justify-between gap-4 py-2 pr-2 pl-4">
+      <span className="text-sm">{label}</span>
+      {children}
     </div>
   );
+}
+
+/** Segments with an icon beside their name, as the launcher's are. */
+function withIcons<T extends string>(options: readonly { id: T; name: string; icon: LucideIcon }[]) {
+  return options.map(({ id, name, icon: Icon }) => ({
+    value: id,
+    label: (
+      <>
+        <Icon strokeWidth={1.75} aria-hidden />
+        {name}
+      </>
+    ),
+  }));
 }
 
 /**
@@ -204,7 +192,7 @@ export function Screenshot({ windowId }: AppComponentProps) {
       setSession(null);
       await paintSettled();
       try {
-        const shot = await b.capture();
+        const shot = await captureDesktop(b);
         if (area) {
           setSession({ phase: 'select', frozen: shot });
           return;
@@ -390,14 +378,10 @@ export function Screenshot({ windowId }: AppComponentProps) {
 
   if (!bridge) {
     return (
-      <div className="grid h-full w-full place-items-center bg-background p-6 text-center">
-        <div className="max-w-xs space-y-3">
-          <MonitorOff className="mx-auto size-8 text-muted-foreground" aria-hidden />
-          <p className="text-sm text-muted-foreground">
-            Screenshots are only available inside the Din desktop. Open this app
-            from the desktop to capture your screen.
-          </p>
-        </div>
+      <div className="grid h-full w-full place-items-center p-6">
+        <EmptyState icon={MonitorOff} className="bg-transparent">
+          Screenshots work in Din’s desktop app, where this app can capture the screen.
+        </EmptyState>
       </div>
     );
   }
@@ -408,7 +392,7 @@ export function Screenshot({ windowId }: AppComponentProps) {
     <>
       {recorder.recording && !busy ? (
         // --- Recording -----------------------------------------------------
-        <div ref={rootRef} className="grid h-full w-full place-items-center bg-background p-4">
+        <div ref={rootRef} className="grid h-full w-full place-items-center p-4">
           <div className="flex w-full max-w-72 flex-col items-center gap-3 text-center">
             <span className="relative grid size-10 place-items-center" aria-hidden>
               <span className="absolute size-10 rounded-full bg-destructive/20 motion-safe:animate-ping" />
@@ -420,10 +404,10 @@ export function Screenshot({ windowId }: AppComponentProps) {
                 {formatRecordingTime(now - recorder.recording.startedAt)}
               </span>
             </p>
-            <Button variant="destructive" className="w-full" onClick={() => void stopRecording()}>
+            <PillButton variant="primary" className={cn(stopClass, 'h-10 w-full')} onClick={() => void stopRecording()}>
               <Square className="fill-current" aria-hidden />
               Stop Recording
-            </Button>
+            </PillButton>
             <p className="text-xs leading-snug text-muted-foreground">
               You can also stop it from the red button in the menu bar.
             </p>
@@ -431,131 +415,132 @@ export function Screenshot({ windowId }: AppComponentProps) {
         </div>
       ) : video?.path ? (
         // --- Recording preview -----------------------------------------------
-        <div ref={rootRef} className="flex h-full w-full flex-col bg-background text-foreground">
-          <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-3">
+        <div ref={rootRef} className="flex h-full w-full flex-col text-foreground">
+          <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
             <video
               src={localFileUrl(video.path)}
               controls
-              className="max-h-full max-w-full rounded-md border border-border bg-black shadow-md"
+              className="max-h-full max-w-full rounded-xl bg-black clay"
             />
           </div>
 
-          <div className="flex items-center gap-1 border-t border-border px-3 py-2">
+          <div className="flex h-14 shrink-0 items-center gap-2 px-4">
             <span className="mr-auto min-w-0 truncate px-1 text-xs text-muted-foreground" title={videoName ?? undefined}>
               {formatRecordingTime(video.durationMs)} &middot; {videoName}
             </span>
-            <Button size="sm" variant="ghost" onClick={() => open(appForFile(videoName ?? ''), { path: video.path! })}>
-              <Play aria-hidden />
-              Open
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            <ToolButton label="Open" onClick={() => open(appForFile(videoName ?? ''), { path: video.path! })}>
+              <Play {...toolIcon} />
+            </ToolButton>
+            <ToolButton
+              label="Show in Files"
               onClick={() => open('file-browser', { path: parentPath(video.path!), select: videoName })}
             >
-              <FolderOpen aria-hidden />
-              Show in Files
-            </Button>
-            <Button size="sm" onClick={() => setVideo(null)}>
+              <FolderOpen {...toolIcon} />
+            </ToolButton>
+            <PillButton variant="primary" onClick={() => setVideo(null)}>
               <Video aria-hidden />
               New
-            </Button>
+            </PillButton>
           </div>
         </div>
       ) : image ? (
         // --- Preview -------------------------------------------------------
-        <div ref={rootRef} className="flex h-full w-full flex-col bg-background text-foreground">
-          <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-3">
+        <div ref={rootRef} className="flex h-full w-full flex-col text-foreground">
+          <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4">
             <img
               src={image.dataUrl}
               alt={`Screenshot, ${image.width} by ${image.height} pixels`}
               width={image.width}
               height={image.height}
-              className="h-auto max-w-full rounded-md border border-border shadow-md"
+              className="h-auto max-w-full rounded-xl clay"
             />
           </div>
 
-          <div className="flex items-center gap-1 border-t border-border px-3 py-2">
+          <div className="flex h-14 shrink-0 items-center gap-2 px-4">
             <span className="mr-auto px-1 text-xs text-muted-foreground tabular-nums">
               {image.width} &times; {image.height}
             </span>
-            <Button size="sm" variant="ghost" onClick={copy}>
-              <Copy aria-hidden />
-              Copy
-            </Button>
+            <ToolButton label="Copy" onClick={copy}>
+              <Copy {...toolIcon} />
+            </ToolButton>
             {fs && (
-              <Button size="sm" variant="ghost" onClick={save} disabled={saving}>
-                {saving ? (
-                  <Loader2 className="animate-spin" aria-hidden />
-                ) : (
-                  <Save aria-hidden />
-                )}
-                Save
-              </Button>
+              <ToolButton label="Save to Pictures" onClick={save} disabled={saving}>
+                {saving ? <Loader2 {...toolIcon} className={cn(toolIcon.className, 'animate-spin')} /> : <Save {...toolIcon} />}
+              </ToolButton>
             )}
-            <Button size="sm" variant="ghost" onClick={download}>
-              <Download aria-hidden />
-              Download
-            </Button>
-            <Button size="sm" onClick={() => setImage(null)}>
+            <ToolButton label="Download" onClick={download}>
+              <Download {...toolIcon} />
+            </ToolButton>
+            <PillButton variant="primary" onClick={() => setImage(null)}>
               <Camera aria-hidden />
               New
-            </Button>
+            </PillButton>
           </div>
         </div>
       ) : (
         // --- Launcher ------------------------------------------------------
-        <div ref={rootRef} className="grid h-full w-full place-items-center overflow-auto bg-background p-4">
-          <div className="flex w-full max-w-80 flex-col items-stretch gap-3">
-            <Segmented
+        <div ref={rootRef} className="flex h-full w-full flex-col items-center overflow-y-auto p-4 [&>*]:shrink-0">
+          <div className="my-auto flex w-full max-w-96 flex-col gap-4 [&>*]:shrink-0">
+            <SegmentedControl
               label="Capture"
-              options={KINDS.map((k) =>
-                k.id === 'video' && !recorder.available
-                  ? { ...k, disabled: true, title: 'Screen recording needs DinOS' }
-                  : k,
-              )}
+              size="md"
+              className="mx-auto"
               value={recording ? 'video' : 'photo'}
-              onChange={setKind}
+              options={withIcons(KINDS).map((o) =>
+                o.value === 'video' && !recorder.available
+                  ? { ...o, disabled: true, title: 'Screen recording needs DinOS' }
+                  : o,
+              )}
+              onValueChange={setKind}
               disabled={busy}
             />
-            <Segmented label="Capture mode" options={MODES} value={mode} onChange={setMode} disabled={busy} />
-            {recording && (
-              <Segmented label="Sound" options={SOUNDS} value={audio} onChange={setAudio} disabled={busy} />
-            )}
-            <Segmented
-              label="Capture delay"
-              options={DELAYS.map((d) => ({ id: d, name: d === 0 ? 'No delay' : `${d}s` }))}
-              value={delay}
-              onChange={setDelay}
-              disabled={busy}
-            />
+            <div className={settingsGroup}>
+              <ChoiceRow label="Capture">
+                <SegmentedControl label="Capture mode" size="md" value={mode} options={withIcons(MODES)} onValueChange={setMode} disabled={busy} />
+              </ChoiceRow>
+              {recording && (
+                <ChoiceRow label="Sound">
+                  <SegmentedControl label="Sound" size="md" value={audio} options={withIcons(SOUNDS)} onValueChange={setAudio} disabled={busy} />
+                </ChoiceRow>
+              )}
+              <ChoiceRow label="Delay">
+                <SegmentedControl
+                  label="Capture delay"
+                  size="md"
+                  value={String(delay)}
+                  options={DELAYS.map((d) => ({ value: String(d), label: d === 0 ? 'None' : `${d} s` }))}
+                  onValueChange={(d) => setDelay(Number(d) as Delay)}
+                  disabled={busy}
+                />
+              </ChoiceRow>
+            </div>
 
             {error && (
-              <p role="alert" className="text-center text-xs text-destructive">
+              <p role="alert" className="px-1 text-center text-sm text-destructive">
                 {error}
               </p>
             )}
 
-            <Button
-              className="w-full"
-              variant={recording ? 'destructive' : 'default'}
+            <PillButton
+              variant="primary"
+              className={cn('h-10 w-full text-sm [&_svg]:size-4.5', recording && stopClass)}
               onClick={() => void startSession(mode)}
               disabled={busy}
             >
               {busy ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
+                <Loader2 className="animate-spin" aria-hidden />
               ) : recording ? (
-                <Video className="size-4" aria-hidden />
+                <Video strokeWidth={1.75} aria-hidden />
               ) : (
-                <Camera className="size-4" aria-hidden />
+                <Camera strokeWidth={1.75} aria-hidden />
               )}
               {recording ? 'Start Recording' : 'Take Screenshot'}
-            </Button>
+            </PillButton>
 
-            <p className="text-center text-xs leading-snug text-muted-foreground">
+            <p className="px-1 text-center text-xs leading-snug text-muted-foreground">
               {recording
-                ? 'Recordings are saved in Videos › Screen Recordings'
-                : 'Print Screen grabs the screen · Shift+Print Screen grabs an area'}
+                ? 'Recordings are saved in Videos › Screen Recordings.'
+                : 'Print Screen takes the whole screen, Shift+Print Screen an area.'}
             </p>
           </div>
         </div>

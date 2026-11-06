@@ -90,7 +90,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
                 variant="secondary"
                 onClick={installed ? () => open(installed.appId) : add}
                 aria-label={installed ? `Open ${name}` : `Add ${name}`}
-                className="h-8 rounded-full bg-secondary px-5 font-semibold text-primary hover:bg-secondary/80"
+                className="h-8 rounded-full bg-secondary px-5 font-semibold text-ink-accent hover:bg-secondary/80"
               >
                 {installed ? 'Open' : 'Add'}
               </Button>
@@ -110,7 +110,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
           <SectionHeader title="What it may do" />
           {asks ? (
             <div className="flex max-w-prose flex-col gap-3">
-              <ul className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-sm">
+              <ul className="space-y-2 rounded-xl bg-card clay p-4 text-sm">
                 {permissions.map((p) => (
                   <li key={p} className="flex gap-2">
                     <span aria-hidden className="text-muted-foreground">•</span>
@@ -208,9 +208,9 @@ export function FolderAppsSection({ onChose }: { onChose: (opened: OpenedFolder)
           type="button"
           onClick={() => void pick()}
           disabled={busy}
-          className="flex min-h-28 items-center gap-3 rounded-xl border border-dashed border-border/70 p-4 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
+          className="flex min-h-28 items-center gap-3 bg-foreground/[0.04] rounded-xl p-4 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
         >
-          <span className="grid size-14 shrink-0 place-items-center rounded-[28%] bg-gradient-to-br from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300">
+          <span className="grid size-14 shrink-0 place-items-center rounded-[28%] bg-gradient-to-br from-warning/25 to-warning/5 text-warning">
             <FolderPlus className="size-6" aria-hidden />
           </span>
           <span className="min-w-0">
@@ -228,7 +228,7 @@ function FolderAppCard({ entry, actions, onOpen }: { entry: FileAppEntry; action
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="relative flex min-h-28 items-center gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md">
+        <div className="relative flex min-h-28 items-center gap-3 rounded-xl bg-card clay p-4 transition-shadow motion-safe:hover:shadow-md">
           <button
             type="button"
             onClick={onOpen}

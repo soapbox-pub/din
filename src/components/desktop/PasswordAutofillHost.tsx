@@ -362,7 +362,7 @@ function Row({
         active ? 'bg-foreground/10' : 'hover:bg-foreground/5',
       )}
     >
-      <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+      <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg bg-pigment text-primary-foreground clay-pigment">
         {icon}
       </span>
       <span className="min-w-0 flex-1">

@@ -1312,7 +1312,7 @@ function UndoneNotice({
   onRedo: () => unknown;
 }) {
   return (
-    <div className="mt-6 rounded-xl border border-dashed border-border px-4 py-3 text-sm">
+    <div className="mt-6 bg-foreground/[0.04] rounded-xl px-4 py-3 text-sm">
       <div className="flex items-center gap-3">
         <Undo2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         <p className="min-w-0 flex-1">
@@ -1332,8 +1332,8 @@ function UndoneNotice({
               <span className="min-w-0 truncate" title={file.file}>
                 {file.file}
               </span>
-              {file.additions > 0 && <span className="text-emerald-700 dark:text-emerald-400">+{file.additions}</span>}
-              {file.deletions > 0 && <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>}
+              {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
+              {file.deletions > 0 && <span className="text-destructive">−{file.deletions}</span>}
             </li>
           ))}
         </ul>
@@ -1368,7 +1368,7 @@ function StatusLine({
       {cost && <span className="shrink-0" aria-label="Cost so far">{cost}</span>}
       {context !== null && (
         <span
-          className={cn('shrink-0', context >= 0.8 && 'text-amber-600 dark:text-amber-400')}
+          className={cn('shrink-0', context >= 0.8 && 'text-warning')}
           title="How much of the model’s context window the conversation fills"
         >
           {formatContextUsage(context)} context

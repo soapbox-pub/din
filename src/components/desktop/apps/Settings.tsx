@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
   ArrowDown,
@@ -54,8 +54,17 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ContentPane, SearchField, SidebarTitle } from '@/shared/appChrome';
-import { SIDEBAR_WIDTH, sidebarHeadingClass, sidebarRowClass, titleSearch } from '@/shared/appChromeStyles';
+import { ContentPane, SearchField, SegmentedControl, SidebarTitle, StatusPill } from '@/shared/appChrome';
+import { SIDEBAR_WIDTH, focusRing, sidebarHeadingClass, sidebarRowClass, titleSearch } from '@/shared/appChromeStyles';
+import { RadioMark, SettingsToken } from '@/shared/settingsChrome';
+import { settingsAlert, settingsCard, settingsChoiceClass, settingsGroup, settingsNotice, settingsRowButton, settingsTokenClass } from '@/shared/settingsChromeStyles';
+import {
+  SettingsFallback as FallbackCard,
+  SettingsGroup,
+  SettingsSection as SectionShell,
+  SettingsSubHeading as SubHeading,
+} from '@/shared/settingsSection';
+import { SettingsGroupContext, SettingsSearchingContext } from '@/shared/settingsContexts';
 import { findMatches, parseQuery } from '@/lib/settingsSearch';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { AppComponentProps } from '@/lib/apps';
@@ -235,6 +244,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
 import { WindowEffectPicker } from '@/components/desktop/apps/WindowEffectPicker';
 import { CursorEffectsSettings } from '@/components/desktop/apps/CursorEffectPicker';
@@ -448,10 +458,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
     ) : id === 'nostr' ? (
       <NostrStorageSection />
     ) : id === 'connected' ? (
-      <ConnectedAppsSection
-        nostrconnect={typeof params?.nostrconnect === 'string' ? params.nostrconnect : undefined}
-        nonce={params?.nonce}
-      />
+      <ConnectedAppsSection />
     ) : id === 'assistant' ? (
       <AssistantSettingsSection />
     ) : id === 'themes' ? (
@@ -505,7 +512,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
           icon={<AppIcon icon="/icons/apps/settings.png" className="size-6 shrink-0 object-contain" />}
           title="Settings"
         />
-        <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2">
+        <nav aria-label="Settings sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2 [&>*]:shrink-0">
           {SECTIONS.map((s, i) => {
             const current = searching ? results.includes(s) : section === s.id;
             return (
@@ -569,11 +576,18 @@ export function Settings({ params, windowId }: AppComponentProps) {
             {!searching ? (
               renderSection(section)
             ) : results.length > 0 ? (
-              results.map((s) => (
-                <div key={s.id} className="border-b border-border/40 last:border-b-0">
-                  {renderSection(s.id)}
-                </div>
-              ))
+              <SettingsSearchingContext value>
+                {results.map((s, i) => (
+                  <Fragment key={s.id}>
+                    {i > 0 && (
+                      <div aria-hidden className="mx-auto max-w-2xl px-4">
+                        <div className="h-px bg-border/70" />
+                      </div>
+                    )}
+                    {renderSection(s.id)}
+                  </Fragment>
+                ))}
+              </SettingsSearchingContext>
             ) : (
               <div className="mx-auto max-w-2xl p-4">
                 <FallbackCard icon={Search}>No settings match “{query.trim()}”.</FallbackCard>
@@ -771,7 +785,7 @@ function ZoomStepper({
         disabled={value <= MIN_ZOOM}
         onClick={() => onChange(clampZoom(value - ZOOM_STEP))}
       >
-        <Minus className="size-4" />
+        <Minus className="size-4.5" strokeWidth={1.75} />
       </Button>
       <span className="flex w-24 flex-col items-center text-center" aria-live="polite">
         <span className="text-sm tabular-nums font-medium">{value}%</span>
@@ -784,7 +798,7 @@ function ZoomStepper({
         disabled={value >= MAX_ZOOM}
         onClick={() => onChange(clampZoom(value + ZOOM_STEP))}
       >
-        <Plus className="size-4" />
+        <Plus className="size-4.5" strokeWidth={1.75} />
       </Button>
       <Button variant="ghost" size="sm" className={cn(automatic && 'invisible')} onClick={onAutomatic}>
         Use automatic
@@ -817,9 +831,9 @@ function DisplayZoomControl({
   onAutomatic: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+    <div className={cn(settingsCard, 'flex flex-col gap-4 p-4')}>
       <div className="flex items-center gap-3">
-        <ZoomIn className="size-6 shrink-0 text-foreground/90" aria-hidden />
+        <SettingsToken icon={ZoomIn} />
         <div className="min-w-0">
           <p className="text-sm font-medium">Zoom</p>
           <p className="text-xs text-muted-foreground">
@@ -852,9 +866,9 @@ function PerDisplayZoomControl() {
   const several = outputs.length > 1;
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+    <div className={cn(settingsCard, 'flex flex-col gap-4 p-4')}>
       <div className="flex items-center gap-3">
-        <ZoomIn className="size-6 shrink-0 text-foreground/90" aria-hidden />
+        <SettingsToken icon={ZoomIn} />
         <div className="min-w-0">
           <p className="text-sm font-medium">Zoom</p>
           <p className="text-xs text-muted-foreground">
@@ -1054,7 +1068,7 @@ function DisplaySection() {
           disabled={!bridge || !status.data?.available}
           onClick={() => status.refetch()}
         >
-          <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+          <RotateCw strokeWidth={1.75} className={cn('size-4.5', status.isFetching && 'animate-spin')} />
         </Button>
       }
     >
@@ -1075,9 +1089,9 @@ function AirPlayDisplays() {
   if (!getAirPlayBridge() || !data?.available) return null;
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+    <div className="flex flex-col gap-3">
       <SoundGroupHeading icon={Airplay}>AirPlay</SoundGroupHeading>
-      <p className="text-xs text-muted-foreground">
+      <p className="px-1 text-xs text-muted-foreground">
         Share the screen with an Apple TV, AirPlay TV or other receiver on this
         network. Sound plays there too, and the volume keys control it.
       </p>
@@ -1211,7 +1225,7 @@ function DisplayArrange({
   return (
     <div
       ref={containerRef}
-      className="relative w-full rounded-lg border border-border/60 bg-background/40"
+      className="relative w-full rounded-xl bg-foreground/[0.04]"
       style={{ height: ARRANGE_HEIGHT, touchAction: 'none' }}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
@@ -1230,11 +1244,10 @@ function DisplayArrange({
                 aria-label={`Position ${d.friendly}`}
                 onPointerDown={(e) => onPointerDown(e, d)}
                 className={cn(
-                  'absolute flex select-none flex-col items-center justify-center overflow-hidden rounded-md border text-center',
+                  'absolute flex select-none flex-col items-center justify-center overflow-hidden rounded-lg bg-card text-center clay',
                   'cursor-grab touch-none active:cursor-grabbing',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  d.primary ? 'border-primary bg-primary/15' : 'border-border bg-foreground/10',
-                  selected === d.name && 'ring-2 ring-ring',
+                  focusRing,
+                  selected === d.name && 'ring-2 ring-ring/60',
                 )}
                 style={{
                   left: offX + (d.x - minX) * scale,
@@ -1251,7 +1264,7 @@ function DisplayArrange({
                   {Math.abs(d.scale - 1) > 0.005 && ` at ${Math.round(d.scale * 100)}%`}
                 </span>
                 {d.primary && (
-                  <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
+                  <span className="text-[10px] font-medium text-ink-accent">
                     Primary
                   </span>
                 )}
@@ -1260,7 +1273,7 @@ function DisplayArrange({
             <ContextMenuContent>
               <ContextMenuItem disabled={d.primary} onSelect={() => onPrimary(d.name)}>
                 <Monitor aria-hidden />
-                Make primary
+                Make Primary
               </ContextMenuItem>
               <ContextMenuSub>
                 <ContextMenuSubTrigger>
@@ -1318,67 +1331,47 @@ function DisplayControlRow({
   const rotationId = `rotation-${d.name}`;
   const currentValue = `${d.width}x${d.height}`;
   const rates = refreshRates(d.allModes, d.width, d.height);
-  const selectClass = cn(
-    'h-8 rounded-md border border-border/60 bg-background px-2 text-sm text-foreground',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  );
 
   return (
     <li
-      className={cn(
-        'rounded-lg border bg-background/40 p-3',
-        selected ? 'border-ring' : 'border-border/60',
-      )}
+      className={cn(settingsCard, 'px-4 py-3', selected && 'ring-2 ring-ring/60')}
     >
       <div className="flex items-center gap-3">
-        <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <SettingsToken icon={Icon} active={d.enabled} />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 truncate text-sm text-foreground">
             {d.friendly}
-            {d.primary && (
-              <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                Primary
-              </span>
-            )}
-            {!d.enabled && (
-              <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                Off
-              </span>
-            )}
+            {d.primary && <StatusPill>Primary</StatusPill>}
+            {!d.enabled && <StatusPill>Off</StatusPill>}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{d.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {d.name}
+            {d.enabled && !canDisable && ' · Your only display that’s on'}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor={`enabled-${d.name}`} className="text-xs text-muted-foreground">
-            On
-          </Label>
-          <Switch
-            id={`enabled-${d.name}`}
-            checked={d.enabled}
-            disabled={d.enabled && !canDisable}
-            onCheckedChange={(value) => onToggle(d.name, value)}
-            aria-label={`Turn ${d.friendly} ${d.enabled ? 'off' : 'on'}`}
-          />
-        </div>
+        <Switch
+          id={`enabled-${d.name}`}
+          checked={d.enabled}
+          disabled={d.enabled && !canDisable}
+          onCheckedChange={(value) => onToggle(d.name, value)}
+          aria-label={d.friendly}
+          title={d.enabled && !canDisable ? 'Turn another display on to turn this one off' : undefined}
+        />
       </div>
 
       {d.enabled && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant={d.primary ? 'secondary' : 'outline'}
-            size="sm"
-            disabled={d.primary}
-            onClick={() => onPrimary(d.name)}
-          >
-            {d.primary ? 'Primary display' : 'Make primary'}
-          </Button>
+          {!d.primary && (
+            <Button type="button" variant="outline" size="sm" onClick={() => onPrimary(d.name)}>
+              Make Primary
+            </Button>
+          )}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <Label htmlFor={selectId} className="sr-only">
               Resolution for {d.friendly}
             </Label>
-            <select
+            <NativeSelect
+              size="sm"
               id={selectId}
               value={currentValue}
               disabled={d.modes.length === 0}
@@ -1386,7 +1379,6 @@ function DisplayControlRow({
                 const [width, height] = e.target.value.split('x').map(Number);
                 if (Number.isFinite(width) && Number.isFinite(height)) onMode(d.name, width, height);
               }}
-              className={selectClass}
             >
               {d.modes.map((mode) => (
                 <option key={`${mode.width}x${mode.height}`} value={`${mode.width}x${mode.height}`}>
@@ -1394,41 +1386,41 @@ function DisplayControlRow({
                   {mode.preferred ? ' (native)' : ''}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {rates.length > 1 && (
               <>
                 <Label htmlFor={refreshId} className="sr-only">
                   Refresh rate for {d.friendly}
                 </Label>
-                <select
+                <NativeSelect
+                  size="sm"
                   id={refreshId}
                   value={String(rates.find((rate) => Math.abs(rate - d.refresh) < 0.01) ?? rates[0])}
                   onChange={(e) => onRefresh(d.name, Number(e.target.value))}
-                  className={selectClass}
-                >
+                    >
                   {rates.map((rate) => (
                     <option key={rate} value={String(rate)}>
                       {formatRefresh(rate)}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </>
             )}
             <Label htmlFor={rotationId} className="sr-only">
               Rotation for {d.friendly}
             </Label>
-            <select
+            <NativeSelect
+              size="sm"
               id={rotationId}
               value={String(d.rotation)}
               onChange={(e) => onRotation(d.name, Number(e.target.value) as DisplayRotation)}
-              className={selectClass}
             >
               {DISPLAY_ROTATIONS.map((rotation) => (
                 <option key={rotation} value={String(rotation)}>
                   {rotationLabel(rotation, d.width, d.height)}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
         </div>
       )}
@@ -1442,7 +1434,7 @@ function DisplayListSkeleton() {
       {Array.from({ length: 2 }, (_, i) => (
         <div
           key={i}
-          className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+          className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}
         >
           <Skeleton className="size-5 rounded bg-foreground/10" />
           <div className="flex-1 space-y-1.5">
@@ -1502,20 +1494,21 @@ function PowerSection() {
           }}
         >
           <RotateCw
-            className={cn('size-4', (status.isFetching || profiles.isFetching) && 'animate-spin')}
+            className={cn('size-4.5', (status.isFetching || profiles.isFetching) && 'animate-spin')}
+            strokeWidth={1.75}
           />
         </Button>
       }
     >
       {hasBattery && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-foreground">Battery</h3>
+          <SubHeading>Battery</SubHeading>
           <BatteryPanel status={status} />
         </div>
       )}
 
-      <div className={cn('space-y-3', hasBattery && 'border-t border-border/60 pt-4')}>
-        <h3 className="text-sm font-medium text-foreground">Power mode</h3>
+      <div className="space-y-3">
+        <SubHeading>Power mode</SubHeading>
         <PowerProfilesPanel profiles={profiles} />
         {profiles.data?.profiles.includes('performance') && <GamePerformanceSwitch />}
       </div>
@@ -1526,7 +1519,7 @@ function PowerSection() {
 function GamePerformanceSwitch() {
   const { config, updateConfig } = useAppContext();
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
       <div className="min-w-0">
         <Label htmlFor="game-performance" className="cursor-pointer text-sm">
           Performance mode for games
@@ -1563,7 +1556,7 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
       ) : !data?.available ? null : (
         <div className="flex flex-col gap-4">
           {summary && (
-            <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+            <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
               <BatteryGlyph
                 percent={summary.percent}
                 charging={summary.charging}
@@ -1578,15 +1571,15 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
                 </p>
               </div>
               {data.acConnected && (
-                <span className="flex items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                <StatusPill>
                   <Plug className="size-3.5" aria-hidden />
                   Plugged in
-                </span>
+                </StatusPill>
               )}
             </div>
           )}
 
-          <ul className="flex flex-col gap-2" aria-label="Batteries">
+          <ul className={settingsGroup} aria-label="Batteries">
             {data.batteries.map((battery) => (
               <BatteryDetailRow key={battery.name} battery={battery} />
             ))}
@@ -1594,8 +1587,8 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
 
           {data.devices.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground">Devices</h4>
-              <ul className="flex flex-col gap-2" aria-label="Devices">
+              <h4 className="px-1 text-xs font-semibold text-muted-foreground">Devices</h4>
+              <ul className={settingsGroup} aria-label="Devices">
                 {data.devices.map((battery) => (
                   <BatteryDetailRow key={battery.name} battery={battery} />
                 ))}
@@ -1653,14 +1646,12 @@ function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
   const percent = battery.percent ?? 0;
 
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40 p-3">
+    <li className="px-4 py-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <BatteryGlyph
-            percent={battery.percent}
-            charging={charging}
-            className="size-4.5 shrink-0 text-muted-foreground"
-          />
+        <div className="flex min-w-0 items-center gap-3">
+          <span aria-hidden className={settingsTokenClass(charging)}>
+            <BatteryGlyph percent={battery.percent} charging={charging} />
+          </span>
           <span className="truncate text-sm text-foreground">{battery.label}</span>
         </div>
         <span className="text-sm tabular-nums text-muted-foreground">
@@ -1690,14 +1681,14 @@ function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
 function BatterySkeleton() {
   return (
     <div className="flex flex-col gap-4" aria-hidden>
-      <div className="flex items-center gap-4 rounded-xl border border-border/60 p-4">
+      <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
         <Skeleton className="size-9 rounded bg-foreground/10" />
         <div className="flex-1 space-y-2">
           <Skeleton className="h-6 w-16 bg-foreground/10" />
           <Skeleton className="h-3.5 w-32 bg-foreground/10" />
         </div>
       </div>
-      <div className="rounded-lg border border-border/60 p-3">
+      <div className={cn(settingsCard, 'px-4 py-3')}>
         <div className="flex items-center justify-between">
           <Skeleton className="h-3.5 w-20 bg-foreground/10" />
           <Skeleton className="h-3.5 w-8 bg-foreground/10" />
@@ -1728,7 +1719,7 @@ function PowerProfilesPanel({ profiles }: { profiles: ReturnType<typeof usePower
         </FallbackCard>
       ) : (
         <div className="flex flex-col gap-3">
-          <div role="radiogroup" aria-label="Power profile" className="flex flex-col gap-2">
+          <div role="radiogroup" aria-label="Power profile" className={settingsGroup}>
             {data.profiles.map((id) => {
               const meta = describePowerProfile(id);
               const active = selected === id;
@@ -1742,26 +1733,9 @@ function PowerProfilesPanel({ profiles }: { profiles: ReturnType<typeof usePower
                   onClick={() => {
                     if (id !== data.active) setProfile.mutate(id);
                   }}
-                  className={cn(
-                    'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    'disabled:cursor-not-allowed disabled:opacity-60',
-                    active
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border/60 bg-background/40 hover:bg-foreground/5',
-                  )}
+                  className={cn(settingsRowButton, 'items-start py-3 disabled:opacity-60')}
                 >
-                  <span
-                    className={cn(
-                      'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
-                      active
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-muted-foreground/50',
-                    )}
-                    aria-hidden
-                  >
-                    {active && <Check className="size-3.5" />}
-                  </span>
+                  <RadioMark checked={active} className="mt-0.5" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium text-foreground">{meta.label}</span>
                     {meta.description && (
@@ -1792,7 +1766,7 @@ function PowerSkeleton() {
   return (
     <div className="flex flex-col gap-2" aria-hidden>
       {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-start gap-3 rounded-xl border border-border/60 p-4">
+        <div key={i} className={cn(settingsCard, 'flex items-start gap-3 p-4')}>
           <Skeleton className="size-5 shrink-0 rounded-full bg-foreground/10" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-24 bg-foreground/10" />
@@ -1860,14 +1834,14 @@ function BrightnessSection() {
       title="Refresh brightness status"
       onClick={() => status.refetch()}
     >
-      <RotateCw className={cn('size-4', status.isFetching && 'animate-spin')} />
+      <RotateCw strokeWidth={1.75} className={cn('size-4.5', status.isFetching && 'animate-spin')} />
     </Button>
   );
 
   if (status.isLoading) {
     return (
       <SectionShell title="Brightness" actions={refresh}>
-        <div className="h-20 rounded-xl border border-border/60" aria-hidden>
+        <div className={cn(settingsCard, 'h-20')} aria-hidden>
           <div className="flex h-full items-center gap-4 px-4">
             <Skeleton className="size-8 rounded bg-foreground/10" />
             <Skeleton className="h-2 flex-1 rounded-full bg-foreground/10" />
@@ -1892,8 +1866,10 @@ function BrightnessSection() {
     <SectionShell title="Brightness" actions={refresh}>
       <div className="flex flex-col gap-4">
         {backlightAvailable && (
-          <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
-            <BrightnessGlyph brightness={value} className="size-6 shrink-0 text-foreground/90" />
+          <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
+            <span aria-hidden className={settingsTokenClass()}>
+              <BrightnessGlyph brightness={value} />
+            </span>
             <BrightnessSlider
               aria-label="Screen brightness"
               value={value}
@@ -1908,16 +1884,10 @@ function BrightnessSection() {
         )}
 
         {nightLight?.available && (
-          <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+          <div className={cn(settingsCard, 'flex flex-col gap-4 p-4')}>
             <div className="flex items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-3">
-                <Moon
-                  className={cn(
-                    'size-6 shrink-0',
-                    nightLight.active ? 'text-foreground/90' : 'text-muted-foreground',
-                  )}
-                  aria-hidden
-                />
+                <SettingsToken icon={Moon} active={nightLight.active} />
                 <div className="min-w-0">
                   <Label htmlFor="night-light" className="cursor-pointer text-sm">
                     Night Light
@@ -1937,7 +1907,7 @@ function BrightnessSection() {
             {nightLight.enabled && (
               <>
                 <NightLightSchedulePicker nightLight={nightLight} />
-                <div className="flex items-center gap-3 border-t border-border/60 pt-4">
+                <div className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground">Cooler</span>
                   {/* Invert the axis so dragging right warms the screen. */}
                   <Slider
@@ -2005,30 +1975,15 @@ function NightLightSchedulePicker({ nightLight }: { nightLight: NightLightState 
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
-      <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-3" role="radiogroup" aria-label="Night Light schedule">
-        {NIGHT_LIGHT_SCHEDULES.map((option) => {
-          const checked = nightLight.schedule === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              onClick={() => save({ schedule: option.value })}
-              className={cn(
-                'rounded-lg border px-3 py-2 text-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                checked
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-              )}
-            >
-              {option.name}
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex flex-col gap-3">
+      <SegmentedControl
+        label="Night Light schedule"
+        size="md"
+        value={nightLight.schedule}
+        options={NIGHT_LIGHT_SCHEDULES.map((option) => ({ value: option.value, label: option.name }))}
+        onValueChange={(schedule) => save({ schedule })}
+        className="self-start"
+      />
 
       {nightLight.schedule === 'custom' && (
         <div className="flex flex-wrap items-center gap-3">
@@ -2078,8 +2033,8 @@ function NightLightSchedulePicker({ nightLight }: { nightLight: NightLightState 
 /** A small heading that groups a subsection within a panel (Sound, Display). */
 function SoundGroupHeading({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 pt-1 text-sm font-medium text-foreground">
-      <Icon className="size-4 text-muted-foreground" aria-hidden />
+    <div className="flex items-center gap-2 px-1 pt-1 text-sm font-semibold text-foreground">
+      <Icon className="size-4.5 text-ink-accent" strokeWidth={1.75} aria-hidden />
       {children}
     </div>
   );
@@ -2106,31 +2061,15 @@ function AudioDeviceRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            'flex items-center gap-2 rounded-md border p-2.5',
-            device.isDefault
-              ? 'border-primary/50 bg-primary/5'
-              : 'border-border/60 bg-background/40',
-          )}
-        >
+        <div className="flex items-center gap-1 pr-2">
           <button
             type="button"
             role="radio"
             aria-checked={device.isDefault}
             onClick={onSelect}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(settingsRowButton, 'min-w-0 flex-1')}
           >
-            <span
-              className={cn(
-                'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                device.isDefault ? 'border-primary' : 'border-muted-foreground/50',
-              )}
-              aria-hidden
-            >
-              {device.isDefault && <span className="size-2 rounded-full bg-primary" />}
-            </span>
-            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <SettingsToken icon={Icon} active={device.isDefault} />
             <span className="min-w-0">
               <span className="block truncate text-sm">{device.name}</span>
               {device.callQuality && (
@@ -2199,22 +2138,16 @@ function AudioPortRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 p-2.5">
+        <div>
           <button
             type="button"
             role="radio"
             aria-checked={false}
             onClick={onSelect}
             disabled={pending}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={settingsRowButton}
           >
-            <span
-              className="flex size-4 shrink-0 items-center justify-center rounded-full border border-muted-foreground/50"
-              aria-hidden
-            >
-              {pending && <Loader2 className="size-3 animate-spin" />}
-            </span>
-            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <SettingsToken icon={pending ? Loader2 : Icon} className={cn(pending && '[&_svg]:animate-spin')} />
             <span className="min-w-0 truncate text-sm">{port.name}</span>
           </button>
         </div>
@@ -2249,7 +2182,7 @@ function AudioStreamRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+        <div className="flex items-center gap-3 px-2.5 py-2">
           <Button
             variant="ghost"
             size="icon"
@@ -2260,7 +2193,7 @@ function AudioStreamRow({
             <VolumeGlyph
               volume={shown}
               muted={stream.muted}
-              className={cn('size-4', stream.muted && 'text-muted-foreground')}
+              className={cn('size-4.5', stream.muted && 'text-muted-foreground')}
             />
           </Button>
           <span className="w-28 shrink-0 truncate text-sm" title={stream.name}>
@@ -2312,7 +2245,7 @@ function InputVolumeRow() {
   const shown = Math.min(MAX_VOLUME, value);
   const MicIcon = muted ? MicOff : Mic;
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+    <div className={cn(settingsCard, 'flex items-center gap-3 p-2.5')}>
       <Button
         variant="ghost"
         size="icon"
@@ -2322,7 +2255,7 @@ function InputVolumeRow() {
         aria-pressed={muted}
         onClick={() => setMuted.mutate(!muted)}
       >
-        <MicIcon className={cn('size-4', muted && 'text-muted-foreground')} />
+        <MicIcon className={cn('size-4.5', muted && 'text-muted-foreground')} strokeWidth={1.75} />
       </Button>
       <span className="w-28 shrink-0 truncate text-sm">Input volume</span>
       <VolumeSlider
@@ -2409,7 +2342,7 @@ function MicTest() {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-3 rounded-md border border-border/60 bg-background/40 p-2.5">
+      <div className={cn(settingsCard, 'flex items-center gap-3 p-2.5')}>
         <Button
           variant={active ? 'secondary' : 'ghost'}
           size="sm"
@@ -2536,8 +2469,9 @@ function SoundSection() {
           }}
         >
           <RotateCw
+            strokeWidth={1.75}
             className={cn(
-              'size-4',
+              'size-4.5',
               (status.isFetching || devices.isFetching || streams.isFetching) &&
                 'animate-spin',
             )}
@@ -2546,7 +2480,7 @@ function SoundSection() {
       }
     >
       {status.isLoading ? (
-        <div className="h-20 rounded-xl border border-border/60" aria-hidden>
+        <div className={cn(settingsCard, 'h-20')} aria-hidden>
           <div className="flex h-full items-center gap-4 px-4">
             <Skeleton className="size-8 rounded bg-foreground/10" />
             <Skeleton className="h-2 flex-1 rounded-full bg-foreground/10" />
@@ -2559,7 +2493,7 @@ function SoundSection() {
         </FallbackCard>
       ) : (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+          <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
             <Button
               variant="ghost"
               size="icon"
@@ -2589,7 +2523,7 @@ function SoundSection() {
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+          <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
             <div className="min-w-0">
               <Label htmlFor="mute-output" className="cursor-pointer text-sm">
                 Mute
@@ -2608,7 +2542,7 @@ function SoundSection() {
           {/* Output devices */}
           <SoundGroupHeading icon={Volume2}>Output device</SoundGroupHeading>
           {sinks.length + inactiveSinks.length > 0 ? (
-            <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Output device">
+            <div className={settingsGroup} role="radiogroup" aria-label="Output device">
               {sinks.map((device) => (
                 <AudioDeviceRow
                   key={device.id}
@@ -2636,7 +2570,7 @@ function SoundSection() {
           {/* Input devices */}
           <SoundGroupHeading icon={Mic}>Input device</SoundGroupHeading>
           {sources.length + inactiveSources.length > 0 ? (
-            <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Input device">
+            <div className={settingsGroup} role="radiogroup" aria-label="Input device">
               {sources.map((device) => (
                 <AudioDeviceRow
                   key={device.id}
@@ -2664,7 +2598,7 @@ function SoundSection() {
           {/* Per-application volume */}
           <SoundGroupHeading icon={Volume2}>App volume</SoundGroupHeading>
           {appStreams.length > 0 ? (
-            <div className="flex flex-col gap-1.5">
+            <div className={settingsGroup}>
               {appStreams.map((stream) => (
                 <AudioStreamRow
                   key={stream.id}
@@ -2710,51 +2644,6 @@ function revealInList(row: HTMLElement | null) {
 /** The scrolling speeds the slider steps through, 1 as the mouse sends it. */
 const SCROLL_SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
-/** A row of choices, one of which is on. */
-function ChoiceRow<T extends string>({
-  label,
-  description,
-  value,
-  choices,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  value: T;
-  choices: { value: T; name: string }[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
-      <p className="text-sm">{label}</p>
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={label}>
-        {choices.map((choice) => {
-          const active = choice.value === value;
-          return (
-            <button
-              key={choice.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => onChange(choice.value)}
-              className={cn(
-                'rounded-lg border px-3 py-1.5 text-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                active
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-              )}
-            >
-              {choice.name}
-            </button>
-          );
-        })}
-      </div>
-      <p className="text-xs text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
 /**
  * Settings → Mouse (window.dinos.mouse): how the pointer and scrolling go,
  * which din-shell applies to every mouse, and a Magic Mouse's own. Only under
@@ -2788,7 +2677,7 @@ function MouseSection() {
 
   return (
     <SectionShell title="Mouse">
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="mouse-tracking" className="text-sm">Tracking speed</Label>
           <span className="text-xs text-muted-foreground">{tracking === 0 ? 'Normal' : tracking < 0 ? 'Slower' : 'Faster'}</span>
@@ -2808,7 +2697,7 @@ function MouseSection() {
           <span className="text-xs text-muted-foreground">Fast</span>
         </div>
       </div>
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="mouse-scroll-speed" className="text-sm">Scrolling speed</Label>
           <span className="text-xs tabular-nums text-muted-foreground">{SCROLL_SPEEDS[scrollIndex]}×</span>
@@ -2827,48 +2716,52 @@ function MouseSection() {
           <span className="text-xs text-muted-foreground">Fast</span>
         </div>
       </div>
-      <ChoiceRow
-        label="Scroll direction"
-        description="Natural moves the page along with your finger, as on a phone. Automatic is natural on a touchpad and a Magic Mouse, and a scroll wheel’s way with a wheel."
-        value={config.mouseScrollDirection}
-        choices={[
-          { value: 'auto', name: 'Automatic' },
-          { value: 'natural', name: 'Natural' },
-          { value: 'traditional', name: 'Traditional' },
-        ]}
-        onChange={(mouseScrollDirection) => set({ mouseScrollDirection })}
-      />
-      <ChoiceRow
-        label="Secondary click"
-        description="The click that opens a right-click menu. Left swaps the buttons, for the left hand."
-        value={config.mouseSecondaryClick}
-        choices={[
-          { value: 'right', name: 'Right side' },
-          { value: 'left', name: 'Left side' },
-          { value: 'off', name: 'Off' },
-        ]}
-        onChange={(mouseSecondaryClick) => set({ mouseSecondaryClick })}
-      />
+      <SettingsGroup>
+        <ChoiceRow
+          label="Scroll direction"
+          description="Natural moves the page along with your finger, as on a phone. Automatic is natural on a touchpad and a Magic Mouse, and a scroll wheel’s way with a wheel."
+          value={config.mouseScrollDirection}
+          choices={[
+            { value: 'auto', name: 'Automatic' },
+            { value: 'natural', name: 'Natural' },
+            { value: 'traditional', name: 'Traditional' },
+          ]}
+          onChange={(mouseScrollDirection) => set({ mouseScrollDirection })}
+        />
+        <ChoiceRow
+          label="Secondary click"
+          description="The click that opens a right-click menu. Left swaps the buttons, for the left hand."
+          value={config.mouseSecondaryClick}
+          choices={[
+            { value: 'right', name: 'Right side' },
+            { value: 'left', name: 'Left side' },
+            { value: 'off', name: 'Off' },
+          ]}
+          onChange={(mouseSecondaryClick) => set({ mouseSecondaryClick })}
+        />
+      </SettingsGroup>
 
       <SubHeading>Magic Mouse</SubHeading>
-      <ChoiceRow
-        label="Swipe with two fingers"
-        description="Swiping two fingers sideways goes Back and Forward in the Web Browser, or to the workspace beside. One finger scrolls, and a quick flick keeps going."
-        value={config.mouseSwipe}
-        choices={[
-          { value: 'pages', name: 'Between pages' },
-          { value: 'workspaces', name: 'Between workspaces' },
-          { value: 'off', name: 'Off' },
-        ]}
-        onChange={(mouseSwipe) => set({ mouseSwipe })}
-      />
-      <SettingSwitchRow
-        id="mouse-middle-click"
-        label="Middle click"
-        description="Clicking the middle of the mouse is a middle click, which opens links in new tabs and pastes the selection in a terminal. On a Mac it’s a click."
-        checked={config.mouseMiddleClick}
-        onCheckedChange={(mouseMiddleClick) => set({ mouseMiddleClick })}
-      />
+      <SettingsGroup>
+        <ChoiceRow
+          label="Swipe with two fingers"
+          description="Swiping two fingers sideways goes Back and Forward in the Web Browser, or to the workspace beside. One finger scrolls, and a quick flick keeps going."
+          value={config.mouseSwipe}
+          choices={[
+            { value: 'pages', name: 'Between pages' },
+            { value: 'workspaces', name: 'Between workspaces' },
+            { value: 'off', name: 'Off' },
+          ]}
+          onChange={(mouseSwipe) => set({ mouseSwipe })}
+        />
+        <SettingSwitchRow
+          id="mouse-middle-click"
+          label="Middle click"
+          description="Clicking the middle of the mouse is a middle click, which opens links in new tabs and pastes the selection in a terminal. On a Mac it’s a click."
+          checked={config.mouseMiddleClick}
+          onCheckedChange={(mouseMiddleClick) => set({ mouseMiddleClick })}
+        />
+      </SettingsGroup>
     </SectionShell>
   );
 }
@@ -2903,7 +2796,7 @@ function KeyboardSection() {
   if (status.isLoading) {
     return (
       <SectionShell title="Keyboard">
-        <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-3" aria-hidden>
+        <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')} aria-hidden>
           <Skeleton className="size-4 bg-foreground/10" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-32 bg-foreground/10" />
@@ -2937,8 +2830,8 @@ function KeyboardSection() {
 
   return (
     <SectionShell title="Keyboard">
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
-        <Keyboard className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
+        <SettingsToken icon={Keyboard} />
         <div className="min-w-0">
           <p className="text-sm text-foreground">{layout.name}</p>
           <p className="text-xs text-muted-foreground">
@@ -2952,7 +2845,7 @@ function KeyboardSection() {
       </div>
 
       {restartNeeded && (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+        <div className={cn(settingsNotice, 'flex items-center justify-between gap-4 p-4')}>
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">Restart Din to finish switching</p>
             <p className="text-xs text-muted-foreground">
@@ -2967,7 +2860,7 @@ function KeyboardSection() {
       )}
 
       <SubHeading>Layouts</SubHeading>
-      <ul aria-label="Keyboard layouts" className="flex flex-col gap-1.5">
+      <ul aria-label="Keyboard layouts" className={settingsGroup}>
         {layouts.map((entry, index) => (
           <KeyboardLayoutRow
             key={layoutKey(entry)}
@@ -3012,9 +2905,9 @@ function KeyboardSection() {
       {canSwitch && (
         <p className="text-xs text-muted-foreground">
           Switch layouts from the menu bar, or press{' '}
-          <kbd className="rounded border bg-muted px-1 font-mono">{LAYOUT_SWITCH_KEYS.previous}</kbd>{' '}
+          <kbd className="rounded-md bg-foreground/[0.07] px-1 font-mono">{LAYOUT_SWITCH_KEYS.previous}</kbd>{' '}
           for the one you used last and{' '}
-          <kbd className="rounded border bg-muted px-1 font-mono">{LAYOUT_SWITCH_KEYS.next}</kbd>{' '}
+          <kbd className="rounded-md bg-foreground/[0.07] px-1 font-mono">{LAYOUT_SWITCH_KEYS.next}</kbd>{' '}
           for the next. Keep Ctrl held and press Space again to go further back.
         </p>
       )}
@@ -3084,14 +2977,11 @@ function KeyboardLayoutRow({
   ];
   const row = (
     <li
-      className={cn(
-        'flex items-center gap-3 rounded-md border p-2.5',
-        typing ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background/40',
-      )}
+      className="flex items-center gap-3 px-4 py-2.5"
     >
       <span
         aria-hidden
-        className="flex h-6 min-w-9 shrink-0 items-center justify-center rounded border border-foreground/30 px-1 text-[0.6875rem] font-semibold tracking-wide text-foreground/90"
+        className="flex h-6 min-w-9 shrink-0 items-center justify-center rounded-md bg-foreground/10 px-1 text-[0.6875rem] font-semibold tracking-wide text-foreground/90"
       >
         {tag}
       </span>
@@ -3101,7 +2991,7 @@ function KeyboardLayoutRow({
           {entry.variant ? `${entry.layout}(${entry.variant})` : entry.layout}
         </span>
       </span>
-      {typing && <span className="shrink-0 text-xs text-primary">Typing</span>}
+      {typing && <span className="shrink-0 text-xs font-medium text-ink-accent">Typing</span>}
       {first && <span className="shrink-0 text-xs text-muted-foreground">Default</span>}
       {actions.length > 0 && (
         <DropdownMenu>
@@ -3177,26 +3067,20 @@ function KeyboardLayoutPicker({
   }, [layouts.data, query]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-2">
+    <div className={cn(settingsCard, 'flex flex-col gap-2 p-2')}>
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            type="search"
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') onCancel();
-            }}
-            placeholder="Search layouts"
-            aria-label="Search keyboard layouts"
-            className="pl-8"
-          />
-        </div>
+        <SearchField
+          size="sm"
+          autoFocus
+          value={query}
+          onValueChange={setQuery}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') onCancel();
+          }}
+          placeholder="Search layouts"
+          aria-label="Search keyboard layouts"
+          className="flex-1"
+        />
         <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
@@ -3215,7 +3099,7 @@ function KeyboardLayoutPicker({
             : 'No keyboard layouts were found. Install xkeyboard-config to choose one.'}
         </FallbackCard>
       ) : (
-        <ul aria-label="Layouts to add" className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+        <ul aria-label="Layouts to add" className="flex max-h-80 flex-col gap-0.5 overflow-y-auto [&>*]:shrink-0">
           {filtered.map((entry) => {
             const key = layoutKey(entry);
             const added = have.has(key);
@@ -3227,7 +3111,7 @@ function KeyboardLayoutPicker({
                   onClick={() => onPick({ layout: entry.layout, variant: entry.variant })}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    focusRing,
                     added ? 'opacity-60' : 'hover:bg-foreground/5',
                   )}
                 >
@@ -3282,18 +3166,14 @@ function DateTimeSection() {
   );
 }
 
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="mt-2 text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
 /** The time and date right now. Its own component so only it re-renders every second. */
 function DateTimeNow() {
   const now = useClock();
   const { config } = useAppContext();
 
   return (
-    <div className="flex items-center gap-4 rounded-xl border bg-muted/20 p-4">
-      <Clock className="size-8 shrink-0 text-muted-foreground" aria-hidden />
+    <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
+      <SettingsToken icon={Clock} className="size-10 [&_svg]:size-5" />
       <div className="min-w-0">
         <p className="text-2xl font-semibold tabular-nums text-foreground">
           {now.toLocaleTimeString([], timeFormatOptions(config.clockFormat, true))}
@@ -3393,7 +3273,7 @@ function ManualTimeForm() {
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3"
+      className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}
       onSubmit={(event) => {
         event.preventDefault();
         if (valid) setTime.mutate(`${date} ${time.length === 5 ? `${time}:00` : time}`);
@@ -3501,8 +3381,8 @@ function TimeZonePicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
-        <Globe className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
+        <SettingsToken icon={Globe} />
         <div className="min-w-0">
           <p className="text-sm text-foreground">
             {city}
@@ -3536,20 +3416,13 @@ function TimeZonePicker({
           <p className="text-xs text-muted-foreground">
             Click where you are on the map, or search for a city in your time zone.
           </p>
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search cities and regions"
-              aria-label="Search time zones"
-              className="pl-8"
-            />
-          </div>
+          <SearchField
+            size="sm"
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search cities and regions"
+            aria-label="Search time zones"
+          />
 
           {zones.isLoading ? (
             <div className="flex flex-col gap-1" aria-hidden>
@@ -3565,7 +3438,7 @@ function TimeZonePicker({
             <div
               role="radiogroup"
               aria-label="Time zone"
-              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-md border bg-muted/20 p-1"
+              className={cn(settingsCard, 'flex max-h-80 flex-col gap-0.5 overflow-y-auto p-1 [&>*]:shrink-0')}
             >
               {filtered.map((entry) => {
                 const active = entry.zone === selected;
@@ -3581,21 +3454,11 @@ function TimeZonePicker({
                     }}
                     className={cn(
                       'flex items-center gap-3 rounded-md px-2 py-1.5 text-left',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      active ? 'bg-primary/10' : 'hover:bg-foreground/5',
+                      focusRing,
+                      active ? 'bg-selected' : 'hover:bg-foreground/5',
                     )}
                   >
-                    <span
-                      className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                        active
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-muted-foreground/50',
-                      )}
-                      aria-hidden
-                    >
-                      {active && <Check className="size-3" />}
-                    </span>
+                    <RadioMark checked={active} />
                     <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                       {entry.city}
                       {entry.region && <span className="text-muted-foreground"> · {entry.region}</span>}
@@ -3634,49 +3497,36 @@ function ClockOptions() {
     <>
       <SubHeading>Clock</SubHeading>
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Clock format">
-          {formats.map((option) => {
-            const active = config.clockFormat === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                onClick={() => updateConfig((current) => ({ ...current, clockFormat: option.value }))}
-                className={cn(
-                  'flex flex-col items-center gap-1 rounded-xl border p-3',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  active
-                    ? 'border-primary bg-primary/10 text-foreground'
-                    : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-                )}
-              >
-                <span className="text-lg font-semibold tabular-nums">
-                  {SAMPLE_TIME.toLocaleTimeString([], timeFormatOptions(option.value))}
-                </span>
-                <span className="text-xs">{option.name}</span>
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedControl
+          label="Clock format"
+          size="md"
+          value={config.clockFormat}
+          options={formats.map((option) => ({
+            value: option.value,
+            label: `${option.name} · ${SAMPLE_TIME.toLocaleTimeString([], timeFormatOptions(option.value))}`,
+          }))}
+          onValueChange={(clockFormat) => updateConfig((current) => ({ ...current, clockFormat }))}
+          className="self-start"
+        />
         <p className="text-xs text-muted-foreground">
           Automatic follows your language’s custom. The menu bar, boot screen, and lock screen all use it.
         </p>
-        <SettingSwitchRow
-          id="clock-show-date"
-          label="Show the date in the menu bar"
-          description="The weekday and date, beside the time."
-          checked={config.clockShowDate}
-          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowDate: checked }))}
-        />
-        <SettingSwitchRow
-          id="clock-show-seconds"
-          label="Show seconds in the menu bar"
-          description="The clock ticks every second."
-          checked={config.clockShowSeconds}
-          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowSeconds: checked }))}
-        />
+        <SettingsGroup>
+          <SettingSwitchRow
+            id="clock-show-date"
+            label="Show the date in the menu bar"
+            description="The weekday and date, beside the time."
+            checked={config.clockShowDate}
+            onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowDate: checked }))}
+          />
+          <SettingSwitchRow
+            id="clock-show-seconds"
+            label="Show seconds in the menu bar"
+            description="The clock ticks every second."
+            checked={config.clockShowSeconds}
+            onCheckedChange={(checked) => updateConfig((current) => ({ ...current, clockShowSeconds: checked }))}
+          />
+        </SettingsGroup>
       </div>
     </>
   );
@@ -3731,7 +3581,7 @@ function NostrStorageSection() {
   return (
     <SectionShell title="Nostr & Storage" actions={<SyncStatusBadge status={syncStatus} />}>
       {/* Encrypted sync master toggle */}
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <div className="min-w-0">
           <Label htmlFor="sync-to-nostr" className="cursor-pointer text-sm">
             Encrypted sync
@@ -3757,7 +3607,7 @@ function NostrStorageSection() {
       )}
 
       {nip44Missing && config.syncToNostr && (
-        <p role="alert" className="flex items-start gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+        <p role="alert" className={cn(settingsAlert, 'flex items-start gap-2 px-4 py-3 text-xs text-foreground')}>
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
           Your signer doesn't support NIP-44 encryption, so settings stay on this
           device. Upgrade your signer to enable encrypted sync.
@@ -3766,31 +3616,26 @@ function NostrStorageSection() {
 
       <div className="space-y-3">
         <div>
-          <h3 className="text-sm font-medium text-foreground">Relays</h3>
-          <p className="text-xs text-muted-foreground">
+          <SubHeading>Relays</SubHeading>
+          <p className="px-1 text-xs text-muted-foreground">
             Nostr relays Din reads from and publishes to (NIP-65).
           </p>
         </div>
         <RelayListManager />
       </div>
 
-      <div className="space-y-3 border-t border-border/60 pt-4">
+      <div className="space-y-3">
         <div>
-          <h3 className="text-sm font-medium text-foreground">Blossom servers</h3>
-          <p className="text-xs text-muted-foreground">
+          <SubHeading>Blossom servers</SubHeading>
+          <p className="px-1 text-xs text-muted-foreground">
             Servers where Din stores files like your avatar (BUD-03).
           </p>
         </div>
         <BlossomServerManager />
       </div>
 
-      <div className="border-t border-border/60 pt-4">
-        <NostrLinkSettings />
-      </div>
-
-      <div className="border-t border-border/60 pt-4">
-        <WebsiteLinkSettings />
-      </div>
+      <NostrLinkSettings />
+      <WebsiteLinkSettings />
     </SectionShell>
   );
 }
@@ -3800,7 +3645,7 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
   const view = {
     local: { icon: CloudOff, label: 'Local only', className: 'text-muted-foreground' },
     syncing: { icon: Loader2, label: 'Syncing…', className: 'text-muted-foreground' },
-    synced: { icon: Check, label: 'Synced', className: 'text-primary' },
+    synced: { icon: Check, label: 'Synced', className: 'text-ink-accent' },
     error: { icon: TriangleAlert, label: 'Sync error', className: 'text-destructive' },
   }[status];
 
@@ -3821,6 +3666,12 @@ function SyncStatusBadge({ status }: { status: ReturnType<typeof useAppDataSyncS
 // ---------------------------------------------------------------------------
 // Appearance
 // ---------------------------------------------------------------------------
+
+/** The wallpaper of the desktops Settings draws in miniature, in the theme's primary. */
+const PREVIEW_WALLPAPER = 'bg-linear-to-br from-primary/85 via-primary/55 to-foreground/35';
+
+/** The stand-in apps on the miniature desktops' Docks and taskbars. */
+const PREVIEW_APPS = ['bg-card', 'bg-card/75', 'bg-card/50'];
 
 type GlassChoice = 'liquid' | 'frosted' | 'solid';
 
@@ -3882,7 +3733,7 @@ function CursorsSection() {
         <FallbackCard>The cursor is your browser’s.</FallbackCard>
       )}
 
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Cursor effects</p>
+      <SubHeading>Cursor effects</SubHeading>
       <CursorEffectsSettings />
     </SectionShell>
   );
@@ -3905,8 +3756,8 @@ function EffectsSection({ windowId }: { windowId: string }) {
 
   return (
     <SectionShell title="Effects">
-      <p className="mb-3 text-sm text-muted-foreground">Windows</p>
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <SubHeading>Windows</SubHeading>
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <div className="min-w-0">
           <Label htmlFor="wobbly-windows" className="cursor-pointer text-sm">
             Wobbly windows
@@ -3943,7 +3794,7 @@ function EffectsSection({ windowId }: { windowId: string }) {
         />
       </div>
 
-      <p className="mb-3 mt-4 text-sm text-muted-foreground">Typing</p>
+      <SubHeading>Typing</SubHeading>
       <PowerModeSettings />
     </SectionShell>
   );
@@ -3970,36 +3821,38 @@ function AccessibilitySection() {
   return (
     <SectionShell title="Accessibility">
       <SubHeading>Display</SubHeading>
-      <SettingSwitchRow
-        id="reduce-motion"
-        icon={Zap}
-        label="Reduce motion"
-        description="Windows, the Dock and menus appear and move without animating, and effects like wobbly windows and cursor trails stay still. Apps are asked to do the same."
-        checked={config.reduceMotion}
-        onCheckedChange={(reduceMotion) => set({ reduceMotion })}
-      />
-      <SettingSwitchRow
-        id="reduce-transparency"
-        icon={Blend}
-        label="Reduce transparency"
-        description="The menu bar, Dock, windows and panels are solid instead of frosted glass."
-        checked={config.reduceTransparency || config.increaseContrast}
-        disabled={config.increaseContrast}
-        onCheckedChange={(reduceTransparency) => set({ reduceTransparency })}
-      />
-      <SettingSwitchRow
-        id="increase-contrast"
-        icon={Contrast}
-        label="Increase contrast"
-        description="Borders, fields and secondary text are darker in a light theme and lighter in a dark one, and the focused control gets a thick outline. Also reduces transparency."
-        checked={config.increaseContrast}
-        onCheckedChange={(increaseContrast) => set({ increaseContrast })}
-      />
+      <SettingsGroup>
+        <SettingSwitchRow
+          id="reduce-motion"
+          icon={Zap}
+          label="Reduce motion"
+          description="Windows, the Dock and menus appear and move without animating, and effects like wobbly windows and cursor trails stay still. Apps are asked to do the same."
+          checked={config.reduceMotion}
+          onCheckedChange={(reduceMotion) => set({ reduceMotion })}
+        />
+        <SettingSwitchRow
+          id="reduce-transparency"
+          icon={Blend}
+          label="Reduce transparency"
+          description="The menu bar, Dock, windows and panels are solid instead of frosted glass."
+          checked={config.reduceTransparency || config.increaseContrast}
+          disabled={config.increaseContrast}
+          onCheckedChange={(reduceTransparency) => set({ reduceTransparency })}
+        />
+        <SettingSwitchRow
+          id="increase-contrast"
+          icon={Contrast}
+          label="Increase contrast"
+          description="Borders, fields and secondary text are darker in a light theme and lighter in a dark one, and the focused control gets a thick outline. Also reduces transparency."
+          checked={config.increaseContrast}
+          onCheckedChange={(increaseContrast) => set({ increaseContrast })}
+        />
+      </SettingsGroup>
 
       <SubHeading>Size</SubHeading>
-      <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
-        <div className="flex items-start gap-3">
-          <Type className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
+        <div className="flex items-center gap-3">
+          <SettingsToken icon={Type} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-4">
               <Label htmlFor="text-size" className="text-sm">Text size</Label>
@@ -4048,30 +3901,32 @@ function AccessibilitySection() {
           />
 
           <SubHeading>Keyboard</SubHeading>
-          <SettingSwitchRow
-            id="sticky-keys"
-            icon={Keyboard}
-            label="Sticky keys"
-            description="Press Shift, Ctrl, Alt or Super and let go, and it stays down for the next key, so shortcuts need one key at a time. Press it twice to keep it down until you press it again."
-            checked={config.stickyKeys}
-            onCheckedChange={(stickyKeys) => set({ stickyKeys })}
-          />
-          <SettingSwitchRow
-            id="slow-keys"
-            icon={Keyboard}
-            label="Slow keys"
-            description="A key only types once it’s been held for a moment, so brushing past one doesn’t."
-            checked={config.slowKeys}
-            onCheckedChange={(slowKeys) => set({ slowKeys })}
-          />
-          <SettingSwitchRow
-            id="bounce-keys"
-            icon={Keyboard}
-            label="Bounce keys"
-            description="A key pressed again just after it came up is ignored, so a shaky press types once."
-            checked={config.bounceKeys}
-            onCheckedChange={(bounceKeys) => set({ bounceKeys })}
-          />
+          <SettingsGroup>
+            <SettingSwitchRow
+              id="sticky-keys"
+              icon={Keyboard}
+              label="Sticky keys"
+              description="Press Shift, Ctrl, Alt or Super and let go, and it stays down for the next key, so shortcuts need one key at a time. Press it twice to keep it down until you press it again."
+              checked={config.stickyKeys}
+              onCheckedChange={(stickyKeys) => set({ stickyKeys })}
+            />
+            <SettingSwitchRow
+              id="slow-keys"
+              icon={Keyboard}
+              label="Slow keys"
+              description="A key only types once it’s been held for a moment, so brushing past one doesn’t."
+              checked={config.slowKeys}
+              onCheckedChange={(slowKeys) => set({ slowKeys })}
+            />
+            <SettingSwitchRow
+              id="bounce-keys"
+              icon={Keyboard}
+              label="Bounce keys"
+              description="A key pressed again just after it came up is ignored, so a shaky press types once."
+              checked={config.bounceKeys}
+              onCheckedChange={(bounceKeys) => set({ bounceKeys })}
+            />
+          </SettingsGroup>
         </>
       ) : (
         <FallbackCard icon={ZoomIn}>
@@ -4100,23 +3955,25 @@ function WindowsSection() {
 
   return (
     <SectionShell title="Windows">
-      <SettingSwitchRow
-        id="tiling-enabled"
-        icon={LayoutDashboard}
-        label="Tile windows"
-        description="Windows share the screen side by side instead of overlapping, like Hyprland. Super+T floats one. Super+Shift+T turns tiling on or off."
-        checked={config.tilingEnabled}
-        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
-      />
-      <SettingSwitchRow
-        id="restore-windows"
-        icon={History}
-        label="Reopen windows when Din starts"
-        description="After Din restarts, updates or the computer starts up, your windows come back where they were, with their tabs and folders. Anything unsaved in them is still lost."
-        checked={config.restoreWindows}
-        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, restoreWindows: checked }))}
-      />
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+      <SettingsGroup>
+        <SettingSwitchRow
+          id="tiling-enabled"
+          icon={LayoutDashboard}
+          label="Tile windows"
+          description="Windows share the screen side by side instead of overlapping, like Hyprland. Super+T floats one. Super+Shift+T turns tiling on or off."
+          checked={config.tilingEnabled}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
+        />
+        <SettingSwitchRow
+          id="restore-windows"
+          icon={History}
+          label="Reopen windows when Din starts"
+          description="After Din restarts, updates or the computer starts up, your windows come back where they were, with their tabs and folders. Anything unsaved in them is still lost."
+          checked={config.restoreWindows}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, restoreWindows: checked }))}
+        />
+      </SettingsGroup>
+      <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="tiling-gap" className="text-sm">Gaps</Label>
           <span className="text-xs tabular-nums text-muted-foreground">{gap} px</span>
@@ -4138,17 +3995,17 @@ function WindowsSection() {
         Keyboard shortcuts work whether tiling is on or not. Each monitor has workspaces 1 to 10 of its own.
       </p>
       {WM_BINDING_HELP.map((group) => (
-        <div key={group.group} className="flex flex-col gap-1">
-          <p className="text-sm text-muted-foreground">{group.group}</p>
-          <div className="divide-y divide-border/60 rounded-md border bg-muted/20">
+        <div key={group.group} className="flex flex-col gap-2">
+          <SubHeading>{group.group}</SubHeading>
+          <div className={settingsGroup}>
             {group.bindings.map((b) => (
-              <div key={b.label} className="flex items-center justify-between gap-4 px-3 py-2">
+              <div key={b.label} className="flex items-center justify-between gap-4 px-4 py-2">
                 <span className="text-sm text-foreground">{b.label}</span>
                 <span className="flex shrink-0 items-center gap-1">
                   {b.keys.map((k) => (
                     <kbd
                       key={k}
-                      className="rounded border border-border/80 bg-background/60 px-1.5 py-0.5 font-sans text-xs text-foreground"
+                      className="rounded-md bg-foreground/[0.07] px-1.5 py-0.5 font-sans text-xs text-foreground"
                     >
                       {k}
                     </kbd>
@@ -4210,7 +4067,7 @@ function DesktopSection() {
         Sorting lays the icons out again from the top-left corner. You can also right-click the desktop to sort or clean up.
       </p>
       {icons.dir && (
-        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
           <div className="min-w-0">
             <p className="text-sm">Desktop folder</p>
             <p className="truncate text-xs text-muted-foreground select-text">{icons.dir}</p>
@@ -4229,7 +4086,7 @@ function DesktopIconSizePreview({ size }: { size: DesktopIconSize }) {
   const px = size === 'small' ? 'size-2.5' : size === 'medium' ? 'size-3.5' : 'size-5';
   return (
     <span className="absolute inset-0 flex flex-col gap-1.5 p-2">
-      {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+      {PREVIEW_APPS.map((color) => (
         <span key={color} className={cn('rounded-[3px] shadow-sm', px, color)} />
       ))}
     </span>
@@ -4265,11 +4122,8 @@ function DockSection() {
               aria-checked={active}
               onClick={() => updateConfig((current) => ({ ...current, desktopLayout: option.value }))}
               className={cn(
-                'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                active
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                settingsChoiceClass(active),
+                'flex min-w-0 flex-col items-center gap-2 p-2',
               )}
             >
               <LayoutPreview layout={option.value} />
@@ -4289,21 +4143,21 @@ function DockSection() {
 /** A small picture of a desktop layout over a wallpaper, for its choice in the picker. */
 function LayoutPreview({ layout }: { layout: DesktopLayout }) {
   return (
-    <span aria-hidden className="relative flex h-20 w-full flex-col overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+    <span aria-hidden className={cn('relative flex h-20 w-full flex-col overflow-hidden rounded-lg', PREVIEW_WALLPAPER)}>
       {layout === 'dock' && <span className="h-2 w-full shrink-0 bg-linear-to-b from-black/30 to-transparent" />}
       <span className="relative flex-1">
         <span className="absolute top-3 left-1/4 h-8 w-1/2 rounded-sm bg-white/80 shadow" />
       </span>
       {layout === 'dock' ? (
         <span className="mx-auto mb-1 flex gap-1 rounded-md bg-white/30 px-1.5 py-1 backdrop-blur">
-          {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+          {PREVIEW_APPS.map((color) => (
             <span key={color} className={cn('size-3 rounded-[3px]', color)} />
           ))}
         </span>
       ) : (
         <span className="flex h-4 w-full shrink-0 items-center gap-1 bg-black/45 px-1">
-          <span className="size-3 rounded-full bg-sky-400 ring-1 ring-white/40" />
-          {['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'].map((color) => (
+          <span className="size-3 rounded-full bg-card ring-1 ring-white/40" />
+          {PREVIEW_APPS.map((color) => (
             <span key={color} className={cn('size-2.5 rounded-[2px]', color)} />
           ))}
           <span className="ml-auto h-1.5 w-4 rounded-full bg-white/60" />
@@ -4320,7 +4174,7 @@ function DockOptions() {
   return (
     <>
       <SubHeading>Dock</SubHeading>
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="dock-size" className="text-sm">Size</Label>
           <span className="text-xs tabular-nums text-muted-foreground">{config.dockSize} px</span>
@@ -4345,7 +4199,8 @@ function DockOptions() {
       />
       <div
         className={cn(
-          'flex flex-col gap-2 rounded-md border bg-muted/20 p-3',
+          settingsCard,
+          'flex flex-col gap-2 px-4 py-3',
           !config.dockMagnification && 'opacity-60',
         )}
       >
@@ -4381,14 +4236,11 @@ function DockOptions() {
               aria-checked={active}
               onClick={() => updateConfig((current) => ({ ...current, dockStyle: option.value }))}
               className={cn(
-                'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                active
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                settingsChoiceClass(active),
+                'flex min-w-0 flex-col items-center gap-2 p-2',
               )}
             >
-              <span className="relative flex h-16 w-full items-end justify-center overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+              <span className={cn('relative flex h-16 w-full items-end justify-center overflow-hidden rounded-lg', PREVIEW_WALLPAPER)}>
                 <DockPreview variant={option.value} />
               </span>
               <span className="text-xs">{option.name}</span>
@@ -4429,14 +4281,11 @@ function PicturedChoices<T extends string>({
             aria-checked={active}
             onClick={() => onChange(option.value)}
             className={cn(
-              'flex min-w-0 flex-col items-center gap-2 rounded-xl border p-2',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              active
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+              settingsChoiceClass(active),
+              'flex min-w-0 flex-col items-center gap-2 p-2',
             )}
           >
-            <span aria-hidden className="relative flex h-16 w-full flex-col justify-end overflow-hidden rounded-lg bg-linear-to-br from-sky-400 via-indigo-500 to-fuchsia-500">
+            <span aria-hidden className={cn('relative flex h-16 w-full flex-col justify-end overflow-hidden rounded-lg', PREVIEW_WALLPAPER)}>
               {preview(option.value)}
             </span>
             <span className="text-xs">{option.name}</span>
@@ -4446,9 +4295,6 @@ function PicturedChoices<T extends string>({
     </div>
   );
 }
-
-/** Colors of the stand-in apps in the taskbar previews. */
-const TASKBAR_PREVIEW_APPS = ['bg-sky-200', 'bg-amber-300', 'bg-emerald-300'];
 
 /** A small taskbar along the bottom, top or left of a desktop, Din's logo as its Start button. */
 function TaskbarPositionPreview({ position }: { position: TaskbarPosition }) {
@@ -4465,7 +4311,7 @@ function TaskbarPositionPreview({ position }: { position: TaskbarPosition }) {
       )}
     >
       <img src="/din-logo.svg" alt="" className="h-2.5 w-auto max-w-3" draggable={false} />
-      {TASKBAR_PREVIEW_APPS.map((color) => (
+      {PREVIEW_APPS.map((color) => (
         <span key={color} className={cn('size-2.5 rounded-[2px]', color)} />
       ))}
       <span className={cn('rounded-full bg-white/60', vertical ? 'mt-auto h-3 w-1.5' : 'ml-auto h-1.5 w-4')} />
@@ -4479,7 +4325,7 @@ function TaskbarStylePreview({ style }: { style: TaskbarStyle }) {
   return (
     <span className={cn('flex w-full shrink-0 items-center gap-1 bg-black/45 px-1', slim ? 'h-4' : 'h-6')}>
       <img src="/din-logo.svg" alt="" className={cn('mr-1 w-auto', slim ? 'h-2.5' : 'h-3.5')} draggable={false} />
-      {TASKBAR_PREVIEW_APPS.map((color) => (
+      {PREVIEW_APPS.map((color) => (
         <span key={color} className={cn('rounded-[2px]', color, slim ? 'size-2.5' : 'size-3.5')} />
       ))}
       <span className="ml-auto h-1.5 w-4 rounded-full bg-white/60" />
@@ -4493,12 +4339,12 @@ function TaskbarButtonsPreview({ buttons }: { buttons: TaskbarButtons }) {
     <span className="flex h-5 w-full shrink-0 items-center gap-1 bg-black/45 px-1">
       <img src="/din-logo.svg" alt="" className="h-3 w-auto shrink-0" draggable={false} />
       {buttons === 'combine'
-        ? TASKBAR_PREVIEW_APPS.map((color) => (
+        ? PREVIEW_APPS.map((color) => (
             <span key={color} className="grid h-4 w-5 place-items-center rounded-[3px] bg-white/15">
               <span className={cn('size-2.5 rounded-[2px]', color)} />
             </span>
           ))
-        : TASKBAR_PREVIEW_APPS.slice(0, 2).map((color) => (
+        : PREVIEW_APPS.slice(0, 2).map((color) => (
             <span key={color} className="flex h-4 w-9 min-w-0 items-center gap-0.5 rounded-[3px] bg-white/15 px-0.5">
               <span className={cn('size-2 shrink-0 rounded-[2px]', color)} />
               <span className="h-1 flex-1 rounded-full bg-white/60" />
@@ -4664,7 +4510,7 @@ function SystemCursorPicker() {
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'flex flex-col gap-4 px-4 py-3')}>
       <div>
         <p className="mb-2 text-sm text-foreground">Style</p>
         {themes.data.length === 0 ? (
@@ -4728,28 +4574,15 @@ function SystemCursorPicker() {
 
       <div>
         <p className="mb-2 text-sm text-foreground">Size</p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cursor size">
-          {sizes.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="radio"
-              aria-checked={size === option}
-              disabled={!canChange || fixedSize}
-              onClick={() => choose({ theme, size: option })}
-              className={cn(
-                'rounded-lg border px-3 py-1.5 text-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:cursor-not-allowed disabled:opacity-60',
-                size === option
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
-              )}
-            >
-              {CURSOR_SIZE_NAMES[option] ?? `${option} px`}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          label="Cursor size"
+          size="md"
+          value={String(size)}
+          options={sizes.map((option) => ({ value: String(option), label: CURSOR_SIZE_NAMES[option] ?? `${option} px` }))}
+          onValueChange={(option) => choose({ theme, size: Number(option) })}
+          disabled={!canChange || fixedSize}
+          className="max-w-full self-start"
+        />
         {fixedSize && canChange && (
           <p className="mt-2 text-xs text-muted-foreground">This style comes in one size only.</p>
         )}
@@ -4820,13 +4653,9 @@ function SystemCursorOption({
             disabled={disabled}
             onClick={onChoose}
             className={cn(
-              'flex w-full flex-col items-start gap-2 rounded-xl border p-3 text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:cursor-not-allowed disabled:opacity-60',
+              settingsChoiceClass(selected),
+              'flex w-full flex-col items-start gap-2 p-3 text-left',
               'pr-10',
-              selected
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
             )}
           >
             <SystemCursorPreview id={option.id} />
@@ -4942,7 +4771,7 @@ function DevelopersSection() {
   return (
     <SectionShell title="Developers">
       {updateState?.available && (
-        <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+        <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-sm text-foreground">Restart Din</p>
@@ -4959,7 +4788,7 @@ function DevelopersSection() {
           {restartError && <p className="text-xs text-destructive">{restartError}</p>}
         </div>
       )}
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <div className="min-w-0">
           <p className="text-sm text-foreground">Trigger an error</p>
           <p className="text-xs text-muted-foreground">
@@ -5041,7 +4870,7 @@ function PasswordSection() {
         Nostr accounts kept on it. Changing it here changes it everywhere.
       </p>
       <form
-        className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4"
+        className={cn(settingsCard, 'flex flex-col gap-4 p-4')}
         onSubmit={(e) => {
           e.preventDefault();
           if (ready) save();
@@ -5167,7 +4996,7 @@ function SudoModeSetting() {
   return (
     <div className="flex flex-col gap-2">
       <SubHeading>Running as administrator</SubHeading>
-      <div role="radiogroup" aria-label="Running as administrator" className="flex flex-col gap-2">
+      <div role="radiogroup" aria-label="Running as administrator" className={settingsGroup}>
         {SUDO_MODES.map(({ id, label, description }) => {
           const active = selected === id;
           return (
@@ -5178,22 +5007,9 @@ function SudoModeSetting() {
               aria-checked={active}
               disabled={isLoading || saving !== null}
               onClick={() => choose(id)}
-              className={cn(
-                'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:cursor-not-allowed disabled:opacity-60',
-                active ? 'border-primary bg-primary/10' : 'border-border/60 bg-background/40 hover:bg-foreground/5',
-              )}
+              className={cn(settingsRowButton, 'items-start py-3 disabled:opacity-60')}
             >
-              <span
-                className={cn(
-                  'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
-                  active ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50',
-                )}
-                aria-hidden
-              >
-                {active && <Check className="size-3.5" />}
-              </span>
+              <RadioMark checked={active} className="mt-0.5" />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-foreground">{label}</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
@@ -5251,7 +5067,7 @@ function AboutSection({ eraseRequest }: { eraseRequest?: number }) {
 
   return (
     <SectionShell title="About">
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-background/40 px-6 py-8 text-center">
+      <div className={cn(settingsCard, 'flex flex-col items-center gap-2 px-6 py-8 text-center')}>
         <img src="/din-logo.svg" alt="Din" className="h-24 w-auto select-none" draggable={false} />
         {dinos && !state ? (
           <Skeleton className="h-4 w-24 bg-foreground/10" aria-hidden />
@@ -5279,12 +5095,12 @@ function AboutSection({ eraseRequest }: { eraseRequest?: number }) {
           it runs on.
         </FallbackCard>
       ) : !state ? (
-        <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
+        <div className={cn(settingsCard, 'space-y-2 p-4')} aria-hidden>
           <Skeleton className="h-4 w-32 bg-foreground/10" />
           <Skeleton className="h-3 w-56 bg-foreground/10" />
         </div>
       ) : state.live ? (
-        <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+        <p className={cn(settingsCard, 'px-4 py-3 text-xs text-muted-foreground')}>
           Running from a USB stick. Install DinOS to get updates.
         </p>
       ) : (
@@ -5324,7 +5140,7 @@ function FirmwareSection() {
     <>
       <SubHeading>Firmware</SubHeading>
       {!state ? (
-        <div className="space-y-2 rounded-xl border border-border/60 p-4" aria-hidden>
+        <div className={cn(settingsCard, 'space-y-2 p-4')} aria-hidden>
           <Skeleton className="h-4 w-32 bg-foreground/10" />
           <Skeleton className="h-3 w-56 bg-foreground/10" />
         </div>
@@ -5369,7 +5185,7 @@ function FirmwareStatus({ state }: { state: FirmwareState }) {
       </p>
 
       {state.pendingRestart.length > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+        <div className={cn(settingsNotice, 'flex items-center justify-between gap-4 p-4')}>
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">
               New firmware for {state.pendingRestart.join(', ')} is ready
@@ -5396,7 +5212,7 @@ function FirmwareStatus({ state }: { state: FirmwareState }) {
         />
       ))}
 
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <p className="min-w-0 text-xs text-muted-foreground">
           {state.phase === 'checking'
             ? 'Looking for firmware updates…'
@@ -5409,7 +5225,7 @@ function FirmwareStatus({ state }: { state: FirmwareState }) {
                   : 'Not checked yet.'}
         </p>
         <Button variant="outline" size="sm" disabled={busy} onClick={check}>
-          <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
+          <RotateCw strokeWidth={1.75} className={cn('size-4.5', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
           Check now
         </Button>
       </div>
@@ -5431,7 +5247,7 @@ function FirmwareUpdateCard({
   onInstall: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border/60 p-4">
+    <div className={cn(settingsCard, 'flex flex-col gap-2 p-4')}>
       <div className="flex items-start gap-3">
         <Cpu className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -5451,7 +5267,7 @@ function FirmwareUpdateCard({
       )}
       {update.description && (
         <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <summary className="cursor-pointer rounded-sm select-none hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
             What's new
           </summary>
           <p className="mt-2 whitespace-pre-line">{update.description}</p>
@@ -5519,7 +5335,7 @@ function UpdateStatus({ state }: { state: UpdateState }) {
   return (
     <div className="flex flex-col gap-3">
       {state.phase === 'updating' && state.updatingTo ? (
-        <div className="flex flex-col gap-2 rounded-xl border border-border/60 p-4">
+        <div className={cn(settingsCard, 'flex flex-col gap-2 p-4')}>
           <div className="flex items-center gap-2 text-sm text-foreground">
             <Loader2 className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
             <span className="min-w-0 flex-1 truncate">
@@ -5540,7 +5356,7 @@ function UpdateStatus({ state }: { state: UpdateState }) {
           )}
         </div>
       ) : finish ? (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-primary/40 bg-primary/10 p-4">
+        <div className={cn(settingsNotice, 'flex items-center justify-between gap-4 p-4')}>
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">{finish.title}</p>
             <p className="text-xs text-muted-foreground">{finish.detail}</p>
@@ -5552,7 +5368,7 @@ function UpdateStatus({ state }: { state: UpdateState }) {
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <p className="min-w-0 text-xs text-muted-foreground">
           {state.phase === 'checking'
             ? `Looking for updates on ${state.branch ?? 'the branch'}…`
@@ -5565,7 +5381,7 @@ function UpdateStatus({ state }: { state: UpdateState }) {
                   : 'Not checked yet.'}
         </p>
         <Button variant="outline" size="sm" disabled={busy} onClick={check}>
-          <RotateCw className={cn('size-4', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
+          <RotateCw strokeWidth={1.75} className={cn('size-4.5', state.phase === 'checking' && 'motion-safe:animate-spin')} aria-hidden />
           Check now
         </Button>
       </div>
@@ -5589,7 +5405,7 @@ function UpdateStatus({ state }: { state: UpdateState }) {
 function UpdateSecurityCard({ state, onUpdate, canUpdate }: { state: UpdateState; onUpdate: () => void; canUpdate: boolean }) {
   const count = state.security.length;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+    <div className={cn(settingsAlert, 'flex flex-col gap-3 p-4')}>
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-start gap-2">
           <ShieldAlert className="mt-0.5 size-4.5 shrink-0 text-destructive" aria-hidden />
@@ -5610,7 +5426,7 @@ function UpdateSecurityCard({ state, onUpdate, canUpdate }: { state: UpdateState
           </Button>
         )}
       </div>
-      <ul className="flex flex-col gap-1 border-t border-destructive/20 pt-3">
+      <ul className="flex flex-col gap-1">
         {state.security.map((fix) => (
           <li key={fix.commit} className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
             <span className="shrink-0 font-mono">{shortRevision(fix.commit)}</span>
@@ -5639,7 +5455,7 @@ function UpdateFixCard({ state }: { state: UpdateState }) {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+    <div className={cn(settingsAlert, 'flex flex-col gap-3 p-4')}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Your changes need a hand</p>
@@ -5650,12 +5466,12 @@ function UpdateFixCard({ state }: { state: UpdateState }) {
           </p>
         </div>
         <Button size="sm" disabled={!fixer.available || fixer.pending} onClick={() => fixer.fix(state)}>
-          {fixer.pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Bot className="size-4" aria-hidden />}
+          {fixer.pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Bot className="size-4.5" strokeWidth={1.75} aria-hidden />}
           Fix with assistant
         </Button>
       </div>
       {state.reason === 'missing' && (
-        <div className="flex items-center justify-between gap-4 border-t border-destructive/20 pt-3">
+        <div className="flex items-center justify-between gap-4">
           <p className="min-w-0 text-xs text-muted-foreground">
             Or leave those changes behind and build <span className="font-mono">{branch}</span> as it is.
           </p>
@@ -5753,10 +5569,10 @@ function UpdateSourceCard({ state }: { state: UpdateState }) {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <GitBranch className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <div className="flex min-w-0 items-center gap-3">
+          <SettingsToken icon={GitBranch} />
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">Source</p>
             <p className="text-xs text-muted-foreground">
@@ -5846,26 +5662,6 @@ function UpdateSourceCard({ state }: { state: UpdateState }) {
 // Shared layout bits
 // ---------------------------------------------------------------------------
 
-function SectionShell({
-  title,
-  actions,
-  children,
-}: {
-  title: string;
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">{title}</h2>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </header>
-      {children}
-    </section>
-  );
-}
-
 /**
  * A labelled toggle row matching the rest of Settings' switch controls. Add a
  * new row's label to its section's `search` in SECTIONS (src/lib/settingsSections.ts) so search finds it.
@@ -5887,10 +5683,11 @@ function SettingSwitchRow({
   disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const inGroup = use(SettingsGroupContext);
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
-      <div className="flex min-w-0 items-start gap-3">
-        {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+    <div className={cn(!inGroup && settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
+      <div className="flex min-w-0 items-center gap-3">
+        {Icon && <SettingsToken icon={Icon} active={checked} />}
         <div className="min-w-0">
           <Label htmlFor={id} className="cursor-pointer text-sm">
             {label}
@@ -5903,17 +5700,29 @@ function SettingSwitchRow({
   );
 }
 
-function FallbackCard({
-  icon: Icon,
-  children,
+/**
+ * A setting that's one of a few named choices: its label, the choices as a
+ * segmented control, and what it does.
+ */
+function ChoiceRow<T extends string>({
+  label,
+  description,
+  value,
+  choices,
+  onChange,
 }: {
-  icon?: LucideIcon;
-  children: React.ReactNode;
+  label: string;
+  description: string;
+  value: T;
+  choices: { value: T; name: string }[];
+  onChange: (value: T) => void;
 }) {
+  const inGroup = use(SettingsGroupContext);
   return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
-      {Icon && <Icon className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />}
-      <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
+    <div className={cn(!inGroup && settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
+      <p className="text-sm">{label}</p>
+      <SegmentedControl label={label} size="md" value={value} options={choices.map((c) => ({ value: c.value, label: c.name }))} onValueChange={onChange} className="self-start" />
+      <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   );
 }

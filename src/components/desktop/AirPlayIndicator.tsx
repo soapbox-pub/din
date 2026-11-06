@@ -65,7 +65,7 @@ export function AirPlayReceiverList({ className }: { className?: string }) {
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       {receivers.length === 0 ? (
-        <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border/60 px-3 py-6 text-sm text-muted-foreground">
+        <div className="flex items-center justify-center gap-2 bg-foreground/[0.04] rounded-lg px-3 py-6 text-sm text-muted-foreground">
           {data?.scanning && <Loader2 className="size-4 animate-spin" aria-hidden />}
           {data?.scanning ? 'Looking for AirPlay receivers…' : 'No AirPlay receivers found nearby.'}
         </div>
@@ -89,14 +89,14 @@ export function AirPlayReceiverList({ className }: { className?: string }) {
                 key={receiver.name}
                 className={cn(
                   'flex flex-col gap-2 rounded-lg px-2 py-1.5',
-                  active && 'bg-primary/10',
+                  active && 'bg-selected',
                 )}
               >
                 <div className="flex items-center gap-3">
                   <span
                     className={cn(
                       'grid size-8 shrink-0 place-items-center rounded-full',
-                      active ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-foreground/80',
+                      active ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/80',
                     )}
                   >
                     <Tv className="size-4" aria-hidden />
@@ -291,7 +291,7 @@ export function AirPlayOsd() {
               key={mode}
               className={cn(
                 'flex w-20 flex-col items-center gap-1 rounded-xl px-2 py-2 text-xs font-medium',
-                change.mode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
+                change.mode === mode ? 'bg-pigment text-primary-foreground clay-pigment' : 'text-muted-foreground',
               )}
             >
               <Icon className="size-5" aria-hidden />

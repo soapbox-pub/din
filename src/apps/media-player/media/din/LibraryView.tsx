@@ -448,7 +448,7 @@ export function LibraryView() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <nav aria-label="Library" className="mp-pane mp-scroll flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-y-0 border-l-0 p-2 max-sm:hidden">
+      <nav aria-label="Library" className="mp-pane mp-scroll flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-y-0 border-l-0 p-2 max-sm:hidden [&>*]:shrink-0">
         <p className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--mp-ink-faint)]">Library</p>
         {nav({ kind: 'recent' }, <Clock className={ic} />, 'Recently Added')}
         {nav({ kind: 'artists' }, <Mic2 className={ic} />, 'Artists')}
@@ -521,7 +521,7 @@ export function LibraryView() {
           </div>
         ) : items.length === 0 && !q && view.kind !== 'folders' && view.kind !== 'playlist' ? (
           <div className="grid flex-1 place-items-center p-8">
-            <div className="max-w-sm rounded-xl border border-dashed border-[var(--mp-line)] px-8 py-12 text-center text-[var(--mp-ink-dim)]">
+            <div className="max-w-sm rounded-xl px-8 py-12 text-center text-[var(--mp-ink-dim)]">
               {scanning ? 'Looking through your Music and Videos folders…' : 'No music yet. Put songs in your Music folder, or add another folder to watch.'}
               {!scanning && (
                 <div className="mt-4">

@@ -175,7 +175,7 @@ export function CursorThemeView({ path, mtimeMs = null, onUse }: CursorThemeView
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               use.state === 'done'
                 ? 'bg-muted text-foreground'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60',
+                : 'bg-pigment text-primary-foreground clay-pigment hover:brightness-110 disabled:opacity-60',
             )}
           >
             {use.state === 'pending' && <Loader2 className="size-4 animate-spin" aria-hidden />}
@@ -207,7 +207,7 @@ export function CursorThemeView({ path, mtimeMs = null, onUse }: CursorThemeView
                 key={cursor.name}
                 title={cursor.name}
                 style={{ cursor: cursor.css }}
-                className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-border/60 bg-muted/20 p-2 hover:bg-foreground/5"
+                className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl bg-card clay p-2 hover:bg-foreground/5"
               >
                 <div className="grid size-16 place-items-center">
                   <CursorImage frames={cursor.frames} />

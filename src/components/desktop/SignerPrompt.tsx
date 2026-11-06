@@ -165,7 +165,7 @@ function DecryptPreview({
         type="button"
         onClick={reveal}
         disabled={state.status === 'busy'}
-        className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-ink-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       >
         {state.status === 'busy' && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
         Show message first

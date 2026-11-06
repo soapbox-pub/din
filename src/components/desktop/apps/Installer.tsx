@@ -42,6 +42,8 @@ import {
   type InstallStep,
   type InstallerDisk,
 } from '@/lib/installer';
+import { settingsChoiceClass } from '@/shared/settingsChromeStyles';
+import { RadioMark } from '@/shared/settingsChrome';
 
 /** A disk's name for people: its model, else its device. */
 function diskName(disk: InstallerDisk): string {
@@ -111,7 +113,7 @@ function InstallSetup() {
     return (
       <Frame>
         <div className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-pigment text-primary-foreground clay-pigment">
             <HardDrive className="size-8" aria-hidden />
           </div>
           <div className="max-w-md space-y-3">
@@ -189,7 +191,7 @@ function InstallSetup() {
         }
       >
         {disks.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <div className="rounded-xl px-8 py-12 text-center">
             <p className="mx-auto max-w-sm text-sm text-muted-foreground">
               No disks found besides the USB stick DinOS is running from.
             </p>
@@ -329,7 +331,7 @@ function InstallSetup() {
       </div>
 
       {unlocking && (
-        <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+        <section className="flex flex-col gap-4 rounded-xl bg-card clay p-4">
           <div className="flex items-start gap-3">
             <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
             <div className="flex min-w-0 flex-1 flex-col gap-3">
@@ -356,7 +358,7 @@ function InstallSetup() {
       )}
 
       {oem && (
-        <section className="flex items-start gap-3 rounded-xl border border-border/60 bg-background/40 p-4">
+        <section className="flex items-start gap-3 rounded-xl bg-card clay p-4">
           <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
           <p className="text-xs text-muted-foreground">
             The disk is encrypted with a key of its own, which opens it until its owner chooses a
@@ -367,7 +369,7 @@ function InstallSetup() {
       )}
 
       {!keep && !oem && (
-        <section className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+        <section className="flex flex-col gap-4 rounded-xl bg-card clay p-4">
           <div className="flex items-start gap-3">
             <Lock className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
             <div className="min-w-0 flex-1">
@@ -491,7 +493,7 @@ function InstallProgress({ state }: { state: InstallState }) {
     return (
       <Frame>
         <div className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-          <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="flex size-16 items-center justify-center rounded-full bg-pigment text-primary-foreground clay-pigment">
             <Check className="size-8" aria-hidden />
           </div>
           <div className="max-w-md space-y-3">
@@ -546,11 +548,11 @@ function InstallProgress({ state }: { state: InstallState }) {
               <div className="flex items-center gap-3">
                 <span
                   className={cn(
-                    'flex size-6 shrink-0 items-center justify-center rounded-full border',
-                    done && 'border-primary bg-primary text-primary-foreground',
-                    active && !failed && 'border-primary text-primary',
-                    broken && 'border-destructive bg-destructive text-white',
-                    !done && !active && !broken && 'border-muted-foreground/40',
+                    'flex size-6 shrink-0 items-center justify-center rounded-full',
+                    done && 'bg-pigment text-primary-foreground clay-pigment',
+                    active && !failed && 'text-ink-accent ring-2 ring-ring/60',
+                    broken && 'bg-destructive text-white',
+                    !done && !active && !broken && 'bg-foreground/10 clay',
                   )}
                   aria-hidden
                 >
@@ -614,7 +616,7 @@ function SetUpForSomeoneElse() {
   return (
     <Frame>
       <div className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-        <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <div className="flex size-16 items-center justify-center rounded-full bg-pigment text-primary-foreground clay-pigment">
           <Gift className="size-8" aria-hidden />
         </div>
         <div className="max-w-md space-y-3">
@@ -664,7 +666,7 @@ function Frame({
 }) {
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-6 [&>*]:shrink-0">
         {title && (
           <div className="flex items-center gap-2">
             {onBack && (
@@ -709,25 +711,11 @@ function Choice({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-60',
-        selected
-          ? 'border-primary bg-primary/10'
-          : 'border-border/60 bg-background/40 hover:bg-foreground/5',
+        settingsChoiceClass(selected),
+        'flex items-start gap-3 p-4 text-left',
       )}
     >
-      <span
-        className={cn(
-          'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
-          selected
-            ? 'border-primary bg-primary text-primary-foreground'
-            : 'border-muted-foreground/50',
-        )}
-        aria-hidden
-      >
-        {selected && <Check className="size-3.5" />}
-      </span>
+      <RadioMark checked={selected} className="mt-0.5" />
       {icon && <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>}
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{title}</span>
@@ -753,7 +741,7 @@ function DiskSkeleton() {
   return (
     <div className="flex flex-col gap-2" aria-hidden>
       {[0, 1].map((i) => (
-        <div key={i} className="flex items-start gap-3 rounded-xl border border-border/60 p-4">
+        <div key={i} className="flex items-start gap-3 rounded-xl bg-card clay p-4">
           <Skeleton className="size-5 shrink-0 rounded-full bg-foreground/10" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-4 w-48 bg-foreground/10" />

@@ -30,7 +30,7 @@ export function ActionItems<T extends string>({
           {i > 0 && <Separator />}
           {group.map(({ id, label, icon: Icon, enabled, destructive }) => (
             <Item key={id} disabled={!enabled} variant={destructive ? 'destructive' : 'default'} onSelect={() => onAction(id)}>
-              <Icon className="size-4" aria-hidden />
+              <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
               {label}
             </Item>
           ))}

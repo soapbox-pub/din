@@ -671,7 +671,7 @@ export const AirPlayMenuItem = memo(function AirPlayMenuItem() {
           className={cn(
             'size-7 rounded-md hover:bg-foreground/10 hover:text-foreground',
             sharing.length > 0
-              ? 'bg-primary/15 text-primary'
+              ? 'bg-selected text-foreground'
               : data.available ? 'text-foreground/90' : 'text-muted-foreground',
           )}
         >

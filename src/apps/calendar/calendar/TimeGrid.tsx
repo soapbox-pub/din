@@ -216,7 +216,7 @@ export function TimeGrid({ days, events, today, now }: { days: Date[]; events: S
                     ))}
                     {drag?.day === i && (
                       <div
-                        className="pointer-events-none absolute inset-x-1 z-10 rounded-md border-2 border-primary bg-primary/15 px-1.5 text-xs font-medium text-primary"
+                        className="pointer-events-none absolute inset-x-1 z-10 rounded-md bg-selected ring-2 ring-ring/60 px-1.5 text-xs font-medium text-ink-accent"
                         style={{ top: (drag.from / 60) * HOUR_PX, height: Math.max(SNAP_MIN, drag.to - drag.from) * (HOUR_PX / 60) }}
                       >
                         {formatTime(startOfDay(d).getTime() + drag.from * 60_000)} – {formatTime(startOfDay(d).getTime() + drag.to * 60_000)}

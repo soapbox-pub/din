@@ -487,6 +487,8 @@ export function runWindowEffect(
   canvas.style.height = `${viewH}px`;
   canvas.style.pointerEvents = 'none';
   canvas.style.zIndex = String(zIndex);
+  // Waited for, or hidden, by a screenshot (captureDesktop).
+  canvas.dataset.windowEffect = '';
 
   const view = { width: viewW, height: viewH };
   const shifted = above ? { ...win, y: win.y + above } : win;

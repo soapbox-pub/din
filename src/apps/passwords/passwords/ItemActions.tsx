@@ -51,12 +51,12 @@ export function ItemMenuItems({
     return (
       <>
         <Item onSelect={() => actions.restore(item.id)}>
-          <RotateCcw className="size-4" aria-hidden />
+          <RotateCcw className="size-4.5" strokeWidth={1.75} aria-hidden />
           Restore
         </Item>
         <Separator />
         <Item variant="destructive" onSelect={() => actions.deleteForever(item.id)}>
-          <Trash2 className="size-4" aria-hidden />
+          <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
           Delete Now…
         </Item>
       </>
@@ -69,51 +69,51 @@ export function ItemMenuItems({
     <>
       {item.username && (
         <Item onSelect={() => actions.copy(item.id, 'username')}>
-          <User className="size-4" aria-hidden />
+          <User className="size-4.5" strokeWidth={1.75} aria-hidden />
           Copy Username
         </Item>
       )}
       {item.kind === 'login' && (
         <Item onSelect={() => actions.copy(item.id, 'password')}>
-          <KeyRound className="size-4" aria-hidden />
+          <KeyRound className="size-4.5" strokeWidth={1.75} aria-hidden />
           Copy Password
         </Item>
       )}
       {item.otp && (
         <Item onSelect={() => actions.copy(item.id, 'otp')}>
-          <ShieldCheck className="size-4" aria-hidden />
+          <ShieldCheck className="size-4.5" strokeWidth={1.75} aria-hidden />
           Copy Verification Code
         </Item>
       )}
       {item.kind === 'note' && (
         <Item onSelect={() => actions.copy(item.id, 'notes')}>
-          <Copy className="size-4" aria-hidden />
+          <Copy className="size-4.5" strokeWidth={1.75} aria-hidden />
           Copy Note
         </Item>
       )}
       {url && (
         <Item onSelect={() => actions.openUrl(url)}>
-          <ExternalLink className="size-4" aria-hidden />
+          <ExternalLink className="size-4.5" strokeWidth={1.75} aria-hidden />
           Open Website
         </Item>
       )}
       <Separator />
       <Item onSelect={() => actions.edit(item.id)}>
-        <Pencil className="size-4" aria-hidden />
+        <Pencil className="size-4.5" strokeWidth={1.75} aria-hidden />
         Edit
       </Item>
       <Item onSelect={() => actions.setFavorite(item.id, !item.favorite)}>
-        {item.favorite ? <StarOff className="size-4" aria-hidden /> : <Star className="size-4" aria-hidden />}
+        {item.favorite ? <StarOff className="size-4.5" strokeWidth={1.75} aria-hidden /> : <Star className="size-4.5" strokeWidth={1.75} aria-hidden />}
         {item.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
       </Item>
       <Sub>
         <SubTrigger>
-          <FolderInput className="size-4" aria-hidden />
+          <FolderInput className="size-4.5" strokeWidth={1.75} aria-hidden />
           Move to Folder
         </SubTrigger>
         <SubContent className="max-h-80 w-52 overflow-y-auto">
           <Item disabled={item.groupId === list.rootId} onSelect={() => actions.move(item.id, list.rootId)}>
-            <Folder className="size-4" aria-hidden />
+            <Folder className="size-4.5" strokeWidth={1.75} aria-hidden />
             No Folder
           </Item>
           {folders.map((folder) => (
@@ -126,7 +126,7 @@ export function ItemMenuItems({
       </Sub>
       <Separator />
       <Item variant="destructive" onSelect={() => actions.trash(item.id)}>
-        <Trash2 className="size-4" aria-hidden />
+        <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
         Delete
       </Item>
     </>

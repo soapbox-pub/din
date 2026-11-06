@@ -27,6 +27,7 @@ import { originLabel, questionTitle } from '@/lib/signerLabels';
 import { APP_DATA_KIND, MAX_CLOCK_SKEW_SECONDS, isAppDataDTag } from '@/lib/appData';
 import { serveAppSignerRequests } from '@/lib/appSigner';
 import { SignerPrompt, type PromptAnswer, type SignerPromptItem } from '@/components/desktop/SignerPrompt';
+import { CONNECT_APP_APP_ID, connectAppParams } from '@/lib/settingsWindows';
 
 /** At most this many questions per site in RATE_WINDOW_MS; more are refused unasked. */
 const RATE_LIMIT = 5;
@@ -108,11 +109,12 @@ export function NostrBridgeHost() {
   const { open } = useWindowActions();
   const [queue, setQueue] = useState<SignerPromptItem[]>([]);
 
-  // A nostrconnect:// link opened in a page goes to Settings, which shows the
-  // app it's for and connects it only if the user says so.
+  // A nostrconnect:// link opened in a page goes to Settings' Connect an App
+  // window, which shows the app it's for and connects it only if the user
+  // says so.
   useEffect(() => {
     return getBunkerBridge()?.onLink((uri) => {
-      open('settings', { section: 'connected', nostrconnect: uri, nonce: Date.now() });
+      open(CONNECT_APP_APP_ID, connectAppParams(uri));
     });
   }, [open]);
 

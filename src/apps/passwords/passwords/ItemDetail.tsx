@@ -9,6 +9,7 @@ import { parseTotp, totpCode } from '@/shared/totp';
 import { ItemIcon } from './ItemIcon';
 import { ItemMenuItems, type ItemActions } from './ItemActions';
 import { displayTitle, openableUrl, siteHost, useBridge, useVaultItem } from './vault';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /** A field's row: its label over its value, copied on a click. */
 function FieldRow({
@@ -41,7 +42,7 @@ function FieldRow({
         onClick={copy}
         disabled={!onCopy}
         aria-label={copyLabel}
-        className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+        className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
       >
         <span className="block text-xs text-muted-foreground">{label}</span>
         <span className="block min-w-0 truncate text-sm">{children}</span>
@@ -55,12 +56,12 @@ function FieldRow({
           title="Copy"
           aria-label={copyLabel}
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground',
-            copied ? 'text-primary opacity-100' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
+            'grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-opacity hover:bg-foreground/[0.07] hover:text-foreground',
+            copied ? 'text-ink-accent opacity-100' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
           )}
         >
           <span aria-live="polite">
-            {copied ? <Check className="size-4" aria-label="Copied" /> : <Copy className="size-4" aria-hidden />}
+            {copied ? <Check className="size-4.5" strokeWidth={1.75} aria-label="Copied" /> : <Copy className="size-4.5" strokeWidth={1.75} aria-hidden />}
           </span>
         </button>
       )}
@@ -69,7 +70,7 @@ function FieldRow({
 }
 
 function Card({ children }: { children: ReactNode }) {
-  return <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-card/60">{children}</div>;
+  return <div className={settingsGroup}>{children}</div>;
 }
 
 /** The current verification code, with the time left on it. */
@@ -174,7 +175,7 @@ export function ItemDetail({
       aria-pressed={shown.has(key)}
       onClick={() => toggle(key)}
     >
-      {shown.has(key) ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+      {shown.has(key) ? <EyeOff className="size-4.5" strokeWidth={1.75} /> : <Eye className="size-4.5" strokeWidth={1.75} />}
     </Button>
   );
   const url = openableUrl(item.url);
@@ -196,14 +197,14 @@ export function ItemDetail({
         <div className="flex shrink-0 items-center gap-1">
           {!item.trashed && (
             <Button type="button" variant="secondary" size="sm" onClick={() => onEdit(item)}>
-              <Pencil className="size-3.5" aria-hidden />
+              <Pencil className="size-4" strokeWidth={1.75} aria-hidden />
               Edit
             </Button>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="ghost" size="icon" className="size-8" aria-label="More">
-                <MoreHorizontal className="size-4" />
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -247,7 +248,7 @@ export function ItemDetail({
                     title={`Open ${siteHost(item.url)}`}
                     onClick={() => window.open(url)}
                   >
-                    <ExternalLink className="size-4" />
+                    <ExternalLink className="size-4.5" strokeWidth={1.75} />
                   </Button>
                 )
               }
@@ -277,7 +278,7 @@ export function ItemDetail({
       {item.notes && (
         <section aria-label="Notes" className="space-y-2">
           <h3 className="px-1 text-xs font-medium text-muted-foreground">Notes</h3>
-          <div className="whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-card/60 px-4 py-3 text-sm select-text">
+          <div className="whitespace-pre-wrap break-words rounded-xl bg-card clay px-4 py-3 text-sm select-text">
             {item.notes}
           </div>
         </section>

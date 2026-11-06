@@ -386,7 +386,7 @@ function StatCard({
         warning === 'critical'
           ? 'border-destructive/60 from-destructive/[0.08]'
           : warning === 'low'
-            ? 'border-amber-500/60 from-amber-500/[0.08]'
+            ? 'border-warning/60 from-warning/[0.08]'
             : 'border-border/60 from-foreground/[0.03]',
         className,
       )}
@@ -404,7 +404,7 @@ function StatCard({
           warning === 'critical'
             ? 'font-medium text-destructive'
             : warning === 'low'
-              ? 'font-medium text-amber-700 dark:text-amber-300'
+              ? 'font-medium text-warning'
               : 'text-muted-foreground',
         )}
       >
@@ -441,7 +441,7 @@ function SpaceBar({ fs }: { fs: FilesystemSpace }) {
             fs.level === 'critical'
               ? 'text-destructive'
               : fs.level === 'low'
-                ? 'text-amber-700 dark:text-amber-300'
+                ? 'text-warning'
                 : 'text-muted-foreground',
           )}
         >
@@ -460,7 +460,7 @@ function SpaceBar({ fs }: { fs: FilesystemSpace }) {
         <div
           className={cn(
             'h-full rounded-full motion-safe:transition-[width]',
-            fs.level === 'critical' ? 'bg-destructive' : fs.level === 'low' ? 'bg-amber-500' : 'bg-chart-4',
+            fs.level === 'critical' ? 'bg-destructive' : fs.level === 'low' ? 'bg-warning' : 'bg-chart-4',
           )}
           style={{ width: `${Math.min(100, used)}%` }}
         />
@@ -533,7 +533,7 @@ function SystemHeader({
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className={cn('space-y-2 rounded-xl border border-border/60 p-3', i === 2 && 'col-span-2 @2xl:col-span-1')}
+            className={cn('space-y-2 rounded-xl bg-card clay p-3', i === 2 && 'col-span-2 @2xl:col-span-1')}
           >
             <div className="flex justify-between">
               <Skeleton className="h-3 w-16" />
@@ -669,7 +669,7 @@ const TableRow = memo(function TableRow({
       title={row.title}
       className={cn(
         'absolute inset-x-0 flex items-center gap-3 rounded-md pl-2 pr-3 text-sm',
-        selected ? (focused ? 'bg-primary/20' : 'bg-foreground/10') : 'hover:bg-foreground/5',
+        selected ? (focused ? 'bg-selected' : 'bg-foreground/10') : 'hover:bg-foreground/5',
       )}
       style={{ top: index * ROW_HEIGHT, height: ROW_HEIGHT }}
       onMouseDown={(e) => {
@@ -713,7 +713,7 @@ const TableRow = memo(function TableRow({
           {row.detail && <span className="ml-2 text-xs text-muted-foreground">{row.detail}</span>}
         </span>
         {row.notResponding && (
-          <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
             Not responding
           </span>
         )}
@@ -899,7 +899,7 @@ export function SystemMonitor() {
   if (!available) {
     return (
       <div className="grid h-full w-full place-items-center p-6">
-        <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+        <div className="max-w-sm rounded-xl px-8 py-12 text-center">
           <Activity className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
           <p className="text-sm text-muted-foreground">
             System Monitor needs the Electron shell to see the computer’s processes. Run{' '}
@@ -1016,7 +1016,7 @@ export function SystemMonitor() {
                 <TableSkeleton />
               ) : rows.length === 0 ? (
                 <div className="grid h-full place-items-center p-6">
-                  <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-10 text-center">
+                  <div className="max-w-sm rounded-xl px-8 py-10 text-center">
                     <p className="text-sm text-muted-foreground">
                       {query ? `Nothing running matches “${query.trim()}”.` : 'No processes to show.'}
                     </p>

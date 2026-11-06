@@ -5,9 +5,11 @@
  */
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { appLink } from '@/shared/launch';
 import {
   getPasswordsBridge,
   type PasswordGroup,
+  type PasswordsImportResult,
   type PasswordItemInput,
   type PasswordList,
   type PasswordSummary,
@@ -15,6 +17,35 @@ import {
 } from '@/lib/passwords';
 
 const KEY = ['passwords'] as const;
+
+/** The windows Passwords opens beside its own, by their `window` launch param. */
+export type PasswordsWindow = 'settings' | 'import';
+
+/** Open Passwords' settings or import in a window of its own. */
+export function openPasswordsWindow(kind: PasswordsWindow): void {
+  const size = kind === 'settings' ? { width: 480, height: 600 } : { width: 480, height: 560 };
+  void window.open(appLink(null, { window: kind, floating: true, ...size }));
+}
+
+/** The channel Passwords' windows talk over: an import done in its window, for the vault's to show. */
+const CHANNEL = 'passwords';
+
+export function announceImported(result: PasswordsImportResult): void {
+  const channel = new BroadcastChannel(CHANNEL);
+  channel.postMessage({ type: 'imported', result });
+  channel.close();
+}
+
+/** Hear imports done in Passwords' import window. */
+export function useImported(onImported: (result: PasswordsImportResult) => void): void {
+  useEffect(() => {
+    const channel = new BroadcastChannel(CHANNEL);
+    channel.onmessage = (e: MessageEvent<{ type?: string; result?: PasswordsImportResult }>) => {
+      if (e.data?.type === 'imported' && e.data.result) onImported(e.data.result);
+    };
+    return () => channel.close();
+  }, [onImported]);
+}
 
 export function useBridge(): PasswordsBridge | undefined {
   return getPasswordsBridge();

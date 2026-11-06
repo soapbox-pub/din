@@ -25,7 +25,7 @@ export function PermissionRow({
       <span
         className={cn(
           'grid size-10 shrink-0 place-items-center rounded-full transition-colors',
-          allowed ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+          allowed ? 'bg-selected text-foreground' : 'bg-muted text-muted-foreground',
         )}
       >
         <Icon className="size-5" aria-hidden />
@@ -34,7 +34,7 @@ export function PermissionRow({
         <label htmlFor={id} className="block font-medium">{title}</label>
         <p className="text-sm text-muted-foreground">{description}</p>
         {required && !allowed && (
-          <p className="mt-1 text-sm text-amber-600 dark:text-amber-400">It says it needs this, so it may not work without it.</p>
+          <p className="mt-1 text-sm text-warning">It says it needs this, so it may not work without it.</p>
         )}
       </div>
       <Switch id={id} checked={allowed} onCheckedChange={onChange} className="mt-2" />

@@ -50,6 +50,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { ContentPane, SearchField, SidebarRow, SidebarTitle, ToolButton } from '@/shared/appChrome';
 import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
 
@@ -237,7 +238,7 @@ export function AppStore({ params }: AppComponentProps) {
             <RefreshCw className={cn(toolIcon.className, refreshing && 'animate-spin')} strokeWidth={toolIcon.strokeWidth} aria-hidden />
           </ToolButton>
       </SidebarTitle>
-      <nav aria-label="Sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2">
+      <nav aria-label="Sections" className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-2 pt-2 [&>*]:shrink-0">
         {TABS.map(({ id, name }) => (
           <SidebarRow
             key={id}
@@ -511,7 +512,7 @@ function FeaturedHero({ app }: { app: StoreApp }) {
   const view = useStoreAppView(app);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(135deg,color-mix(in_oklab,var(--primary)_22%,var(--card)),color-mix(in_oklab,var(--primary)_8%,var(--card)))] p-6 text-foreground clay">
+    <div className="relative overflow-hidden rounded-2xl bg-card clay bg-[linear-gradient(135deg,color-mix(in_oklab,var(--primary)_22%,var(--card)),color-mix(in_oklab,var(--primary)_8%,var(--card)))] p-6 text-foreground">
       <CardLink app={app} name={view.name} />
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
         Featured
@@ -552,7 +553,7 @@ const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="relative flex w-64 shrink-0 snap-start flex-col gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex w-64 shrink-0 snap-start flex-col gap-3 rounded-xl bg-card clay p-4 transition-shadow motion-safe:hover:shadow-md"
     >
       <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
@@ -602,7 +603,7 @@ const StoreAppCard = memo(function StoreAppCard({ app }: { app: StoreApp }) {
   return (
     <div
       ref={ref}
-      className="relative flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-card p-4 clay transition-shadow motion-safe:hover:shadow-md"
+      className="relative flex min-w-0 flex-col gap-3 rounded-xl bg-card clay p-4 transition-shadow motion-safe:hover:shadow-md"
     >
       <CardLink app={app} name={view.name} />
       <div className="flex items-center gap-3">
@@ -769,7 +770,7 @@ function AppDetail({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
+          <dl className={cn(settingsGroup, 'text-sm')}>
             <InfoRow label="Publisher">{view.publisher ?? 'Unknown'}</InfoRow>
             <InfoRow label="Updated">{updated}</InfoRow>
             <InfoRow label="Files">{fileCount.toLocaleString()}</InfoRow>
@@ -972,7 +973,7 @@ function GetPill({
         'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
         onHero
           ? 'bg-pigment text-primary-foreground clay-pigment hover:bg-transparent hover:brightness-110'
-          : 'bg-secondary text-primary hover:bg-secondary/80',
+          : 'bg-secondary text-ink-accent hover:bg-secondary/80',
         className,
       )}
     >
@@ -984,7 +985,7 @@ function GetPill({
 function FeaturedSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-border/70 bg-card p-6">
+      <div className="rounded-xl bg-card clay p-6">
         <Skeleton className="h-3 w-20" />
         <div className="mt-4 flex items-center gap-4">
           <Skeleton className="size-20 shrink-0 rounded-[1.25rem]" />
@@ -1000,7 +1001,7 @@ function FeaturedSkeleton() {
         {Array.from({ length: 3 }, (_, i) => (
           <div
             key={i}
-            className="flex w-64 shrink-0 flex-col gap-3 rounded-xl border border-border/70 bg-card p-4"
+            className="flex w-64 shrink-0 flex-col gap-3 rounded-xl bg-card clay p-4"
           >
             <div className="flex items-center gap-3">
               <Skeleton className="size-14 shrink-0 rounded-2xl" />
@@ -1027,7 +1028,7 @@ function CatalogSkeleton() {
       {Array.from({ length: 6 }, (_, i) => (
         <div
           key={i}
-          className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4"
+          className="flex flex-col gap-3 rounded-xl bg-card clay p-4"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="size-14 shrink-0 rounded-2xl" />

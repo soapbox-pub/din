@@ -109,7 +109,7 @@ export function GitBranchChip({ directory, open, onToggle }: { directory: string
       <span className="min-w-0 truncate">{name}</span>
       {status.ahead > 0 && <span className="shrink-0 tabular-nums" aria-label={`${status.ahead} to push`}>↑{status.ahead}</span>}
       {status.behind > 0 && <span className="shrink-0 tabular-nums" aria-label={`${status.behind} to pull`}>↓{status.behind}</span>}
-      {status.changes > 0 && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-label={plural(status.changes, 'uncommitted change')} />}
+      {status.changes > 0 && <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-label={plural(status.changes, 'uncommitted change')} />}
     </button>
   );
 }
@@ -166,7 +166,7 @@ export function GitPanel({
 
 function EmptyCard({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-1 mt-1 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+    <div className="mx-1 mt-1 rounded-xl px-4 py-8 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );
@@ -309,7 +309,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
     <section aria-label="Remote" className="mx-1 mt-1 space-y-2 rounded-xl bg-background/60 p-2 clay">
       {(status.changes > 0 || status.state) && (
         <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-          <span className="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
+          <span className="size-2 shrink-0 rounded-full bg-warning" aria-hidden />
           {status.state
             ? `In the middle of ${status.state === 'merging' ? 'a merge' : status.state === 'rebasing' ? 'a rebase' : status.state === 'reverting' ? 'a revert' : 'a cherry-pick'}${status.conflicts ? `, ${plural(status.conflicts, 'conflict')}` : ''}`
             : plural(status.changes, 'uncommitted change')}
@@ -324,7 +324,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
             aria-label={`${remote.name}’s URL`}
             title={remote.url}
             onFocus={(e) => e.currentTarget.select()}
-            className={cn('h-7 min-w-0 flex-1 rounded-full border border-border/70 bg-background px-2.5 font-mono text-xs text-muted-foreground', focusRing)}
+            className={cn('h-7 min-w-0 flex-1 rounded-full bg-foreground/[0.06] px-2.5 font-mono text-xs text-muted-foreground', focusRing)}
           />
           <CopyToolButton text={remote.url} label="Copy the URL" />
           {web && (
@@ -345,7 +345,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
           <div
             className={cn(
               'flex h-8 overflow-hidden rounded-full border bg-background clay',
-              unpushed ? 'border-amber-500/70 text-amber-700 dark:text-amber-300' : 'border-border/70 text-foreground',
+              unpushed ? 'border-warning/70 text-warning' : 'border-border/70 text-foreground',
               !canSync && 'opacity-50',
             )}
           >
@@ -364,7 +364,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
               {busy ? RUNNING_LABELS[sync.running!] : sync.succeeded ? 'Synced' : 'Sync'}
               {unpushed && !busy && <span className="sr-only">, {plural(status.ahead, 'commit')} to push</span>}
             </button>
-            <span aria-hidden className={cn('my-1.5 w-px', unpushed ? 'bg-amber-500/50' : 'bg-border')} />
+            <span aria-hidden className={cn('my-1.5 w-px', unpushed ? 'bg-warning/50' : 'bg-border')} />
             <CollapsibleTrigger asChild>
               <button
                 type="button"
@@ -753,7 +753,7 @@ function CommitRow({
                     key={ref.name}
                     className={cn(
                       'max-w-full truncate rounded-full px-1.5 py-px text-[11px] font-medium',
-                      ref.kind === 'head' ? 'bg-selected text-foreground' : ref.kind === 'tag' ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300' : 'bg-foreground/[0.07] text-muted-foreground',
+                      ref.kind === 'head' ? 'bg-selected text-foreground' : ref.kind === 'tag' ? 'bg-warning/15 text-warning' : 'bg-foreground/[0.07] text-muted-foreground',
                     )}
                     title={ref.kind === 'tag' ? `Tag ${ref.name}` : ref.kind === 'head' ? `${ref.name}, checked out` : ref.name}
                   >
@@ -815,8 +815,8 @@ function CommitDetails({ directory, commit }: { directory: string; commit: GitCo
                       <span className="shrink-0 text-muted-foreground">binary</span>
                     ) : (
                       <>
-                        {file.additions > 0 && <span className="shrink-0 text-emerald-700 dark:text-emerald-400">+{file.additions}</span>}
-                        {(file.deletions ?? 0) > 0 && <span className="shrink-0 text-red-700 dark:text-red-400">−{file.deletions}</span>}
+                        {file.additions > 0 && <span className="shrink-0 text-success">+{file.additions}</span>}
+                        {(file.deletions ?? 0) > 0 && <span className="shrink-0 text-destructive">−{file.deletions}</span>}
                       </>
                     )}
                   </li>

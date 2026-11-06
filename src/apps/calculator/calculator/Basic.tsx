@@ -171,7 +171,7 @@ const TONES: Record<Button['tone'], string> = {
   num: 'border border-border/60 bg-card text-2xl hover:bg-accent',
   fn: 'bg-muted text-xl hover:bg-foreground/10',
   op: 'bg-foreground/10 text-3xl hover:bg-foreground/15',
-  eq: 'bg-primary text-3xl text-primary-foreground hover:bg-primary/90',
+  eq: 'bg-pigment clay-pigment text-3xl text-primary-foreground hover:brightness-110',
 };
 
 export function Basic({

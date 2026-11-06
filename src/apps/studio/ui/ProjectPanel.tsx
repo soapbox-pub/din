@@ -55,7 +55,7 @@ export function RenameField({ value: initial, label, onDone, className }: { valu
         if (e.key === 'Escape') finish(null);
       }}
       onBlur={() => finish(value.trim() || null)}
-      className={cn('w-full rounded-sm bg-background px-1 text-sm font-medium outline-none ring-2 ring-ring', className)}
+      className={cn('w-full rounded-sm bg-background px-1 text-sm font-medium outline-none ring-2 ring-ring/60', className)}
     />
   );
 }
@@ -113,9 +113,9 @@ function ItemRow({
         <li
           ref={ref}
           className={cn(
-            'group relative flex cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-1 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring',
-            selected && 'bg-accent',
-            fresh && !selected && 'bg-primary/10',
+            'group relative flex cursor-default items-center gap-2 rounded-lg py-2 pr-2 pl-1 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60',
+            selected && 'bg-selected',
+            fresh && !selected && 'bg-selected',
           )}
           // A row Enter opens, which keeps its right-click menu as a list item.
           // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
@@ -150,7 +150,7 @@ function ItemRow({
           <div className={cn('min-w-0 flex-1', !item.keep && 'text-muted-foreground')}>
             {renaming ? <RenameField value={take.title} label="Take name" onDone={onRenamed} /> : <p className={cn('truncate text-sm font-medium', !item.keep && 'line-through')}>{take.title}</p>}
             <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-              {take.kind === 'clip' && <span className="rounded bg-muted px-1 font-medium">Clip</span>}
+              {take.kind === 'clip' && <span className="rounded-full bg-foreground/[0.07] px-1.5 font-medium">Clip</span>}
               {length > 0 && <span className="tabular-nums">{formatTime(length * 1000)}</span>}
               {trimmed && <Scissors className="size-3" aria-label="Trimmed" />}
               {item.note && <StickyNote className="size-3" aria-label="Has a note" />}
@@ -173,11 +173,11 @@ function ItemRow({
               onAction('keep');
             }}
             className={cn(
-              'grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring',
+              'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60',
               item.keep ? 'opacity-0 group-hover:opacity-100' : 'opacity-100',
             )}
           >
-            {item.keep ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            {item.keep ? <Eye className="size-4.5" strokeWidth={1.75} /> : <EyeOff className="size-4.5" strokeWidth={1.75} />}
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -185,9 +185,9 @@ function ItemRow({
                 type="button"
                 aria-label={`More for ${take.title}`}
                 onClick={(e) => e.stopPropagation()}
-                className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100"
+                className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 outline-none group-hover:opacity-100 hover:bg-foreground/[0.07] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=open]:opacity-100"
               >
-                <MoreHorizontal className="size-4" />
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={keepFocus}>
@@ -313,7 +313,7 @@ export function ProjectPanel({
   return (
     <aside
       aria-label="Project"
-      className={cn('relative flex w-80 shrink-0 flex-col border-l border-border/60 bg-background', filesOver && 'ring-2 ring-inset ring-primary')}
+      className={cn('relative flex w-80 shrink-0 flex-col bg-background', filesOver && 'ring-2 ring-inset ring-ring/60')}
       onDragOver={(e) => {
         if (project && !e.dataTransfer.types.includes(TAKE_MIME) && e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
@@ -343,8 +343,8 @@ export function ProjectPanel({
             {project && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button type="button" aria-label={`More for ${project.title}`} className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                    <MoreHorizontal className="size-4" />
+                  <button type="button" aria-label={`More for ${project.title}`} className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+                    <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={keepFocus}>
@@ -352,8 +352,8 @@ export function ProjectPanel({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <button type="button" onClick={onClose} aria-label="Hide the project" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-              <X className="size-4" />
+            <button type="button" onClick={onClose} aria-label="Hide the project" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+              <X className="size-4.5" strokeWidth={1.75} />
             </button>
           </div>
         </ContextMenuTrigger>
@@ -376,17 +376,17 @@ export function ProjectPanel({
             ))}
           </ul>
         ) : !project ? (
-          <div className="m-2 rounded-xl border border-dashed px-6 py-10 text-center">
+          <div className="m-2 rounded-xl px-6 py-10 text-center">
             <p className="text-sm text-muted-foreground">
               Record as many takes as you like: each one lands here, in order. Leave out the ones that didn’t work, add clips you already have, then have the Assistant make one video from them.
             </p>
-            <button type="button" onClick={onNewProject} className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
-              <Plus className="size-4" aria-hidden />
+            <button type="button" onClick={onNewProject} className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-background px-3.5 text-sm clay outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60">
+              <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
               New Project
             </button>
           </div>
         ) : items.length === 0 && importing.length === 0 ? (
-          <div className="m-2 rounded-xl border border-dashed px-6 py-10 text-center">
+          <div className="m-2 rounded-xl px-6 py-10 text-center">
             <p className="text-sm text-muted-foreground">Nothing here yet. Press Record for your first take, or drop video files here to add them as clips.</p>
           </div>
         ) : (
@@ -419,14 +419,14 @@ export function ProjectPanel({
       </div>
 
       {project && (
-        <div className="shrink-0 space-y-2 border-t border-border/60 p-3">
+        <div className="relative shrink-0 space-y-2 p-3 before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border/70">
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>
               {items.length === 0 ? 'No takes yet' : `${kept.length} of ${items.length} in the edit`}
               {total > 0 && ` · ${formatTime(total * 1000)}`}
             </span>
-            <button type="button" onClick={onPickClips} className="inline-flex h-7 items-center gap-1 rounded-md px-2 font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
-              <Plus className="size-3.5" aria-hidden />
+            <button type="button" onClick={onPickClips} className="inline-flex h-7 items-center gap-1 rounded-full px-2.5 font-medium text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60">
+              <Plus className="size-4" strokeWidth={1.75} aria-hidden />
               Add Clips
             </button>
           </div>
@@ -434,9 +434,9 @@ export function ProjectPanel({
             type="button"
             onClick={onMake}
             disabled={!groups[0]?.[0]?.enabled}
-            className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground outline-none transition-opacity hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-40"
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-pigment clay-pigment text-sm font-medium text-primary-foreground outline-none transition-opacity hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 disabled:opacity-40"
           >
-            <Sparkles className="size-4" aria-hidden />
+            <Sparkles className="size-4.5" strokeWidth={1.75} aria-hidden />
             Make with Assistant
           </button>
         </div>

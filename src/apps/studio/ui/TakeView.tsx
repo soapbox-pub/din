@@ -33,7 +33,7 @@ export interface ItemChange {
   out?: number | null;
 }
 
-const button = 'inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+const button = 'inline-flex h-8 items-center gap-1.5 rounded-full bg-background px-3.5 text-sm clay outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50';
 
 /** One take or clip of the project: watch it, and say how the edit should use it. */
 export function TakeView({
@@ -117,18 +117,18 @@ export function TakeView({
   ].filter(Boolean);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [&>*]:shrink-0">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-6">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={onBack} className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-            <ArrowLeft className="size-4" aria-hidden />
+          <button type="button" onClick={onBack} className="flex h-8 items-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+            <ArrowLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
             Back to recording
           </button>
           <div className="flex-1" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" aria-label={`More for ${take.title}`} className="grid size-8 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                <MoreHorizontal className="size-4" />
+              <button type="button" aria-label={`More for ${take.title}`} className="grid size-8 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -166,14 +166,14 @@ export function TakeView({
             )}
           </div>
           <button type="button" onClick={() => onChange({ keep: !item.keep })} aria-pressed={!item.keep} className={button}>
-            {item.keep ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+            {item.keep ? <EyeOff className="size-4.5" strokeWidth={1.75} aria-hidden /> : <Eye className="size-4.5" strokeWidth={1.75} aria-hidden />}
             {item.keep ? 'Leave Out of the Edit' : 'Use in the Edit'}
           </button>
         </div>
 
-        <section aria-labelledby="studio-trim" className="rounded-2xl border bg-card p-4 shadow-sm">
+        <section aria-labelledby="studio-trim" className="rounded-2xl bg-card p-4 clay">
           <h2 id="studio-trim" className="flex items-center gap-2 text-base font-semibold">
-            <Scissors className="size-4 text-muted-foreground" aria-hidden />
+            <Scissors strokeWidth={1.75} className="size-4.5 text-ink-accent" aria-hidden />
             The part to use
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -212,7 +212,7 @@ export function TakeView({
             placeholder="Anything about this one: “the second half is better”, “use as the intro”"
             onChange={(e) => setNote(e.target.value)}
             onBlur={() => note.trim() !== item.note && onChange({ note: note.trim() })}
-            className="w-full resize-y rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full resize-y rounded-xl bg-foreground/[0.06] px-3 py-2 text-[15px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
           />
         </section>
       </div>

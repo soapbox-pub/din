@@ -40,6 +40,10 @@ import {
   type BackgroundSite,
   type BackgroundStatus,
 } from '@/lib/periodicSync';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
+import { SettingsSubHeading } from '@/shared/settingsSection';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 const QUERY_KEY = ['periodic-sync'];
 
@@ -87,7 +91,7 @@ export function BackgroundActivity() {
 
   if (!bridge) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+      <div className="px-8 py-12 text-center">
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">Background activity needs Din’s desktop app.</p>
       </div>
     );
@@ -101,9 +105,9 @@ export function BackgroundActivity() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <RefreshCw className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
+        <div className="flex min-w-0 items-center gap-3">
+          <SettingsToken icon={RefreshCw} />
           <div className="min-w-0">
             <Label htmlFor="background-enabled" className="cursor-pointer text-sm">
               Let apps refresh in the background
@@ -116,15 +120,15 @@ export function BackgroundActivity() {
         <Switch id="background-enabled" checked={data?.enabled ?? true} disabled={!data} onCheckedChange={setEnabled} />
       </div>
 
-      <div className="border-t border-border/60 pt-4">
-        <h3 className="text-sm font-medium text-foreground">Scheduled</h3>
-        <p className="mb-3 text-xs text-muted-foreground">
+      <div>
+        <SettingsSubHeading>Scheduled</SettingsSubHeading>
+        <p className="mb-3 px-1 text-xs text-muted-foreground">
           What each app does on a schedule, as often as every 15 minutes. Pause one to keep its schedule without running it.
         </p>
         {isLoading ? (
-          <div className="flex flex-col gap-2" aria-hidden>
+          <div className={settingsGroup} aria-hidden>
             {Array.from({ length: 2 }, (_, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-md border p-3">
+              <div key={i} className="flex items-center gap-3 px-4 py-3">
                 <Skeleton className="size-8 shrink-0 rounded-md" />
                 <div className="flex-1 space-y-1.5">
                   <Skeleton className="h-3.5 w-32" />
@@ -134,7 +138,7 @@ export function BackgroundActivity() {
             ))}
           </div>
         ) : !data || data.sites.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border px-8 py-8 text-center">
+          <div className="px-8 py-8 text-center">
             <RefreshCw className="mx-auto mb-3 size-6 text-muted-foreground/80" aria-hidden />
             <p className="mx-auto max-w-sm text-sm text-muted-foreground">No app has asked to refresh in the background yet.</p>
           </div>
@@ -152,7 +156,7 @@ function SiteRows({ status, onChanged }: { status: BackgroundStatus; onChanged: 
     .map((site) => ({ site, ...backgroundApp(site, apps) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className={settingsGroup}>
       {rows.map(({ site, app, name }) => (
         <SiteRow key={site.origin} site={site} app={app} name={name} enabled={status.enabled} onChanged={onChanged} />
       ))}
@@ -212,13 +216,11 @@ function SiteRow({
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <li className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+          <li className="flex items-start gap-3 px-4 py-3">
             {app ? (
               <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" />
             ) : (
-              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/5">
-                <Globe className="size-4 text-muted-foreground" aria-hidden />
-              </span>
+              <SettingsToken icon={Globe} />
             )}
             <div className="min-w-0 flex-1">
               <label htmlFor={id} className="block cursor-pointer truncate text-sm">
@@ -247,7 +249,7 @@ function SiteRow({
                   aria-label={`More for ${name}`}
                   disabled={running}
                 >
-                  {running ? <RefreshCw className="size-4 motion-safe:animate-spin" aria-hidden /> : <MoreHorizontal className="size-4" aria-hidden />}
+                  {running ? <RefreshCw className="size-4 motion-safe:animate-spin" aria-hidden /> : <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">

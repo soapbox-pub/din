@@ -42,16 +42,16 @@ export function ProjectSwitcher({
           type="button"
           aria-label={`Project: ${current?.title ?? 'New Project'}`}
           title={disabled ? 'The take goes into this project' : 'Switch projects'}
-          className="flex h-8 max-w-56 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:hover:bg-transparent"
+          className="flex h-8 max-w-56 min-w-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-60 disabled:hover:bg-transparent"
         >
-          <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <FolderOpen strokeWidth={1.75} className="size-4.5 shrink-0 text-ink-accent" aria-hidden />
           <span className={cn('truncate', !current && 'text-muted-foreground')}>{current?.title ?? 'New Project'}</span>
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-[min(28rem,70vh)] w-72 overflow-y-auto">
         <DropdownMenuItem onSelect={onNew}>
-          <Plus className="size-4" aria-hidden />
+          <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
           New Project
           <DropdownMenuShortcut>Ctrl+N</DropdownMenuShortcut>
         </DropdownMenuItem>

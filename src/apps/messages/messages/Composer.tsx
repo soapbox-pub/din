@@ -69,7 +69,7 @@ export function Composer({
             }
           }}
           className={cn(
-            'max-h-40 min-h-10 flex-1 resize-none rounded-[20px] border border-border bg-background/70 px-4 py-2 text-[15px] leading-6 text-foreground',
+            'max-h-40 min-h-10 flex-1 resize-none rounded-[20px] bg-foreground/[0.06] px-4 py-2 text-[15px] leading-6 text-foreground',
             'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
             'disabled:opacity-60 [field-sizing:content]',
           )}
@@ -78,7 +78,7 @@ export function Composer({
           type="submit"
           aria-label="Send"
           disabled={!text.trim() || sending || !!disabled}
-          className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-sm transition-[opacity,transform] hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+          className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment transition-[opacity,transform] hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
         >
           {sending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <ArrowUp className="size-5" strokeWidth={2.5} aria-hidden />}
         </button>
