@@ -410,6 +410,24 @@ export interface DinFiles {
    * outside Electron.
    */
   pathUrl(path: string): string;
+  /**
+   * For apps with `nostr`: upload a file the app holds to the signed-in
+   * account's Blossom servers (those in Settings → Nostr & Storage), signed
+   * as the account, and resolve with where anyone can now get it. The file
+   * is public from then on. Rejects with why when no one is signed in, the
+   * file is a folder or too big, or no server takes it.
+   */
+  upload(handle: FileSystemFileHandle): Promise<BlossomBlob>;
+}
+
+/** A file on a Blossom server (BUD-02's blob descriptor). */
+export interface BlossomBlob {
+  /** Where anyone can get it, https. */
+  url: string;
+  /** Its SHA-256, hex, which is its name on every Blossom server. */
+  sha256: string;
+  size: number;
+  type: string;
 }
 
 /** Where a picker starts: beside a handle, or in a named folder of home. */

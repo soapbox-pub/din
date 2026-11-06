@@ -60,6 +60,9 @@ import { getNativeAppsBridge, isProgram, openInInstalledApp } from '@/lib/native
 import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
+import { mimeOf } from '@/lib/mime';
+import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
+import { useUploadFile } from '@/hooks/useUploadFile';
 import {
   appOrigin,
   appUrl,
@@ -147,17 +150,6 @@ function normalizePath(path: unknown): string | null {
 /** How recently the user must have pressed a key or clicked in the app (or picked from its menus) for it to read the file clipboard. */
 const GESTURE_MS = 3000;
 
-const MIME_BY_EXT: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
-  svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif', txt: 'text/plain', md: 'text/markdown',
-  html: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json', pdf: 'application/pdf',
-  mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', mp4: 'video/mp4', webm: 'video/webm',
-};
-
-function mimeOf(name: string): string {
-  return MIME_BY_EXT[name.split('.').pop()?.toLowerCase() ?? ''] ?? '';
-}
-
 
 /** `startIn`'s named folders, under home. */
 const NAMED_FOLDERS: Record<string, string> = {
@@ -197,6 +189,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const areas = useWorkAreas();
   const { config } = useAppContext();
   const { user } = useCurrentUser();
+  const { mutateAsync: uploadFile } = useUploadFile();
   const queryClient = useQueryClient();
   const openUrl = useOpenUrl();
   const { updateConfig } = useAppContext();
@@ -811,6 +804,18 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const [handle] = await grantPaths([path], writable);
         if (!handle) throw new Error(`${path} doesn’t exist`);
         return handle;
+      },
+      // Through the desktop's uploader, so to the servers Settings lists.
+      'files.upload': async ({ handle }) => {
+        need('nostr');
+        if (!user) throw new Error('Sign in to upload files');
+        const g = await usableGrant(handle);
+        if (g.kind !== 'file') throw new Error('Only a file can be uploaded');
+        try {
+          return await uploadLocalFile(g.path, uploadFile);
+        } catch (error) {
+          throw new Error(cleanUploadError(error), { cause: error });
+        }
       },
 
       'media.setSession': ({ session: next }) => {

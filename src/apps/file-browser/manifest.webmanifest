@@ -21,6 +21,7 @@
   "din": {
     "permissions": [
       "fs",
+      "nostr",
       "volumes",
       "notifications",
       "wallpaper"

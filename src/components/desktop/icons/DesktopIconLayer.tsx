@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AppWindow, ClipboardCopy, FolderOpen, Pencil, SquareArrowOutUpRight, Trash2 } from 'lucide-react';
+import { AppWindow, ClipboardCopy, CloudUpload, FolderOpen, Pencil, SquareArrowOutUpRight, Trash2 } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,6 +21,8 @@ import { useToast } from '@/hooks/useToast';
 import { DESKTOP_ICON_SIZES, type Rect } from '@/lib/desktopIcons';
 import { dockTakes } from '@/lib/dockDrop';
 import { cleanFsError, localFileUrl } from '@/lib/fs';
+import { uploadWindowParams } from '@/lib/blossomUpload';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { entryApp } from '@/lib/openPath';
 import type { AppDefinition } from '@/lib/apps';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
@@ -213,6 +215,14 @@ function DesktopIconTile({
     const paths = targets().flatMap((name) => icons.icons.find((i) => i.name === name)?.path ?? []);
     void navigator.clipboard?.writeText(paths.join('\n')).catch(() => {});
   };
+  // Files' Upload to Blossom…, for plain files (not folders or launchers).
+  const { open: openWindow } = useWindowActions();
+  const targetIcons = () => targets().flatMap((name) => icons.icons.find((i) => i.name === name) ?? []);
+  const uploadable = !folder && !icon.entry;
+  const upload = () => {
+    const files = targetIcons().filter((i) => i.kind === 'file' && !i.entry);
+    if (files.length) openWindow('file-browser', { ...uploadWindowParams(files.length), paths: files.map((i) => i.path) });
+  };
 
   return (
     <ContextMenu>
@@ -307,6 +317,11 @@ function DesktopIconTile({
         <ContextMenuItem onSelect={copyPaths}>
           <ClipboardCopy aria-hidden /> {single ? 'Copy Path' : 'Copy Paths'}
         </ContextMenuItem>
+        {uploadable && (
+          <ContextMenuItem onSelect={upload}>
+            <CloudUpload aria-hidden /> Upload to Blossom…
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         {single && (
           <ContextMenuItem

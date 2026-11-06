@@ -208,3 +208,17 @@ the file to another app with `din.app.launch`. To load a file by path,
 is cheap: when the desktop grants `fs`, main gives the window a URL base
 (`din-file://<token>`) that serves any path but Din's own profile, for as
 long as the grant lasts.
+
+## Uploading to Blossom
+
+`din.files.upload(handle)`, for apps with `nostr`, puts a file the app
+holds on the signed-in account's Blossom servers and resolves with where
+it is (`{ url, sha256, size, type }`, BUD-02's blob descriptor). The
+desktop does the upload (`src/lib/blossomUpload.ts`, with the uploader
+behind `useUploadFile`), so it goes to the servers Settings → Nostr &
+Storage lists, signed by the account's signer; the app never sees the
+authorization. It rejects with why: no one signed in, a folder, a file
+over 512 MiB (it's read whole, to hash it), or no server taking it.
+Files' Upload to Blossom… (and the desktop icons') is a window of Files
+(`{ window: 'upload' }`, the files its launch's) built on it, and `din nostr upload <file>`
+does the same from the command line.

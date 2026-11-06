@@ -4,6 +4,7 @@
  * `Din.version`. Everything is structured-cloneable.
  */
 import type {
+  BlossomBlob,
   DragInfo,
   FrameStyle,
   Menu,
@@ -240,6 +241,7 @@ export interface Requests {
   'files.stored': [{ tokens: string[] }, void];
   'files.url': [{ handle: string }, string];
   'files.fromPath': [{ path: string }, HandleData];
+  'files.upload': [{ handle: string }, BlossomBlob];
 
   'media.setSession': [{ session: MediaReport | null }, void];
   'desktop.setWallpaper': [{ handle: string }, void];

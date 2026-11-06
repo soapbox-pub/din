@@ -832,6 +832,11 @@ export function installDin(transport: Transport): void {
       return wrap(await request('files.fromPath', { path }));
     },
     requestAccess: async (paths, reason) => (await request('files.requestAccess', { paths, reason })).map(wrap),
+    upload: async (handle) => {
+      await ready;
+      need('nostr');
+      return request('files.upload', { handle: await idOf(handle) });
+    },
     pathUrl: (path) => {
       needFs();
       if (!h?.fsUrlBase) throw new Error('File URLs are only available inside Din');

@@ -95,6 +95,7 @@ import { CompressDialog, ConfirmDialog, PropertiesDialog, ShortcutsDialog } from
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { canDropInto, draggedFiles, dropCopies, endFilesDrag, startFilesDrag, takeDrop } from './files/drag';
 import { broadcastInvalidate, onInvalidate, popUndo, pushUndo, runUndo } from './files/windows';
+import { openUploadWindow } from './files/upload';
 
 /** The tab this window was opened for, if any: read once per window. */
 let adoption: Promise<unknown> | null = null;
@@ -1966,6 +1967,17 @@ function FileBrowserTab({
                         >
                           Compress…
                         </ContextMenuItem>
+                        {selectedEntries.every((e) => e.kind === 'file') && (
+                          <ContextMenuItem
+                            onSelect={() =>
+                              void openUploadWindow(din, pathsOf(selectedNames)).catch((error: unknown) =>
+                                setStatus({ kind: 'error', text: cleanFsError(error) }),
+                              )
+                            }
+                          >
+                            Upload to Blossom…
+                          </ContextMenuItem>
+                        )}
                       </>
                     )}
                     {singleFolderPath && (

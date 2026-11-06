@@ -1,4 +1,5 @@
 import { nip19 } from 'nostr-tools';
+import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
 import { getEraseBridge } from '@/lib/erase';
 import { getFirmwareBridge } from '@/lib/firmware';
 import { getLockBridge } from '@/lib/lock';
@@ -193,6 +194,18 @@ export const nostrArea: Area = {
       const servers = ctx.config.blossomServerMetadata.servers;
       if (!url || !servers.includes(url)) throw new CommandError(`${args.string('url')} isn’t one of your servers`);
       await saveServers(ctx, servers.filter((s) => s !== url));
+    }),
+    // Files' Upload to Blossom…
+    command('nostr', 'upload', 'Upload a file to your Blossom servers, and print its URL (anyone with it can get the file)', [
+      { name: 'file', type: 'path', positional: true, help: 'The file' },
+    ], async (args, ctx) => {
+      requireUser(ctx);
+      try {
+        const blob = await uploadLocalFile(args.string('file'), (file) => ctx.upload(file));
+        return { data: blob, text: blob.url };
+      } catch (error) {
+        throw new CommandError(cleanUploadError(error));
+      }
     }),
   ],
 };
