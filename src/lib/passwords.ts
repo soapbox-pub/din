@@ -171,13 +171,15 @@ export interface PasswordSuggestion {
   /** In a frame of its own, `rect` is that frame's; the list goes at the top of the page instead. */
   mainFrame: boolean;
   rect: FieldRect;
-  kind: 'username' | 'password' | 'new-password';
+  kind: 'username' | 'password' | 'new-password' | 'one-time-code';
   site: string;
   items: { id: string; title: string; username: string }[];
   /** The vault is locked: offer to unlock it. */
   locked: boolean;
   /** A strong password to offer, for a new-password field. */
   generated: string | null;
+  /** For a verification code field: the codes in the user's texts lately, newest first (electron/phone-codes.mts). */
+  codes: { id: string; code: string; from: string; time: number }[];
 }
 
 /** A submitted login the vault doesn't have, or has with another password. */
@@ -189,7 +191,7 @@ export interface PasswordOffer {
   update: boolean;
 }
 
-export type SuggestionChoice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'dismiss' };
+export type SuggestionChoice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'code'; id: string } | { type: 'dismiss' };
 
 /** The desktop's extras: the browser's toolbar and autofill. */
 export interface PasswordsDesktopBridge extends PasswordsBridge {

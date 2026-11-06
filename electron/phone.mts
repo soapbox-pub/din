@@ -17,6 +17,10 @@
 // conversations changed) and `phone:incoming` (a new text, for the desktop's
 // notification) to the shell and to apps granted `phone`.
 //
+// A new text with a verification code in it, from a phone with "Fill in
+// verification codes" on, has its code offered in web pages' code fields
+// for a few minutes (phone-codes.mts, passwords.mts).
+//
 // Files a phone shares over Bluetooth land in Downloads (phone-receive.mts),
 // from phones here with "Receive files" on; `phone:receive` (the shell's
 // alone) tells the desktop how each share is going. While one of them is
@@ -31,6 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, safeStorage } from 'electron';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
+import { extractCode, forgetCodes, noteCode } from './phone-codes.mts';
 import { MapConnection } from './phone-map.mts';
 import { cancelReceive, startReceiving } from './phone-receive.mts';
 import type {
@@ -83,6 +88,8 @@ interface StoredPhone {
   lastSeen: number | null;
   /** Off only once turned off: files it shares are saved unless so. */
   receiveFiles?: boolean;
+  /** Off only once turned off: codes in its texts are offered in web pages' code fields unless so. */
+  fillCodes?: boolean;
 }
 
 interface Thread {
@@ -244,6 +251,7 @@ function state(): PhoneState {
       unread: Object.values(d.threads).reduce((n, t) => n + unread(t), 0),
       lastSeen: p.lastSeen,
       receiveFiles: p.receiveFiles !== false,
+      fillCodes: p.fillCodes !== false,
     };
   });
   const candidates = bluetoothCandidates.filter((c) => !added.has(c.id));
@@ -304,6 +312,7 @@ function upsert(phoneId: string, incoming: BackendMessage[]): void {
   const d = phoneData(phoneId);
   const touched = new Set<string>();
   const announce: PhoneMessage[] = [];
+  const fresh: PhoneMessage[] = [];
   const now = Date.now();
   for (const m of incoming) {
     if (m.time <= (d.hidden[m.threadId] ?? -1)) continue;
@@ -330,6 +339,8 @@ function upsert(phoneId: string, incoming: BackendMessage[]): void {
       }
       thread.messages.push(message);
       if (!message.outgoing && !message.read && now - message.time < NEW_MS && message.time > thread.readUntil) announce.push(message);
+      // Read on the phone already or not: it's the code the user is waiting on.
+      if (!message.outgoing && now - message.time < NEW_MS) fresh.push(message);
     }
     touched.add(m.threadId);
   }
@@ -343,6 +354,9 @@ function upsert(phoneId: string, incoming: BackendMessage[]): void {
   scheduleSave(phoneId);
   deps.sendToShell('phone:messages', { phoneId, threadIds: [...touched] });
   changed();
+  if (phones.find((p) => p.id === phoneId)?.fillCodes !== false) {
+    for (const message of fresh) noteCode(`${phoneId}:${message.id}`, message.body, nameOf(d, message.sender ?? message.addresses[0] ?? ''), message.time);
+  }
   for (const message of announce.slice(-5)) announceText(phoneId, message, false);
 }
 
@@ -365,7 +379,7 @@ function announceText(phoneId: string, message: PhoneMessage, update: boolean): 
     announced.push({ phoneId, message, name, from, at: now });
   }
   while (announced.length && (announced.length > 20 || now - announced[0].at > NEW_MS)) announced.shift();
-  deps.sendToShell('phone:incoming', { message, name, from, update });
+  deps.sendToShell('phone:incoming', { message, name, from, update, code: extractCode(message.body) });
 }
 
 function conversations(phoneId?: string): PhoneConversation[] {
@@ -523,6 +537,15 @@ function setReceiveFiles(phoneId: string, on: boolean): void {
   changed();
 }
 
+function setFillCodes(phoneId: string, on: boolean): void {
+  const p = phones.find((x) => x.id === phoneId);
+  if (!p) return;
+  p.fillCodes = on;
+  if (!on) forgetCodes(phoneId);
+  savePhones();
+  changed();
+}
+
 /**
  * The phone a file from this Bluetooth address comes from, if it may send
  * files: still paired, and receiving. Over OBEX (phone-receive.mts), and
@@ -559,6 +582,7 @@ function forget(phoneId: string): void {
   saveTimers.delete(phoneId);
   data.delete(phoneId);
   live.delete(phoneId);
+  forgetCodes(phoneId);
   fs.rmSync(dataFile(phoneId), { force: true });
   changed();
 }
@@ -619,6 +643,7 @@ export function registerPhoneHandlers(options: Deps): void {
   });
   handle('phone:forget', (phoneId) => forget(phoneArg(phoneId)));
   handle('phone:setReceiveFiles', (phoneId, on) => setReceiveFiles(phoneArg(phoneId), on === true));
+  handle('phone:setFillCodes', (phoneId, on) => setFillCodes(phoneArg(phoneId), on === true));
   handle('phone:cancelReceive', (id) => {
     if (typeof id !== 'string') throw new Error('No such transfer.');
     cancelReceive(id);

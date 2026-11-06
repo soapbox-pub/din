@@ -39,6 +39,11 @@
 // before anything is sent to it. A submitted login the vault doesn't have
 // becomes an offer to save it, which the desktop shows.
 //
+// A verification code field gets the codes from the user's texts lately
+// instead (phone-codes.mts), vault or no vault; the one picked goes to the
+// frame that asked, if it's still on the same site. A code arriving while the
+// cursor is in such a field brings the suggestions up there.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
@@ -56,6 +61,7 @@ import type { Kdbx, KdbxEntry, KdbxGroup } from 'kdbxweb';
 import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
 import { parseCsvExport, parseJsonExport, type ImportedItem, type ParsedExport } from './passwords-import.mts';
+import { onCode, recentCodes } from './phone-codes.mts';
 import { deleteSecret, lookupSecret, storeSecret } from './secret-service.mts';
 
 const require = createRequire(import.meta.url);
@@ -1130,7 +1136,8 @@ function copyField(entry: KdbxEntry, field: CopyField): void {
 // Autofill
 // ---------------------------------------------------------------------------
 
-type FieldKind = 'username' | 'password' | 'new-password';
+type FieldKind = 'username' | 'password' | 'new-password' | 'one-time-code';
+const FIELD_KINDS: readonly string[] = ['username', 'password', 'new-password', 'one-time-code'];
 
 interface Rect {
   x: number;
@@ -1236,9 +1243,10 @@ async function onField(event: Electron.IpcMainEvent, raw: unknown): Promise<void
   const sender = webSender(event);
   if (!sender) return;
   const r = (raw ?? {}) as Record<string, unknown>;
-  const kind = r.kind === 'username' || r.kind === 'password' || r.kind === 'new-password' ? (r.kind as FieldKind) : null;
+  const kind = typeof r.kind === 'string' && FIELD_KINDS.includes(r.kind) ? (r.kind as FieldKind) : null;
   const rect = parseRect(r.rect);
   if (!kind || !rect) return;
+  if (kind === 'one-time-code') return suggestCodes(sender, rect);
   await serial(refresh).catch(() => {});
   const db = vault?.db;
   if (!db && !(await exists())) return hideSuggestions();
@@ -1261,8 +1269,51 @@ async function onField(event: Electron.IpcMainEvent, raw: unknown): Promise<void
     items,
     locked: !db,
     generated,
+    codes: [],
   });
   sendToFrame(sender.frame, 'passwords:shown', { visible: true, highlighted: false });
+}
+
+/** The codes from the user's texts lately, below a verification code field. */
+function suggestCodes(sender: { contents: WebContents; frame: WebFrameMain; url: string }, rect: Rect): void {
+  const codes = recentCodes();
+  if (codes.length === 0) return hideSuggestions();
+  if (suggestion) hideSuggestions();
+  watch(sender.contents);
+  const requestId = nextRequestId++;
+  suggestion = { requestId, contents: sender.contents, frame: sender.frame, url: sender.url, generated: null };
+  options?.sendToShell('passwords:suggest', {
+    requestId,
+    wcId: sender.contents.id,
+    mainFrame: sender.frame === sender.contents.mainFrame,
+    rect,
+    kind: 'one-time-code',
+    site: siteOf(sender.url)?.host ?? '',
+    items: [],
+    locked: false,
+    generated: null,
+    // Only the code itself and who sent it: never the rest of the text.
+    codes: codes.map((c) => ({ id: c.id, code: c.code, from: c.from, time: c.time })),
+  });
+  sendToFrame(sender.frame, 'passwords:shown', { visible: true, highlighted: false });
+}
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** A code arrived: a page whose code field has the cursor asks again, for it. */
+function codeArrived(): void {
+  for (const contents of webContents.getAllWebContents()) {
+    if (contents.isDestroyed() || !options?.isAutofillGuest(contents)) continue;
+    for (const frame of contents.mainFrame.framesInSubtree) {
+      if (isWebUrl(frame.url)) sendToFrame(frame, 'passwords:code-arrived', null);
+    }
+  }
 }
 
 function onSubmitted(event: Electron.IpcMainEvent, raw: unknown): void {
@@ -1305,7 +1356,7 @@ function onSubmitted(event: Electron.IpcMainEvent, raw: unknown): void {
 }
 
 /** What the desktop picked from the suggestions. */
-type Choice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'dismiss' };
+type Choice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'code'; id: string } | { type: 'dismiss' };
 
 function choose(requestId: unknown, raw: unknown): void {
   const s = suggestion;
@@ -1325,6 +1376,11 @@ function choose(requestId: unknown, raw: unknown): void {
       password: fieldText(entry, 'Password'),
       generated: false,
     });
+  } else if (choice.type === 'code') {
+    // Still the page it was offered to, and still a code from a text lately.
+    const code = recentCodes().find((c) => c.id === choice.id);
+    if (!code || !isWebUrl(url) || originOf(url) !== originOf(s.url)) return;
+    sendToFrame(s.frame, 'passwords:fill-code', { code: code.code });
   } else if (choice.type === 'generated' && s.generated && siteOf(url)?.host === siteOf(s.url)?.host) {
     sendToFrame(s.frame, 'passwords:fill', { username: null, password: s.generated, generated: true });
   }
@@ -1430,6 +1486,7 @@ export function registerPasswordsHandlers(opts: Options): void {
     });
 
   void loadSettings().then(() => scheduleAutoUnlock());
+  onCode(codeArrived);
 
   handle('state', () => serial(async () => {
     if (!vault) await unlockFromKeyring();

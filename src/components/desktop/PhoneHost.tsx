@@ -12,7 +12,9 @@ import { cleanPhoneError, formatAddress } from '@/shared/phone';
  * with a reply field, the way a Mac shows iMessages. One per conversation:
  * a newer text replaces the one before. A click opens the conversation in
  * Messages; none shows while Messages is the window in front, and one goes
- * once its conversation is read, in Messages or on the phone.
+ * once its conversation is read, in Messages or on the phone. A text with a
+ * verification code in it has a button to copy the code (the Web Browser
+ * offers it in the page's code field too: PasswordAutofillHost).
  *
  * Files a phone shares over Bluetooth (electron/phone-receive.mts) get one
  * notification per share: progress with Cancel while a file takes more than
@@ -42,7 +44,7 @@ export function PhoneHost() {
         }
       }, () => {});
     });
-    const offIncoming = phone.onIncoming(({ message, name: rawName, from, update }) => {
+    const offIncoming = phone.onIncoming(({ message, name: rawName, from, update, code }) => {
       // A number that isn't a contact, written as people write it.
       const name = rawName.split(', ').map(formatAddress).join(', ');
       const group = message.addresses.length > 1;
@@ -74,7 +76,15 @@ export function PhoneHost() {
         body: text,
         replaceKey,
         reply,
-        onActivate: () => openRef.current('messages', { phoneId: message.phoneId, threadId: message.threadId, nonce: Date.now() }),
+        // A verification code, a click from the clipboard.
+        actions: code ? [{ id: 'copy-code', label: `Copy ${code}` }] : undefined,
+        onActivate: (action) => {
+          if (action === 'copy-code' && code) {
+            void navigator.clipboard?.writeText(code).catch(() => {});
+            return;
+          }
+          openRef.current('messages', { phoneId: message.phoneId, threadId: message.threadId, nonce: Date.now() });
+        },
       });
     });
     return () => {

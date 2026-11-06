@@ -38,5 +38,8 @@ export function usePhoneActions() {
     setReceiveFiles: useMutation({
       mutationFn: ({ id, on }: { id: string; on: boolean }) => requireBridge().setReceiveFiles(id, on),
     }),
+    setFillCodes: useMutation({
+      mutationFn: ({ id, on }: { id: string; on: boolean }) => requireBridge().setFillCodes(id, on),
+    }),
   };
 }

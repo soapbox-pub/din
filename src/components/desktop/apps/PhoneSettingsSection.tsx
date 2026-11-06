@@ -138,6 +138,10 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
             phone &&
             actions.setReceiveFiles.mutate({ id: phone.id, on }, { onError: failed(`Couldn’t change ${phone.name}`) })
           }
+          onFillCodes={(on) =>
+            phone &&
+            actions.setFillCodes.mutate({ id: phone.id, on }, { onError: failed(`Couldn’t change ${phone.name}`) })
+          }
           {...(phone ? rowActions(phone) : NO_ACTIONS)}
         />
         {forgetDialog}
@@ -338,13 +342,14 @@ function PhoneRow({
   );
 }
 
-/** One phone's page: open its texts, connect or disconnect it, forget it, whether it can send files, and how it's doing. */
+/** One phone's page: open its texts, connect or disconnect it, forget it, whether it can send files or fill in codes, and how it's doing. */
 function PhoneDetails({
   phone,
   connectPending,
   disconnectPending,
   onBack,
   onReceiveFiles,
+  onFillCodes,
   onOpen,
   onConnect,
   onDisconnect,
@@ -355,6 +360,7 @@ function PhoneDetails({
   disconnectPending: boolean;
   onBack: () => void;
   onReceiveFiles: (on: boolean) => void;
+  onFillCodes: (on: boolean) => void;
 } & PhoneActions) {
   const connected = phone?.status === 'connected';
   return (
@@ -398,6 +404,12 @@ function PhoneDetails({
               description="Share from the phone to this computer over Bluetooth, or with Quick Share while it’s connected, without being asked. Files are saved to Downloads."
               checked={phone.receiveFiles}
               onChange={onReceiveFiles}
+            />
+            <ToggleRow
+              label="Fill in verification codes"
+              description="When a text with a sign-in code arrives, the Web Browser offers it in the page’s code field for 10 minutes. It’s filled in only when you pick it."
+              checked={phone.fillCodes}
+              onChange={onFillCodes}
             />
           </DetailsGroup>
 

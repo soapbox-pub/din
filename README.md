@@ -934,6 +934,16 @@ files — `git add` new source files before `npm run os:build`.
   (`electron/phone-map.mts`), as Windows does for iPhones; no pictures or
   group conversations. New texts pop up as notifications with a reply field.
   Messages are kept only on this computer, sealed with the login keyring.
+- A text with a verification code in it (`electron/phone-codes.mts` finds
+  it) has the code offered in the Web Browser's code fields for 10 minutes,
+  as a Mac offers the codes from Messages: the suggestions below the field
+  (`autocomplete="one-time-code"`, a field named like one, or a row of
+  one-digit boxes) list it "From Messages", and the one picked is typed in,
+  spread across the boxes. A code arriving while the cursor is in the field
+  brings them up. The code is kept in memory only, and goes only to the page
+  it's picked for; its notification has a button to copy it. "Fill in
+  verification codes" on the phone's page (`din phone fill-codes`) turns it
+  off.
 - A phone added there can share files to the computer over Bluetooth (the
   share sheet's Bluetooth target): `electron/phone-receive.mts` is obexd's
   agent, saving them to Downloads without asking, with one notification per

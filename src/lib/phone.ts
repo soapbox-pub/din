@@ -31,6 +31,8 @@ export interface PhoneDevice {
   lastSeen: number | null;
   /** Whether it may share files here: over Bluetooth (electron/phone-receive.mts), and with Quick Share while it's connected (electron/quickshare.mts). */
   receiveFiles: boolean;
+  /** Whether verification codes in its texts are offered in web pages' code fields (electron/phone-codes.mts). */
+  fillCodes: boolean;
 }
 
 /** A phone that could be added: one paired over Bluetooth, or one found on the network. */
@@ -97,6 +99,8 @@ export interface PhoneIncoming {
   from: string;
   /** Names for one already announced (contacts arrived after it): change its notification if it's still there, without popping it up again. */
   update?: boolean;
+  /** The verification code in it, if it has one, for the notification to copy. */
+  code?: string | null;
 }
 
 /** Files a phone is sharing to this computer, one share's worth, as it goes. */
@@ -138,6 +142,8 @@ export interface PhoneBridge {
   forget(phoneId: string): Promise<void>;
   /** Save files the phone shares over Bluetooth to Downloads, or turn them away. */
   setReceiveFiles(phoneId: string, on: boolean): Promise<void>;
+  /** Offer the verification codes in its texts in web pages' code fields, or don't. */
+  setFillCodes(phoneId: string, on: boolean): Promise<void>;
   /** Stop files arriving in a share (a PhoneReceive's id). */
   cancelReceive(id: string): Promise<void>;
   onChanged(cb: (state: PhoneState) => void): () => void;
@@ -147,7 +153,7 @@ export interface PhoneBridge {
 }
 
 /** What Messages has of it (`din.system.phone`): the messages, not adding, disconnecting or forgetting phones, or their files. */
-export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'disconnect' | 'forget' | 'setReceiveFiles' | 'cancelReceive' | 'onReceive'>;
+export type PhoneAppBridge = Omit<PhoneBridge, 'add' | 'disconnect' | 'forget' | 'setReceiveFiles' | 'setFillCodes' | 'cancelReceive' | 'onReceive'>;
 
 declare global {
   interface Dinos {

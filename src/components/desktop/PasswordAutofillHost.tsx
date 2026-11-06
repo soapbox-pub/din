@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { KeyRound, LockKeyhole, Sparkles, X } from 'lucide-react';
+import { KeyRound, LockKeyhole, MessageCircle, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { getPasswordsDesktopBridge, type PasswordOffer, type PasswordSuggestion } from '@/lib/passwords';
 import { portalContainer } from '@/lib/portalContainer';
 import { findGuest } from '@/platform/guest';
+import { formatAddress } from '@/shared/phone';
 
 const LIST_WIDTH = 320;
 const OFFER_WIDTH = 340;
@@ -55,7 +56,9 @@ function useGuestBox(wcId: number | null): Box | null {
  *
  *  - below a login field the cursor goes into, the vault's logins for the
  *    site, or a strong password for a new-password field, or Unlock while
- *    the vault is locked. The page keeps the keyboard; its preload sends the
+ *    the vault is locked; below a verification code field, the codes in the
+ *    user's texts lately (electron/phone-codes.mts), as a Mac offers the
+ *    ones from Messages. The page keeps the keyboard; its preload sends the
  *    arrow keys, Enter and Escape here while the list is up;
  *  - after a login the vault doesn't have is submitted, an offer to save it
  *    at the top right of the page.
@@ -91,9 +94,11 @@ export function PasswordAutofillHost() {
 
   /** The rows, in order: what Enter and the arrows walk through. */
   const rows = suggestion
-    ? suggestion.locked
-      ? ['unlock']
-      : [...(suggestion.generated ? ['generated'] : []), ...suggestion.items.map((i) => `login:${i.id}`)]
+    ? suggestion.kind === 'one-time-code'
+      ? suggestion.codes.map((c) => `code:${c.id}`)
+      : suggestion.locked
+        ? ['unlock']
+        : [...(suggestion.generated ? ['generated'] : []), ...suggestion.items.map((i) => `login:${i.id}`)]
     : [];
 
   const pick = useCallback(
@@ -113,6 +118,8 @@ export function PasswordAutofillHost() {
         void bridge.choose(s.requestId, { type: 'generated' });
       } else if (row.startsWith('login:')) {
         void bridge.choose(s.requestId, { type: 'login', id: row.slice('login:'.length) });
+      } else if (row.startsWith('code:')) {
+        void bridge.choose(s.requestId, { type: 'code', id: row.slice('code:'.length) });
       }
     },
     [bridge, open],
@@ -206,7 +213,7 @@ export function PasswordAutofillHost() {
           onManage={() => {
             void bridge.choose(suggestion.requestId, { type: 'dismiss' });
             setSuggestion(null);
-            open('passwords');
+            open(suggestion.kind === 'one-time-code' ? 'messages' : 'passwords');
           }}
         />
       )}
@@ -269,18 +276,32 @@ function SuggestionList({
     top = box.top + MARGIN;
   }
   left = Math.max(MARGIN, Math.min(left, window.innerWidth - width - MARGIN));
+  const codes = suggestion.kind === 'one-time-code';
 
   return (
     <div
       ref={listRef}
       role="listbox"
-      aria-label={`Passwords for ${suggestion.site}`}
+      aria-label={codes ? 'Verification codes from Messages' : `Passwords for ${suggestion.site}`}
       // Clicks here mustn't take the keyboard from the page's field.
       onMouseDown={(e) => e.preventDefault()}
       style={{ left, top, width }}
       className="fixed z-[10000] overflow-hidden glass-surface rounded-xl p-1 text-popover-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95"
     >
-      {suggestion.locked ? (
+      {codes ? (
+        suggestion.codes.map((c, index) => (
+          <Row
+            key={c.id}
+            active={highlighted === index}
+            onHover={() => onHover(index)}
+            onClick={() => onPick(`code:${c.id}`)}
+            icon={<MessageCircle className="size-4" />}
+            title={c.code}
+            titleMono
+            subtitle={`From Messages · ${formatAddress(c.from)} · ${sentAgo(c.time)}`}
+          />
+        ))
+      ) : suggestion.locked ? (
         <Row
           active={highlighted === 0}
           onHover={() => onHover(0)}
@@ -326,11 +347,17 @@ function SuggestionList({
           onClick={onManage}
           className="w-full rounded-md px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
         >
-          Open Passwords…
+          {codes ? 'Open Messages…' : 'Open Passwords…'}
         </button>
       </div>
     </div>
   );
+}
+
+/** How long ago a text came, as the code's row says it. */
+function sentAgo(time: number): string {
+  const minutes = Math.floor((Date.now() - time) / 60_000);
+  return minutes < 1 ? 'just now' : `${minutes} min ago`;
 }
 
 function Row({
@@ -341,6 +368,7 @@ function Row({
   title,
   subtitle,
   mono,
+  titleMono,
 }: {
   active: boolean;
   onHover: () => void;
@@ -349,6 +377,8 @@ function Row({
   title: string;
   subtitle: string;
   mono?: boolean;
+  /** The title is a code, read character by character. */
+  titleMono?: boolean;
 }) {
   return (
     <button
@@ -366,7 +396,7 @@ function Row({
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{title}</span>
+        <span className={cn('block truncate text-sm font-medium', titleMono && 'font-mono tracking-widest')}>{title}</span>
         <span className={cn('block truncate text-xs text-muted-foreground', mono && 'font-mono')}>
           {subtitle}
         </span>

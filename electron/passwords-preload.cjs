@@ -10,6 +10,10 @@
 // offer to save. Nothing of the vault is ever handed to the page except the
 // login the user picks.
 //
+// Verification code fields are reported too, for the desktop to offer the
+// codes from the user's texts (electron/phone-codes.mts): one field, or a
+// row of one-digit boxes, which the code picked is spread across.
+//
 // Stays in the isolated world: the page can't see or call any of this. It
 // can see the events filling dispatches, which is what makes its own
 // scripts notice the values, and the values themselves, as it would had
@@ -84,6 +88,62 @@ if (/^https?:$/.test(location.protocol)) {
     return /user|e-?mail|login|account|identifier|phone/i.test(hints(el)) ? 'username' : null;
   };
 
+  /** Codes that aren't the one a text brings. */
+  const NOT_VERIFICATION = /zip|postal|post[-_ ]?code|promo|coupon|voucher|gift|discount|country|area[-_ ]?code|referr|invit|captcha|tracking|product|sku|color|colour|swift|sort[-_ ]?code|bank|cvc|cvv|card|phone|mobile/i;
+
+  /** @param {HTMLInputElement} input */
+  const codeHints = (input) => `${hints(input)} ${input.autocomplete} ${[...(input.labels ?? [])].map((l) => l.textContent ?? '').join(' ')}`;
+
+  /** @param {EventTarget | null} el @returns {el is HTMLInputElement} */
+  const isCodeInput = (el) =>
+    isInput(el) && !el.disabled && !el.readOnly && (el.type === 'text' || el.type === 'tel' || el.type === 'number');
+
+  /**
+   * The row of one-digit boxes a code goes in, if this is one of them: four
+   * to ten of them side by side, in the box's nearest container that holds
+   * them all.
+   * @param {HTMLInputElement} input
+   * @returns {HTMLInputElement[] | null}
+   */
+  const codeBoxes = (input) => {
+    if (input.maxLength !== 1) return null;
+    let container = input.parentElement;
+    for (let depth = 0; container && depth < 4; depth++, container = container.parentElement) {
+      const boxes = /** @type {HTMLInputElement[]} */ ([...container.querySelectorAll('input')]).filter(
+        (i) => isCodeInput(i) && i.maxLength === 1 && visible(i),
+      );
+      if (boxes.length >= 4 && boxes.length <= 10) return boxes;
+      if (boxes.length > 10) return null;
+    }
+    return null;
+  };
+
+  /**
+   * Whether this is where a verification code goes: a field that says so
+   * (autocomplete="one-time-code", or a name like "otp" or "verification
+   * code"), or a row of one-digit boxes.
+   * @param {EventTarget | null} el
+   * @returns {el is HTMLInputElement}
+   */
+  const isCodeField = (el) => {
+    if (!isCodeInput(el)) return false;
+    const autocomplete = el.autocomplete.toLowerCase();
+    if (autocomplete.includes('one-time-code')) return true;
+    if (/\b(username|email|current-password|new-password|cc-|postal-code|tel)\b/.test(autocomplete)) return false;
+    const text = codeHints(el);
+    if (NOT_VERIFICATION.test(text)) return false;
+    if (codeBoxes(el)) return true;
+    if (el.maxLength > 0 && (el.maxLength < 4 || el.maxLength > 12)) return false;
+    return /otp|one[-_ ]?time|verif|2fa|mfa|two[-_ ]?(factor|step)|passcode|sms[-_ ]?code|security[-_ ]?code|auth\w*[-_ ]?code|confirm\w*[-_ ]?code|login[-_ ]?code|sign[-_ ]?in[-_ ]?code|\bcode\b|\bpin\b|token/i.test(text);
+  };
+
+  /**
+   * What kind of field the autofill offers something for, if any.
+   * @param {EventTarget | null} el
+   * @returns {'username' | 'password' | 'new-password' | 'one-time-code' | null}
+   */
+  const fieldKind = (el) => (isCodeField(el) ? 'one-time-code' : loginKind(el));
+
   /**
    * The field a username goes in, for a password field (the last text field before it).
    * @param {HTMLInputElement} password
@@ -102,7 +162,7 @@ if (/^https?:$/.test(location.protocol)) {
 
   /** @param {HTMLInputElement} input */
   const report = (input) => {
-    const kind = loginKind(input);
+    const kind = fieldKind(input);
     if (!kind) return;
     current = input;
     const r = input.getBoundingClientRect();
@@ -167,7 +227,7 @@ if (/^https?:$/.test(location.protocol)) {
       return;
     }
     pageBlurred = false;
-    if (loginKind(event.target)) report(/** @type {HTMLInputElement} */ (event.target));
+    if (fieldKind(event.target)) report(/** @type {HTMLInputElement} */ (event.target));
   }, true);
 
   // A click on the desktop's suggestions takes the keyboard from the page
@@ -235,6 +295,41 @@ if (/^https?:$/.test(location.protocol)) {
   ipcRenderer.on('passwords:shown', (_event, /** @type {{ visible: boolean, highlighted: boolean }} */ state) => {
     shown = state.visible;
     highlighted = state.highlighted;
+  });
+
+  // A code from a text arrived: up come the suggestions, if the cursor's in a code field.
+  ipcRenderer.on('passwords:code-arrived', () => {
+    if (current?.isConnected && document.hasFocus() && document.activeElement === current && isCodeField(current)) report(current);
+  });
+
+  ipcRenderer.on('passwords:fill-code', (_event, /** @type {{ code: string }} */ { code }) => {
+    const anchor = current?.isConnected && isCodeField(current) ? current : null;
+    if (!anchor || typeof code !== 'string' || !/^[A-Za-z0-9]{1,12}$/.test(code)) return;
+    filling = true;
+    try {
+      const boxes = codeBoxes(anchor);
+      if (boxes && boxes.length >= code.length) {
+        // Widgets made of boxes mostly take a paste in the first and spread it
+        // themselves; if this one doesn't, one character a box, as if typed
+        // into each in turn.
+        const data = new DataTransfer();
+        data.setData('text/plain', code);
+        boxes[0].focus();
+        const paste = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+        if (!boxes[0].dispatchEvent(paste) && boxes.every((box, i) => box.value === (code[i] ?? ''))) return;
+        boxes.forEach((box, i) => {
+          box.focus();
+          type(box, code[i] ?? '');
+        });
+        boxes[Math.min(code.length, boxes.length) - 1].focus();
+      } else {
+        type(anchor, code);
+        anchor.focus();
+      }
+    } finally {
+      filling = false;
+      pageBlurred = !document.hasFocus();
+    }
   });
 
   ipcRenderer.on('passwords:fill', (_event, /** @type {{ username: string | null, password: string, generated: boolean }} */ login) => {

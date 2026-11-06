@@ -6,7 +6,7 @@ import { call, command, need, pick } from './util';
 /**
  * `din phone`: the phones in Settings → Phone and their texts, as Messages
  * shows them (electron/phone.mts), and whether they can send files here (over Bluetooth, or with
- * Quick Share while connected). Sending a text asks on screen first: it can't be taken back.
+ * Quick Share while connected) or fill in the codes in their texts. Sending a text asks on screen first: it can't be taken back.
  * Pairing a phone is Bluetooth's (`din bluetooth pair`).
  */
 
@@ -123,6 +123,17 @@ export const phoneArea: Area = {
       if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
       await call(phone().setReceiveFiles(p.id, state === 'on'));
       return { text: `Receiving files from ${p.name} is ${state}` };
+    }),
+    command('phone', 'fill-codes', 'Whether the Web Browser offers the verification codes in the phone’s texts in pages’ code fields', [
+      { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off (leave out to see which)' },
+      PHONE,
+    ], async (args) => {
+      const p = await device(args.optString('phone'));
+      const state = args.optString('state');
+      if (state === undefined) return { data: { fillCodes: p.fillCodes }, text: `Filling in codes from ${p.name}’s texts is ${p.fillCodes ? 'on' : 'off'}` };
+      if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
+      await call(phone().setFillCodes(p.id, state === 'on'));
+      return { text: `Filling in codes from ${p.name}’s texts is ${state}` };
     }),
     command('phone', 'add', 'Add a phone paired in Bluetooth (din bluetooth pair) to read its texts here', [
       { name: 'name', type: 'string', positional: true, help: 'The phone’s name' },
