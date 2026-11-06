@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   AppWindow,
+  Box,
   Disc,
   File,
   FileArchive,
@@ -32,6 +33,7 @@ const CATEGORY_ICON: Record<FileCategory, LucideIcon> = {
   document: FileText,
   program: AppWindow,
   disk: Disc,
+  model: Box,
   other: File,
 };
 
@@ -46,6 +48,7 @@ const CATEGORY_TINT: Partial<Record<FileCategory, string>> = {
   code: 'text-sky-500',
   program: 'text-indigo-500',
   disk: 'text-teal-500',
+  model: 'text-emerald-500',
 };
 
 export interface FileIconProps {

@@ -18,6 +18,7 @@ export type FileCategory =
   | 'document'
   | 'program'
   | 'disk'
+  | 'model'
   | 'other';
 
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'heic', 'jxl', 'tif', 'tiff', 'psd', 'ora']);
@@ -41,6 +42,9 @@ const ARCHIVE = new Set([
   'zip', 'tar', 'tgz', 'tbz', 'tbz2', 'txz', 'tzst', 'gz', 'xz', 'bz2', 'zst', '7z', 'rar', 'jar',
   'cpio', 'cab', 'deb', 'rpm', 'apk',
 ]);
+/** 3D models; the ones in MODEL_VIEWABLE Preview draws and turns. */
+const MODEL = new Set(['glb', 'gltf', 'stl', 'obj', 'ply', '3mf', 'fbx', 'dae', 'usdz', 'usda', 'blend', 'x3d', 'wrl']);
+const MODEL_VIEWABLE = new Set(['glb', 'gltf', 'stl', 'obj', 'ply', '3mf', 'fbx', 'dae']);
 const DISK = new Set(['iso', 'img', 'qcow2', 'vmdk', 'vdi', 'dmg']);
 const DOCUMENT = new Set(['dwg', 'dxf', 'ai', 'ait', 'indd', 'indt', 'idml', 'pub', 'doc', 'docx', 'docm', 'dotx', 'odt', 'ott', 'fodt', 'rtf', 'xls', 'xlsx', 'xlsm', 'xltx', 'ods', 'ots', 'fods', 'ppt', 'pptx', 'pptm', 'potx', 'ppsx', 'odp', 'otp', 'fodp', 'epub']);
 /** Names that are text whatever their extension. */
@@ -63,6 +67,7 @@ export function fileCategory(name: string, kind: FsEntryKind): FileCategory {
   if (TEXT.has(ext) || TEXT_NAMES.has(name.toLowerCase())) return 'text';
   if (ARCHIVE.has(ext)) return 'archive';
   if (DISK.has(ext)) return 'disk';
+  if (MODEL.has(ext)) return 'model';
   if (DOCUMENT.has(ext)) return 'document';
   if (isProgram(name)) return 'program';
   return 'other';
@@ -174,6 +179,11 @@ export function isPhotoEditable(name: string): boolean {
   return isLayeredImage(name) || isViewableImage(name);
 }
 
+/** 3D models Preview can draw (src/shared/model). */
+export function isViewableModel(name: string): boolean {
+  return MODEL_VIEWABLE.has(extensionOf(name));
+}
+
 export function isPlayableVideo(name: string): boolean {
   return PLAYABLE_VIDEO.has(extensionOf(name));
 }
@@ -214,6 +224,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   document: 'Document',
   program: 'Windows program',
   disk: 'Disk image',
+  model: '3D model',
   other: 'File',
 };
 

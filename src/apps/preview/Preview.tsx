@@ -45,7 +45,7 @@ async function openWith(din: Din, appId: string, path: string, params: Record<st
 /**
  * Preview - a window for one file, opened from Files: pictures and video
  * (with the arrow keys stepping through the rest of the folder's), music,
- * PDFs, archives' contents, cursor themes (to install and use), and text, which
+ * PDFs, 3D models, archives' contents, cursor themes (to install and use), and text, which
  * can be edited and saved.
  *
  * It has `file-folders`: stepping through the folder, listing and

@@ -25,6 +25,7 @@ export const FILE_ICON_NAMES: Record<FileCategory, string[]> = {
   document: ['x-office-document'],
   program: ['application-x-executable'],
   disk: ['application-x-cd-image', 'media-optical'],
+  model: ['model', 'application-x-blender', 'unknown'],
   other: ['unknown', 'application-octet-stream'],
 };
 

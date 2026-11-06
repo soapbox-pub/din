@@ -10,6 +10,7 @@ import {
   isPlayableAudio,
   isPlayableVideo,
   isViewableImage,
+  isViewableModel,
   typeLabel,
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
@@ -24,6 +25,8 @@ const TEXT_MAX_CHARS = 512 * 1024;
 
 /** pdf.js is big: it's loaded the first time a PDF is shown. */
 const PdfView = lazy(() => import('@/shared/PdfView'));
+/** So is three.js: it's loaded the first time a 3D model is shown. */
+const ModelView = lazy(() => import('@/shared/model/ModelView'));
 
 export interface FileViewerBodyProps {
   path: string;
@@ -42,7 +45,7 @@ export interface FileViewerBodyProps {
 
 /**
  * What a file looks like inside: the picture, the video, the song, the
- * PDF, the text, the archive's listing, the cursor theme's cursors. Shared by the Preview window and Files'
+ * PDF, the 3D model, the text, the archive's listing, the cursor theme's cursors. Shared by the Preview window and Files'
  * Quick Look (Space).
  */
 export function FileViewerBody({
@@ -56,7 +59,7 @@ export function FileViewerBody({
 }: FileViewerBodyProps) {
   const name = path.slice(path.lastIndexOf('/') + 1);
   const category = fileCategory(name, 'file');
-  const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) || category === 'pdf' ? path : null);
+  const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) || category === 'pdf' || isViewableModel(name) ? path : null);
   // Bust Chromium's media cache when the file changes under the same name.
   const url = base && `${base}${mtimeMs ? `?v=${Math.floor(mtimeMs)}` : ''}`;
 
@@ -85,9 +88,16 @@ export function FileViewerBody({
       </Suspense>
     );
   }
+  if (isViewableModel(name)) {
+    return (
+      <Suspense fallback={null}>
+        {url && <ModelView key={url} url={url} name={name} />}
+      </Suspense>
+    );
+  }
   if (isCursorTheme(name)) return <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />;
   if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
-  if (category === 'document' || category === 'disk' || category === 'program' || category === 'image' || category === 'video') {
+  if (category === 'document' || category === 'disk' || category === 'model' || category === 'program' || category === 'image' || category === 'video') {
     return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;
   }
   return (
