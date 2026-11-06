@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
+import { isWindowsShell } from './windows-shell.mts';
 import { sudoAskpass } from './system-packages.mts';
 
 export type LoginSessionAction = 'install' | 'update' | 'rollback' | 'default' | 'restore' | 'uninstall';
@@ -100,10 +101,11 @@ export function registerLoginSessionHandlers(options: {
   const { devUrl, assertShellSender, sendToShell } = options;
 
   // scripts/session.mjs's builds, and NixOS's desktop module
-  // (os/desktop-module.nix), which has no builds of its own to manage.
+  // (os/desktop-module.nix), which has no builds of its own to manage, and
+  // Din as Windows' shell (electron/windows-shell.mts).
   ipcMain.handle('session:isLoginSession', (event) => {
     assertShellSender(event);
-    return !!process.env.DIN_SESSION_RELEASE || process.env.DIN_LOGIN_SESSION === '1';
+    return !!process.env.DIN_SESSION_RELEASE || process.env.DIN_LOGIN_SESSION === '1' || isWindowsShell();
   });
 
   ipcMain.handle('session:status', async (event) => {

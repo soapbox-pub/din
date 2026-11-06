@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 dist-perf
+dist-windows
 
 # Profiler output (scripts/perf-profile.mjs)
 perf-reports

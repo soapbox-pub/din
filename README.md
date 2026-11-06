@@ -124,6 +124,31 @@ packages are often older) and the compositor's libraries:
 The script says which are missing. NixOS can't take it (`/usr` is read-only);
 it has a module instead.
 
+### Din as the Windows shell
+
+Din can stand in for Explorer as the desktop a Windows user logs in to:
+
+```sh
+npm run build && npm run windows:package   # dist-windows/din, with Electron's Windows build
+```
+
+Copy `dist-windows/din` to the Windows machine, and in the user's PowerShell
+run `.\din\install-shell.ps1` (`-Restore` goes back to Explorer). It sets the
+per-user shell (`HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\Shell`)
+to `din.exe --din-shell`, from the next sign-in (tried on Windows 11
+Enterprise). Ctrl+Alt+Del → Task Manager → Run new task →
+`explorer.exe` is the way out for a session where Din won't start.
+
+As the shell (`electron/windows-shell.mts`), Din's window is the desktop:
+`electron/windows-shell-helper.ps1` keeps it under every program's window,
+as Explorer's desktop is, and sets the work area so maximized programs leave
+the menu bar showing. Programs (`.exe`, `.lnk`, `.msi`, `.bat`) open with
+Windows itself, not Wine; Log out signs out of Windows, and Restart and Shut
+down go through `shutdown.exe`. Not there yet: programs' windows in the Dock
+(Alt+Tab switches between them), Din's menus and windows over programs', the
+Run keys and Startup folder, and the Linux-only parts (Terminal, displays,
+sound, Wi-Fi, …).
+
 ### Din on NixOS
 
 On NixOS, Din goes on the login screen from the system's configuration, with

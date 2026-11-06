@@ -163,6 +163,7 @@ import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
+import { becomeWindowsDesktop, isWindows, isWindowsShell, windowsPower } from './windows-shell.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
 import { startWatchdog } from './watchdog.mts';
@@ -2185,6 +2186,7 @@ function assertSafeToPowerOff(): void {
 function registerPowerHandlers(): void {
   ipcMain.handle('power:actions', async (event) => {
     assertShellSender(event);
+    if (isWindows) return { reboot: true, powerOff: true };
     const [reboot, powerOff] = await Promise.all([
       logindAllows('CanReboot'),
       logindAllows('CanPowerOff'),
@@ -2196,6 +2198,7 @@ function registerPowerHandlers(): void {
     assertShellSender(event);
     assertSafeToPowerOff();
     await saveBeforeStopping();
+    if (isWindows) return windowsPower.reboot();
     await tool('systemctl', ['reboot'], 15_000);
   });
 
@@ -2203,6 +2206,7 @@ function registerPowerHandlers(): void {
     assertShellSender(event);
     assertSafeToPowerOff();
     await saveBeforeStopping();
+    if (isWindows) return windowsPower.powerOff();
     await tool('systemctl', ['poweroff'], 15_000);
   });
 
@@ -2272,9 +2276,14 @@ function registerPowerHandlers(): void {
 
   // Log out: quit cleanly. As a login session (scripts/session.mjs) that
   // ends it, returning to the display manager; on DinOS the din-shell
-  // service brings a fresh Din back up.
+  // service brings a fresh Din back up. As Windows' shell it signs out of
+  // Windows, which closes Din with the rest.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
+    if (isWindowsShell()) {
+      void saveBeforeStopping().then(() => windowsPower.logOff()).catch((error) => console.error('shutdown /l:', error));
+      return;
+    }
     void saveBeforeStopping().then(() => app.quit());
   });
 }
@@ -6647,6 +6656,7 @@ app.whenReady().then(() => {
       win.setKiosk(true);
     }
     win.show();
+    if (isWindowsShell()) becomeWindowsDesktop(win);
     watchLiveStick();
     watchDiskSpace();
   };

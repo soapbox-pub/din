@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type ChildProcess, spawn } from 'node:child_process';
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import { forgetIconIndex, resolveAppIcon } from './icon-theme.mts';
 import {
   embeddedDisplay,
@@ -47,6 +47,7 @@ import {
   windowsShellDir,
 } from './windows-apps.mts';
 import { icoFileIcon, programInfo } from './pe-icon.mts';
+import { isWindows } from './windows-shell.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -776,6 +777,13 @@ async function runAppImage(file: string): Promise<void> {
 export async function runProgram(file: string): Promise<void> {
   if (!path.isAbsolute(file) || !isProgram(file) || !fs.statSync(file).isFile()) {
     throw new Error('Not a program');
+  }
+  // On Windows a program is Windows' own to run, shortcuts and installers
+  // included (ShellExecute, which needs no Explorer running).
+  if (isWindows) {
+    const error = await shell.openPath(file);
+    if (error) throw new Error(error);
+    return;
   }
   if (isAppImage(file)) await runAppImage(file);
   else await runWindowsProgram(file);

@@ -20,6 +20,7 @@
     "session:install": "node scripts/session.mjs install",
     "session:update": "node scripts/session.mjs update",
     "session:uninstall": "node scripts/session.mjs uninstall",
+    "windows:package": "node scripts/windows-shell.mjs",
     "os:build": "nix build ./os#image",
     "os:run": "nix build ./os#vm && ./result/bin/run-dinos-vm",
     "os:release": "scripts/dinos-release.sh",
