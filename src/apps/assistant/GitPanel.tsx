@@ -303,6 +303,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
   const upstream = status.upstream ?? (remote && status.branch ? `${remote.name}/${status.branch}` : null);
   const canSync = !!remote && !!status.branch && !status.state;
   const busy = sync.running !== null;
+  const unpushed = canSync && status.ahead > 0;
 
   return (
     <section aria-label="Remote" className="mx-1 mt-1 space-y-2 rounded-xl bg-background/60 p-2 clay">
@@ -340,29 +341,38 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
 
       {remote && (
         <Collapsible open={more} onOpenChange={setMore}>
-          <div className={cn('flex h-9 overflow-hidden rounded-full bg-pigment text-primary-foreground clay-pigment', !canSync && 'opacity-50')}>
+          {/* An outline capsule like Pull and Push, turning amber while there are commits to push. */}
+          <div
+            className={cn(
+              'flex h-8 overflow-hidden rounded-full border bg-background clay',
+              unpushed ? 'border-amber-500/70 text-amber-700 dark:text-amber-300' : 'border-border/70 text-foreground',
+              !canSync && 'opacity-50',
+            )}
+          >
             <button
               type="button"
               disabled={!canSync || busy}
               onClick={() => void sync.run('sync')}
-              className={cn('flex min-w-0 flex-1 items-center justify-center gap-2 text-sm font-medium hover:brightness-110 disabled:pointer-events-none', focusRing)}
+              title={unpushed ? `${plural(status.ahead, 'commit')} to push` : undefined}
+              className={cn('flex min-w-0 flex-1 items-center justify-center gap-1.5 text-xs font-medium hover:bg-foreground/[0.05] disabled:pointer-events-none', focusRing)}
             >
               {sync.succeeded && !busy ? (
-                <Check className="size-4" aria-hidden />
+                <Check className="size-3.5" aria-hidden />
               ) : (
-                <RefreshCw className={cn('size-4', busy && 'animate-spin')} aria-hidden />
+                <RefreshCw className={cn('size-3.5', busy && 'animate-spin')} aria-hidden />
               )}
               {busy ? RUNNING_LABELS[sync.running!] : sync.succeeded ? 'Synced' : 'Sync'}
+              {unpushed && !busy && <span className="sr-only">, {plural(status.ahead, 'commit')} to push</span>}
             </button>
-            <span aria-hidden className="my-2 w-px bg-primary-foreground/30" />
+            <span aria-hidden className={cn('my-1.5 w-px', unpushed ? 'bg-amber-500/50' : 'bg-border')} />
             <CollapsibleTrigger asChild>
               <button
                 type="button"
                 aria-label={more ? 'Hide Pull and Push' : 'Pull or Push'}
                 title="Pull or Push"
-                className={cn('grid w-9 shrink-0 place-items-center hover:brightness-110', focusRing)}
+                className={cn('grid w-8 shrink-0 place-items-center hover:bg-foreground/[0.05]', focusRing)}
               >
-                <ChevronDown className={cn('size-4 transition-transform motion-reduce:transition-none', more && 'rotate-180')} aria-hidden />
+                <ChevronDown className={cn('size-3.5 transition-transform motion-reduce:transition-none', more && 'rotate-180')} aria-hidden />
               </button>
             </CollapsibleTrigger>
           </div>
