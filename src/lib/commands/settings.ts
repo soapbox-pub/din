@@ -79,7 +79,7 @@ const SETTINGS: Setting[] = [
   { key: 'taskbar.style', field: 'taskbarStyle', help: 'A tall taskbar (Windows 7) or a slim one (Windows Vista)', param: { type: 'string', choices: ['tall', 'slim'] } },
   { key: 'taskbar.position', field: 'taskbarPosition', help: 'The screen edge the taskbar runs along', param: { type: 'string', choices: ['bottom', 'top', 'left', 'right'] } },
   { key: 'taskbar.buttons', field: 'taskbarButtons', help: 'A taskbar button per app, its windows combined, or one per window', param: { type: 'string', choices: ['combine', 'separate'] } },
-  { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent (reset for the display’s own)', param: { type: 'integer', min: 50, max: 200 } },
+  { key: 'display.zoom', field: 'zoomLevel', help: 'Scale everything on the desktop, in percent (reset for the display’s own); on DinOS each monitor has its own, din display set --zoom', param: { type: 'integer', min: 50, max: 200 } },
   { key: 'accessibility.reduce-motion', field: 'reduceMotion', help: 'Keep animation to what’s needed, in Din and its apps', param: bool },
   { key: 'accessibility.reduce-transparency', field: 'reduceTransparency', help: 'Solid panels, menus and windows instead of frosted glass (Themes’ Glass or Solid)', param: bool },
   { key: 'accessibility.increase-contrast', field: 'increaseContrast', help: 'Stronger borders, secondary text and focus rings; also reduces transparency', param: bool },
@@ -117,6 +117,7 @@ export const CONFIG_FIELDS_ELSEWHERE: Partial<Record<keyof AppConfig, string>> =
   blossomServerMetadata: 'din nostr blossom',
   profileThemeMetadata: 'the profile theme itself, kept in step by the desktop',
   localTheme: 'the theme editor in Settings → Themes (not yet a command)',
+  displayZoom: 'din display set <monitor> --zoom',
 };
 
 export const SETTING_FIELDS: (keyof AppConfig)[] = SETTINGS.flatMap((s) => (s.field ? [s.field] : []));

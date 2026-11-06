@@ -11,6 +11,7 @@ import {
   type DisplayPlacement,
   type DisplayRotation,
 } from '@/lib/display';
+import { MAX_ZOOM, MIN_ZOOM, withDisplayZoom, zoomOf } from '@/lib/displayZoom';
 import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
 import {
   LAYOUT_SWITCH_KEYS,
@@ -153,14 +154,21 @@ export const brightnessArea: Area = {
 
 export const displayArea: Area = {
   name: 'display',
-  summary: 'Monitors: resolution, rotation, arrangement, which is primary',
+  summary: 'Monitors: resolution, zoom, rotation, arrangement, which is primary',
   commands: [
-    command('display', 'list', 'Connected monitors and their modes', [], async () => {
+    command('display', 'list', 'Connected monitors and their modes', [], async (_args, ctx) => {
       const status = await call(need(getDisplayBridge(), 'Display arrangement').status());
+      const zoom = (o: (typeof status.outputs)[number]) => {
+        if (!status.perDisplayZoom) return '';
+        const { percent, automatic } = zoomOf(o, ctx.config.displayZoom);
+        return `, zoom ${percent}%${automatic ? ' (automatic)' : ''}`;
+      };
       return {
-        data: status.outputs,
+        data: status.perDisplayZoom
+          ? status.outputs.map((o) => ({ ...o, zoom: zoomOf(o, ctx.config.displayZoom) }))
+          : status.outputs,
         text: status.outputs.map((o) => [
-          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height}${o.current.refresh ? ` @ ${formatRefresh(o.current.refresh)}` : ''}${o.rotation ? `, ${rotationLabel(o.rotation, o.current.width, o.current.height).toLowerCase()} (${o.rotation}°)` : ''} at ${o.position.x},${o.position.y}` : 'off'}`,
+          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height}${o.current.refresh ? ` @ ${formatRefresh(o.current.refresh)}` : ''}${o.rotation ? `, ${rotationLabel(o.rotation, o.current.width, o.current.height).toLowerCase()} (${o.rotation}°)` : ''} at ${o.position.x},${o.position.y}${zoom(o)}` : 'off'}`,
           `    modes: ${[...new Set(o.modes.map((m) => `${m.width}x${m.height}`))].map((size) => {
             const [width, height] = size.split('x').map(Number);
             const rates = refreshRates(o.modes, width, height);
@@ -169,8 +177,9 @@ export const displayArea: Area = {
         ].join('\n')).join('\n'),
       };
     }),
-    command('display', 'set', 'Change one monitor: its mode, refresh rate, rotation, position, whether it’s on or primary', [
+    command('display', 'set', 'Change one monitor: its zoom, mode, refresh rate, rotation, position, whether it’s on or primary', [
       { name: 'output', type: 'string', positional: true, help: 'Its name, e.g. HDMI-A-1' },
+      { name: 'zoom', type: 'string', optional: true, help: `Its zoom in percent (${MIN_ZOOM} to ${MAX_ZOOM}), remembered for it, or auto for its own (DinOS; elsewhere, din settings set display.zoom)` },
       { name: 'mode', type: 'string', optional: true, help: 'WIDTHxHEIGHT, one it offers' },
       {
         name: 'rotation', type: 'string', optional: true, choices: DISPLAY_ROTATIONS.map(String),
@@ -181,10 +190,21 @@ export const displayArea: Area = {
       { name: 'y', type: 'integer', optional: true, help: 'Its top edge' },
       { name: 'enabled', type: 'boolean', optional: true, help: 'On, or off (--no-enabled)' },
       { name: 'primary', type: 'boolean', optional: true, help: 'Make it the primary monitor' },
-    ], async (args) => {
+    ], async (args, ctx) => {
       const bridge = need(getDisplayBridge(), 'Display arrangement');
-      const { outputs } = await call(bridge.status());
+      const { outputs, perDisplayZoom } = await call(bridge.status());
       const target = pick(outputs, args.string('output'), (o) => [o.name, friendlyOutputName(o.name)], 'monitor');
+      const zoom = args.optString('zoom');
+      if (zoom !== undefined) {
+        if (!perDisplayZoom) throw new CommandError('Monitors can’t each have their own zoom here; din settings set display.zoom zooms the desktop');
+        const percent = zoom === 'auto' ? null : Number(zoom.replace(/%$/, ''));
+        if (percent !== null && !(Number.isFinite(percent) && percent >= MIN_ZOOM && percent <= MAX_ZOOM)) {
+          throw new CommandError(`--zoom takes ${MIN_ZOOM} to ${MAX_ZOOM}, or auto`, 'usage');
+        }
+        ctx.updateConfig((current) => withDisplayZoom(current, target, percent));
+        // Zoom alone: the arrangement stays as it is (AppProvider moves the others beside it).
+        if (['mode', 'refresh', 'rotation', 'x', 'y', 'enabled', 'primary'].every((name) => !args.has(name))) return;
+      }
       const mode = args.optString('mode');
       const size = mode ? /^(\d+)x(\d+)$/.exec(mode) : null;
       if (mode && !size) throw new CommandError('--mode takes WIDTHxHEIGHT', 'usage');
@@ -211,7 +231,7 @@ export const displayArea: Area = {
         const current = o.current ?? o.modes.find((m) => m.preferred) ?? o.modes[0] ?? { width: 0, height: 0 };
         return {
           output: o.name, enabled: o.enabled, primary: primary ? false : o.primary,
-          x: o.position.x, y: o.position.y, width: current.width, height: current.height, rotation: o.rotation ?? 0,
+          x: o.position.x, y: o.position.y, width: current.width, height: current.height, rotation: o.rotation ?? 0, scale: o.scale,
         };
       });
       // Turned as Settings turns it: the displays beside it move with its edge.

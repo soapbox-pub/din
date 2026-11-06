@@ -200,9 +200,17 @@ export interface AppConfig {
    * Chromium page zoom in the Electron shell (DPI-style scaling of the whole
    * desktop); has no effect in a plain browser, where the browser's own zoom
    * applies. Device-specific, so it is kept local and never synced. Unset,
-   * it's the primary display's automatic zoom (src/lib/autoZoom.ts).
+   * it's the primary display's automatic zoom (src/lib/autoZoom.ts). Under
+   * din-shell each display has a zoom of its own instead (`displayZoom`),
+   * and this is 100.
    */
   zoomLevel: number;
+  /**
+   * Under din-shell, the zoom the user chose for each display, as a
+   * percentage, by the display's identity (src/lib/displayZoom.ts). A display
+   * not here has its automatic zoom, from its pixel density. Kept local.
+   */
+  displayZoom: Record<string, number>;
   /**
    * Accessibility (src/lib/accessibility.ts): Din's own motion is cut down
    * to what's needed, as if the system preferred reduced motion, in the
@@ -255,6 +263,8 @@ export interface AppContextType {
   updateConfig: (updater: (currentConfig: Partial<AppConfig>) => Partial<AppConfig>) => void;
   /** Whether `config.zoomLevel` is the display's automatic zoom, the user having set none. */
   zoomAutomatic: boolean;
+  /** Whether each display has its own zoom (`config.displayZoom`), under din-shell. */
+  perDisplayZoom: boolean;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);

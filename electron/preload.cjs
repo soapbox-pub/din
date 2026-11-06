@@ -767,6 +767,13 @@ expose('display', {
    * @param {Array<{ output: string, enabled: boolean, primary: boolean, x: number, y: number, width: number, height: number }>} placements
    */
   applyLayout: (placements) => ipcRenderer.invoke('display:applyLayout', placements),
+
+  /**
+   * Under din-shell (status `perDisplayZoom`), zoom displays one by one:
+   * { [output]: scale }, 0.5 to 3. The others move to stay beside them.
+   * @param {Record<string, number>} scales
+   */
+  setScales: (scales) => ipcRenderer.invoke('display:setScales', scales),
 });
 
 // Page fullscreen bridge (window.dinos.pageFullscreen), backed by the

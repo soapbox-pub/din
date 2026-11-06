@@ -93,6 +93,7 @@ const defaultConfig: AppConfig = {
   desktopIcons: true,
   desktopIconSize: 'medium',
   zoomLevel: 100,
+  displayZoom: {},
   reduceMotion: false,
   reduceTransparency: false,
   glass: 'liquid',

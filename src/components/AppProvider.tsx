@@ -5,6 +5,7 @@ import { AppConfigSchema } from '@/lib/appConfigSchema';
 import { getZoomBridge } from '@/lib/zoom';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import { autoZoomForOutputs } from '@/lib/autoZoom';
+import { scalesToApply, withDisplayZoom } from '@/lib/displayZoom';
 import { getDisplayBridge } from '@/lib/display';
 import { getMonitorsBridge } from '@/lib/monitors';
 import { applyAccessibility, getAccessibilityBridge } from '@/lib/accessibility';
@@ -50,20 +51,24 @@ export function AppProvider(props: AppProviderProps) {
   // only re-render when the config actually changes, not whenever an
   // ancestor re-renders this provider.
   // Zoom the user hasn't set is the display's own (src/lib/autoZoom.ts).
-  const autoZoom = useAutoZoom();
+  // Under din-shell each display has its own (src/lib/displayZoom.ts), and
+  // the page itself isn't zoomed.
+  const perDisplayZoom = usePerDisplayZoom(rawConfig.displayZoom, rawConfig.zoomLevel, updateConfig);
+  const autoZoom = useAutoZoom(!perDisplayZoom);
   const zoomAutomatic = rawConfig.zoomLevel === undefined;
   const config = useMemo(
     () => ({
       ...defaultConfig,
       ...(autoZoom !== null && { zoomLevel: autoZoom }),
       ...rawConfig,
+      ...(perDisplayZoom && { zoomLevel: 100 }),
     }),
-    [defaultConfig, autoZoom, rawConfig],
+    [defaultConfig, autoZoom, rawConfig, perDisplayZoom],
   );
 
   const appContextValue: AppContextType = useMemo(
-    () => ({ config, updateConfig, zoomAutomatic }),
-    [config, updateConfig, zoomAutomatic],
+    () => ({ config, updateConfig, zoomAutomatic, perDisplayZoom }),
+    [config, updateConfig, zoomAutomatic, perDisplayZoom],
   );
 
   // Apply theme effects to document
@@ -99,14 +104,67 @@ function useApplyZoom(zoomLevel: number) {
 }
 
 const AUTO_ZOOM_KEY = 'din:auto-zoom';
+const PER_DISPLAY_ZOOM_KEY = 'din:per-display-zoom';
+
+/**
+ * Whether each display has its own zoom (din-shell), kept from the last run
+ * so the desktop starts unzoomed rather than zooming and then not. Where it
+ * does, keeps every display at its zoom: CHOSEN's, else its automatic one,
+ * as displays come and go and the user changes them. A zoom the user chose
+ * for the whole desktop before (LEGACY) becomes the primary display's.
+ */
+function usePerDisplayZoom(
+  chosen: Record<string, number> | undefined,
+  legacy: number | undefined,
+  updateConfig: AppContextType['updateConfig'],
+): boolean {
+  const [perDisplay, setPerDisplay] = useState(
+    () => !!getDisplayBridge() && localStorage.getItem(PER_DISPLAY_ZOOM_KEY) === '1',
+  );
+  useEffect(() => {
+    const display = getDisplayBridge();
+    if (!display) return;
+    let stale = false;
+    // One at a time: applying scales changes the displays, which reads them again.
+    let busy: Promise<void> = Promise.resolve();
+    const sync = () => {
+      busy = busy.then(async () => {
+        if (stale) return;
+        const status = await display.status();
+        if (stale) return;
+        const supported = status.available && status.perDisplayZoom === true;
+        localStorage.setItem(PER_DISPLAY_ZOOM_KEY, supported ? '1' : '0');
+        setPerDisplay(supported);
+        if (!supported) return;
+        const primary = status.outputs.find((o) => o.primary && o.enabled);
+        if (chosen === undefined && legacy !== undefined && primary) {
+          updateConfig((c) => withDisplayZoom(c, primary, legacy));
+          return;
+        }
+        const scales = scalesToApply(status.outputs, chosen);
+        if (scales) await display.setScales(scales);
+      }).catch((error: unknown) => {
+        console.warn('Could not zoom the displays:', error);
+      });
+    };
+    sync();
+    const off = getMonitorsBridge()?.onChange(sync);
+    return () => {
+      stale = true;
+      off?.();
+    };
+  }, [chosen, legacy, updateConfig]);
+  return perDisplay;
+}
 
 /**
  * The zoom for the primary display's pixel density, or null outside the
- * Electron shell or where its displays can't be read. Read again whenever the
- * displays change (one plugged in, the lid shut, a new resolution), and kept
- * from the last run so the desktop starts at it rather than jumping to it.
+ * Electron shell or where its displays can't be read (or while ENABLED is
+ * false, where each display has its own). Read again whenever the displays
+ * change (one plugged in, the lid shut, a new resolution), and kept from the
+ * last run so the desktop starts at it rather than jumping to it.
  */
-function useAutoZoom(): number | null {
+function useAutoZoom(enabled: boolean): number | null {
   const [zoom, setZoom] = useState<number | null>(() => {
     if (!getDisplayBridge()) return null;
     const saved = Number(localStorage.getItem(AUTO_ZOOM_KEY));
@@ -114,7 +172,7 @@ function useAutoZoom(): number | null {
   });
   useEffect(() => {
     const display = getDisplayBridge();
-    if (!display) return;
+    if (!display || !enabled) return;
     let stale = false;
     const read = () => {
       display.status().then((status) => {
@@ -131,7 +189,7 @@ function useAutoZoom(): number | null {
       stale = true;
       off?.();
     };
-  }, []);
+  }, [enabled]);
   return zoom;
 }
 

@@ -70,6 +70,7 @@ import {
   friendlyOutputName,
   getDisplayBridge,
   isInternalOutput,
+  layoutSize,
   preferredMode,
   refreshRates,
   rotatedSize,
@@ -77,6 +78,7 @@ import {
   rotationLabel,
   uniqueModes,
 } from '@/lib/display';
+import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, clampZoom, withDisplayZoom, zoomOf } from '@/lib/displayZoom';
 import type { DisplayMode, DisplayOutput, DisplayPlacement, DisplayRotation } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
 import {
@@ -658,13 +660,15 @@ interface DisplayDraft {
   /** Hz; 0 where the output doesn't say. */
   refresh: number;
   rotation: DisplayRotation;
+  /** Its zoom (din-shell): its size on the shared screen is over this. */
+  scale: number;
   modes: DisplayMode[];
   allModes: DisplayMode[];
 }
 
-/** The space a draft display takes on the shared screen, turned as it's to be. */
+/** The space a draft display takes on the shared screen, turned as it's to be, over its zoom. */
 function draftSize(d: DisplayDraft): { width: number; height: number } {
-  return rotatedSize(d.width, d.height, d.rotation);
+  return layoutSize(d.width, d.height, d.rotation, d.scale);
 }
 
 /** Seed the editable draft from the reported outputs. */
@@ -684,6 +688,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
       height: output.current?.height ?? fallback?.height ?? 0,
       refresh: output.current?.refresh ?? fallback?.refresh ?? 0,
       rotation: output.rotation ?? 0,
+      scale: output.scale ?? 1,
       modes,
       allModes: output.modes,
     };
@@ -693,7 +698,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
 /** A stable signature of the arrangement, for dirty-checking and re-seeding. */
 function layoutSignature(drafts: DisplayDraft[]): string {
   return JSON.stringify(
-    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height, d.refresh, d.rotation]),
+    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height, d.refresh, d.rotation, d.scale]),
   );
 }
 
@@ -715,15 +720,6 @@ function toPlacements(drafts: DisplayDraft[]): DisplayPlacement[] {
   }));
 }
 
-const MIN_ZOOM = 50; // %
-const MAX_ZOOM = 200; // %
-const ZOOM_STEP = 10; // %
-
-/** Clamp a zoom percentage to the supported range and round to an integer. */
-function clampZoom(percent: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(percent)));
-}
-
 /** The config without a zoom of the user's, so the display's own applies. */
 function automaticZoom(config: Partial<AppConfig>): Partial<AppConfig> {
   const { zoomLevel: _, ...rest } = config;
@@ -731,11 +727,79 @@ function automaticZoom(config: Partial<AppConfig>): Partial<AppConfig> {
 }
 
 /**
+ * Zoom: per display under din-shell (src/lib/displayZoom.ts), else one
+ * for the whole desktop.
+ */
+function InterfaceZoom() {
+  const { config, updateConfig, zoomAutomatic, perDisplayZoom } = useAppContext();
+  if (perDisplayZoom) return <PerDisplayZoomControl />;
+  return (
+    <DisplayZoomControl
+      available={getZoomBridge() !== undefined}
+      value={config.zoomLevel}
+      automatic={zoomAutomatic}
+      onChange={(percent) => updateConfig((c) => ({ ...c, zoomLevel: clampZoom(percent) }))}
+      onAutomatic={() => updateConfig(automaticZoom)}
+    />
+  );
+}
+
+/** − 125% + for a zoom, with "Use automatic" once the user has chosen one. */
+function ZoomStepper({
+  label,
+  value,
+  automatic,
+  onChange,
+  onAutomatic,
+}: {
+  /** What's zoomed, for the buttons' labels ("Zoom out Built-in display"). */
+  label?: string;
+  value: number;
+  /** Whether VALUE is the display's own, the user having set none. */
+  automatic: boolean;
+  onChange: (percent: number) => void;
+  /** Go back to the display's own zoom. */
+  onAutomatic: () => void;
+}) {
+  const of = label ? ` ${label}` : '';
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Zoom out${of}`}
+        disabled={value <= MIN_ZOOM}
+        onClick={() => onChange(clampZoom(value - ZOOM_STEP))}
+      >
+        <Minus className="size-4" />
+      </Button>
+      <span className="flex w-24 flex-col items-center text-center" aria-live="polite">
+        <span className="text-sm tabular-nums font-medium">{value}%</span>
+        {automatic && <span className="text-xs text-muted-foreground">Automatic</span>}
+      </span>
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label={`Zoom in${of}`}
+        disabled={value >= MAX_ZOOM}
+        onClick={() => onChange(clampZoom(value + ZOOM_STEP))}
+      >
+        <Plus className="size-4" />
+      </Button>
+      <Button variant="ghost" size="sm" className={cn(automatic && 'invisible')} onClick={onAutomatic}>
+        Use automatic
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Interface zoom - DPI-style scaling of the whole desktop through Chromium
- * page zoom (window.dinos.zoom preload bridge). Lives in AppConfig (persisted
- * locally) and works in every Electron session, including ones where the
- * arrangement below is unavailable. In a plain browser there is no
- * bridge, so the control points at the browser's own zoom instead.
+ * page zoom (window.dinos.zoom preload bridge), where displays can't each
+ * have their own. Lives in AppConfig (persisted locally) and works in every
+ * Electron session, including ones where the arrangement below is
+ * unavailable. In a plain browser there is no bridge, so the control points
+ * at the browser's own zoom instead.
  */
 function DisplayZoomControl({
   available,
@@ -757,9 +821,7 @@ function DisplayZoomControl({
       <div className="flex items-center gap-3">
         <ZoomIn className="size-6 shrink-0 text-foreground/90" aria-hidden />
         <div className="min-w-0">
-          <Label htmlFor="interface-zoom" className="text-sm">
-            Zoom
-          </Label>
+          <p className="text-sm font-medium">Zoom</p>
           <p className="text-xs text-muted-foreground">
             Scale everything on the desktop up or down. Automatic suits the
             main display's sharpness.
@@ -767,40 +829,72 @@ function DisplayZoomControl({
         </div>
       </div>
       {available ? (
-        <div className="flex items-center justify-center gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Zoom out"
-            disabled={value <= MIN_ZOOM}
-            onClick={() => onChange(clampZoom(value - ZOOM_STEP))}
-          >
-            <Minus className="size-4" />
-          </Button>
-          <span className="flex w-24 flex-col items-center text-center">
-            <span className="text-sm tabular-nums font-medium">{value}%</span>
-            {automatic && <span className="text-xs text-muted-foreground">Automatic</span>}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Zoom in"
-            disabled={value >= MAX_ZOOM}
-            onClick={() => onChange(clampZoom(value + ZOOM_STEP))}
-          >
-            <Plus className="size-4" />
-          </Button>
-          {!automatic && (
-            <Button variant="ghost" size="sm" onClick={onAutomatic}>
-              Use automatic
-            </Button>
-          )}
-        </div>
+        <ZoomStepper value={value} automatic={automatic} onChange={onChange} onAutomatic={onAutomatic} />
       ) : (
         <p className="text-xs text-muted-foreground">
           Zoom needs the Din desktop shell. In a browser, use the browser's own
           zoom instead (Ctrl and + / -).
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Zoom display by display, under din-shell: each is zoomed to suit its own
+ * sharpness until the user picks a zoom for it, which is remembered for that
+ * display (src/lib/displayZoom.ts).
+ */
+function PerDisplayZoomControl() {
+  const { config, updateConfig } = useAppContext();
+  const status = useDisplayStatus();
+  const outputs = (status.data?.available ? status.data.outputs : []).filter((o) => o.enabled);
+  const several = outputs.length > 1;
+
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-background/40 p-4">
+      <div className="flex items-center gap-3">
+        <ZoomIn className="size-6 shrink-0 text-foreground/90" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Zoom</p>
+          <p className="text-xs text-muted-foreground">
+            {several
+              ? 'Each display is zoomed to suit its sharpness, so the desktop is the same size on all of them. A zoom you pick is remembered for that display.'
+              : 'Scale everything on the desktop up or down. Automatic suits the display’s sharpness, and a zoom you pick is remembered for this display.'}
+          </p>
+        </div>
+      </div>
+      {status.isLoading ? (
+        <Skeleton className="mx-auto h-9 w-64 rounded-md bg-foreground/10" />
+      ) : outputs.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No displays are on.</p>
+      ) : (
+        <ul className="flex flex-col gap-3" aria-label="Zoom by display">
+          {outputs.map((output) => {
+            const { percent, automatic } = zoomOf(output, config.displayZoom);
+            const name = output.airplay ? `${output.airplay} (AirPlay)` : friendlyOutputName(output.name);
+            const Icon = isInternalOutput(output.name) ? Laptop : Monitor;
+            return (
+              <li key={output.name} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                {several && (
+                  <span className="flex min-w-0 items-center gap-2 text-sm">
+                    <Icon className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="truncate">{name}</span>
+                  </span>
+                )}
+                <div className={cn(!several && 'mx-auto')}>
+                  <ZoomStepper
+                    label={several ? name : undefined}
+                    value={percent}
+                    automatic={automatic}
+                    onChange={(next) => updateConfig((c) => withDisplayZoom(c, output, next))}
+                    onAutomatic={() => updateConfig((c) => withDisplayZoom(c, output, null))}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
@@ -819,7 +913,6 @@ function DisplaySection() {
   const bridge = getDisplayBridge();
   const status = useDisplayStatus();
   const apply = useApplyDisplayLayout();
-  const { config, updateConfig, zoomAutomatic } = useAppContext();
 
   const outputs = status.data?.available ? status.data.outputs : undefined;
   const baseline = useMemo(() => (outputs ? draftFromOutputs(outputs) : []), [outputs]);
@@ -882,9 +975,6 @@ function DisplaySection() {
     if (outputs) setDraft(draftFromOutputs(outputs));
     setError(null);
   };
-
-  const setZoom = (percent: number) =>
-    updateConfig((c) => ({ ...c, zoomLevel: clampZoom(percent) }));
 
   const arrangement = !bridge ? (
     <FallbackCard icon={Monitor}>
@@ -968,13 +1058,7 @@ function DisplaySection() {
         </Button>
       }
     >
-      <DisplayZoomControl
-        available={getZoomBridge() !== undefined}
-        value={config.zoomLevel}
-        automatic={zoomAutomatic}
-        onChange={setZoom}
-        onAutomatic={() => updateConfig(automaticZoom)}
-      />
+      <InterfaceZoom />
       {arrangement}
       <AirPlayDisplays />
     </SectionShell>
@@ -1163,7 +1247,8 @@ function DisplayArrange({
                   {d.friendly}
                 </span>
                 <span className="truncate px-1 text-[10px] text-muted-foreground">
-                  {draftSize(d).width} × {draftSize(d).height}
+                  {rotatedSize(d.width, d.height, d.rotation).width} × {rotatedSize(d.width, d.height, d.rotation).height}
+                  {Math.abs(d.scale - 1) > 0.005 && ` at ${Math.round(d.scale * 100)}%`}
                 </span>
                 {d.primary && (
                   <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
@@ -3873,7 +3958,7 @@ function EffectsSection({ windowId }: { windowId: string }) {
  * reach its apps with the theme and, on DinOS, Linux apps through GSettings.
  */
 function AccessibilitySection() {
-  const { config, updateConfig, zoomAutomatic } = useAppContext();
+  const { config, updateConfig } = useAppContext();
   const set = (patch: Partial<AppConfig>) => updateConfig((current) => ({ ...current, ...patch }));
   const textSize = clampTextSize(config.textSize);
   // Zoom, colour filters and the keyboard aids are din-shell's.
@@ -3939,13 +4024,7 @@ function AccessibilitySection() {
           <span className="text-lg text-muted-foreground" aria-hidden>A</span>
         </div>
       </div>
-      <DisplayZoomControl
-        available={getZoomBridge() !== undefined}
-        value={config.zoomLevel}
-        automatic={zoomAutomatic}
-        onChange={(percent) => set({ zoomLevel: clampZoom(percent) })}
-        onAutomatic={() => updateConfig(automaticZoom)}
-      />
+      <InterfaceZoom />
 
       {screen ? (
         <>

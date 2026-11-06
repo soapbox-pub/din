@@ -48,6 +48,13 @@ export interface DisplayOutput {
   airplay?: string;
   /** How far it's turned (see DisplayRotation); 0 while off. */
   rotation: DisplayRotation;
+  /**
+   * Layout units per pixel's worth: its zoom, under din-shell (1 = 100%).
+   * The display takes up its mode over this in the virtual screen.
+   */
+  scale?: number;
+  /** Which display this is wherever it's plugged in (make, model, serial), under Wayland. */
+  id?: string;
 }
 
 /**
@@ -87,6 +94,8 @@ interface Turnable {
   width: number;
   height: number;
   rotation?: DisplayRotation;
+  /** Its zoom (din-shell), which its size on the shared screen is over. */
+  scale?: number;
 }
 
 /**
@@ -95,8 +104,8 @@ interface Turnable {
  * beside it stay beside it instead of overlapping it or leaving a gap.
  */
 export function rotateInLayout<T extends Turnable>(layout: T[], target: T, rotation: DisplayRotation): T[] {
-  const before = rotatedSize(target.width, target.height, target.rotation ?? 0);
-  const after = rotatedSize(target.width, target.height, rotation);
+  const before = layoutSize(target.width, target.height, target.rotation ?? 0, target.scale);
+  const after = layoutSize(target.width, target.height, rotation, target.scale);
   const right = target.x + before.width;
   const bottom = target.y + before.height;
   return layout.map((d) => {
@@ -115,6 +124,12 @@ export interface DisplayStatus {
   available: boolean;
   /** Connected outputs. */
   outputs: DisplayOutput[];
+  /**
+   * Whether each display has a zoom of its own (din-shell): set with
+   * `setScales`, and the page itself isn't zoomed. Elsewhere the zoom is
+   * one for the whole desktop (src/lib/zoom.ts).
+   */
+  perDisplayZoom?: boolean;
 }
 
 /** One output's slot in a desired layout, as sent to `applyLayout`. */
@@ -134,6 +149,8 @@ export interface DisplayPlacement {
   refresh?: number;
   /** Omitted keeps the current rotation. */
   rotation?: DisplayRotation;
+  /** Its zoom (din-shell). Omitted keeps the current one. */
+  scale?: number;
 }
 
 export interface DisplayBridge {
@@ -145,6 +162,11 @@ export interface DisplayBridge {
    * in the main process against the display tool's own report before use.
    */
   applyLayout(placements: DisplayPlacement[]): Promise<void>;
+  /**
+   * Zoom displays one by one, by output name (1 = 100%, 0.5 to 3), where
+   * `status().perDisplayZoom`. The others move to stay beside them.
+   */
+  setScales(scales: Record<string, number>): Promise<void>;
 }
 
 declare global {
@@ -225,4 +247,13 @@ export function preferredMode(output: DisplayOutput): DisplayMode | null {
   return (
     modes.find((m) => m.preferred) ?? modes.find((m) => m.current) ?? modes[0] ?? null
   );
+}
+
+/**
+ * How much of the shared screen a display takes up: its mode, on its side at
+ * 90 and 270, over its zoom (din-shell), as the compositor rounds it.
+ */
+export function layoutSize(width: number, height: number, rotation: DisplayRotation = 0, scale = 1): { width: number; height: number } {
+  const turned = rotatedSize(width, height, rotation);
+  return { width: Math.round(turned.width / scale), height: Math.round(turned.height / scale) };
 }

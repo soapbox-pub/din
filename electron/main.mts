@@ -752,9 +752,11 @@ async function tool(
 // windowed dev shell), status reports `available: false` and the Settings
 // panel renders a fallback - same shape as the WiFi bridge in QEMU.
 //
-// Positions are in the compositor's layout coordinates, which match output
-// pixels at scale 1. (Scaled outputs are laid out by their scaled size, which
-// the arrangement editor doesn't model yet.)
+// Positions are in the compositor's layout coordinates: an output takes up
+// its mode's pixels over its scale. Under din-shell each display has a scale
+// of its own, its zoom (display:setScales), and Din's window is drawn at the
+// densest one's; elsewhere every output stays at 1 and the zoom is the
+// shell's page zoom (src/lib/zoom.ts).
 //
 // Threat model: same boundaries as the other bridges (strict CSP, sender
 // guard, arguments re-validated). Both tools run via execFile with an argv
@@ -798,6 +800,10 @@ interface DisplayOutput {
   airplay?: string;
   /** Its rotation in degrees, as Wayland counts an output's transform; 0 while off. */
   rotation: Rotation;
+  /** Layout units per pixel's worth (Wayland only; 1 elsewhere). */
+  scale?: number;
+  /** Which display this is, whatever it's plugged into: its make, model and serial (Wayland only). */
+  id?: string;
 }
 
 /** An output's rotation: wl_output's transforms 90/180/270, xrandr's left/inverted/right. */
@@ -821,11 +827,17 @@ interface OutputPlacement {
   primary: boolean;
   /** Absent keeps whichever rotation it has. */
   rotation?: Rotation;
+  /** Wayland: its scale; absent keeps the one it has. */
+  scale?: number;
 }
 
-/** The space an output takes on the shared screen: its mode, turned on its side at 90 and 270. */
-function footprint(width: number, height: number, rotation: Rotation | undefined): { width: number; height: number } {
-  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
+/**
+ * The space an output takes on the shared screen: its mode, turned on its
+ * side at 90 and 270, over its scale (as the compositor rounds it).
+ */
+function footprint(width: number, height: number, rotation: Rotation | undefined, scale = 1): { width: number; height: number } {
+  const turned = rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
+  return { width: Math.round(turned.width / scale), height: Math.round(turned.height / scale) };
 }
 
 /**
@@ -885,6 +897,10 @@ function parseXrandr(stdout: string): DisplayOutput[] {
 /** `wlr-randr --json`: one entry per head the compositor knows (all connected). */
 interface WlrHead {
   name?: unknown;
+  make?: unknown;
+  model?: unknown;
+  serial?: unknown;
+  scale?: unknown;
   enabled?: unknown;
   position?: { x?: unknown; y?: unknown };
   physical_size?: { width?: unknown; height?: unknown };
@@ -914,6 +930,9 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
     // A mirror-image transform counts as its turn: Din doesn't flip outputs.
     const turn = Number(String(head.transform ?? '').replace(/^flipped-?/, '')) as Rotation;
     const rotation = enabled && ROTATIONS.includes(turn) ? turn : 0;
+    const scale = Number(head.scale);
+    const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+    const identity = [text(head.make), text(head.model), text(head.serial)].filter(Boolean).join(' ');
     return [{
       name: head.name,
       connected: true,
@@ -926,6 +945,8 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
       modes,
       ...(mmWidth > 0 && mmHeight > 0 && { physicalSize: { width: mmWidth, height: mmHeight } }),
       rotation,
+      scale: scale > 0 && Number.isFinite(scale) ? scale : 1,
+      id: identity || head.name,
     }];
   });
 }
@@ -1083,6 +1104,7 @@ async function applyOutputLayout(
         args.push('--transform', e.rotation === 0 ? 'normal' : String(e.rotation));
       }
       args.push('--pos', `${e.x},${e.y}`);
+      if (e.scale) args.push('--scale', String(e.scale));
     }
     for (const name of disabled) args.push('--output', name, '--off');
   }
@@ -1150,6 +1172,8 @@ function placementsFor(
       primary: Boolean(p.primary),
       // Always named, so a saved arrangement puts the turn back too.
       rotation: rotation as Rotation,
+      // The renderer arranges displays; their zoom is set apart (display:setScales).
+      ...(DISPLAY_TOOL !== 'xrandr' && { scale: validScale(p.scale) ?? output.scale ?? 1 }),
     });
   }
   // Any connected output the renderer didn't mention is turned off.
@@ -1175,7 +1199,8 @@ function layoutMatches(outputs: DisplayOutput[], layout: SavedLayout): boolean {
         (!e.refresh || sameRefresh(o.current.refresh, e.refresh)) &&
         (e.rotation === undefined || o.rotation === e.rotation) &&
         o.position.x === e.x &&
-        o.position.y === e.y
+        o.position.y === e.y &&
+        (!e.scale || Math.abs((o.scale ?? 1) - e.scale) < 0.001)
       );
     }) && layout.disabled.every((name) => !byName.get(name)?.enabled)
   );
@@ -1270,7 +1295,7 @@ async function closeLayoutGaps(): Promise<void> {
     o.enabled && o.current
       ? [{
         ...o.position,
-        ...footprint(o.current.width, o.current.height, o.rotation),
+        ...footprint(o.current.width, o.current.height, o.rotation, o.scale),
         placement: { name: o.name, width: o.current.width, height: o.current.height, ...o.position, primary: o.primary },
       }]
       : [],
@@ -1314,6 +1339,136 @@ async function closeLayoutGaps(): Promise<void> {
   }
 }
 
+/** Placements laid out by their size in the layout, back at their outputs' current modes. */
+function withModes(outputs: DisplayOutput[], placements: OutputPlacement[]): OutputPlacement[] {
+  const byName = new Map(outputs.map((o) => [o.name, o]));
+  return placements.map((p) => {
+    const now = byName.get(p.name)?.current;
+    return now ? { ...p, width: now.width, height: now.height } : p;
+  });
+}
+
+/** A scale from the renderer, if it's one Din zooms a display to. */
+function validScale(raw: unknown): number | undefined {
+  const scale = Number(raw);
+  return Number.isFinite(scale) && scale >= 0.5 && scale <= 3 ? Math.round(scale * 120) / 120 : undefined;
+}
+
+/** Whether each display can have its own zoom: under din-shell, which draws Din at the densest (session/shell.rs). */
+const PER_DISPLAY_ZOOM = DISPLAY_TOOL === 'wlr-randr' && process.env.WAYLAND_DISPLAY === 'din-shell';
+
+/**
+ * Lay the enabled outputs out again at new sizes, each where it was beside
+ * the others: one that was right of its neighbour stays against its right
+ * edge, as far along it as before, so zooming one display keeps the
+ * arrangement. The primary stays put; the whole is then moved back to the
+ * origin. RECTS are the old sizes in the layout, SIZES the new.
+ */
+function relayout(
+  rects: OutputPlacement[],
+  sizes: Map<string, { width: number; height: number }>,
+): Map<string, { x: number; y: number }> {
+  const old = new Map(rects.map((r) => [r.name, r]));
+  const placed = new Map<string, OutputPlacement>();
+  const primary = rects.find((r) => r.primary) ?? rects[0];
+  if (!primary) return new Map();
+  placed.set(primary.name, { ...primary, ...sizes.get(primary.name) });
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  let rest = rects.filter((r) => r !== primary);
+  while (rest.length > 0) {
+    // The next output touching one already placed, else the nearest one.
+    let next: { output: OutputPlacement; anchor: string } | null = null;
+    for (const output of rest) {
+      const anchor = [...placed.keys()].find((name) => rectsTouch(output, old.get(name)!));
+      if (anchor) {
+        next = { output, anchor };
+        break;
+      }
+    }
+    if (!next) {
+      const distance = (a: OutputPlacement, b: OutputPlacement) =>
+        Math.hypot(a.x + a.width / 2 - (b.x + b.width / 2), a.y + a.height / 2 - (b.y + b.height / 2));
+      let best = { output: rest[0], anchor: primary.name, d: Infinity };
+      for (const output of rest) {
+        for (const name of placed.keys()) {
+          const d = distance(output, old.get(name)!);
+          if (d < best.d) best = { output, anchor: name, d };
+        }
+      }
+      next = best;
+    }
+    const { output } = next;
+    const was = old.get(next.anchor)!;
+    const anchor = placed.get(next.anchor)!;
+    const size = sizes.get(output.name) ?? { width: output.width, height: output.height };
+    const moved: OutputPlacement = { ...output, ...size };
+    // How far along the shared edge it was, kept in proportion.
+    const alongY = anchor.y + Math.round(((output.y - was.y) * anchor.height) / Math.max(1, was.height));
+    const alongX = anchor.x + Math.round(((output.x - was.x) * anchor.width) / Math.max(1, was.width));
+    if (output.x >= was.x + was.width) {
+      moved.x = anchor.x + anchor.width;
+      moved.y = clamp(alongY, anchor.y - size.height + 1, anchor.y + anchor.height - 1);
+    } else if (output.x + output.width <= was.x) {
+      moved.x = anchor.x - size.width;
+      moved.y = clamp(alongY, anchor.y - size.height + 1, anchor.y + anchor.height - 1);
+    } else if (output.y >= was.y + was.height) {
+      moved.y = anchor.y + anchor.height;
+      moved.x = clamp(alongX, anchor.x - size.width + 1, anchor.x + anchor.width - 1);
+    } else {
+      moved.y = anchor.y - size.height;
+      moved.x = clamp(alongX, anchor.x - size.width + 1, anchor.x + anchor.width - 1);
+    }
+    placed.set(output.name, moved);
+    rest = rest.filter((r) => r !== output);
+  }
+  const left = Math.min(...[...placed.values()].map((p) => p.x));
+  const top = Math.min(...[...placed.values()].map((p) => p.y));
+  return new Map([...placed.values()].map((p) => [p.name, { x: p.x - left, y: p.y - top }]));
+}
+
+/**
+ * Zoom each display NAME to SCALES[NAME], moving the others so they stay
+ * beside it. The saved arrangement for these displays, if any, follows.
+ */
+async function setOutputScales(rawScales: unknown): Promise<void> {
+  if (!PER_DISPLAY_ZOOM) throw new Error('Displays can’t each have their own zoom here');
+  if (!rawScales || typeof rawScales !== 'object') throw new Error('Invalid scales');
+  const outputs = await queryOutputs();
+  const scales = new Map<string, number>();
+  for (const [name, raw] of Object.entries(rawScales as Record<string, unknown>)) {
+    const output = outputs.find((o) => o.name === name);
+    const scale = validScale(raw);
+    if (!output) throw new Error('Unknown display output');
+    if (scale === undefined) throw new Error(`Invalid zoom for ${name}`);
+    scales.set(name, scale);
+  }
+  const on: OutputPlacement[] = outputs.flatMap((o) =>
+    o.enabled && o.current
+      ? [{ name: o.name, ...footprint(o.current.width, o.current.height, o.rotation, o.scale), ...o.position, primary: o.primary, scale: o.scale }]
+      : [],
+  );
+  if (!on.some((p) => Math.abs((scales.get(p.name) ?? p.scale ?? 1) - (p.scale ?? 1)) >= 0.001)) return;
+  const sizes = new Map(outputs.flatMap((o) =>
+    o.enabled && o.current ? [[o.name, footprint(o.current.width, o.current.height, o.rotation, scales.get(o.name) ?? o.scale)] as const] : [],
+  ));
+  const positions = relayout(on, sizes);
+  const enabled = withModes(outputs, on).map((p) => ({ ...p, ...positions.get(p.name), scale: scales.get(p.name) ?? p.scale }));
+  const disabled = outputs.filter((o) => !o.enabled).map((o) => o.name);
+  await applyOutputLayout(outputs, enabled, disabled);
+  const key = outputSetKey(outputs);
+  const saved = readSavedLayouts()[key];
+  if (saved) {
+    const byName = new Map(enabled.map((e) => [e.name, e]));
+    saveLayout(key, {
+      ...saved,
+      enabled: saved.enabled.map((e) => {
+        const now = byName.get(e.name);
+        return now ? { ...e, x: now.x, y: now.y, scale: now.scale } : e;
+      }),
+    });
+  }
+}
+
 function registerDisplayHandlers(): void {
   ipcMain.handle('display:status', async (event) => {
     assertShellSender(event);
@@ -1323,7 +1478,7 @@ function registerDisplayHandlers(): void {
         const receiver = airplay.get(o.name);
         return receiver ? { ...o, airplay: receiver } : o;
       });
-      return { available: true, outputs };
+      return { available: true, outputs, perDisplayZoom: PER_DISPLAY_ZOOM };
     } catch (error) {
       if (displayUnavailable(error)) return { available: false, outputs: [] };
       throw error;
@@ -1337,6 +1492,11 @@ function registerDisplayHandlers(): void {
     await applyOutputLayout(outputs, enabled, disabled, true);
     // A manual arrangement supersedes any automatic lid re-arrangement.
     lidAutoArranged = false;
+  });
+
+  ipcMain.handle('display:setScales', async (event, rawScales) => {
+    assertShellSender(event);
+    await setOutputScales(rawScales);
   });
 }
 
@@ -1781,9 +1941,10 @@ function packLeftToRight(
       x,
       y: 0,
       primary: enabled.length === 0,
+      ...(output.scale && { scale: output.scale }),
     });
-    // Each keeps its turn, and takes its turned width.
-    x += footprint(mode.width, mode.height, output.rotation).width;
+    // Each keeps its turn and zoom, and takes its turned, zoomed width.
+    x += footprint(mode.width, mode.height, output.rotation, output.scale).width;
   }
   if (enabled.length === 0) return null;
   return { enabled, disabled: off.map((o) => o.name) };

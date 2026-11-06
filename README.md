@@ -40,6 +40,15 @@ protocols the rest of the system uses: output management (`wlr-randr`, Din's
 display settings), screencopy (`grim`, AirPlay) and gamma control (night
 light).
 
+Each display has a zoom of its own, its scale in din-shell: automatic from
+its pixel density (`src/lib/autoZoom.ts`) until the user picks one in
+Settings → Display, which is remembered for that display
+(`src/lib/displayZoom.ts`, `din display set <monitor> --zoom`). Din's window
+is drawn at the densest display's scale and scaled down on the others, so a
+hidpi panel beside a low-dpi monitor shows the desktop at the same size on
+both. Elsewhere (a windowed shell, bare X11) the zoom is one Chromium page
+zoom for the whole desktop.
+
 ## Requirements
 
 - Node.js (dev servers and builds)

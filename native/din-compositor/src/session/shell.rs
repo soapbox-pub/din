@@ -4,12 +4,18 @@
 //! shown. Any other (Chromium's detached DevTools, a native dialog) would
 //! cover it fullscreen and take the input with no way back, so it's asked to
 //! close instead. Once Din's window is gone, the next one can take its place.
+//!
+//! Each display has a scale of its own (Din's per-display zoom, set through
+//! output management), and Din's one window spans them all, so it's told to
+//! draw at the densest one's: sharp there, and scaled down on the others as
+//! they're composited, the way a hidpi screen beside a low-dpi one works on
+//! a Mac.
 
 use smithay::{
     delegate_compositor, delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
         PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, find_popup_root_surface,
-        get_popup_toplevel_coords,
+        PopupManager, get_popup_toplevel_coords, utils::with_surfaces_surface_tree,
     },
     input::{Seat, pointer::Focus},
     reexports::{
@@ -22,9 +28,13 @@ use smithay::{
             protocol::{wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
-    utils::{Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Rectangle, SERIAL_COUNTER, Serial, Transform},
     wayland::{
-        compositor::{CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface},
+        compositor::{
+            CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface,
+            send_surface_state,
+        },
+        fractional_scale::with_fractional_scale,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
             decoration::XdgDecorationHandler,
@@ -68,8 +78,37 @@ impl State {
                 pointer.set_location(clamped);
             }
         }
+        self.tell_scale_all();
         self.output_management_changed();
         self.queue_redraw_all();
+    }
+
+    /// The scale Din draws at: its densest display's.
+    fn din_scale(&self) -> f64 {
+        self.space.outputs().map(|o| o.current_scale().fractional_scale()).fold(1.0, f64::max)
+    }
+
+    /// Tell a surface tree the scale to draw at: as a fractional scale where
+    /// the client asks for one, and as a whole buffer scale (rounded up).
+    /// Both are only sent when they change.
+    fn tell_scale(&self, surface: &WlSurface) {
+        let scale = self.din_scale();
+        with_surfaces_surface_tree(surface, |surface, states| {
+            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
+            send_surface_state(surface, states, scale.ceil() as i32, Transform::Normal);
+        });
+    }
+
+    /// Tell every window and popup the scale, which a display changed.
+    fn tell_scale_all(&self) {
+        let windows = self.space.elements().chain(self.pending.windows.iter());
+        for toplevel in windows.filter_map(|w| w.toplevel()) {
+            let surface = toplevel.wl_surface();
+            self.tell_scale(surface);
+            for (popup, _) in PopupManager::popups_for_surface(surface) {
+                self.tell_scale(popup.wl_surface());
+            }
+        }
     }
 
     fn configure_din(&self, toplevel: &ToplevelSurface) {
@@ -187,6 +226,7 @@ impl CompositorHandler for State {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
+            self.tell_scale(&root);
             if let Some(window) = self.space.elements().find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root)) {
                 window.on_commit();
             } else if let Some(index) = self

@@ -63,6 +63,7 @@ export const AppConfigSchema = z.object({
   desktopIcons: z.boolean(),
   desktopIconSize: z.enum(['small', 'medium', 'large']),
   zoomLevel: z.number(),
+  displayZoom: z.record(z.string(), z.number().min(50).max(300)),
   reduceMotion: z.boolean(),
   reduceTransparency: z.boolean(),
   // Astra was a third material for a while; it's Liquid now.
