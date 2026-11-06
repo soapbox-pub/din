@@ -317,9 +317,6 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
 
       {remote ? (
         <div className="flex min-w-0 items-center gap-1">
-          <span className="shrink-0 px-1 text-xs font-medium text-muted-foreground" title={`The remote ${remote.name}`}>
-            {remote.name}
-          </span>
           <input
             readOnly
             value={remote.url}
@@ -338,30 +335,6 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
       ) : (
         <p className="px-1 text-xs text-muted-foreground">
           No remote to sync with. Add one with <code className="font-mono">git remote add</code>, or ask the assistant to.
-        </p>
-      )}
-
-      {sync.failure && (
-        <SyncFailure
-          failure={sync.failure}
-          remote={remote ? remoteLabel(remote) : 'the remote'}
-          busy={busy}
-          onDismiss={sync.dismiss}
-          onPull={() => void sync.run('pull')}
-          onForce={setForcing}
-        />
-      )}
-
-      {!sync.failure && remote && status.branch && !status.state && !status.upstream && (
-        <p className="rounded-lg border border-border/70 bg-foreground/[0.03] p-2 text-xs text-muted-foreground">
-          <strong className="font-semibold text-foreground">{status.branch}</strong> isn’t on {remote.name} yet. Sync or Push to put it there.
-        </p>
-      )}
-      {!sync.failure && remote && (!status.branch || status.state) && (
-        <p className="rounded-lg border border-border/70 bg-foreground/[0.03] p-2 text-xs text-muted-foreground">
-          {status.state
-            ? 'Finish or abort what git is in the middle of before syncing.'
-            : 'No branch is checked out (a detached HEAD), so there’s nothing to sync. Check out a branch to pull and push.'}
         </p>
       )}
 
@@ -404,6 +377,17 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
             </PillButton>
           </CollapsibleContent>
         </Collapsible>
+      )}
+
+      {sync.failure && (
+        <SyncFailure
+          failure={sync.failure}
+          remote={remote ? remoteLabel(remote) : 'the remote'}
+          busy={busy}
+          onDismiss={sync.dismiss}
+          onPull={() => void sync.run('pull')}
+          onForce={setForcing}
+        />
       )}
 
       {remote && (
