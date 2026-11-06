@@ -857,10 +857,17 @@ async function launch(name) {
   await pressKey("Enter", "Enter", 13);
 }
 
-/** Close every window through its close button (a built-in app's is in its page), waiting out the exit animation. */
+/**
+ * Close every window through its close button (a built-in app's is in its
+ * page), topmost first, as a lower one's button can be under the windows
+ * above it, waiting out the exit animation.
+ */
 async function closeAll() {
   for (let i = 0; i < 20 && (await windowCount()) > 0; i++) {
-    const id = await evaluate(() => document.querySelector("section[data-window-id]:not(.pointer-events-none)")?.dataset.windowId ?? null);
+    const id = await evaluate(() => {
+      const open = [...document.querySelectorAll("section[data-window-id]:not(.pointer-events-none)")];
+      return open.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex))[0]?.dataset.windowId ?? null;
+    });
     if (!id) break;
     const at =
       (await centerOf('[aria-label="Close window"]', `section[data-window-id="${id}"]`)) ??

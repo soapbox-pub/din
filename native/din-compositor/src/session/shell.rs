@@ -19,21 +19,23 @@ use smithay::{
     },
     input::{Seat, pointer::Focus},
     reexports::{
+        calloop::Interest,
         wayland_protocols::xdg::{
             decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
             shell::server::xdg_toplevel,
         },
         wayland_server::{
-            Client,
+            Client, Resource,
             protocol::{wl_output, wl_seat, wl_surface::WlSurface},
         },
     },
     utils::{Rectangle, SERIAL_COUNTER, Serial, Transform},
     wayland::{
         compositor::{
-            CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface,
-            send_surface_state,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+            add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, send_surface_state, with_states,
         },
+        dmabuf::get_dmabuf,
         fractional_scale::with_fractional_scale,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -217,6 +219,34 @@ impl CompositorHandler for State {
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
         &client.get_data::<ClientState>().expect("client state").compositor_state
+    }
+
+    /// A commit with a GPU buffer Din is still rendering into waits for it to
+    /// be done, as the embedded compositor's do (and anvil's and niri's).
+    /// Din's window is scanned out as it is, so without the wait the display
+    /// can show a frame Chromium hasn't finished: where frosted windows
+    /// overlap, the frame's slowest part, it flickered with what was there
+    /// before, and a screenshot, drawn later, never caught it.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, _dh, surface| {
+            let dmabuf = with_states(surface, |states| {
+                match states.cached_state.get::<SurfaceAttributes>().pending().buffer.as_ref() {
+                    Some(BufferAssignment::NewBuffer(buffer)) => get_dmabuf(buffer).ok().cloned(),
+                    _ => None,
+                }
+            });
+            let Some(dmabuf) = dmabuf else { return };
+            let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) else { return };
+            let Some(client) = surface.client() else { return };
+            let ready = state.handle.insert_source(source, move |_, _, state| {
+                let dh = state.dh.clone();
+                state.client_compositor_state(&client).blocker_cleared(state, &dh);
+                Ok(())
+            });
+            if ready.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
