@@ -662,6 +662,18 @@ have becomes an offer to save it, and the toolbar shows a site's saved
 logins to fill or copy. Copied passwords and codes leave the clipboard after
 90 seconds.
 
+Passkeys work too: Din is the authenticator, since Chromium has none on
+Linux. `electron/passkeys-preload.cjs` gives pages a `navigator.credentials`
+whose public-key requests go to main (`electron/passkeys.mts`), and the
+desktop asks the user below the toolbar (`PasskeyPrompt`): save a passkey,
+or pick an account to sign in with. Main builds the signed client data from
+the frame's own origin and checks the relying party ID against it, and keeps
+each passkey in the vault the way KeePassXC does (`KPEX_PASSKEY_*` fields),
+with the account's password when the vault has one, so KeePassXC, Strongbox
+and KeePassDX use the same passkeys. A request for a security key, a frame
+from another site, and the prompt's "Use a Security Key" go to Chromium's own
+WebAuthn.
+
 Import (the + menu, or Settings) adds another KeePass file's items, KDBX 3 or
 4 with its password or key file, in a folder named after it; or another app's
 export (`electron/passwords-import.mts`): CSVs from Google Passwords, the

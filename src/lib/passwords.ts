@@ -31,6 +31,8 @@ export interface PasswordSummary {
   favorite: boolean;
   /** Whether it has a verification code (TOTP). */
   otp: boolean;
+  /** Whether it has a passkey. */
+  passkey: boolean;
   trashed: boolean;
   created: number;
   modified: number;
@@ -49,6 +51,8 @@ export interface PasswordItem extends PasswordSummary {
   otpUri: string;
   fields: PasswordField[];
   tags: string[];
+  /** Its passkey, which the Web Browser signs in with: the site (relying party) it's for, and the account. */
+  passkeyDetails: { rpId: string; username: string } | null;
 }
 
 export interface PasswordItemInput {
@@ -137,6 +141,8 @@ export interface PasswordsBridge {
   /** To Recently Deleted, or for good from there. */
   trash(id: string): Promise<void>;
   restore(id: string): Promise<void>;
+  /** Take an item's passkey out of it, leaving the rest. */
+  removePasskey(id: string): Promise<void>;
   deleteForever(id: string): Promise<void>;
   emptyTrash(): Promise<void>;
   createGroup(name: string, parentId?: string): Promise<string>;

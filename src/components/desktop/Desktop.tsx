@@ -39,6 +39,7 @@ import { DesktopMenu } from './DesktopMenu';
 import { InstalledAppsProvider } from './InstalledAppsProvider';
 import { BrowserExtensionHost } from './BrowserExtensionHost';
 import { ExtensionPopupHost } from './ExtensionPopupHost';
+import { PasskeyPrompt } from './PasskeyPrompt';
 import { PasswordAutofillHost } from './PasswordAutofillHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
@@ -124,6 +125,7 @@ const SessionHosts = memo(function SessionHosts() {
       <BrowserExtensionHost />
       <ExtensionPopupHost />
       <PasswordAutofillHost />
+      <PasskeyPrompt />
       <NostrBridgeHost />
       <HighlightBridgeHost />
       <NsiteBridgeHost />

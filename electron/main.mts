@@ -142,6 +142,7 @@ import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
 import { registerLockHandlers } from './lock.mts';
 import { registerEraseHandlers } from './erase.mts';
+import { registerPasskeyHandlers } from './passkeys.mts';
 import { registerPasswordsHandlers } from './passwords.mts';
 import { registerAskpass } from './askpass.mts';
 import { registerPolkitAgent } from './polkit-agent.mts';
@@ -3850,6 +3851,13 @@ const MEDIA_PRELOAD = path.join(import.meta.dirname, 'media-preload.cjs');
 const PASSWORDS_PRELOAD = path.join(import.meta.dirname, 'passwords-preload.cjs');
 
 /**
+ * Absolute path to the session preload that answers pages' WebAuthn requests
+ * with passkeys kept in Passwords (see electron/passkeys.mts). Every page
+ * gets it, in every frame.
+ */
+const PASSKEYS_PRELOAD = path.join(import.meta.dirname, 'passkeys-preload.cjs');
+
+/**
  * Absolute path to the session preload that tells Din where the caret is as
  * keys are typed in web pages, while power mode is on (electron/power-mode.mts);
  * power-mode-preload.cjs with src/shared/caret.ts bundled in
@@ -6108,6 +6116,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-eyedropper', type: 'frame', filePath: EYEDROPPER_PRELOAD });
     s.registerPreloadScript({ id: 'din-media', type: 'frame', filePath: MEDIA_PRELOAD });
     s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
+    s.registerPreloadScript({ id: 'din-passkeys', type: 'frame', filePath: PASSKEYS_PRELOAD });
     s.registerPreloadScript({ id: 'din-power-mode', type: 'frame', filePath: POWER_MODE_PRELOAD });
     allowScreenSharing(s);
   }
@@ -6339,6 +6348,13 @@ app.whenReady().then(() => {
     isBridgeEvent,
     sendToShell,
     isAutofillGuest: (contents) =>
+      shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
+  });
+  registerPasskeyHandlers({
+    assertShellSender,
+    isBridgeEvent,
+    sendToShell,
+    isPasskeyGuest: (contents) =>
       shellGuestFromId(contents.id) !== null && isBrowserTabSession(contents.session),
   });
   registerAskpass({

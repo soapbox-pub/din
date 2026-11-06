@@ -1,4 +1,4 @@
-import { Copy, ExternalLink, Folder, FolderInput, KeyRound, Pencil, RotateCcw, ShieldCheck, Star, StarOff, Trash2, User } from 'lucide-react';
+import { Copy, ExternalLink, Folder, FolderInput, KeyRound, KeySquare, Pencil, RotateCcw, ShieldCheck, Star, StarOff, Trash2, User } from 'lucide-react';
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -25,6 +25,8 @@ export interface ItemActions {
   move(id: string, groupId: string): void;
   trash(id: string): void;
   restore(id: string): void;
+  /** Asks first. */
+  removePasskey(id: string): void;
   /** Asks first. */
   deleteForever(id: string): void;
 }
@@ -125,6 +127,12 @@ export function ItemMenuItems({
         </SubContent>
       </Sub>
       <Separator />
+      {item.passkey && (
+        <Item variant="destructive" onSelect={() => actions.removePasskey(item.id)}>
+          <KeySquare className="size-4.5" strokeWidth={1.75} aria-hidden />
+          Remove Passkey…
+        </Item>
+      )}
       <Item variant="destructive" onSelect={() => actions.trash(item.id)}>
         <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
         Delete

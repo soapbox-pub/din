@@ -156,7 +156,7 @@ export default defineConfig(
     // directly (window/document/Element/requestAnimationFrame), so they need
     // browser globals on top of the electron block's node globals.
     name: "app/electron-dom-preload",
-    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/permissions-preload.cjs", "electron/chrome-app-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/eyedropper-preload.cjs", "electron/media-preload.cjs", "electron/passwords-preload.cjs", "electron/power-mode-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/din-app-worker-preload.cjs", "electron/widget-preload.cjs", "electron/preload.cjs"],
+    files: ["electron/browser-highlight-preload.cjs", "electron/notification-preload.cjs", "electron/geolocation-preload.cjs", "electron/permissions-preload.cjs", "electron/chrome-app-preload.cjs", "electron/nostr-preload.cjs", "electron/adblock-preload.cjs", "electron/adblock-scriptlets-preload.cjs", "electron/popup-preload.cjs", "electron/print-preload.cjs", "electron/screen-share-preload.cjs", "electron/eyedropper-preload.cjs", "electron/media-preload.cjs", "electron/passwords-preload.cjs", "electron/passkeys-preload.cjs", "electron/power-mode-preload.cjs", "electron/napp-preload.cjs", "electron/web-push-preload.cjs", "electron/din-app-preload.cjs", "electron/din-app-worker-preload.cjs", "electron/widget-preload.cjs", "electron/preload.cjs"],
     languageOptions: {
       globals: globals.browser,
     },

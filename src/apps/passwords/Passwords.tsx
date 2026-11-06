@@ -155,6 +155,7 @@ function Vault({ state }: { state: PasswordsState }) {
   const [search, setSearch] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [removingPasskey, setRemovingPasskey] = useState<string | null>(null);
   const [emptying, setEmptying] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [folderPrompt, setFolderPrompt] = useState<FolderPrompt>(null);
@@ -208,6 +209,7 @@ function Vault({ state }: { state: PasswordsState }) {
       move: (id: string, groupId: string) => void bridge.move(id, groupId).catch(fail),
       trash: (id: string) => void bridge.trash(id).catch(fail),
       restore: (id: string) => void bridge.restore(id).catch(fail),
+      removePasskey: (id: string) => setRemovingPasskey(id),
       deleteForever: (id: string) => setDeleting(id),
     };
   }, [bridge, fail]);
@@ -465,6 +467,26 @@ function Vault({ state }: { state: PasswordsState }) {
               onClick={() => deleting && void bridge.deleteForever(deleting).catch(fail)}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={removingPasskey !== null} onOpenChange={(open) => !open && setRemovingPasskey(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove the passkey from “{displayTitle(list?.items.find((i) => i.id === removingPasskey) ?? { title: '', url: '' })}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You can’t sign in with it anymore, here or in another app that opens this vault. The rest of the item stays. Remove it from your account on the site too.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => removingPasskey && void bridge.removePasskey(removingPasskey).catch(fail)}
+            >
+              Remove Passkey
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

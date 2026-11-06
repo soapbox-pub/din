@@ -1943,7 +1943,7 @@ function listen(channel, callback) {
 const passwords = {};
 for (const method of [
   'state', 'create', 'createWithComputerPassword', 'unlock', 'lock', 'setAutoUnlock', 'forgetNever', 'changePassword',
-  'list', 'get', 'save', 'setFavorite', 'move', 'trash', 'restore', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
+  'list', 'get', 'save', 'setFavorite', 'move', 'trash', 'restore', 'removePasskey', 'deleteForever', 'emptyTrash', 'createGroup', 'renameGroup',
   'deleteGroup', 'import', 'generate', 'copy',
 ]) {
   passwords[method] = (...args) => ipcRenderer.invoke(`passwords:${method}`, ...args);
@@ -1974,6 +1974,19 @@ expose('passwords', {
   onOffer: (callback) => listen('passwords:offer', callback),
   /** @param {(offerId: number) => void} callback */
   onOfferGone: (callback) => listen('passwords:offer-gone', (p) => callback(p.offerId)),
+});
+
+// Passkeys (window.dinos.passkeys), backed by electron/passkeys.mts: web
+// pages' requests to make a passkey or sign in with one, for the desktop to
+// ask the user about. Types in src/lib/passkeys.ts.
+expose('passkeys', {
+  /** @param {number} requestId @param {unknown} answer */
+  answer: (requestId, answer) => ipcRenderer.invoke('passkeys:answer', requestId, answer),
+  pending: () => ipcRenderer.invoke('passkeys:pending'),
+  /** @param {(request: unknown) => void} callback */
+  onRequest: (callback) => listen('passkeys:request', callback),
+  /** @param {(requestId: number) => void} callback */
+  onGone: (callback) => listen('passkeys:gone', (p) => callback(p.requestId)),
 });
 
 // Phones (window.dinos.phone), backed by electron/phone.mts: text messages

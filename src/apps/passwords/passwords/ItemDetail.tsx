@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, Copy, ExternalLink, Eye, EyeOff, Folder, MoreHorizontal, Pencil, Star } from 'lucide-react';
+import { Check, Copy, ExternalLink, Eye, EyeOff, Folder, KeySquare, MoreHorizontal, Pencil, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -219,14 +219,32 @@ export function ItemDetail({
           <FieldRow label="Username" copyLabel={`Copy the username, ${item.username}`} onCopy={item.username ? copy('username') : undefined}>
             {item.username || <span className="text-muted-foreground">None</span>}
           </FieldRow>
-          <FieldRow
-            label="Password"
-            copyLabel="Copy the password"
-            onCopy={item.password ? copy('password') : undefined}
-            extra={item.password ? reveal('password', 'the password') : undefined}
-          >
-            <Secret value={item.password} shown={shown.has('password')} />
-          </FieldRow>
+          {(item.password || !item.passkeyDetails) && (
+            <FieldRow
+              label="Password"
+              copyLabel="Copy the password"
+              onCopy={item.password ? copy('password') : undefined}
+              extra={item.password ? reveal('password', 'the password') : undefined}
+            >
+              <Secret value={item.password} shown={shown.has('password')} />
+            </FieldRow>
+          )}
+          {item.passkeyDetails && (
+            <div className="flex items-center gap-3 px-4 py-2.5">
+              <KeySquare className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
+              <div className="min-w-0 flex-1">
+                <span className="block text-xs text-muted-foreground">Passkey</span>
+                <span className="block truncate text-sm">
+                  {item.passkeyDetails.username || 'Your account'} on {item.passkeyDetails.rpId}
+                </span>
+              </div>
+              {!item.trashed && (
+                <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={() => actions.removePasskey(item.id)}>
+                  Remove…
+                </Button>
+              )}
+            </div>
+          )}
           {item.otpUri && (
             <FieldRow label="Verification code" copyLabel="Copy the verification code" onCopy={copy('otp')}>
               <Code uri={item.otpUri} />

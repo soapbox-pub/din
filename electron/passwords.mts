@@ -85,6 +85,10 @@ const KDF_PARALLELISM = 2;
 /** The tag KeePass apps show; Passwords' Favorites. */
 const FAVORITE_TAG = 'Favorite';
 const STANDARD_FIELDS = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', 'otp']);
+/** A passkey's fields, as KeePassXC keeps them (and Strongbox's two of its own): never shown or edited as fields. */
+const PASSKEY_FIELD = /^KP(EX|XC)_PASSKEY_/;
+/** The tag KeePassXC gives an item with a passkey. */
+const PASSKEY_TAG = 'Passkey';
 const MAX_TEXT = 64 * 1024;
 const CLIPBOARD_CLEAR_MS = 90_000;
 const OFFER_TTL_MS = 10 * 60_000;
@@ -116,6 +120,8 @@ export interface PasswordSummary {
   favorite: boolean;
   /** Whether it has a verification code (TOTP). */
   otp: boolean;
+  /** Whether it has a passkey. */
+  passkey: boolean;
   trashed: boolean;
   created: number;
   modified: number;
@@ -134,6 +140,8 @@ export interface PasswordItem extends PasswordSummary {
   otpUri: string;
   fields: PasswordField[];
   tags: string[];
+  /** Its passkey: the site (relying party) it signs in to, and the account. */
+  passkeyDetails: { rpId: string; username: string } | null;
 }
 
 export interface PasswordItemInput {
@@ -375,11 +383,14 @@ async function state(): Promise<PasswordsState> {
 }
 
 let changeTimer: ReturnType<typeof setTimeout> | null = null;
+/** Told when the vault locks, unlocks or changes (passkeys.mts). */
+const changeListeners = new Set<() => void>();
 function notifyChanged(): void {
   if (changeTimer) return;
   changeTimer = setTimeout(() => {
     changeTimer = null;
     void state().then((s) => options?.sendToShell('passwords:changed', s));
+    for (const listener of changeListeners) listener();
   }, 50);
 }
 
@@ -690,7 +701,8 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
   const url = fieldText(entry, 'URL');
   const hasSecret = !!(username || url || fieldText(entry, 'Password'));
   // A note, or a card or such brought in from another app: fields and no login.
-  const hasNote = !!fieldText(entry, 'Notes') || [...entry.fields.keys()].some((name) => !STANDARD_FIELDS.has(name));
+  const hasNote = !!fieldText(entry, 'Notes')
+    || [...entry.fields.keys()].some((name) => !STANDARD_FIELDS.has(name) && !PASSKEY_FIELD.test(name));
   return {
     id: entry.uuid.id,
     title: fieldText(entry, 'Title'),
@@ -700,6 +712,7 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
     kind: hasSecret || !hasNote ? 'login' : 'note',
     favorite: entry.tags.includes(FAVORITE_TAG),
     otp: !!otpOf(entry),
+    passkey: hasPasskey(entry),
     trashed: inTrash(db, entry.parentGroup),
     created: entry.times.creationTime?.getTime() ?? 0,
     modified: entry.lastModTime,
@@ -709,7 +722,7 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
 function item(db: Kdbx, entry: KdbxEntry): PasswordItem {
   const fields: PasswordField[] = [];
   for (const [name, value] of entry.fields) {
-    if (STANDARD_FIELDS.has(name)) continue;
+    if (STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name)) continue;
     fields.push({ name, value: typeof value === 'string' ? value : value.getText(), protected: typeof value !== 'string' });
   }
   return {
@@ -719,6 +732,9 @@ function item(db: Kdbx, entry: KdbxEntry): PasswordItem {
     otpUri: otpOf(entry),
     fields,
     tags: entry.tags.filter((t) => t !== FAVORITE_TAG),
+    passkeyDetails: hasPasskey(entry)
+      ? { rpId: fieldText(entry, PASSKEY.rpId), username: passkeyUsername(entry) }
+      : null,
   };
 }
 
@@ -783,7 +799,7 @@ function parseInput(raw: unknown): PasswordItemInput {
     fields: fields.map((f: unknown) => {
       const field = (f ?? {}) as Record<string, unknown>;
       const name = text(field.name, 'field name').trim();
-      if (!name || STANDARD_FIELDS.has(name)) throw new Error(`"${name}" can't be a field's name`);
+      if (!name || STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name)) throw new Error(`"${name}" can't be a field's name`);
       return { name, value: text(field.value, 'field'), protected: field.protected === true };
     }),
   };
@@ -813,7 +829,8 @@ function saveItem(db: Kdbx, input: PasswordItemInput): string {
   else entry.fields.delete('otp');
   const keep = new Set(input.fields.map((f) => f.name));
   for (const name of [...entry.fields.keys()]) {
-    if (!STANDARD_FIELDS.has(name) && !keep.has(name)) entry.fields.delete(name);
+    // A passkey stays: the editor never sees its fields.
+    if (!STANDARD_FIELDS.has(name) && !PASSKEY_FIELD.test(name) && !keep.has(name)) entry.fields.delete(name);
   }
   for (const field of input.fields) setField(entry, field.name, field.value, field.protected);
   setFavorite(entry, input.favorite);
@@ -1131,6 +1148,178 @@ function copyField(entry: KdbxEntry, field: CopyField): void {
   }
   throw new Error('Not a field');
 }
+
+// ---------------------------------------------------------------------------
+// Passkeys
+// ---------------------------------------------------------------------------
+//
+// The vault's side of the browser's passkeys (electron/passkeys.mts makes
+// and uses them). A passkey is kept as KeePassXC keeps one, in fields of an
+// item, so KeePassXC, Strongbox and KeePassDX sign in with the same ones:
+// the private key as a PKCS#8 PEM, the credential ID and user handle in
+// unpadded base64url, the relying party's ID, and the account's name.
+
+const PASSKEY = {
+  username: 'KPEX_PASSKEY_USERNAME',
+  credentialId: 'KPEX_PASSKEY_CREDENTIAL_ID',
+  privateKey: 'KPEX_PASSKEY_PRIVATE_KEY_PEM',
+  rpId: 'KPEX_PASSKEY_RELYING_PARTY',
+  userHandle: 'KPEX_PASSKEY_USER_HANDLE',
+  backupEligible: 'KPEX_PASSKEY_FLAG_BE',
+  backedUp: 'KPEX_PASSKEY_FLAG_BS',
+  /** Strongbox's names for the credential ID and the account. */
+  strongboxCredentialId: 'KPEX_PASSKEY_GENERATED_USER_ID',
+  strongboxUsername: 'KPXC_PASSKEY_USERNAME',
+} as const;
+
+function passkeyCredentialId(entry: KdbxEntry): string {
+  return fieldText(entry, PASSKEY.strongboxCredentialId) || fieldText(entry, PASSKEY.credentialId);
+}
+
+function passkeyUsername(entry: KdbxEntry): string {
+  return fieldText(entry, PASSKEY.strongboxUsername) || fieldText(entry, PASSKEY.username);
+}
+
+function hasPasskey(entry: KdbxEntry): boolean {
+  return !!fieldText(entry, PASSKEY.privateKey) && !!fieldText(entry, PASSKEY.rpId) && !!passkeyCredentialId(entry);
+}
+
+/** KeePassXC writes its flags as "1" (older versions "true"); a passkey without them is backed up, as KeePassXC assumes. */
+function passkeyFlag(entry: KdbxEntry, name: string): boolean {
+  if (!entry.fields.has(name)) return true;
+  const value = fieldText(entry, name).toLowerCase();
+  return value === '1' || value === 'true';
+}
+
+export interface StoredPasskey {
+  /** The vault item it's in. */
+  entryId: string;
+  title: string;
+  username: string;
+  rpId: string;
+  /** base64url, unpadded. */
+  credentialId: string;
+  /** base64url, unpadded. */
+  userHandle: string;
+  privateKeyPem: string;
+  backupEligible: boolean;
+  backedUp: boolean;
+}
+
+export interface NewPasskey {
+  rpId: string;
+  /** What the site calls itself, for a new item's title. */
+  rpName: string;
+  /** The page's origin, for a new item's website. */
+  origin: string;
+  username: string;
+  credentialId: string;
+  userHandle: string;
+  privateKeyPem: string;
+}
+
+function storedPasskey(entry: KdbxEntry): StoredPasskey {
+  return {
+    entryId: entry.uuid.id,
+    title: fieldText(entry, 'Title'),
+    username: passkeyUsername(entry) || fieldText(entry, 'UserName'),
+    rpId: fieldText(entry, PASSKEY.rpId),
+    credentialId: passkeyCredentialId(entry),
+    userHandle: fieldText(entry, PASSKEY.userHandle),
+    privateKeyPem: fieldText(entry, PASSKEY.privateKey),
+    backupEligible: passkeyFlag(entry, PASSKEY.backupEligible),
+    backedUp: passkeyFlag(entry, PASSKEY.backedUp),
+  };
+}
+
+/** The passkeys for a relying party, out of the trash, by account. */
+function passkeysFor(db: Kdbx, rpId: string): StoredPasskey[] {
+  const found: StoredPasskey[] = [];
+  for (const entry of db.getDefaultGroup().allEntries()) {
+    if (!hasPasskey(entry) || inTrash(db, entry.parentGroup)) continue;
+    if (fieldText(entry, PASSKEY.rpId).toLowerCase() !== rpId) continue;
+    found.push(storedPasskey(entry));
+  }
+  return found.sort((a, b) => a.username.localeCompare(b.username) || a.title.localeCompare(b.title));
+}
+
+function writePasskey(entry: KdbxEntry, passkey: NewPasskey): void {
+  for (const name of [...entry.fields.keys()]) if (PASSKEY_FIELD.test(name)) entry.fields.delete(name);
+  setField(entry, PASSKEY.username, passkey.username, false);
+  setField(entry, PASSKEY.credentialId, passkey.credentialId, true);
+  setField(entry, PASSKEY.privateKey, passkey.privateKeyPem, true);
+  setField(entry, PASSKEY.rpId, passkey.rpId, false);
+  setField(entry, PASSKEY.userHandle, passkey.userHandle, true);
+  setField(entry, PASSKEY.backupEligible, '1', false);
+  setField(entry, PASSKEY.backedUp, '1', false);
+  if (!entry.tags.includes(PASSKEY_TAG)) entry.tags = [...entry.tags, PASSKEY_TAG];
+}
+
+/**
+ * Keep a new passkey: in place of the one the vault has for the same
+ * account on the site (an authenticator keeps one per account), else with
+ * the account's password, else in an item of its own.
+ */
+function addPasskey(db: Kdbx, passkey: NewPasskey): string {
+  const live = [...db.getDefaultGroup().allEntries()].filter((e) => !inTrash(db, e.parentGroup));
+  const same = live.find(
+    (e) => hasPasskey(e) && fieldText(e, PASSKEY.rpId).toLowerCase() === passkey.rpId && fieldText(e, PASSKEY.userHandle) === passkey.userHandle,
+  );
+  const login = same ?? (passkey.username
+    ? loginsFor(db, passkey.origin).find((e) => !hasPasskey(e) && fieldText(e, 'UserName') === passkey.username)
+    : undefined);
+  let entry: KdbxEntry;
+  if (login) {
+    entry = login;
+    entry.pushHistory();
+    trimHistory(db, entry);
+  } else {
+    entry = db.createEntry(db.getDefaultGroup());
+    setField(entry, 'Title', passkey.rpName || passkey.rpId, false);
+    setField(entry, 'UserName', passkey.username, false);
+    setField(entry, 'Password', '', true);
+    setField(entry, 'URL', passkey.origin, false);
+    setField(entry, 'Notes', '', false);
+  }
+  writePasskey(entry, passkey);
+  entry.times.update();
+  return entry.uuid.id;
+}
+
+function removePasskey(db: Kdbx, entry: KdbxEntry): void {
+  entry.pushHistory();
+  trimHistory(db, entry);
+  for (const name of [...entry.fields.keys()]) if (PASSKEY_FIELD.test(name)) entry.fields.delete(name);
+  entry.tags = entry.tags.filter((t) => t !== PASSKEY_TAG);
+  entry.times.update();
+}
+
+/** What passkeys.mts reaches the vault through, one operation at a time with the rest. */
+export const passkeyVault = {
+  async status(): Promise<'open' | 'locked' | 'missing'> {
+    if (vault) return 'open';
+    return (await exists()) ? 'locked' : 'missing';
+  },
+  /** The relying party's passkeys; null while the vault is locked. */
+  find(rpId: string): Promise<StoredPasskey[] | null> {
+    return serial(async () => {
+      await refresh();
+      return vault ? passkeysFor(vault.db, rpId) : null;
+    });
+  },
+  store(passkey: NewPasskey): Promise<string> {
+    return serial(async () => {
+      await refresh();
+      const id = addPasskey(openVault(), passkey);
+      await save();
+      return id;
+    });
+  },
+  onChanged(listener: () => void): () => void {
+    changeListeners.add(listener);
+    return () => changeListeners.delete(listener);
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Autofill
@@ -1538,6 +1727,7 @@ export function registerPasswordsHandlers(opts: Options): void {
     else db.remove(entry);
   }));
   handle('restore', edit((db, id) => restore(db, findEntry(db, id))));
+  handle('removePasskey', edit((db, id) => removePasskey(db, findEntry(db, id))));
   handle('deleteForever', edit((db, id) => db.move(findEntry(db, id), undefined)));
   handle('emptyTrash', edit((db) => {
     const bin = recycleBin(db);
