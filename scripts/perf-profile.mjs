@@ -29,7 +29,9 @@
  *   drag         drag a window's title bar in circles for --drag-sec (6) with
  *                wobbly windows on, then again with them off: frame rate,
  *                long frames and main-thread cost of each. --drag-behind
- *                "App Store" leaves other apps open under it
+ *                "App Store" leaves other apps open under it; --drag-size
+ *                1400x950 grows the dragged window first, as big app
+ *                windows are. Each is paced still first, for a baseline
  *   switch       four light windows open, click each title bar in turn for
  *                --rounds (6) rounds: pointer-down to next frame per raise
  *   switch-store the same with the App Store's card grid open as well
@@ -64,7 +66,15 @@
  * other, not against DinOS on real hardware.
  *
  * `--no-blur` turns every backdrop-filter off, to A/B how much of a frame is
- * compositing the frosted glass rather than the app's own work.
+ * compositing the frosted glass rather than the app's own work; `--css
+ * "rules"` adds any other rules to every page, to A/B one effect at a time.
+ *
+ * To measure on a GPU, point DIN_PERF_CHROME at a script that runs a real
+ * browser on the screen (Electron with a main that opens a 1920x1080
+ * BrowserWindow, --ozone-platform=wayland --use-angle=vulkan, passing on the
+ * harness's arguments). Frame pacing then also reports amdgpu's busy
+ * percentage (gpuBusyPct), which counts the rest of the screen too: compare
+ * the drag against the still baseline taken just before it.
  *
  * Output: `perf-reports/<scenario>.json` (full reports), a screenshot per
  * scenario, and a summary on stdout. With --cpu-profile, also
@@ -103,6 +113,17 @@ const ONLY = opt("only", "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+/** Window size the drag scenario's window is grown to first (--drag-size 1400x950), as big app windows are. */
+const DRAG_SIZE = (() => {
+  const m = /^(\d+)x(\d+)$/.exec(opt("drag-size", ""));
+  return m ? { width: Number(m[1]), height: Number(m[2]) } : null;
+})();
+/** amdgpu's busy percentage, read while frames are paced when the browser is one of your own (DIN_PERF_CHROME), which may use the GPU. */
+const GPU_BUSY_FILE = process.env.DIN_PERF_CHROME
+  ? (existsSync("/sys/class/drm") ? readdirSync("/sys/class/drm") : [])
+      .map((d) => `/sys/class/drm/${d}/device/gpu_busy_percent`)
+      .find((p) => existsSync(p)) ?? null
+  : null;
 const PORT = 8383;
 const ORIGIN = `http://localhost:${PORT}`;
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -315,6 +336,16 @@ if (flag("no-blur")) {
     source: `{
       const sheet = new CSSStyleSheet();
       sheet.replaceSync("*, *::before, *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }");
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }`,
+  });
+}
+if (opt("css", "")) {
+  // Any other A/B: these rules added to every page (--css "rules"), as --no-blur adds its own.
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `{
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(${JSON.stringify(opt("css", ""))});
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     }`,
   });
@@ -645,7 +676,9 @@ async function framePacing(fn) {
     window.__dinFrames = { deltas, stop: () => (running = false) };
   });
   const t = Date.now();
+  const gpu = sampleGpuBusy();
   const result = await fn();
+  const gpuBusy = gpu.stop();
   const wall = (Date.now() - t) / 1000;
   const deltas = await evaluate(() => {
     window.__dinFrames.stop();
@@ -661,6 +694,30 @@ async function framePacing(fn) {
       p95: q(0.95),
       max: Math.round(sorted.at(-1) ?? 0),
       dropped: deltas.filter((d) => d > 25).length,
+      ...(gpuBusy === null ? {} : { gpuBusyPct: gpuBusy }),
+    },
+  };
+}
+
+/**
+ * The GPU's busy percentage, sampled every 50ms until `stop()`, which
+ * returns the mean: what compositing costs when the browser renders on a
+ * real GPU (DIN_PERF_CHROME pointed at one), which rAF pacing alone hides
+ * until it runs out. Null where the kernel doesn't report it (amdgpu's
+ * gpu_busy_percent), or the browser is software-rendered and it means nothing.
+ */
+function sampleGpuBusy() {
+  const file = GPU_BUSY_FILE;
+  if (!file) return { stop: () => null };
+  const samples = [];
+  const timer = setInterval(() => {
+    const n = Number(readFileSync(file, "utf8"));
+    if (Number.isFinite(n)) samples.push(n);
+  }, 50);
+  return {
+    stop: () => {
+      clearInterval(timer);
+      return samples.length ? Math.round(samples.reduce((a, b) => a + b, 0) / samples.length) : null;
     },
   };
 }
@@ -854,6 +911,19 @@ async function grabPoint(id) {
   );
 }
 
+/** Size window `id` to `size` by its corners, as a user would: top-left to `at`, then bottom-right out. */
+async function growWindow(id, size, at = { x: 120, y: 80 }) {
+  const rect = () =>
+    evaluate((sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    }, `section[data-window-id="${id}"]`);
+  let r = await rect();
+  await dragBy({ x: r.left + 2, y: r.top + 2 }, at.x - r.left, at.y - r.top);
+  r = await rect();
+  await dragBy({ x: r.right - 2, y: r.bottom - 2 }, size.width - (r.right - r.left), size.height - (r.bottom - r.top));
+}
+
 /** Drag from `from` by (dx, dy) in small steps, and let go. */
 async function dragBy(from, dx, dy, steps = 12) {
   await moveTo(from.x, from.y);
@@ -1005,6 +1075,13 @@ try {
       await launch("Settings");
       await waitFor(windowSettled, undefined, 15_000);
       await sleep(800);
+      if (DRAG_SIZE) {
+        await growWindow(await topWindowId(), DRAG_SIZE);
+        await sleep(800);
+      }
+      await screenshot(`drag-${label}`);
+      // The same desktop left alone, to tell the drag's cost from the scene's.
+      const still = await framePacing(() => sleep(2000));
       const grab = await grabPoint(await topWindowId());
       if (!grab) throw new Error("no window to drag");
       await moveTo(grab.x, grab.y);
@@ -1032,13 +1109,14 @@ try {
       const r = await report();
       runs[label] = {
         moves: result.result.result,
+        still: still.frames,
         drag: { ...result.cost, ...result.result.frames },
         settle: { ...settle.cost, ...settle.result.frames },
         hot,
         errors: errors.slice(mark),
         digest: digest(r),
       };
-      console.log(`  ${label}: ${runs[label].drag.fps} fps, p95 ${runs[label].drag.p95}ms, cpu ${runs[label].drag.cpuPct}%`);
+      console.log(`  ${label}: ${runs[label].drag.fps} fps, p95 ${runs[label].drag.p95}ms, cpu ${runs[label].drag.cpuPct}%${runs[label].drag.gpuBusyPct === undefined ? "" : `, gpu ${runs[label].drag.gpuBusyPct}% busy (${runs[label].still.gpuBusyPct}% still)`}`);
     }
     save("drag", runs);
   }
