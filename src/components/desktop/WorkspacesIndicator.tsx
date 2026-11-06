@@ -157,7 +157,7 @@ function WorkspacesPopoverBody({ tiling, monitors }: { tiling: boolean; monitors
                     className={cn(
                       'relative grid h-7 place-items-center rounded-md text-xs tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       current
-                        ? 'bg-primary font-semibold text-primary-foreground'
+                        ? 'bg-pigment clay-pigment font-semibold text-primary-foreground'
                         : busy
                           ? 'bg-foreground/10 text-foreground hover:bg-foreground/15'
                           : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',

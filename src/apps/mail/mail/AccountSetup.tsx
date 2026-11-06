@@ -62,7 +62,7 @@ function GoogleWordmark() {
 function ServerFields({ title, value, onChange }: { title: string; value: MailServer; onChange: (s: MailServer) => void }) {
   const id = title.toLowerCase().replace(/\s+/g, '-');
   return (
-    <fieldset className="space-y-2 rounded-lg border border-border/70 p-3">
+    <fieldset className="space-y-2 rounded-xl bg-card clay p-3">
       <legend className="px-1 text-xs font-medium text-muted-foreground">{title}</legend>
       <div className="grid grid-cols-[1fr_88px] gap-2">
         <div className="space-y-1">
@@ -149,7 +149,7 @@ export function AccountSetup({ onClose, onAdded, first }: { onClose: () => void;
                     setProvider(p.id);
                     if (p.id === 'proton') setServers({ imap: { host: '127.0.0.1', port: 1143, secure: false, user: '' }, smtp: { host: '127.0.0.1', port: 1025, secure: false, user: '' } });
                   }}
-                  className="flex h-12 w-full items-center justify-center rounded-lg border border-border/70 bg-card text-lg outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className="flex h-12 w-full items-center justify-center rounded-xl bg-card clay text-lg outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
                   <span className={p.className}>{p.id === 'gmail' ? <GoogleWordmark /> : p.label}</span>
                 </button>
@@ -220,7 +220,7 @@ export function AccountSetup({ onClose, onAdded, first }: { onClose: () => void;
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> {busy}
               </span>
             ) : (
-              <button type="button" onClick={() => setServers((s) => s ?? { imap: { host: '', port: 993, secure: true, user: email.trim() }, smtp: { host: '', port: 465, secure: true, user: email.trim() } })} className={cn('flex-1 text-left text-[13px] text-primary hover:underline', servers && 'invisible')}>
+              <button type="button" onClick={() => setServers((s) => s ?? { imap: { host: '', port: 993, secure: true, user: email.trim() }, smtp: { host: '', port: 465, secure: true, user: email.trim() } })} className={cn('flex-1 text-left text-[13px] text-ink-accent hover:underline', servers && 'invisible')}>
                 Server settings…
               </button>
             )}

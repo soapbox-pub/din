@@ -48,6 +48,7 @@ import {
 } from '@/lib/themePackages';
 import { cn } from '@/lib/utils';
 import { frameUrl, framesNear } from '@/shared/cursorFrames';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 type PackageCatalog = PackageCatalogState;
 
@@ -229,7 +230,7 @@ function PackageCard({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
     <PackageContextMenu pkg={pkg} handlers={handlers}>
       <div
         ref={ref}
-        className="relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
+        className="relative flex flex-col overflow-hidden rounded-xl bg-card clay transition-shadow motion-safe:hover:shadow-md"
       >
         <button
           type="button"
@@ -343,7 +344,7 @@ function PackagePill({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
       aria-label={`${label} ${pkg.title}`}
       className={cn(
         'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
-        'bg-secondary text-primary hover:bg-secondary/80',
+        'bg-secondary text-ink-accent hover:bg-secondary/80',
         (done || state.busy) && 'cursor-default text-muted-foreground hover:bg-secondary',
       )}
     >
@@ -514,7 +515,7 @@ function PackageDetailPage({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
+          <dl className={cn(settingsGroup, 'text-sm')}>
             <InfoRow label="Download size">{pkg.size ? formatBytes(pkg.size) : 'Unknown'}</InfoRow>
             {pkg.type === 'cursor' ? (
               <InfoRow label="Cursors">{`${pkg.cursors.length.toLocaleString()}${pkg.links.length ? `, under ${(pkg.cursors.length + pkg.links.length).toLocaleString()} names` : ''}`}</InfoRow>
@@ -603,7 +604,7 @@ function TryCursors({ pkg }: { pkg: CursorPackage }) {
               <div
                 key={label}
                 style={{ cursor: css }}
-                className="flex h-24 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card"
+                className="flex h-24 flex-col items-center justify-center gap-2 rounded-xl bg-card clay"
               >
                 <img src={src} alt="" draggable={false} className="size-8 object-contain" />
                 <span className="text-xs text-muted-foreground">{label}</span>
@@ -625,7 +626,7 @@ export function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
       <SectionHeader title="What It Can Do" />
       <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2">
         {sites.length > 0 && (
-          <div className="rounded-xl border border-border/70 bg-card p-4">
+          <div className="rounded-xl bg-card clay p-4">
             <p className="mb-2 text-sm font-medium">Read and change data on</p>
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
               {sites.map((site) => (
@@ -635,7 +636,7 @@ export function ExtensionAccess({ pkg }: { pkg: ExtensionPackage }) {
           </div>
         )}
         {pkg.permissions.length > 0 && (
-          <div className="rounded-xl border border-border/70 bg-card p-4">
+          <div className="rounded-xl bg-card clay p-4">
             <p className="mb-2 text-sm font-medium">Permissions</p>
             <ul className="flex flex-wrap gap-1.5">
               {pkg.permissions.map((permission) => (
@@ -664,7 +665,7 @@ function PackageGridSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="overflow-hidden rounded-xl border border-border/70 bg-card">
+        <div key={i} className="overflow-hidden rounded-xl bg-card clay">
           <Skeleton className="h-28 rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">

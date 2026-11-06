@@ -467,7 +467,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         // What this app could only read, the opened one can only read too.
         const readOnlyPaths = grants.filter((g) => !g.writable).map((g) => g.path);
         // Who asked, which the opened app reads as `din.app.opener`.
-        live.current.actions.open(target, { ...clean, ...files, ...(readOnlyPaths.length > 0 ? { readOnlyPaths } : {}), opener: appId });
+        // An app's own window.open opens another window of it, even for a
+        // single-instance app (its settings, a form): only launches from
+        // elsewhere go to the window it has.
+        live.current.actions.open(target, { ...clean, ...files, ...(readOnlyPaths.length > 0 ? { readOnlyPaths } : {}), opener: appId }, { newWindow: self === true });
       },
       'app.openFiles': async ({ handles, app }) => {
         for (const id of handles) {

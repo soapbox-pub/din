@@ -158,10 +158,10 @@ export function FindBar({ view, store }: { view: EditorView; store: FindBarStore
             {status}
           </span>
           <IconButton label="Previous Match (Shift+Enter)" small disabled={count === 0} onClick={() => findPrevious(view)}>
-            <ArrowUp className="size-4" />
+            <ArrowUp className="size-4.5" strokeWidth={1.75} />
           </IconButton>
           <IconButton label="Next Match (Enter)" small disabled={count === 0} onClick={() => findNext(view)}>
-            <ArrowDown className="size-4" />
+            <ArrowDown className="size-4.5" strokeWidth={1.75} />
           </IconButton>
           <IconButton
             label="Select All Matches (Alt+Enter)"
@@ -172,11 +172,11 @@ export function FindBar({ view, store }: { view: EditorView; store: FindBarStore
               view.focus();
             }}
           >
-            <TextSelect className="size-4" />
+            <TextSelect className="size-4.5" strokeWidth={1.75} />
           </IconButton>
           <span className="flex-1" />
           <IconButton label="Close (Escape)" small onClick={close}>
-            <X className="size-4" />
+            <X className="size-4.5" strokeWidth={1.75} />
           </IconButton>
         </div>
         {showReplace && (

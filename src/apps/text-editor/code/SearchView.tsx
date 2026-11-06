@@ -170,13 +170,13 @@ export function SearchView({
                 />
               </FieldBox>
               <IconButton label="Replace All" small disabled={!result || total === 0 || replacing} onClick={() => setConfirming(true)}>
-                {replacing ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Replace className="size-4" />}
+                {replacing ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Replace className="size-4.5" strokeWidth={1.75} />}
               </IconButton>
             </div>
           )}
           <div className="flex justify-end">
             <IconButton label="Toggle file filters" small pressed={state.showFilters} onClick={() => set({ showFilters: !state.showFilters })} className="size-6">
-              <Ellipsis className="size-4" />
+              <Ellipsis className="size-4.5" strokeWidth={1.75} />
             </IconButton>
           </div>
           {state.showFilters && (
@@ -209,7 +209,7 @@ export function SearchView({
       </div>
 
       {confirming && result && (
-        <div className="mx-2 mb-2 rounded-lg border border-border bg-background/80 p-3 text-sm" role="alertdialog" aria-label="Replace all">
+        <div className="mx-2 mb-2 rounded-xl bg-card clay p-3 text-sm" role="alertdialog" aria-label="Replace all">
           <p>
             Replace {total.toLocaleString()} match{total === 1 ? '' : 'es'} in {result.files.length.toLocaleString()} file
             {result.files.length === 1 ? '' : 's'} with “{state.replace}”?
@@ -254,7 +254,7 @@ export function SearchView({
                     type="button"
                     onClick={toggle}
                     title={file.path}
-                    className="flex h-6 w-full items-center gap-1.5 px-2 text-left hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    className="flex h-6 w-full items-center gap-1.5 px-2 text-left hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                   >
                     <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', !isCollapsed && 'rotate-90')} aria-hidden />
                     <FileIcon path="" name={name} kind="file" size={null} mtimeMs={null} px={16} thumbnail={false} />
@@ -286,7 +286,7 @@ export function SearchView({
                           aria-selected={false}
                           title={`Line ${m.line}`}
                           onClick={() => openAt(m)}
-                          className="flex h-6 w-full items-center gap-2 pl-10 pr-2 text-left font-mono text-xs hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          className="flex h-6 w-full items-center gap-2 pl-10 pr-2 text-left font-mono text-xs hover:bg-foreground/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                         >
                           <span className="min-w-0 truncate whitespace-pre text-foreground/80">
                             {m.preview.slice(0, m.previewColumn)}

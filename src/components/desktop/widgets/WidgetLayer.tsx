@@ -209,7 +209,7 @@ function AboutWidget({ widget, onClose, onPublish }: { widget: PlacedWidget | nu
           {source && source.type !== 'builtin' ? (
             <NappletIcon source={source} className="size-16 text-2xl" />
           ) : (
-            <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary">
+            <span className="grid size-16 place-items-center rounded-2xl bg-pigment text-primary-foreground clay-pigment">
               <BuiltinIcon name={manifest?.icon ?? ''} className="size-8" />
             </span>
           )}

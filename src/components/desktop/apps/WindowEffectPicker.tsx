@@ -14,6 +14,7 @@ import { effectThumbnail, type ThumbnailSubject } from '@/lib/effects/thumbnail'
 import { getScreenshotBridge } from '@/lib/screenshot';
 import { revealInCarousel } from '@/lib/carousel';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsChoiceClass } from '@/shared/settingsChromeStyles';
 
 interface EffectChoice {
   id: string;
@@ -117,7 +118,7 @@ export function WindowEffectPicker({
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p id={labelId} className="text-sm font-medium">{label}</p>
@@ -209,12 +210,9 @@ function EffectTile({
           tabIndex={tabbable ? 0 : -1}
           onClick={onChoose}
           className={cn(
-            'group flex w-36 shrink-0 snap-start flex-col gap-2 rounded-xl border p-2 text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            settingsChoiceClass(selected),
+            'group flex w-36 shrink-0 snap-start flex-col gap-2 p-2 text-left',
             'motion-safe:transition-colors',
-            selected
-              ? 'border-primary bg-primary/10 text-foreground'
-              : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
           )}
         >
           <div className="relative aspect-[8/5] w-full overflow-hidden rounded-lg bg-muted">
@@ -224,7 +222,7 @@ function EffectTile({
               <EffectPicture subject={choice.subject} event={event} />
             )}
             {selected && (
-              <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+              <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-pigment text-primary-foreground clay-pigment">
                 <Check className="size-3.5" aria-hidden />
               </span>
             )}
@@ -282,7 +280,7 @@ function RandomPicture({ event, offered }: { event: EffectEvent; offered: Effect
       </div>
       <span className="absolute inset-0 flex items-center justify-center">
         <span className="flex size-9 items-center justify-center rounded-full bg-background/85 text-foreground shadow-md">
-          <Shuffle className="size-4" aria-hidden />
+          <Shuffle className="size-4.5" strokeWidth={1.75} aria-hidden />
         </span>
       </span>
     </>

@@ -29,7 +29,7 @@ function ExternalLink({ href, children, className }: { href: string; children: R
         e.preventDefault();
         window.open(href, '_blank');
       }}
-      className={cn('break-all text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60', className)}
+      className={cn('break-all text-ink-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60', className)}
     >
       {children}
     </a>

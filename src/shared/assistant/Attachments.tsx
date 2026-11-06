@@ -115,7 +115,7 @@ export function AttachmentItem({
           onClick={() => setOpen(true)}
           aria-label={`View ${name}`}
           title={name}
-          className="block overflow-hidden rounded-lg border border-border bg-muted/50 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="block overflow-hidden rounded-xl bg-card clay transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <img
             src={src}
@@ -134,7 +134,7 @@ export function AttachmentItem({
   return (
     <li
       className={cn(
-        'flex max-w-56 items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground',
+        'flex max-w-56 items-center gap-1.5 rounded-xl bg-card clay px-2 py-1 text-xs text-muted-foreground',
         remove && 'pr-1',
         className,
       )}

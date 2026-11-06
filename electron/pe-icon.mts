@@ -187,12 +187,53 @@ async function bestIcon(resources: Resources): Promise<Buffer | null> {
     const bits = group.readUInt16LE(at + 6) || (colors ? Math.ceil(Math.log2(colors)) : 8);
     images.push({ px, bits, id: group.readUInt16LE(at + 12) });
   }
-  const score = (image: { px: number; bits: number }) =>
-    (image.px > ICON_PX ? ICON_PX - image.px : image.px) * 64 + image.bits;
-  images.sort((a, b) => score(b) - score(a));
+  images.sort((a, b) => iconScore(b) - iconScore(a));
   for (const image of images) {
     const data = await resources.data(RT_ICON, image.id, MAX_ICON_BYTES);
     const png = data && iconToPng(data);
+    if (png) return png;
+  }
+  return null;
+}
+
+/** Which of an icon's images to show: the largest, up to ICON_PX, with the most colors. */
+function iconScore(image: { px: number; bits: number }): number {
+  return (image.px > ICON_PX ? ICON_PX - image.px : image.px) * 64 + image.bits;
+}
+
+/**
+ * The best image in an .ico file, as a PNG, or null. An .ico is an icon
+ * group with its images in the file: entries of 16 bytes, each its image's
+ * size, colors and place, where a group's 14-byte entries name an RT_ICON.
+ */
+export async function icoFileIcon(file: string): Promise<Buffer | null> {
+  let data: Buffer;
+  try {
+    const stats = await fs.promises.stat(file);
+    if (!stats.isFile() || stats.size > MAX_ICON_BYTES) return null;
+    data = await fs.promises.readFile(file);
+  } catch {
+    return null;
+  }
+  if (data.length < 6 || data.readUInt16LE(0) !== 0 || data.readUInt16LE(2) !== 1) return null;
+  const count = data.readUInt16LE(4);
+  const images: { px: number; bits: number; offset: number; size: number }[] = [];
+  for (let i = 0; i < count && 6 + (i + 1) * 16 <= data.length; i++) {
+    const at = 6 + i * 16;
+    const colors = data[at + 2];
+    const size = data.readUInt32LE(at + 8);
+    const offset = data.readUInt32LE(at + 12);
+    if (size === 0 || offset + size > data.length) continue;
+    images.push({
+      px: data[at] || 256,
+      bits: data.readUInt16LE(at + 6) || (colors ? Math.ceil(Math.log2(colors)) : 8),
+      offset,
+      size,
+    });
+  }
+  images.sort((a, b) => iconScore(b) - iconScore(a));
+  for (const image of images) {
+    const png = iconToPng(data.subarray(image.offset, image.offset + image.size));
     if (png) return png;
   }
   return null;

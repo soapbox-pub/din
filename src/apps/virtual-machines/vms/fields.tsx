@@ -165,8 +165,8 @@ export function CdromField({
   return (
     <div className="space-y-2">
       <Label>CD/DVD drive</Label>
-      <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-muted/30 p-3">
-        <Disc3 className={cn('size-5 shrink-0', path ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+      <div className="flex items-center gap-3 rounded-xl bg-card clay p-3">
+        <Disc3 className={cn('size-5 shrink-0', path ? 'text-ink-accent' : 'text-muted-foreground')} aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm">{path ? path.slice(path.lastIndexOf('/') + 1) : 'Empty'}</p>
           {path && <p className="truncate text-xs text-muted-foreground" title={path}>{path}</p>}

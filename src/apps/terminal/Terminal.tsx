@@ -810,7 +810,7 @@ export function Terminal() {
       <div className={cn('flex h-full w-full flex-col rounded-[inherit] text-foreground', sheen)} style={surface}>
         {header}
         <div className="grid flex-1 place-items-center p-6">
-          <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <div className="max-w-sm rounded-xl px-8 py-12 text-center">
             <SquareTerminal className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
             <p className="text-sm text-muted-foreground">
               Terminal needs the Electron shell to run an OS shell. Run{' '}

@@ -281,7 +281,7 @@ export function Home({
                     onClick={() => complete(entry.name)}
                     className={cn(
                       'rounded-md border border-border/60 bg-popover px-2 py-0.5 font-mono text-xs shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      i === 0 && 'border-primary/50',
+                      i === 0 && 'bg-selected',
                     )}
                   >
                     {entry.name}
@@ -302,7 +302,7 @@ export function Home({
               autoFocus
               aria-label="Entry line"
               placeholder="solve(x^2-5x+6=0, x)"
-              className="h-11 w-full rounded-lg border border-input bg-background px-3 pr-11 font-mono text-[1.05rem] shadow-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="h-11 w-full rounded-lg bg-foreground/[0.06] px-3 pr-11 font-mono text-[1.05rem] shadow-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
             />
             <button
               type="button"
@@ -322,7 +322,7 @@ export function Home({
                   {hint.entry.args!.map((arg, i) => (
                     <span key={i}>
                       {i > 0 && ', '}
-                      <span className={cn(i === hint.arg && 'font-semibold text-primary underline underline-offset-2')}>{arg}</span>
+                      <span className={cn(i === hint.arg && 'font-semibold text-ink-accent underline underline-offset-2')}>{arg}</span>
                     </span>
                   ))}
                   )
@@ -364,7 +364,7 @@ function EmptyHome({ onTry }: { onTry: (example: string) => void }) {
             key={example}
             type="button"
             onClick={() => onTry(example)}
-            className="rounded-lg border border-border/60 bg-background px-3 py-1.5 font-mono text-xs shadow-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-xl bg-card clay px-3 py-1.5 font-mono text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {example}
           </button>

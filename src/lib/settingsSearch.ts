@@ -44,10 +44,26 @@ export function parseQuery(query: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Normalized texts searched, by text: the sections' and apps' names and
+ * keywords, which every keystroke searches again and which hardly change.
+ */
+const normalizedTexts = new Map<string, string>();
+const NORMALIZED_TEXTS_MAX = 5000;
+
+function normalizedText(text: string): string {
+  let norm = normalizedTexts.get(text);
+  if (norm === undefined) {
+    if (normalizedTexts.size >= NORMALIZED_TEXTS_MAX) normalizedTexts.clear();
+    norm = normalize(text).text;
+    normalizedTexts.set(text, norm);
+  }
+  return norm;
+}
+
 /** Whether every term occurs in at least one of the texts. */
 export function matchesAll(texts: string[], terms: string[]): boolean {
-  const normalized = texts.map((t) => normalize(t).text);
-  return terms.every((term) => normalized.some((t) => t.includes(term)));
+  return terms.every((term) => texts.some((t) => normalizedText(t).includes(term)));
 }
 
 /**

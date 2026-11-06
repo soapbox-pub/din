@@ -275,12 +275,12 @@ export function BookmarkStarButton({
           aria-label={bookmark ? 'Edit bookmark for this page' : 'Bookmark this page'}
           title={bookmark ? 'Edit bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)'}
           className={cn(
-            'grid size-6 shrink-0 place-items-center rounded-full text-foreground/70',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+            'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
+            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           )}
         >
-          <Star className={cn('size-3.5', bookmark && 'fill-primary text-primary')} aria-hidden />
+          <Star className={cn('size-4.5', bookmark && 'fill-ink-accent text-ink-accent')} strokeWidth={1.75} aria-hidden />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={10} className="w-80">
@@ -392,9 +392,9 @@ function StarEditor({
 // ---- the bookmarks bar ----
 
 const chipClass = cn(
-  'flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-foreground/80',
-  'hover:bg-foreground/10 hover:text-foreground',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+  'flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] text-foreground/85',
+  'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
+  'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
 );
 
 /**
@@ -503,7 +503,7 @@ export function BookmarksBar({
                   <button
                     type="button"
                     onClick={onImport}
-                    className="shrink-0 rounded px-1 font-medium text-foreground/80 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="shrink-0 rounded px-1 font-medium text-foreground/80 underline-offset-2 hover:underline outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     Import bookmarks…
                   </button>
@@ -545,7 +545,7 @@ export function BookmarksBar({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button type="button" aria-label="More bookmarks" title="More bookmarks" className={cn(chipClass, 'px-1.5')}>
-                    <ChevronsRight className="size-4" aria-hidden />
+                    <ChevronsRight className="size-4.5" strokeWidth={1.75} aria-hidden />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="max-h-96 w-64 overflow-y-auto">
@@ -568,7 +568,7 @@ function DropMarker({ side }: { side: 'left' | 'right' }) {
   return (
     <span
       aria-hidden
-      className={cn('absolute inset-y-1 z-10 w-0.5 rounded-full bg-primary', side === 'left' ? '-left-px' : '-right-px')}
+      className={cn('absolute inset-y-1 z-10 w-0.5 rounded-full bg-ink-accent', side === 'left' ? '-left-px' : '-right-px')}
     />
   );
 }
@@ -627,9 +627,9 @@ function BarFolder({
               draggable
               onDragStart={(e) => startBookmarkDrag(e, folder)}
               onContextMenu={(e) => e.stopPropagation()}
-              className={cn(chipClass, highlighted && 'bg-primary/15 ring-1 ring-primary/40')}
+              className={cn(chipClass, highlighted && 'bg-selected ring-2 ring-ring/60')}
             >
-              <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <Folder className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
               <span className="truncate">{folder.title}</span>
             </button>
           </DropdownMenuTrigger>
@@ -676,7 +676,7 @@ function FolderMenuItems({
         ) : (
           <DropdownMenuSub key={node.id}>
             <DropdownMenuSubTrigger className="gap-2">
-              <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <Folder className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
               <span className="truncate">{node.title}</span>
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-96 w-64 overflow-y-auto">

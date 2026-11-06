@@ -275,7 +275,7 @@ function ReferencedEvent({ id, label }: { id: string; label: string }) {
   const { data: event, isLoading } = useEvent(id);
 
   return (
-    <div className="space-y-1 rounded-lg border border-border/60 bg-background/40 p-2">
+    <div className="space-y-1 rounded-xl bg-card clay p-2">
       <Meta icon={Quote}>{label}</Meta>
 
       {isLoading ? (
@@ -1117,7 +1117,7 @@ function Byline({ pubkey, subtitle }: { pubkey: string | undefined; subtitle?: s
  */
 function NestedEvent({ event }: { event: DraftEvent }) {
   return (
-    <div className="space-y-2 rounded-lg border border-border/60 bg-background/40 p-2">
+    <div className="space-y-2 rounded-xl bg-card clay p-2">
       <Byline pubkey={event.pubkey} subtitle={getKindLabel(event.kind)} />
       <EventBody event={event} />
     </div>
@@ -1172,7 +1172,7 @@ export function EmbeddedEvent({
 /** What the prompt shows when there is no event to show. */
 export function UnreadableEvent({ kind }: { kind: number | null }) {
   return (
-    <div className="space-y-1 rounded-xl border border-dashed p-3">
+    <div className="space-y-1 bg-foreground/[0.04] rounded-xl p-3">
       <Meta icon={Ban}>{kind === null ? 'Unreadable event' : getKindLabel(kind)}</Meta>
       <p className="text-xs text-muted-foreground">
         Din could not read what this app sent, so there is nothing to show but the request

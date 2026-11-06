@@ -17,6 +17,9 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useNsitePublisher } from '@/hooks/useSiteIdentity';
 import { getBrowserBridge } from '@/lib/browser';
 import { canonicalHostOfUrl } from '@/lib/nsiteApps';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsSubHeading } from '@/shared/settingsSection';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 interface Site {
   origin: string;
@@ -62,15 +65,15 @@ export function NotificationSitesList() {
   };
 
   return (
-    <div className="border-t border-border/60 pt-4">
-      <h3 className="text-sm font-medium text-foreground">Apps and sites</h3>
-      <p className="mb-3 text-xs text-muted-foreground">
+    <div>
+      <SettingsSubHeading>Apps and sites</SettingsSubHeading>
+      <p className="mb-3 px-1 text-xs text-muted-foreground">
         Installed nsites and websites that asked to show notifications. Forget one to have it ask again.
       </p>
       {isLoading ? (
-        <div className="flex flex-col gap-2" aria-hidden>
+        <div className={settingsGroup} aria-hidden>
           {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="flex items-center gap-3 rounded-md border p-3">
+            <div key={i} className="flex items-center gap-3 px-4 py-3">
               <Skeleton className="size-8 shrink-0 rounded-md" />
               <div className="flex-1 space-y-1.5">
                 <Skeleton className="h-3.5 w-32" />
@@ -80,7 +83,7 @@ export function NotificationSitesList() {
           ))}
         </div>
       ) : !sites || sites.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border px-8 py-8 text-center">
+        <div className="px-8 py-8 text-center">
           <Bell className="mx-auto mb-3 size-6 text-muted-foreground/80" aria-hidden />
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">
             No app or site has asked to show notifications yet.
@@ -110,7 +113,7 @@ function SiteRows({
     .sort((a, b) => Number(b.allow) - Number(a.allow) || a.name.localeCompare(b.name));
 
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className={settingsGroup}>
       {rows.map(({ origin, allow, app, name }) => (
         <SiteRow key={origin} origin={origin} allow={allow} app={app} name={name} onSet={onSet} />
       ))}
@@ -140,13 +143,11 @@ function SiteRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li className="flex items-center gap-3 rounded-md border bg-muted/20 p-3">
+        <li className="flex items-center gap-3 px-4 py-3">
           {app ? (
             <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" />
           ) : (
-            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/5">
-              <Globe className="size-4 text-muted-foreground" aria-hidden />
-            </span>
+            <SettingsToken icon={Globe} />
           )}
           <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
             <span className="block truncate text-sm">{name}</span>
@@ -164,7 +165,7 @@ function SiteRow({
             title="Forget (asks again next time)"
             onClick={() => onSet(origin, null)}
           >
-            <RotateCcw className="size-4" aria-hidden />
+            <RotateCcw className="size-4.5" strokeWidth={1.75} aria-hidden />
           </Button>
           <Switch id={id} checked={allow} onCheckedChange={(on) => onSet(origin, on)} />
         </li>

@@ -39,7 +39,7 @@ const CATEGORY_ICON: Record<FileCategory, LucideIcon> = {
 
 /** Tints that tell kinds apart at a glance, legible on light and dark. */
 const CATEGORY_TINT: Partial<Record<FileCategory, string>> = {
-  folder: 'text-primary',
+  folder: 'text-ink-accent',
   image: 'text-fuchsia-500',
   video: 'text-rose-500',
   audio: 'text-amber-500',

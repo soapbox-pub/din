@@ -136,7 +136,7 @@ function ListSelect({ label, value, onChange }: { label: string; value: string; 
   return (
     <label className="flex items-center justify-between gap-2 text-sm">
       {label}
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-8 w-24 rounded-md border border-input bg-background px-2 font-mono text-sm">
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-8 w-24 rounded-lg bg-foreground/[0.06] px-2 font-mono text-sm">
         {LIST_NAMES.map((name) => (
           <option key={name}>{name}</option>
         ))}
@@ -188,7 +188,7 @@ function StatsPanel({
   }, [fit, format]);
 
   return (
-    <div className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border/60 bg-muted/20 p-3">
+    <div className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border/60 bg-muted/20 p-3 [&>*]:shrink-0">
       <div className="flex rounded-lg bg-muted p-0.5" role="radiogroup" aria-label="Statistics">
         {(
           [
@@ -221,7 +221,7 @@ function StatsPanel({
           {typeof one === 'string' ? (
             <p className="text-sm text-muted-foreground">{one}</p>
           ) : (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-border/60 bg-background p-3 font-mono text-sm tabular-nums">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl bg-card clay p-3 font-mono text-sm tabular-nums">
               {(
                 [
                   ['x̄', one.mean],
@@ -251,7 +251,7 @@ function StatsPanel({
           <ListSelect label="Y list" value={scatter.y} onChange={(y) => onScatter({ ...scatter, y })} />
           <label className="flex items-center justify-between gap-2 text-sm">
             Model
-            <select value={model} onChange={(e) => setModel(e.target.value as Model)} className="h-8 w-36 rounded-md border border-input bg-background px-2 text-sm">
+            <select value={model} onChange={(e) => setModel(e.target.value as Model)} className="h-8 w-36 rounded-lg bg-foreground/[0.06] px-2 text-sm">
               {MODELS.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
@@ -263,7 +263,7 @@ function StatsPanel({
           {typeof fit === 'string' ? (
             <p className="text-sm text-muted-foreground">{fit}</p>
           ) : (
-            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background p-3">
+            <div className="flex flex-col gap-2 rounded-xl bg-card clay p-3">
               {equationTex && <TeX tex={equationTex} className="overflow-x-auto overflow-y-hidden text-base" />}
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm tabular-nums">
                 {fit.coefficients.map(([name, value]) => (
@@ -284,7 +284,7 @@ function StatsPanel({
               <button
                 type="button"
                 onClick={() => onGraphEquation(fit.equation)}
-                className="mt-1 flex h-8 items-center justify-center gap-1.5 rounded-md bg-primary text-xs font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mt-1 flex h-8 items-center justify-center gap-1.5 rounded-md bg-pigment clay-pigment text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <LineChart className="size-3.5" aria-hidden /> Graph with the data
               </button>
@@ -337,11 +337,11 @@ function TestsPanel({ vars, format }: { vars: Record<string, string>; format: Nu
 
   const parameter = test === 'prop1' ? 'p' : test === 'prop2' ? 'p1' : test === 'tsamp2' ? 'μ1' : 'μ';
   const against = test === 'prop1' ? 'p₀' : test === 'prop2' ? 'p2' : test === 'tsamp2' ? 'μ2' : 'μ₀';
-  const field = 'h-8 w-24 rounded-md border border-input bg-background px-2 text-right font-mono text-sm outline-none focus:border-ring';
+  const field = 'h-8 w-24 rounded-lg bg-foreground/[0.06] px-2 text-right font-mono text-sm outline-none focus:border-ring';
 
   return (
     <>
-      <select value={test} onChange={(e) => setTest(e.target.value as TestId)} aria-label="Test" className="h-8 rounded-md border border-input bg-background px-2 text-sm">
+      <select value={test} onChange={(e) => setTest(e.target.value as TestId)} aria-label="Test" className="h-8 rounded-lg bg-foreground/[0.06] px-2 text-sm">
         {TESTS.map((t) => (
           <option key={t.id} value={t.id}>
             {t.label}
@@ -380,7 +380,7 @@ function TestsPanel({ vars, format }: { vars: Record<string, string>; format: Nu
         ))}
       <label className="flex items-center justify-between gap-2 text-sm">
         Alternative
-        <select value={alt} onChange={(e) => setAlt(e.target.value as Alternative)} className="h-8 w-24 rounded-md border border-input bg-background px-2 font-mono text-sm">
+        <select value={alt} onChange={(e) => setAlt(e.target.value as Alternative)} className="h-8 w-24 rounded-lg bg-foreground/[0.06] px-2 font-mono text-sm">
           {(['≠', '<', '>'] as const).map((a) => (
             <option key={a} value={a}>
               {parameter} {a} {against}
@@ -395,7 +395,7 @@ function TestsPanel({ vars, format }: { vars: Record<string, string>; format: Nu
       {typeof result === 'string' ? (
         <p className="text-sm text-muted-foreground">{result}</p>
       ) : (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-border/60 bg-background p-3 font-mono text-sm tabular-nums">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl bg-card clay p-3 font-mono text-sm tabular-nums">
           {result.rows.map(([name, value]) => (
             <div key={name} className="contents">
               <dt className="text-muted-foreground">{name}</dt>

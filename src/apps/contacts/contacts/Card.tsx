@@ -9,6 +9,7 @@ import { Avatar } from './Avatar';
 import { addressLines, describeBirthday, labelText } from './format';
 import type { ContactAction, MenuEntry } from './menu';
 import { DropdownEntries } from './MenuEntries';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 export interface FieldActions {
   /** Text a phone number, in Messages; absent when there's no phone to text from. */
@@ -66,7 +67,7 @@ export function ContactCard({
                   title="More"
                   className="flex h-14 w-16 flex-col items-center justify-center gap-1 rounded-xl bg-foreground/[0.05] text-xs text-foreground/80 outline-none hover:bg-foreground/[0.09] focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
-                  <MoreHorizontal className="size-5 text-primary" />
+                  <MoreHorizontal className="size-5 text-ink-accent" />
                   More
                 </button>
               </DropdownMenuTrigger>
@@ -124,7 +125,7 @@ export function ContactCard({
                 <div className="text-xs text-muted-foreground">Groups</div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {c.groups.map((g) => (
-                    <span key={g} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-sm text-primary">{g}</span>
+                    <span key={g} className="rounded-full bg-selected px-2.5 py-0.5 text-sm text-ink-accent">{g}</span>
                   ))}
                 </div>
               </div>
@@ -151,14 +152,14 @@ function QuickAction({ icon: Icon, label, onClick }: { icon: LucideIcon; label: 
       onClick={onClick}
       className="flex h-14 min-w-16 flex-col items-center justify-center gap-1 rounded-xl bg-foreground/[0.05] px-3 text-xs text-foreground/80 outline-none hover:bg-foreground/[0.09] focus-visible:ring-2 focus-visible:ring-ring/60"
     >
-      <Icon className="size-5 text-primary" />
+      <Icon className="size-5 text-ink-accent" />
       {label}
     </button>
   );
 }
 
 function Section({ children }: { children: React.ReactNode }) {
-  return <div className="divide-y divide-border/60 overflow-hidden rounded-xl bg-foreground/[0.035]">{children}</div>;
+  return <div className={settingsGroup}>{children}</div>;
 }
 
 function Field({
@@ -187,7 +188,7 @@ function Field({
                 type="button"
                 onClick={primary.run}
                 title={primary.label}
-                className={cn('max-w-full text-left text-[15px] break-words whitespace-pre-line text-primary outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring/60', mono && 'tabular-nums')}
+                className={cn('max-w-full text-left text-[15px] break-words whitespace-pre-line text-ink-accent outline-none hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring/60', mono && 'tabular-nums')}
               >
                 {value}
               </button>

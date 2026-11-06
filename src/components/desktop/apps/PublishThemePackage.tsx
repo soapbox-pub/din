@@ -155,7 +155,7 @@ function PublishForm({
     return (
       <>
         <DialogHeader className="items-center text-center sm:text-center">
-          <span className="grid size-14 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+          <span className="grid size-14 place-items-center rounded-full bg-success/15 text-success">
             <Check className="size-7" aria-hidden />
           </span>
           <DialogTitle className="text-xl">{title.trim()} is on Nostr</DialogTitle>
@@ -253,7 +253,7 @@ function PublishForm({
                   type="button"
                   onClick={() => void addShots()}
                   disabled={busy}
-                  className="grid aspect-[16/10] w-32 shrink-0 place-items-center rounded-lg border border-dashed border-border text-muted-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="grid aspect-[16/10] w-32 shrink-0 place-items-center bg-foreground/[0.04] rounded-lg text-muted-foreground hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="flex flex-col items-center gap-1 text-xs">
                     <ImagePlus className="size-5" aria-hidden />

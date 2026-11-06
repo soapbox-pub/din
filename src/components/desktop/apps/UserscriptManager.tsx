@@ -12,14 +12,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { ToolButton } from '@/shared/appChrome';
+import { SettingsToken } from '@/shared/settingsChrome';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import type { AppComponentProps } from '@/lib/apps';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { useUserscripts } from '@/hooks/useUserscripts';
+import { useToast } from '@/hooks/useToast';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 /** Human summary of where a script runs, from its match/include rules. */
 function describeTargets(matches: string[], includes: string[]): string {
@@ -45,43 +46,31 @@ export function UserscriptsSection({
   onAdd: () => void;
 }) {
   return (
-    <div className="space-y-2 border-t border-border/60 pt-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-medium">Userscripts</h3>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <div className="min-w-0">
+          <SettingsSubHeading className="mt-0 px-0">Userscripts</SettingsSubHeading>
           <p className="text-xs text-muted-foreground">
             Scripts that run automatically on matching sites.
           </p>
         </div>
-        <button
-          type="button"
-          aria-label="Add userscript"
-          title="Add userscript"
-          onClick={onAdd}
-          className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
-            'hover:bg-foreground/10 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          <Plus className="size-4" />
-        </button>
+        <ToolButton label="Add Userscript" onClick={onAdd}>
+          <Plus className="size-4.5" strokeWidth={1.75} />
+        </ToolButton>
       </div>
 
       {scripts.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+        <p className="px-4 py-6 text-center text-sm text-muted-foreground">
           No userscripts yet. Open a .user.js link to install one, or add your
           own.
         </p>
       ) : (
-        <ul className="max-h-64 space-y-1 overflow-y-auto">
+        <ul className={settingsGroup}>
           {scripts.map((script) => (
             <ContextMenu key={script.id}>
               <ContextMenuTrigger asChild>
-                <li className="flex items-center gap-2 rounded-md px-1 py-1">
-                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-secondary">
-                    <FileCode2 className="size-3.5 text-muted-foreground" aria-hidden />
-                  </span>
+                <li className="flex items-center gap-3 py-2 pr-2 pl-4">
+                  <SettingsToken icon={FileCode2} active={script.enabled} />
                   <div className="min-w-0 flex-1">
                     <p
                       className={cn(
@@ -104,19 +93,9 @@ export function UserscriptsSection({
                     checked={script.enabled}
                     onCheckedChange={(enabled) => onSetEnabled(script.id, enabled)}
                   />
-                  <button
-                    type="button"
-                    aria-label={`Remove ${script.name}`}
-                    title={`Remove ${script.name}`}
-                    onClick={() => onRemove(script)}
-                    className={cn(
-                      'grid size-7 shrink-0 place-items-center rounded-md text-foreground/60',
-                      'hover:bg-destructive/10 hover:text-destructive',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    )}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  <ToolButton size="sm" label={`Remove ${script.name}`} onClick={() => onRemove(script)} className="hover:bg-destructive/10 hover:text-destructive">
+                    <Trash2 className="size-4" strokeWidth={1.75} />
+                  </ToolButton>
                 </li>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-48">
@@ -137,111 +116,85 @@ export function UserscriptsSection({
   );
 }
 
-/** What the install dialog opens with: source text plus its origin, if any. */
-export interface UserscriptInstallRequest {
-  /** Prefilled source (empty string for a manual paste). */
-  code: string;
-  /** The *.user.js URL the script came from, when installed via navigation. */
-  url?: string;
+/**
+ * Installing a userscript, in a window of its own beside the browser
+ * (src/lib/webPopup.ts): its parsed name, version and targets above its
+ * editable source, refusing anything without a valid ==UserScript== block.
+ * Launch params `code` and `url`; `at` starts it over.
+ */
+export function UserscriptInstallWindow({ windowId, params }: AppComponentProps) {
+  useWindowTitle('Install Userscript');
+  const code = typeof params?.code === 'string' ? params.code : '';
+  const url = typeof params?.url === 'string' ? params.url : undefined;
+  return <UserscriptInstall key={String(params?.at)} windowId={windowId} initial={code} url={url} />;
 }
 
-/**
- * The install/review dialog: shows the parsed metadata (name, version,
- * targets) above an editable source view, and refuses to install anything
- * without a valid ==UserScript== block.
- */
-export function UserscriptInstallDialog({
-  request,
-  onOpenChange,
-  onInstall,
-}: {
-  request: UserscriptInstallRequest | null;
-  onOpenChange: (open: boolean) => void;
-  onInstall: (code: string, downloadUrl?: string) => void;
-}) {
-  const [code, setCode] = useState('');
+function UserscriptInstall({ windowId, initial, url }: { windowId: string; initial: string; url?: string }) {
+  const { close } = useWindowActions();
+  const { install } = useUserscripts();
+  const { toast } = useToast();
+  const [code, setCode] = useState(initial);
+  const meta = useMemo(() => (code.trim() ? parseUserscriptMeta(code) : null), [code]);
 
-  // Reset the editor whenever a new request opens the dialog (state adjusted
-  // during render, per react.dev's "you might not need an effect").
-  const [lastRequest, setLastRequest] = useState<UserscriptInstallRequest | null>(null);
-  if (request !== lastRequest) {
-    setLastRequest(request);
-    if (request) setCode(request.code);
-  }
-
-  const meta = useMemo(
-    () => (code.trim() ? parseUserscriptMeta(code) : null),
-    [code],
-  );
+  const submit = () => {
+    try {
+      const script = install(code, url);
+      toast({ title: `${script.name} installed`, description: 'It runs on matching pages from their next load.' });
+      close(windowId);
+    } catch (error) {
+      toast({
+        title: "Couldn't install userscript",
+        description: error instanceof Error ? error.message : undefined,
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
-    <Dialog open={request !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Install userscript</DialogTitle>
-          <DialogDescription>
-            Userscripts run automatically on the sites they match, with the
-            same access to those pages as the sites themselves. Only install
-            scripts you trust.
-          </DialogDescription>
-        </DialogHeader>
-
-        {meta ? (
-          <div className="flex items-start gap-3 rounded-md border border-border p-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-md bg-secondary">
-              <FileCode2 className="size-4 text-muted-foreground" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">
-                {meta.name}
-                {meta.version && (
-                  <span className="text-muted-foreground"> v{meta.version}</span>
-                )}
-              </p>
-              {meta.description && (
-                <p className="line-clamp-2 text-xs text-muted-foreground">
-                  {meta.description}
-                </p>
-              )}
-              <p className="truncate text-xs text-muted-foreground">
-                Runs on: {describeTargets(meta.matches, meta.includes)}
-              </p>
-            </div>
+    <div className="flex h-full flex-col gap-4 overflow-y-auto bg-background p-4 [&>*]:shrink-0">
+      <p className="px-1 text-sm text-muted-foreground">
+        Userscripts run automatically on the sites they match, with the same access to those pages as the sites
+        themselves. Only install scripts you trust.
+      </p>
+      {meta ? (
+        <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
+          <SettingsToken icon={FileCode2} active />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">
+              {meta.name}
+              {meta.version && <span className="text-muted-foreground"> v{meta.version}</span>}
+            </p>
+            {meta.description && <p className="line-clamp-2 text-xs text-muted-foreground">{meta.description}</p>}
+            <p className="truncate text-xs text-muted-foreground">Runs on: {describeTargets(meta.matches, meta.includes)}</p>
           </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Paste a script with a <code>==UserScript==</code> metadata header
-            below.
-          </p>
-        )}
-
-        <Textarea
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          aria-label="Userscript source"
-          spellCheck={false}
-          autoComplete="off"
-          placeholder={
-            '// ==UserScript==\n// @name   My script\n// @match  https://example.com/*\n// ==/UserScript==\n'
-          }
-          className="h-56 resize-none font-mono text-xs"
-        />
-
-        {request?.url && (
-          <p className="truncate text-xs text-muted-foreground" title={request.url}>
-            From {request.url}
-          </p>
-        )}
-
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={!meta} onClick={() => onInstall(code, request?.url)}>
-            Install
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      ) : (
+        <p className="px-1 text-xs text-muted-foreground">
+          Paste a script with a <code>==UserScript==</code> metadata header below.
+        </p>
+      )}
+      <Textarea
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        aria-label="Userscript source"
+        spellCheck={false}
+        autoComplete="off"
+        placeholder={'// ==UserScript==\n// @name   My script\n// @match  https://example.com/*\n// ==/UserScript==\n'}
+        className="min-h-56 flex-1 resize-none font-mono text-xs"
+      />
+      {url && (
+        <p className="truncate px-1 text-xs text-muted-foreground" title={url}>
+          From {url}
+        </p>
+      )}
+      <div className="mt-auto flex justify-end gap-2">
+        <Button variant="ghost" onClick={() => close(windowId)}>
+          Cancel
+        </Button>
+        <Button disabled={!meta} onClick={submit}>
+          Install
+        </Button>
+      </div>
+    </div>
   );
 }

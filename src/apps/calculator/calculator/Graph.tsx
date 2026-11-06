@@ -831,7 +831,7 @@ export function Graph({
                 aria-label={spec.steps[tool.picks.length]}
                 placeholder="x"
                 ref={toolInputRef}
-                className="h-7 w-24 rounded-md border border-input bg-background px-2 font-mono text-xs outline-none focus:border-ring"
+                className="h-7 w-24 rounded-lg bg-foreground/[0.06] px-2 font-mono text-xs outline-none focus:border-ring"
               />
             </form>
             <button type="button" onClick={() => setTool(null)} className="ml-auto rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-foreground/10 hover:text-foreground">
@@ -876,7 +876,7 @@ export function Graph({
 function toolbarButton(active = false) {
   return cn(
     'flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40',
-    active ? 'bg-primary/15 text-primary' : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
+    active ? 'bg-selected text-foreground' : 'text-foreground/80 hover:bg-foreground/10 hover:text-foreground',
   );
 }
 
@@ -887,7 +887,7 @@ function CurveSelect({ curves, value, onChange, label }: { curves: Curve[]; valu
       <select
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-7 rounded-md border border-input bg-background px-1 font-mono text-xs text-foreground"
+        className="h-7 rounded-lg bg-foreground/[0.06] px-1 font-mono text-xs text-foreground"
       >
         {curves.map((c, i) => (
           <option key={c.plot.id} value={i}>

@@ -44,7 +44,7 @@ export function SectionHeader({ title, subtitle }: { title: string; subtitle?: s
 export function EmptyState({ message }: { message: string }) {
   return (
     <div className="grid place-items-center py-8">
-      <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+      <div className="max-w-sm rounded-xl px-8 py-12 text-center">
         <Store className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden />
         <p className="text-sm text-muted-foreground">{message}</p>
       </div>

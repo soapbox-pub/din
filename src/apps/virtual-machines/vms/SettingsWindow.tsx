@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cleanVmsError, type VmConfig, type VmInfo, type VmPortForward, type VmsStatus } from '@/lib/vms';
 import { formatBytes, isOn, useBridge, usePickDiscImage } from './bridge';
 import { CdromField, CpuField, Field, MemoryField, OsPicker, SwitchRow } from './fields';
+import { announce } from './windows';
+import { FormWindow } from '@/shared/appChrome';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 function Forwards({ value, onChange }: { value: VmPortForward[]; onChange: (forwards: VmPortForward[]) => void }) {
   const set = (i: number, patch: Partial<VmPortForward>) => onChange(value.map((f, j) => (i === j ? { ...f, ...patch } : f)));
@@ -15,7 +16,7 @@ function Forwards({ value, onChange }: { value: VmPortForward[]; onChange: (forw
   return (
     <div className="space-y-2">
       {value.length === 0 && (
-        <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+        <p className="rounded-lg px-3 py-4 text-center text-xs text-muted-foreground">
           Reach a server in the machine from this computer, like SSH on port 22.
         </p>
       )}
@@ -48,12 +49,12 @@ function Forwards({ value, onChange }: { value: VmPortForward[]; onChange: (forw
             className="flex-1"
           />
           <Button type="button" variant="ghost" size="icon" aria-label="Remove" onClick={() => onChange(value.filter((_, j) => j !== i))}>
-            <Trash2 className="size-4" />
+            <Trash2 className="size-4.5" strokeWidth={1.75} />
           </Button>
         </div>
       ))}
       <Button type="button" variant="outline" size="sm" onClick={() => onChange([...value, { protocol: 'tcp', host: 0, guest: 0 }])}>
-        <Plus className="size-4" aria-hidden />
+        <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
         Add Port
       </Button>
     </div>
@@ -61,17 +62,7 @@ function Forwards({ value, onChange }: { value: VmPortForward[]; onChange: (forw
 }
 
 /** A machine's settings. Hardware changes made while it runs take effect when it next starts. */
-export function SettingsDialog({
-  vm,
-  status,
-  onOpenChange,
-  onRenamed,
-}: {
-  vm: VmInfo;
-  status: VmsStatus;
-  onOpenChange: (open: boolean) => void;
-  onRenamed: (id: string) => void;
-}) {
+export function SettingsWindow({ vm, status }: { vm: VmInfo; status: VmsStatus }) {
   const bridge = useBridge()!;
   const pick = usePickDiscImage();
   const [config, setConfig] = useState<VmConfig>(vm.config);
@@ -90,8 +81,8 @@ export function SettingsDialog({
       const forwards = config.forwards.filter((f) => f.host && f.guest);
       const saved = await bridge.update(vm.id, { ...config, forwards });
       if (diskGiB > currentGiB) await bridge.resizeDisk(saved.id, diskGiB);
-      if (saved.id !== vm.id) onRenamed(saved.id);
-      onOpenChange(false);
+      if (saved.id !== vm.id) announce({ type: 'renamed', id: saved.id });
+      window.close();
     } catch (err) {
       setError(cleanVmsError(err));
     } finally {
@@ -100,25 +91,23 @@ export function SettingsDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <form onSubmit={submit} className="space-y-5">
-          <DialogHeader>
-            <DialogTitle>{vm.config.name} Settings</DialogTitle>
-            <DialogDescription>
-              {on ? 'It’s running: changes to its hardware take effect when it next starts.' : 'Kept in its folder, with its disk.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <Tabs defaultValue="general">
-            <TabsList className="w-full">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="system">System</TabsTrigger>
-              <TabsTrigger value="storage">Storage</TabsTrigger>
-              <TabsTrigger value="network">Network</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="general" className="space-y-5 pt-4">
+    <form onSubmit={submit} className="contents">
+      <FormWindow
+        title={`${vm.config.name} Settings`}
+        description={on ? 'It’s running: changes to its hardware take effect when it next starts.' : 'Kept in its folder, with its disk.'}
+        className="gap-5"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => window.close()} disabled={busy}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !config.name.trim()}>
+              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+              Save
+            </Button>
+          </>
+        }
+      >
               <Field label="Name" htmlFor="vm-settings-name" hint={on ? 'Turn it off to rename it.' : undefined}>
                 <Input
                   id="vm-settings-name"
@@ -135,9 +124,8 @@ export function SettingsDialog({
               <Field label="Folder">
                 <p className="truncate text-sm text-muted-foreground" title={vm.dir}>{vm.dir}</p>
               </Field>
-            </TabsContent>
 
-            <TabsContent value="system" className="space-y-5 pt-4">
+              <SettingsSubHeading>System</SettingsSubHeading>
               <MemoryField value={config.memoryMiB} onChange={(memoryMiB) => patch({ memoryMiB })} status={status} />
               <CpuField value={config.cpus} onChange={(cpus) => patch({ cpus })} status={status} />
               <SwitchRow
@@ -155,9 +143,8 @@ export function SettingsDialog({
               />
               <SwitchRow label="TPM 2.0" checked={config.tpm} onChange={(tpm) => patch({ tpm })} disabled={!status.tpm} />
               <SwitchRow label="Sound" checked={config.audio} onChange={(audio) => patch({ audio })} />
-            </TabsContent>
 
-            <TabsContent value="storage" className="space-y-5 pt-4">
+              <SettingsSubHeading>Storage</SettingsSubHeading>
               <CdromField
                 path={config.cdrom}
                 onChoose={() => void pick().then((file) => file && patch({ cdrom: file.path }))}
@@ -183,9 +170,8 @@ export function SettingsDialog({
                   <span className="text-sm text-muted-foreground">GB</span>
                 </div>
               </Field>
-            </TabsContent>
 
-            <TabsContent value="network" className="space-y-5 pt-4">
+              <SettingsSubHeading>Network</SettingsSubHeading>
               <SwitchRow
                 label="Network"
                 description="Through this computer’s connection (NAT)."
@@ -197,22 +183,9 @@ export function SettingsDialog({
                   <Forwards value={config.forwards} onChange={(forwards) => patch({ forwards })} />
                 </Field>
               )}
-            </TabsContent>
-          </Tabs>
 
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy || !config.name.trim()}>
-              {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {error && <p role="alert" className="px-1 text-sm text-destructive">{error}</p>}
+      </FormWindow>
+    </form>
   );
 }

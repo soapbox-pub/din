@@ -34,6 +34,7 @@ import {
 import { useAssistantHost } from '@/shared/assistant/host';
 import { PROVIDER_WINDOW_APP_ID, providerWindowParams } from '@/shared/assistant/providerWindow';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
 
 /** Each provider's base URL, from its models, for its icon. */
 function useProviderBaseURLs(): Map<string, string> {
@@ -108,15 +109,15 @@ export function ProviderList({ description = true }: { description?: boolean }) 
     <div className="space-y-3">
       <div className="flex items-end justify-between gap-2">
         <div>
-          <h3 className="text-sm font-medium text-foreground">AI providers</h3>
+          <h3 className="px-1 text-sm font-semibold text-foreground/90">AI providers</h3>
           {description && (
-            <p className="text-xs text-muted-foreground">
+            <p className="px-1 text-xs text-muted-foreground">
               The services whose models the assistant may use. OpenCode’s free models need none.
             </p>
           )}
         </div>
         <Button variant="outline" size="sm" disabled={!ready} onClick={() => openProvider(null)}>
-          <Plus className="size-3.5" aria-hidden /> Add provider
+          <Plus className="size-4.5" strokeWidth={1.75} aria-hidden /> Add provider
         </Button>
       </div>
 
@@ -124,26 +125,26 @@ export function ProviderList({ description = true }: { description?: boolean }) 
 
       {!ready || isLoading ? (
         <div className="space-y-2">
-          <Skeleton className="h-12 w-full rounded-md" />
-          <Skeleton className="h-12 w-full rounded-md" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
         </div>
       ) : connected.length === 0 ? (
-        <div className="rounded-md border border-dashed px-6 py-8 text-center text-sm text-muted-foreground">
+        <div className="px-6 py-8 text-center text-sm text-muted-foreground">
           No providers yet. Add one with an API key or by signing in.
         </div>
       ) : (
-        <ul className="divide-y divide-border/60 rounded-md border">
+        <ul className={settingsGroup}>
           {connected.map((integration) => {
             const credentials = credentialIDs(integration);
             const name = providerName(integration.id, integration.name);
             const problem = integration.connections.find((c) => c.status)?.status;
             return (
-              <li key={integration.id} className="flex items-center gap-3 px-3 py-2.5">
+              <li key={integration.id} className="flex items-center gap-3 py-2.5 pr-2 pl-4">
                 <ProviderIcon providerID={integration.id} baseURL={baseURLs.get(integration.id)} size={20} className="text-foreground/80" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{name}</p>
                   {problem ? (
-                    <p className="flex items-center gap-1 truncate text-xs text-amber-700 dark:text-amber-400" title={problem.message}>
+                    <p className="flex items-center gap-1 truncate text-xs text-warning" title={problem.message}>
                       <CircleAlert className="size-3 shrink-0" aria-hidden />
                       <span className="truncate">{problem.message}</span>
                     </p>
@@ -163,7 +164,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
                   title={problem ? 'Fix it' : 'Replace the key, or sign in again'}
                   onClick={() => openProvider(integration.id)}
                 >
-                  <Pencil className="size-4" aria-hidden />
+                  <Pencil className="size-4.5" strokeWidth={1.75} aria-hidden />
                 </Button>
                 {credentials.length > 0 && (
                   <Button
@@ -175,7 +176,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
                     disabled={remove.isPending}
                     onClick={() => remove.mutate(credentials)}
                   >
-                    <Trash2 className="size-4" aria-hidden />
+                    <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                   </Button>
                 )}
               </li>
@@ -398,8 +399,8 @@ function ClaudeSetupCard() {
   const state = useClaudeSetup();
   if (state.step === 'idle') return null;
   return (
-    <div className="rounded-md border bg-muted/20">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+    <div className={settingsCard}>
+      <div className="relative flex items-center gap-2 py-2 pr-2 pl-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-border/70">
         <ProviderIcon providerID={CLAUDE_PROVIDER} size={16} />
         <p className="flex-1 text-sm font-medium">Setting up Claude</p>
         <Button variant="ghost" size="sm" className="h-7 text-muted-foreground" onClick={cancelClaudeSetup}>
@@ -506,7 +507,7 @@ function ClaudeSetupSteps({ state, compact }: { state: ClaudeSetupState; compact
       )}
 
       {state.step === 'signing-in' && (
-        <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+        <div className="space-y-3 rounded-xl bg-foreground/[0.04] p-3">
           <p className="text-sm">Sign in to Claude in the browser, and allow Claude Code. Din carries on by itself once you have.</p>
           <div className="flex flex-wrap gap-2">
             {page && (

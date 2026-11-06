@@ -152,6 +152,33 @@ export function paintSettled(): Promise<void> {
   });
 }
 
+/** How long a capture waits for window effects to finish before it hides what's left of them. */
+const EFFECTS_DEADLINE_MS = 1500;
+
+/**
+ * Capture the desktop as the user sees it, without what only animates over
+ * it: a window still minimizing or closing (its effect, a canvas or <img>
+ * marked `data-window-effect`, outlives the window it was) is waited for,
+ * and the cursor effects' layer (trails, a click's ripple, the arrows Mouse
+ * Trails draws) is hidden while the shot is taken, as is any effect still
+ * playing at the deadline (`data-capturing` on the root, in index.css).
+ * din-shell draws the pointer itself, so it's never in a capture.
+ */
+export async function captureDesktop(bridge: ScreenshotBridge): Promise<Screenshot> {
+  const deadline = Date.now() + EFFECTS_DEADLINE_MS;
+  while (document.querySelector('[data-window-effect]') && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 32));
+  }
+  const root = document.documentElement;
+  root.dataset.capturing = '';
+  try {
+    await paintSettled();
+    return await bridge.capture();
+  } finally {
+    delete root.dataset.capturing;
+  }
+}
+
 /**
  * Crop a full-desktop capture to the selected region. The selection is in
  * viewport CSS pixels while the capture is in device pixels; the shell

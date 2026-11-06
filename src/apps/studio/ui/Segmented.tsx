@@ -39,7 +39,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={cn('inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5', disabled && 'opacity-50', className)}
+      className={cn('inline-flex items-center gap-0.5 rounded-full bg-foreground/[0.06] p-0.5', disabled && 'opacity-50', className)}
       onKeyDown={(e) => {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
@@ -64,9 +64,9 @@ export function Segmented<T extends string>({
             disabled={disabled || segment.disabled}
             onClick={() => onChange(segment.value)}
             className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none',
-              'hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none',
-              on && 'bg-background text-foreground shadow-sm',
+              'inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none',
+              'hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none',
+              on && 'bg-background text-foreground clay dark:bg-foreground/[0.14]',
             )}
           >
             {segment.icon}

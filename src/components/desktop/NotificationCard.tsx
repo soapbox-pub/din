@@ -75,7 +75,7 @@ export function NotificationCard({
             variant === 'popup' &&
               'pointer-events-auto', glassPanel, 'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4',
             variant === 'list' && 'px-4 hover:bg-accent/60',
-            variant === 'list' && !notification.read && 'bg-primary/5',
+            variant === 'list' && !notification.read && 'bg-selected',
           )}
         >
           <div className="flex items-center gap-1.5 pr-6 text-xs text-muted-foreground">
@@ -251,13 +251,13 @@ function ReplyField({
               onCancel();
             }
           }}
-          className="max-h-24 min-h-8 flex-1 resize-none rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [field-sizing:content]"
+          className="max-h-24 min-h-8 flex-1 resize-none rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [field-sizing:content]"
         />
         <button
           type="submit"
           aria-label="Send"
           disabled={!text.trim() || sending}
-          className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-pigment text-primary-foreground clay-pigment transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {sending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <SendHorizontal className="size-4" aria-hidden />}
         </button>

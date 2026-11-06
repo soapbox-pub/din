@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type FormEvent, type ReactNode } from 'react';
-import { EllipsisVertical, Loader2, Plus, Shield, ShieldOff } from 'lucide-react';
+import { Loader2, MoreHorizontal, Plus, Shield, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -30,6 +30,8 @@ import {
   type FirewallRule,
 } from '@/lib/firewall';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsSection, SettingsSubHeading } from '@/shared/settingsSection';
 
 /**
  * Settings → Firewall: the ports other devices may connect to, besides
@@ -49,17 +51,14 @@ export function FirewallSettingsSection() {
   };
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header>
-        <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">Firewall</h2>
-      </header>
+    <SettingsSection title="Firewall">
 
       {!bridge ? (
         <Fallback>Firewall settings need the Din desktop shell; they aren’t available in a plain browser.</Fallback>
       ) : !status ? (
         <div className="flex flex-col gap-2">
-          <Skeleton className="h-16 w-full rounded-lg" />
-          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-16 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
         </div>
       ) : !status.canChange ? (
         <Fallback>
@@ -68,13 +67,13 @@ export function FirewallSettingsSection() {
         </Fallback>
       ) : (
         <>
-          <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-3">
+          <div className={cn(settingsCard, 'flex items-start gap-3 px-4 py-3')}>
             <span
               className={cn(
                 'grid size-9 shrink-0 place-items-center rounded-full',
                 status.active === false
-                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'bg-emerald-600/15 text-emerald-700 dark:text-emerald-400',
+                  ? 'bg-destructive/15 text-destructive'
+                  : 'bg-pigment text-primary-foreground clay-pigment',
               )}
             >
               {status.active === false ? <ShieldOff className="size-4.5" aria-hidden /> : <Shield className="size-4.5" aria-hidden />}
@@ -92,13 +91,13 @@ export function FirewallSettingsSection() {
           </div>
 
           <div>
-            <h3 className="mb-2 text-sm font-medium text-foreground">Allowed ports</h3>
+            <SettingsSubHeading>Allowed ports</SettingsSubHeading>
             {status.rules.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border px-6 py-8 text-center">
+              <div className="mt-2 px-6 py-8 text-center">
                 <p className="mx-auto max-w-sm text-sm text-muted-foreground">No other ports are let in.</p>
               </div>
             ) : (
-              <ul className="flex flex-col gap-2" aria-label="Allowed ports">
+              <ul className={cn(settingsGroup, 'mt-2')} aria-label="Allowed ports">
                 {status.rules.map((rule) => (
                   <RuleRow key={`${rule.protocol} ${rule.from}-${rule.to}`} rule={rule} onRemove={() => remove(rule)} />
                 ))}
@@ -109,13 +108,13 @@ export function FirewallSettingsSection() {
           <AllowPortForm />
         </>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
 function Fallback({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+    <div className="px-8 py-12 text-center">
       <Shield className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
       <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
     </div>
@@ -142,10 +141,10 @@ function RuleRow({ rule, onRemove }: { rule: FirewallRule; onRemove: () => void 
   const ports = describeRule(rule);
   const label = rule.name || ports;
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40">
+    <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex items-center gap-3 px-3 py-2">
+          <div className="flex items-center gap-3 py-2 pr-2 pl-4">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-foreground">{label}</p>
               {rule.name && <p className="truncate text-xs text-muted-foreground tabular-nums">{ports}</p>}
@@ -153,7 +152,7 @@ function RuleRow({ rule, onRemove }: { rule: FirewallRule; onRemove: () => void 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label={`${label} options`}>
-                  <EllipsisVertical className="size-4" />
+                  <MoreHorizontal className="size-4.5" strokeWidth={1.75} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -204,9 +203,9 @@ function AllowPortForm() {
   };
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-border/60 bg-background/40 p-3" aria-label="Allow a port">
+    <form onSubmit={submit} className={cn(settingsCard, 'px-4 py-3')} aria-label="Allow a port">
       <h3 className="mb-3 text-sm font-medium text-foreground">Allow a port</h3>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_9rem]">
+      <div className="grid gap-3 @xl:grid-cols-[minmax(0,1fr)_8rem_9rem]">
         <div className="space-y-1.5">
           <Label htmlFor="firewall-name">What it’s for</Label>
           <Input
@@ -258,7 +257,7 @@ function AllowPortForm() {
           A range is two ports with a dash, like 27000-27015. The app’s instructions say which it needs.
         </p>
         <Button type="submit" size="sm" disabled={pending || !ports.trim()}>
-          {pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Plus className="size-4" aria-hidden />}
+          {pending ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden /> : <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />}
           Allow
         </Button>
       </div>

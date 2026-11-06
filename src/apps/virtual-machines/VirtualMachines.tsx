@@ -11,7 +11,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -30,11 +29,12 @@ import { VmActionItems } from './vms/ActionItems';
 import { CdromField, OsBadge } from './vms/fields';
 import { Gallery } from './vms/Gallery';
 import { InstallCard } from './vms/InstallCard';
-import { NewVmDialog } from './vms/NewVmDialog';
-import { SettingsDialog } from './vms/SettingsDialog';
+import { NewVmWindow } from './vms/NewVmWindow';
+import { SettingsWindow } from './vms/SettingsWindow';
+import { openVmWindow, useVmWindowMessages, type VmWindow } from './vms/windows';
 import { Sidebar, StateDot } from './vms/Sidebar';
 import { SnapshotList, TakeSnapshotDialog } from './vms/Snapshots';
-import { appLink } from '@/shared/launch';
+import { appLink, windowLaunch, type Launch } from '@/shared/launch';
 
 const SELECTED_KEY = 'virtual-machines:selected';
 const SCALE_KEY = 'virtual-machines:scale';
@@ -79,10 +79,20 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
  * permission; electron/vms.mts). Each machine is a folder in ~/VMs. Its
  * screen is QEMU's VNC server, drawn by noVNC over the app's bridge port.
  */
+/** The window a launch asks for: Virtual Machines itself, or one it opened for a form. */
+function windowKind({ params }: Launch): VmWindow | null {
+  if (params.window === 'settings' && typeof params.vm === 'string') return { window: 'settings', vm: params.vm };
+  if (params.window === 'new') {
+    return { window: 'new', system: typeof params.system === 'string' ? (params.system as VmInstallerId) : undefined, other: params.other === true };
+  }
+  return null;
+}
+
 export function VirtualMachines() {
   const bridge = useBridge();
   const { data: status } = useVmsStatus();
-  useWindowTitle('Virtual Machines');
+  const [kind] = useState(() => windowKind(windowLaunch()));
+  useWindowTitle(kind?.window === 'new' ? 'New Virtual Machine' : kind?.window === 'settings' ? 'Settings' : 'Virtual Machines');
 
   let body: React.ReactNode;
   if (!bridge) {
@@ -104,18 +114,38 @@ export function VirtualMachines() {
   } else if (!status.available) {
     body = (
       <div className="m-auto max-w-md space-y-3 p-8 text-center">
-        <AlertTriangle className="mx-auto size-10 text-amber-500" aria-hidden />
+        <AlertTriangle className="mx-auto size-10 text-warning" aria-hidden />
         <h1 className="text-lg font-semibold">Virtual machines can’t run here</h1>
         <p className="text-sm text-muted-foreground">This computer is missing {status.missing.join(' and ')}.</p>
       </div>
     );
+  } else if (kind) {
+    return <FormWindowFor kind={kind} status={status} />;
   } else {
     return <Machines bridge={bridge} status={status} />;
   }
   return (
-    <div className="flex h-full w-full flex-col bg-background text-foreground">
+    <div className="flex h-full w-full flex-col text-foreground">
       <TitleBar />
-      {body}
+      <ContentPane inset={false} className="border-t-0">
+        {body}
+      </ContentPane>
+    </div>
+  );
+}
+
+/** A window Virtual Machines opened beside its own: a new machine, or one's settings. */
+function FormWindowFor({ kind, status }: { kind: VmWindow; status: VmsStatus }) {
+  const { data: vms, isLoading } = useVms();
+  if (kind.window === 'new') return <NewVmWindow status={status} existing={vms ?? []} system={kind.system} other={kind.other} />;
+  const vm = vms?.find((v) => v.id === kind.vm);
+  if (vm) return <SettingsWindow key={vm.id} vm={vm} status={status} />;
+  return (
+    <div className="flex h-full w-full flex-col text-foreground">
+      <TitleBar />
+      <ContentPane inset={false} className="border-t-0">
+        {isLoading ? <Skeleton className="m-auto h-24 w-72 rounded-xl" /> : <p className="m-auto p-8 text-sm text-muted-foreground">This machine isn’t here any more.</p>}
+      </ContentPane>
     </div>
   );
 }
@@ -125,13 +155,9 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
   const { data: vms = [], isLoading } = useVms();
   const [chosen, setChosen] = useState<string | null>(() => localStorage.getItem(SELECTED_KEY));
   const [scale, setScale] = useState(() => localStorage.getItem(SCALE_KEY) !== 'false');
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  /** The form: undefined while closed, null for Other, else Custom Install of that system. */
-  const [form, setForm] = useState<VmInstallerId | null | undefined>(undefined);
   const [cancelling, setCancelling] = useState<VmInfo | null>(null);
   /** Machines being installed whose screens are shown instead of their progress. */
   const [screens, setScreens] = useState<Set<string>>(new Set());
-  const [settingsFor, setSettingsFor] = useState<string | null>(null);
   const [snapshotFor, setSnapshotFor] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<VmInfo | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -196,7 +222,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         case 'snapshot':
           return setSnapshotFor(id);
         case 'settings':
-          return setSettingsFor(id);
+          return openVmWindow({ window: 'settings', vm: id });
         case 'showInFiles':
           // Files opens at a folder it's handed, not one named in its params.
           return void din.files.fromPath(parentPath(target.dir)).then(
@@ -212,22 +238,27 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
     [bridge, busy, din],
   );
 
+  // The empty window's systems: a tile installs at once, a right-click (or
+  // Other) opens the form in a window of its own.
   const install = useCallback(
     async (system: VmInstallerId) => {
       try {
-        const created = await bridge.install(system);
-        select(created.id);
-        setGalleryOpen(false);
+        select((await bridge.install(system)).id);
       } catch (err) {
         fail(err);
       }
     },
     [bridge, fail],
   );
-  const custom = (system: VmInstallerId | null) => {
-    setGalleryOpen(false);
-    setForm(system);
-  };
+  const custom = (system: VmInstallerId | null) => openVmWindow(system ? { window: 'new', system } : { window: 'new', other: true });
+
+  // What the windows it opened made: a new machine, or one renamed, to choose.
+  useVmWindowMessages(
+    useCallback((message) => {
+      setChosen(message.id);
+      localStorage.setItem(SELECTED_KEY, message.id);
+    }, []),
+  );
   const toggleScreen = (id: string) =>
     setScreens((s) => {
       const next = new Set(s);
@@ -268,7 +299,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
     },
   ];
   useMenuBar(menus, (id) => {
-    if (id === 'new') setGalleryOpen(true);
+    if (id === 'new') openVmWindow({ window: 'new' });
     else if (id.startsWith('vm:') && vm) act(vm, id.slice(3) as VmAction);
     else if (id === 'scale') setScale((s) => !s);
     else if (id === 'fullscreen') consoleRef.current?.fullscreen();
@@ -279,7 +310,6 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
     else if (id.startsWith('vt:')) sendKeys([KEY.ctrl, KEY.alt, KEY.f(Number(id.slice(3)))]);
   });
 
-  const settingsVm = vms.find((v) => v.id === settingsFor);
   const snapshotVm = vms.find((v) => v.id === snapshotFor);
   const working = vm ? pending.has(vm.id) : false;
 
@@ -290,7 +320,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         loading={isLoading}
         selected={vm?.id ?? null}
         onSelect={select}
-        onNew={() => setGalleryOpen(true)}
+        onNew={() => openVmWindow({ window: 'new' })}
         onAction={act}
         className="hidden sm:flex"
       />
@@ -333,7 +363,7 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
                   <VmActionItems vm={vm} kind="dropdown" onAction={(action) => act(vm, action)} />
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="New virtual machine" onClick={() => setGalleryOpen(true)}>
+              <Button variant="ghost" size="icon" className="size-8 sm:hidden" aria-label="New virtual machine" onClick={() => openVmWindow({ window: 'new' })}>
                 <Plus className="size-4" />
               </Button>
               {/* The VM's state after what acts on it; its name only while the
@@ -404,36 +434,6 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
         </ContentPane>
       </div>
 
-      <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>New Virtual Machine</DialogTitle>
-            <DialogDescription>Pick a system and Din sets it all up. Right-click one to choose its settings first.</DialogDescription>
-          </DialogHeader>
-          <Gallery available={status.installers} onInstall={install} onCustom={custom} />
-        </DialogContent>
-      </Dialog>
-      <NewVmDialog
-        key={form ?? 'other'}
-        system={form ?? null}
-        open={form !== undefined}
-        onOpenChange={(o) => !o && setForm(undefined)}
-        status={status}
-        existing={vms}
-        onCreated={(created, start) => {
-          select(created.id);
-          if (start) act(created, 'start');
-        }}
-      />
-      {settingsVm && (
-        <SettingsDialog
-          key={settingsVm.id}
-          vm={settingsVm}
-          status={status}
-          onOpenChange={(o) => !o && setSettingsFor(null)}
-          onRenamed={select}
-        />
-      )}
       {snapshotVm && <TakeSnapshotDialog vm={snapshotVm} onOpenChange={(o) => !o && setSnapshotFor(null)} onError={fail} />}
       <AlertDialog open={!!cancelling} onOpenChange={(o) => !o && setCancelling(null)}>
         <AlertDialogContent>
@@ -500,7 +500,7 @@ function Empty({
 
 function Spec({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5">
+    <div className="rounded-xl bg-card clay px-3 py-2.5">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 truncate text-sm font-medium">{value}</dd>
     </div>

@@ -16,10 +16,9 @@ export const editorChrome = EditorView.theme({
   '.cm-content': { padding: '8px 0', caretColor: 'var(--foreground)' },
   '.cm-line': { padding: '0 16px 0 8px' },
   '.cm-gutters': {
-    backgroundColor: mix('var(--foreground)', 3),
+    backgroundColor: 'transparent',
     color: mix('var(--muted-foreground)', 85),
     border: 'none',
-    borderRight: `1px solid ${mix('var(--border)', 50)}`,
   },
   '.cm-lineNumbers .cm-gutterElement': { padding: '0 8px 0 16px', minWidth: '40px' },
   '.cm-foldGutter .cm-gutterElement': { padding: '0 4px', cursor: 'pointer' },
@@ -28,10 +27,10 @@ export const editorChrome = EditorView.theme({
   '.cm-cursor, .cm-dropCursor': { borderLeft: '2px solid var(--foreground)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
     { backgroundColor: `${SELECTION} !important` },
-  '.cm-selectionMatch': { backgroundColor: mix('var(--sidebar-ring)', 14) },
+  '.cm-selectionMatch': { backgroundColor: mix('var(--primary)', 14) },
   '&.cm-focused .cm-matchingBracket': {
-    backgroundColor: mix('var(--sidebar-ring)', 20),
-    outline: `1px solid ${mix('var(--sidebar-ring)', 60)}`,
+    backgroundColor: mix('var(--primary)', 20),
+    outline: `1px solid ${mix('var(--primary)', 60)}`,
   },
   '&.cm-focused .cm-nonmatchingBracket': { backgroundColor: mix('var(--destructive)', 30) },
   '.cm-searchMatch': {
@@ -60,10 +59,10 @@ export const editorChrome = EditorView.theme({
   '.cm-tooltip-autocomplete > ul': { fontFamily: MONO_FONT, maxHeight: '16em' },
   '.cm-tooltip-autocomplete > ul > li': { padding: '2px 8px !important' },
   '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-    backgroundColor: mix('var(--sidebar-ring)', 30),
+    backgroundColor: mix('var(--primary)', 30),
     color: 'var(--foreground)',
   },
-  '.cm-completionMatchedText': { textDecoration: 'none', fontWeight: '600', color: 'var(--sidebar-ring)' },
+  '.cm-completionMatchedText': { textDecoration: 'none', fontWeight: '600', color: 'var(--primary)' },
   '.cm-completionDetail': { color: 'var(--muted-foreground)', fontStyle: 'normal' },
   '.cm-indentation-marker': { opacity: '0.6' },
 });

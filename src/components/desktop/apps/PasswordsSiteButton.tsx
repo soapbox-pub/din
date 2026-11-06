@@ -41,7 +41,7 @@ function CopyButton({ label, icon, onCopy }: { label: string; icon: React.ReactN
       title={label}
       onClick={() => void onCopy().then(() => setDone(true))}
     >
-      {done ? <Check className="size-3.5 text-primary" /> : icon}
+      {done ? <Check className="size-3.5 text-ink-accent" /> : icon}
     </Button>
   );
 }
@@ -89,7 +89,7 @@ export function PasswordsSiteButton({ url, wcId }: { url: string; wcId: number |
                 type="button"
                 onClick={() => fill(login)}
                 title="Fill in this page"
-                className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span className="block truncate text-sm font-medium">{login.username || 'No username'}</span>
                 <span className="block truncate text-xs text-muted-foreground">{login.title || 'Fill in this page'}</span>
@@ -106,7 +106,7 @@ export function PasswordsSiteButton({ url, wcId }: { url: string; wcId: number |
               setOpen(false);
               openApp('passwords', logins.length === 1 ? { item: logins[0].id, nonce: Date.now() } : undefined);
             }}
-            className="w-full rounded-md px-2 py-1.5 text-left text-sm text-primary hover:bg-foreground/5"
+            className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-ink-accent hover:bg-foreground/5"
           >
             Open Passwords…
           </button>

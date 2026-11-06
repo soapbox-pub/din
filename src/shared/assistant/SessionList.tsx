@@ -409,7 +409,7 @@ export function SessionList({
           <div className="space-y-3">
             {needsYou.length > 0 && (
               <section aria-labelledby="assistant-needs-you">
-                <h3 id="assistant-needs-you" className={cn(sidebarHeadingClass, 'gap-1.5 text-primary')}>
+                <h3 id="assistant-needs-you" className={cn(sidebarHeadingClass, 'gap-1.5 text-ink-accent')}>
                   Needs you
                   <span className="mb-1 size-1.5 rounded-full bg-primary" aria-hidden />
                 </h3>
@@ -449,7 +449,7 @@ export function SessionList({
                   }}
                   className={cn(
                     'rounded-lg motion-safe:transition-colors',
-                    dropTarget === project.key && accepts && 'bg-primary/10 ring-2 ring-primary/50',
+                    dropTarget === project.key && accepts && 'bg-selected ring-2 ring-ring/60',
                   )}
                 >
                   <div className="group flex items-center gap-1">

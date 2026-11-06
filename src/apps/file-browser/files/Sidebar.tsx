@@ -219,7 +219,7 @@ export function Sidebar({
   return (
     <nav
       aria-label="Places"
-      className={cn('flex h-full shrink-0 flex-col gap-3 overflow-y-auto px-2 pb-2', sidebarWidthClass)}
+      className={cn('flex h-full shrink-0 flex-col gap-3 overflow-y-auto px-2 pb-2 [&>*]:shrink-0', sidebarWidthClass)}
       onDragEnter={(e) => {
         if (favoriteDrop(e)) setOfferingFavorite(true);
       }}
@@ -252,9 +252,9 @@ export function Sidebar({
               });
             }}
             className={cn(
-              'flex items-center gap-2 rounded-md border border-dashed px-2 py-2 text-xs',
+              'flex items-center gap-2 rounded-md px-2 py-2 text-xs',
               dragTarget === '#favorites'
-                ? 'border-primary bg-primary/10 text-foreground'
+                ? 'bg-selected text-foreground'
                 : 'border-border text-muted-foreground',
             )}
           >
@@ -330,7 +330,7 @@ function SidebarItem({
           className={cn(
             'group flex items-center rounded-md',
             dropping
-              ? 'bg-primary/20 text-foreground ring-2 ring-primary'
+              ? 'bg-selected text-foreground ring-2 ring-ring/60'
               : active
                 ? 'bg-foreground/10 font-medium text-foreground'
                 : 'hover:bg-foreground/5',

@@ -49,6 +49,8 @@ import { useToast } from '@/hooks/useToast';
 import { describePhone, getPhoneDesktopBridge, type PhoneDevice } from '@/lib/phone';
 import { cleanPhoneError } from '@/shared/phone';
 import { PhoneSetupWizard } from './PhoneSetupWizard';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsSection, SettingsSubHeading } from '@/shared/settingsSection';
 
 /**
  * Settings → Phone: the phones whose texts show up in Messages and
@@ -147,23 +149,26 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
   const others = data?.phones.filter((p) => p.status !== 'connected') ?? [];
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="font-[family-name:var(--font-title)] text-lg font-semibold text-foreground">Phone</h2>
-        {bridge && data && data.phones.length > 0 && (
+    <SettingsSection
+      title="Phone"
+      actions={
+        bridge &&
+        data &&
+        data.phones.length > 0 && (
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-            <Plus className="size-4" aria-hidden />
+            <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
             Add a phone
           </Button>
-        )}
-      </header>
+        )
+      }
+    >
 
       {!bridge ? (
         <Fallback>Phone settings need the Din desktop shell; they aren’t available in a plain browser.</Fallback>
       ) : status.isLoading ? (
-        <div className="flex flex-col gap-2">
+        <div className={settingsGroup}>
           {[0, 1].map((i) => (
-            <div key={i} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-3">
+            <div key={i} className="flex items-center gap-3 px-4 py-3">
               <Skeleton className="size-5 rounded" />
               <div className="flex flex-1 flex-col gap-1.5">
                 <Skeleton className="h-4 w-40" />
@@ -175,13 +180,13 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
       ) : status.isError || !data ? (
         <Fallback>Couldn’t read the phones: {cleanPhoneError(status.error)}</Fallback>
       ) : data.phones.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+        <div className="px-8 py-12 text-center">
           <Smartphone className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">
             Read and answer your texts on this computer, in Messages and in notifications. Works with iPhone and Android.
           </p>
           <Button className="mt-6" onClick={() => setAdding(true)}>
-            <Plus className="size-4" aria-hidden />
+            <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
             Add a phone
           </Button>
         </div>
@@ -189,8 +194,8 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
         <div className="flex flex-col gap-4">
           {connected.length > 0 && (
             <div className="flex flex-col gap-2">
-              <SubHeading>Connected phones</SubHeading>
-              <ul className="flex flex-col gap-1" aria-label="Connected phones">
+              <SettingsSubHeading>Connected phones</SettingsSubHeading>
+              <ul className={settingsGroup} aria-label="Connected phones">
                 {connected.map((phone) => (
                   <PhoneRow key={phone.id} phone={phone} {...rowActions(phone)} />
                 ))}
@@ -199,8 +204,8 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
           )}
           {others.length > 0 && (
             <div className="flex flex-col gap-2">
-              <SubHeading>{connected.length > 0 ? 'Other phones' : 'My phones'}</SubHeading>
-              <ul className="flex flex-col gap-1" aria-label="My phones">
+              <SettingsSubHeading>{connected.length > 0 ? 'Other phones' : 'My phones'}</SettingsSubHeading>
+              <ul className={settingsGroup} aria-label="My phones">
                 {others.map((phone) => (
                   <PhoneRow key={phone.id} phone={phone} {...rowActions(phone)} />
                 ))}
@@ -212,7 +217,7 @@ export function PhoneSettingsSection({ addRequest }: { addRequest?: unknown }) {
       )}
 
       {forgetDialog}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -264,7 +269,7 @@ function PhoneRow({
   const connected = phone.status === 'connected';
   const connecting = phone.status === 'connecting';
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40">
+    <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
@@ -285,7 +290,7 @@ function PhoneRow({
                   title="Phone details"
                   onClick={onDetails}
                 >
-                  <Settings2 className="size-4" />
+                  <Settings2 className="size-4.5" strokeWidth={1.75} />
                 </Button>
               )
             }
@@ -325,7 +330,7 @@ function PhoneRow({
         </ContextMenuContent>
       </ContextMenu>
       {phone.error && (
-        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+        <p role="alert" className="px-4 pb-2 text-xs text-destructive">
           {phone.error}
         </p>
       )}
@@ -422,13 +427,9 @@ function PhoneDetails({
   );
 }
 
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
 function Fallback({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+    <div className="px-8 py-12 text-center">
       <Smartphone className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
       <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
     </div>

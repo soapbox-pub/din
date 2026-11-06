@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
-import { Settings, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { getAdblockBridge } from '@/lib/adblock';
 import { useAdblockSettings } from '@/hooks/useAdblock';
 import { getPopupsBridge } from '@/lib/popups';
 import { usePopupSettings } from '@/hooks/usePopups';
 import { useBookmarksBarShown } from '@/hooks/useBrowserBookmarks';
-import { Button } from '@/components/ui/button';
+import { PillButton, ToolButton } from '@/shared/appChrome';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -14,6 +15,7 @@ import {
 } from '@/components/ui/context-menu';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /**
  * Everything `about:preferences` needs from the browser window hosting it.
@@ -59,20 +61,12 @@ export function PreferencesPage(props: PreferencesProps) {
   const [barShown, setBarShown] = useBookmarksBarShown();
 
   return (
-    // Opaque, like the new-tab page: the surface underneath is a white
-    // about:blank that would otherwise wash out the gradient in dark mode.
-    <div className="absolute inset-0 overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-12 text-foreground">
-      <div className="mx-auto w-full max-w-2xl space-y-8">
-        <header className="flex items-center gap-4">
-          <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
-            <Settings className="size-6" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-            <p className="text-sm text-muted-foreground">
-              Preferences for this browser, saved on this device.
-            </p>
-          </div>
+    // Opaque: the surface underneath is a white about:blank.
+    <div className="absolute inset-0 overflow-auto bg-background px-6 py-10 text-foreground">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 [&>*]:shrink-0">
+        <header className="px-1">
+          <h1 className="font-[family-name:var(--font-title)] text-2xl font-semibold tracking-tight">Browser Settings</h1>
+          <p className="text-sm text-muted-foreground">Preferences for the Web Browser, saved on this device.</p>
         </header>
 
         <PreferencesSection
@@ -103,16 +97,16 @@ export function PreferencesPage(props: PreferencesProps) {
           >
             <Switch id="prefs-bookmarks-bar" checked={barShown} onCheckedChange={setBarShown} />
           </SettingRow>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={onOpenBookmarks}>
-              Manage bookmarks
-            </Button>
-            <Button variant="secondary" onClick={onImportBookmarks}>
+          <div className="flex flex-wrap gap-2 px-4 py-3">
+            <PillButton size="sm" onClick={onOpenBookmarks}>
+              Manage Bookmarks
+            </PillButton>
+            <PillButton size="sm" onClick={onImportBookmarks}>
               Import…
-            </Button>
-            <Button variant="secondary" onClick={onExportBookmarks}>
+            </PillButton>
+            <PillButton size="sm" onClick={onExportBookmarks}>
               Export…
-            </Button>
+            </PillButton>
           </div>
         </PreferencesSection>
 
@@ -129,9 +123,9 @@ export function PreferencesPage(props: PreferencesProps) {
               label="Clear browsing data"
               description="Remove saved history, cookies and site data, or the cache."
             >
-              <Button variant="secondary" onClick={onClearBrowsingData}>
-                Clear data…
-              </Button>
+              <PillButton size="sm" onClick={onClearBrowsingData}>
+                Clear Data…
+              </PillButton>
             </SettingRow>
           </PreferencesSection>
         )}
@@ -154,6 +148,26 @@ function AdblockSection() {
     <PreferencesSection
       title="Ad blocker"
       description="Blocks ads and trackers with EasyList, EasyPrivacy, and uBlock Origin's filters, updated every few days."
+      after={
+        settings.allowlist.length > 0 && (
+          <>
+            <p className="px-1 text-xs font-semibold text-muted-foreground">Allowed on these sites</p>
+            <ul className={settingsGroup}>
+              {[...settings.allowlist].sort().map((site) => (
+                <AllowlistRow
+                  key={site}
+                  site={site}
+                  ariaLabel={`Block ads on ${site} again`}
+                  action="Block ads here again"
+                  onRemove={() => {
+                    bridge.setSiteAllowed(site, false).catch(() => {});
+                  }}
+                />
+              ))}
+            </ul>
+          </>
+        )
+      }
     >
       <SettingRow
         htmlFor="prefs-adblock"
@@ -168,24 +182,6 @@ function AdblockSection() {
           }}
         />
       </SettingRow>
-      {settings.allowlist.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Allowed on these sites</p>
-          <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
-            {[...settings.allowlist].sort().map((site) => (
-              <AllowlistRow
-                key={site}
-                site={site}
-                ariaLabel={`Block ads on ${site} again`}
-                action="Block ads here again"
-                onRemove={() => {
-                  bridge.setSiteAllowed(site, false).catch(() => {});
-                }}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
     </PreferencesSection>
   );
 }
@@ -205,19 +201,17 @@ function PopupsSection() {
       title="Pop-ups"
       description="Sites need a click to open a new window, except these."
     >
-      <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
-        {[...settings.allowlist].sort().map((site) => (
-          <AllowlistRow
-            key={site}
-            site={site}
-            ariaLabel={`Block pop-ups on ${site} again`}
-            action="Block pop-ups here again"
-            onRemove={() => {
-              bridge.setSiteAllowed(site, false).catch(() => {});
-            }}
-          />
-        ))}
-      </ul>
+      {[...settings.allowlist].sort().map((site) => (
+        <AllowlistRow
+          key={site}
+          site={site}
+          ariaLabel={`Block pop-ups on ${site} again`}
+          action="Block pop-ups here again"
+          onRemove={() => {
+            bridge.setSiteAllowed(site, false).catch(() => {});
+          }}
+        />
+      ))}
     </PreferencesSection>
   );
 }
@@ -237,19 +231,12 @@ function AllowlistRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li className="flex items-center justify-between gap-4 px-3 py-2">
+        <div className="flex items-center justify-between gap-4 py-1.5 pr-2 pl-4">
           <span className="min-w-0 truncate text-sm">{site}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
-            aria-label={ariaLabel}
-            title={action}
-            onClick={onRemove}
-          >
-            <X className="size-4" aria-hidden />
-          </Button>
-        </li>
+          <ToolButton size="sm" label={ariaLabel} title={action} onClick={onRemove}>
+            <X className="size-4" strokeWidth={1.75} aria-hidden />
+          </ToolButton>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">
         <ContextMenuItem onSelect={onRemove}>{action}</ContextMenuItem>
@@ -258,25 +245,27 @@ function AllowlistRow({
   );
 }
 
-/** A titled card grouping related settings. */
+/** A titled group of settings: its heading and what it's for, then its rows parted by inset hairlines. */
 function PreferencesSection({
   title,
   description,
+  after,
   children,
 }: {
   title: string;
   description?: string;
+  /** Below the rows, outside their group (a list of sites). */
+  after?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-xl border border-border/60 bg-card/60 p-6 shadow-sm">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-        {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        )}
+    <section className="flex flex-col gap-2 [&>*]:shrink-0">
+      <div className="px-1">
+        <SettingsSubHeading className="mt-0 px-0">{title}</SettingsSubHeading>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
       </div>
-      {children}
+      <div className={settingsGroup}>{children}</div>
+      {after}
     </section>
   );
 }
@@ -295,16 +284,16 @@ function SettingRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-6">
-      <div className="min-w-0 space-y-1">
+    <div className="flex items-center justify-between gap-6 px-4 py-3">
+      <div className="min-w-0">
         {htmlFor ? (
-          <Label htmlFor={htmlFor} className="text-sm">
+          <Label htmlFor={htmlFor} className="cursor-pointer text-sm">
             {label}
           </Label>
         ) : (
-          <p className="text-sm font-medium">{label}</p>
+          <p className="text-sm">{label}</p>
         )}
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
       </div>
       <div className="shrink-0">{children}</div>
     </div>

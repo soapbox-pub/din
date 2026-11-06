@@ -22,6 +22,7 @@ import {
   cleanScreenshotError,
   copyScreenshot,
   cropCapture,
+  captureDesktop,
   getScreenshotBridge,
   isScreenshotSessionActive,
   onScreenshotRequest,
@@ -146,7 +147,7 @@ export function ScreenshotHost() {
           }
           let shot: Screenshot;
           try {
-            shot = await bridge.capture();
+            shot = await captureDesktop(bridge);
           } catch (e) {
             return failed(e);
           }
@@ -310,23 +311,23 @@ function CaptureThumbnail({
                 }}
                 title={path ? 'Click to open, or drag into Files' : 'Saving…'}
                 aria-label={name ? `Open ${name}` : 'Screenshot taken'}
-                className="block overflow-hidden rounded-lg border border-white/70 bg-background shadow-xl ring-1 ring-black/20 transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-progress"
+                className="block rounded-2xl glass-surface p-1.5 shadow-lg outline-none transition-transform motion-safe:hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-progress"
               >
                 <img
                   src={shot.dataUrl}
                   alt=""
                   draggable={false}
                   style={{ width, height }}
-                  className="block object-cover"
+                  className="block rounded-xl object-cover"
                 />
               </button>
               <button
                 type="button"
                 onClick={onDismiss}
                 aria-label="Dismiss"
-                className="absolute -top-2 -left-2 grid size-6 place-items-center rounded-full border border-border bg-background text-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="absolute -top-2 -left-2 grid size-7 place-items-center rounded-full glass-surface text-popover-foreground opacity-0 shadow-md outline-none transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60"
               >
-                <X className="size-3.5" aria-hidden />
+                <X className="size-4" strokeWidth={1.75} aria-hidden />
               </button>
             </div>
           </ContextMenuTrigger>

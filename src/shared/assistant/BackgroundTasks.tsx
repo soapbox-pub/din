@@ -74,7 +74,7 @@ export function BackgroundTasks({
       <CollapsibleContent>
         <ul
           aria-label="Background tasks"
-          className="mt-2 max-h-56 space-y-px overflow-y-auto rounded-xl border border-border/70 bg-muted/30 p-1"
+          className="mt-2 max-h-56 space-y-px overflow-y-auto rounded-xl bg-card clay p-1"
         >
           {tasks.map((task) => (
             <TaskRow

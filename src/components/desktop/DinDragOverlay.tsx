@@ -32,7 +32,7 @@ export function DinDragOverlay() {
     // a fixed element at its 0,0 lands at that monitor's corner.
     <ScreenLayer aria-hidden className="pointer-events-none z-[2147483647]">
       <div
-        className="absolute left-0 top-0 max-w-72 truncate whitespace-nowrap rounded-lg bg-primary px-2.5 py-1 text-[13px] font-medium text-primary-foreground shadow-lg"
+        className="absolute left-0 top-0 max-w-72 truncate whitespace-nowrap rounded-lg bg-pigment clay-pigment px-2.5 py-1 text-[13px] font-medium text-primary-foreground shadow-lg"
         style={{ transform: `translate(${at.x + 12}px, ${at.y + 12}px)` }}
       >
         {label}

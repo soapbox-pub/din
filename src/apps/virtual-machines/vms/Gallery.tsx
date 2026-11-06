@@ -29,7 +29,7 @@ function Tile({
       disabled={disabled}
       {...rest}
       className={cn(
-        'group flex flex-col items-center gap-3 rounded-2xl border border-border/70 bg-card p-5 text-center shadow-sm transition',
+        'group flex flex-col items-center gap-3 rounded-2xl bg-card clay p-5 text-center transition',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'enabled:hover:-translate-y-0.5 enabled:hover:shadow-md motion-reduce:transform-none',
         'disabled:opacity-50',
@@ -119,7 +119,7 @@ export function Gallery({
         disabled={!!busy}
         onClick={() => onCustom(null)}
         badge={
-          <span className="grid size-16 place-items-center rounded-2xl border-2 border-dashed border-muted-foreground/40 text-muted-foreground">
+          <span className="grid size-16 place-items-center bg-foreground/[0.04] rounded-2xl text-muted-foreground">
             <Disc3 className="size-8" aria-hidden />
           </span>
         }

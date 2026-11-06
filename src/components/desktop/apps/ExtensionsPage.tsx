@@ -10,7 +10,6 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
-  Search,
   Trash2,
 } from 'lucide-react';
 import { EmptyState } from '@/components/desktop/apps/appstore/common';
@@ -41,6 +40,9 @@ import { formatBytes } from '@/lib/fs';
 import { packageCoordinate, parsePackageNaddr, type PackageAddress, type ThemePackage } from '@/lib/themePackages';
 import { cn } from '@/lib/utils';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SearchField, SegmentedControl, ToolButton } from '@/shared/appChrome';
+import { toolIcon } from '@/shared/appChromeStyles';
 
 export interface ExtensionsPageProps {
   /** The extension whose page to open on, from a `nostr:` link to one. */
@@ -99,7 +101,7 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
         select(null);
       }}
     >
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border/60 px-4 py-3 @2xl:px-6">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 @2xl:px-6">
         <button
           type="button"
           onClick={() => {
@@ -108,51 +110,42 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
             setSearch('');
             setCategory(null);
           }}
-          className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-2.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           aria-label="Extensions home"
         >
-          <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-sky-500 via-violet-500 to-fuchsia-500 text-white shadow-sm">
-            <Puzzle className="size-5" aria-hidden />
+          <span className="grid size-9 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment">
+            <Puzzle className="size-4.5" strokeWidth={1.75} aria-hidden />
           </span>
-          <span className="text-lg font-semibold tracking-tight">Extensions</span>
+          <span className="font-[family-name:var(--font-title)] text-lg font-semibold tracking-tight">Extensions</span>
         </button>
-        <nav className="flex items-center gap-1" aria-label="Sections">
-          <TopTab active={view === 'discover'} onClick={() => { select(null); setView('discover'); }}>
-            Discover
-          </TopTab>
-          <TopTab active={view === 'installed'} onClick={() => { setSelected(null); setView('installed'); }}>
-            Installed
-            {crxInstalled && crxInstalled.length > 0 && (
-              <span className="ml-1.5 rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{crxInstalled.length}</span>
-            )}
-          </TopTab>
-        </nav>
-        <div className="relative ml-auto w-full @2xl:w-80">
-          <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setSelected(null);
-              setView('discover');
-            }}
-            placeholder="Search extensions, or paste an address"
-            aria-label="Search extensions"
-            className="h-10 w-full rounded-full border border-transparent bg-muted pl-10 pr-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring/40"
-          />
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="rounded-full"
-          onClick={() => void catalog.refresh()}
-          disabled={catalog.refreshing}
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshCw className={cn(catalog.refreshing && 'motion-safe:animate-spin')} aria-hidden />
-        </Button>
+        <SegmentedControl
+          label="Sections"
+          size="md"
+          value={view}
+          options={[
+            { value: 'discover', label: 'Discover' },
+            { value: 'installed', label: crxInstalled && crxInstalled.length > 0 ? `Installed · ${crxInstalled.length}` : 'Installed' },
+          ]}
+          onValueChange={(next) => {
+            if (next === 'discover') select(null);
+            else setSelected(null);
+            setView(next);
+          }}
+        />
+        <SearchField
+          value={search}
+          onValueChange={(text) => {
+            setSearch(text);
+            setSelected(null);
+            setView('discover');
+          }}
+          placeholder="Search extensions, or paste an address"
+          aria-label="Search extensions"
+          className="ml-auto w-full @2xl:w-80"
+        />
+        <ToolButton label="Refresh" onClick={() => void catalog.refresh()} disabled={catalog.refreshing}>
+          <RefreshCw className={cn(toolIcon.className, catalog.refreshing && 'motion-safe:animate-spin')} strokeWidth={toolIcon.strokeWidth} aria-hidden />
+        </ToolButton>
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
@@ -188,23 +181,6 @@ export function ExtensionsPage({ initial, installed }: ExtensionsPageProps) {
       </div>
       <DeleteDialog handlers={handlers} />
     </div>
-  );
-}
-
-function TopTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        'flex h-9 items-center rounded-full px-4 text-sm font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -321,11 +297,11 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'h-9 shrink-0 rounded-full border px-4 text-sm font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'h-8 shrink-0 rounded-full px-3.5 text-sm font-medium transition-colors',
+        'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         active
-          ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border bg-background text-foreground hover:bg-muted',
+          ? 'bg-pigment text-primary-foreground clay-pigment'
+          : 'bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.09]',
       )}
     >
       {children}
@@ -375,7 +351,7 @@ function Featured({ packages, handlers, onSelect }: { packages: ExtensionPackage
             type="button"
             onClick={() => go(-1)}
             aria-label="Previous"
-            className="absolute left-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-background/90 shadow-md hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute left-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-background/90 shadow-md hover:bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <ChevronLeft className="size-5" aria-hidden />
           </button>
@@ -383,7 +359,7 @@ function Featured({ packages, handlers, onSelect }: { packages: ExtensionPackage
             type="button"
             onClick={() => go(1)}
             aria-label="Next"
-            className="absolute right-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-background/90 shadow-md hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute right-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-background/90 shadow-md hover:bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <ChevronRight className="size-5" aria-hidden />
           </button>
@@ -396,8 +372,8 @@ function Featured({ packages, handlers, onSelect }: { packages: ExtensionPackage
                 aria-label={`Show ${p.title}`}
                 aria-current={i === index}
                 className={cn(
-                  'h-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  i === index ? 'w-6 bg-primary' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50',
+                  'h-2 rounded-full transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                  i === index ? 'w-6 bg-ink-accent' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50',
                 )}
               />
             ))}
@@ -413,18 +389,18 @@ function FeaturedSlide({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
   const shot = pkg.screenshots[0];
   return (
     <PackageContextMenu pkg={pkg} handlers={handlers}>
-      <div className="relative grid overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 motion-safe:animate-in motion-safe:fade-in @3xl:grid-cols-[1fr_1.2fr]">
+      <div className="relative grid overflow-hidden rounded-3xl bg-card clay motion-safe:animate-in motion-safe:fade-in @3xl:grid-cols-[1fr_1.2fr]">
         <button
           type="button"
           onClick={() => onSelect(pkg)}
           aria-label={`View ${pkg.title}`}
-          className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
         />
         <div className="pointer-events-none relative flex flex-col justify-center gap-4 p-6 @2xl:p-10">
           <div className="flex items-center gap-3">
             <ExtensionIcon pkg={pkg} className="size-14" />
             <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <p className="text-xs font-semibold text-muted-foreground">
                 {pkg.categories[0] ? categoryLabel(pkg.categories[0]) : 'Extension'}
               </p>
               {author.name && <p className="truncate text-sm text-muted-foreground">by {author.name}</p>}
@@ -443,7 +419,7 @@ function FeaturedSlide({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
               alt=""
               referrerPolicy="no-referrer"
               draggable={false}
-              className="max-h-72 w-full rounded-2xl object-cover shadow-xl ring-1 ring-black/5"
+              className="max-h-72 w-full rounded-2xl object-cover clay"
             />
           ) : (
             <ExtensionIcon pkg={pkg} className="size-40 drop-shadow-xl" />
@@ -478,9 +454,9 @@ function ExtensionCard({ pkg, handlers, onSelect }: { pkg: ExtensionPackage; han
           type="button"
           onClick={() => onSelect(pkg)}
           aria-label={`View ${pkg.title}`}
-          className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4"
+          className="absolute inset-0 z-10 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-4"
         />
-        <div className="relative aspect-[16/10] overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/50 to-muted transition-shadow motion-safe:group-hover:shadow-lg">
+        <div className="relative aspect-[16/10] overflow-hidden rounded-2xl bg-card clay transition-shadow motion-safe:group-hover:shadow-lg">
           {!seen ? (
             <Skeleton className="size-full rounded-none" />
           ) : shot ? (
@@ -571,9 +547,9 @@ function ExtensionDetail({
     <button
       type="button"
       onClick={onBack}
-      className="flex w-fit items-center gap-1.5 rounded-full py-1 pr-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex w-fit items-center gap-1.5 rounded-full py-1 pr-3 text-sm font-medium text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
-      <ArrowLeft className="size-4" aria-hidden />
+      <ArrowLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
       Back
     </button>
   );
@@ -677,7 +653,7 @@ function ExtensionDetail({
 
       <section className="flex flex-col gap-4" aria-label="Details">
         <h2 className="text-xl font-semibold tracking-tight">Details</h2>
-        <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
+        <dl className={cn(settingsGroup, 'text-sm')}>
           <InfoRow label="Version">{pkg.version || (loadingRelease ? '…' : 'Unknown')}</InfoRow>
           <InfoRow label="Updated">{updated}</InfoRow>
           <InfoRow label="Size">{pkg.size ? formatBytes(pkg.size) : loadingRelease ? '…' : 'Unknown'}</InfoRow>
@@ -718,7 +694,7 @@ function Screenshots({ urls, title }: { urls: string[]; title: string }) {
             referrerPolicy="no-referrer"
             draggable={false}
             onError={() => setFailed((prev) => new Set(prev).add(url))}
-            className="aspect-[16/10] w-[min(100%,40rem)] shrink-0 snap-start rounded-2xl border border-border bg-muted object-cover"
+            className="aspect-[16/10] w-[min(100%,40rem)] shrink-0 snap-start rounded-2xl bg-foreground/[0.04] object-cover clay"
           />
         ))}
       </div>
@@ -752,7 +728,7 @@ function AddButton({ pkg, handlers, large = false, disabled = false }: { pkg: Th
       title={handlers.canInstall ? (pkg.size && !state.id ? `Downloads ${formatBytes(pkg.size)}` : undefined) : 'Extensions install in the Din desktop app'}
       className={cn(
         'rounded-full px-6 font-semibold',
-        installed && 'cursor-default bg-muted text-foreground hover:bg-muted',
+        installed && 'cursor-default bg-foreground/[0.07] text-foreground hover:bg-foreground/[0.07]',
       )}
     >
       {state.busy ? <Loader2 className="animate-spin" aria-hidden /> : installed ? <Check aria-hidden /> : state.outdated ? <RefreshCw aria-hidden /> : <Plus aria-hidden />}
@@ -767,7 +743,7 @@ function ExtensionIcon({ pkg, className }: { pkg: ThemePackage; className?: stri
   const src = pkg.type === 'extension' ? pkg.image : null;
   if (!src || failed) {
     return (
-      <span className={cn('grid shrink-0 place-items-center rounded-[22%] bg-gradient-to-br from-sky-500 to-violet-600 text-white', className)} aria-hidden>
+      <span className={cn('grid shrink-0 place-items-center rounded-[22%] bg-pigment text-primary-foreground clay-pigment', className)} aria-hidden>
         <Puzzle className="size-1/2" />
       </span>
     );

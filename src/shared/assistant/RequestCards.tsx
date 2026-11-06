@@ -58,10 +58,10 @@ export function PermissionCard({ request, className }: { request: PermissionRequ
   return (
     <section
       aria-label="Permission request"
-      className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm', className)}
+      className={cn('rounded-xl bg-selected p-4', className)}
     >
       <div className="flex items-start gap-3">
-        <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+        <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-ink-accent" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground">Allow the assistant to {title.toLowerCase()}?</p>
           {request.message && <p className="mt-1 text-sm text-muted-foreground">{request.message}</p>}
@@ -173,10 +173,10 @@ function ApprovalCard({ request, focusKey, onFocused, className }: PasswordCardP
       ref={card}
       tabIndex={-1}
       aria-label="Administrator request"
-      className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm outline-none', className)}
+      className={cn('rounded-xl bg-selected p-4 outline-none', className)}
     >
       <div className="flex items-start gap-3">
-        <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+        <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-ink-accent" aria-hidden />
         <div className="min-w-0 flex-1 space-y-2">
           <PasswordRequestSummary request={request} />
         </div>
@@ -237,7 +237,7 @@ function PasswordEntryCard({ request, focusKey, onFocused, className }: Password
   return (
     <section
       aria-label="Password request"
-      className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm', className)}
+      className={cn('rounded-xl bg-selected p-4', className)}
     >
       <form
         onSubmit={(e) => {
@@ -246,7 +246,7 @@ function PasswordEntryCard({ request, focusKey, onFocused, className }: Password
         }}
       >
         <div className="flex items-start gap-3">
-          <KeyRound className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+          <KeyRound className="mt-0.5 size-5 shrink-0 text-ink-accent" aria-hidden />
           <div className="min-w-0 flex-1 space-y-2">
             <PasswordRequestSummary request={request} />
             <Label htmlFor={id} className="sr-only">
@@ -412,7 +412,7 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
   };
 
   return (
-    <section aria-label={form.title} className={cn('rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm', className)}>
+    <section aria-label={form.title} className={cn('rounded-xl bg-selected p-4', className)}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -426,7 +426,7 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
         }}
       >
         <div className="flex items-start gap-3">
-          <MessageCircleQuestion className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
+          <MessageCircleQuestion className="mt-0.5 size-5 shrink-0 text-ink-accent" aria-hidden />
           <div className="min-w-0 flex-1 space-y-4">
             <div className="flex items-baseline justify-between gap-3">
               <p className="font-medium text-foreground">{form.title}</p>
@@ -449,7 +449,7 @@ export function FormCard({ form, className }: { form: FormInfo; className?: stri
                       className={cn(
                         'flex max-w-40 shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         i === index
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-pigment text-primary-foreground clay-pigment'
                           : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground',
                       )}
                     >

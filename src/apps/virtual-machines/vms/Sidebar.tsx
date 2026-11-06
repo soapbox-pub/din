@@ -12,10 +12,10 @@ import { OsBadge } from './fields';
 
 const DOT: Record<VmState, string> = {
   stopped: 'bg-muted-foreground/50',
-  starting: 'bg-amber-500 motion-safe:animate-pulse',
-  running: 'bg-emerald-500',
-  paused: 'bg-amber-500',
-  stopping: 'bg-amber-500 motion-safe:animate-pulse',
+  starting: 'bg-warning motion-safe:animate-pulse',
+  running: 'bg-success',
+  paused: 'bg-warning',
+  stopping: 'bg-warning motion-safe:animate-pulse',
 };
 
 function installStatus(install: VmInstall): string {

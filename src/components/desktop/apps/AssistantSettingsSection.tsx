@@ -11,6 +11,9 @@ import { useAssistantStatus, useHomeDirectory, useSetAssistantEnabled } from '@/
 import { useToast } from '@/hooks/useToast';
 import { cleanAssistantError, getAssistantBridge, tildify } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsSection } from '@/shared/settingsSection';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 /**
  * Settings → Assistant: whether Din keeps OpenCode running, the state of
@@ -23,13 +26,10 @@ export function AssistantSettingsSection() {
   const bridge = getAssistantBridge();
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-foreground">Assistant</h2>
-      </header>
+    <SettingsSection title="Assistant">
 
       {!bridge ? (
-        <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+        <div className="px-8 py-12 text-center">
           <Bot className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">
             The assistant works through OpenCode on this computer, so it needs Din’s desktop app.
@@ -37,7 +37,7 @@ export function AssistantSettingsSection() {
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+          <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
             <div className="flex min-w-0 items-start gap-3">
               <img src="/icons/apps/assistant.png" alt="" className="size-10 shrink-0 object-contain" />
               <div className="min-w-0">
@@ -58,14 +58,14 @@ export function AssistantSettingsSection() {
               <ServerStatus />
               <ProviderList />
               {/* Smaller things, out of the way below the providers. */}
-              <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
+              <div className={settingsGroup}>
                 <FolderSetting
                   value={config.assistantDirectory}
                   onChange={(assistantDirectory) => updateConfig((current) => ({ ...current, assistantDirectory }))}
                 />
-                <div className="flex items-center justify-between gap-4 py-3">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <Palette className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <SettingsToken icon={Palette} />
                     <div className="min-w-0">
                       <Label htmlFor="assistant-colorful" className="cursor-pointer text-sm font-normal">
                         Colorful replies
@@ -88,7 +88,7 @@ export function AssistantSettingsSection() {
           )}
         </>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -100,7 +100,7 @@ function ServerStatus() {
   const restart = useMutation({ mutationFn: () => bridge!.restart() });
   const upgrade = useMutation({ mutationFn: () => bridge!.upgrade() });
 
-  if (!status) return <Skeleton className="h-20 w-full rounded-md" />;
+  if (!status) return <Skeleton className="h-20 w-full rounded-xl" />;
 
   const updating = status.updating || upgrade.isPending;
   const state = status.installing
@@ -119,7 +119,7 @@ function ServerStatus() {
     toast({ title, description: cleanAssistantError(error), variant: 'destructive' });
 
   return (
-    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'space-y-3 px-4 py-3')}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm font-medium">
@@ -127,8 +127,8 @@ function ServerStatus() {
               aria-hidden
               className={cn(
                 'size-2 rounded-full',
-                state.tone === 'ok' && 'bg-emerald-500',
-                state.tone === 'warn' && 'bg-amber-500',
+                state.tone === 'ok' && 'bg-success',
+                state.tone === 'warn' && 'bg-warning',
                 state.tone === 'muted' && 'bg-muted-foreground/50',
               )}
             />
@@ -199,9 +199,9 @@ function FolderSetting({ value, onChange }: { value: string; onChange: (path: st
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <SettingsToken icon={Folder} />
         <div className="min-w-0">
           <p className="text-sm">Start conversations in</p>
           <p className="truncate text-xs text-muted-foreground" title={current}>

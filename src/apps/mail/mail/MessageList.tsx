@@ -51,7 +51,7 @@ export function SelectBox({ checked, label, onClick, className, ...props }: Omit
       <span
         className={cn(
           'grid size-4 place-items-center rounded-[4px] border',
-          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/40 group-hover/box:border-foreground/70',
+          checked ? 'border-transparent bg-pigment text-primary-foreground clay-pigment' : 'border-foreground/40 group-hover/box:border-foreground/70',
         )}
       >
         {checked === 'mixed' ? <Minus className="size-3" strokeWidth={3} /> : checked && <Check className="size-3" strokeWidth={3} />}

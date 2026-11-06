@@ -7,7 +7,8 @@ import { Switch } from '@/components/ui/switch';
 import { useTorStatus } from '@/hooks/useTor';
 import { cleanTorError, getTorBridge, torState, type TorStatus } from '@/lib/tor';
 import { cn } from '@/lib/utils';
-import { trayRuleTop } from './trayPanel';
+import { trayRuleTop, trayTokenClass } from './trayPanel';
+import { settingsCard } from '@/shared/settingsChromeStyles';
 
 /** One line on where Tor stands. */
 function describe(status: TorStatus): string {
@@ -50,18 +51,13 @@ export function TorControls() {
 
   return (
     <div className="mt-6">
-      <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
-        <OnionIcon className="size-4 shrink-0 text-muted-foreground" />
+      <h3 className="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-foreground/90">
+        <OnionIcon className="size-4.5 shrink-0 text-ink-accent" />
         Tor
       </h3>
-      <div className="rounded-lg border border-border/60 bg-background/40">
-        <div className="flex items-center gap-3 px-3 py-2.5">
-          <span
-            className={cn(
-              'grid size-9 shrink-0 place-items-center rounded-full',
-              state === 'ready' ? 'bg-violet-600/15 text-violet-600 dark:text-violet-400' : 'bg-muted text-muted-foreground',
-            )}
-          >
+      <div className={settingsCard}>
+        <div className="flex items-center gap-3 px-4 py-2.5">
+          <span className={cn(trayTokenClass(state === 'ready'), 'size-9')}>
             {state === 'connecting' ? (
               <Loader2 className="size-4.5 motion-safe:animate-spin" aria-hidden />
             ) : (
@@ -86,7 +82,7 @@ export function TorControls() {
           )}
         </div>
         {state === 'connecting' && status.progress !== null && (
-          <div className="flex items-center gap-3 px-3 pb-3">
+          <div className="flex items-center gap-3 px-4 pb-3">
             <Progress value={status.progress} className="h-1.5" aria-label="Connecting to Tor" />
             <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
               {status.progress}%

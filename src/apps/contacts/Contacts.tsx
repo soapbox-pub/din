@@ -495,9 +495,9 @@ export function Contacts() {
 
   if (!fsAvailable) {
     return (
-      <div className="flex h-full flex-col bg-background text-foreground">
+      <div className="flex h-full flex-col text-foreground">
         {header(<><span className="flex-1" /><WindowControls /></>, 'px-3')}
-        <div className="grid flex-1 place-items-center p-8">
+        <div className="grid flex-1 place-items-center bg-background p-8">
           <div className="flex max-w-sm flex-col items-center text-center">
             <img src="/icons/apps/contacts.png" alt="" className="mb-4 size-28 drop-shadow-md" />
             <h1 className="font-[family-name:var(--font-title)] text-2xl font-semibold">Contacts</h1>
@@ -692,7 +692,7 @@ export function Contacts() {
               placeholder="Family, Work, Neighbors…"
               value={naming.name}
               onChange={(e) => setNaming({ ...naming, name: e.target.value })}
-              className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="h-9 w-full rounded-lg bg-foreground/[0.06] px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
             />
             <div className="flex justify-end gap-2">
               <DialogButton onClick={() => setNaming(null)}>Cancel</DialogButton>
@@ -759,7 +759,7 @@ export function Contacts() {
 }
 
 function EmptyCard({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-xl border border-dashed border-border px-5 py-8 text-center text-sm text-muted-foreground">{children}</div>;
+  return <div className="rounded-xl px-5 py-8 text-center text-sm text-muted-foreground">{children}</div>;
 }
 
 function Selection({ count, onExport, onDelete }: { count: number; onExport: () => void; onDelete?: () => void }) {

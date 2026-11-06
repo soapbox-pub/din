@@ -1,8 +1,8 @@
 import type { ComponentProps, ComponentType, ReactNode, Ref } from 'react';
 import { Search, X } from 'lucide-react';
-import { WindowDragRegion } from '@/sdk/react';
+import { WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
-import { flushPane, focusRing, sidebarHeadingClass, sidebarRowClass, toolButtonBase } from './appChromeStyles';
+import { emptyStateClass, flushPane, focusRing, sidebarHeadingClass, sidebarRowClass, toolButtonBase } from './appChromeStyles';
 
 /*
  * The chrome Din's apps share: toolbars and their buttons, sidebar rows,
@@ -197,20 +197,22 @@ export function SegmentedControl<T extends string>({
   options,
   onValueChange,
   size = 'sm',
+  disabled,
   className,
 }: {
   label: string;
   value: T;
-  options: readonly { value: T; label: ReactNode; title?: string }[];
+  options: readonly { value: T; label: ReactNode; title?: string; disabled?: boolean }[];
   onValueChange: (value: T) => void;
   size?: 'md' | 'sm';
+  disabled?: boolean;
   className?: string;
 }) {
   return (
     <div
       role="radiogroup"
       aria-label={label}
-      className={cn('flex shrink-0 rounded-full bg-foreground/[0.06] p-0.5', size === 'md' ? 'h-8 text-[13px]' : 'text-xs', className)}
+      className={cn('flex w-fit max-w-full shrink-0 rounded-full bg-foreground/[0.06] p-0.5', size === 'md' ? 'h-8 text-[13px]' : 'text-xs', className)}
     >
       {options.map((o) => (
         <button
@@ -220,9 +222,10 @@ export function SegmentedControl<T extends string>({
           aria-checked={value === o.value}
           aria-label={o.title}
           title={o.title}
+          disabled={disabled || o.disabled}
           onClick={() => onValueChange(o.value)}
           className={cn(
-            'flex items-center justify-center gap-1 font-medium',
+            'flex items-center justify-center gap-1 font-medium disabled:pointer-events-none disabled:opacity-50',
             'rounded-full',
             size === 'md' ? 'px-3 [&_svg]:size-4' : 'px-2 py-1 [&_svg]:size-3.5',
             focusRing,
@@ -346,4 +349,68 @@ export function SidebarTitle({
 /** An app's own icon as a sidebar's title shows it. */
 export function SidebarTitleIcon({ src }: { src: string }) {
   return <img src={src} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />;
+}
+
+/**
+ * What an empty list, pane or search says: an optional icon, the words, and
+ * what to do about it (`action`), plain and centered with no box around it.
+ */
+export function EmptyState({
+  icon: Icon,
+  title,
+  action,
+  className,
+  children,
+}: {
+  icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
+  title?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={cn(emptyStateClass, className)}>
+      {Icon && <Icon className="mb-3 size-8 text-muted-foreground/70" strokeWidth={1.5} />}
+      {title && <p className="font-medium text-foreground">{title}</p>}
+      {children && <div className={cn('max-w-sm', title && 'mt-1')}>{children}</div>}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * A window an app opens for what's more than a quick question (its
+ * settings, an import, a form; see "Windows, Not Dialogs"): a 48px title
+ * bar with the title and the window controls, the content in a solid
+ * scrolling pane below it, and `footer` (its buttons) along the pane's foot.
+ */
+export function FormWindow({
+  title,
+  description,
+  footer,
+  className,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  footer?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex h-full w-full flex-col text-foreground">
+      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-2 pl-4">
+        <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-[15px] font-semibold">{title}</h1>
+        <WindowControls />
+      </WindowDragRegion>
+      <ContentPane inset={false} className="border-t-0">
+        {/* What's in it scrolls, never squeezed to fit a short window. */}
+        <div className={cn('flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0', className)}>
+          {description && <p className="px-1 text-sm text-muted-foreground">{description}</p>}
+          {children}
+        </div>
+        {footer && <div className="flex shrink-0 items-center justify-end gap-2 px-4 pb-4">{footer}</div>}
+      </ContentPane>
+    </div>
+  );
 }

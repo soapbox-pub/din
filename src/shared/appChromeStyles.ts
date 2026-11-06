@@ -9,7 +9,8 @@ export const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-r
 export const toolButtonBase = cn(
   'grid shrink-0 place-items-center text-muted-foreground',
   'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07] data-[state=open]:text-foreground',
-  'disabled:pointer-events-none disabled:opacity-35',
+  // Dimmed by its color rather than opacity, which renders a thin glyph soft.
+  'disabled:pointer-events-none disabled:text-muted-foreground/45',
   focusRing,
 );
 
@@ -73,3 +74,12 @@ export const flushPane = cn(
  * moment: notifications, toasts, the volume and brightness readouts.
  */
 export const glassPanel = 'rounded-2xl glass-surface';
+
+/** What's chosen among cards, chips or tiles in an app's content: tinted with the theme, never outlined in it. */
+export const chosenClass = 'bg-selected text-foreground';
+
+/** Something being dragged over a place it can be dropped: a ring, not a fill of the primary. */
+export const dropTargetClass = 'bg-selected ring-2 ring-ring/60';
+
+/** What an empty list or pane says: plain and centered, never in a dashed box. */
+export const emptyStateClass = 'flex shrink-0 flex-col items-center px-6 py-12 text-center text-sm text-muted-foreground';

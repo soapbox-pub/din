@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import { SettingsSection, SettingsSubHeading } from '@/shared/settingsSection';
+import { settingsAlert, settingsCard, settingsGroup, settingsRowButton, settingsTokenClass } from '@/shared/settingsChromeStyles';
 
 /**
  * The pieces of a Settings page about one thing - a Wi-Fi network, a
@@ -23,15 +25,17 @@ export function DetailsPage({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center gap-2">
+    <SettingsSection
+      title={title}
+      subpage
+      leading={
         <Button variant="ghost" size="icon" aria-label={backLabel} onClick={onBack}>
-          <ArrowLeft className="size-4" />
+          <ArrowLeft className="size-4.5" strokeWidth={1.75} />
         </Button>
-        <h2 className="truncate text-lg font-semibold text-foreground">{title}</h2>
-      </header>
+      }
+    >
       {children}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -47,17 +51,17 @@ export function DetailsHero({
   active: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-border/60 bg-gradient-to-b from-primary/10 to-transparent px-4 py-6 text-center">
+    <div className={cn(settingsCard, 'flex flex-col items-center gap-2 px-4 py-6 text-center')}>
       <div
         className={cn(
           'flex size-14 items-center justify-center rounded-full [&_svg]:size-7',
-          active ? 'bg-primary text-primary-foreground' : 'bg-foreground/10 text-muted-foreground',
+          active ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-muted-foreground clay',
         )}
       >
         {icon}
       </div>
       <p className="max-w-full truncate text-base font-semibold text-foreground">{name}</p>
-      <p className={cn('flex items-center gap-1.5 text-sm', active ? 'text-primary' : 'text-muted-foreground')}>
+      <p className={cn('flex items-center gap-1.5 text-sm', active ? 'text-ink-accent' : 'text-muted-foreground')}>
         {status}
       </p>
     </div>
@@ -96,30 +100,24 @@ export function ActionButton({
 
 export function DetailsError({ children }: { children: React.ReactNode }) {
   return (
-    <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+    <p role="alert" className={cn(settingsAlert, 'px-4 py-2.5 text-xs text-destructive')}>
       {children}
     </p>
   );
 }
 
-export function DetailsSubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="mt-2 text-sm font-medium text-muted-foreground">{children}</h3>;
-}
+export const DetailsSubHeading = SettingsSubHeading;
 
 export function DetailsGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col divide-y divide-border/60 rounded-xl border border-border/60 bg-background/40">
-      {children}
-    </div>
+    <div className={settingsGroup}>{children}</div>
   );
 }
 
 /** A group of facts, as `InfoRow`s. */
 export function InfoList({ children }: { children: React.ReactNode }) {
   return (
-    <dl className="flex flex-col divide-y divide-border/60 rounded-xl border border-border/60 bg-background/40">
-      {children}
-    </dl>
+    <dl className={settingsGroup}>{children}</dl>
   );
 }
 
@@ -162,7 +160,7 @@ export function DetailsSkeleton() {
       <Skeleton className="h-40 rounded-xl bg-foreground/10" />
       <div className="grid grid-cols-3 gap-2">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-16 rounded-md bg-foreground/10" />
+          <Skeleton key={i} className="h-16 rounded-xl bg-foreground/10" />
         ))}
       </div>
       <Skeleton className="h-48 rounded-xl bg-foreground/10" />
@@ -173,8 +171,8 @@ export function DetailsSkeleton() {
 /**
  * A device or network in a Settings list, Android-style: the whole row is one
  * button (open a connected one's page, connect any other), and `trailing`
- * sits beside it (a gear for a saved one's page). Connected rows are in the
- * primary color.
+ * sits beside it (a gear for a saved one's page). A connected one's icon
+ * is in the accent.
  */
 export function DeviceRowButton({
   icon,
@@ -205,14 +203,11 @@ export function DeviceRowButton({
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className={cn(
-          'flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent',
-          trailing ? 'rounded-l-lg' : 'rounded-lg',
-        )}
+        className={cn(settingsRowButton, 'min-w-0 flex-1')}
       >
-        <span className={cn('shrink-0 [&_svg]:size-5', connected ? 'text-primary' : 'text-muted-foreground')}>{icon}</span>
+        <span aria-hidden className={settingsTokenClass(connected)}>{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className={cn('block truncate text-sm', connected ? 'font-medium text-primary' : 'text-foreground')}>
+          <span className={cn('block truncate text-sm text-foreground', connected && 'font-medium')}>
             {name}
           </span>
           {(detail || pending) && (

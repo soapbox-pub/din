@@ -17,7 +17,7 @@ import { Avatar } from './Avatar';
 import { photoFromFile } from './photo';
 import { labelText } from './format';
 
-const field = 'h-9 w-full min-w-0 rounded-md border border-input bg-background px-2.5 text-[15px] outline-none placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 aria-invalid:border-destructive';
+const field = 'h-9 w-full min-w-0 rounded-lg bg-foreground/[0.06] px-2.5 text-[15px] outline-none placeholder:text-muted-foreground/80 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 aria-invalid:border-destructive';
 const CUSTOM = '\u0000custom';
 const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(undefined, { month: 'long' }));
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
@@ -55,7 +55,7 @@ function LabelPicker({ value, options, onChange }: { value: string; options: rea
         aria-label="Label"
         value={value}
         onChange={(e) => (e.target.value === CUSTOM ? setTyping(true) : onChange(e.target.value))}
-        className={cn(field, 'appearance-none pr-6 text-sm text-primary')}
+        className={cn(field, 'appearance-none pr-6 text-sm text-ink-accent')}
       >
         {options.map((o) => <option key={o} value={o}>{labelText(o)}</option>)}
         {!options.includes(value) && <option value={value}>{value}</option>}
@@ -85,7 +85,7 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex h-9 items-center gap-2 rounded-md px-1 text-sm text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+      className="flex h-9 items-center gap-2 rounded-md px-1 text-sm text-ink-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       <span className="grid size-6 place-items-center rounded-full bg-emerald-600 text-white"><Plus className="size-3.5" strokeWidth={3} /></span>
       {label}
@@ -336,7 +336,7 @@ export function ContactEditor({
               <input value={c.title} placeholder="Job title" aria-label="Job title" onChange={(e) => set({ title: e.target.value })} className={field} />
               {more && <input value={c.department} placeholder="Department" aria-label="Department" onChange={(e) => set({ department: e.target.value })} className={field} />}
               {!more && (
-                <button type="button" onClick={() => setMore(true)} className="col-span-2 justify-self-start text-sm text-primary outline-none hover:underline focus-visible:underline">
+                <button type="button" onClick={() => setMore(true)} className="col-span-2 justify-self-start text-sm text-ink-accent outline-none hover:underline focus-visible:underline">
                   More name fields
                 </button>
               )}
@@ -376,8 +376,8 @@ export function ContactEditor({
                       aria-checked={on}
                       onClick={() => set({ groups: on ? c.groups.filter((x) => x !== g) : [...c.groups, g] })}
                       className={cn(
-                        'rounded-full border px-2.5 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                        on ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground/80 hover:bg-foreground/[0.05]',
+                        'rounded-full px-2.5 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                        on ? 'bg-selected text-foreground' : 'bg-foreground/[0.06] text-foreground/80 hover:bg-foreground/[0.09]',
                       )}
                     >
                       {g}
@@ -400,7 +400,7 @@ export function ContactEditor({
         <button
           type="submit"
           disabled={!named || badEmail || saving}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-pigment clay-pigment px-3 text-sm font-medium text-primary-foreground outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
         >
           {saving && <Loader2 className="size-3.5 motion-safe:animate-spin" />}
           {isNew ? 'Add Contact' : 'Save'}

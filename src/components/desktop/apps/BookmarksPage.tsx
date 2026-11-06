@@ -7,7 +7,6 @@ import {
   FolderOpen,
   FolderPlus,
   MoreHorizontal,
-  Search,
   Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -36,12 +35,13 @@ import {
   DropdownMenuEntries,
   type BookmarkDialogState,
 } from '@/components/desktop/apps/BrowserBookmarks';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState, PillButton, SearchField, ToolButton } from '@/shared/appChrome';
+import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /** Everything about:bookmarks needs from the browser window hosting it. */
 export interface BookmarksPageProps {
@@ -97,47 +97,26 @@ export function BookmarksPage({ openers, onImport, onExport }: BookmarksPageProp
   return (
     // Opaque, like the other internal pages: the surface underneath is a
     // white about:blank.
-    <div className="absolute inset-0 flex flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex flex-wrap items-center gap-4 border-b border-border/60 px-6 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
-            <BookmarkIcon className="size-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight">Bookmarks</h1>
-            <p className="text-xs text-muted-foreground">Saved on this device only.</p>
-          </div>
-        </div>
-        <div className="relative ml-auto min-w-48 max-w-sm flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search bookmarks"
-            aria-label="Search bookmarks"
-            spellCheck={false}
-            className="h-9 w-full rounded-full bg-secondary/70 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={newFolder}>
-            <FolderPlus aria-hidden />
-            New folder
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onImport}>
-            <Upload aria-hidden />
-            Import…
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onExport}>
-            <Download aria-hidden />
-            Export…
-          </Button>
-        </div>
+    <div className="@container absolute inset-0 flex flex-col overflow-hidden bg-background text-foreground">
+      {/* A 48px band, as a window's toolbar: the search, then what to do. */}
+      <header className="flex h-14 shrink-0 items-center gap-2 px-4">
+        <BookmarkIcon className="ml-1 size-5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
+        <h1 className="mr-2 shrink-0 font-[family-name:var(--font-title)] text-lg font-semibold">Bookmarks</h1>
+        <SearchField value={query} onValueChange={setQuery} placeholder="Search bookmarks" aria-label="Search bookmarks" className={titleSearch} />
+        <div className="min-w-2 flex-1" />
+        <ToolButton label="New Folder" onClick={newFolder}>
+          <FolderPlus {...toolIcon} />
+        </ToolButton>
+        <ToolButton label="Import Bookmarks…" onClick={onImport}>
+          <Upload {...toolIcon} />
+        </ToolButton>
+        <ToolButton label="Export Bookmarks…" onClick={onExport}>
+          <Download {...toolIcon} />
+        </ToolButton>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="Bookmark folders" className="hidden w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border/60 p-3 sm:flex">
+        <nav aria-label="Bookmark folders" className={cn(sidebarWidthClass, 'hidden shrink-0 flex-col gap-4 overflow-y-auto px-2 pb-2 @2xl:flex [&>*]:shrink-0')}>
           <ul className="space-y-0.5">
             {[tree.bar, tree.other].map((root) => (
               <FolderTreeItem
@@ -153,38 +132,38 @@ export function BookmarksPage({ openers, onImport, onExport }: BookmarksPageProp
               />
             ))}
           </ul>
-          <div className="mt-auto flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
-            <Label htmlFor="bookmarks-show-bar" className="text-xs">
+          <div className="mt-auto flex items-center justify-between gap-3 px-2.5 py-2">
+            <Label htmlFor="bookmarks-show-bar" className="text-[13px] font-normal">
               Show bookmarks bar
             </Label>
             <Switch id="bookmarks-show-bar" checked={barShown} onCheckedChange={setBarShown} />
           </div>
         </nav>
 
-        <section className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6" aria-label={results ? 'Search results' : folder.title}>
-          <h2 className="mb-3 truncate text-sm font-medium text-muted-foreground">
+        <section className="mr-2 mb-2 min-w-0 flex-1 overflow-y-auto rounded-2xl bg-card px-4 py-4 clay @2xl:px-6" aria-label={results ? 'Search results' : folder.title}>
+          <h2 className="mb-3 truncate px-1 text-sm font-semibold text-foreground/90">
             {results ? `${results.length} found` : folderPaths.get(folder.id) ?? folder.title}
           </h2>
           {rows.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="px-8 py-12 text-center">
-                <p className="mx-auto max-w-sm text-muted-foreground">
-                  {results
-                    ? 'No bookmarks match your search.'
-                    : folder.id === BOOKMARKS_BAR_ID
-                      ? 'Nothing here yet. Bookmark a page with the star in the address bar, or import bookmarks from another browser.'
-                      : 'This folder is empty.'}
-                </p>
-                {!results && folder.id === BOOKMARKS_BAR_ID && (
-                  <Button variant="secondary" className="mt-4" onClick={onImport}>
+            <EmptyState
+              action={
+                !results &&
+                folder.id === BOOKMARKS_BAR_ID && (
+                  <PillButton onClick={onImport}>
                     <Upload aria-hidden />
-                    Import bookmarks…
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+                    Import Bookmarks…
+                  </PillButton>
+                )
+              }
+            >
+              {results
+                ? 'No bookmarks match your search.'
+                : folder.id === BOOKMARKS_BAR_ID
+                  ? 'Nothing here yet. Bookmark a page with the star in the address bar, or import bookmarks from another browser.'
+                  : 'This folder is empty.'}
+            </EmptyState>
           ) : (
-            <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
+            <ul className={settingsGroup}>
               {rows.map((node, index) => (
                 <BookmarkRow
                   key={node.id}
@@ -236,9 +215,9 @@ function FolderTreeItem({
         <ContextMenuTrigger asChild>
           <div
             className={cn(
-              'flex items-center gap-1 rounded-md pr-2 text-sm',
-              active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
-              dropping && 'ring-2 ring-primary/50',
+              'flex h-8 items-center gap-1 rounded-md pr-2 text-sm',
+              active ? 'bg-selected font-medium' : 'hover:bg-foreground/5',
+              dropping && 'ring-2 ring-ring/60',
             )}
             style={{ paddingInlineStart: depth * 12 + 4 }}
             onDragOver={(e) => {
@@ -261,19 +240,19 @@ function FolderTreeItem({
               aria-expanded={expanded}
               onClick={() => setExpanded(!expanded)}
               className={cn(
-                'grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                 !subfolders.length && 'invisible',
               )}
             >
-              <ChevronRight className={cn('size-3.5 motion-safe:transition-transform', expanded && 'rotate-90')} aria-hidden />
+              <ChevronRight className={cn('size-4 motion-safe:transition-transform', expanded && 'rotate-90')} strokeWidth={1.75} aria-hidden />
             </button>
             <button
               type="button"
               aria-current={active ? 'true' : undefined}
               onClick={() => onSelect(folder.id)}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
-              <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <Icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
               <span className="truncate">{folder.title}</span>
             </button>
           </div>
@@ -326,9 +305,9 @@ function BookmarkRow({
       <ContextMenuTrigger asChild>
         <li
           className={cn(
-            'group relative flex items-center gap-3 px-3 py-2 hover:bg-accent/40',
-            drop === 'before' && 'shadow-[inset_0_2px_0_0_var(--primary)]',
-            drop === 'after' && 'shadow-[inset_0_-2px_0_0_var(--primary)]',
+            'group relative flex items-center gap-3 py-1.5 pr-2 pl-4 hover:bg-foreground/5',
+            drop === 'before' && 'shadow-[inset_0_2px_0_0_var(--ink-accent)]',
+            drop === 'after' && 'shadow-[inset_0_-2px_0_0_var(--ink-accent)]',
           )}
           draggable
           onDragStart={(e) => startBookmarkDrag(e, node)}
@@ -355,7 +334,7 @@ function BookmarkRow({
               if (e.button === 1 && node.type === 'bookmark') openers.openInNewTab(node.url, true);
             }}
             title={node.type === 'bookmark' ? node.url : undefined}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <BookmarkNodeIcon node={node} className="size-4 shrink-0" />
             <span className="min-w-0 max-w-[50%] shrink-0 truncate text-sm">{node.title}</span>
@@ -366,15 +345,9 @@ function BookmarkRow({
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0"
-                aria-label={`More actions for ${node.title}`}
-                title="More actions"
-              >
-                <MoreHorizontal className="size-4" aria-hidden />
-              </Button>
+              <ToolButton size="sm" label={`More actions for ${node.title}`}>
+                <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />
+              </ToolButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={(e) => e.preventDefault()}>
               <DropdownMenuEntries entries={entries} />

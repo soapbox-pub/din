@@ -4,13 +4,11 @@ import {
   ArrowRight,
   AtSign,
   Bookmark as BookmarkGlyph,
-  BookmarkCheck,
   Library,
   Puzzle,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Code,
   Download,
   FileCode,
   FolderOpen,
@@ -34,6 +32,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toolButtonClass, toolIcon } from '@/shared/appChromeStyles';
+import { PillButton, StatusPill, ToolButton } from '@/shared/appChrome';
 import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
 import { useTorStatus } from '@/hooks/useTor';
 import { useSiteLocations } from '@/hooks/useSiteLocations';
@@ -98,6 +97,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -105,7 +113,7 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
-import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
+import { normalizeThemeColor, themeColorTokens, untintedSource, untintedTokens } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useNsiteIcon } from '@/hooks/useNsiteIcon';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
@@ -169,10 +177,7 @@ import { SignerSiteButton } from '@/components/desktop/apps/SignerSiteButton';
 import { PasswordsSiteButton } from '@/components/desktop/apps/PasswordsSiteButton';
 import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { useUserscripts } from '@/hooks/useUserscripts';
-import {
-  UserscriptInstallDialog,
-  type UserscriptInstallRequest,
-} from '@/components/desktop/apps/UserscriptManager';
+import { USERSCRIPT_INSTALL_APP_ID, userscriptInstallParams } from '@/lib/webPopup';
 import {
   PreferencesPage,
   type PreferencesProps,
@@ -529,12 +534,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // the main process. The bridge's absence hides all userscript UI.
   const {
     scripts: userscriptList,
-    install: installUserscript,
     remove: removeUserscript,
     setEnabled: setUserscriptEnabled,
   } = useUserscripts();
-  // A pending userscript install prompt (source + origin) for the dialog.
-  const [scriptInstall, setScriptInstall] = useState<UserscriptInstallRequest | null>(null);
   // Whether the "Clear browsing data" dialog is open (non-private windows).
   const [clearDataOpen, setClearDataOpen] = useState(false);
   const { toast } = useToast();
@@ -1521,7 +1523,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       if (!userscriptsBridge) return;
       userscriptsBridge
         .fetchText(url)
-        .then((code) => setScriptInstall({ code, url }))
+        .then((code) => openWindow(USERSCRIPT_INSTALL_APP_ID, userscriptInstallParams(code, url)))
         .catch((error: unknown) => {
           toast({
             title: "Couldn't download userscript",
@@ -1530,7 +1532,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           });
         });
     },
-    [userscriptsBridge, toast],
+    [userscriptsBridge, toast, openWindow],
   );
 
   // *.user.js navigations intercepted by the main process (in-page link
@@ -1544,26 +1546,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     });
   }, [userscriptsBridge, promptUserscriptInstall]);
 
-  /** Install from the review dialog; closes it and toasts on success. */
-  const installUserscriptFromDialog = useCallback(
-    (code: string, downloadUrl?: string) => {
-      try {
-        const script = installUserscript(code, downloadUrl);
-        setScriptInstall(null);
-        toast({
-          title: `${script.name} installed`,
-          description: 'It runs on matching pages from their next load.',
-        });
-      } catch (error) {
-        toast({
-          title: "Couldn't install userscript",
-          description: error instanceof Error ? error.message : undefined,
-          variant: 'destructive',
-        });
-      }
-    },
-    [installUserscript, toast],
-  );
 
   /** `typed`: the user asked for `raw` in the address bar or new-tab page's search box. */
   const navigateTab = useCallback(
@@ -1843,7 +1825,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         removeUserscript(script.id);
         toast({ title: `${script.name} removed` });
       },
-      onAddUserscript: () => setScriptInstall({ code: '' }),
+      onAddUserscript: () => openWindow(USERSCRIPT_INSTALL_APP_ID, userscriptInstallParams('')),
     }),
     [openTab, userscriptsBridge, userscriptList, setUserscriptEnabled, removeUserscript, toast],
   );
@@ -1853,18 +1835,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // theme tokens are mapped with `@theme inline`, so overriding them locally
   // re-themes every toolbar control to keep contrast on the arbitrary color.
   const accent = normalizeThemeColor(chromeColor);
-  const accentDark = accent !== null && isDarkThemeColor(accent);
-  const toolbarTint = accent
-    ? ({
-        backgroundColor: accent,
-        '--foreground': accentDark ? '#ffffff' : '#000000',
-        '--muted-foreground': accentDark
-          ? 'rgb(255 255 255 / 0.7)'
-          : 'rgb(0 0 0 / 0.6)',
-        '--border': accentDark ? 'rgb(255 255 255 / 0.15)' : 'rgb(0 0 0 / 0.15)',
-        '--secondary': accentDark ? 'rgb(255 255 255 / 0.15)' : 'rgb(0 0 0 / 0.06)',
-      } as React.CSSProperties)
-    : undefined;
+  // The same tokens the title bar takes (themeColorTokens), for everything
+  // that sits on the tinted window: the toolbar, the bookmarks bar and the
+  // tree of tabs, so none of it keeps the theme's text over the page's color.
+  const chromeTokens = accent ? (themeColorTokens(accent) as React.CSSProperties) : undefined;
+  const toolbarTint = accent ? ({ backgroundColor: accent, ...chromeTokens } as React.CSSProperties) : undefined;
 
   // F12 / Ctrl+Shift+I while focus is in the shell's chrome (address bar,
   // buttons). The same shortcut inside a page arrives as a `toggle` command
@@ -2053,7 +2028,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   ]);
 
   return (
-    <div className="flex h-full w-full flex-col" onKeyDown={onToolbarKeyDown}>
+    <div className="flex h-full w-full flex-col" style={untintedSource as React.CSSProperties} onKeyDown={onToolbarKeyDown}>
       {/* Toolbar: spans the full width across the top, sitting *over* the
           tree-tabs sidebar and the page surface (not beside the tabs). In the
           horizontal-strip mode the tabs live in the title bar, so this is
@@ -2136,34 +2111,23 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         <PasswordsSiteButton url={activeTab.url} wcId={activeTab.wcId} />
 
         {activeTab.zoom !== 1 && (
-          <button
-            type="button"
+          <PillButton
+            size="sm"
             onClick={() => zoomTab(activeId, 0)}
             title="Reset zoom (Ctrl+0)"
             aria-label={`Zoom ${Math.round(activeTab.zoom * 100)}%, reset to 100%`}
-            className={cn(
-              'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium tabular-nums text-foreground/80',
-              'hover:bg-foreground/10 hover:text-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            )}
+            className="tabular-nums"
           >
-            {activeTab.zoom > 1 ? (
-              <ZoomIn className="size-3.5" aria-hidden />
-            ) : (
-              <ZoomOut className="size-3.5" aria-hidden />
-            )}
+            {activeTab.zoom > 1 ? <ZoomIn aria-hidden /> : <ZoomOut aria-hidden />}
             {Math.round(activeTab.zoom * 100)}%
-          </button>
+          </PillButton>
         )}
 
         {isPrivate && (
-          <span
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-secondary/60 px-2.5 py-1 text-xs font-medium text-foreground/80"
-            title="Private window - history and cookies are discarded when it closes"
-          >
-            <VenetianMask className="size-3.5" aria-hidden />
+          <StatusPill className="h-7 px-2.5 text-xs text-foreground/80" title="Private window: history and cookies are discarded when it closes">
+            <VenetianMask className="size-4" strokeWidth={1.75} aria-hidden />
             Private
-          </span>
+          </StatusPill>
         )}
 
         {!activeTab.tor && <InstallSiteButton
@@ -2212,7 +2176,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         {activeTab.loading && (
           <span
             aria-hidden
-            className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-primary"
+            className="absolute inset-x-0 bottom-0 h-0.5 animate-pulse bg-ink-accent"
           />
         )}
       </form>
@@ -2244,6 +2208,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onMoveTabToEnd={moveTabToEnd}
             transfer={transfer}
             menu={tabMenu}
+            style={chromeTokens}
           />
         )}
 
@@ -2323,13 +2288,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         />
       )}
 
-      <UserscriptInstallDialog
-        request={scriptInstall}
-        onOpenChange={(open) => {
-          if (!open) setScriptInstall(null);
-        }}
-        onInstall={installUserscriptFromDialog}
-      />
 
       <ClearBrowsingDataDialog
         open={clearDataOpen}
@@ -2528,8 +2486,8 @@ function AddressBar({
   const showOnion = !!onionLocation && !open;
   const showNsite = !!nsiteLocation && !open;
   const badgeClass = cn(
-    'flex h-6 items-center gap-1 rounded-full px-2 text-xs font-medium transition-colors',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-colors',
+    'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
     'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
   );
 
@@ -2538,7 +2496,7 @@ function AddressBar({
       {/* While the user types, the box is a search box; otherwise its icon
           speaks for the page that's open. */}
       {open || !site ? (
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4.5 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} aria-hidden />
       ) : (
         site
       )}
@@ -2585,7 +2543,7 @@ function AddressBar({
         spellCheck={false}
         autoComplete="off"
         className={cn(
-          'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border',
+          'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
           // Room for what sits at the end: each badge, and the star.
           [
             ['pr-3', 'pr-9'],
@@ -2608,7 +2566,7 @@ function AddressBar({
               aria-label="Open this site's nsite in a new tab"
               className={cn(
                 badgeClass,
-                'text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400',
+                'text-success hover:bg-foreground/[0.07]',
               )}
             >
               <NsiteIcon className="size-3.5" />
@@ -2623,7 +2581,7 @@ function AddressBar({
               aria-label="Open this site's onion service in a new tab"
               className={cn(
                 badgeClass,
-                'text-violet-700 hover:bg-violet-500/15 dark:text-violet-400',
+                'text-foreground hover:bg-foreground/[0.07]',
               )}
             >
               <OnionIcon className="size-3.5" />
@@ -2640,7 +2598,9 @@ function AddressBar({
           aria-label="Suggestions"
           // Keep focus in the input so item clicks land before blur closes.
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute inset-x-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-border/60 bg-popover py-1 text-popover-foreground shadow-lg"
+          // Din's glass, under the page-tinted toolbar: the theme's text on it.
+          style={untintedTokens as React.CSSProperties}
+          className="absolute inset-x-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl glass-surface p-1.5 text-popover-foreground shadow-lg"
         >
           {suggestions.map((entry, i) => (
             <li
@@ -2653,16 +2613,14 @@ function AddressBar({
                 onNavigate(entry.url, true);
               }}
               className={cn(
-                'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-sm',
-                i === highlighted
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent/50',
+                'flex h-8 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-sm',
+                i === highlighted ? 'bg-selected text-foreground' : 'hover:bg-foreground/5',
               )}
             >
               {isSuggestedSite(entry) ? (
-                <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <Globe className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
               ) : (
-                <History className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <History className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
               )}
               <span className="min-w-0 max-w-[50%] truncate">
                 {entry.title ?? hostnameOf(entry.url) ?? entry.url}
@@ -2706,7 +2664,7 @@ function FindBar({
     <div
       role="search"
       aria-label="Find in page"
-      className="absolute right-3 top-2 z-30 flex items-center gap-0.5 rounded-lg border border-border/60 bg-popover px-1.5 py-1 text-popover-foreground shadow-lg"
+      className="absolute right-3 top-2 z-30 flex items-center gap-1 rounded-2xl glass-surface p-1.5 text-popover-foreground shadow-lg"
     >
       <input
         ref={inputRef}
@@ -2729,7 +2687,7 @@ function FindBar({
         spellCheck={false}
         autoComplete="off"
         className={cn(
-          'h-7 w-44 rounded-md bg-transparent px-1.5 text-sm outline-none placeholder:text-muted-foreground',
+          'h-8 w-48 rounded-full bg-foreground/[0.06] px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60',
           noMatches && 'text-destructive',
         )}
       />
@@ -2743,13 +2701,13 @@ function FindBar({
         {text && result ? `${result.activeMatchOrdinal}/${result.matches}` : ''}
       </span>
       <FindBarButton label="Previous match" disabled={!text} onClick={onPrev}>
-        <ChevronUp className="size-4" />
+        <ChevronUp className="size-4.5" strokeWidth={1.75} />
       </FindBarButton>
       <FindBarButton label="Next match" disabled={!text} onClick={onNext}>
-        <ChevronDown className="size-4" />
+        <ChevronDown className="size-4.5" strokeWidth={1.75} />
       </FindBarButton>
       <FindBarButton label="Close find bar" onClick={onClose}>
-        <X className="size-4" />
+        <X className="size-4.5" strokeWidth={1.75} />
       </FindBarButton>
     </div>
   );
@@ -2768,20 +2726,9 @@ function FindBarButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'grid size-6 shrink-0 place-items-center rounded-md text-foreground/80',
-        'hover:bg-foreground/10 hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
-    >
+    <ToolButton size="sm" label={label} onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </ToolButton>
   );
 }
 
@@ -3113,6 +3060,7 @@ function TreeTabStrip({
   onMoveTabToEnd,
   transfer,
   menu,
+  style,
 }: {
   tabs: Tab[];
   activeId: string;
@@ -3130,6 +3078,8 @@ function TreeTabStrip({
    */
   transfer: TabTransferOptions;
   menu: BrowserTabMenu;
+  /** The tinted window's tokens, when a page has colored it. */
+  style?: React.CSSProperties;
 }) {
   const tabTransfer = useTabTransfer(transfer, tabs.length);
   // Pinned tabs sit in a row of icons above the tree, outside it.
@@ -3149,7 +3099,8 @@ function TreeTabStrip({
         role="tablist"
         aria-label="Browser tabs"
         aria-orientation="vertical"
-        className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border/60 bg-background/40 p-1.5"
+        style={style}
+        className="flex w-64 shrink-0 flex-col gap-0.5 overflow-y-auto px-2 pb-2 text-foreground [&>*]:shrink-0"
       >
         {pinned.length > 0 && (
           <div className="flex shrink-0 flex-wrap gap-1 pb-1">
@@ -3199,13 +3150,13 @@ function TreeTabStrip({
           title="New tab"
           onClick={onNewTab}
           className={cn(
-            'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground',
-            'hover:bg-foreground/[0.06] hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-[13px] text-muted-foreground',
+            'hover:bg-foreground/5 hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           )}
         >
-          <Plus className="size-4 shrink-0" />
-          <span className="truncate">New tab</span>
+          <Plus className="size-4.5 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">New Tab</span>
         </button>
         {/* Trailing drop zone (only during a drag): dropping in the empty space
             below the list moves the tab back to the top level, at the end - the
@@ -3229,7 +3180,7 @@ function TreeTabStrip({
             {endHover && (
               <span
                 aria-hidden
-                className="pointer-events-none absolute inset-x-1 top-0 h-0.5 rounded-full bg-primary"
+                className="pointer-events-none absolute inset-x-1 top-0 h-0.5 rounded-full bg-ink-accent"
               />
             )}
           </div>
@@ -3362,26 +3313,26 @@ function TreeTabRow({
         title={label}
         style={{ marginInlineStart: depth * 14, paddingInlineStart: gutter }}
         className={cn(
-          'group relative flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-md pr-1.5 text-xs transition-[background-color,color] duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'group relative flex h-8 min-w-0 cursor-default items-center gap-2 rounded-lg pr-1.5 text-[13px] transition-[background-color,color] duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           dragging && 'opacity-40',
-          dropZone === 'inside' && 'ring-2 ring-inset ring-primary',
+          dropZone === 'inside' && 'ring-2 ring-inset ring-ring/60',
           active
             ? tabRaisedClass
-            : 'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
+            : 'text-foreground/80 hover:bg-foreground/5 hover:text-foreground',
         )}
       >
         {/* Sibling drop indicators: a bar in the gap above / below the row. */}
         {dropZone === 'before' && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-primary"
+            className="pointer-events-none absolute inset-x-1 -top-[3px] h-0.5 rounded-full bg-ink-accent"
           />
         )}
         {dropZone === 'after' && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-primary"
+            className="pointer-events-none absolute inset-x-1 -bottom-[3px] h-0.5 rounded-full bg-ink-accent"
           />
         )}
         {/* Disclosure chevron: sits in the row's gutter, out of the flex flow,
@@ -3394,7 +3345,7 @@ function TreeTabRow({
               e.stopPropagation();
               onToggleCollapsed();
             }}
-            className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute start-0.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded text-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
             <ChevronRight
               className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
@@ -3424,7 +3375,7 @@ function TreeTabRow({
             'grid size-5 shrink-0 place-items-center rounded-full text-foreground/60',
             'opacity-0 hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100',
             active && 'opacity-100',
-            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
           )}
         >
           <X className="size-3" />
@@ -3466,11 +3417,11 @@ function CertificateWarning({
   const [confirming, setConfirming] = useState(false);
   const code = info.error.replace(/^net::/, '');
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-muted/95 p-6 backdrop-blur-sm">
-      <div className="w-full max-w-md space-y-5 rounded-xl border bg-background p-6 shadow-lg">
+    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
+      <div className="w-full max-w-md space-y-5 rounded-2xl bg-card p-6 clay">
         <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-            <ShieldAlert className="size-5" />
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+            <ShieldAlert className="size-5" strokeWidth={1.75} />
           </div>
           <div className="space-y-1">
             <h2 className="text-lg font-semibold leading-tight">
@@ -3485,7 +3436,7 @@ function CertificateWarning({
           </div>
         </div>
 
-        <dl className="space-y-1.5 rounded-lg bg-muted/60 p-3 text-xs">
+        <dl className="space-y-1.5 rounded-xl bg-foreground/[0.04] p-3 text-xs">
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">Error</dt>
             <dd className="font-mono">{code}</dd>
@@ -3672,24 +3623,24 @@ export function LoadErrorPage({
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
       <div className="w-full max-w-md space-y-5 text-center">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Icon className="size-7" />
+        <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-foreground/10 text-foreground/75 clay">
+          <Icon className="size-7" strokeWidth={1.5} />
         </div>
         <div className="space-y-2">
           <h2 className="text-xl font-semibold leading-tight">{title}</h2>
           <p className="text-sm text-muted-foreground">{detail}</p>
           {info.url && (
-            <p className="break-all font-mono text-xs text-muted-foreground/80">
+            <p className="break-all font-mono text-xs text-muted-foreground">
               {info.url}
             </p>
           )}
         </div>
         <div className="flex flex-col items-center gap-3">
           <Button onClick={onRetry} className="min-w-32">
-            <RotateCw className="mr-2 size-4" />
+            <RotateCw className="size-4.5" strokeWidth={1.75} />
             Reload
           </Button>
-          <span className="font-mono text-xs text-muted-foreground/70">{code}</span>
+          <span className="font-mono text-xs text-muted-foreground">{code}</span>
         </div>
       </div>
     </div>
@@ -3723,8 +3674,8 @@ function DownloadShelf({
   onClearAll: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-t bg-background/95 px-2 py-1.5">
-      <Download className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+    <div role="region" aria-label="Downloads" className="flex h-14 shrink-0 items-center gap-2 bg-background px-2">
+      <Download className="ml-1 size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {downloads.map((d) => (
           <DownloadChip
@@ -3736,14 +3687,9 @@ function DownloadShelf({
           />
         ))}
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 shrink-0 text-muted-foreground"
-        onClick={onClearAll}
-      >
-        Clear all
-      </Button>
+      <PillButton size="sm" onClick={onClearAll}>
+        Clear All
+      </PillButton>
     </div>
   );
 }
@@ -3785,15 +3731,16 @@ function DownloadChip({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border bg-card px-2.5 py-1">
-          <div
+        <div className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-xl bg-card py-1 pr-1 pl-1.5 clay">
+          <span
+            aria-hidden
             className={cn(
-              'flex size-8 shrink-0 items-center justify-center rounded-md',
-              failed ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
+              'grid size-8 shrink-0 place-items-center rounded-full',
+              failed ? 'bg-destructive/10 text-destructive' : done ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/75 clay',
             )}
           >
-            <Download className="size-4" />
-          </div>
+            <Download className="size-4" strokeWidth={1.75} />
+          </span>
           <button
             type="button"
             className="min-w-0 flex-1 text-left disabled:cursor-default"
@@ -3806,43 +3753,33 @@ function DownloadChip({
             <div className="truncate text-xs font-medium">{filename}</div>
             <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
             {!done && !failed && pct !== null && (
-              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-foreground/10">
                 <div
-                  className="h-full bg-primary transition-[width]"
+                  className="h-full bg-pigment transition-[width]"
                   style={{ width: `${pct}%` }}
                 />
               </div>
             )}
           </button>
           {done && (
-            <button
-              type="button"
-              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              title="Show in folder"
-              onClick={showInFolder}
-            >
-              <FolderOpen className="size-3.5" />
-            </button>
+            <ToolButton size="sm" label="Show in Folder" onClick={showInFolder}>
+              <FolderOpen className="size-4" strokeWidth={1.75} />
+            </ToolButton>
           )}
-          <button
-            type="button"
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Dismiss"
-            onClick={onDismiss}
-          >
-            <X className="size-3.5" />
-          </button>
+          <ToolButton size="sm" label="Dismiss" onClick={onDismiss}>
+            <X className="size-4" strokeWidth={1.75} />
+          </ToolButton>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         {done && <ContextMenuItem onSelect={openFile}>Open</ContextMenuItem>}
-        {done && <ContextMenuItem onSelect={showInFolder}>Show in folder</ContextMenuItem>}
+        {done && <ContextMenuItem onSelect={showInFolder}>Show in Folder</ContextMenuItem>}
         <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(download.url).catch(() => {})}>
-          Copy link
+          Copy Link
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={onDismiss}>Dismiss</ContextMenuItem>
-        <ContextMenuItem onSelect={onClearAll}>Clear all</ContextMenuItem>
+        <ContextMenuItem onSelect={onClearAll}>Clear All</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -4135,8 +4072,8 @@ const TabSurface = memo(function TabSurface({
             }}
             className={cn(
               'shrink-0 touch-none bg-background',
-              'hover:bg-primary/40 motion-safe:transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'hover:bg-foreground/[0.07] motion-safe:transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               side
                 ? 'w-1.5 cursor-col-resize border-l border-border'
                 : 'h-1.5 cursor-row-resize border-t border-border',
@@ -4252,12 +4189,12 @@ function NewTabTile({
           title={link.url}
           onClick={() => onNavigate(link.url)}
           onPointerEnter={() => onPredict?.(link.url)}
-          className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group flex min-w-0 flex-col items-center gap-2 rounded-xl p-2 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {failed || !icon ? (
             <span
               aria-hidden
-              className="grid size-12 place-items-center rounded-2xl text-lg font-semibold uppercase text-white shadow-sm transition-transform group-hover:scale-105"
+              className="grid size-12 place-items-center rounded-2xl text-lg font-semibold uppercase text-white clay transition-transform motion-safe:group-hover:scale-105"
               style={{ backgroundColor: link.color ?? monogramColor(link.label) }}
             >
               {link.label[0]}
@@ -4269,12 +4206,12 @@ function NewTabTile({
               aria-hidden
               draggable={false}
               onError={() => setFailed(true)}
-              className="size-12 rounded-2xl object-cover shadow-sm transition-transform group-hover:scale-105"
+              className="size-12 rounded-2xl object-cover clay transition-transform motion-safe:group-hover:scale-105"
             />
           ) : (
             <span
               aria-hidden
-              className="grid size-12 place-items-center rounded-2xl bg-card shadow-sm ring-1 ring-border/60 transition-transform group-hover:scale-105"
+              className="grid size-12 place-items-center rounded-2xl bg-card clay transition-transform motion-safe:group-hover:scale-105"
             >
               <img
                 src={icon}
@@ -4285,20 +4222,20 @@ function NewTabTile({
               />
             </span>
           )}
-          <span className="w-full truncate text-center text-xs text-muted-foreground">
+          <span className="w-full truncate text-center text-[13px] text-foreground/80">
             {link.label}
           </span>
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <ContextMenuItem onSelect={() => onNavigate(link.url)}>Open</ContextMenuItem>
-        <ContextMenuItem onSelect={() => onOpenTab(link.url)}>Open in new tab</ContextMenuItem>
+        <ContextMenuItem onSelect={() => onOpenTab(link.url)}>Open in New Tab</ContextMenuItem>
         {onOpenWindow && (
-          <ContextMenuItem onSelect={() => onOpenWindow(link.url)}>Open in new window</ContextMenuItem>
+          <ContextMenuItem onSelect={() => onOpenWindow(link.url)}>Open in New Window</ContextMenuItem>
         )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(link.url).catch(() => {})}>
-          Copy link
+          Copy Link
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -4333,27 +4270,23 @@ function NewTabPage({
   const [query, setQuery] = useState('');
 
   return (
-    // The opaque bg-background matters: the gradient's translucent end would
-    // otherwise blend with the white about:blank surface underneath, fading
-    // to near-white even in dark mode.
-    <div className="@container absolute inset-0 flex flex-col items-center overflow-auto bg-background bg-gradient-to-b from-background to-muted/30 px-6 py-16 text-foreground">
+    // Opaque: the white about:blank surface is underneath.
+    <div className="@container absolute inset-0 flex flex-col items-center overflow-auto bg-background px-6 py-16 text-foreground [&>*]:shrink-0">
       <div className="flex w-full max-w-xl flex-col items-center">
         <div className="mb-8 flex flex-col items-center gap-3">
           <div
             className={cn(
-              'grid size-14 place-items-center rounded-2xl ring-1',
-              isPrivate
-                ? 'bg-foreground/10 text-foreground/80 ring-foreground/15'
-                : 'bg-primary/10 text-primary ring-primary/20',
+              'grid size-14 place-items-center rounded-full',
+              isPrivate ? 'bg-foreground/10 text-foreground/80 clay' : 'bg-pigment text-primary-foreground clay-pigment',
             )}
           >
             {isPrivate ? (
-              <VenetianMask className="size-7" aria-hidden />
+              <VenetianMask className="size-7" strokeWidth={1.5} aria-hidden />
             ) : (
-              <Globe className="size-7" aria-hidden />
+              <Globe className="size-7" strokeWidth={1.5} aria-hidden />
             )}
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="font-[family-name:var(--font-title)] text-4xl font-semibold tracking-tight">
             {isPrivate ? 'Private window' : 'New Tab'}
           </h1>
           {isPrivate && (
@@ -4373,7 +4306,8 @@ function NewTabPage({
           className="relative w-full"
         >
           <Search
-            className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground/80"
+            className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.75}
             aria-hidden
           />
           <input
@@ -4388,7 +4322,7 @@ function NewTabPage({
             placeholder="Search or type a URL"
             spellCheck={false}
             autoComplete="off"
-            className="h-12 w-full rounded-full bg-secondary/70 pl-12 pr-4 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="glass-control h-12 w-full rounded-full bg-foreground/[0.06] pl-12 pr-4 text-base placeholder:text-muted-foreground outline-none focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60"
           />
         </form>
 
@@ -4535,154 +4469,50 @@ function BrowserMenu({
   /** Open the about:extensions tab. */
   onOpenExtensions: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  /** Run an action and dismiss the menu. */
-  const run = (fn: () => void) => {
-    setOpen(false);
-    fn();
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Browser menu"
-          title="Menu"
-          className={cn(
-            toolButtonClass,
-            open && 'bg-foreground/10 text-foreground',
-          )}
-        >
-          <BarsStaggeredIcon className="size-4.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-72 p-0">
-        <div className="p-1">
-          <BrowserMenuItem
-            icon={SquarePlus}
-            label="New window"
-            shortcut="Ctrl+N"
-            onClick={() => run(onNewWindow)}
-          />
-          <BrowserMenuItem
-            icon={VenetianMask}
-            label="New private window"
-            shortcut="Ctrl+Shift+N"
-            onClick={() => run(onNewPrivateWindow)}
-          />
-          <BrowserMenuItem
-            icon={Library}
-            label="Bookmarks"
-            shortcut="Ctrl+Shift+O"
-            onClick={() => run(onOpenBookmarks)}
-          />
-          <BrowserMenuItem
-            icon={BookmarkCheck}
-            label="Show bookmarks bar"
-            shortcut="Ctrl+Shift+B"
-            active={bookmarksBarShown}
-            onClick={() => run(onToggleBookmarksBar)}
-          />
-          {showFind && (
-            <BrowserMenuItem
-              icon={Search}
-              label="Find in page…"
-              shortcut="Ctrl+F"
-              disabled={findDisabled}
-              onClick={() => run(onFind)}
-            />
-          )}
-          {showFind && (
-            <BrowserMenuItem
-              icon={Printer}
-              label="Print…"
-              shortcut="Ctrl+P"
-              disabled={printDisabled}
-              onClick={() => run(onPrint)}
-            />
-          )}
-          {showFind && (
-            <BrowserMenuItem
-              icon={FileCode}
-              label="View page source"
-              shortcut="Ctrl+U"
-              disabled={viewSourceDisabled}
-              onClick={() => run(onViewSource)}
-            />
-          )}
-          {hasDevtools && (
-            <BrowserMenuItem
-              icon={Code}
-              label="Developer tools"
-              shortcut="F12"
-              active={devtoolsActive}
-              disabled={devtoolsDisabled}
-              onClick={() => run(onToggleDevtools)}
-            />
-          )}
-          {showClearData && (
-            <BrowserMenuItem
-              icon={Trash2}
-              label="Clear browsing data…"
-              shortcut="Ctrl+Shift+Del"
-              onClick={() => run(onClearBrowsingData)}
-            />
-          )}
-          {showExtensions && (
-            <BrowserMenuItem
-              icon={Puzzle}
-              label="Extensions"
-              onClick={() => run(onOpenExtensions)}
-            />
-          )}
-          <BrowserMenuItem
-            icon={Settings}
-            label="Settings"
-            onClick={() => run(onOpenPreferences)}
-          />
-        </div>
-      </PopoverContent>
-    </Popover>
+  const item = (Icon: LucideIcon, label: string, onSelect: () => void, shortcut?: string, disabled?: boolean) => (
+    <DropdownMenuItem disabled={disabled} onSelect={onSelect}>
+      <Icon aria-hidden />
+      {label}
+      {shortcut && <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>}
+    </DropdownMenuItem>
   );
-}
 
-/** A single action row in the {@link BrowserMenu}. */
-function BrowserMenuItem({
-  icon: Icon,
-  label,
-  shortcut,
-  active,
-  disabled,
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  /** Right-aligned shortcut hint (e.g. "F12"). */
-  shortcut?: string;
-  /** Toggle-item state (e.g. developer tools while its pane is open). */
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground',
-        'hover:bg-accent hover:text-accent-foreground',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
-        active && 'bg-accent/60',
-      )}
-    >
-      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="flex-1 text-left">{label}</span>
-      {shortcut && <span className="text-xs text-muted-foreground">{shortcut}</span>}
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ToolButton label="Browser menu">
+          <BarsStaggeredIcon className="size-4.5" />
+        </ToolButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={8} className="w-72">
+        {item(SquarePlus, 'New Window', onNewWindow, 'Ctrl+N')}
+        {item(VenetianMask, 'New Private Window', onNewPrivateWindow, 'Ctrl+Shift+N')}
+        <DropdownMenuSeparator />
+        {item(Library, 'Bookmarks', onOpenBookmarks, 'Ctrl+Shift+O')}
+        <DropdownMenuCheckboxItem checked={bookmarksBarShown} onCheckedChange={onToggleBookmarksBar}>
+          Show Bookmarks Bar
+          <DropdownMenuShortcut>Ctrl+Shift+B</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
+        {showFind && (
+          <>
+            <DropdownMenuSeparator />
+            {item(Search, 'Find in Page…', onFind, 'Ctrl+F', findDisabled)}
+            {item(Printer, 'Print…', onPrint, 'Ctrl+P', printDisabled)}
+            {item(FileCode, 'View Page Source', onViewSource, 'Ctrl+U', viewSourceDisabled)}
+          </>
+        )}
+        {hasDevtools && (
+          <DropdownMenuCheckboxItem checked={devtoolsActive} disabled={devtoolsDisabled} onCheckedChange={onToggleDevtools}>
+            Developer Tools
+            <DropdownMenuShortcut>F12</DropdownMenuShortcut>
+          </DropdownMenuCheckboxItem>
+        )}
+        <DropdownMenuSeparator />
+        {showClearData && item(Trash2, 'Clear Browsing Data…', onClearBrowsingData, 'Ctrl+Shift+Del')}
+        {showExtensions && item(Puzzle, 'Extensions', onOpenExtensions)}
+        {item(Settings, 'Settings', onOpenPreferences)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -5072,20 +4902,9 @@ function NavButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={pressed}
-      title={title ?? label}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        toolButtonClass,
-                pressed && 'bg-foreground/10 text-foreground',
-      )}
-    >
+    <ToolButton label={label} title={title ?? label} onClick={onClick} disabled={disabled} pressed={pressed}>
       {children}
-    </button>
+    </ToolButton>
   );
 }
 

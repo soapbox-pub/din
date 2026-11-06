@@ -26,6 +26,7 @@ import {
   type ThemeDefinition,
 } from '@/lib/themeDefinition';
 import { cn } from '@/lib/utils';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 export type ThemeAddress = { pubkey: string; identifier: string };
 
@@ -259,7 +260,7 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
     <ThemeContextMenu theme={theme} handlers={handlers}>
       <div
         ref={ref}
-        className="relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-shadow motion-safe:hover:shadow-md"
+        className="relative flex flex-col overflow-hidden rounded-xl bg-card clay transition-shadow motion-safe:hover:shadow-md"
       >
         <button
           type="button"
@@ -351,7 +352,7 @@ function UseThemePill({ theme, handlers }: { theme: ThemeDefinition; handlers: T
       aria-label={worn ? `${theme.title} is in use` : `Use ${theme.title}`}
       className={cn(
         'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
-        'bg-secondary text-primary hover:bg-secondary/80',
+        'bg-secondary text-ink-accent hover:bg-secondary/80',
         worn && 'cursor-default text-muted-foreground hover:bg-secondary',
       )}
     >
@@ -463,7 +464,7 @@ function ThemeDetailPage({
 
         <section className="flex flex-col gap-4" aria-label="Information">
           <SectionHeader title="Information" />
-          <dl className="grid grid-cols-1 divide-y divide-border rounded-xl border border-border/70 bg-card text-sm">
+          <dl className={cn(settingsGroup, 'text-sm')}>
             <InfoRow label="Colors">
               <span className="flex items-center justify-end gap-2">
                 {(['background', 'text', 'primary'] as const).map((role) => (
@@ -544,7 +545,7 @@ function ThemeGridSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="overflow-hidden rounded-xl border border-border/70 bg-card">
+        <div key={i} className="overflow-hidden rounded-xl bg-card clay">
           <Skeleton className="aspect-video rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">

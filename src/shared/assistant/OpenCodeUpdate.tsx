@@ -32,7 +32,7 @@ export function OpenCodeUpdate({ className }: { className?: string }) {
       {updating ? (
         <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
       ) : (
-        <ArrowUpCircle className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+        <ArrowUpCircle className="mt-0.5 size-4 shrink-0 text-ink-accent" aria-hidden />
       )}
       <div className="min-w-0 flex-1">
         <p className="font-medium text-foreground">{updating ? 'Updating OpenCode…' : `OpenCode ${status.update} is out`}</p>

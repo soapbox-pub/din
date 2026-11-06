@@ -105,9 +105,9 @@ function Attachments({ item, list }: { item: Item; list: MailAttachmentInfo[] })
                     type="button"
                     onClick={() => void save(a)}
                     title={`Save ${a.filename}`}
-                    className="flex max-w-64 items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2 text-left text-[13px] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="flex max-w-64 items-center gap-2 rounded-xl bg-card clay px-3 py-2 text-left text-[13px] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
-                    <Icon className="size-5 shrink-0 text-primary" strokeWidth={1.5} />
+                    <Icon className="size-5 shrink-0 text-ink-accent" strokeWidth={1.5} />
                     <span className="min-w-0">
                       <span className="block truncate">{a.filename}</span>
                       <span className="block text-xs text-muted-foreground">{fileSize(a.size)}</span>
@@ -208,7 +208,7 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item
           <ChevronDown className={cn('size-3.5 shrink-0 transition-transform motion-reduce:transition-none', details && 'rotate-180')} />
         </button>
         {details && (
-          <div className="mt-2 space-y-0.5 rounded-lg border border-border/60 p-3">
+          <div className="mt-2 space-y-0.5 rounded-xl bg-card clay p-3">
             <div className="truncate text-xs text-muted-foreground">From: <span className="text-foreground/80 select-text">{m.from.map(formatAddress).join(', ')}</span></div>
             <People label="To" list={m.to} />
             <People label="Cc" list={m.cc} />
@@ -222,7 +222,7 @@ function Header({ item, m, me, menu, onPick, onUnsubscribe, onCollapse }: { item
             {m.unsubscribe.unsubscribed ? (
               <span className="text-muted-foreground">Unsubscribed {unsubscribedOn.format(m.unsubscribe.unsubscribed)}</span>
             ) : (
-              <button type="button" onClick={onUnsubscribe} className="inline-flex items-center gap-1 font-medium text-primary outline-none hover:underline focus-visible:underline">
+              <button type="button" onClick={onUnsubscribe} className="inline-flex items-center gap-1 font-medium text-ink-accent outline-none hover:underline focus-visible:underline">
                 <MailMinus className="size-3.5" /> Unsubscribe
               </button>
             )}
@@ -286,7 +286,7 @@ function Opened({
 
   if (query.isError) {
     return (
-      <div className="rounded-xl border border-border/60 p-4 text-sm">
+      <div className="rounded-xl bg-card clay p-4 text-sm">
         <p className="font-medium">This message couldn’t be opened.</p>
         <p className="mt-1 text-muted-foreground">{query.error instanceof Error ? query.error.message : String(query.error)}</p>
         <PillButton variant="primary" size="sm" onClick={() => void query.refetch()} className="mt-3">
@@ -310,7 +310,7 @@ function Opened({
         )}
         {m.html && hasRemote && !remote && (
           <div className="mb-3 flex items-center gap-3 rounded-lg bg-muted/50 px-4 py-2 text-[13px]">
-            <ShieldCheck className="size-4 shrink-0 text-primary" />
+            <ShieldCheck className="size-4 shrink-0 text-ink-accent" />
             <span className="flex-1 text-muted-foreground">Remote content is hidden to keep the sender from seeing when you read this.</span>
             <PillButton size="sm" onClick={() => setLoadRemote(true)}>
               Load Remote Content

@@ -81,7 +81,8 @@ pub struct Direct {
     shown: Option<(u32, Rectangle<i32, Logical>)>,
     /// The buffer in a frame that's waiting for its refresh.
     awaiting: Option<u32>,
-    /// The last buffer the client was told is in a frame.
+    /// The buffer last shown, once the client's been told it's in a frame:
+    /// each show is told once, however many frames it's drawn in.
     latched: Option<u32>,
 }
 
@@ -275,6 +276,12 @@ impl State {
                 }
                 let origin = self.din().and_then(|din| self.space.element_location(din)).unwrap_or_default();
                 let rect = Rectangle::new(origin + Point::from((x, y)), (w, h).into());
+                // The same buffer shown again (a game re-committing a still
+                // frame, or its window placed again) is told it's latched
+                // again too: the client waits for that before showing another,
+                // and calls a wait of 250ms a stall, which sends the game back
+                // through Din's window for good.
+                self.direct.latched = None;
                 match self.direct.shown.replace((id, rect)) {
                     None => info!("direct: showing a game at {rect:?}"),
                     Some((_, before)) if before != rect => self.queue_redraw_rect(before),

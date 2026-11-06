@@ -248,7 +248,7 @@ export function FileTree({
           onFocus={(e) => {
             if (e.target === e.currentTarget && !selected) setSelected(rows()[0]?.dataset.path ?? null);
           }}
-          className="min-h-0 flex-1 overflow-auto pb-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="min-h-0 flex-1 overflow-auto pb-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
         >
           <Children dir={root} depth={0} ctx={ctx} />
         </div>
@@ -339,7 +339,7 @@ function Node({ entry, path, depth, ctx }: { entry: FsEntry; path: string; depth
             onContextMenu={() => ctx.select(path)}
             className={cn(
               'flex cursor-default select-none items-center gap-1.5 pr-2 text-foreground/85 hover:bg-foreground/[0.06]',
-              ctx.selected === path && 'bg-foreground/10 text-foreground',
+              ctx.selected === path && 'bg-selected text-foreground',
               ctx.activePath === path && 'font-medium text-foreground',
               entry.name.startsWith('.') && 'text-foreground/60',
             )}
@@ -416,7 +416,7 @@ function NameInput({
           else if (e.key === 'Escape') finish(null);
         }}
         onBlur={(e) => finish(e.currentTarget.value)}
-        className="h-5 min-w-0 flex-1 rounded-sm border border-sidebar-ring bg-background px-1 text-sm outline-none"
+        className="h-5 min-w-0 flex-1 rounded-md bg-background px-1 text-sm outline-none ring-2 ring-ring/60"
       />
     </div>
   );

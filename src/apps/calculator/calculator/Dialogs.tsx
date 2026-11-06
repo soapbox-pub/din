@@ -91,7 +91,7 @@ export function ModeDialog({ mode, onChange, onClose }: { mode: Mode; onChange: 
               const [m, d] = e.target.value.split(':');
               onChange({ ...mode, digits: { mode: m as 'float' | 'fix', digits: Number(d) } });
             }}
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            className="h-8 rounded-lg bg-foreground/[0.06] px-2 text-sm"
           >
             {[6, 8, 10, 12].map((d) => (
               <option key={`f${d}`} value={`float:${d}`}>
@@ -157,7 +157,7 @@ export function CatalogDialog({ onInsert, onTry, onClose }: { onInsert: (text: s
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search functions — “derivative”, “matrix”, “mean”…"
             aria-label="Search the catalog"
-            className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-2 text-sm outline-none focus:border-ring"
+            className="h-9 w-full rounded-lg bg-foreground/[0.06] pl-8 pr-2 text-sm outline-none focus:border-ring"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && entries[0]) {
                 onInsert(insertText(entries[0]));
@@ -175,7 +175,7 @@ export function CatalogDialog({ onInsert, onTry, onClose }: { onInsert: (text: s
               aria-pressed={c === category}
               className={cn(
                 'rounded-full px-2.5 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                c === category ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground',
+                c === category ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-muted text-muted-foreground hover:text-foreground',
               )}
             >
               {c}
@@ -321,7 +321,7 @@ export function MatrixDialog({ onInsert, onClose }: { onInsert: (text: string) =
         <div className="flex items-center gap-4 text-sm">
           <label className="flex items-center gap-2">
             Rows
-            <select value={rows} onChange={(e) => setRows(Number(e.target.value))} className="h-8 rounded-md border border-input bg-background px-2">
+            <select value={rows} onChange={(e) => setRows(Number(e.target.value))} className="h-8 rounded-lg bg-foreground/[0.06] px-2">
               {[1, 2, 3, 4, 5, 6].map((n) => (
                 <option key={n}>{n}</option>
               ))}
@@ -329,7 +329,7 @@ export function MatrixDialog({ onInsert, onClose }: { onInsert: (text: string) =
           </label>
           <label className="flex items-center gap-2">
             Columns
-            <select value={cols} onChange={(e) => setCols(Number(e.target.value))} className="h-8 rounded-md border border-input bg-background px-2">
+            <select value={cols} onChange={(e) => setCols(Number(e.target.value))} className="h-8 rounded-lg bg-foreground/[0.06] px-2">
               {[1, 2, 3, 4, 5, 6].map((n) => (
                 <option key={n}>{n}</option>
               ))}
@@ -352,7 +352,7 @@ export function MatrixDialog({ onInsert, onClose }: { onInsert: (text: string) =
                     onClose();
                   }
                 }}
-                className="h-9 rounded-md border border-input bg-background px-2 text-center font-mono text-sm outline-none focus:border-ring"
+                className="h-9 rounded-lg bg-foreground/[0.06] px-2 text-center font-mono text-sm outline-none focus:border-ring"
               />
             )),
           )}

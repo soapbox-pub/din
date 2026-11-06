@@ -598,7 +598,7 @@ export function useWindows(
     focus(id);
   }, [setWindows, focus]);
 
-  const open = useCallback((requestedId: string, requestedParams?: WindowParams) => {
+  const open = useCallback((requestedId: string, requestedParams?: WindowParams, options?: { newWindow?: boolean }) => {
     let appId = requestedId;
     let params = requestedParams;
     let app = getApp(appId);
@@ -624,12 +624,15 @@ export function useWindows(
 
     // Single-instance apps (e.g. Settings) reuse their existing window: focus
     // and un-minimize it, merging in any new launch params, rather than
-    // spawning a duplicate.
-    if (app.singleInstance) {
+    // spawning a duplicate. `newWindow` is the app opening another window of
+    // its own (a form, its settings), which always opens.
+    if (app.singleInstance && !options?.newWindow) {
       // Read through the ref, not `windows`: depending on the array would
       // re-create open() - and with it every action consumers hold - on
       // each focus, move and resize.
-      const existing = windowsRef.current.find((w) => w.appId === appId && !w.closing);
+      // Its main window, not one it opened for a form (a `window` param).
+      const mine = windowsRef.current.filter((w) => w.appId === appId && !w.closing);
+      const existing = mine.find((w) => w.params?.window === undefined) ?? mine[0];
       if (existing) {
         launchIn(existing.id, params);
         return existing.id;

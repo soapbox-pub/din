@@ -16,6 +16,9 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
 import { blossomListTags, normalizeBlossomUrl } from '@/lib/relayLists';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { cn } from '@/lib/utils';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 /**
  * BlossomServerManager - edit the user's BUD-03 Blossom server list.
@@ -132,19 +135,17 @@ export function BlossomServerManager() {
   return (
     <div className="space-y-4">
       {/* Server list */}
-      <div className="space-y-2">
-        {servers.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-            No personal Blossom servers configured.
-          </p>
-        ) : (
-          servers.map((url) => (
+      {servers.length === 0 ? (
+        <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+          No personal Blossom servers configured.
+        </p>
+      ) : (
+        <div className={settingsGroup}>
+          {servers.map((url) => (
             <ContextMenu key={url}>
               <ContextMenuTrigger asChild>
-                <div
-                  className="flex items-center gap-3 rounded-md border bg-muted/20 p-3"
-                >
-                  <HardDrive className="size-4 shrink-0 text-muted-foreground" />
+                <div className="flex items-center gap-3 py-2 pr-2 pl-4">
+                  <SettingsToken icon={HardDrive} />
                   <span className="min-w-0 flex-1 truncate font-mono text-sm" title={url}>
                     {renderServerUrl(url)}
                   </span>
@@ -153,9 +154,9 @@ export function BlossomServerManager() {
                     size="icon"
                     aria-label={`Remove ${renderServerUrl(url)}`}
                     onClick={() => handleRemoveServer(url)}
-                    className="size-5 shrink-0 text-muted-foreground hover:bg-transparent hover:text-destructive"
+                    className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
                   >
-                    <X className="size-4" />
+                    <X className="size-4.5" strokeWidth={1.75} />
                   </Button>
                 </div>
               </ContextMenuTrigger>
@@ -171,9 +172,9 @@ export function BlossomServerManager() {
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Add server form */}
       <div className="flex gap-2">
@@ -204,7 +205,7 @@ export function BlossomServerManager() {
       </div>
 
       {/* Default-server merge toggle */}
-      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
         <div className="min-w-0">
           <Label htmlFor="use-app-blossom" className="cursor-pointer text-sm">
             Include Din's default servers

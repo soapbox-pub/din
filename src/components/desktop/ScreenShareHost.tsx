@@ -161,9 +161,9 @@ function SourceSection({
               onClick={() => onSelect(source.id)}
               onDoubleClick={() => onShare(source)}
               className={cn(
-                'flex min-w-0 flex-col gap-2 rounded-lg border p-2 text-left transition-colors',
-                'hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                checked ? 'border-primary bg-primary/10' : 'border-border',
+                'flex min-w-0 flex-col gap-2 rounded-xl p-2 text-left transition-colors',
+                'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                checked ? 'bg-selected' : 'hover:bg-foreground/5',
               )}
             >
               <span className="grid aspect-video w-full place-items-center overflow-hidden rounded-md bg-muted">

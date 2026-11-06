@@ -2,10 +2,11 @@ import { createElement, lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
-import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
+import { USERSCRIPT_INSTALL_APP_ID, WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
+import { ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
@@ -27,6 +28,15 @@ const Settings = lazy(() =>
 );
 const ProviderWindow = lazy(() =>
   import('@/components/desktop/apps/ProviderWindow').then((m) => ({ default: m.ProviderWindow })),
+);
+const UserscriptInstallWindow = lazy(() =>
+  import('@/components/desktop/apps/UserscriptManager').then((m) => ({ default: m.UserscriptInstallWindow })),
+);
+const AddPrinterWindow = lazy(() =>
+  import('@/components/desktop/apps/AddPrinterWindow').then((m) => ({ default: m.AddPrinterWindow })),
+);
+const ConnectAppWindow = lazy(() =>
+  import('@/components/desktop/apps/ConnectedAppsSection').then((m) => ({ default: m.ConnectAppWindow })),
 );
 const PrintWindow = lazy(() =>
   import('@/components/desktop/apps/PrintWindow').then((m) => ({ default: m.PrintWindow })),
@@ -299,6 +309,33 @@ export const APPS: readonly AppDefinition[] = [
     dockAs: 'settings',
   },
   {
+    // Settings → Printers' Add printer, beside Settings rather than over it.
+    // Hidden from the launcher; opened with addPrinterParams().
+    id: ADD_PRINTER_APP_ID,
+    name: 'Add a Printer',
+    icon: '/icons/apps/settings.png',
+    component: AddPrinterWindow,
+    defaultSize: { width: 480, height: 520 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'settings',
+  },
+  {
+    // Connecting an app to the account (NIP-46), from Settings → Connected
+    // apps or a nostrconnect:// link a page opened. Hidden from the
+    // launcher; opened with connectAppParams().
+    id: CONNECT_APP_APP_ID,
+    name: 'Connect an App',
+    icon: '/icons/apps/settings.png',
+    component: ConnectAppWindow,
+    defaultSize: { width: 480, height: 600 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'settings',
+  },
+  {
     // Printing a page or a file: a window per document, beside the rest of
     // the desktop rather than over it. Hidden from the launcher; PrintHost
     // opens it with the document in its launch params.
@@ -375,6 +412,19 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 500, height: 640 },
     floating: true,
     hidden: true,
+    dockAs: 'web-browser',
+  },
+  {
+    // Reviewing and installing a userscript, beside the browser rather than
+    // over it. Hidden; opened with userscriptInstallParams().
+    id: USERSCRIPT_INSTALL_APP_ID,
+    name: 'Install Userscript',
+    icon: '/icons/apps/web-browser.png',
+    component: UserscriptInstallWindow,
+    defaultSize: { width: 560, height: 600 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
     dockAs: 'web-browser',
   },
   // One file opened from Files (a picture, a video, some text). Hidden

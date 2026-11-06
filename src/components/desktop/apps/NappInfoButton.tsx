@@ -164,7 +164,7 @@ export function NappInfoButton({
           title={`About ${name}`}
           className={cn(
             '-mx-1 flex h-6 min-w-0 items-center gap-2 rounded-md px-1',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
             className,
             hoverClassName,
           )}
@@ -225,7 +225,7 @@ export function NappInfoButton({
                 setSaved(false);
               }}
             >
-              <Plus className="size-3.5" aria-hidden />
+              <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
               Add
             </Button>
           </div>
@@ -261,7 +261,7 @@ export function NappInfoButton({
                       setDirty(true);
                       setSaved(false);
                     }}
-                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <X className="size-3.5" aria-hidden />
                   </button>
@@ -280,7 +280,7 @@ export function NappInfoButton({
             </Button>
           )}
           {saved && (
-            <div className="flex items-center gap-3 rounded-lg bg-secondary/60 p-3">
+            <div className="flex items-center gap-3 rounded-xl bg-selected p-3">
               <p className="min-w-0 flex-1 text-xs text-muted-foreground">Reload the app to use them.</p>
               <Button
                 type="button"
@@ -315,7 +315,7 @@ export function NappInfoButton({
             </>
           ) : (
             <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => setConfirmClear(true)}>
-              <Trash2 className="size-3.5" aria-hidden />
+              <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
               Clear app data
             </Button>
           )}

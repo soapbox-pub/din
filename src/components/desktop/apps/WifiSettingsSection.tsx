@@ -16,6 +16,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { useSavedNetworks, useWifiMutations, useWifiNetworks, useWifiStatus } from '@/hooks/useWifi';
@@ -31,6 +32,9 @@ import {
   SECURITY_LABELS,
 } from '@/lib/wifi';
 import type { SavedWifiNetwork, WifiNetwork, WifiSecurity } from '@/lib/wifi';
+import { SettingsFallback as Fallback, SettingsSection, SettingsSubHeading as SubHeading } from '@/shared/settingsSection';
+import { settingsAlert, settingsCard, settingsGroup, settingsRowButton } from '@/shared/settingsChromeStyles';
+import { SettingsToken } from '@/shared/settingsChrome';
 
 type View = { kind: 'list' } | { kind: 'saved' } | { kind: 'details'; uuid: string; from: 'list' | 'saved' };
 
@@ -194,11 +198,17 @@ function NetworkListView({
     />
   );
 
+  const power = (on: boolean) => {
+    rescan.reset();
+    setRadio.mutate(on);
+  };
+
   return (
     <Shell
       title="Wi-Fi"
       actions={
-        <>
+        radioEnabled &&
+        hasAdapter && (
           <Button
             variant="ghost"
             size="icon"
@@ -207,41 +217,41 @@ function NetworkListView({
             disabled={!radioEnabled || !hasAdapter || rescan.isPending || setRadio.isPending}
             onClick={() => rescan.mutate()}
           >
-            <RotateCw className={cn('size-4', (rescan.isPending || networks.isFetching) && 'animate-spin')} />
+            <RotateCw strokeWidth={1.75} className={cn('size-4.5', (rescan.isPending || networks.isFetching) && 'animate-spin')} />
           </Button>
-          <Switch
-            aria-label="Wi-Fi radio"
-            checked={radioEnabled}
-            disabled={!available || setRadio.isPending || rescan.isPending}
-            onCheckedChange={(checked) => {
-              rescan.reset();
-              setRadio.mutate(checked);
-            }}
-          />
-        </>
+        )
       }
     >
       {setRadio.isError && (
-        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p role="alert" className={cn(settingsAlert, 'px-4 py-2.5 text-xs text-destructive')}>
           {setRadio.variables && canReset
             ? `Couldn't reset the Wi-Fi adapter: ${cleanWifiError(setRadio.error)}`
             : cleanWifiError(setRadio.error)}
         </p>
       )}
       {rescan.isError && (
-        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p role="alert" className={cn(settingsAlert, 'px-4 py-2.5 text-xs text-destructive')}>
           Couldn't refresh: {cleanWifiError(rescan.error)}. The networks below may be out of date.
         </p>
+      )}
+      {available && radioEnabled && hasAdapter && (
+        <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
+          <SettingsToken icon={Wifi} active />
+          <Label htmlFor="wifi-power" className="min-w-0 flex-1 cursor-pointer text-sm">
+            Wi-Fi
+          </Label>
+          <Switch id="wifi-power" checked disabled={setRadio.isPending} onCheckedChange={power} />
+        </div>
       )}
       {(ethernet || connected.length > 0) && (
         <div className="flex flex-col gap-2">
           <SubHeading>Connected</SubHeading>
-          <ul className="flex flex-col gap-1" aria-label="Connected">
+          <ul className={settingsGroup} aria-label="Connected">
             {ethernet && (
-              <li className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-                <EthernetPort className="size-5 shrink-0 text-primary" aria-hidden />
+              <li className="flex items-center gap-3 px-4 py-2.5">
+                <SettingsToken icon={EthernetPort} active />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-primary">Ethernet</p>
+                  <p className="text-sm font-medium text-foreground">Ethernet</p>
                   {status.data?.ethernet?.iface && (
                     <p className="truncate text-xs text-muted-foreground">
                       {status.data.ethernet.iface}
@@ -266,12 +276,31 @@ function NetworkListView({
           Resetting the Wi-Fi adapter…
         </Fallback>
       ) : !hasAdapter ? (
-        <Fallback icon={WifiOff}>
+        <Fallback
+          icon={WifiOff}
+          action={
+            canReset && (
+              <Button variant="outline" disabled={setRadio.isPending} onClick={() => power(true)}>
+                Reset Wi-Fi Adapter
+              </Button>
+            )
+          }
+        >
           No Wi-Fi adapter was found on this system.
-          {canReset && ' If this computer has one, turn Wi-Fi off and on again to reset it.'}
+          {canReset && ' If this computer has one, resetting it may bring it back.'}
         </Fallback>
       ) : !radioEnabled ? (
-        <Fallback icon={WifiOff}>Wi-Fi is turned off.</Fallback>
+        <Fallback
+          icon={WifiOff}
+          action={
+            <Button disabled={setRadio.isPending} onClick={() => power(true)}>
+              {setRadio.isPending && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />}
+              Turn Wi-Fi On
+            </Button>
+          }
+        >
+          Wi-Fi is off.
+        </Fallback>
       ) : networks.isLoading ? (
         <NetworkListSkeleton />
       ) : networks.isError ? (
@@ -282,11 +311,11 @@ function NetworkListView({
         <div className="flex flex-col gap-2">
           <SubHeading>Available networks</SubHeading>
           {others.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               No other networks found nearby.
             </div>
           ) : (
-            <ul className="flex flex-col gap-1" aria-label="Available networks">
+            <ul className={settingsGroup} aria-label="Available networks">
               {others.map(networkRow)}
             </ul>
           )}
@@ -294,7 +323,7 @@ function NetworkListView({
       )}
 
       {available && (
-        <div className="flex flex-col divide-y divide-border/60 rounded-lg border border-border/60 bg-background/40">
+        <div className={settingsGroup}>
           <LinkRow icon={Plus} label="Add network" onClick={() => onAdd({})} />
           <LinkRow
             icon={Settings2}
@@ -325,9 +354,9 @@ function LinkRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-3 px-3 py-2.5 text-left first:rounded-t-lg last:rounded-b-lg hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={settingsRowButton}
     >
-      <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+      <SettingsToken icon={Icon} />
       <span className="min-w-0 flex-1 text-sm text-foreground">{label}</span>
       {detail && <span className="text-xs text-muted-foreground">{detail}</span>}
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -368,7 +397,7 @@ function NetworkRow({
   const keepFocus = useRef(false);
 
   return (
-    <li className="rounded-lg border border-border/60 bg-background/40">
+    <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
@@ -403,7 +432,7 @@ function NetworkRow({
                   title="Network details"
                   onClick={() => onDetails(saved.uuid)}
                 >
-                  <Settings2 className="size-4" />
+                  <Settings2 className="size-4.5" strokeWidth={1.75} />
                 </Button>
               )
             }
@@ -459,7 +488,7 @@ function NetworkRow({
       )}
 
       {error !== null && (
-        <p role="alert" className="border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
+        <p role="alert" className="px-4 pb-2 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -490,7 +519,7 @@ function PasswordForm({
         e.preventDefault();
         if (valid && !pending) onSubmit(password);
       }}
-      className="flex items-center gap-2 border-t border-border/60 px-3 py-2"
+      className="flex items-center gap-2 px-4 pb-2.5"
     >
       <Input
         type="password"
@@ -543,7 +572,7 @@ function SavedNetworksView({
   return (
     <Shell title="Saved networks" onBack={onBack}>
       {error !== null && (
-        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p role="alert" className={cn(settingsAlert, 'px-4 py-2.5 text-xs text-destructive')}>
           {error}
         </p>
       )}
@@ -552,7 +581,7 @@ function SavedNetworksView({
       ) : !saved || saved.length === 0 ? (
         <Fallback icon={Wifi}>No saved networks. Networks you join are remembered here.</Fallback>
       ) : (
-        <ul className="flex flex-col divide-y divide-border/60 rounded-lg border border-border/60 bg-background/40" aria-label="Saved networks">
+        <ul className={settingsGroup} aria-label="Saved networks">
           {saved.map((network) => (
             <li key={network.uuid}>
               <ContextMenu>
@@ -560,13 +589,9 @@ function SavedNetworksView({
                   <button
                     type="button"
                     onClick={() => onOpen(network.uuid)}
-                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className={settingsRowButton}
                   >
-                    {network.active || inRange.has(network.ssid) ? (
-                      <Wifi className={cn('size-5 shrink-0', network.active ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
-                    ) : (
-                      <WifiOff className="size-5 shrink-0 text-muted-foreground/60" aria-hidden />
-                    )}
+                    <SettingsToken icon={network.active || inRange.has(network.ssid) ? Wifi : WifiOff} active={network.active} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm text-foreground">{network.ssid}</span>
                       <span className="block truncate text-xs text-muted-foreground">
@@ -627,10 +652,6 @@ function SavedNetworksView({
   );
 }
 
-function SubHeading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
 function Shell({
   title,
   actions,
@@ -643,37 +664,28 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {onBack && (
-            <Button variant="ghost" size="icon" aria-label="Back to Wi-Fi" onClick={onBack}>
-              <ArrowLeft className="size-4" />
-            </Button>
-          )}
-          <h2 className="truncate text-lg font-semibold text-foreground">{title}</h2>
-        </div>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </header>
+    <SettingsSection
+      title={title}
+      actions={actions}
+      subpage={onBack !== undefined}
+      leading={
+        onBack && (
+          <Button variant="ghost" size="icon" aria-label="Back to Wi-Fi" onClick={onBack}>
+            <ArrowLeft className="size-4.5" strokeWidth={1.75} />
+          </Button>
+        )
+      }
+    >
       {children}
-    </section>
-  );
-}
-
-function Fallback({ icon: Icon, spin, children }: { icon?: LucideIcon; spin?: boolean; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
-      {Icon && <Icon className={cn('mx-auto mb-4 size-8 text-muted-foreground/80', spin && 'animate-spin')} aria-hidden />}
-      <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
-    </div>
+    </SettingsSection>
   );
 }
 
 function NetworkListSkeleton() {
   return (
-    <div className="flex flex-col gap-1" aria-hidden>
+    <div className={settingsGroup} aria-hidden>
       {Array.from({ length: 4 }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
+        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
           <Skeleton className="size-5 rounded bg-foreground/10" />
           <div className="flex-1 space-y-1.5">
             <Skeleton className="h-3.5 bg-foreground/10" style={{ width: `${30 + ((i * 23) % 35)}%` }} />

@@ -66,7 +66,7 @@ type Pane =
 /** The side's buttons below the built-in widgets. */
 const OTHER_PANES = [
   { kind: 'nostr', label: 'From Nostr', icon: Search, tile: 'from-violet-500/25 to-violet-500/5 text-violet-600 dark:text-violet-300' },
-  { kind: 'folder', label: 'From a Folder', icon: FolderOpen, tile: 'from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300' },
+  { kind: 'folder', label: 'From a Folder', icon: FolderOpen, tile: 'from-warning/25 to-warning/5 text-warning' },
 ] as const;
 
 /** Which of those a pane belongs to. */
@@ -110,7 +110,7 @@ export function WidgetGallery() {
   return (
     <Dialog open={galleryOpen && !picking} onOpenChange={(open) => (open ? setGalleryOpen(true) : close())}>
       <DialogContent className="grid h-[min(760px,90vh)] grid-cols-1 gap-0 overflow-hidden p-0 sm:max-w-5xl md:grid-cols-[232px_1fr]">
-        <nav aria-label="Widgets" className="hidden flex-col gap-1 overflow-y-auto border-r bg-muted/40 p-4 md:flex">
+        <nav aria-label="Widgets" className="hidden flex-col gap-1 overflow-y-auto border-r bg-muted/40 p-4 md:flex [&>*]:shrink-0">
           <DialogTitle className="px-2 pb-2 text-lg">Add Widgets</DialogTitle>
           <DialogDescription className="sr-only">Pick a widget for your desktop.</DialogDescription>
           {[...builtinWidgets()].map(([id, manifest]) => {
@@ -126,7 +126,7 @@ export function WidgetGallery() {
                   selected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
                 )}
               >
-                <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 text-primary">
+                <span className="grid size-8 place-items-center rounded-lg bg-pigment text-primary-foreground clay-pigment">
                   <BuiltinIcon name={manifest.icon} className="size-4" />
                 </span>
                 {manifest.name}
@@ -340,7 +340,7 @@ function NostrPane({ onPick }: { onPick: (source: NappletSource) => void }) {
           {browse.data.map((source) => <NappletCard key={source.address} source={source} onPick={() => onPick(source)} />)}
         </div>
       ) : (
-        <Card className="border-dashed">
+        <Card>
           <CardContent className="px-8 py-12 text-center">
             <p className="mx-auto max-w-sm text-muted-foreground">
               No widgets were found on your relays. Paste a widget's address above to add it.
@@ -363,9 +363,9 @@ function FolderPane({ state, onChoose }: { state: FolderState; onChoose: () => v
         <h2 className="text-2xl font-semibold tracking-tight">From a Folder</h2>
         <p className="text-muted-foreground">Make your own widget, and see it on your desktop as you work on it.</p>
       </div>
-      <Card className="border-dashed">
+      <Card>
         <CardContent className="flex flex-col items-center gap-4 px-8 py-12 text-center">
-          <span className="grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-500/25 to-amber-500/5 text-amber-600 dark:text-amber-300">
+          <span className="grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-warning/25 to-warning/5 text-warning">
             <FolderOpen className="size-7" aria-hidden />
           </span>
           <p className="max-w-md text-sm text-muted-foreground">
@@ -444,7 +444,7 @@ export function PermissionScreen({ source, onCancel, onAdd }: { source: NappletS
       <div className="w-full rounded-2xl border bg-card px-4">
         {asked.length === 0 ? (
           <div className="flex items-start gap-4 py-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-success/15 text-success">
               <ShieldCheck className="size-5" aria-hidden />
             </span>
             <div>

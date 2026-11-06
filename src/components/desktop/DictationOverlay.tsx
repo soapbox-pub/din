@@ -45,7 +45,7 @@ export function DictationOverlay() {
             <span
               className={cn(
                 'relative grid size-8 place-items-center rounded-full',
-                status === 'error' ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground',
+                status === 'error' ? 'bg-muted text-muted-foreground' : 'bg-pigment text-primary-foreground clay-pigment',
               )}
             >
               {status === 'error' ? (

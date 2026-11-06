@@ -81,7 +81,7 @@ const TONES: Record<NonNullable<Key['tone']>, string> = {
   fn: 'bg-muted text-foreground hover:bg-muted/70',
   num: 'bg-background text-foreground hover:bg-accent text-base font-medium',
   op: 'bg-secondary text-secondary-foreground hover:bg-secondary/70',
-  enter: 'bg-primary text-primary-foreground hover:bg-primary/90',
+  enter: 'bg-pigment text-primary-foreground clay-pigment hover:brightness-110',
   clear: 'bg-muted text-foreground hover:bg-destructive/15',
 };
 

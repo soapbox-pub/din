@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Wallpaper } from './Wallpaper';
 import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
@@ -110,6 +110,78 @@ function coveredWindows(
   }
   return covered;
 }
+
+/**
+ * The session's hosts and overlays take no props: memoized, so the session
+ * re-rendering as windows open, move and raise doesn't re-render all of them
+ * (and every dialog and menu in them). What reads the windows reads them
+ * from context.
+ */
+const SessionHosts = memo(function SessionHosts() {
+  return (
+    <>
+      <FilePickerBridgeHost />
+      <BrowserExtensionHost />
+      <ExtensionPopupHost />
+      <PasswordAutofillHost />
+      <NostrBridgeHost />
+      <HighlightBridgeHost />
+      <NsiteBridgeHost />
+      <PromptHost />
+      <AdminPromptHost />
+      <PolkitPromptHost />
+      <ScreenSharePicker />
+      <EyeDropperHost />
+      <DesktopHotkeys />
+      <MouseHost />
+      <DeviceBatteryHost />
+      <AssistantHost />
+      <SecurityOptions />
+      <ScreenshotHost />
+      <ScreenRecordingHost />
+      <SystemEventsHost />
+      <NativeLinksHost />
+      <LaunchHost />
+      <CommandHost />
+      <SystemNotificationsHost />
+      <PhoneHost />
+      <MailHost />
+      <QuickShareHost />
+      <GuestInputHost />
+      <MenuHost />
+      <CursorEffectsLayer />
+      <DinDragOverlay />
+      <InstallerAutoOpen />
+      <UpdateNotifier />
+      <AirPlayPromptHost />
+      <BluetoothPromptHost />
+      <VolumesHost />
+      <PrintHost />
+      <PageFullscreenHost />
+      <GamePerformanceHost />
+      <BootScreenSync />
+      <WindowSessionHost />
+      <Announcer />
+    </>
+  );
+});
+
+const SessionOverlays = memo(function SessionOverlays() {
+  return (
+    <>
+      <WindowSwitcher />
+      <VolumeOsd />
+      <WorkspaceOsd />
+      <BrightnessOsd />
+      <KeyboardLayoutOsd />
+      <AirPlayOsd />
+      <DictationOverlay />
+      <ScreenDimmer />
+      <NotificationPopups />
+      <NativeDisplayHost />
+    </>
+  );
+});
 
 /**
  * The desktop session: top menu bar, wallpaper workspace, bottom dock; or
@@ -239,48 +311,7 @@ function DesktopSession() {
               <FilePickerProvider>
                 <DesktopBackgroundProvider>
                   <DesktopAssistantHost>
-                    <FilePickerBridgeHost />
-                    <BrowserExtensionHost />
-                    <ExtensionPopupHost />
-                    <PasswordAutofillHost />
-                    <NostrBridgeHost />
-                    <HighlightBridgeHost />
-                    <NsiteBridgeHost />
-                    <PromptHost />
-                    <AdminPromptHost />
-                    <PolkitPromptHost />
-                    <ScreenSharePicker />
-                    <EyeDropperHost />
-                    <DesktopHotkeys />
-                    <MouseHost />
-                    <DeviceBatteryHost />
-                    <AssistantHost />
-                    <SecurityOptions />
-                    <ScreenshotHost />
-                    <ScreenRecordingHost />
-                    <SystemEventsHost />
-                    <NativeLinksHost />
-                    <LaunchHost />
-                    <CommandHost />
-                    <SystemNotificationsHost />
-                    <PhoneHost />
-                    <MailHost />
-                    <QuickShareHost />
-                    <GuestInputHost />
-                    <MenuHost />
-                    <CursorEffectsLayer />
-                    <DinDragOverlay />
-                    <InstallerAutoOpen />
-                    <UpdateNotifier />
-                    <AirPlayPromptHost />
-                    <BluetoothPromptHost />
-                    <VolumesHost />
-                    <PrintHost />
-                    <PageFullscreenHost />
-                    <GamePerformanceHost />
-                    <BootScreenSync />
-                    <WindowSessionHost />
-                    <Announcer />
+                    <SessionHosts />
                     <Wallpaper backdrop={<DesktopMenu />}>
                       {!taskbar && <MenuBar />}
 
@@ -319,16 +350,7 @@ function DesktopSession() {
                       </main>
 
                       {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
-                      <WindowSwitcher />
-                      <VolumeOsd />
-                      <WorkspaceOsd />
-                      <BrightnessOsd />
-                      <KeyboardLayoutOsd />
-                      <AirPlayOsd />
-                      <DictationOverlay />
-                      <ScreenDimmer />
-                      <NotificationPopups />
-                      <NativeDisplayHost />
+                      <SessionOverlays />
                     </Wallpaper>
                   </DesktopAssistantHost>
                 </DesktopBackgroundProvider>

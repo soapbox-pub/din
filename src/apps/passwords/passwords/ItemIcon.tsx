@@ -30,7 +30,7 @@ export function ItemIcon({
       <span
         aria-hidden
         className={cn(
-          'grid shrink-0 place-items-center bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 shadow-sm',
+          'grid shrink-0 place-items-center bg-foreground/10 text-ink-accent clay',
           SIZES[size],
           className,
         )}

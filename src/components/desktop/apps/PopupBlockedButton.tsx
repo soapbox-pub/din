@@ -60,7 +60,7 @@ export function PopupBlockedButton({
           <AppWindow className="size-4.5" strokeWidth={1.75} aria-hidden />
           <span
             aria-hidden
-            className="absolute right-1 top-1 size-2 rounded-full bg-destructive ring-2 ring-background"
+            className="absolute right-1 top-1 size-2 rounded-full bg-destructive"
           />
         </button>
       </PopoverTrigger>
@@ -82,8 +82,8 @@ export function PopupBlockedButton({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                  'hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm',
+                  'hover:bg-foreground/5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                 )}
               >
                 <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

@@ -25,6 +25,7 @@ import { useToast } from '@/hooks/useToast';
 import { DIN_ICON_THEME } from '@/lib/iconTheme';
 import type { IconThemeInfo } from '@/lib/iconTheme';
 import { cn } from '@/lib/utils';
+import { settingsCard, settingsChoiceClass } from '@/shared/settingsChromeStyles';
 
 /** What the Din theme looks like: Din's own bundled icons. */
 const DIN_PREVIEW = [
@@ -54,7 +55,7 @@ export function IconThemePicker() {
   }
   if (status.isError || !status.data || !themes.data) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+      <div className="px-8 py-12 text-center">
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">Could not read the icon settings.</p>
       </div>
     );
@@ -80,7 +81,7 @@ export function IconThemePicker() {
   // Nothing to pick between: only Din's own icons are installed.
   if (themes.data.every((option) => option.id === DIN_ICON_THEME) && theme === DIN_ICON_THEME) {
     return (
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border px-8 py-12 text-center">
+      <div className="flex flex-col items-center gap-4 px-8 py-12 text-center">
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">
           Din is using its own icons. Get icon themes from the App Store, or add one to ~/.local/share/icons.
         </p>
@@ -93,7 +94,7 @@ export function IconThemePicker() {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/20 p-3">
+    <div className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
       {themes.data.length === 0 ? (
         <p className="text-xs text-muted-foreground">No icon themes are installed.</p>
       ) : (
@@ -171,13 +172,9 @@ function IconThemeOption({
             disabled={disabled}
             onClick={onChoose}
             className={cn(
-              'flex w-full flex-col items-start gap-2 rounded-xl border p-3 text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:cursor-not-allowed disabled:opacity-60',
+              settingsChoiceClass(selected),
+              'flex w-full flex-col items-start gap-2 p-3 text-left',
               !din && 'pr-10',
-              selected
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground enabled:hover:bg-foreground/5 enabled:hover:text-foreground',
             )}
           >
             <span className="flex h-10 items-center gap-2" aria-hidden>

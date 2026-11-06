@@ -8,6 +8,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { websiteLabel } from '@/lib/nsiteApps';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /**
  * The websites whose links installed nsites open, each with a switch: the
@@ -20,19 +21,19 @@ export function WebsiteLinkSettings() {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-medium text-foreground">Website links</h3>
-        <p className="text-xs text-muted-foreground">
+        <h3 className="px-1 text-sm font-semibold text-foreground/90">Website links</h3>
+        <p className="px-1 text-xs text-muted-foreground">
           Links to these websites open in an installed nsite that the website says is its own.
         </p>
       </div>
 
       {linkedWebsites.length === 0 ? (
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+        <p className="px-4 py-3 text-xs text-muted-foreground">
           No installed nsite opens a website’s links yet. A website names its nsite in its
           web-app-origin-association file.
         </p>
       ) : (
-        <ul className="divide-y rounded-md border">
+        <ul className={settingsGroup}>
           {linkedWebsites.map((website) => {
             const app = getApp(website.appId);
             const label = websiteLabel(website);
@@ -40,7 +41,7 @@ export function WebsiteLinkSettings() {
             return (
               <ContextMenu key={`${website.appId} ${website.origin}`}>
                 <ContextMenuTrigger asChild>
-                  <li className="flex items-center gap-3 px-3 py-2">
+                  <li className="flex items-center gap-3 py-2 pr-2 pl-4">
                     {app && <AppIcon icon={app.icon} web={app.web} className="size-5 shrink-0 rounded" />}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-foreground">{label}</p>

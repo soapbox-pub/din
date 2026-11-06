@@ -83,6 +83,9 @@
   --color-window: var(--window);
   --color-glass: var(--glass);
   --color-ink-accent: var(--ink-accent);
+  --color-raised: var(--raised);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
 
   --color-md-heading: var(--md-heading);
   --color-md-strong: var(--md-strong);
@@ -202,7 +205,7 @@
   }
   @container style(--glass-material: frosted) {
     .glass-surface {
-      border-color: color-mix(in oklab, var(--border) 60%, transparent);
+      border-color: color-mix(in oklab, var(--foreground) 7%, transparent);
       background-color: color-mix(in oklab, color-mix(in oklab, var(--popover) 94%, var(--primary)) 74%, transparent);
       background-image: none;
       -webkit-backdrop-filter: blur(24px);
@@ -212,7 +215,7 @@
   }
   @container style(--glass-material: solid) {
     .glass-surface {
-      border-color: var(--border);
+      border-color: color-mix(in oklab, var(--foreground) 7%, transparent);
       background-color: color-mix(in oklab, var(--popover) 94%, var(--primary));
       background-image: none;
       -webkit-backdrop-filter: none;
@@ -428,6 +431,12 @@
   /* The accent for icons on glass (sidebars' rows): the primary's hue, pulled
      toward the text so it reads over whatever shows through. */
   --ink-accent: color-mix(in oklab, var(--primary) 60%, var(--foreground));
+  /* An active tab's or chosen segment's face: lighter than what it sits on. */
+  --raised: var(--background);
+  /* What's well and what needs looking at (running, connected; low,
+     stopped), dark enough to read as text on the window and to tint a token. */
+  --success: hsl(152 62% 32%);
+  --warning: hsl(32 92% 38%);
   --glass: color-mix(in oklab, color-mix(in oklab, var(--popover) 94%, var(--primary)) 68%, transparent);
   --glass-material: liquid;
   /* Light on the glass's curved surface: its rim, the bright line along its
@@ -481,6 +490,9 @@
 
   --destructive: hsl(0 62.8% 30.6%);
   --destructive-foreground: hsl(210 40% 98%);
+  --success: hsl(152 55% 58%);
+  --warning: hsl(38 92% 62%);
+  --raised: color-mix(in oklab, var(--foreground) 12%, transparent);
 
   /* Lines a step lighter and greyer than the fills (muted, accent), so a
      border never reads as a hovered row or a field. */
@@ -559,6 +571,13 @@
   ::selection {
     background-color: var(--selection);
   }
+}
+
+/* While a screenshot is taken (captureDesktop in src/lib/screenshot.ts),
+   nothing that only animates over the desktop is in it. */
+:root[data-capturing] [data-cursor-effects],
+:root[data-capturing] [data-window-effect] {
+  visibility: hidden !important;
 }
 
 /* Settings → Accessibility (src/lib/accessibility.ts). */

@@ -38,6 +38,9 @@ import {
 } from '@/lib/profileTheme';
 import { THEME_DESCRIPTION_MAX, THEME_TITLE_MAX } from '@/lib/themeDefinition';
 import { CURATED_FONTS, THEME_FONT_CATEGORIES, previewFamily } from '@/lib/themeFonts';
+import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
+import { SegmentedControl } from '@/shared/appChrome';
+import { SettingsSubHeading } from '@/shared/settingsSection';
 
 const MODES: { value: AppearanceMode; name: string; icon: LucideIcon }[] = [
   { value: 'light', name: 'Light', icon: Sun },
@@ -53,6 +56,9 @@ const COLOR_ROLES: { role: keyof DesktopTheme['colors']; name: string }[] = [
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 
+/** A label over a custom theme's fields, as a menu bar panel's small headings. */
+const fieldHeading = 'mb-2 text-xs font-semibold text-muted-foreground';
+
 /**
  * Settings → Themes' theme: built-in light or dark, or a custom one of
  * colors, fonts and a background picture, and whether the custom one is the
@@ -66,27 +72,23 @@ export function ThemeSettings() {
 
   return (
     <>
-      <p className="mb-3 text-sm text-muted-foreground">Theme</p>
-      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Theme">
-        {MODES.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={editor.mode === option.value}
-            onClick={() => editor.setMode(option.value)}
-            className={cn(
-              'flex w-28 flex-col items-center gap-2 rounded-xl border p-4',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              editor.mode === option.value
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-            )}
-          >
-            <option.icon className="size-6" aria-hidden />
-            <span className="text-sm">{option.name}</span>
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-4 px-1">
+        <SettingsSubHeading className="mt-0 px-0">Theme</SettingsSubHeading>
+        <SegmentedControl
+          label="Theme"
+          size="md"
+          value={editor.mode}
+          options={MODES.map((option) => ({
+            value: option.value,
+            label: (
+              <>
+                <option.icon strokeWidth={1.75} aria-hidden />
+                {option.name}
+              </>
+            ),
+          }))}
+          onValueChange={editor.setMode}
+        />
       </div>
 
       {editor.theme && (
@@ -96,7 +98,7 @@ export function ThemeSettings() {
       )}
 
       {editor.canSync && (
-        <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 p-3">
+        <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
           <div className="min-w-0">
             <Label htmlFor="sync-profile-theme" className="cursor-pointer text-sm">
               Sync with your profile theme
@@ -137,11 +139,11 @@ function CustomTheme({
   const background = theme.background;
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border bg-muted/20 p-3">
+    <div className={settingsGroup}>
       <SaveThemeBar theme={theme} />
 
-      <div>
-        <p className="mb-2 text-sm text-foreground">Colors</p>
+      <div className="px-4 py-3">
+        <p className={fieldHeading}>Colors</p>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2">
           {COLOR_ROLES.map(({ role, name }) => (
             <ColorField
@@ -154,8 +156,8 @@ function CustomTheme({
         </div>
       </div>
 
-      <div>
-        <p className="mb-2 text-sm text-foreground">Fonts</p>
+      <div className="px-4 py-3">
+        <p className={fieldHeading}>Fonts</p>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-2">
           <FontField
             name="Text"
@@ -170,12 +172,12 @@ function CustomTheme({
         </div>
       </div>
 
-      <div>
-        <p className="mb-2 text-sm text-foreground">Background picture</p>
+      <div className="px-4 py-3">
+        <p className={fieldHeading}>Background picture</p>
         <div className="flex flex-wrap items-start gap-3">
           <div
             aria-hidden
-            className="aspect-video w-40 shrink-0 overflow-hidden rounded-md border bg-cover bg-center"
+            className="aspect-video w-40 shrink-0 overflow-hidden rounded-lg bg-cover bg-center clay"
             style={{
               backgroundColor: theme.colors.background,
               backgroundImage: background ? `url("${background.url}")` : undefined,
@@ -202,26 +204,16 @@ function CustomTheme({
               )}
             </div>
             {background && (
-              <div className="flex gap-1" role="radiogroup" aria-label="Picture fit">
-                {(['cover', 'tile'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="radio"
-                    aria-checked={background.mode === mode}
-                    onClick={() => edit({ ...theme, background: { ...background, mode } })}
-                    className={cn(
-                      'rounded-md border px-3 py-1 text-xs',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      background.mode === mode
-                        ? 'border-primary bg-primary/10 text-foreground'
-                        : 'border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
-                    )}
-                  >
-                    {mode === 'cover' ? 'Fill screen' : 'Tile'}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                label="Picture fit"
+                value={background.mode}
+                options={[
+                  { value: 'cover', label: 'Fill screen' },
+                  { value: 'tile', label: 'Tile' },
+                ]}
+                onValueChange={(mode) => edit({ ...theme, background: { ...background, mode } })}
+                className="self-start"
+              />
             )}
           </div>
         </div>
@@ -244,13 +236,13 @@ function ColorField({
   const id = `theme-color-${name.toLowerCase()}`;
 
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-background/60 p-2">
+    <div className="flex items-center gap-2">
       <input
         type="color"
         aria-label={`${name} color`}
         value={value}
         onChange={(e) => onChange(e.target.value.toLowerCase())}
-        className="size-8 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+        className="size-8 shrink-0 cursor-pointer appearance-none rounded-full border-0 bg-transparent p-0 clay [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
       />
       <div className="min-w-0 flex-1">
         <Label htmlFor={id} className="text-xs text-muted-foreground">
@@ -378,8 +370,8 @@ function SaveThemeBar({ theme }: { theme: DesktopTheme }) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <p className="mr-auto min-w-0 truncate text-sm text-foreground">
+    <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+      <p className="mr-auto min-w-0 truncate text-sm font-medium text-foreground">
         {editing ? editing.title : theme.title || 'Custom theme'}
       </p>
       {editing && changed && (

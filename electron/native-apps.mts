@@ -46,7 +46,7 @@ import {
   windowsProgramCommand,
   windowsShellDir,
 } from './windows-apps.mts';
-import { programInfo } from './pe-icon.mts';
+import { icoFileIcon, programInfo } from './pe-icon.mts';
 
 /** An installed native application, as the shell sees it. */
 export interface NativeApp {
@@ -1328,8 +1328,102 @@ async function windowsProgramApp(pid: number): Promise<UnlistedApp | null> {
   };
 }
 
+/** Where Steam keeps its data: a native install, or the Flatpak's. */
+function steamRoots(): string[] {
+  const home = os.homedir();
+  return [
+    path.join(home, '.local/share/Steam'),
+    path.join(home, '.steam/steam'),
+    path.join(home, '.var/app/com.valvesoftware.Steam/.local/share/Steam'),
+  ].filter((root) => fs.existsSync(path.join(root, 'steamapps')));
+}
+
+/** A string value of a Valve KeyValues (.vdf, .acf) text file, unescaped. */
+function vdfStrings(text: string, key: string): string[] {
+  const pattern = new RegExp(`"${key}"\\s+"((?:[^"\\\\]|\\\\.)*)"`, 'g');
+  return [...text.matchAll(pattern)].map((m) => m[1].replace(/\\(.)/g, '$1'));
+}
+
+/** A file of a megabyte or less, or null. */
+function readSmall(file: string): Buffer | null {
+  try {
+    return fs.statSync(file).size <= 1024 * 1024 ? fs.readFileSync(file) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The Steam game a window's class names (steam_app_<id>): its id, or null. */
+function steamGameId(wmClass: string[]): string | null {
+  return wmClass.map((name) => /^steam_app_(\d+)$/i.exec(name)?.[1]).find(Boolean) ?? null;
+}
+
+/**
+ * The unlisted app a game Steam launched belongs to (its window's class is
+ * steam_app_<id>, see src/lib/gameMode.ts): named as Steam's library names
+ * it, from the game's manifest in whichever library folder holds it, and
+ * drawn with its icon from Steam's cache (librarycache/<id>/<hash>.jpg, the
+ * same hash as the larger steam/games/<hash>.ico). Asked before the window's
+ * process, which for a Flatpak's Steam is a pid in its sandbox, not Din's.
+ */
+async function steamGameApp(wmClass: string[]): Promise<UnlistedApp | null> {
+  const appId = steamGameId(wmClass);
+  if (!appId) return null;
+  let name: string | null = null;
+  let icon: string | null = null;
+  for (const root of steamRoots()) {
+    if (!name) {
+      const folders = readSmall(path.join(root, 'steamapps/libraryfolders.vdf'))?.toString('utf8');
+      const libraries = [root, ...(folders ? vdfStrings(folders, 'path') : [])];
+      for (const library of libraries) {
+        const manifest = readSmall(path.join(library, 'steamapps', `appmanifest_${appId}.acf`))?.toString('utf8');
+        const found = manifest && vdfStrings(manifest, 'name')[0];
+        if (found && found.length <= 128) {
+          name = found;
+          break;
+        }
+      }
+    }
+    if (!icon) {
+      const cache = path.join(root, 'appcache/librarycache', appId);
+      let jpg: string | undefined;
+      try {
+        jpg = fs.readdirSync(cache).find((file) => /^[0-9a-f]{40}\.jpg$/.test(file));
+      } catch {
+        jpg = undefined;
+      }
+      if (jpg) {
+        const ico = await icoFileIcon(path.join(root, 'steam/games', jpg.replace(/\.jpg$/, '.ico')));
+        if (ico) icon = `data:image/png;base64,${ico.toString('base64')}`;
+        else {
+          const small = readSmall(path.join(cache, jpg));
+          if (small) icon = `data:image/jpeg;base64,${small.toString('base64')}`;
+        }
+      }
+    }
+  }
+  return {
+    entry: null,
+    app: {
+      id: unlistedId(`steam-${appId}`),
+      desktopId: '',
+      name: name ?? `Steam game ${appId}`,
+      comment: null,
+      icon,
+      iconGlyph: false,
+      categories: ['Game'],
+      keywords: [],
+      terminal: false,
+      schemes: [],
+    },
+  };
+}
+
 /** The unlisted app a window's process belongs to, from its bundle. */
-async function unlistedAppFor(pid: number, wmClass: string[]): Promise<UnlistedApp | null> {
+async function unlistedAppFor(pid: number | null, wmClass: string[]): Promise<UnlistedApp | null> {
+  const steam = await steamGameApp(wmClass);
+  if (steam) return steam;
+  if (pid === null) return null;
   // Wine's own store path has a desktop entry too (the program loader's),
   // so a Windows program is told apart first.
   const windows = await windowsProgramApp(pid);
@@ -1401,7 +1495,8 @@ interface WindowApp {
  * already-running instance), then by where its program came from.
  */
 async function appForWindow(pid: number | null, wmClass: string[]): Promise<WindowApp | null> {
-  const byPid = appIdForPid(pid);
+  // A game is its own app, not the Steam that launched it.
+  const byPid = steamGameId(wmClass) ? null : appIdForPid(pid);
   if (byPid) {
     const unlisted = unlistedApps.get(byPid);
     return unlisted ? { appId: byPid, app: unlisted.app } : { appId: byPid };
@@ -1411,7 +1506,6 @@ async function appForWindow(pid: number | null, wmClass: string[]): Promise<Wind
     const appId = wmClassIndex.get(name.toLowerCase());
     if (appId) return { appId };
   }
-  if (pid === null) return null;
   const unlisted = await unlistedAppFor(pid, wmClass);
   if (!unlisted) return null;
   // A program seen before keeps the record it had, so it's one Dock tile.

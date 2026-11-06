@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AppWindow, Ban, Boxes, Download, EllipsisVertical, Globe, Loader2, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
+import { AppWindow, Ban, Boxes, Download, Globe, Loader2, MoreHorizontal, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +28,8 @@ import {
 } from '@/lib/features';
 import { resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { cn } from '@/lib/utils';
+import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SettingsSection } from '@/shared/settingsSection';
 
 const ICONS: Record<string, LucideIcon> = {
   windows: AppWindow,
@@ -77,16 +79,17 @@ export function OptionalFeaturesSection() {
   };
 
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 p-4">
-      <header className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-foreground">Optional Features</h2>
-        {features.data?.available && missing.length > 1 && (
+    <SettingsSection
+      title="Optional Features"
+      actions={
+        features.data?.available && missing.length > 1 && (
           <Button variant="outline" size="sm" onClick={installAll}>
-            <Download className="size-4" aria-hidden />
+            <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
             Install All ({formatFeatureSize(missingSize)})
           </Button>
-        )}
-      </header>
+        )
+      }
+    >
       <p className="text-sm text-muted-foreground">
         Parts of DinOS that take a lot of space, kept off the disk until you want them. Each downloads from the
         internet when you install it, and comes back to the size it was when you remove it. Dictation comes with
@@ -96,9 +99,9 @@ export function OptionalFeaturesSection() {
       {!bridge ? (
         <Fallback>Optional features are DinOS’s; they aren’t available in a plain browser.</Fallback>
       ) : features.isLoading ? (
-        <ul className="flex flex-col gap-2" aria-hidden>
+        <ul className={settingsGroup} aria-hidden>
           {[0, 1, 2].map((i) => (
-            <li key={i} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-3">
+            <li key={i} className="flex items-center gap-3 px-4 py-3">
               <Skeleton className="size-8 rounded-md" />
               <div className="flex flex-1 flex-col gap-1.5">
                 <Skeleton className="h-4 w-40" />
@@ -113,7 +116,7 @@ export function OptionalFeaturesSection() {
       ) : !features.data?.available ? (
         <Fallback>This computer has no optional features to install: everything Din uses is already part of it.</Fallback>
       ) : (
-        <ul className="flex flex-col gap-2" aria-label="Optional features">
+        <ul className={settingsGroup} aria-label="Optional features">
           {list.map((feature) => (
             <FeatureRow
               key={feature.id}
@@ -170,7 +173,7 @@ export function OptionalFeaturesSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -196,19 +199,14 @@ function FeatureRow({
     <li>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            className={cn(
-              'flex items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-3',
-              feature.installed && 'border-primary/30',
-            )}
-          >
+          <div className="flex items-center gap-3 py-3 pr-2 pl-4">
             <span
               className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground',
-                feature.installed && 'bg-primary/10 text-primary',
+                'flex size-9 shrink-0 items-center justify-center rounded-full',
+                feature.installed ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/75 clay',
               )}
             >
-              <Icon className="size-5" aria-hidden />
+              <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
             </span>
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="text-sm font-medium text-foreground">{feature.title}</span>
@@ -236,14 +234,14 @@ function FeatureRow({
               <div className="flex shrink-0 items-center gap-1">
                 {!feature.installed && (
                   <Button variant="outline" size="sm" onClick={onInstall}>
-                    <Download className="size-4" aria-hidden />
+                    <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
                     Download Now
                   </Button>
                 )}
-                  <DropdownMenu>
+                <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" aria-label={`More for ${feature.title}`}>
-                      <EllipsisVertical className="size-4" aria-hidden />
+                      <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -253,7 +251,7 @@ function FeatureRow({
               </div>
             ) : (
               <Button variant="outline" size="sm" onClick={onInstall}>
-                <Download className="size-4" aria-hidden />
+                <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
                 Install
               </Button>
             )}
@@ -314,7 +312,7 @@ function FeatureMenuItems({
 
 function Fallback({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-border px-8 py-12 text-center">
+    <div className="px-8 py-12 text-center">
       <PackagePlus className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
       <p className="mx-auto max-w-sm text-sm text-muted-foreground">{children}</p>
     </div>

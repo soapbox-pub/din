@@ -350,7 +350,7 @@ export function FileBrowser() {
                 cwds[t.id] && cwds[t.id] === trash.data ? (
                   <Trash2 className="size-3.5 text-muted-foreground" />
                 ) : (
-                  <Folder className="size-3.5 text-primary" />
+                  <Folder className="size-3.5 text-ink-accent" />
                 ),
             }))}
             activeId={activeId}
@@ -379,7 +379,7 @@ export function FileBrowser() {
       <div className="flex h-full w-full flex-col">
         {header}
         <div className="grid min-h-0 flex-1 place-items-center p-6">
-          <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+          <div className="max-w-sm rounded-xl px-8 py-12 text-center">
             <HardDrive className="mx-auto mb-4 size-8 text-muted-foreground/80" aria-hidden />
             <p className="text-sm text-muted-foreground">
               Files needs the Electron shell to access the OS filesystem. Run{' '}
@@ -1649,7 +1649,7 @@ function FileBrowserTab({
                   'absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full',
                   focusRing,
                   searchContents
-                    ? 'bg-primary/15 text-primary'
+                    ? 'bg-selected text-foreground'
                     : 'text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground',
                 )}
               >
@@ -1776,7 +1776,7 @@ function FileBrowserTab({
                 type="button"
                 disabled={entries.length === 0}
                 onClick={() => setDialog({ type: 'emptyTrash' })}
-                className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+                className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-destructive hover:bg-destructive/10  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
               >
                 Empty Trash
               </button>
@@ -1787,7 +1787,7 @@ function FileBrowserTab({
             <ListSkeleton />
           ) : listing.isError ? (
             <div className="grid flex-1 place-items-center p-6">
-              <div className="max-w-sm rounded-xl border border-dashed border-border px-8 py-12 text-center">
+              <div className="max-w-sm rounded-xl px-8 py-12 text-center">
                 <p className="text-sm text-muted-foreground">
                   Couldn’t open this folder: {cleanFsError(listing.error)}
                 </p>
@@ -2061,13 +2061,13 @@ function FileBrowserTab({
                   : `${selectedNames.length.toLocaleString()} of ${entries.length.toLocaleString()} selected${selectionBytes > 0 ? ` (${formatBytes(selectionBytes)})` : ''}`}
           </span>
           {listing.data?.truncated && !filter && (
-            <span className="shrink-0 text-amber-600 dark:text-amber-400">
+            <span className="shrink-0 text-warning">
               Showing the first {listing.data.entries.length.toLocaleString()} items.
             </span>
           )}
           {searching && entries.length > 0 && <span className="shrink-0">Searching subfolders…</span>}
           {foundCurrent && found.data.truncated && (
-            <span className="shrink-0 text-amber-600 dark:text-amber-400">Too many matches; showing some of them.</span>
+            <span className="shrink-0 text-warning">Too many matches; showing some of them.</span>
           )}
           <span
             role={status?.kind === 'error' ? 'alert' : 'status'}
@@ -2309,7 +2309,7 @@ function Breadcrumbs({
                     'flex h-6 items-center gap-1.5 rounded px-1.5 text-sm',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     over === c.path
-                      ? 'bg-primary/20 ring-2 ring-primary'
+                      ? 'bg-selected ring-2 ring-ring/60'
                       : last
                         ? 'font-medium text-foreground'
                         : 'text-foreground/70 hover:bg-foreground/10 hover:text-foreground',

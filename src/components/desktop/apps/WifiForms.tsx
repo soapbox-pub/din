@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Switch } from '@/components/ui/switch';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useWifiMutations } from '@/hooks/useWifi';
@@ -28,6 +29,7 @@ import {
   proxyFromDraft,
 } from '@/lib/wifiForm';
 import type { EapDraft, IpDraft, ProxyDraft } from '@/lib/wifiForm';
+import { settingsCard } from '@/shared/settingsChromeStyles';
 
 /**
  * The pieces Wi-Fi settings are edited with: the fields for a password, IP
@@ -62,23 +64,19 @@ export function SelectField<T extends string>({
       <Label htmlFor={id} className="text-xs text-muted-foreground">
         {label}
       </Label>
-      <select
+      <NativeSelect
         id={id}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value as T)}
-        className={cn(
-          'h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          'disabled:cursor-not-allowed disabled:opacity-60',
-        )}
+        className="w-full"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
     </div>
   );
@@ -169,7 +167,7 @@ export function PasswordField({
           aria-pressed={shown}
           onClick={() => setShown((s) => !s)}
         >
-          {shown ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          {shown ? <EyeOff className="size-4.5" strokeWidth={1.75} /> : <Eye className="size-4.5" strokeWidth={1.75} />}
         </Button>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -234,7 +232,7 @@ function FileField({
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-input px-3 text-sm',
+            'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg bg-foreground/[0.06] px-3 text-sm',
             value ? 'text-foreground' : 'text-muted-foreground',
           )}
           title={value || undefined}
@@ -381,7 +379,7 @@ export function EapFields({
             <FileField label="CA certificate file" value={draft.caCert} onChange={(caCert) => set({ caCert })} />
           )}
           {draft.caMode === 'none' ? (
-            <p className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <p className="flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               No certificate specified. Your connection won't be private.
             </p>
@@ -519,7 +517,7 @@ export function AddNetworkDialog({
 
           <button
             type="button"
-            className="flex items-center gap-1 self-start rounded text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex items-center gap-1 self-start rounded text-sm text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             aria-expanded={advanced}
             onClick={() => setAdvanced((a) => !a)}
           >
@@ -527,7 +525,7 @@ export function AddNetworkDialog({
             Advanced options
           </button>
           {advanced && (
-            <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
+            <div className={cn(settingsCard, 'flex flex-col gap-3 px-4 py-3')}>
               {!fixedSsid && (
                 <SwitchField label="Hidden network" description="Look for this network even when it doesn't broadcast its name." checked={hidden} onChange={setHidden} />
               )}
