@@ -67,13 +67,13 @@ export function AdminPasswordDialog({
     <Dialog open={open} onOpenChange={(next) => !next && !checking && onCancel()}>
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <DialogHeader className="flex-row items-center gap-3 text-left">
+          <DialogHeader className="flex-row items-center gap-3 pr-6 text-left">
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
               <ShieldCheck className="size-5" aria-hidden />
             </span>
             <div className="min-w-0 space-y-1">
-              <DialogTitle className="break-words">{title}</DialogTitle>
-              {description && <DialogDescription>{description}</DialogDescription>}
+              <DialogTitle className="wrap-anywhere">{title}</DialogTitle>
+              {description && <DialogDescription className="wrap-anywhere">{description}</DialogDescription>}
             </div>
           </DialogHeader>
 
@@ -144,13 +144,13 @@ function ApprovalDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onAnswer(false)}>
       <DialogContent className="sm:max-w-md">
         <div className="flex flex-col gap-4">
-          <DialogHeader className="flex-row items-center gap-3 text-left">
+          <DialogHeader className="flex-row items-center gap-3 pr-6 text-left">
             <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
               <ShieldCheck className="size-5" aria-hidden />
             </span>
             <div className="min-w-0 space-y-1">
-              <DialogTitle className="break-words">{title}</DialogTitle>
-              <DialogDescription>{description}</DialogDescription>
+              <DialogTitle className="wrap-anywhere">{title}</DialogTitle>
+              <DialogDescription className="wrap-anywhere">{description}</DialogDescription>
             </div>
           </DialogHeader>
 
