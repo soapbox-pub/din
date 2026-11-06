@@ -697,8 +697,10 @@ function CommitRow({
       <span
         aria-hidden
         className={cn(
-          'absolute top-2.5 left-[13px] size-[7px] rounded-full',
-          incoming ? 'border border-dashed border-muted-foreground bg-transparent' : unpushed ? 'bg-ink-accent' : 'bg-muted-foreground/70',
+          'absolute rounded-full',
+          // Not pushed yet: a bigger, empty, dotted ring in the accent; the rest a small solid dot.
+          unpushed && !incoming ? 'top-2 left-[11px] size-[11px] border-2 border-dotted border-ink-accent bg-background' : 'top-2.5 left-[13px] size-[7px]',
+          incoming ? 'border border-dashed border-muted-foreground bg-transparent' : !unpushed && 'bg-muted-foreground/70',
           commit.parents.length > 1 && 'rounded-[2px] rotate-45',
         )}
       />
