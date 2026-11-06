@@ -6,17 +6,13 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  Cloud,
   Copy,
   ExternalLink,
   GitBranch,
-  GitCommitHorizontal,
-  HardDrive,
   LoaderCircle,
   PanelRightClose,
   RefreshCw,
   X,
-  Zap,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -32,7 +28,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WindowControls, WindowDragRegion } from '@/sdk/react';
-import { PillButton, StatusPill, ToolButton } from '@/shared/appChrome';
+import { PillButton, ToolButton } from '@/shared/appChrome';
 import { focusRing, sidebarHeadingClass, toolIcon } from '@/shared/appChromeStyles';
 import { LoadMore } from '@/shared/assistant/LoadMore';
 import { useAssistantHost } from '@/shared/assistant/host';
@@ -141,18 +137,7 @@ export function GitPanel({
 
   return (
     <aside aria-label="Git" style={style} className={cn('flex min-h-0 shrink-0 flex-col text-foreground', className)}>
-      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1 pr-3 pl-3.75">
-        <GitCommitHorizontal className="size-6 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
-        <h2 className="ml-1 shrink-0 font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Git</h2>
-        {repo?.remote && (
-          <ToolButton
-            label={`Check ${repo.remote.name} for new commits`}
-            disabled={sync.running !== null}
-            onClick={() => void sync.run('fetch')}
-          >
-            <RefreshCw {...toolIcon} className={cn(toolIcon.className, sync.running === 'fetch' && 'animate-spin')} aria-hidden />
-          </ToolButton>
-        )}
+      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1 px-3">
         <ToolButton label="Hide Git (Ctrl+Shift+G)" onClick={onClose}>
           <PanelRightClose {...toolIcon} aria-hidden />
         </ToolButton>
@@ -205,7 +190,7 @@ function NotARepository({ directory, reason }: { directory: string; reason?: str
 function PanelSkeleton() {
   return (
     <div className="space-y-3 px-1 pt-1" aria-label="Loading the repository">
-      <Skeleton className="h-36 w-full rounded-xl" />
+      <Skeleton className="h-24 w-full rounded-xl" />
       <Skeleton className="mt-4 h-3 w-20" />
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className="space-y-1.5 py-1">
@@ -308,15 +293,9 @@ function remoteLabel(remote: { name: string; url: string }): string {
   return remoteWebUrl(remote.url) || /^nostr:/i.test(remote.url) ? remoteHostName(remote.url) : remote.name;
 }
 
-function RemoteIcon({ url, className }: { url: string; className?: string }) {
-  const Icon = /^nostr:/i.test(url) ? Zap : remoteWebUrl(url) ? Cloud : HardDrive;
-  return <Icon className={cn('size-4.5 shrink-0 text-ink-accent', className)} strokeWidth={1.75} aria-hidden />;
-}
-
-/** The branch, its remote and syncing with it. */
+/** The branch's remote and syncing with it (the branch itself is under the composer). */
 function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperations }) {
   const { openUrl } = useAssistantHost();
-  const home = useHomeDirectory();
   const [forcing, setForcing] = useState<'forcePull' | 'forcePush' | null>(null);
   const [more, setMore] = useState(false);
   const remote = status.remote;
@@ -326,25 +305,9 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
   const busy = sync.running !== null;
 
   return (
-    <section aria-label="Branch" className="mx-1 mt-1 rounded-xl bg-background/60 p-3 clay">
-      <div className="flex min-w-0 items-center gap-2">
-        <GitBranch className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={status.branch ?? status.head ?? undefined}>
-          {status.branch ?? (status.head ? `Detached at ${status.head.slice(0, 7)}` : 'No commits yet')}
-        </span>
-        {status.upstream && (status.ahead > 0 || status.behind > 0) && (
-          <StatusPill className="tabular-nums" title={`${plural(status.ahead, 'commit')} to push, ${plural(status.behind, 'commit')} to pull`}>
-            {status.ahead > 0 && <span>↑{status.ahead}</span>}
-            {status.behind > 0 && <span>↓{status.behind}</span>}
-          </StatusPill>
-        )}
-      </div>
-      <p className="mt-1 truncate pl-6.5 text-xs text-muted-foreground" title={status.root}>
-        {tildify(status.root, home)}
-      </p>
-
+    <section aria-label="Remote" className="mx-1 mt-1 space-y-2 rounded-xl bg-background/60 p-2 clay">
       {(status.changes > 0 || status.state) && (
-        <p className="mt-2 flex items-center gap-2 pl-0.5 text-xs text-muted-foreground">
+        <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
           <span className="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
           {status.state
             ? `In the middle of ${status.state === 'merging' ? 'a merge' : status.state === 'rebasing' ? 'a rebase' : status.state === 'reverting' ? 'a revert' : 'a cherry-pick'}${status.conflicts ? `, ${plural(status.conflicts, 'conflict')}` : ''}`
@@ -353,30 +316,27 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
       )}
 
       {remote ? (
-        <div className="mt-3 space-y-1.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <RemoteIcon url={remote.url} />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{remoteHostName(remote.url)}</span>
-            <span className="shrink-0 text-xs text-muted-foreground">{remote.name}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <input
-              readOnly
-              value={remote.url}
-              aria-label="Repository URL"
-              onFocus={(e) => e.currentTarget.select()}
-              className={cn('h-7 min-w-0 flex-1 rounded-full border border-border/70 bg-background px-2.5 font-mono text-xs text-muted-foreground', focusRing)}
-            />
-            <CopyToolButton text={remote.url} label="Copy the URL" />
-            {web && (
-              <ToolButton size="sm" label="Open in the browser" onClick={() => openUrl(web)}>
-                <ExternalLink className="size-3.5" strokeWidth={1.75} aria-hidden />
-              </ToolButton>
-            )}
-          </div>
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 px-1 text-xs font-medium text-muted-foreground" title={`The remote ${remote.name}`}>
+            {remote.name}
+          </span>
+          <input
+            readOnly
+            value={remote.url}
+            aria-label={`${remote.name}’s URL`}
+            title={remote.url}
+            onFocus={(e) => e.currentTarget.select()}
+            className={cn('h-7 min-w-0 flex-1 rounded-full border border-border/70 bg-background px-2.5 font-mono text-xs text-muted-foreground', focusRing)}
+          />
+          <CopyToolButton text={remote.url} label="Copy the URL" />
+          {web && (
+            <ToolButton size="sm" label="Open in the browser" onClick={() => openUrl(web)}>
+              <ExternalLink className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </ToolButton>
+          )}
         </div>
       ) : (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="px-1 text-xs text-muted-foreground">
           No remote to sync with. Add one with <code className="font-mono">git remote add</code>, or ask the assistant to.
         </p>
       )}
@@ -392,9 +352,13 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
         />
       )}
 
-      {!sync.failure && remote && status.branch && !status.state && <AheadBehind status={status} upstream={upstream} />}
+      {!sync.failure && remote && status.branch && !status.state && !status.upstream && (
+        <p className="rounded-lg border border-border/70 bg-foreground/[0.03] p-2 text-xs text-muted-foreground">
+          <strong className="font-semibold text-foreground">{status.branch}</strong> isn’t on {remote.name} yet. Sync or Push to put it there.
+        </p>
+      )}
       {!sync.failure && remote && (!status.branch || status.state) && (
-        <p className="mt-3 rounded-lg border border-border/70 bg-foreground/[0.03] p-2.5 text-xs text-muted-foreground">
+        <p className="rounded-lg border border-border/70 bg-foreground/[0.03] p-2 text-xs text-muted-foreground">
           {status.state
             ? 'Finish or abort what git is in the middle of before syncing.'
             : 'No branch is checked out (a detached HEAD), so there’s nothing to sync. Check out a branch to pull and push.'}
@@ -402,7 +366,7 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
       )}
 
       {remote && (
-        <Collapsible open={more} onOpenChange={setMore} className="mt-3">
+        <Collapsible open={more} onOpenChange={setMore}>
           <div className={cn('flex h-9 overflow-hidden rounded-full bg-pigment text-primary-foreground clay-pigment', !canSync && 'opacity-50')}>
             <button
               type="button"
@@ -455,28 +419,6 @@ function BranchCard({ status, sync }: { status: GitRepoStatus; sync: GitOperatio
   );
 }
 
-/** How far the branch is from the remote's, as Shakespeare says it. */
-function AheadBehind({ status, upstream }: { status: GitRepoStatus; upstream: string | null }) {
-  if (!status.upstream) {
-    return (
-      <p className="mt-3 rounded-lg border border-border/70 bg-foreground/[0.03] p-2.5 text-xs text-muted-foreground">
-        <strong className="font-semibold text-foreground">{status.branch}</strong> isn’t on {status.remote?.name} yet. Sync or Push to put it
-        there.
-      </p>
-    );
-  }
-  if (!status.ahead && !status.behind) return null;
-  return (
-    <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2.5 text-xs">
-      This branch is{' '}
-      {status.ahead > 0 && <strong className="font-semibold">{plural(status.ahead, 'commit')} ahead of</strong>}
-      {status.ahead > 0 && status.behind > 0 && ' and '}
-      {status.behind > 0 && <strong className="font-semibold">{plural(status.behind, 'commit')} behind</strong>}{' '}
-      <strong className="font-semibold">{upstream}</strong>.
-    </p>
-  );
-}
-
 /** What went wrong, in words, and what can be done about it (Shakespeare's SyncStepError). */
 function failureText(failure: Failure, remote: string): { text: string; pull?: boolean; force?: boolean } {
   switch (failure.kind) {
@@ -524,7 +466,7 @@ function SyncFailure({
   const { text, pull, force } = failureText(failure, remote);
   const raw = text !== failure.message && failure.message;
   return (
-    <div role="alert" className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+    <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
         <p className="min-w-0 flex-1 break-words">{text}</p>
@@ -767,12 +709,12 @@ function CommitRow({
   return (
     <li className={cn('relative rounded-lg', open && 'bg-foreground/5')}>
       {/* The line the commits are on, and this one's dot on it. */}
-      <span aria-hidden className={cn('absolute top-0 left-4 w-px bg-border', last ? 'h-3.5' : 'bottom-0', incoming && 'border-l border-dashed border-border bg-transparent')} />
+      <span aria-hidden className={cn('absolute top-0 left-4 w-px bg-border', last ? 'h-3.5' : 'bottom-0', unpushed && 'bg-ink-accent/60', incoming && 'border-l border-dashed border-border bg-transparent')} />
       <span
         aria-hidden
         className={cn(
           'absolute top-2.5 left-[13px] size-[7px] rounded-full',
-          incoming ? 'border border-dashed border-muted-foreground bg-transparent' : unpushed ? 'border-[1.5px] border-ink-accent bg-background' : 'bg-muted-foreground/70',
+          incoming ? 'border border-dashed border-muted-foreground bg-transparent' : unpushed ? 'bg-ink-accent' : 'bg-muted-foreground/70',
           commit.parents.length > 1 && 'rounded-[2px] rotate-45',
         )}
       />
@@ -784,7 +726,7 @@ function CommitRow({
             onClick={onToggle}
             className={cn('w-full rounded-lg py-1.5 pr-2 pl-8 text-left hover:bg-foreground/5', focusRing, incoming && 'opacity-75')}
           >
-            <span className={cn('block text-sm leading-5', open ? 'break-words' : 'truncate')} title={open ? undefined : commit.subject}>
+            <span className={cn('block text-sm leading-5', open ? 'break-words' : 'truncate', unpushed && 'font-medium text-ink-accent')} title={open ? undefined : commit.subject}>
               {commit.subject || <span className="text-muted-foreground italic">No message</span>}
             </span>
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
