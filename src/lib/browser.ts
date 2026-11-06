@@ -18,9 +18,16 @@
 
 /**
  * A capability a site has to ask the user for. `background-sync` is an
- * installed nsite's periodic sync (electron/napp.mts).
+ * installed nsite's periodic sync (electron/napp.mts); `clipboard` is reading
+ * the clipboard from script (navigator.clipboard.read and readText).
  */
-export type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'background-sync';
+export type SiteCapability =
+  | 'camera'
+  | 'microphone'
+  | 'geolocation'
+  | 'notifications'
+  | 'background-sync'
+  | 'clipboard';
 
 /** Details of a rejected TLS certificate for a browser tab. */
 export interface CertificateErrorInfo {

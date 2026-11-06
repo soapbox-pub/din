@@ -1,5 +1,6 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
-import { getBrowserBridge, siteOriginOf } from '@/lib/browser';
+import { getBrowserBridge, siteOriginOf, type SiteCapability } from '@/lib/browser';
+import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
 import { getFsBridge } from '@/lib/fs';
 import { openPath } from '@/lib/openPath';
@@ -461,9 +462,17 @@ export const screenshotArea: Area = {
   ],
 };
 
+const SITE_CAPABILITY_NAMES = Object.keys(SITE_CAPABILITIES) as SiteCapability[];
+
+function siteOrigin(site: string): string {
+  const origin = siteOriginOf(site);
+  if (!origin) throw new CommandError(`Not a website’s URL: ${site}`, 'usage');
+  return origin;
+}
+
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar) and site data',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), site data, and what each site may do',
   commands: [
     ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
@@ -483,6 +492,42 @@ export const browserArea: Area = {
       if (!ok) throw new CommandError('You didn’t allow it');
       await call(browser.clearSiteData(origin, false));
       return { text: `Deleted ${name}’s data` };
+    }),
+    command('browser', 'site-permissions', 'What a site may do, as its site info shows: camera, microphone, location, notifications, background refresh, the clipboard', [
+      { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
+    ], async (args) => {
+      const origin = siteOrigin(args.string('site'));
+      const browser = need(getBrowserBridge(), 'The Web Browser');
+      const { permissions } = await call(browser.getSiteInfo(origin, false));
+      const rows = SITE_CAPABILITY_NAMES.map((capability) => ({
+        capability,
+        name: SITE_CAPABILITIES[capability].name,
+        answer: permissions[capability] === undefined ? 'ask' : permissions[capability] ? 'allow' : 'block',
+      }));
+      return { data: rows, text: rows.map((r) => `${r.capability}\t${r.answer}`).join('\n') };
+    }),
+    command('browser', 'site-permission', 'Allow or block something for a site, or have it ask again, as its site info does (asks on screen first to allow)', [
+      { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
+      { name: 'capability', type: 'string', positional: true, help: 'What it may do', choices: SITE_CAPABILITY_NAMES },
+      { name: 'answer', type: 'string', positional: true, help: 'Allow it, block it, or have the site ask', choices: ['allow', 'block', 'ask'] },
+    ], async (args, ctx) => {
+      const origin = siteOrigin(args.string('site'));
+      const capability = args.string('capability') as SiteCapability;
+      const answer = args.string('answer');
+      const browser = need(getBrowserBridge(), 'The Web Browser');
+      const name = origin.slice(origin.indexOf('//') + 2);
+      const { name: what, label } = SITE_CAPABILITIES[capability];
+      if (answer === 'allow') {
+        const action = `${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+        const ok = await ctx.confirm({
+          title: `Let ${name} ${action}?`,
+          description: `A command asked to let ${name} ${action} without asking you first. You can change it from the icon beside its address.`,
+          action: 'Allow',
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+      }
+      await call(browser.setSitePermission(origin, capability, answer === 'ask' ? null : answer === 'allow', false));
+      return { text: `${what} for ${name}: ${answer}` };
     }),
   ],
 };

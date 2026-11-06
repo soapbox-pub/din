@@ -4717,7 +4717,7 @@ function hardenWebStorePreload(): void {
 // ---------------------------------------------------------------------------
 
 /** A capability a site must ask the user for. */
-type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'background-sync';
+type SiteCapability = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'background-sync' | 'clipboard';
 
 const SITE_CAPABILITIES: readonly SiteCapability[] = [
   'camera',
@@ -4725,6 +4725,7 @@ const SITE_CAPABILITIES: readonly SiteCapability[] = [
   'geolocation',
   'notifications',
   'background-sync',
+  'clipboard',
 ];
 
 type ShellPrompt =
@@ -4778,12 +4779,15 @@ function registerPromptBridge(): void {
 // session gets a deny-by-default policy instead:
 //   - harmless capabilities pages rely on are allowed (writing the clipboard,
 //     fullscreen video, pointer lock for games, DRM playback)
-//   - camera, microphone, location and notifications are asked in the shell,
-//     per origin, and the answer is remembered (site-permissions.json, shared
-//     by browser tabs and installed apps; private windows forget with their
-//     session). The address bar's site info changes or forgets it.
-//   - everything else is denied: clipboard reads, keyboard lock, external
-//     protocol handlers, device pickers (HID/serial/USB/Bluetooth), ...
+//   - camera, microphone, location, notifications and reading the clipboard
+//     (navigator.clipboard.read and readText, as Chrome asks; pasting with
+//     Ctrl+V needs nothing) are asked in the shell, per origin, and the
+//     answer is remembered (site-permissions.json, shared by browser tabs
+//     and installed apps; private windows forget with their session). The
+//     address bar's site info changes or forgets it. Tor windows never read
+//     the clipboard: what's copied could name who's browsing.
+//   - everything else is denied: keyboard lock, external protocol handlers,
+//     device pickers (HID/serial/USB/Bluetooth), ...
 // Guest sessions also refuse file:// outright: nothing legitimate loads local
 // files into a tab, and an extension could otherwise point one at Din's own
 // profile directory (chrome.tabs.update skips the address bar's checks).
@@ -4932,6 +4936,7 @@ function requestedCapabilities(
   details: Electron.PermissionRequest | Electron.MediaAccessPermissionRequest,
 ): SiteCapability[] | null {
   if (permission === 'geolocation' || permission === 'notifications') return [permission];
+  if (permission === 'clipboard-read') return ['clipboard'];
   if (permission !== 'media') return null;
   const types = 'mediaTypes' in details ? details.mediaTypes ?? [] : [];
   const capabilities: SiteCapability[] = [];
@@ -5041,7 +5046,7 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     // Chromium's own geolocation can't locate anything here (it would send
     // the request to Google, without a key); pages get Din's instead
     // (geolocation-preload.cjs), which asks through `ask` below.
-    if (permission === 'geolocation') {
+    if (permission === 'geolocation' || (permission === 'clipboard-read' && s === torBrowserSession())) {
       callback(false);
       return;
     }
@@ -5058,9 +5063,12 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     if (ALWAYS_ALLOWED_PERMISSIONS.has(permission)) return true;
     let capability: SiteCapability | null = null;
     if (permission === 'geolocation' || permission === 'notifications') capability = permission;
+    else if (permission === 'clipboard-read') capability = s === torBrowserSession() ? null : 'clipboard';
     else if (permission === 'media' && details.mediaType === 'video') capability = 'camera';
     else if (permission === 'media' && details.mediaType === 'audio') capability = 'microphone';
-    return capability !== null && decisions.get(key(requestingOrigin, capability)) === true;
+    // Chromium names the origin as a URL ("https://example.com/").
+    const origin = siteOriginOf(requestingOrigin) ?? requestingOrigin;
+    return capability !== null && decisions.get(key(origin, capability)) === true;
   });
 
   s.setDevicePermissionHandler(() => false);

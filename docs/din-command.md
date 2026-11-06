@@ -71,7 +71,7 @@ areas' commands rather than `settings` keys, since they act on the system.
 Commands act at once, as the user's own clicks would, except where Din
 asks the user anyway or the act can't be taken back: restarting or shutting
 down (`din power restart|off`), restarting Din (`din update restart`),
-installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), deleting a folder of bookmarks (`din browser remove-bookmark`), replacing a file with exported bookmarks (`din browser export-bookmarks`), publishing a cursor theme,
+installing firmware, installing DinOS (`din installer install`), deleting a site's data (`din browser clear-site-data`), allowing a site something (`din browser site-permission … allow`), deleting a folder of bookmarks (`din browser remove-bookmark`), replacing a file with exported bookmarks (`din browser export-bookmarks`), publishing a cursor theme,
 icon theme, skin or extension (`din cursors|icons|skins|extensions publish`),
 loading or installing an extension (`din extensions load|install`), sending a text
 (`din phone send`), marking a mailbox read (`din mail mark-read`), unsubscribing from mailing lists (`din mail unsubscribe`), deleting a mail label (`din mail label-delete`), removing an app's background schedule (`din background remove`), letting a port through the firewall (`din firewall allow`), deleting a calendar event or calendar (`din calendar delete|delete-calendar`), publishing an event to the public Nostr calendar (`din calendar add --calendar nostr`), deleting a contact (`din contacts delete`), forgetting a phone with its messages (`din phone forget`) and removing an optional feature (`din features remove`) put the question on
