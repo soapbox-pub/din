@@ -1,9 +1,10 @@
 // A guest's DevTools protocol connection, shared. Electron gives each
 // WebContents one `debugger`, and several parts of Din use it: a tab's
 // docked DevTools and its device emulation (devtools-bridge.mts), files
-// dragged into a page (main.mts), and Din's accessibility preferences as CSS
-// media features (accessibility.mts). Each holds it here under a name, and
-// it's detached when the last lets go.
+// dragged into a page (main.mts), web pages' uploads going to Din's file
+// picker (main.mts), and Din's accessibility preferences as CSS media
+// features (accessibility.mts). Each holds it here under a name, and it's
+// detached when the last lets go.
 //
 // A holder that leaves the connection in a state nobody else should inherit
 // (DevTools, whose frontend enabled the Debugger and every other domain)
@@ -55,6 +56,27 @@ export function holdDebugger(contents: Electron.WebContents, holder: string, rea
 /** Whether `holder` holds the guest's debugger. */
 export function holdsDebugger(contents: Electron.WebContents, holder: string): boolean {
   return !contents.isDestroyed() && contents.debugger.isAttached() && (holders.get(contents.id)?.has(holder) ?? false);
+}
+
+/**
+ * Detach the guest's debugger and attach it afresh, asking its holders to
+ * apply what they had again: for a holder (DevTools) that has to start
+ * from a connection nobody has set up yet.
+ */
+export function resetDebugger(contents: Electron.WebContents): void {
+  const held = holders.get(contents.id);
+  if (!held || contents.isDestroyed()) return;
+  resetting.add(contents.id);
+  try {
+    if (contents.debugger.isAttached()) contents.debugger.detach();
+    contents.debugger.attach('1.3');
+  } catch {
+    holders.delete(contents.id);
+    return;
+  } finally {
+    resetting.delete(contents.id);
+  }
+  for (const reapply of held.values()) reapply?.();
 }
 
 /** Let go of the guest's debugger; the last to let go detaches it. */

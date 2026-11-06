@@ -35,7 +35,7 @@ import crypto from 'node:crypto';
 import type net from 'node:net';
 import type { Duplex } from 'node:stream';
 import { webContents } from 'electron';
-import { holdDebugger, releaseDebugger } from './guest-debugger.mts';
+import { holdDebugger, releaseDebugger, resetDebugger } from './guest-debugger.mts';
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const DEVTOOLS_ORIGIN = 'devtools://devtools';
@@ -410,6 +410,10 @@ export class DevtoolsBridge {
       socket.destroy();
       return;
     }
+    // A connection of its own: one where another holder (the file picker's)
+    // already auto-attached to the page's iframes would never tell the
+    // frontend about them. Holders seeing DevTools hold it leave that to it.
+    resetDebugger(target);
 
     const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(

@@ -101,7 +101,7 @@ import {
 import { registerCursorHandlers } from './cursor.mts';
 import { registerMouseHandlers } from './mouse.mts';
 import { registerAccessibilityHandlers } from './accessibility.mts';
-import { holdDebugger, releaseDebugger } from './guest-debugger.mts';
+import { holdDebugger, holdsDebugger, releaseDebugger } from './guest-debugger.mts';
 import { registerIconThemeHandlers } from './icon-theme.mts';
 import { registerInddHandlers } from './indd.mts';
 import { registerMailHandlers } from './mail.mts';
@@ -4435,6 +4435,8 @@ interface PendingFilePick {
   contents: Electron.WebContents;
   /** The intercepted <input type=file> node, per Page.fileChooserOpened. */
   backendNodeId: number;
+  /** The iframe's DevTools session when the input is in one of its own process. */
+  sessionId?: string;
   timer: NodeJS.Timeout;
 }
 const pendingFilePicks = new Map<number, PendingFilePick>();
@@ -4459,7 +4461,7 @@ function registerFilePickerBridge(): void {
     clearTimeout(pending.timer);
     pendingFilePicks.delete(requestId as number);
 
-    const { contents, backendNodeId } = pending;
+    const { contents, backendNodeId, sessionId } = pending;
     if (contents.isDestroyed()) return;
 
     // A non-empty path means the user chose a file; anything else is a cancel.
@@ -4468,7 +4470,7 @@ function registerFilePickerBridge(): void {
     const path = (response as { path?: unknown }).path;
     const files = chosen.length > 0 ? chosen : typeof path === 'string' && path ? [path] : [];
     contents.debugger
-      .sendCommand('DOM.setFileInputFiles', { files, backendNodeId })
+      .sendCommand('DOM.setFileInputFiles', { files, backendNodeId }, sessionId)
       .catch(() => {
         // Node gone (page navigated) or DOM agent unavailable - nothing to do.
       });
@@ -4483,29 +4485,44 @@ function registerFilePickerBridge(): void {
 }
 
 /**
- * Attach CDP file-chooser interception to a web-content guest. Idempotent per
- * WebContents: re-runs (e.g. after devtools closing detaches the shared
- * debugger) simply re-enable interception. Silently no-ops if another client
- * holds the debugger and won't yield.
+ * Attach CDP file-chooser interception to a web-content guest, holding its
+ * shared debugger (guest-debugger.mts). Idempotent per WebContents: re-runs
+ * (after a reset, or the debugger detaching) simply re-enable interception.
  */
 function attachFileChooserInterception(contents: Electron.WebContents): void {
   const dbg = contents.debugger;
 
-  const enable = () => {
-    if (contents.isDestroyed()) return;
-    try {
-      if (!dbg.isAttached()) dbg.attach('1.3');
-    } catch {
-      return; // another client owns the debugger; leave it alone
-    }
+  /**
+   * Intercept in the page, or in the iframe of `sessionId`. A frame from
+   * another site runs in a process of its own with its own DevTools target,
+   * which the page's interception doesn't reach: its input went to the
+   * native dialog, and nothing opened. Auto-attaching (flattened, so each
+   * frame is a session on this debugger) intercepts in every such frame
+   * too, and in theirs. While DevTools holds the debugger, its frontend
+   * auto-attaches (and has to, to be told of the frames), and its sessions
+   * are intercepted in as they come.
+   */
+  const intercept = (sessionId?: string) => {
     // Page domain must be enabled to receive fileChooserOpened.
-    dbg.sendCommand('Page.enable').catch(() => {});
+    dbg.sendCommand('Page.enable', {}, sessionId).catch(() => {});
+    dbg.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }, sessionId).catch(() => {});
+    if (holdsDebugger(contents, 'devtools')) return;
     dbg
-      .sendCommand('Page.setInterceptFileChooserDialog', { enabled: true })
+      .sendCommand('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId)
       .catch(() => {});
   };
 
-  const onMessage = (_e: Electron.Event, method: string, params: unknown) => {
+  const enable = () => {
+    if (contents.isDestroyed()) return;
+    if (holdDebugger(contents, 'file-chooser', enable)) intercept();
+  };
+
+  const onMessage = (_e: Electron.Event, method: string, params: unknown, sessionId?: string) => {
+    if (method === 'Target.attachedToTarget') {
+      const { sessionId: child, targetInfo } = params as { sessionId?: unknown; targetInfo?: { type?: unknown } };
+      if (typeof child === 'string' && targetInfo?.type === 'iframe') intercept(child);
+      return;
+    }
     if (method !== 'Page.fileChooserOpened') return;
     if (!shellWindow || shellWindow.webContents.isDestroyed()) return;
     const { backendNodeId, mode } = params as { backendNodeId?: unknown; mode?: unknown };
@@ -4515,7 +4532,7 @@ function attachFileChooserInterception(contents: Electron.WebContents): void {
     const timer = setTimeout(() => {
       pendingFilePicks.delete(requestId);
     }, FILE_PICKER_REQUEST_TIMEOUT_MS);
-    pendingFilePicks.set(requestId, { contents, backendNodeId, timer });
+    pendingFilePicks.set(requestId, { contents, backendNodeId, sessionId: sessionId || undefined, timer });
 
     let origin = '';
     try {
@@ -4526,8 +4543,8 @@ function attachFileChooserInterception(contents: Electron.WebContents): void {
     sendToShell('filepicker:request', { requestId, origin, multiple: mode === 'selectMultiple' });
   };
 
-  // devtools closing detaches the shared debugger (see devtools-bridge.mts);
-  // re-attach so uploads keep routing to the in-Din picker afterwards.
+  // Detached from outside (a crash's recovery), every hold went with it:
+  // hold it again so uploads keep routing to the in-Din picker.
   const onDetach = () => {
     if (!contents.isDestroyed()) setTimeout(enable, 0);
   };
@@ -6588,6 +6605,15 @@ app.whenReady().then(() => {
     // Extension popups keep transparency for their own shapes.
     if (!attachingGuestSrc.startsWith('chrome-extension://')) {
       webPreferences.transparent = false;
+      // Web pages' uploads go to Din's file picker by intercepting the file
+      // chooser (attachFileChooserInterception), and with that on, Chromium
+      // fails every showOpenFilePicker, showSaveFilePicker and
+      // showDirectoryPicker with an AbortError, so a site's Open button did
+      // nothing. Without them, sites do as they do in Firefox and Safari: an
+      // <input type=file> to open, which reaches the picker, and a download to save.
+      webPreferences.disableBlinkFeatures = [webPreferences.disableBlinkFeatures, 'FileSystemAccessLocal']
+        .filter(Boolean)
+        .join(',');
     }
     // The ad blocker's engine, before the tab's first request.
     const ephemeralTab =
