@@ -106,6 +106,32 @@ interface UpdateState {
   restart: Restart | null;
   /** What the staged system takes beyond applying it; null if nothing. */
   stagedNeeds: Restart | null;
+  /** The security fixes on the branch the newest system lacks, oldest first. */
+  security: SecurityFix[];
+}
+
+type Severity = 'low' | 'medium' | 'high' | 'critical';
+const SEVERITIES: readonly string[] = ['low', 'medium', 'high', 'critical'];
+
+/** A commit on the branch that fixes a security issue (its `Security:` trailer, os/din-update.sh). */
+interface SecurityFix {
+  commit: string;
+  subject: string;
+  severity: Severity | null;
+}
+
+function securityOf(value: unknown): SecurityFix[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((fix: unknown) => {
+    if (typeof fix !== 'object' || fix === null) return [];
+    const { commit, subject, severity } = fix as Record<string, unknown>;
+    if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) return [];
+    return [{
+      commit,
+      subject: typeof subject === 'string' ? subject.slice(0, 200) : '',
+      severity: typeof severity === 'string' && SEVERITIES.includes(severity) ? severity as Severity : null,
+    }];
+  });
 }
 
 /** os/din-update.sh's `status`. */
@@ -128,6 +154,7 @@ interface HelperStatus {
   custom: boolean;
   changes: number | null;
   checkedAt: number | null;
+  security?: unknown;
 }
 
 let state: UpdateState = {
@@ -150,6 +177,7 @@ let state: UpdateState = {
   reason: null,
   restart: null,
   stagedNeeds: null,
+  security: [],
 };
 
 function messageOf(error: unknown): string {
@@ -216,6 +244,7 @@ export function registerUpdaterHandlers(options: {
       reason: status.reason && REASONS.includes(status.reason) ? status.reason as Reason : null,
       restart: restartOf(status.restart),
       stagedNeeds: restartOf(status.stagedNeeds),
+      security: securityOf(status.security),
     };
     sendToShell('updater:progress', state);
   };

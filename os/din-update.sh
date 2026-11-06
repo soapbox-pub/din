@@ -16,9 +16,10 @@
 #       JSON: whether this is a live boot; the running system's version and
 #       commit and the commit the next boot starts, if one is staged; the
 #       repository and branch followed, whether updates are automatic, and
-#       the last or current run's phase, step, progress and error; and
-#       what the running system still needs to be all of itself (`restart`)
-#       and to start the staged one (`stagedNeeds`), below.
+#       the last or current run's phase, step, progress and error; the
+#       security fixes on the branch the newest system lacks (`security`,
+#       below); and what the running system still needs to be all of
+#       itself (`restart`) and to start the staged one (`stagedNeeds`).
 #   din-update start
 #       Check for an update now. Unlike the timer's runs, this one goes ahead
 #       with updates off, on battery, or for a commit that failed to build.
@@ -29,7 +30,8 @@
 #       The branch is the source already chosen, so this chooses nothing
 #       new to trust.
 #   din-update auto on|off
-#       Whether the timer's runs update the system.
+#       Whether the timer's runs update the system. Off (or on battery),
+#       they still fetch the branch, for the security fixes it has.
 #   din-update source <url> <branch>
 #       Follow another repository or branch: a fork's, say. Not one of the
 #       commands Din runs without asking (configuration.nix), as whoever
@@ -71,6 +73,14 @@
 # A merge that comes out the same as the branch's tip (the user's changes
 # have been taken upstream) builds the tip itself, so the system is no
 # longer custom.
+#
+# A system that's behind the branch, custom or not (updates off, or the
+# user's changes conflicting with it), may lack a fix for a security issue.
+# The branch's commits say which they are, in their messages (`Security:`
+# and `Security-Fix:` trailers, find_security), so they're as trusted as
+# the code they fix, with nothing else to publish or sign; `status` lists
+# the ones missing, and Din says so even once the user has set aside the
+# update's failure.
 #
 # The checkout's `upstream` branch is the tip last fetched, and its `system`
 # branch the commit of the last system the updater staged, for ~/DinOS to
@@ -219,8 +229,9 @@ ensure_checkout() {
 
 # `failed` is the attempt that failed to build (attempt below), not tried
 # again unless asked; `reason` why the last run failed, when it's for the
-# user to fix: `conflict`, `dirty`, `missing`, or `build`.
-phase=idle step="" percent=0 target="" error="" reason="" checked_at="" failed=""
+# user to fix: `conflict`, `dirty`, `missing`, or `build`. `security` is
+# the security fixes the newest system lacks (find_security), as JSON.
+phase=idle step="" percent=0 target="" error="" reason="" checked_at="" failed="" security="[]"
 
 load_state() {
   [[ -f $STATE ]] || return 0
@@ -229,15 +240,17 @@ load_state() {
   reason=$(jq -r '.reason // ""' "$STATE")
   checked_at=$(jq -r '.checkedAt // ""' "$STATE")
   failed=$(jq -r '.failed // ""' "$STATE")
+  security=$(jq -c '.security // []' "$STATE")
 }
 
 save_state() {
   jq -n --arg phase "$phase" --arg step "$step" --argjson percent "$percent" \
-    --arg target "$target" --arg error "$error" --arg reason "$reason" --arg checkedAt "$checked_at" --arg failed "$failed" '
+    --arg target "$target" --arg error "$error" --arg reason "$reason" --arg checkedAt "$checked_at" --arg failed "$failed" \
+    --argjson security "$security" '
     def orNull: if . == "" then null else . end;
     {phase: $phase, step: ($step | orNull), percent: $percent, target: ($target | orNull),
      error: ($error | orNull), reason: ($reason | orNull), checkedAt: ($checkedAt | orNull | if . then tonumber else . end),
-     failed: ($failed | orNull)}' >"$STATE.tmp"
+     failed: ($failed | orNull), security: $security}' >"$STATE.tmp"
   chmod 644 "$STATE.tmp"
   mv "$STATE.tmp" "$STATE"
 }
@@ -255,6 +268,7 @@ finish() {
   percent=0
   target=""
   checked_at=$(date +%s%3N)
+  find_security
   save_state
 }
 
@@ -300,6 +314,59 @@ find_custom() {
   fi
 }
 
+# The security fixes on the branch, as last fetched, that the newest system
+# lacks, into `security`: [{commit, subject, severity}], oldest first. A
+# commit says it fixes a security issue with a `Security:` trailer, its
+# severity (low, medium, high or critical); one that only later turns out to
+# have is named by a later commit's `Security-Fix: <commit>` trailer, the
+# severity in its own `Security:`. A fix the system has the same change as
+# (cherry-picked into the user's commits, say) isn't missing. Worked out
+# when a run ends, not by `status`, which runs on every change to STATE:
+# comparing patches across the branch takes a moment.
+find_security() {
+  security="[]"
+  local head upstream line commit severity fixes fix found=""
+  local -A missing=()
+  head=$(newest_revision)
+  head=${head%-dirty}
+  if [[ -z $head ]] || ! has_commit "$head"; then return 0; fi
+  upstream=$(src_git rev-parse -q --verify "$UPSTREAM_REF" 2>/dev/null) || return 0
+  if src_git merge-base --is-ancestor "$upstream" "$head" 2>/dev/null; then return 0; fi
+  # The branch's commits with no change like them in the system.
+  while read -r commit; do
+    missing[$commit]=1
+  done < <(src_git rev-list --no-merges --cherry-pick --right-only "$head...$upstream" 2>/dev/null || true)
+  while IFS=$'\t' read -r commit severity fixes; do
+    if [[ -z $severity && -z $fixes ]]; then continue; fi
+    severity=${severity,,}
+    [[ $severity =~ ^(low|medium|high|critical)$ ]] || severity=""
+    if [[ -z $fixes ]]; then
+      if [[ -n ${missing[$commit]:-} ]]; then found+="$commit $severity"$'\n'; fi
+      continue
+    fi
+    local -a named=()
+    IFS=', ' read -ra named <<<"$fixes"
+    for fix in "${named[@]}"; do
+      fix=$(src_git rev-parse -q --verify "$fix^{commit}" 2>/dev/null) || continue
+      if [[ -n ${missing[$fix]:-} ]]; then found+="$fix $severity"$'\n'; fi
+    done
+  done < <(src_git log --reverse --format='%H%x09%(trailers:key=Security,valueonly,separator=%x2C)%x09%(trailers:key=Security-Fix,valueonly,separator=%x2C)' \
+    "$head..$upstream" 2>/dev/null || true)
+  if [[ -z $found ]]; then return 0; fi
+  # Each fix once, where it was first named, with the last severity given.
+  security=$(
+    while read -r commit severity; do
+      [[ -n $commit ]] || continue
+      jq -n --arg commit "$commit" --arg subject "$(src_git log -1 --format=%s "$commit")" --arg severity "$severity" \
+        '{commit: $commit, subject: $subject, severity: (if $severity == "" then null else $severity end)}'
+    done <<<"$found" | jq -sc '
+      reduce .[] as $f ([];
+        if any(.[]; .commit == $f.commit)
+        then map(if .commit == $f.commit and $f.severity != null then .severity = $f.severity else . end)
+        else . + [$f] end)'
+  ) || security="[]"
+}
+
 status() {
   local live=false current staged="" version auto=true active=false
   if is_live; then live=true; fi
@@ -335,7 +402,7 @@ status() {
      step: $state.step, percent: ($state.percent // 0), target: $state.target,
      error: (if $phase == "failed" then ($error | orNull) else null end),
      reason: (if $phase == "failed" then ($reason | orNull) else null end),
-     custom: $custom, changes: $changes, checkedAt: $state.checkedAt,
+     custom: $custom, changes: $changes, checkedAt: $state.checkedAt, security: ($state.security // []),
      restart: ($restart | orNull), stagedNeeds: (if $staged == "" then null else ($stagedNeeds | orNull) end)}'
 }
 
@@ -584,6 +651,17 @@ contains() {
   [[ $have == "$want" ]] || src_git merge-base --is-ancestor "$want" "$have" 2>/dev/null
 }
 
+# Fetch the branch and note the security fixes the system lacks, building
+# nothing. What the last run left (its phase, error and check time) stands:
+# nothing was checked for updating.
+check_security() {
+  ensure_checkout
+  src_git fetch --quiet --no-tags origin "refs/heads/$(source_branch)" </dev/null 2>/dev/null || return 0
+  src_git update-ref "$UPSTREAM_REF" "$(src_git rev-parse FETCH_HEAD)"
+  find_security
+  save_state
+}
+
 run() {
   if is_live; then exit 0; fi
   exec 9>"$LOCK"
@@ -603,10 +681,11 @@ run() {
       return
       ;;
   esac
-  if ! $manual; then
-    [[ -e $AUTO_OFF ]] && exit 0
-    # Building a whole system on battery is the user's to ask for.
-    systemd-ac-power || exit 0
+  # With updates off, or on battery (building a whole system there is the
+  # user's to ask for), the timer's runs only look for security fixes.
+  if ! $manual && { [[ -e $AUTO_OFF ]] || ! systemd-ac-power; }; then
+    check_security
+    exit 0
   fi
 
   # Its error is shown again if this run goes no further than finding the

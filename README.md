@@ -329,7 +329,34 @@ branch's tip, once the user's changes are upstream, builds the tip itself,
 so the system stops being custom. The checkout's `upstream` branch is the
 tip last fetched and `system` the last commit it staged, for `~/DinOS` to
 pull. A developer can point `~/DinOS` at their own checkout with a
-symlink.
+symlink. Dismissing that notification sets the failure aside, across
+restarts, until an update stops on another commit of the user's: the branch
+moving on doesn't bring it back. Settings → About still shows it.
+
+A system behind its branch (updates off, on battery, or the user's changes
+conflicting) may lack a fix for a security issue, and **a commit that fixes
+one says so** with a trailer in its message:
+
+```
+Check the path the fs bridge is given against the folders it grants
+
+Security: high
+```
+
+The severity is `low`, `medium`, `high` or `critical`. A commit that only
+later turns out to have fixed one is flagged by a later commit (empty, if
+there's nothing else to it) naming it: `Security-Fix: <commit>`, with its
+own `Security:`. The trailers ride on the signed branch like the code
+they're on, so there's nothing else to publish. Whenever a run ends, the
+updater lists the branch's flagged commits the newest system has no change
+like (a fix cherry-picked into the user's commits counts), and with updates
+off or on battery the timer's runs still fetch the branch to look for
+them. `din-update status` reports them (`security`), Settings → About lists
+them, and Din puts up a notification for each new one, even once the
+failure keeping it out was dismissed, offering **Update now** or, when the
+user's changes are in the way, **Fix with assistant**. Dismissing it sets
+those fixes aside for good. A fork set as the source passes on Din's fixes
+only once its maintainer merges them.
 
 New installs start from a disk image. To cut one, bump `os/version`, commit,
 tag `v<version>`, and run `npm run os:release -- -- --nbunksec-file <file>`

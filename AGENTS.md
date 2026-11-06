@@ -230,3 +230,5 @@ Use `git status` / `git diff` to review changes and `git log` to learn project c
 **A red `npm test` may not be your fault.** Because another agent may have left the tree mid-edit, a full validation run can fail on files you never touched. Still run it, but also validate your files in isolation (e.g. `npx eslint <your-file>`, or type-check and read the errors for *your* paths). If the only failures are in files you didn't edit, say so plainly and commit your scoped changes anyway — don't fix the other agent's work to force a green run.
 
 **Always commit when you are finished.** Non-negotiable — every completed task ends with a commit of your own files. Don't wait for the user to ask.
+
+**A commit that fixes a security issue says so** with a `Security: low|medium|high|critical` trailer in its message, so DinOS systems behind `main` tell their users it's waiting (README, "Din on NixOS"); one found later to have fixed one is flagged by a new commit with `Security-Fix: <commit>` and its own `Security:`.

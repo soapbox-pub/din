@@ -38,8 +38,10 @@ export function useUpdateState(): UpdateState | null {
 function fixPrompt(state: UpdateState): string {
   const branch = state.branch ?? DEFAULT_UPDATE_BRANCH;
   const url = state.url ?? DEFAULT_UPDATE_URL;
+  const fixes = state.security.map((f) => `${f.commit.slice(0, 7)} (${f.subject})`);
   return [
     `DinOS couldn't update itself: ${state.error ?? 'my changes stopped it.'}`,
+    ...(fixes.length ? [`It's missing security fixes from ${branch}: ${fixes.join(', ')}.`] : []),
     `Load the dinos skill and fix it: bring ~/DinOS up to date with ${branch} of ${url}, keeping my changes,`,
     'then apply it with nixos-rebuild switch, and tell me whether Din or the computer needs to restart.',
   ].join(' ');

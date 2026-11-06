@@ -62,6 +62,19 @@ export interface UpdateState {
   restart: UpdateRestart | null;
   /** What the staged system takes beyond applying it; null if nothing. */
   stagedNeeds: UpdateRestart | null;
+  /**
+   * The security fixes on the branch the newest system lacks, oldest first:
+   * its commits with a `Security:` trailer, or named by a later one's
+   * `Security-Fix:` (os/din-update.sh).
+   */
+  security: SecurityFix[];
+}
+
+export interface SecurityFix {
+  commit: string;
+  /** The fix's commit subject. */
+  subject: string;
+  severity: 'low' | 'medium' | 'high' | 'critical' | null;
 }
 
 export interface UpdaterBridge {

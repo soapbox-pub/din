@@ -1,11 +1,21 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFixUpdateWithAssistant, useUpdateState } from '@/hooks/useUpdater';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { cleanInstallerError } from '@/lib/installer';
 import { setDinBadge } from '@/lib/appBadges';
+import { notify, type NotificationSource } from '@/lib/notificationCenter';
 import { getUpdaterBridge, shortRevision } from '@/lib/updater';
-import { dismissUpdateNotice, UPDATE_NOTICE_KEY, useUpdateNoticePending } from '@/lib/updateNotice';
+import {
+  dismissUpdateNotice,
+  dismissUpdateProblems,
+  failureKey,
+  isUpdateProblemDismissed,
+  securityKey,
+  UPDATE_NOTICE_KEY,
+  UPDATE_PROBLEM_KEY,
+  useUpdateNoticePending,
+} from '@/lib/updateNotice';
 
 /** The commit already announced this boot, so a re-login doesn't repeat it. */
 const NOTIFIED_KEY = 'updater:notified';
@@ -13,14 +23,24 @@ const NOTIFIED_KEY = 'updater:notified';
 const RESTART_NOTIFIED_KEY = 'updater:restart-notified';
 /** Likewise the failure. */
 const FAILURE_NOTIFIED_KEY = 'updater:failure-notified';
+/** Likewise the security fixes. */
+const SECURITY_NOTIFIED_KEY = 'updater:security-notified';
+
+const DIN: NotificationSource = { name: 'Din' };
 
 /**
  * Says so once when a DinOS update is ready, and applies it or leads to the
  * restart; once when a system switched to (by Apply now, or nixos-rebuild
- * switch) needs Din or the computer restarted to be all there; and
- * when the user's own changes stopped one, offers the assistant to fix it.
- * Until the update's notice is seen (in Settings → About) or dismissed,
- * Settings' Dock tile carries a dot.
+ * switch) needs Din or the computer restarted to be all there; when the
+ * user's own changes stopped one, offers the assistant to fix it; and when
+ * the branch has security fixes the system lacks, says so. Until the
+ * update's notice is seen (in Settings → About) or dismissed, Settings'
+ * Dock tile carries a dot.
+ *
+ * A failure or a security fix the user dismisses (or acts on) stays
+ * dismissed, across restarts: a failure until it stops on another commit
+ * of theirs, a fix for good. A fix that's new comes up however many
+ * failures were dismissed before it.
  */
 export function UpdateNotifier() {
   const state = useUpdateState();
@@ -118,24 +138,92 @@ export function UpdateNotifier() {
     latest.current = { state, fixer };
   });
 
+  // A failure is the user's commit it stopped on and why, not the error's
+  // words, which name the branch's tip: the branch moving on is the same
+  // failure, and once dismissed it stays dismissed.
+  const head = state?.staged ?? state?.current ?? null;
+  const failed = failure && state?.reason ? failureKey(state.reason, head) : null;
+  // A run under way may bring the fixes in: wait for it.
+  const settledRun = state?.phase === 'idle' || state?.phase === 'failed';
+  const fixes = useMemo(() => (settledRun ? state?.security ?? [] : []), [settledRun, state?.security]);
+  const freshFixes = fixes.filter((f) => !isUpdateProblemDismissed(securityKey(f.commit)));
+  const fresh = freshFixes.map((f) => f.commit).join(',');
+
+  // Picking an action, or dismissing it, sets the problem aside.
+  const fixOrDetails = (id: string) => {
+    const { state: current, fixer: currentFixer } = latest.current;
+    if (id === 'update') {
+      getUpdaterBridge()
+        ?.check()
+        .catch((e: unknown) =>
+          toast({ title: 'Couldn’t update DinOS', description: cleanInstallerError(e), variant: 'destructive' }),
+        );
+      return;
+    }
+    // Without the assistant, Settings says why it can't.
+    if (id === 'fix' && current && currentFixer.available) currentFixer.fix(current);
+    else open('settings', { section: 'about' });
+  };
+  const fixOrDetailsRef = useRef(fixOrDetails);
   useEffect(() => {
-    if (!failure || sessionStorage.getItem(FAILURE_NOTIFIED_KEY) === failure) return;
-    sessionStorage.setItem(FAILURE_NOTIFIED_KEY, failure);
-    toast({
+    fixOrDetailsRef.current = fixOrDetails;
+  });
+
+  useEffect(() => {
+    // A security fix's notice says why it's waiting, the failure too.
+    if (!failed || fresh || isUpdateProblemDismissed(failed)) return;
+    if (sessionStorage.getItem(FAILURE_NOTIFIED_KEY) === failed) return;
+    sessionStorage.setItem(FAILURE_NOTIFIED_KEY, failed);
+    notify({
+      source: DIN,
       title: 'Couldn’t update DinOS',
-      description: failure,
+      body: failure ?? '',
+      replaceKey: UPDATE_PROBLEM_KEY,
+      history: true,
       actions: [
         { id: 'fix', label: 'Fix with assistant' },
         { id: 'details', label: 'Details' },
       ],
-      onAction: (id) => {
-        const { state: current, fixer: currentFixer } = latest.current;
-        // Without the assistant, Settings says why it can't.
-        if (id === 'fix' && current && currentFixer.available) currentFixer.fix(current);
-        else open('settings', { section: 'about' });
+      onActivate: (id) => fixOrDetailsRef.current(id),
+      onClose: (why) => {
+        if (why === 'dismissed') dismissUpdateProblems([failed]);
       },
     });
-  }, [failure, toast, open]);
+  }, [failed, failure, fresh]);
+
+  useEffect(() => {
+    if (!fresh || sessionStorage.getItem(SECURITY_NOTIFIED_KEY) === fresh) return;
+    sessionStorage.setItem(SECURITY_NOTIFIED_KEY, fresh);
+    const waiting = fixes.filter((f) => fresh.split(',').includes(f.commit));
+    const [first] = waiting;
+    const why = failure && failed
+      ? `It can’t be installed: ${failure}`
+      : 'Update DinOS to install it.';
+    notify({
+      source: DIN,
+      title: waiting.length === 1 ? 'A security fix for DinOS is waiting' : `${waiting.length} security fixes for DinOS are waiting`,
+      body: `${first.subject}${waiting.length > 1 ? `, and ${waiting.length - 1} more` : ''}. ${why}`,
+      replaceKey: UPDATE_PROBLEM_KEY,
+      history: true,
+      urgency: waiting.some((f) => f.severity === 'high' || f.severity === 'critical') ? 'critical' : 'normal',
+      actions: failed
+        ? [
+            { id: 'fix', label: 'Fix with assistant' },
+            { id: 'details', label: 'Details' },
+          ]
+        : [
+            { id: 'update', label: 'Update now' },
+            { id: 'details', label: 'Details' },
+          ],
+      onActivate: (id) => fixOrDetailsRef.current(id),
+      // Dismissed, it's every fix it told of, and the failure it named.
+      onClose: (reason) => {
+        if (reason === 'dismissed') {
+          dismissUpdateProblems([...fixes.map((f) => securityKey(f.commit)), ...(failed ? [failed] : [])]);
+        }
+      },
+    });
+  }, [fresh, fixes, failure, failed]);
 
   return null;
 }

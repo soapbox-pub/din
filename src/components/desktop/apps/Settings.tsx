@@ -42,6 +42,7 @@ import {
   RotateCw,
   Search,
   Share,
+  ShieldAlert,
   Store,
   Sun,
   TriangleAlert,
@@ -5426,9 +5427,55 @@ function UpdateStatus({ state }: { state: UpdateState }) {
         </Button>
       </div>
 
+      {state.security.length > 0 && !busy && (
+        <UpdateSecurityCard state={state} onUpdate={check} canUpdate={!(state.phase === 'failed' && state.reason)} />
+      )}
+
       {state.phase === 'failed' && state.reason && <UpdateFixCard state={state} />}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The security fixes on the branch the system lacks (the branch's commits
+ * that say so, os/din-update.sh). Updating brings them in, unless the
+ * user's changes stopped it, which the fix card below is for.
+ */
+function UpdateSecurityCard({ state, onUpdate, canUpdate }: { state: UpdateState; onUpdate: () => void; canUpdate: boolean }) {
+  const count = state.security.length;
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-2">
+          <ShieldAlert className="mt-0.5 size-4.5 shrink-0 text-destructive" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              {count === 1 ? 'A security fix is waiting' : `${count} security fixes are waiting`}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {canUpdate
+                ? `${state.branch ?? DEFAULT_UPDATE_BRANCH} has ${count === 1 ? 'a fix' : 'fixes'} this system doesn’t. Updating installs ${count === 1 ? 'it' : 'them'}.`
+                : `Your changes have to be brought up to date before ${count === 1 ? 'it' : 'they'} can be installed.`}
+            </p>
+          </div>
+        </div>
+        {canUpdate && (
+          <Button size="sm" onClick={onUpdate}>
+            Update now
+          </Button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-1 border-t border-destructive/20 pt-3">
+        {state.security.map((fix) => (
+          <li key={fix.commit} className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+            <span className="shrink-0 font-mono">{shortRevision(fix.commit)}</span>
+            <span className="min-w-0 flex-1 truncate text-foreground">{fix.subject}</span>
+            {fix.severity && <span className="shrink-0 capitalize">{fix.severity}</span>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -37,6 +37,7 @@ export const updateArea: Area = {
           state.staged ? `staged: ${shortRevision(state.staged)}${state.stagedNeeds ? ` (needs ${state.stagedNeeds === 'din' ? 'Din to restart' : 'the computer to restart'})` : ''}` : '',
           state.restart ? `waiting on: ${state.restart === 'din' ? 'Restart Din' : 'a restart'}` : '',
           state.error ? `error: ${state.error}` : '',
+          ...state.security.map((f) => `security fix waiting: ${shortRevision(f.commit)} ${f.subject}${f.severity ? ` (${f.severity})` : ''}`),
         ].filter(Boolean).join('\n'),
       };
     }),
