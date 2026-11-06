@@ -31,9 +31,10 @@ if (location.origin === EXTENSION_ORIGIN) {
      * @param {string | null} coop its Cross-Origin-Opener-Policy header
      * @param {string | null} onionLocation its Onion-Location header
      * @param {string | null} nsiteLocation its Nsite-Location header
+     * @param {string | null} cfMitigated its cf-mitigated header (Cloudflare's challenge)
      */
-    reportDocument: (url, coop, onionLocation, nsiteLocation) =>
-      ipcRenderer.send('adblock-ext:document', url, coop, onionLocation, nsiteLocation),
+    reportDocument: (url, coop, onionLocation, nsiteLocation, cfMitigated) =>
+      ipcRenderer.send('adblock-ext:document', url, coop, onionLocation, nsiteLocation, cfMitigated),
 
     /** @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback */
     onSettings: (callback) => {
