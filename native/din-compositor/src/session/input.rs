@@ -377,7 +377,12 @@ impl State {
             .or_else(|| if usb { self.space.outputs().find(|o| !built_in(o)) } else { self.space.outputs().find(built_in) })
             .or_else(|| self.space.outputs().next())?;
         let geometry = self.space.output_geometry(output)?;
-        let location = geometry.loc.to_f64() + event.position_transformed(geometry.size);
+        // The touch is on the panel as it's built; the picture on it may be
+        // turned (Settings' rotation), so turn the touch with it.
+        let transform = output.current_transform();
+        let panel = transform.invert().transform_size(geometry.size);
+        let on_panel = event.position_transformed(panel);
+        let location = geometry.loc.to_f64() + transform.transform_point_in(on_panel, &panel.to_f64());
         let g = geometry.to_f64();
         Some(Point::from((
             location.x.clamp(g.loc.x, g.loc.x + g.size.w - 1.0),

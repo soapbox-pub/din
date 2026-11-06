@@ -1,6 +1,16 @@
 import { getAudioBridge, MAX_VOLUME, type AudioDevices } from '@/lib/audio';
 import { getBrightnessBridge, MIN_BRIGHTNESS, MIN_TEMPERATURE, MAX_TEMPERATURE, type NightLightSchedule } from '@/lib/brightness';
-import { getDisplayBridge, formatRefresh, friendlyOutputName, refreshRates, type DisplayPlacement } from '@/lib/display';
+import {
+  DISPLAY_ROTATIONS,
+  getDisplayBridge,
+  formatRefresh,
+  friendlyOutputName,
+  refreshRates,
+  rotateInLayout,
+  rotationLabel,
+  type DisplayPlacement,
+  type DisplayRotation,
+} from '@/lib/display';
 import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
 import {
   LAYOUT_SWITCH_KEYS,
@@ -143,14 +153,14 @@ export const brightnessArea: Area = {
 
 export const displayArea: Area = {
   name: 'display',
-  summary: 'Monitors: resolution, arrangement, which is primary',
+  summary: 'Monitors: resolution, rotation, arrangement, which is primary',
   commands: [
     command('display', 'list', 'Connected monitors and their modes', [], async () => {
       const status = await call(need(getDisplayBridge(), 'Display arrangement').status());
       return {
         data: status.outputs,
         text: status.outputs.map((o) => [
-          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height}${o.current.refresh ? ` @ ${formatRefresh(o.current.refresh)}` : ''} at ${o.position.x},${o.position.y}` : 'off'}`,
+          `${o.primary ? '*' : ' '} ${o.name} (${friendlyOutputName(o.name)}): ${o.enabled && o.current ? `${o.current.width}x${o.current.height}${o.current.refresh ? ` @ ${formatRefresh(o.current.refresh)}` : ''}${o.rotation ? `, ${rotationLabel(o.rotation, o.current.width, o.current.height).toLowerCase()} (${o.rotation}°)` : ''} at ${o.position.x},${o.position.y}` : 'off'}`,
           `    modes: ${[...new Set(o.modes.map((m) => `${m.width}x${m.height}`))].map((size) => {
             const [width, height] = size.split('x').map(Number);
             const rates = refreshRates(o.modes, width, height);
@@ -159,9 +169,13 @@ export const displayArea: Area = {
         ].join('\n')).join('\n'),
       };
     }),
-    command('display', 'set', 'Change one monitor: its mode, refresh rate, position, whether it’s on or primary', [
+    command('display', 'set', 'Change one monitor: its mode, refresh rate, rotation, position, whether it’s on or primary', [
       { name: 'output', type: 'string', positional: true, help: 'Its name, e.g. HDMI-A-1' },
       { name: 'mode', type: 'string', optional: true, help: 'WIDTHxHEIGHT, one it offers' },
+      {
+        name: 'rotation', type: 'string', optional: true, choices: DISPLAY_ROTATIONS.map(String),
+        help: `Degrees: ${DISPLAY_ROTATIONS.map((r) => `${r} ${rotationLabel(r).toLowerCase()}`).join(', ')}`,
+      },
       { name: 'refresh', type: 'number', optional: true, help: 'Hz, one it offers at that size (e.g. 165); a new mode alone gets its fastest' },
       { name: 'x', type: 'integer', optional: true, help: 'Its left edge on the shared screen' },
       { name: 'y', type: 'integer', optional: true, help: 'Its top edge' },
@@ -192,17 +206,25 @@ export const displayArea: Area = {
         );
       }
       const primary = args.optBool('primary') === true;
-      const placements: DisplayPlacement[] = outputs.map((o) => {
+      const rotation = args.optString('rotation');
+      let placements: DisplayPlacement[] = outputs.map((o) => {
         const current = o.current ?? o.modes.find((m) => m.preferred) ?? o.modes[0] ?? { width: 0, height: 0 };
-        const base: DisplayPlacement = {
+        return {
           output: o.name, enabled: o.enabled, primary: primary ? false : o.primary,
-          x: o.position.x, y: o.position.y, width: current.width, height: current.height,
+          x: o.position.x, y: o.position.y, width: current.width, height: current.height, rotation: o.rotation ?? 0,
         };
-        if (o.name !== target.name) return base;
+      });
+      // Turned as Settings turns it: the displays beside it move with its edge.
+      if (rotation !== undefined) {
+        const turning = placements.find((p) => p.output === target.name);
+        if (turning) placements = rotateInLayout(placements, turning, Number(rotation) as DisplayRotation);
+      }
+      placements = placements.map((base) => {
+        if (base.output !== target.name) return base;
         return {
           ...base,
           enabled: args.optBool('enabled') ?? true,
-          primary: primary || o.primary,
+          primary: primary || target.primary,
           x: args.optNumber('x') ?? base.x,
           y: args.optNumber('y') ?? base.y,
           ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),

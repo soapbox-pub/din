@@ -64,6 +64,7 @@ import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
 import { BluetoothSettingsSection } from '@/components/desktop/apps/BluetoothSettingsSection';
 import {
   cleanDisplayError,
+  DISPLAY_ROTATIONS,
   formatMode,
   formatRefresh,
   friendlyOutputName,
@@ -71,9 +72,12 @@ import {
   isInternalOutput,
   preferredMode,
   refreshRates,
+  rotatedSize,
+  rotateInLayout,
+  rotationLabel,
   uniqueModes,
 } from '@/lib/display';
-import type { DisplayMode, DisplayOutput, DisplayPlacement } from '@/lib/display';
+import type { DisplayMode, DisplayOutput, DisplayPlacement, DisplayRotation } from '@/lib/display';
 import { getZoomBridge } from '@/lib/zoom';
 import {
   COLOR_FILTERS,
@@ -212,7 +216,12 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
@@ -648,8 +657,14 @@ interface DisplayDraft {
   height: number;
   /** Hz; 0 where the output doesn't say. */
   refresh: number;
+  rotation: DisplayRotation;
   modes: DisplayMode[];
   allModes: DisplayMode[];
+}
+
+/** The space a draft display takes on the shared screen, turned as it's to be. */
+function draftSize(d: DisplayDraft): { width: number; height: number } {
+  return rotatedSize(d.width, d.height, d.rotation);
 }
 
 /** Seed the editable draft from the reported outputs. */
@@ -668,6 +683,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
       width: output.current?.width ?? fallback?.width ?? 0,
       height: output.current?.height ?? fallback?.height ?? 0,
       refresh: output.current?.refresh ?? fallback?.refresh ?? 0,
+      rotation: output.rotation ?? 0,
       modes,
       allModes: output.modes,
     };
@@ -677,7 +693,7 @@ function draftFromOutputs(outputs: DisplayOutput[]): DisplayDraft[] {
 /** A stable signature of the arrangement, for dirty-checking and re-seeding. */
 function layoutSignature(drafts: DisplayDraft[]): string {
   return JSON.stringify(
-    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height, d.refresh]),
+    drafts.map((d) => [d.name, d.enabled, d.primary, d.x, d.y, d.width, d.height, d.refresh, d.rotation]),
   );
 }
 
@@ -695,6 +711,7 @@ function toPlacements(drafts: DisplayDraft[]): DisplayPlacement[] {
     width: d.width,
     height: d.height,
     ...(d.refresh > 0 && { refresh: d.refresh }),
+    rotation: d.rotation,
   }));
 }
 
@@ -849,6 +866,11 @@ function DisplaySection() {
     );
   const setRefreshFor = (name: string, refresh: number) =>
     setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, refresh } : d)));
+  const setRotationFor = (name: string, rotation: DisplayRotation) =>
+    setDraft((ds) => {
+      const target = ds.find((d) => d.name === name);
+      return target ? rotateInLayout(ds, target, rotation) : ds;
+    });
   const moveTo = (name: string, x: number, y: number) =>
     setDraft((ds) => ds.map((d) => (d.name === name ? { ...d, x, y } : d)));
 
@@ -893,6 +915,7 @@ function DisplaySection() {
         onMove={moveTo}
         onToggle={setEnabled}
         onPrimary={setPrimary}
+        onRotation={setRotationFor}
       />
 
       <div className="flex items-center justify-end gap-2">
@@ -922,6 +945,7 @@ function DisplaySection() {
             onPrimary={setPrimary}
             onMode={setModeFor}
             onRefresh={setRefreshFor}
+            onRotation={setRotationFor}
           />
         ))}
       </ul>
@@ -1004,10 +1028,11 @@ function snapPosition(
   const xEdges: number[] = [];
   const yEdges: number[] = [];
   for (const o of others) {
+    const size = draftSize(o);
     // align left / align right / place to the right / place to the left
-    xEdges.push(o.x, o.x + o.width - w, o.x + o.width, o.x - w);
+    xEdges.push(o.x, o.x + size.width - w, o.x + size.width, o.x - w);
     // align top / align bottom / place below / place above
-    yEdges.push(o.y, o.y + o.height - h, o.y + o.height, o.y - h);
+    yEdges.push(o.y, o.y + size.height - h, o.y + size.height, o.y - h);
   }
   return [
     Math.round(snapAxis(x, xEdges, threshold)),
@@ -1031,6 +1056,7 @@ function DisplayArrange({
   onMove,
   onToggle,
   onPrimary,
+  onRotation,
 }: {
   draft: DisplayDraft[];
   selected: string | null;
@@ -1039,6 +1065,7 @@ function DisplayArrange({
   onMove: (name: string, x: number, y: number) => void;
   onToggle: (name: string, enabled: boolean) => void;
   onPrimary: (name: string) => void;
+  onRotation: (name: string, rotation: DisplayRotation) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -1057,8 +1084,8 @@ function DisplayArrange({
   const on = draft.filter((d) => d.enabled);
   const minX = on.length ? Math.min(...on.map((d) => d.x)) : 0;
   const minY = on.length ? Math.min(...on.map((d) => d.y)) : 0;
-  const maxX = on.length ? Math.max(...on.map((d) => d.x + d.width)) : 1;
-  const maxY = on.length ? Math.max(...on.map((d) => d.y + d.height)) : 1;
+  const maxX = on.length ? Math.max(...on.map((d) => d.x + draftSize(d).width)) : 1;
+  const maxY = on.length ? Math.max(...on.map((d) => d.y + draftSize(d).height)) : 1;
   const spanX = Math.max(1, maxX - minX);
   const spanY = Math.max(1, maxY - minY);
   const rawScale = Math.min(
@@ -1083,7 +1110,8 @@ function DisplayArrange({
     const moving = draft.find((d) => d.name === st.name);
     if (!moving) return;
     const others = on.filter((d) => d.name !== st.name);
-    const [sx, sy] = snapPosition(nx, ny, moving.width, moving.height, others, 24 / scale);
+    const size = draftSize(moving);
+    const [sx, sy] = snapPosition(nx, ny, size.width, size.height, others, 24 / scale);
     onMove(st.name, sx, sy);
   };
   const endDrag = (e: React.PointerEvent) => {
@@ -1127,15 +1155,15 @@ function DisplayArrange({
                 style={{
                   left: offX + (d.x - minX) * scale,
                   top: offY + (d.y - minY) * scale,
-                  width: Math.max(d.width * scale, 8),
-                  height: Math.max(d.height * scale, 8),
+                  width: Math.max(draftSize(d).width * scale, 8),
+                  height: Math.max(draftSize(d).height * scale, 8),
                 }}
               >
                 <span className="truncate px-1 text-[11px] font-medium text-foreground">
                   {d.friendly}
                 </span>
                 <span className="truncate px-1 text-[10px] text-muted-foreground">
-                  {d.width} × {d.height}
+                  {draftSize(d).width} × {draftSize(d).height}
                 </span>
                 {d.primary && (
                   <span className="text-[9px] font-medium uppercase tracking-wide text-primary">
@@ -1149,6 +1177,24 @@ function DisplayArrange({
                 <Monitor aria-hidden />
                 Make primary
               </ContextMenuItem>
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <RotateCw aria-hidden />
+                  Rotation
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent>
+                  <ContextMenuRadioGroup
+                    value={String(d.rotation)}
+                    onValueChange={(value) => onRotation(d.name, Number(value) as DisplayRotation)}
+                  >
+                    {DISPLAY_ROTATIONS.map((rotation) => (
+                      <ContextMenuRadioItem key={rotation} value={String(rotation)}>
+                        {rotationLabel(rotation, d.width, d.height)}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </ContextMenuRadioGroup>
+                </ContextMenuSubContent>
+              </ContextMenuSub>
               <ContextMenuItem disabled={!canDisable} onSelect={() => onToggle(d.name, false)}>
                 <Power aria-hidden />
                 Turn off
@@ -1169,6 +1215,7 @@ function DisplayControlRow({
   onPrimary,
   onMode,
   onRefresh,
+  onRotation,
 }: {
   draft: DisplayDraft;
   canDisable: boolean;
@@ -1177,11 +1224,13 @@ function DisplayControlRow({
   onPrimary: (name: string) => void;
   onMode: (name: string, width: number, height: number) => void;
   onRefresh: (name: string, refresh: number) => void;
+  onRotation: (name: string, rotation: DisplayRotation) => void;
 }) {
   const d = draft;
   const Icon = d.internal ? Laptop : Monitor;
   const selectId = `resolution-${d.name}`;
   const refreshId = `refresh-${d.name}`;
+  const rotationId = `rotation-${d.name}`;
   const currentValue = `${d.width}x${d.height}`;
   const rates = refreshRates(d.allModes, d.width, d.height);
   const selectClass = cn(
@@ -1240,7 +1289,7 @@ function DisplayControlRow({
           >
             {d.primary ? 'Primary display' : 'Make primary'}
           </Button>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <Label htmlFor={selectId} className="sr-only">
               Resolution for {d.friendly}
             </Label>
@@ -1280,6 +1329,21 @@ function DisplayControlRow({
                 </select>
               </>
             )}
+            <Label htmlFor={rotationId} className="sr-only">
+              Rotation for {d.friendly}
+            </Label>
+            <select
+              id={rotationId}
+              value={String(d.rotation)}
+              onChange={(e) => onRotation(d.name, Number(e.target.value) as DisplayRotation)}
+              className={selectClass}
+            >
+              {DISPLAY_ROTATIONS.map((rotation) => (
+                <option key={rotation} value={String(rotation)}>
+                  {rotationLabel(rotation, d.width, d.height)}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       )}

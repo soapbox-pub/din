@@ -738,7 +738,7 @@ async function tool(
 
 // ---------------------------------------------------------------------------
 // Display bridge (window.dinos.display): the arrangement of the outputs Din's one
-// window spans - resolution, position, on/off and which output is primary -
+// window spans - resolution, rotation, position, on/off and which output is primary -
 // applied as a whole desired layout at once. Two backends:
 //   - wlr-randr on Wayland (din-shell on DinOS), through the compositor's
 //     wlr-output-management protocol. "Primary" isn't a Wayland notion: it's
@@ -796,11 +796,22 @@ interface DisplayOutput {
   physicalSize?: { width: number; height: number };
   /** The AirPlay receiver this display is, for the ones deckmon adds. */
   airplay?: string;
+  /** Its rotation in degrees, as Wayland counts an output's transform; 0 while off. */
+  rotation: Rotation;
 }
+
+/** An output's rotation: wl_output's transforms 90/180/270, xrandr's left/inverted/right. */
+type Rotation = 0 | 90 | 180 | 270;
+
+const ROTATIONS: readonly Rotation[] = [0, 90, 180, 270];
+
+/** xrandr's names for each rotation. */
+const XRANDR_ROTATION: Record<Rotation, string> = { 0: 'normal', 90: 'left', 180: 'inverted', 270: 'right' };
 
 /** A desired on-state for one output in a layout call. */
 interface OutputPlacement {
   name: string;
+  /** Its mode, as the output is driven, before any rotation. */
   width: number;
   height: number;
   /** Hz, one the output offers at this size; absent keeps whichever rate it has. */
@@ -808,6 +819,13 @@ interface OutputPlacement {
   x: number;
   y: number;
   primary: boolean;
+  /** Absent keeps whichever rotation it has. */
+  rotation?: Rotation;
+}
+
+/** The space an output takes on the shared screen: its mode, turned on its side at 90 and 270. */
+function footprint(width: number, height: number, rotation: Rotation | undefined): { width: number; height: number } {
+  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
 }
 
 /**
@@ -821,20 +839,24 @@ function parseXrandr(stdout: string): DisplayOutput[] {
   let current: DisplayOutput | null = null;
   for (const line of stdout.split('\n')) {
     const head = line.match(
-      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+))?/,
+      /^(\S+)\s+(connected|disconnected)\b(\s+primary)?(?:.*?\s(\d+)x(\d+)\+(\d+)\+(\d+)(?:\s+(left|inverted|right)\b)?)?/,
     );
     if (head) {
       const on = Boolean(head[4]);
       const mm = line.match(/\s(\d+)mm x (\d+)mm/);
+      const rotation = on ? (ROTATIONS.find((r) => XRANDR_ROTATION[r] === head[8]) ?? 0) : 0;
+      // The geometry is the rotated screen's; the mode is the output's own.
+      const size = footprint(Number(head[4]), Number(head[5]), rotation);
       current = {
         name: head[1],
         connected: head[2] === 'connected',
         primary: Boolean(head[3]),
         enabled: on,
-        current: on ? { width: Number(head[4]), height: Number(head[5]), refresh: 0 } : null,
+        current: on ? { ...size, refresh: 0 } : null,
         position: on ? { x: Number(head[6]), y: Number(head[7]) } : { x: 0, y: 0 },
         modes: [],
         ...(mm && { physicalSize: { width: Number(mm[1]), height: Number(mm[2]) } }),
+        rotation,
       };
       outputs.push(current);
       continue;
@@ -866,6 +888,8 @@ interface WlrHead {
   enabled?: unknown;
   position?: { x?: unknown; y?: unknown };
   physical_size?: { width?: unknown; height?: unknown };
+  /** "normal", "90", "180", "270", or one of those flipped ("flipped-90"). */
+  transform?: unknown;
   modes?: { width?: unknown; height?: unknown; refresh?: unknown; current?: unknown; preferred?: unknown }[];
 }
 
@@ -887,6 +911,9 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
     const now = enabled ? modes.find((m) => m.current) : undefined;
     const mmWidth = Number(head.physical_size?.width) || 0;
     const mmHeight = Number(head.physical_size?.height) || 0;
+    // A mirror-image transform counts as its turn: Din doesn't flip outputs.
+    const turn = Number(String(head.transform ?? '').replace(/^flipped-?/, '')) as Rotation;
+    const rotation = enabled && ROTATIONS.includes(turn) ? turn : 0;
     return [{
       name: head.name,
       connected: true,
@@ -898,6 +925,7 @@ function parseWlrRandr(stdout: string): DisplayOutput[] {
         : { x: 0, y: 0 },
       modes,
       ...(mmWidth > 0 && mmHeight > 0 && { physicalSize: { width: mmWidth, height: mmHeight } }),
+      rotation,
     }];
   });
 }
@@ -1029,15 +1057,16 @@ async function applyOutputLayout(
   remember = false,
 ): Promise<void> {
   const args: string[] = [];
+  const byName = new Map(outputs.map((o) => [o.name, o]));
   if (DISPLAY_TOOL === 'xrandr') {
     for (const e of enabled) {
       args.push('--output', e.name, '--mode', `${e.width}x${e.height}`, '--pos', `${e.x}x${e.y}`);
       if (e.refresh) args.push('--rate', e.refresh.toFixed(2));
+      if (e.rotation !== undefined) args.push('--rotate', XRANDR_ROTATION[e.rotation]);
       if (e.primary) args.push('--primary');
     }
     for (const name of disabled) args.push('--output', name, '--off');
   } else {
-    const byName = new Map(outputs.map((o) => [o.name, o]));
     for (const e of enabled) {
       args.push('--output', e.name, '--on');
       // A size alone is whichever of its rates wlr-randr finds first: the
@@ -1049,6 +1078,10 @@ async function applyOutputLayout(
       if (!now || now.width !== e.width || now.height !== e.height || !sameRefresh(now.refresh, refresh)) {
         args.push('--mode', refresh ? `${e.width}x${e.height}@${refresh.toFixed(3)}Hz` : `${e.width}x${e.height}`);
       }
+      // Only a change of turn: an output someone mirrored keeps its flip.
+      if (e.rotation !== undefined && (!output?.enabled || output.rotation !== e.rotation)) {
+        args.push('--transform', e.rotation === 0 ? 'normal' : String(e.rotation));
+      }
       args.push('--pos', `${e.x},${e.y}`);
     }
     for (const name of disabled) args.push('--output', name, '--off');
@@ -1058,7 +1091,11 @@ async function applyOutputLayout(
   if (remember && DISPLAY_TOOL !== 'xrandr') saveLayout(outputSetKey(outputs), { enabled, disabled });
 
   if (DISPLAY_TOOL === 'xrandr' && enabled.length > 0 && shellWindow && !shellWindow.isDestroyed()) {
-    shellWindow.setBounds(unionRect(enabled));
+    shellWindow.setBounds(unionRect(enabled.map((e) => ({
+      x: e.x,
+      y: e.y,
+      ...footprint(e.width, e.height, e.rotation ?? byName.get(e.name)?.rotation),
+    }))));
   }
   // The primary may have moved without any output changing.
   scheduleMonitorsUpdate();
@@ -1098,6 +1135,8 @@ function placementsFor(
     ) {
       throw new Error(`Unsupported refresh rate for ${output.name}`);
     }
+    const rotation = p.rotation === undefined || p.rotation === null ? output.rotation : Number(p.rotation);
+    if (!ROTATIONS.includes(rotation as Rotation)) throw new Error(`Unsupported rotation for ${output.name}`);
     enabled.push({
       name: output.name,
       width,
@@ -1109,6 +1148,8 @@ function placementsFor(
       x: Math.max(0, Math.round(Number(p.x)) || 0),
       y: Math.max(0, Math.round(Number(p.y)) || 0),
       primary: Boolean(p.primary),
+      // Always named, so a saved arrangement puts the turn back too.
+      rotation: rotation as Rotation,
     });
   }
   // Any connected output the renderer didn't mention is turned off.
@@ -1132,6 +1173,7 @@ function layoutMatches(outputs: DisplayOutput[], layout: SavedLayout): boolean {
         o.current?.width === e.width &&
         o.current?.height === e.height &&
         (!e.refresh || sameRefresh(o.current.refresh, e.refresh)) &&
+        (e.rotation === undefined || o.rotation === e.rotation) &&
         o.position.x === e.x &&
         o.position.y === e.y
       );
@@ -1175,8 +1217,16 @@ async function restoreSavedLayout(): Promise<void> {
   }
 }
 
+/** An output's rectangle on the shared screen, for gap-closing. */
+interface PlacedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Whether two rectangles overlap or share a stretch of edge. */
-function rectsTouch(a: OutputPlacement, b: OutputPlacement): boolean {
+function rectsTouch(a: PlacedRect, b: PlacedRect): boolean {
   const xs = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
   const ys = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
   return (xs >= 0 && ys > 0) || (xs > 0 && ys >= 0);
@@ -1186,7 +1236,7 @@ function rectsTouch(a: OutputPlacement, b: OutputPlacement): boolean {
  * Slide OUTPUT toward ANCHOR along the axis that separates them until it sits
  * against it, keeping some of the shared edge.
  */
-function placeAgainst(output: OutputPlacement, anchor: OutputPlacement): void {
+function placeAgainst(output: PlacedRect, anchor: PlacedRect): void {
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
   const gapX = Math.max(anchor.x - (output.x + output.width), output.x - (anchor.x + anchor.width));
   const gapY = Math.max(anchor.y - (output.y + output.height), output.y - (anchor.y + anchor.height));
@@ -1215,14 +1265,19 @@ async function closeLayoutGaps(): Promise<void> {
   } catch {
     return;
   }
-  const on: OutputPlacement[] = outputs.flatMap((o) =>
+  // Each with the rectangle it covers, which a turned output has on its side.
+  const on: (PlacedRect & { placement: OutputPlacement })[] = outputs.flatMap((o) =>
     o.enabled && o.current
-      ? [{ name: o.name, width: o.current.width, height: o.current.height, ...o.position, primary: o.primary }]
+      ? [{
+        ...o.position,
+        ...footprint(o.current.width, o.current.height, o.rotation),
+        placement: { name: o.name, width: o.current.width, height: o.current.height, ...o.position, primary: o.primary },
+      }]
       : [],
   );
   if (on.length < 2) return;
 
-  const placed = [on.find((p) => p.primary) ?? on[0]];
+  const placed = [on.find((p) => p.placement.primary) ?? on[0]];
   let rest = on.filter((p) => p !== placed[0]);
   let moved = false;
   while (rest.length > 0) {
@@ -1233,7 +1288,7 @@ async function closeLayoutGaps(): Promise<void> {
       continue;
     }
     // None touch: move the one closest to the placed ones against its nearest.
-    const distance = (a: OutputPlacement, b: OutputPlacement) =>
+    const distance = (a: PlacedRect, b: PlacedRect) =>
       Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width)) +
       Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
     let best = { output: rest[0], anchor: placed[0], d: Infinity };
@@ -1250,13 +1305,10 @@ async function closeLayoutGaps(): Promise<void> {
 
   const left = Math.min(...on.map((p) => p.x));
   const top = Math.min(...on.map((p) => p.y));
-  for (const p of on) {
-    p.x -= left;
-    p.y -= top;
-  }
-  const disabled = outputs.filter((o) => !on.some((p) => p.name === o.name)).map((o) => o.name);
+  const placements = on.map((p) => ({ ...p.placement, x: p.x - left, y: p.y - top }));
+  const disabled = outputs.filter((o) => !placements.some((p) => p.name === o.name)).map((o) => o.name);
   try {
-    await applyOutputLayout(outputs, on, disabled);
+    await applyOutputLayout(outputs, placements, disabled);
   } catch (error) {
     console.warn('displays: could not close a gap between displays:', messageOf(error));
   }
@@ -1730,7 +1782,8 @@ function packLeftToRight(
       y: 0,
       primary: enabled.length === 0,
     });
-    x += mode.width;
+    // Each keeps its turn, and takes its turned width.
+    x += footprint(mode.width, mode.height, output.rotation).width;
   }
   if (enabled.length === 0) return null;
   return { enabled, disabled: off.map((o) => o.name) };

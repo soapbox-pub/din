@@ -9,7 +9,8 @@
  * must feature-detect and render a fallback.
  *
  * The bridge models a full multi-output layout: each connected output has a
- * resolution, a position in the shared virtual screen, an on/off state and a
+ * resolution, a rotation, a position in the shared virtual screen (where a
+ * display turned on its side takes its height across), an on/off state and a
  * primary flag (the monitor with the menu bar and Dock). `applyLayout`
  * commits an entire desired arrangement in one atomic call, so the desktop
  * never passes through a half-configured state. Under din-shell, the arrangement
@@ -45,6 +46,68 @@ export interface DisplayOutput {
   physicalSize?: { width: number; height: number };
   /** The AirPlay receiver this display is (one added to extend the desktop). */
   airplay?: string;
+  /** How far it's turned (see DisplayRotation); 0 while off. */
+  rotation: DisplayRotation;
+}
+
+/**
+ * How far a display's picture is turned, in degrees, as Wayland counts an
+ * output's transform (xrandr's left, inverted and right): 90 and 270 are the
+ * two ways of standing a monitor on its side.
+ */
+export type DisplayRotation = 0 | 90 | 180 | 270;
+
+export const DISPLAY_ROTATIONS: readonly DisplayRotation[] = [0, 90, 180, 270];
+
+/**
+ * What a rotation is called, as GNOME's Settings names it: a display whose
+ * own mode (WIDTH x HEIGHT) is tall, like a phone's or a tablet's panel,
+ * starts out portrait.
+ */
+export function rotationLabel(rotation: DisplayRotation, width = 1, height = 0): string {
+  const tall = height > width;
+  switch (rotation) {
+    case 0: return tall ? 'Portrait' : 'Landscape';
+    case 90: return tall ? 'Landscape (right)' : 'Portrait (right)';
+    case 180: return tall ? 'Portrait (flipped)' : 'Landscape (flipped)';
+    case 270: return tall ? 'Landscape (left)' : 'Portrait (left)';
+  }
+}
+
+/** The width and height a display takes on the shared screen: its mode, on its side at 90 and 270. */
+export function rotatedSize(width: number, height: number, rotation: DisplayRotation): { width: number; height: number } {
+  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
+}
+
+/** A display's slot in a layout, as far as turning it is concerned. */
+interface Turnable {
+  enabled: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: DisplayRotation;
+}
+
+/**
+ * LAYOUT with TARGET turned to ROTATION. It keeps its top-left corner, and
+ * the displays beyond its right or bottom edge move with that edge, so ones
+ * beside it stay beside it instead of overlapping it or leaving a gap.
+ */
+export function rotateInLayout<T extends Turnable>(layout: T[], target: T, rotation: DisplayRotation): T[] {
+  const before = rotatedSize(target.width, target.height, target.rotation ?? 0);
+  const after = rotatedSize(target.width, target.height, rotation);
+  const right = target.x + before.width;
+  const bottom = target.y + before.height;
+  return layout.map((d) => {
+    if (d === target) return { ...d, rotation };
+    if (!d.enabled || !target.enabled) return d;
+    return {
+      ...d,
+      x: d.x >= right ? d.x + after.width - before.width : d.x,
+      y: d.y >= bottom ? d.y + after.height - before.height : d.y,
+    };
+  });
 }
 
 export interface DisplayStatus {
@@ -64,11 +127,13 @@ export interface DisplayPlacement {
   /** Top-left position in the shared virtual screen (px). Ignored when off. */
   x: number;
   y: number;
-  /** Chosen mode. Must be one the output reports. Ignored when off. */
+  /** Chosen mode, before any rotation. Must be one the output reports. Ignored when off. */
   width: number;
   height: number;
   /** Refresh rate in Hz, one the output offers at that size. Omitted keeps the current one. */
   refresh?: number;
+  /** Omitted keeps the current rotation. */
+  rotation?: DisplayRotation;
 }
 
 export interface DisplayBridge {
