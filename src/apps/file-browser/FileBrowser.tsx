@@ -566,6 +566,9 @@ function FileBrowserTab({
   const [revealToken, setRevealToken] = useState(0);
   const reveal = useCallback(() => setRevealToken((t) => t + 1), []);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Rename… chosen from the right-click menu: started once the menu has
+  // closed, as its focus trap would otherwise take focus back from the field.
+  const renameAfterMenu = useRef<string | null>(null);
   const [quickLook, setQuickLook] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [status, setStatus] = useState<Status>(null);
@@ -1849,7 +1852,10 @@ function FileBrowserTab({
                 className="w-60"
                 onCloseAutoFocus={(e) => {
                   e.preventDefault();
-                  if (document.activeElement === document.body || !document.activeElement) focusView();
+                  const rename = renameAfterMenu.current;
+                  renameAfterMenu.current = null;
+                  if (rename !== null) setRenaming(rename);
+                  else if (document.activeElement === document.body || !document.activeElement) focusView();
                 }}
               >
                 {menuFor === 'items' && selectedNames.length > 0 ? (
@@ -1943,7 +1949,7 @@ function FileBrowserTab({
                         )}
                         <ContextMenuItem onSelect={() => duplicate(selectedNames)}>Duplicate</ContextMenuItem>
                         {single && (
-                          <ContextMenuItem onSelect={() => setRenaming(single.name)}>
+                          <ContextMenuItem onSelect={() => { renameAfterMenu.current = single.name; }}>
                             Rename… <ContextMenuShortcut>F2</ContextMenuShortcut>
                           </ContextMenuItem>
                         )}
