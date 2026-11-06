@@ -77,24 +77,53 @@ export function installLiquidGlass(): void {
 }
 
 /**
+ * How far past a surface's edge the light can be and still show: its
+ * gradients' widest (window-glass's 600px circle) and then some. Further
+ * out, the light is held at this distance, where it looks the same (none),
+ * so the pointer moving far away doesn't repaint the surface.
+ */
+const LIGHT_REACH = 640;
+
+/**
+ * Set while a window is being moved, resized or animated (the desktop's
+ * windowGestures): the light holds still, as the pointer is carrying a
+ * window, not looking at the glass.
+ */
+export const WINDOW_GESTURE_ATTR = 'data-window-gesture';
+
+/**
  * Liquid glass's light: where the pointer is, in each glass surface's own
  * coordinates (--glass-x/--glass-y), once a frame while it moves, and only
  * while Liquid is chosen (the root's --glass-material, which the desktop and
  * the theme it sends its apps set inline). Set on the surfaces themselves
  * rather than the root, so a move restyles them and not the whole document.
+ * Every surface is measured before any is written, as a write between two
+ * reads makes the second lay the page out again, and only a surface whose
+ * light moved is written, as each write repaints the whole surface: a
+ * window's glass is as big as the window.
  */
 function followPointer(): void {
   let frame = 0;
   let x = 0;
   let y = 0;
+  const lit = new WeakMap<HTMLElement, string>();
   const update = () => {
     frame = 0;
-    if (document.documentElement.style.getPropertyValue('--glass-material').trim() !== 'liquid') return;
-    for (const el of document.querySelectorAll<HTMLElement>('.glass-surface, .window-glass, .glass-control, .bar-glass, .glass-sheen')) {
-      const r = el.getBoundingClientRect();
-      el.style.setProperty('--glass-x', `${Math.round(x - r.left)}px`);
-      el.style.setProperty('--glass-y', `${Math.round(y - r.top)}px`);
-    }
+    const root = document.documentElement;
+    if (root.hasAttribute(WINDOW_GESTURE_ATTR)) return;
+    if (root.style.getPropertyValue('--glass-material').trim() !== 'liquid') return;
+    const surfaces = [...document.querySelectorAll<HTMLElement>('.glass-surface, .window-glass, .glass-control, .bar-glass, .glass-sheen')];
+    const rects = surfaces.map((el) => el.getBoundingClientRect());
+    surfaces.forEach((el, i) => {
+      const r = rects[i];
+      const lx = Math.round(Math.min(Math.max(x - r.left, -LIGHT_REACH), r.width + LIGHT_REACH));
+      const ly = Math.round(Math.min(Math.max(y - r.top, -LIGHT_REACH), r.height + LIGHT_REACH));
+      const key = `${lx},${ly}`;
+      if (lit.get(el) === key) return;
+      lit.set(el, key);
+      el.style.setProperty('--glass-x', `${lx}px`);
+      el.style.setProperty('--glass-y', `${ly}px`);
+    });
   };
   window.addEventListener(
     'pointermove',

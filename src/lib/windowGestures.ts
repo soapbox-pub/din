@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
+import { WINDOW_GESTURE_ATTR } from '@/shared/liquidGlass';
+
 /**
  * Which windows are mid-gesture: being dragged or resized, wobbling, or
  * playing a genie or maximize animation. Those paint through CSS transforms
@@ -7,6 +9,8 @@ import { useSyncExternalStore } from 'react';
  * rects say nothing about where they are on screen until then. The desktop
  * reads this so a window it's hiding behind one of them (see Desktop's
  * covered windows) shows again the moment the one above starts to move.
+ * The root's data-window-gesture tells liquid glass's light (liquidGlass.ts)
+ * to hold still meanwhile.
  *
  * A set of ids rather than a counter: a gesture may end more than once (a
  * snap drop ends the drag, then its FLIP), and ending one twice is harmless.
@@ -16,6 +20,7 @@ const listeners = new Set<() => void>();
 
 function update(next: ReadonlySet<string>): void {
   moving = next;
+  document.documentElement.toggleAttribute(WINDOW_GESTURE_ATTR, next.size > 0);
   for (const listener of listeners) listener();
 }
 

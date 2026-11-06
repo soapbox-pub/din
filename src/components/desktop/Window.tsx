@@ -648,18 +648,17 @@ export const Window = memo(function Window({
   }, [focus, win.id]);
 
   /**
-   * Put the window into "cheap to move" mode for the duration of a gesture.
-   * backdrop-filter forces the compositor to re-sample everything behind the
-   * window on every frame it moves - the single most expensive part of a drag,
-   * catastrophic under software rendering. The card is 90% opaque, so dropping
-   * the blur mid-gesture is nearly invisible.
+   * Put the window into "cheap to move" mode for the duration of a gesture
+   * (a drag, its wobble settling, a resize): a layer of its own, and, through
+   * windowGestures' root attribute, liquid glass's light held still
+   * (liquidGlass.ts). Its glass keeps its blur: that's window-glass, a layer
+   * under the section, not the section itself.
    */
   const beginGesture = useCallback(() => {
     beginWindowGesture(win.id);
     const el = sectionRef.current;
     if (!el) return;
     el.style.willChange = 'transform';
-    el.style.backdropFilter = 'none';
   }, [win.id]);
 
   const endGesture = useCallback(() => {
@@ -667,7 +666,6 @@ export const Window = memo(function Window({
     const el = sectionRef.current;
     if (!el) return;
     el.style.willChange = '';
-    el.style.backdropFilter = '';
   }, [win.id]);
 
   // A window closed mid-gesture never ends it.
