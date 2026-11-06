@@ -164,6 +164,7 @@ import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.m
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { becomeWindowsDesktop, isWindows, isWindowsShell, windowsPower } from './windows-shell.mts';
+import { argsForDin, drives, isComputerRoot, isWindowsHidden } from './windows-paths.mts';
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
 import { startWatchdog } from './watchdog.mts';
@@ -447,6 +448,8 @@ interface FsDirEntry {
   symlink: boolean;
   size: number | null;
   mtimeMs: number | null;
+  /** Hidden by the system though its name doesn't start with a dot (Windows' desktop.ini). */
+  hidden?: boolean;
 }
 
 function registerFsHandlers(): void {
@@ -457,11 +460,14 @@ function registerFsHandlers(): void {
 
   ipcMain.handle('fs:stat', async (event, target) => {
     assertShellSender(event);
+    if (typeof target === 'string' && isComputerRoot(target)) return { kind: 'directory', size: 0, mtimeMs: 0 };
     return statSummary(await fsp.stat(normalizeAbsolute(target)));
   });
 
   ipcMain.handle('fs:readdir', async (event, dirPath) => {
     assertShellSender(event);
+    // On Windows, the computer: its drives.
+    if (typeof dirPath === 'string' && isComputerRoot(dirPath)) return { path: '/', entries: await drives(), truncated: false };
     const dir = normalizeAbsolute(dirPath);
 
     const dirents = await fsp.readdir(dir, { withFileTypes: true });
@@ -480,6 +486,7 @@ function registerFsHandlers(): void {
           symlink: dirent.isSymbolicLink(),
           size: null,
           mtimeMs: null,
+          ...(isWindowsHidden(dirent.name) ? { hidden: true } : {}),
         };
         try {
           // stat() follows symlinks so links to directories browse correctly.
@@ -546,7 +553,8 @@ function registerFsHandlers(): void {
   ipcMain.handle('fs:rm', async (event, target, options) => {
     assertShellSender(event);
     const p = normalizeAbsolute(target);
-    if (p === '/') throw new Error('Refusing to remove /');
+    // `/`, or on Windows a drive's top (`C:\`).
+    if (path.parse(p).root === p) throw new Error(`Refusing to remove ${p}`);
     const recursive = options !== null && typeof options === 'object'
       ? options.recursive === true
       : false;
@@ -6743,6 +6751,20 @@ async function defuseViewSourceLineWrap(contents: Electron.WebContents): Promise
   }
 }
 
+/**
+ * On Windows, give Din's own pages (the desktop and its apps) what main
+ * sends them with its paths in Din's form, as their calls' results are
+ * (electron/windows-paths.mts). Web pages and extensions get Windows' own.
+ */
+function translateSends(contents: Electron.WebContents): void {
+  const send = contents.send.bind(contents);
+  contents.send = (channel: string, ...args: unknown[]) => {
+    const url = contents.getURL();
+    const din = url.startsWith(SHELL_ORIGIN) || url.startsWith('app://') || url.startsWith('din://') || url.startsWith('din+file://') || url.startsWith('widget://');
+    send(channel, ...(din ? argsForDin(channel, args) : args));
+  };
+}
+
 // Harden any <webview> the shell embeds (the web browser app). Keep them
 // sandboxed with no Node integration, and deny requests to spawn native
 // windows - target=_blank and friends become new browser tabs instead.
@@ -6753,6 +6775,7 @@ app.on('web-contents-created', (_event, contents) => {
   // screen share, …) cleans up on its 'destroyed', once per guest, and a
   // browser tab is tracked by more than Node's default 10. Not a leak.
   contents.setMaxListeners(30);
+  if (isWindows) translateSends(contents);
 
   // Brightness and volume keys arrive as ordinary keyboard input to whichever
   // contents holds focus (shell or any guest), so hook them everywhere.

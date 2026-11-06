@@ -27,7 +27,7 @@ import {
   type PlacedIcon,
   type Rect,
 } from '@/lib/desktopIcons';
-import { cleanFsError, getFsBridge, isValidEntryName, joinPath } from '@/lib/fs';
+import { cleanFsError, getFsBridge, isHiddenEntry, isValidEntryName, joinPath } from '@/lib/fs';
 import type { WorkArea } from '@/lib/monitors';
 import { openPath } from '@/lib/openPath';
 import { areaGrid, cellsRect, placedCells } from '@/lib/widgetGrid';
@@ -98,7 +98,7 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     if (!listing) return [];
     const next: DesktopIcon[] = [];
     for (const e of listing.entries) {
-      if (e.name.startsWith('.')) continue;
+      if (isHiddenEntry(e)) continue;
       const path = joinPath(dir, e.name);
       let entry: DesktopEntry | undefined;
       if (e.kind === 'file' && isDesktopEntryName(e.name)) {

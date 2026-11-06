@@ -63,6 +63,7 @@ import {
 } from './code/setup';
 import { useIsDark } from '@/hooks/useIsDark';
 import { pickFiles, pickFolder, pickSaveFile, windowLaunchFiles } from '@/shared/fileHandles';
+import { decodeText, encodeText, isUtf16, type TextEncoding } from '@/shared/textEncoding';
 
 /** Bigger files than this aren't opened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -120,16 +121,16 @@ function revealInFiles(din: Din, path: string, select?: string): void {
 }
 
 /** A file's text, or why it can't be edited here. */
-async function readText(fs: FsBridge, path: string): Promise<{ text: string } | { error: string }> {
+async function readText(fs: FsBridge, path: string): Promise<{ text: string; encoding: TextEncoding } | { error: string }> {
   try {
     const result = await fs.readFile(path, MAX_BYTES);
     if (result.truncated) return { error: 'It’s too big for the Text Editor (over 16 MB).' };
     const bytes = result.data;
-    // A null byte near the start: it's binary.
-    if (bytes.subarray(0, Math.min(bytes.length, 8192)).includes(0)) {
+    // A null byte near the start: it's binary (unless it's UTF-16, as Windows writes).
+    if (!isUtf16(bytes) && bytes.subarray(0, Math.min(bytes.length, 8192)).includes(0)) {
       return { error: 'It doesn’t look like a text file.' };
     }
-    return { text: new TextDecoder('utf-8', { fatal: false }).decode(bytes) };
+    return decodeText(bytes);
   } catch (error) {
     return { error: cleanFsError(error) };
   }
@@ -266,6 +267,8 @@ export function TextEditor() {
   /** What each tab's file held when last read or saved. */
   const saved = useRef(new Map<string, Text>());
   const mtimes = useRef(new Map<string, number>());
+  /** Each file's encoding as it was read, which saving keeps. */
+  const encodings = useRef(new Map<string, TextEncoding>());
   const scrolls = useRef(new Map<string, ReturnType<EditorView['scrollSnapshot']>>());
   const reveals = useRef(new Map<string, Reveal>());
   const shown = useRef<string | null>(null);
@@ -480,6 +483,7 @@ export function TextEditor() {
     const state = makeState(result.text);
     states.current.set(id, state);
     saved.current.set(id, state.doc);
+    encodings.current.set(id, result.encoding);
     if (stat) mtimes.current.set(id, stat.mtimeMs);
     patchTab(id, { loading: false, indent: state.facet(indentUnit) });
     detectLanguage(id, path, result.text);
@@ -529,7 +533,7 @@ export function TextEditor() {
     setSaving(true);
     setStatus(null);
     try {
-      await fs.writeFile(target, doc.toString());
+      await fs.writeFile(target, encodeText(doc.toString(), encodings.current.get(id)));
       saved.current.set(id, doc);
       const stat = await fs.stat(target).catch(() => null);
       if (stat) mtimes.current.set(id, stat.mtimeMs);
@@ -563,6 +567,7 @@ export function TextEditor() {
     states.current.delete(id);
     saved.current.delete(id);
     mtimes.current.delete(id);
+    encodings.current.delete(id);
     scrolls.current.delete(id);
     reveals.current.delete(id);
     if (shown.current === id) shown.current = null;
@@ -723,7 +728,7 @@ export function TextEditor() {
           const read = await readText(fs, path);
           if ('error' in read) throw new Error(read.error);
           const after = replaceText(read.text);
-          if (after !== read.text) await fs.writeFile(path, after);
+          if (after !== read.text) await fs.writeFile(path, encodeText(after, read.encoding));
         }
         files++;
       } catch {

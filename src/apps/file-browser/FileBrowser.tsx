@@ -26,6 +26,7 @@ import {
   extractionWarning,
   formatBytes,
   getFsBridge,
+  isHiddenEntry,
   joinPath,
   parentPath,
   sortEntriesBy,
@@ -606,7 +607,7 @@ function FileBrowserTab({
 
   const entries = useMemo(() => {
     let items = listing.data?.entries ?? [];
-    if (!prefs.showHidden) items = items.filter((e) => !e.name.startsWith('.'));
+    if (!prefs.showHidden) items = items.filter((e) => !isHiddenEntry(e));
     if (needle && searchContents && !isTrash) {
       items = foundCurrent ? found.data.entries : [];
     } else if (needle) {

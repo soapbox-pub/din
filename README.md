@@ -144,7 +144,12 @@ As the shell (`electron/windows-shell.mts`), Din's window is the desktop:
 as Explorer's desktop is, and sets the work area so maximized programs leave
 the menu bar showing. Programs (`.exe`, `.lnk`, `.msi`, `.bat`) open with
 Windows itself, not Wine; Log out signs out of Windows, and Restart and Shut
-down go through `shutdown.exe`. Not there yet: programs' windows in the Dock
+down go through `shutdown.exe`. Din's desktop and apps see Windows' paths
+in POSIX form (`C:\Users\Din` is `/C:/Users/Din`, and `/` is the computer,
+whose folders are its drives), translated where they cross into main
+(`electron/windows-paths.mts`); the files Windows hides (`desktop.ini`,
+`Thumbs.db`, …) are hidden, and UTF-16 text is read and saved as it came.
+Not there yet: programs' windows in the Dock
 (Alt+Tab switches between them), Din's menus and windows over programs', the
 Run keys and Startup folder, and the Linux-only parts (Terminal, displays,
 sound, Wi-Fi, …).

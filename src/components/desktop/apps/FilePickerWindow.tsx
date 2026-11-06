@@ -22,6 +22,7 @@ import {
   compareEntriesBy,
   formatBytes,
   getFsBridge,
+  isHiddenEntry,
   isKnownTime,
   joinPath,
   parentPath,
@@ -237,7 +238,7 @@ function FilePicker({ options, onConfirm, onCancel }: FilePickerProps) {
     }
     if (folder === null) return [];
     return (listing.data?.entries ?? [])
-      .filter((e) => showHidden || !e.name.startsWith('.'))
+      .filter((e) => showHidden || !isHiddenEntry(e))
       .sort(compare)
       .map((entry) => ({ entry, path: joinPath(folder, entry.name), when: entry.mtimeMs }));
   }, [inRecent, recent.data, filter, folder, listing.data, showHidden, sort]);

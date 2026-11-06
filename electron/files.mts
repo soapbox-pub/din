@@ -19,6 +19,7 @@ import { Readable } from 'node:stream';
 import { ipcMain, nativeImage, protocol } from 'electron';
 import { programInfo } from './pe-icon.mts';
 import { CommandError, runCommand } from './system.mts';
+import { isWindowsHidden, nativePath } from './windows-paths.mts';
 
 const fsp = fs.promises;
 
@@ -1101,7 +1102,7 @@ async function walkFind(root: string, query: string, hidden: boolean, signal: Ab
         continue;
       }
       for (const d of dirents) {
-        if (!hidden && d.name.startsWith('.')) continue;
+        if (!hidden && (d.name.startsWith('.') || isWindowsHidden(d.name))) continue;
         budget--;
         const p = path.join(dir, d.name);
         if (d.name.toLowerCase().includes(needle)) found.push(p);
@@ -1502,7 +1503,7 @@ export function registerLocalFileProtocol(shellOrigin: string): void {
     const cors = { 'access-control-allow-origin': shellOrigin };
     let file: string;
     try {
-      file = absolute(decodeURIComponent(new URL(request.url).pathname));
+      file = absolute(nativePath(decodeURIComponent(new URL(request.url).pathname)));
     } catch {
       return new Response(null, { status: 400, headers: cors });
     }

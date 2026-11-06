@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Copy, FolderOpen, Layers, Paintbrush, Printer, Wallpaper } from 'lucide-react';
 import { ToolButton } from '@/shared/appChrome';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { cleanFsError, extractionWarning, formatBytes, getFsBridge, joinPath, parentPath, sortEntries } from '@/lib/fs';
+import { cleanFsError, extractionWarning, formatBytes, getFsBridge, isHiddenEntry, joinPath, parentPath, sortEntries } from '@/lib/fs';
 import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTypes';
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { printFile } from '@/shared/print';
@@ -78,7 +78,7 @@ export function Preview() {
     if (!isMedia(name)) return [];
     return sortEntries(
       (listing.data?.entries ?? []).filter(
-        (e) => e.kind === 'file' && !e.name.startsWith('.') && isMedia(e.name),
+        (e) => e.kind === 'file' && !isHiddenEntry(e) && isMedia(e.name),
       ),
     );
   }, [listing.data, name]);

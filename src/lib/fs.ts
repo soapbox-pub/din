@@ -30,6 +30,13 @@ export interface FsEntry {
   size: number | null;
   /** Modification time (ms since epoch), or null when stat failed. */
   mtimeMs: number | null;
+  /** Hidden by the system though its name doesn't start with a dot (Windows' desktop.ini). */
+  hidden?: boolean;
+}
+
+/** Whether an entry is hidden: a dotfile, or one the system hides (Windows' desktop.ini). */
+export function isHiddenEntry(entry: { name: string; hidden?: boolean }): boolean {
+  return entry.hidden === true || entry.name.startsWith('.');
 }
 
 export interface FsListing {
@@ -284,7 +291,9 @@ export function extractionWarning({ damaged, incomplete, removedLinks }: FsExtra
 }
 
 // ---------------------------------------------------------------------------
-// POSIX path helpers (the shell only ever runs on Linux).
+// POSIX path helpers. On Windows too: there the system side hands Din
+// `/C:/Users/…` for `C:\Users\…` (electron/windows-paths.mts), and `/` is
+// the computer, whose folders are its drives.
 // ---------------------------------------------------------------------------
 
 /** Parent directory of an absolute path ('/' is its own parent). */

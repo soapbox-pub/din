@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { getFsBridge, joinPath, parentPath } from '@/lib/fs';
+import { getFsBridge, isHiddenEntry, joinPath, parentPath } from '@/lib/fs';
 import { grantsReady, homeDir, keepFor } from './grants';
 import { isPlayableMedia, isVideoLocation, trackInfo, baseTitle } from './metadata';
 import { isPlaylistFile } from './playlists';
@@ -187,7 +187,7 @@ class Library {
       }
       const subdirs: string[] = [];
       for (const e of listing.entries) {
-        if (e.name.startsWith('.')) continue;
+        if (isHiddenEntry(e)) continue;
         const path = joinPath(dir, e.name);
         if (e.kind === 'directory') subdirs.push(path);
         else if (e.kind === 'file' && isPlayableMedia(e.name)) found.set(path, { mtimeMs: e.mtimeMs ?? 0, size: e.size ?? 0 });

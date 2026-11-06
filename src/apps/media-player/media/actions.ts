@@ -1,5 +1,5 @@
 import { extensionOf } from '@/lib/fileTypes';
-import { cleanFsError, getFsBridge, joinPath, sortEntries } from '@/lib/fs';
+import { cleanFsError, getFsBridge, isHiddenEntry, joinPath, sortEntries } from '@/lib/fs';
 import { makeTrack, player, type Track } from './engine';
 import { adopt, grantsReady, handleFor, homeDir, reachPlaylistSongs, readLocal } from './grants';
 import { isPlayableMedia } from './metadata';
@@ -52,7 +52,7 @@ async function mediaInFolder(dir: string, depth = 0): Promise<string[]> {
   }
   const out: string[] = [];
   for (const e of sortEntries(listing.entries)) {
-    if (e.name.startsWith('.')) continue;
+    if (isHiddenEntry(e)) continue;
     const path = joinPath(dir, e.name);
     if (e.kind === 'directory') out.push(...(await mediaInFolder(path, depth + 1)));
     else if (e.kind === 'file' && isPlayableMedia(e.name)) out.push(path);

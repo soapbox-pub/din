@@ -17,6 +17,7 @@ import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CursorThemeView } from '@/shared/CursorThemeView';
 import { FileIcon } from '@/shared/FileIcon';
+import { decodeText, encodeText, isUtf16, type TextEncoding } from '@/shared/textEncoding';
 
 /** Cap for text reads; bigger files show read-only, truncated. */
 const TEXT_MAX_BYTES = 1024 * 1024;
@@ -344,9 +345,10 @@ function TextView({
   const text = useMemo(() => {
     if (!content.data) return null;
     const bytes = content.data.data;
-    // A null byte near the start: it's binary.
-    if (bytes.subarray(0, Math.min(bytes.length, 8192)).includes(0)) return null;
-    return new TextDecoder('utf-8', { fatal: false }).decode(bytes).slice(0, TEXT_MAX_CHARS);
+    // A null byte near the start: it's binary (unless it's UTF-16, as Windows writes).
+    if (!isUtf16(bytes) && bytes.subarray(0, Math.min(bytes.length, 8192)).includes(0)) return null;
+    const decoded = decodeText(bytes);
+    return { ...decoded, text: decoded.text.slice(0, TEXT_MAX_CHARS) };
   }, [content.data]);
 
   if (content.isLoading) return <TextSkeleton />;
@@ -359,9 +361,9 @@ function TextView({
   }
   if (text === null) return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;
 
-  const truncated = content.data!.truncated || text.length >= TEXT_MAX_CHARS;
+  const truncated = content.data!.truncated || text.text.length >= TEXT_MAX_CHARS;
   if (editable && !truncated) {
-    return <TextEditor key={path} path={path} initial={text} onDirtyChange={onDirtyChange} />;
+    return <TextEditor key={path} path={path} initial={text.text} encoding={text.encoding} onDirtyChange={onDirtyChange} />;
   }
   return (
     <div className="h-full overflow-auto">
@@ -371,7 +373,7 @@ function TextView({
         </p>
       )}
       <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground/90 select-text">
-        {text}
+        {text.text}
       </pre>
     </div>
   );
@@ -381,10 +383,13 @@ function TextView({
 function TextEditor({
   path,
   initial,
+  encoding,
   onDirtyChange,
 }: {
   path: string;
   initial: string;
+  /** The file's encoding, which saving keeps. */
+  encoding: TextEncoding;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const queryClient = useQueryClient();
@@ -405,7 +410,7 @@ function TextEditor({
     setStatus(null);
     const contents = value;
     try {
-      await getFsBridge()!.writeFile(path, contents);
+      await getFsBridge()!.writeFile(path, encodeText(contents, encoding));
       setSaved(contents);
       setStatus('Saved');
       void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', path] });

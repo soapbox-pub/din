@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { ipcMain, MessageChannelMain, net, session, webContents } from 'electron';
 import { LOCAL_FILE_SCHEME, serveLocalFile, trashedFrom } from './files.mts';
 import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
+import { argsForDin, argsFromDin, valueForDin } from './windows-paths.mts';
 import { ptyRoutes } from './pty-routes.mts';
 import type { MessagePortMain } from 'electron';
 
@@ -515,7 +516,7 @@ function grant(contents: Electron.WebContents, permission: SystemPermission, roo
     id: contents.id,
     isDestroyed: () => contents.isDestroyed() || grants.get(contents.id)?.get(permission) !== entry,
     send: (channel: string, ...args: unknown[]) => {
-      if (!sender.isDestroyed()) port1.postMessage({ push: channel, args });
+      if (!sender.isDestroyed()) port1.postMessage({ push: channel, args: argsForDin(channel, args) });
     },
     once: () => sender,
     on: () => sender,
@@ -523,14 +524,18 @@ function grant(contents: Electron.WebContents, permission: SystemPermission, roo
   entry.send = sender.send;
 
   port1.on('message', ({ data }) => {
-    const { id, channel, args } = (data ?? {}) as { id?: unknown; channel?: unknown; args?: unknown };
+    const { id, channel, args: sent } = (data ?? {}) as { id?: unknown; channel?: unknown; args?: unknown };
     const reply = (message: Record<string, unknown>) => {
-      if (typeof id === 'number' && !sender.isDestroyed()) port1.postMessage({ id, ...message });
+      if (typeof id === 'number' && !sender.isDestroyed()) {
+        port1.postMessage({ id, ...message, ...('result' in message ? { result: valueForDin(String(channel), message.result) } : {}) });
+      }
     };
-    if (typeof channel !== 'string' || !Array.isArray(args) || !SYSTEM_PERMISSIONS[permission].test(channel)) {
+    if (typeof channel !== 'string' || !Array.isArray(sent) || !SYSTEM_PERMISSIONS[permission].test(channel)) {
       reply({ error: { name: 'DinPermissionError', message: `${String(channel)} isn't covered by ${permission}` } });
       return;
     }
+    // Checked, and called, with its paths as the system names them.
+    const args = argsFromDin(channel, sent);
     const refusal = checkCall(permission, channel, args, entry);
     if (refusal) {
       reply({ error: { name: 'DinPermissionError', message: refusal } });
