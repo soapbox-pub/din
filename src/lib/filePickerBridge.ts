@@ -5,7 +5,7 @@
  * A native `<input type=file>` click inside a browser tab or installed web-app
  * guest is intercepted over CDP in the main process and relayed here, to the
  * shell renderer, where `FilePickerBridgeHost` opens the in-Din
- * `FilePickerDialog` (via `useFilePicker`) and answers with the absolute path
+ * file picker window (via `useFilePicker`) and answers with the absolute path
  * the user chose — which the main process then hands back to the page with
  * `DOM.setFileInputFiles`. This keeps uploads inside Din instead of popping the
  * host OS file dialog.

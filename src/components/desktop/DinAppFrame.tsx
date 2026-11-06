@@ -658,6 +658,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!pick) return [];
         const start = await startFolder(o.startInHandle, typeof o.startIn === 'string' ? o.startIn : undefined);
         const result = await pick.pickFiles({
+          owner: appId,
           title: o.title,
           multiple: o.multiple,
           directory: o.directory,
@@ -672,6 +673,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!pick) return null;
         const start = await startFolder(o.startInHandle, typeof o.startIn === 'string' ? o.startIn : undefined);
         const result = await pick.pickFiles({
+          owner: appId,
           title: o.title,
           mode: 'save',
           currentName: o.suggestedName,

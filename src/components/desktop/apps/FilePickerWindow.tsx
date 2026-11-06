@@ -36,7 +36,7 @@ import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
 import { FileIcon } from '@/shared/FileIcon';
 import { USER_DIRS } from '@/shared/userDirs';
-import { ContentPane, PillButton, SidebarHeading, SidebarRow, ToolButton } from '@/shared/appChrome';
+import { ContentPane, PillButton, SidebarHeading, SidebarRow, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
 import { focusRing, listRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import {
   ContextMenu,
@@ -47,6 +47,12 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import type { AppComponentProps } from '@/lib/apps';
+import { getPickerRequest, settlePickerRequest } from '@/lib/filePickerWindows';
 import {
   Select,
   SelectContent,
@@ -55,7 +61,66 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-interface FilePickerDialogProps {
+/**
+ * The file picker's window (FILE_PICKER_APP_ID), one per request, opened by
+ * FilePickerProvider over the window that asked and under its app's Dock
+ * tile: a window, not a dialog, so it can be moved aside, minimized or
+ * maximized, and the rest of the desktop stays usable while it's open.
+ * Choosing answers the request and closes the window; Cancel, Escape or
+ * closing the window answers it with nothing.
+ */
+export function FilePickerWindow({ windowId, params }: AppComponentProps) {
+  const { close } = useWindowActions();
+  const request = typeof params?.request === 'string' ? params.request : null;
+  // Read once: answering forgets the request, while the window is still
+  // playing its close.
+  const [pending] = useState(() => (request ? getPickerRequest(request) : undefined));
+
+  // However the window goes (its close button, the Dock's Quit), the asker
+  // hears back. Deferred, so a remount (React's dev double effects) doesn't
+  // count as closing.
+  useEffect(() => {
+    if (!request) return;
+    mounted.set(request, (mounted.get(request) ?? 0) + 1);
+    return () => {
+      mounted.set(request, (mounted.get(request) ?? 1) - 1);
+      window.setTimeout(() => {
+        if ((mounted.get(request) ?? 0) > 0) return;
+        mounted.delete(request);
+        settlePickerRequest(request, null);
+      }, 0);
+    };
+  }, [request]);
+
+  if (!request || !pending) {
+    return <NothingToChoose />;
+  }
+  return (
+    <FilePicker
+      options={pending.options}
+      onConfirm={(result) => {
+        settlePickerRequest(request, result);
+        close(windowId);
+      }}
+      onCancel={() => {
+        settlePickerRequest(request, null);
+        close(windowId);
+      }}
+    />
+  );
+}
+
+/** How many picker windows show each request (one, but for a remount). */
+const mounted = new Map<string, number>();
+
+/** A picker window with no request behind it (its asker is gone). */
+function NothingToChoose() {
+  useOwnWindowHeader(false);
+  useWindowTitle('Choose a file');
+  return <FallbackMessage>Nothing to choose: whatever asked for a file is gone.</FallbackMessage>;
+}
+
+interface FilePickerProps {
   options: FilePickerOptions;
   onConfirm: (result: FilePickerResult) => void;
   onCancel: () => void;
@@ -93,7 +158,7 @@ interface PickerItem {
 }
 
 /**
- * In-Din modal file picker. Reuses the `window.dinos.fs` bridge (via the same
+ * In-Din file picker, the body of its window. Reuses the `window.dinos.fs` bridge (via the same
  * TanStack Query hooks as the Files app) to browse the real filesystem, but
  * renders entirely inside Din — no host OS dialog. It opens one file or
  * several, chooses folders, or asks where to save a new file, as the
@@ -104,7 +169,7 @@ interface PickerItem {
  * files picked before) unless the asker names a folder. The sidebar has the
  * Files app's places and Favorites, and the sort order is remembered.
  */
-export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDialogProps) {
+function FilePicker({ options, onConfirm, onCancel }: FilePickerProps) {
   const bridge = getFsBridge();
   const home = useHomeDir();
   const saving = options.mode === 'save';
@@ -471,6 +536,10 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
   const title =
     options.title ??
     (saving ? 'Save file' : directory ? 'Choose a folder' : multiple ? 'Choose files' : 'Choose a file');
+  // The sidebar and the bar over the list are the window's title bar, as
+  // Files' are, and the window is named for what it's asking.
+  useOwnWindowHeader();
+  useWindowTitle(title);
   const confirmLabel = replacing
     ? 'Replace'
     : (options.confirmLabel ?? (saving ? 'Save' : directory ? 'Select' : 'Open'));
@@ -546,22 +615,11 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
 
   return (
     <div
-      className="fixed inset-0 z-[1000] grid place-items-center bg-black/30 p-6"
-      onPointerDown={(e) => {
-        // Click on the backdrop (not the dialog) cancels.
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        // Made as a window is, as Files is: a frame of the glass Settings →
-        // Themes chooses (window-glass) under the sidebar and toolbar, and
-        // the list on a solid pane inset from it.
-        className="relative isolate flex h-[600px] max-h-full w-[960px] max-w-full overflow-hidden rounded-2xl shadow-2xl ring-1 ring-black/20 outline-none"
+      ref={dialogRef}
+      aria-label={title}
+      tabIndex={-1}
+      // Laid out by the window's width, not the screen's.
+      className="@container flex h-full w-full text-foreground outline-none"
         onKeyDown={(e) => {
           const typing = e.target instanceof HTMLInputElement;
           // Keys from menus and lists portaled out of the picker (a row's
@@ -594,15 +652,9 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
           }
         }}
       >
-        <div aria-hidden className="window-glass pointer-events-none absolute inset-0 -z-10 rounded-[inherit]" />
-
         {/* Places sidebar, on the glass, its title where an app's name is */}
-        <nav aria-label="Places" className={cn('hidden min-h-0 shrink-0 flex-col sm:flex', sidebarWidthClass)}>
-          <div className="flex h-12 shrink-0 items-center pr-2 pl-3.75">
-            <h2 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">
-              {title}
-            </h2>
-          </div>
+        <nav aria-label="Places" className={cn('hidden min-h-0 shrink-0 flex-col @2xl:flex', sidebarWidthClass)}>
+          <SidebarTitle region={WindowDragRegion} icon={<SidebarTitleIcon src={FILES_ICON} />} title={title} />
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2">
             {sections.map((section) =>
               section.places.length === 0 ? null : (
@@ -624,7 +676,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
                             onClick={() => navigate(place.path)}
                           />
                         </ContextMenuTrigger>
-                        <ContextMenuContent className="z-[1001]">
+                        <ContextMenuContent>
                           <ContextMenuItem onSelect={() => navigate(place.path)}>
                             <place.icon /> Open
                           </ContextMenuItem>
@@ -651,8 +703,8 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* The title bar over the content: where the picker is, and its tools */}
-          <header className="flex h-12 shrink-0 items-center gap-0.5 pr-2 pl-2 sm:pl-0">
-            <h2 className="mr-2 max-w-40 shrink-0 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90 sm:hidden">
+          <WindowDragRegion className="flex h-12 shrink-0 items-center gap-0.5 pr-3 pl-2 @2xl:pl-0">
+            <h2 className="mr-2 max-w-40 shrink-0 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90 @2xl:hidden">
               {title}
             </h2>
             <ToolButton label="Parent folder" disabled={!folder || folder === '/'} onClick={goUp}>
@@ -687,10 +739,11 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             >
               {showHidden ? <Eye {...toolIcon} aria-hidden /> : <EyeOff {...toolIcon} aria-hidden />}
             </ToolButton>
-          </header>
+            <WindowControls className="ml-2" />
+          </WindowDragRegion>
 
           {/* File list, on the solid pane */}
-          <ContentPane className="mb-0 ml-2 sm:ml-0">{body}</ContentPane>
+          <ContentPane className="mb-0 ml-2 @2xl:ml-0">{body}</ContentPane>
 
           {/* Footer, back on the glass */}
           <footer className="shrink-0 space-y-2 px-3 py-3">
@@ -727,7 +780,7 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
                     <SelectTrigger size="sm" className="h-9 max-w-48 rounded-full" aria-label="File type">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="z-[1001]">
+                    <SelectContent>
                       {filters.map((f, i) => (
                         <SelectItem key={i} value={String(i)}>
                           {f.name || 'Files'}
@@ -749,10 +802,11 @@ export function FilePickerDialog({ options, onConfirm, onCancel }: FilePickerDia
             </div>
           </footer>
         </div>
-      </div>
     </div>
   );
 }
+
+const FILES_ICON = '/icons/apps/file-browser.png';
 
 interface Place {
   name: string;
@@ -1043,7 +1097,7 @@ const PickerRow = memo(function PickerRow({
           </div>
         </li>
       </ContextMenuTrigger>
-      <ContextMenuContent className="z-[1001]">
+      <ContextMenuContent>
         {folder && <ContextMenuItem onSelect={() => onOpen(item)}>Open</ContextMenuItem>}
         {menu.canChoose(entry) && <ContextMenuItem onSelect={() => menu.choose(item)}>{menu.chooseLabel}</ContextMenuItem>}
         {(folder || menu.canChoose(entry)) && <ContextMenuSeparator />}

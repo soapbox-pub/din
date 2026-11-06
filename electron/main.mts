@@ -4179,7 +4179,7 @@ function registerHighlightBridge(): void {
 // "file selection happens inside Din" model the FilePickerProvider is built
 // on. Instead we intercept the chooser over CDP (Page.setInterceptFileChooser-
 // Dialog) on every web-content guest, relay the request to the shell renderer
-// (which opens the in-Din FilePickerDialog via useFilePicker), and hand the
+// (which opens the in-Din file picker window via useFilePicker), and hand the
 // chosen absolute path back to the page with DOM.setFileInputFiles. Chromium
 // reads the file bytes from disk itself, so no file contents ever cross the
 // process boundary here - only a path the user explicitly selected.

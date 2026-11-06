@@ -12,7 +12,7 @@ import {
  * dialogs (the desktop portal, electron/file-chooser.mts). When a native
  * `<input type=file>` is clicked inside a guest, the chooser is intercepted
  * over CDP and proxied here; this host opens the in-Din
- * {@link FilePickerDialog} via `useFilePicker` and answers with the chosen
+ * file picker window via `useFilePicker` and answers with the chosen
  * absolute paths, which the main process hands back to the page with
  * `DOM.setFileInputFiles` (or to the app, through the portal).
  *

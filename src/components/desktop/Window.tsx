@@ -3,7 +3,7 @@ import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
-import type { AppComponentProps } from '@/lib/apps';
+import { windowTile, type AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
@@ -453,6 +453,8 @@ export const Window = memo(function Window({
   const renderedZ = win.closing ? DEPARTING_Z + win.z : win.z;
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
+  /** The Dock tile it minimizes into. */
+  const dockId = windowTile(win, getApp);
   const areas = useWorkAreas();
   // A covered window hides once it has stayed covered a moment, and shows
   // again in the same render that it stops being covered.
@@ -821,7 +823,7 @@ export const Window = memo(function Window({
     if (winRect.width === 0 || winRect.height === 0) return;
 
     const parent = el.parentElement;
-    const target = dockTarget(parent, app?.dockAs ?? win.appId, dockEdge);
+    const target = dockTarget(parent, dockId, dockEdge);
     const effectZ = minimizing ? DEPARTING_Z + win.z : win.z;
 
     // Warp the live element directly (the pre-snapshot behaviour). Used
@@ -960,7 +962,7 @@ export const Window = memo(function Window({
     runLiveGenie();
     // config.minimizeEffect and dockEdge are read when the flag flips, and
     // a change to them alone returns at the guard above.
-  }, [win.minimized, win.appId, app?.dockAs, win.z, config.minimizeEffect, dockEdge, beginGesture, endGesture, stopWobble]);
+  }, [win.minimized, dockId, win.z, config.minimizeEffect, dockEdge, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or
@@ -1167,7 +1169,7 @@ export const Window = memo(function Window({
         if (!capture) return;
         stopWobble(false);
         const winRect = offsetRect(el);
-        const target = event === 'minimize' ? dockTarget(parent, app?.dockAs ?? win.appId, dockEdge) : null;
+        const target = event === 'minimize' ? dockTarget(parent, dockId, dockEdge) : null;
         const seed = newSeed();
         let cancelled = false;
         let current: (() => void) | null = null;
@@ -1207,7 +1209,7 @@ export const Window = memo(function Window({
             if (!cancelled) done();
           });
       }),
-    [win.id, win.minimized, win.closing, win.z, win.appId, app?.dockAs, dockEdge, stopWobble],
+    [win.id, win.minimized, win.closing, win.z, dockId, dockEdge, stopWobble],
   );
 
   /**

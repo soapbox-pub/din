@@ -53,7 +53,7 @@ import { focusedWindow } from '@/hooks/useWindows';
 import { getAvatarShape } from '@/lib/avatarShape';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import type { AppBadge } from '@/lib/appBadges';
-import { appsDockedAs, type AppDefinition } from '@/lib/apps';
+import { appsDockedAs, windowTile, type AppDefinition } from '@/lib/apps';
 import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { registerDockTile } from '@/lib/dockTiles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
@@ -357,7 +357,7 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
   const [unpinnedOrder, setUnpinnedOrder] = useState<string[]>([]);
   const launching = useLaunchingApps();
   const tileOf = (appId: string) => getApp(appId)?.dockAs ?? appId;
-  const running = [...new Set([...windows.map((w) => tileOf(w.appId)), ...launching])];
+  const running = [...new Set([...windows.map((w) => windowTile(w, getApp)), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -414,7 +414,7 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
             const app = getApp(appId);
             if (!app) return null;
             const appWindows: TaskWindow[] = windows
-              .filter((w) => tileOf(w.appId) === appId && !w.closing)
+              .filter((w) => windowTile(w, getApp) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon, maximized: w.maximized }));
             if (separate && appWindows.length > 0) {
               return (

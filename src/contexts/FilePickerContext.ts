@@ -1,4 +1,5 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useMemo } from 'react';
+import { WindowAppContext } from '@/contexts/WindowAppContext';
 import type { FileFilter } from '@/lib/fileFilters';
 
 /** Options controlling a single file-picker request. */
@@ -27,6 +28,12 @@ export interface FilePickerOptions {
   currentFilter?: number;
   /** Save mode: the name suggested. */
   currentName?: string;
+  /**
+   * The app asking, whose Dock tile the picker's window goes under and over
+   * whose window it opens. `useFilePicker` fills it in with the window it's
+   * used in; without it, the focused window's app.
+   */
+  owner?: string;
   /** Aborting closes the picker as if cancelled (the asker gave up). */
   signal?: AbortSignal;
 }
@@ -43,8 +50,8 @@ export interface FilePickerResult {
 export interface FilePickerContextValue {
   /**
    * Open an in-Din file picker window and resolve with the absolute path of
-   * the selected file, or `null` if the user cancelled. Only one picker can be
-   * open at a time; a second call while one is open rejects the earlier one.
+   * the selected file, or `null` if the user cancelled or closed the window.
+   * Each call opens a window of its own.
    */
   pickFile(options?: FilePickerOptions): Promise<string | null>;
   /** Like `pickFile`, for every kind of request: several files, folders, saving. */
@@ -55,11 +62,25 @@ export const FilePickerContext = createContext<FilePickerContextValue | undefine
   undefined,
 );
 
-/** Access the in-Din file picker. Must be used within the Desktop. */
+/**
+ * Access the in-Din file picker. Must be used within the Desktop. Inside a
+ * window, its pickers belong to that window's app (`owner`).
+ */
 export function useFilePicker(): FilePickerContextValue {
   const ctx = useContext(FilePickerContext);
-  if (!ctx) {
+  const owner = useContext(WindowAppContext);
+  const value = useMemo<FilePickerContextValue | undefined>(
+    () =>
+      ctx && owner
+        ? {
+            pickFile: (options) => ctx.pickFile({ owner, ...options }),
+            pickFiles: (options) => ctx.pickFiles({ owner, ...options }),
+          }
+        : ctx,
+    [ctx, owner],
+  );
+  if (!value) {
     throw new Error('useFilePicker must be used within a Desktop');
   }
-  return ctx;
+  return value;
 }

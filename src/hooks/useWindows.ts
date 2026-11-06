@@ -745,15 +745,17 @@ export function useWindows(
   }, [setWindows]);
 
   const closeApp = useCallback((appId: string) => {
+    // Its windows, and those that belong to it (its file pickers).
+    const ofApp = (w: WindowState) => w.appId === appId || w.params?.dockAs === appId;
     const kept = new Set<string>();
     for (const w of windowsRef.current) {
-      if (w.appId !== appId) continue;
+      if (!ofApp(w)) continue;
       const xid = liveNativeWindow(w);
       if (xid !== null) closeNativeWindow(xid);
       else if (!w.closing && closeIntercepted(w.id)) kept.add(w.id);
     }
     const closes = (w: WindowState) =>
-      w.appId === appId && !kept.has(w.id) && liveNativeWindow(w) === null;
+      ofApp(w) && !kept.has(w.id) && liveNativeWindow(w) === null;
     setWindows((ws) =>
       ws.some((w) => closes(w) && !w.closing)
         ? ws.map((w) => (closes(w) ? { ...w, closing: true } : w))

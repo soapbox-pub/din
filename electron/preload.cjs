@@ -3733,7 +3733,7 @@ expose('webPushHost', {
 // File-picker bridge host (window.dinos.filePickerHost), backed by the filepicker:*
 // handlers in main.mts. A native <input type=file> click inside a browser or
 // web-app guest is intercepted over CDP and relayed here, to the shell
-// renderer, where FilePickerBridgeHost opens the in-Din FilePickerDialog and
+// renderer, where FilePickerBridgeHost opens the in-Din file picker window and
 // answers with the chosen absolute path (or null on cancel). The page never
 // supplies the path - it only triggers the request. Native apps' Open and
 // Save dialogs come the same way, from the desktop portal (file-chooser.mts).

@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { NATIVE_APP_ICON } from '@/lib/appIcons';
 import { WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
+import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
 
@@ -29,6 +30,9 @@ const ProviderWindow = lazy(() =>
 );
 const PrintWindow = lazy(() =>
   import('@/components/desktop/apps/PrintWindow').then((m) => ({ default: m.PrintWindow })),
+);
+const FilePickerWindow = lazy(() =>
+  import('@/components/desktop/apps/FilePickerWindow').then((m) => ({ default: m.FilePickerWindow })),
 );
 const Screenshot = lazy(() =>
   import('@/components/desktop/apps/Screenshot').then((m) => ({ default: m.Screenshot })),
@@ -308,6 +312,19 @@ export const APPS: readonly AppDefinition[] = [
     dockAs: 'settings',
   },
   {
+    // Choosing files to open, a folder, or where to save: a window per
+    // request, over the window that asked. Hidden from the launcher;
+    // FilePickerProvider opens it with the request in its launch params,
+    // and a `dockAs` param putting it under the asking app's Dock tile.
+    id: FILE_PICKER_APP_ID,
+    name: 'Choose a File',
+    icon: '/icons/apps/file-browser.png',
+    component: FilePickerWindow,
+    defaultSize: { width: 960, height: 600 },
+    floating: true,
+    hidden: true,
+  },
+  {
     // What's running and what it costs, and ending what won't quit.
     // Ctrl+Shift+Escape opens it from anywhere (DesktopHotkeys).
     id: 'system-monitor',
@@ -391,6 +408,20 @@ export const APPS: readonly AppDefinition[] = [
 const listed = new Set(APPS.map((app) => app.id));
 for (const id of dinManifests().keys()) {
   if (!listed.has(id)) (APPS as AppDefinition[]).push(dinApp(id));
+}
+
+/**
+ * The Dock tile a window goes under: the app its launch params' `dockAs`
+ * names, for a window that belongs to whichever app opened it (the file
+ * picker), else its app's own `dockAs`, else its app's.
+ */
+export function windowTile(
+  w: { appId: string; params?: Record<string, unknown> },
+  lookup: (id: string) => AppDefinition | undefined = getApp,
+): string {
+  const own = w.params?.dockAs;
+  if (typeof own === 'string' && own !== w.appId && lookup(own)) return own;
+  return lookup(w.appId)?.dockAs ?? w.appId;
 }
 
 /** The built-in apps whose windows go under this app's Dock tile. */

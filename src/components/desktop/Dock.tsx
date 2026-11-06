@@ -25,7 +25,7 @@ import { getFsBridge } from '@/lib/fs';
 import { registerDockTile } from '@/lib/dockTiles';
 import type { AppBadge } from '@/lib/appBadges';
 import { cn } from '@/lib/utils';
-import { appsDockedAs } from '@/lib/apps';
+import { appsDockedAs, windowTile } from '@/lib/apps';
 import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -179,7 +179,7 @@ export function Dock({
   const launching = useLaunchingApps();
   // The tile a window goes under: its app's, or the one its app docks as.
   const tileOf = (appId: string) => getApp(appId)?.dockAs ?? appId;
-  const running = [...new Set([...windows.map((w) => tileOf(w.appId)), ...launching])];
+  const running = [...new Set([...windows.map((w) => windowTile(w, getApp)), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -710,7 +710,7 @@ export function Dock({
             // Launch order, so cycling visits windows in a fixed sequence.
             // Closing windows are on their way out and can't be focused.
             const appWindows = windows
-              .filter((w) => tileOf(w.appId) === appId && !w.closing)
+              .filter((w) => windowTile(w, getApp) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
             return (
               <Fragment key={appId}>
