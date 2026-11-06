@@ -3544,6 +3544,7 @@ function ClockOptions() {
  */
 function NotificationsSection() {
   const { doNotDisturb } = useNotificationCenter();
+  const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Notifications">
@@ -3555,6 +3556,14 @@ function NotificationsSection() {
           description="Keep notifications in the list without popping them up. Urgent ones still show."
           checked={doNotDisturb}
           onCheckedChange={setDoNotDisturb}
+        />
+        <SettingSwitchRow
+          id="notif-resource-alerts"
+          icon={Gauge}
+          label="Warn about programs slowing the computer down"
+          description="The System Monitor tells you when a program keeps the processor busy for a minute, or holds the most memory while it's running out, and offers to stop it."
+          checked={config.resourceAlerts}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, resourceAlerts: checked }))}
         />
         <NotificationSitesList />
         <PushServiceSetting />

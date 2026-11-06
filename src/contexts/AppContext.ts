@@ -106,6 +106,12 @@ export interface AppConfig {
    */
   gamePerformance: boolean;
   /**
+   * The System Monitor says when a program is slowing the computer down
+   * (a minute of heavy CPU, or the most memory while it's running out),
+   * offering to stop it (ResourceAlertsHost.tsx).
+   */
+  resourceAlerts: boolean;
+  /**
    * The effect a window minimizes with, and plays backwards to restore: an
    * id from src/lib/effects, `random` or `none`. Kept as a plain string so
    * a choice this version doesn't know falls back rather than failing to

@@ -552,20 +552,74 @@ function requirePid(pid: unknown): number {
   return pid;
 }
 
-/** End a process: SIGTERM, or SIGKILL when forced. */
-async function end(pid: number, force: boolean): Promise<void> {
+/**
+ * Why a process can't be ended from here, or null when it can (or is gone):
+ * another user's, what Din runs on, or one of Din's own.
+ */
+async function whyBlocked(pid: number, electron = electronProcesses()): Promise<string | null> {
   const owner = await readOwner(pid);
-  // Gone already, which is what was wanted.
-  if (!owner) return;
-  if (owner.uid !== process.getuid?.()) throw new Error(SYSTEM_MESSAGE);
-  if ((await hosts()).has(pid)) throw new Error(HOST_MESSAGE);
-  const electron = electronProcesses();
+  if (!owner) return null;
+  if (owner.uid !== process.getuid?.()) return SYSTEM_MESSAGE;
+  if ((await hosts()).has(pid)) return HOST_MESSAGE;
   const own = electronRole(pid, electron);
-  if (own?.blocked) throw new Error(own.blocked);
+  if (own?.blocked) return own.blocked;
   if (!own) {
     const type = chromiumType(await readCmdline(pid));
-    if (type && chromiumChildRole(type).blocked && (await underMain(pid))) throw new Error(DIN_MESSAGE);
+    if (type && chromiumChildRole(type).blocked && (await underMain(pid))) return DIN_MESSAGE;
   }
+  return null;
+}
+
+/** What a process is to the user, for a notification about it (resource-alerts.mts). */
+export interface ProcessSubject {
+  /** Its program's name, or the title of the page it shows. */
+  name: string;
+  /** The app it's part of, when Din launched it (a native app), so the shell can name it. */
+  appId: string | null;
+}
+
+/**
+ * Name a process the way the System Monitor would, and say whether it can
+ * be ended; null for one that can't (another user's, or Din's own), which a
+ * notification offering to stop it would only frustrate.
+ */
+export async function describeEndable(
+  entry: ProcEntry,
+  byPid: ReadonlyMap<number, ProcEntry>,
+): Promise<ProcessSubject | null> {
+  const electron = electronProcesses();
+  if (await whyBlocked(entry.pid, electron)) return null;
+  const pages = (electron.pages.get(entry.pid) ?? []).flatMap((h) => (h.page ? [h.page] : []));
+  if (pages.length > 0) {
+    const page = pages[0];
+    let host = '';
+    try {
+      host = new URL(page.url).host;
+    } catch {
+      // Not a URL with a host (about:blank, a data: URL).
+    }
+    return { name: page.title || host || 'A web page', appId: null };
+  }
+  // Part of a native app Din launched: the app's name says more than its
+  // processes' do. The Terminal's programs are named for themselves.
+  const launched = launchedApps();
+  let current: ProcEntry | undefined = entry;
+  for (let depth = 0; current && depth < 64; depth += 1) {
+    const appId = launched.get(current.pid);
+    if (appId && current.ppid === process.pid) return { name: displayName(entry.comm, await readCmdline(entry.pid)), appId };
+    if (current.ppid === process.pid) break;
+    current = byPid.get(current.ppid);
+  }
+  return { name: displayName(entry.comm, await readCmdline(entry.pid)), appId: null };
+}
+
+/** End a process: SIGTERM, or SIGKILL when forced. */
+async function end(pid: number, force: boolean): Promise<void> {
+  const electron = electronProcesses();
+  const blocked = await whyBlocked(pid, electron);
+  if (blocked) throw new Error(blocked);
+  // Gone already, which is what was wanted.
+  if (!(await readOwner(pid))) return;
   const hosted = electron.pages.get(pid);
   if (hosted?.length) {
     // One renderer can host several pages; crashing it through any of them

@@ -121,7 +121,32 @@ export interface SystemSnapshot {
   processes: ProcessInfo[];
 }
 
+/** A program slowing the computer down (electron/resource-alerts.mts). */
+export interface ResourceAlert {
+  /** Unique for this program and reason; the gone callback names it. */
+  id: string;
+  kind: 'cpu' | 'memory';
+  pid: number;
+  /** Its program's name, or the page it shows. */
+  name: string;
+  /** The app it's part of, when Din launched it. */
+  appId: string | null;
+  /** Percent of the whole machine's CPU it used over the last minute. */
+  cpu: number;
+  cpuCount: number;
+  /** Resident memory, in bytes. */
+  memory: number;
+  memoryTotal: number;
+  /** Memory still available to programs, in bytes. */
+  memoryFree: number;
+}
+
 export interface SystemMonitorBridge {
+  /**
+   * Watch for programs slowing the computer down: `onAlert` for each, once,
+   * and `onGone` with its id once it's quit. Returns a fn that stops watching.
+   */
+  watchAlerts(onAlert: (alert: ResourceAlert) => void, onGone: (id: string) => void): () => void;
   /** Receive snapshots while subscribed. Returns an unsubscribe fn. */
   subscribe(callback: (snapshot: SystemSnapshot) => void): () => void;
   /** Ask a process to quit (SIGTERM; a web page's renderer is crashed). */

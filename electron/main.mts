@@ -137,6 +137,7 @@ import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
 import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
+import { registerResourceAlertHandlers } from './resource-alerts.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
 import { registerBootScreenHandlers } from './boot-screen.mts';
@@ -6324,6 +6325,7 @@ app.whenReady().then(() => {
     isAppGuest: isDinAppGuest,
   });
   app.on('will-quit', cleanUpPrinting);
+  registerResourceAlertHandlers({ assertShellSender, sendToShell });
   registerSystemMonitorHandlers({
     assertShellSender,
     sendToShell,

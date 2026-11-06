@@ -44,6 +44,7 @@ export function TestApp({ children }: TestAppProps) {
     localTheme: null,
     wobblyWindows: true,
     gamePerformance: true,
+    resourceAlerts: true,
     minimizeEffect: 'magic-lamp',
     closeEffect: 'pop',
     cursorTrail: 'none',

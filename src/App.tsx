@@ -62,6 +62,7 @@ const defaultConfig: AppConfig = {
   localTheme: null,
   wobblyWindows: true,
   gamePerformance: true,
+  resourceAlerts: true,
   minimizeEffect: 'magic-lamp',
   closeEffect: 'pop',
   cursorTrail: 'none',

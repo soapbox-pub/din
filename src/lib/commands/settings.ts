@@ -101,6 +101,7 @@ const SETTINGS: Setting[] = [
   { key: 'assistant.enabled', field: 'assistantEnabled', help: 'The Assistant is on', param: bool },
   { key: 'assistant.directory', field: 'assistantDirectory', help: 'The folder new conversations work in (empty for home)', param: { type: 'path' } },
   { key: 'assistant.colorful-replies', field: 'assistantColorfulReplies', help: 'Replies color their headings, code and links', param: bool },
+  { key: 'notifications.resource-alerts', field: 'resourceAlerts', help: 'The System Monitor warns when a program is slowing the computer down, and offers to stop it', param: bool },
   {
     key: 'notifications.do-not-disturb', help: 'Only urgent notifications pop up', param: bool,
     get: () => getNotificationState().doNotDisturb,

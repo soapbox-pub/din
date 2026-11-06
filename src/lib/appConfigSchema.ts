@@ -32,6 +32,7 @@ export const AppConfigSchema = z.object({
   localTheme: DesktopThemeSchema.nullable(),
   wobblyWindows: z.boolean(),
   gamePerformance: z.boolean(),
+  resourceAlerts: z.boolean(),
   minimizeEffect: z.string(),
   closeEffect: z.string(),
   cursorTrail: z.string(),

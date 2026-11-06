@@ -2100,6 +2100,36 @@ expose('systemMonitor', {
 
   /** The space on /home, measured now. */
   filesystems: () => ipcRenderer.invoke('system-monitor:filesystems'),
+
+  /**
+   * Hear about programs slowing the computer down (electron/resource-alerts.mts):
+   * watching runs while `on`, and a reload asks again. Returns a fn that
+   * stops listening (and watching).
+   * @param {(alert: unknown) => void} onAlert
+   * @param {(id: string) => void} onGone
+   */
+  watchAlerts: (onAlert, onGone) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} alert
+     */
+    const alert = (_event, alert) => onAlert(alert);
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} id
+     */
+    const gone = (_event, id) => {
+      if (typeof id === 'string') onGone(id);
+    };
+    ipcRenderer.on('system-monitor:alert', alert);
+    ipcRenderer.on('system-monitor:alert-gone', gone);
+    void ipcRenderer.invoke('system-monitor:alerts', true);
+    return () => {
+      ipcRenderer.removeListener('system-monitor:alert', alert);
+      ipcRenderer.removeListener('system-monitor:alert-gone', gone);
+      void ipcRenderer.invoke('system-monitor:alerts', false);
+    };
+  },
 });
 
 // Bluetooth login bridge (window.dinos.bluetoothLogin), backed by
