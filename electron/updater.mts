@@ -36,6 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
 import { CommandError, runCommand } from './system.mts';
+import { saveBeforeStopping } from './session-save.mts';
 
 const HELPER = process.env.DIN_UPDATER;
 
@@ -350,6 +351,7 @@ export function registerUpdaterHandlers(options: {
   ipcMain.handle('updater:restartDin', async (event) => {
     assertShellSender(event);
     assertSafeToPowerOff();
+    await saveBeforeStopping();
     await run(helperOf(), '-n', ['restart-din']);
   });
 
@@ -357,6 +359,7 @@ export function registerUpdaterHandlers(options: {
     assertShellSender(event);
     if (isUpdating()) throw new Error('An update is being installed');
     assertSafeToPowerOff();
+    await saveBeforeStopping();
     await runCommand('systemctl', ['reboot'], { timeout: 15_000 });
   });
 

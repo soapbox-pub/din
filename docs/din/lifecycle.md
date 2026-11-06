@@ -75,8 +75,13 @@ tiled or minimized as it was, with the launch params it was opened with
 (less a shortcut, which would run again). Native Linux apps are started
 again, and their windows go back where they were as they map.
 
-Din is stopped without warning, so there's no moment to save at quit.
-An app that wants to come back as it was saves what it shows as that
+Din can be stopped without warning (a crash, the power going), so
+there's no moment to save at quit. The desktop saves the windows a
+moment after each change (2 s at the most, however busy) and has the
+save put on the disk at once, not left for Chromium to commit when it
+likes; Restart Din, restarting and turning off the computer have it save
+once more before Din stops. Apps don't hear of any of this: what they
+saved is what comes back. An app that wants to come back as it was saves what it shows as that
 changes, as the window's Navigation API state, and reads it back from
 there; the runtime passes it on to the desktop, and puts it back before
 the window's launch reaches `launchQueue`:

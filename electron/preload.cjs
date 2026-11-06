@@ -156,6 +156,32 @@ expose('boot', {
    * @returns {Promise<boolean>}
    */
   skipRestore: () => ipcRenderer.invoke('shell:skipRestore'),
+  /**
+   * Put what the shell just saved in localStorage on the disk soon, rather
+   * than whenever Chromium gets to it (electron/session-save.mts).
+   */
+  flushStorage: () => ipcRenderer.send('shell:flushStorage'),
+  /**
+   * Hear that Din is about to stop (Restart Din, a restart, turning off):
+   * `save` saves at once, and Din waits for it a moment before stopping.
+   * @param {() => void} save
+   * @returns {() => void}
+   */
+  onSaveNow: (save) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} id
+     */
+    const handler = (_event, id) => {
+      try {
+        save();
+      } finally {
+        ipcRenderer.send('shell:saved', id);
+      }
+    };
+    ipcRenderer.on('shell:saveNow', handler);
+    return () => ipcRenderer.removeListener('shell:saveNow', handler);
+  },
 });
 
 // Session bridge (window.dinos.session): "Log out" quits the shell cleanly. As

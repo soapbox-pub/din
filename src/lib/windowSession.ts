@@ -10,9 +10,11 @@ import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
  * The windows Din had open, kept on this device so the next start reopens
  * them: after Restart Din, an update, a crash, logging out or a reboot.
  *
- * Din is stopped without warning (systemd restarts din-shell), so there's
- * no moment to save at quit: the desktop saves a snapshot a moment after
- * every change instead (WindowSessionHost). Each window keeps its app, its
+ * Din can be stopped without warning (a crash, or systemd stopping
+ * din-shell), so the desktop saves a snapshot a moment after every change
+ * (WindowSessionHost) and has it put on the disk at once, rather than left
+ * in memory for Chromium to commit when it likes; Restart Din, restarting
+ * and turning off also have it save just before (electron/session-save.mts). Each window keeps its app, its
  * launch params, where it was (monitor, workspace, geometry, maximized,
  * tiled, minimized, stacking) and, if its app saved one, a state of its own
  * (a Din app's navigation state, the browser's tabs) that it gets back on restore.
@@ -266,15 +268,17 @@ export function readSession(): SavedSession | null {
 
 let lastWritten: string | null = null;
 
-/** Save the session (skipped when nothing changed). */
-export function writeSession(session: SavedSession): void {
+/** Save the session (skipped when nothing changed). True if it was written. */
+export function writeSession(session: SavedSession): boolean {
   const json = JSON.stringify(session);
-  if (json === lastWritten) return;
+  if (json === lastWritten) return false;
   try {
     localStorage.setItem(SESSION_KEY, json);
     lastWritten = json;
+    return true;
   } catch (error) {
     console.warn('Failed to save the open windows:', error);
+    return false;
   }
 }
 

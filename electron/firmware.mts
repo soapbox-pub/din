@@ -21,6 +21,7 @@
 
 import { spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
+import { saveBeforeStopping } from './session-save.mts';
 
 const FWUPDMGR = process.env.DIN_FWUPDMGR;
 
@@ -253,6 +254,7 @@ export function registerFirmwareHandlers(options: {
   ipcMain.handle('firmware:reboot', async (event) => {
     assertShellSender(event);
     assertSafeToPowerOff();
+    await saveBeforeStopping();
     await new Promise<void>((resolve, reject) => {
       const child = spawn('systemctl', ['reboot'], { stdio: 'ignore' });
       child.on('error', reject);

@@ -28,6 +28,12 @@ import {
 
 /** How long after the last change the session is saved. */
 const SAVE_DELAY_MS = 300;
+/**
+ * The longest a change waits to be saved, however often more come (a
+ * browser window's tabs loading keep changing their titles, a drag the
+ * window's place): waiting for a quiet moment alone could wait for minutes.
+ */
+const SAVE_MAX_WAIT_MS = 2_000;
 /** How long saved windows wait for their app to be listed (native apps and nsites come in late). */
 const RESTORE_DEADLINE_MS = 30_000;
 /**
@@ -81,7 +87,32 @@ export function WindowSessionHost() {
     const session = snapshotSession(actions.getSession(), (id) => getApp(id)?.native === true, keep);
     // Windows still to come back stay on file, in case Din stops first.
     for (const w of pending.current?.windows ?? []) session.windows.push({ ...w, id: `pending:${w.id}` });
-    writeSession(session);
+    // On the disk now: Chromium would otherwise keep it in memory a while.
+    if (writeSession(session)) getBootBridge()?.flushStorage();
+  }, []);
+
+  /** Save a moment after the last change, or SAVE_MAX_WAIT_MS after the first one waiting. */
+  const saveTimer = useRef<{ timer: ReturnType<typeof setTimeout>; since: number } | null>(null);
+  const saveSoon = useCallback(() => {
+    const since = saveTimer.current?.since ?? Date.now();
+    if (saveTimer.current) clearTimeout(saveTimer.current.timer);
+    const delay = Math.min(SAVE_DELAY_MS, Math.max(0, since + SAVE_MAX_WAIT_MS - Date.now()));
+    saveTimer.current = {
+      since,
+      timer: setTimeout(() => {
+        saveTimer.current = null;
+        save();
+      }, delay),
+    };
+  }, [save]);
+  /** Save now, whatever was waiting. */
+  const saveNow = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current.timer);
+    saveTimer.current = null;
+    save();
+  }, [save]);
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current.timer);
   }, []);
 
   /** Reopen what has an app to open it by now; the rest wait. */
@@ -189,26 +220,15 @@ export function WindowSessionHost() {
   }, [enabled]);
 
   // A moment after every change, and when a window's app saves its state.
+  useEffect(saveSoon, [windows, active, enabled, saveSoon]);
+  useEffect(() => subscribeWindowStates(saveSoon), [saveSoon]);
+  // Din told it's going (about to be restarted or turned off, or the page
+  // unloading): whatever's left unsaved.
+  useEffect(() => getBootBridge()?.onSaveNow(saveNow), [saveNow]);
   useEffect(() => {
-    const timer = setTimeout(save, SAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [windows, active, enabled, save]);
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const unsubscribe = subscribeWindowStates(() => {
-      clearTimeout(timer);
-      timer = setTimeout(save, SAVE_DELAY_MS);
-    });
-    return () => {
-      clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [save]);
-  // Din told it's going: whatever's left unsaved.
-  useEffect(() => {
-    window.addEventListener('pagehide', save);
-    return () => window.removeEventListener('pagehide', save);
-  }, [save]);
+    window.addEventListener('pagehide', saveNow);
+    return () => window.removeEventListener('pagehide', saveNow);
+  }, [saveNow]);
 
   return null;
 }

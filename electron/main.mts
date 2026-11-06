@@ -146,6 +146,7 @@ import { registerPasswordsHandlers } from './passwords.mts';
 import { registerAskpass } from './askpass.mts';
 import { registerPolkitAgent } from './polkit-agent.mts';
 import { isUpdating, registerUpdaterHandlers } from './updater.mts';
+import { registerSessionSaveHandlers, saveBeforeStopping } from './session-save.mts';
 import { isFlashing, registerFirmwareHandlers } from './firmware.mts';
 import { airplayDisplays, airplayNetworkChanged, registerAirPlayHandlers, switchAirPlayMode } from './airplay.mts';
 import { registerSystemPackageHandlers } from './system-packages.mts';
@@ -1980,12 +1981,14 @@ function registerPowerHandlers(): void {
   ipcMain.handle('power:reboot', async (event) => {
     assertShellSender(event);
     assertSafeToPowerOff();
+    await saveBeforeStopping();
     await tool('systemctl', ['reboot'], 15_000);
   });
 
   ipcMain.handle('power:powerOff', async (event) => {
     assertShellSender(event);
     assertSafeToPowerOff();
+    await saveBeforeStopping();
     await tool('systemctl', ['poweroff'], 15_000);
   });
 
@@ -2058,7 +2061,7 @@ function registerPowerHandlers(): void {
   // service brings a fresh Din back up.
   ipcMain.on('shell:endSession', (event) => {
     if (!isShellSender(event)) return;
-    app.quit();
+    void saveBeforeStopping().then(() => app.quit());
   });
 }
 
@@ -6117,6 +6120,7 @@ app.whenReady().then(() => {
     hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
     assertShellSender,
   });
+  registerSessionSaveHandlers({ isShellSender, sendToShell });
   registerUpdaterHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerFirmwareHandlers({ assertShellSender, sendToShell, assertSafeToPowerOff });
   registerSystemPackageHandlers({ assertShellSender });

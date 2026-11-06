@@ -16,6 +16,18 @@ export interface BootBridge {
    * leave the saved windows closed. Removes it, so it's true once.
    */
   skipRestore(): Promise<boolean>;
+  /**
+   * Put what was just saved in localStorage on the disk soon. Chromium would
+   * otherwise hold it in memory for seconds or minutes, and Din can be
+   * stopped at any moment (electron/session-save.mts).
+   */
+  flushStorage(): void;
+  /**
+   * Hear that Din is about to stop (Restart Din, restarting or turning off
+   * the computer). `save` must save synchronously; Din stops once it
+   * returns, or a moment later regardless.
+   */
+  onSaveNow(save: () => void): () => void;
 }
 
 declare global {
