@@ -1090,7 +1090,7 @@ function DockMenuContent({ above }: { above: MenuAboveContentProps }) {
       </ContextMenuCheckboxItem>
       <ContextMenuSub>
         <ContextMenuSubTrigger>Background</ContextMenuSubTrigger>
-        <ContextMenuSubContent className="w-40">
+        <ContextMenuSubContent className="z-[10000] w-40">
           <ContextMenuRadioGroup
             value={config.dockStyle}
             onValueChange={(value) => {

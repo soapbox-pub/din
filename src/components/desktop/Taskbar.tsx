@@ -741,7 +741,7 @@ function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
     <ContextMenuContent className="z-[10000] w-56" {...above}>
       <ContextMenuSub>
         <ContextMenuSubTrigger>Size</ContextMenuSubTrigger>
-        <ContextMenuSubContent className="w-40">
+        <ContextMenuSubContent className="z-[10000] w-40">
           <ContextMenuRadioGroup
             value={config.taskbarStyle}
             onValueChange={(value) => {
@@ -759,7 +759,7 @@ function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
       </ContextMenuSub>
       <ContextMenuSub>
         <ContextMenuSubTrigger>Position</ContextMenuSubTrigger>
-        <ContextMenuSubContent className="w-40">
+        <ContextMenuSubContent className="z-[10000] w-40">
           <ContextMenuRadioGroup
             value={config.taskbarPosition}
             onValueChange={(value) => {
