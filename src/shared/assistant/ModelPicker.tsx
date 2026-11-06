@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Brain, Check, ChevronDown, Settings } from 'lucide-react';
+import { Check, ChevronDown, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -214,7 +214,6 @@ export function ThinkingPicker({
           aria-label={`Thinking: ${variantName(current)}`}
           title="How hard the model thinks"
         >
-          <Brain className="size-3.5 shrink-0" aria-hidden />
           <span className="truncate">{variantName(current)}</span>
           <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
         </Button>

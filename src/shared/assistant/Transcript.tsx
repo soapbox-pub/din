@@ -2,7 +2,6 @@ import { createContext, createElement, memo, useContext, useEffect, useState, ty
 import {
   Bot,
   Braces,
-  Brain,
   ChevronRight,
   CircleAlert,
   Clock,
@@ -12,6 +11,7 @@ import {
   FolderSearch,
   GitFork,
   Globe,
+  Lightbulb,
   ListTodo,
   Loader2,
   MessageCircleQuestion,
@@ -637,7 +637,7 @@ function ThoughtStep({ step }: { step: ReasoningPart }) {
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className={ROW}>
-        <Brain className="size-3.5 shrink-0" aria-hidden />
+        <Lightbulb className="size-3.5 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{thoughtLabel(step, false)}</span>
         <RowChevron open={open} />
       </CollapsibleTrigger>
