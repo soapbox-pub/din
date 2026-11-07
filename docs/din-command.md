@@ -17,7 +17,7 @@ din settings set windows.tiling on
 din sound volume 40
 din wifi connect "Home" --password hunter2
 din windows list --json           # structured output, for scripts
-din open ~/notes.txt https://example.com nostr:npub1…
+din open ~/notes.txt https://example.com nostr:npub1… blossom:<sha256>.pdf
 ```
 
 Every command is `din <area> <command> [arguments]`; an area with one

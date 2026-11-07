@@ -94,12 +94,12 @@ export const bookmarkCommands: Command[] = [
     return { data: list.map(({ node, folder: path }) => row(node, path)) };
   }),
   command('browser', 'bookmark', 'Bookmark a page, as the address bar’s star does', [
-    { name: 'url', type: 'string', positional: true, help: 'Its address (https://, http://, nsite:// or nostr:)' },
+    { name: 'url', type: 'string', positional: true, help: 'Its address (https://, http://, nsite://, nostr: or blossom:)' },
     { name: 'title', type: 'string', optional: true, help: 'Its name (default: the address)' },
     { name: 'folder', type: 'string', optional: true, help: FOLDER_HELP },
   ], async (args, ctx) => {
     const url = args.string('url');
-    if (!isBookmarkableUrl(url)) throw new CommandError(`Can’t bookmark ${url}: use an https://, http://, nsite:// or nostr: address`, 'usage');
+    if (!isBookmarkableUrl(url)) throw new CommandError(`Can’t bookmark ${url}: use an https://, http://, nsite://, nostr: or blossom: address`, 'usage');
     const folder = pickFolder(ctx, args.optString('folder'));
     const made = addBookmark(ownerOf(ctx), { url, title: args.optString('title') }, folder.id);
     if (!made) throw new CommandError(`Couldn’t bookmark ${url}`);

@@ -1007,6 +1007,26 @@ export async function storeBlob(hash: string, data: Buffer): Promise<void> {
   }
 }
 
+/**
+ * Where to write a blob that is still arriving, before it is verified: beside
+ * its place in the cache, so {@link adoptBlobFile} is a rename.
+ */
+export async function blobTempPath(hash: string): Promise<string> {
+  const target = cachePathFor(hash);
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  return `${target}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+}
+
+/** Move a verified blob written to {@link blobTempPath} into the cache. */
+export async function adoptBlobFile(hash: string, temp: string, size: number): Promise<void> {
+  try {
+    await fsp.rename(temp, cachePathFor(hash));
+    noteCacheWrite(size);
+  } catch {
+    await fsp.unlink(temp).catch(() => {});
+  }
+}
+
 /** A cached blob's size, or null when it isn't cached. */
 export async function cachedBlobSize(hash: string): Promise<number | null> {
   const stat = await fsp.stat(cachePathFor(hash)).catch(() => null);

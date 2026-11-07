@@ -5,6 +5,7 @@ import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { isNsiteUrl } from '@/lib/nsite';
 import { isNostrUri } from '@/lib/nostrUri';
+import { isBlossomUri } from '@/lib/blossomUri';
 import { isMailtoUrl } from '@/lib/mailto';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
@@ -20,7 +21,9 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  * A `mailto:` link opens a new message in Mail.
  *
  * A `nostr:` link opens in the default app for its kind, or else as a
- * preview in the Web Browser, with buttons to open it in an app.
+ * preview in the Web Browser, with buttons to open it in an app. A `blossom:`
+ * link (BUD-10) opens as a tab showing its file, which Din fetches and checks
+ * against its hash (electron/blossom.mts).
  *
  * Outside the Electron shell (plain-browser build) the in-app browser can't
  * host webviews, so the link defers to the host browser via `window.open`.
@@ -61,13 +64,13 @@ export function useOpenUrl(): (url: string) => void {
         return;
       }
 
-      // nsites are served by Din's own protocol handler; a host browser has
-      // no handler for the scheme at all.
-      const nsite = isNsiteUrl(url);
+      // nsites and blossom: files are served by Din's own protocol handlers;
+      // a host browser has no handler for either scheme at all.
+      const dinOnly = isNsiteUrl(url) || isBlossomUri(url);
 
       // No in-app browser outside Electron — hand off to the host browser.
       if (!isWebviewAvailable()) {
-        if (nsite) return;
+        if (dinOnly) return;
         window.open(url, '_blank', 'noopener,noreferrer');
         return;
       }

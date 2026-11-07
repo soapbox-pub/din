@@ -77,11 +77,12 @@ export function frecency(entry: BrowserHistoryEntry, now = Date.now() / 1000): n
 
 /**
  * Whether a URL belongs in history: real https destinations, plus nsite://
- * sites, whose canonical URLs are key-derived and so stay meaningful.
+ * sites, whose canonical URLs are key-derived and so stay meaningful, and
+ * blossom: files, named by their hash.
  */
 function isRecordable(url: string): boolean {
   if (url.length > MAX_URL_LENGTH) return false;
-  return url.startsWith('https://') || url.startsWith('nsite://');
+  return url.startsWith('https://') || url.startsWith('nsite://') || url.startsWith('blossom:');
 }
 
 interface AccountHistory {

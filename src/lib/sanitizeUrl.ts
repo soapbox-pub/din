@@ -1,6 +1,7 @@
 import { normalizeInternalUrl } from '@/lib/internalPages';
 import { normalizeNsiteInput, NSITE_PROTOCOL, parseCanonicalNsiteHost } from '@/lib/nsite';
 import { parseNostrUri } from '@/lib/nostrUri';
+import { parseBlossomUri } from '@/lib/blossomUri';
 
 /**
  * Sanitize a user-entered URL for safe use as an iframe `src`.
@@ -56,7 +57,8 @@ export function sanitizeAppUrl(input: string): string | null {
  *
  * Broader than {@link sanitizeUrl}: it also permits `http:` so users can reach
  * local dev servers (`http://localhost:8080`) and plain-http sites, and
- * `nsite:` for NIP-5A sites served by Din itself (see `src/lib/nsite.ts`).
+ * `nsite:` for NIP-5A sites served by Din itself (see `src/lib/nsite.ts`),
+ * and `blossom:` for Blossom links, also Din's (`src/lib/blossomUri.ts`).
  * Script- and data-bearing schemes (`javascript:`, `data:`, `file:`, `blob:`,
  * …) are still rejected. This is safe because the `<webview>` is a separate
  * embedder outside the app's page and CSP. Never use it for an iframe/img
@@ -68,6 +70,10 @@ export function sanitizeAppUrl(input: string): string | null {
 export function sanitizeNavigationUrl(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  // A Blossom link (BUD-10) has no `//`, and is served by Din itself.
+  const blossom = parseBlossomUri(trimmed);
+  if (blossom) return blossom.uri;
 
   const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
     ? trimmed
@@ -181,6 +187,10 @@ export function resolveNavigation(input: string): string | null {
     const inner = resolveNavigation(trimmed.slice(VIEW_SOURCE_PREFIX.length));
     return inner ? viewSourceUrl(inner) : null;
   }
+
+  // A Blossom link (`blossom:<sha256>.<ext>`), which has no `://`.
+  const blossom = parseBlossomUri(trimmed);
+  if (blossom) return blossom.uri;
 
   // nsite addresses first, so a bare `npub1…` or `naddr1…` isn't mistaken for
   // a search term.

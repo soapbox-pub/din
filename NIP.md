@@ -270,7 +270,7 @@ its app, releases and assets.
 |---|---|---|
 | 0 | NIP-01 | Profile metadata (published on signup) |
 | 10002 | NIP-65 | Relay list; read on login, published from Settings → Nostr & Storage |
-| 10063 | BUD-03 | Blossom server list; read on login, published from Settings → Nostr & Storage |
+| 10063 | BUD-03 | Blossom server list; read on login, published from Settings → Nostr & Storage. Also read for the authors a `blossom:` link (BUD-10) names in `as`, to find its file when the link's own `xs` servers don't have it |
 | 32267, 30063, 3063 | NIP-82 (draft) | Browser extensions: published and listed on `about:extensions` from a synced copy kept on the device ([Browser extensions](#browser-extensions-nip-82)) |
 | 15128, 35128 | NIP-5A | nsite manifests; read to serve `nsite://` sites, and kept (signature-checked) in the device's nsite store for sites that were opened or installed |
 | 16767 | Profile Themes | Active profile theme; applied as the OS theme, and published when a synced custom theme changes. A theme worn from a named one carries Ditto's credit tags: `["a", "36767:<pubkey>:<d>"]`, plus `["p", <pubkey>]` when someone else made it. Editing someone else's theme drops both |

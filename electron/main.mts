@@ -78,6 +78,7 @@ import {
   clearNsiteBlobCache,
 } from './nsite.mts';
 import { parseCanonicalHost } from './nsite-store.mts';
+import { BLOSSOM_SCHEME, registerBlossomProtocol } from './blossom.mts';
 import { isProgram, registerNativeAppHandlers, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
 import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
 import { attachLayoutKeys, registerKeyboardHandlers } from './keyboard.mts';
@@ -292,6 +293,21 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true,
       allowServiceWorkers: true,
+    },
+  },
+  {
+    // BUD-10 Blossom links (electron/blossom.mts): a file by its hash.
+    // `standard`, though BUD-10's form has no `//`, because Chromium can't
+    // seek a video on a scheme that isn't (it reads past a range and fails):
+    // `blossom:<sha256>.<ext>?…` loads as `blossom://<sha256>.<ext>/?…`, and
+    // each file is an origin of its own. `secure`, and `stream` +
+    // `supportFetchAPI` so media streams.
+    scheme: BLOSSOM_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
     },
   },
   {
@@ -6433,6 +6449,18 @@ app.whenReady().then(() => {
     onUninstall: forgetNappSite,
   });
 
+  // blossom: links in the same sessions, for the same reasons, sharing the
+  // nsite store's blob cache. The authors' and the user's servers are asked of
+  // the shell renderer (BlossomBridgeHost).
+  registerBlossomProtocol({
+    sessions: [
+      { session: browserSession(), persist: true },
+      { session: privateBrowserSession(), persist: false },
+    ],
+    sendToShell,
+    isShellSender,
+  });
+
   // Browser tabs (and installed apps, which share their session) say they're
   // Chrome, as Chromium-based browsers do: Electron's default user agent
   // names Electron, which sites like YouTube take as a sign of an ad blocker.
@@ -6542,7 +6570,7 @@ app.whenReady().then(() => {
   const keepShellHome = (event: Electron.Event, url: string) => {
     if (isShellUrl(url)) return;
     event.preventDefault();
-    if (/^(https?|nsite):\/\//i.test(url)) sendToShell('crx:openTab', { url });
+    if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) sendToShell('crx:openTab', { url });
   };
   win.webContents.on('will-navigate', (event) => {
     if (/^nostrconnect:/i.test(event.url)) return;
@@ -6552,7 +6580,7 @@ app.whenReady().then(() => {
     if (event.isMainFrame) keepShellHome(event, event.url);
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?|nsite):\/\//i.test(url)) sendToShell('crx:openTab', { url });
+    if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) sendToShell('crx:openTab', { url });
     return { action: 'deny' };
   });
 
@@ -6973,7 +7001,7 @@ app.on('web-contents-created', (_event, contents) => {
     const keepAppHome = (event: Electron.Event, url: string) => {
       if (appOrigin && appOriginOf(url) === appOrigin) return;
       event.preventDefault();
-      if (/^(https?|nsite):\/\//i.test(url)) {
+      if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) {
         sendToShell('crx:openTab', { url, openerWcId: contents.id });
       }
     };
@@ -7055,6 +7083,9 @@ app.on('web-contents-created', (_event, contents) => {
       sendToShell('userscripts:installRequested', { url, wcId: contents.id });
     } else if (
       /^(https|nsite):\/\//i.test(url) ||
+      // A Blossom link, served by Din (electron/blossom.mts), but not to Tor's
+      // tabs, which have no handler for it: its lookups go out directly.
+      (/^blossom:/i.test(url) && contents.session !== torBrowserSession()) ||
       // Onion services are mostly plain http, and Tor encrypts them anyway.
       (/^http:\/\//i.test(url) && isOnionUrl(url)) ||
       // Extension pages may open their own kind; a web page may not, since the
@@ -7195,7 +7226,7 @@ app.on('web-contents-created', (_event, contents) => {
       openLink: (url, disposition) => {
         // What a tab can load (isAllowedTabUrl): plain http too, since the
         // user picked it (a dev server's images, say), and nsite: pages'.
-        if (/^(https?|nsite|chrome-extension):\/\//i.test(url)) {
+        if (/^(https?|nsite|chrome-extension):\/\//i.test(url) || /^blossom:/i.test(url)) {
           // "Open link/image in new tab" (disposition 'default') opens in the
           // background like Chrome; "Open in new window" stays foreground.
           sendToShell('crx:openTab', {

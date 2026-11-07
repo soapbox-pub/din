@@ -45,6 +45,7 @@ import { PasswordAutofillHost } from './PasswordAutofillHost';
 import { NostrBridgeHost } from './NostrBridgeHost';
 import { HighlightBridgeHost } from './HighlightBridgeHost';
 import { NsiteBridgeHost } from './NsiteBridgeHost';
+import { BlossomBridgeHost } from './BlossomBridgeHost';
 import { PromptHost } from './PromptHost';
 import { AdminPromptHost, PolkitPromptHost } from './AdminPrompt';
 import { ScreenSharePicker } from './ScreenShareHost';
@@ -130,6 +131,7 @@ const SessionHosts = memo(function SessionHosts() {
       <NostrBridgeHost />
       <HighlightBridgeHost />
       <NsiteBridgeHost />
+      <BlossomBridgeHost />
       <PromptHost />
       <AdminPromptHost />
       <PolkitPromptHost />

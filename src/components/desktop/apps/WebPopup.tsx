@@ -116,7 +116,7 @@ export function WebPopup({ windowId, params }: AppComponentProps) {
     );
   }
 
-  const secure = url.startsWith('https:') || url.startsWith('nsite:') || isOnionUrl(url);
+  const secure = url.startsWith('https:') || url.startsWith('nsite:') || url.startsWith('blossom:') || isOnionUrl(url);
   const SiteIcon = secure ? Lock : Globe;
 
   return (

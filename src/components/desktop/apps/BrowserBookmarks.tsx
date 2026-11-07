@@ -206,7 +206,7 @@ function BookmarkEditForm({ node, actions, onClose }: { node: BookmarkNode; acti
             autoComplete="off"
           />
           {!urlValid && (
-            <p className="text-xs text-destructive">Use an https://, http://, nsite:// or nostr: address.</p>
+            <p className="text-xs text-destructive">Use an https://, http://, nsite://, nostr: or blossom: address.</p>
           )}
         </div>
       )}

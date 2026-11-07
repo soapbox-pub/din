@@ -85,6 +85,8 @@
 //     FilePickerBridgeHost)
 //   - window.dinos.nsiteHost: relays nsite:// manifest lookups to the renderer's
 //     Nostr client (see NsiteBridgeHost / electron/nsite.mts)
+//   - window.dinos.blossomHost: finds the servers blossom: links' files may be
+//     on, for electron/blossom.mts (see BlossomBridgeHost)
 //   - window.dinos.nsiteStore: the OS-level store of nsites, and which are
 //     installed as apps (see src/lib/nsiteStore.ts / electron/nsite-store.mts)
 //   - window.dinos.nappHost: installed nsites' napp runtime - their ENV, clearing
@@ -3640,6 +3642,35 @@ expose('nsiteHost', {
    * @param {{ requestId: number, resolution: unknown }} response
    */
   respond: (response) => ipcRenderer.send('nsite:response', response),
+});
+
+// blossom: server lookups (window.dinos.blossomHost), backed by the blossom:*
+// handlers in electron/blossom.mts. The blossom: protocol handler tries a
+// link's own servers first; when they don't have the file it asks here for
+// the link's authors' servers (their kind 10063 lists) and the user's own,
+// since main has no Nostr client (see BlossomBridgeHost). Only places to
+// look: main checks every byte against the hash.
+expose('blossomHost', {
+  /**
+   * Subscribe to server lookups. The callback receives
+   * { requestId, authors }. Returns an unsubscribe fn.
+   * @param {(request: { requestId: number, authors: string[] }) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number, authors: string[] }} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('blossom:request', listener);
+    return () => ipcRenderer.removeListener('blossom:request', listener);
+  },
+
+  /**
+   * Answer a lookup: { requestId, authorServers, servers }.
+   * @param {{ requestId: number, authorServers: string[], servers: string[] }} response
+   */
+  respond: (response) => ipcRenderer.send('blossom:response', response),
 });
 
 // The OS-level nsite store (window.dinos.nsiteStore), backed by the nsite:* handlers

@@ -362,13 +362,13 @@ export function attachAppGuest(contents: Electron.WebContents, src: string, send
   contents.on('will-frame-navigate', (event) => {
     if (home(event.url)) return;
     event.preventDefault();
-    if (event.isMainFrame && /^(https?|nsite):\/\//i.test(event.url)) send('crx:openTab', { url: event.url });
+    if (event.isMainFrame && (/^(https?|nsite):\/\//i.test(event.url) || /^blossom:/i.test(event.url))) send('crx:openTab', { url: event.url });
   });
   contents.on('will-redirect', (event) => {
     if (!home(event.url)) event.preventDefault();
   });
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?|nsite):\/\//i.test(url)) send('crx:openTab', { url });
+    if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) send('crx:openTab', { url });
     return { action: 'deny' };
   });
   contents.on('unresponsive', () => send('dinos-apps:responsive', { webContentsId: contents.id, responsive: false }));

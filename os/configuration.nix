@@ -1542,7 +1542,7 @@ in
         Type=Application
         Name=Din
         Exec=din-open %U
-        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;inode/directory;
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;x-scheme-handler/blossom;inode/directory;
         NoDisplay=true
       '')
       # The defaults' mimeapps.list in the system profile's etc/xdg too, which
@@ -1610,7 +1610,8 @@ in
   };
 
   # Links native apps open go to Din's Web Browser (electron/open-uri.mts),
-  # nostr: links too, which Din opens in the app chosen for them.
+  # nostr: links too, which Din opens in the app chosen for them, and
+  # blossom: links (BUD-10), files Din fetches by their hash.
   # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
   # portal's OpenURI; both start the default handler, din-open, which hands
   # the links to Din over the session bus. Folders too, which open in Files:
@@ -1622,6 +1623,7 @@ in
     "x-scheme-handler/https" = "din-open.desktop";
     "x-scheme-handler/nsite" = "din-open.desktop";
     "x-scheme-handler/nostr" = "din-open.desktop";
+    "x-scheme-handler/blossom" = "din-open.desktop";
   };
 
   systemd.services.flathub = {

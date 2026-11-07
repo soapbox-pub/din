@@ -9,6 +9,8 @@
  * feature-detect via `getTorBridge()`.
  */
 
+import { parseBlossomUri } from '@/lib/blossomUri';
+
 export interface TorStatus {
   /** Whether Din can turn Tor on and off here (DinOS). */
   canToggle: boolean;
@@ -92,9 +94,15 @@ function watchTlsHosts(): void {
  * sites as https so their pages are secure contexts, as Tor Browser's are
  * (electron/onion-proxy.mts), but their address is http://, and that's what
  * the address bar, history and copied links say. Sites with TLS of their
- * own keep https://. Anything else comes back as it is.
+ * own keep https://.
+ *
+ * A Blossom link loads as `blossom://<sha256>.<ext>/?…` (the scheme is a
+ * standard one, which Chromium needs to seek a video: electron/blossom.mts),
+ * and shows in BUD-10's form, `blossom:<sha256>.<ext>?…`. Anything else comes
+ * back as it is.
  */
 export function shownUrl(url: string): string {
+  if (/^blossom:/i.test(url)) return parseBlossomUri(url)?.uri ?? url;
   if (!/^https:/i.test(url)) return url;
   watchTlsHosts();
   let parsed: URL;

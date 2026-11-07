@@ -200,7 +200,8 @@ export function getCrxBridge(): CrxBridge | undefined {
  * chrome.tabs.create). Safe because tabs load in the out-of-CSP `<webview>`,
  * not the app DOM. `chrome-extension:` is additionally allowed for extension
  * pages (options/dashboard), which only exist inside the browser's extension
- * system, and `nsite:` for NIP-5A sites Din serves itself.
+ * system, and `nsite:` and `blossom:` for NIP-5A sites and Blossom files Din
+ * serves itself.
  */
 export function isAllowedTabUrl(url: string): boolean {
   try {
@@ -209,7 +210,8 @@ export function isAllowedTabUrl(url: string): boolean {
       protocol === 'https:' ||
       protocol === 'http:' ||
       protocol === 'chrome-extension:' ||
-      protocol === 'nsite:'
+      protocol === 'nsite:' ||
+      protocol === 'blossom:'
     );
   } catch {
     return false;

@@ -54,11 +54,11 @@ const MAX_TITLE_LENGTH = 300;
 
 /**
  * Whether a URL can be bookmarked: pages the browser opens (https and http,
- * nsites, nostr: links). Never javascript: or data:, so an imported file
+ * nsites, nostr: and blossom: links). Never javascript: or data:, so an imported file
  * can't plant a bookmarklet that runs in the browser's chrome.
  */
 export function isBookmarkableUrl(url: string): boolean {
-  return url.length <= MAX_URL_LENGTH && /^(https?:\/\/|nsite:\/\/|nostr:)/i.test(url);
+  return url.length <= MAX_URL_LENGTH && /^(https?:\/\/|nsite:\/\/|nostr:|blossom:)/i.test(url);
 }
 
 /** A favicon worth keeping: a plain http(s) URL, not a data: URI. */

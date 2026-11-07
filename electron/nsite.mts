@@ -64,7 +64,7 @@ export const NSITE_SCHEME = 'nsite';
  * and the DOM's `ReadableStream` are structurally different types for the same
  * runtime object here, so the cast is the whole point.
  */
-function toWebStream(stream: Readable): ReadableStream<Uint8Array> {
+export function toWebStream(stream: Readable): ReadableStream<Uint8Array> {
   return Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>;
 }
 
@@ -96,10 +96,10 @@ const BLOB_TIMEOUT_MS = 30_000;
  * unverified large file, but script-bearing types are buffered whatever their
  * size (SCRIPT_BEARING), so nothing with XSS consequence is released unverified.
  */
-const VERIFY_IN_FULL_LIMIT = 4 * 1024 * 1024;
+export const VERIFY_IN_FULL_LIMIT = 4 * 1024 * 1024;
 
 /** Content types that can execute script; always verified before release. */
-const SCRIPT_BEARING = /^(text\/html|text\/javascript|image\/svg\+xml|application\/xml|application\/wasm)/;
+export const SCRIPT_BEARING = /^(text\/html|text\/javascript|image\/svg\+xml|application\/xml|application\/wasm)/;
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -135,6 +135,9 @@ const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
+  '.m4v': 'video/mp4',
+  '.mkv': 'video/x-matroska',
+  '.aac': 'audio/aac',
   '.wasm': 'application/wasm',
   '.pdf': 'application/pdf',
   '.zip': 'application/zip',
@@ -142,7 +145,7 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 /** Content type for a path, from its extension. Blossom's is unreliable. */
-function mimeFor(pathname: string): string {
+export function mimeFor(pathname: string): string {
   const ext = path.extname(pathname).toLowerCase();
   return MIME_TYPES[ext] ?? 'application/octet-stream';
 }
@@ -305,7 +308,7 @@ function escapeHtml(text: string): string {
 }
 
 /** A branded failure page, served in place of Chromium's raw network error. */
-function errorPage(status: number, title: string, detail: string, url: string): Response {
+export function errorPage(status: number, title: string, detail: string, url: string): Response {
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -354,7 +357,7 @@ function redirectTo(url: string): Response {
 }
 
 /** Parse a `Range` header against a known length. Null means "ignore it". */
-function parseRange(
+export function parseRange(
   header: string | null,
   size: number,
 ): { start: number; end: number } | null {
