@@ -126,8 +126,7 @@ chrome.webRequest.onBeforeRequest.addListener(
 
 // Every top-level response's COOP goes to the pop-up blocker (popups.mts),
 // and its Onion-Location and Nsite-Location to the address bar
-// (site-locations.mts), and its cf-mitigated to the user agent
-// (cloudflare-ua.mts), blocking on or off: a session.webRequest listener
+// (site-locations.mts), blocking on or off: a session.webRequest listener
 // there would switch this one off. Electron
 // doesn't fire onHeadersReceived here; onResponseStarted, with the same
 // headers, it does.
@@ -140,7 +139,6 @@ chrome.webRequest.onResponseStarted.addListener(
       header('cross-origin-opener-policy'),
       header('onion-location'),
       header('nsite-location'),
-      header('cf-mitigated'),
     );
   },
   { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] },

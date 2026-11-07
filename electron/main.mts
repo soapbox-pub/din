@@ -59,7 +59,6 @@ import {
   isUserscriptInstallUrl,
 } from './userscripts.mts';
 import { attachAdblock, ensureAdblockEngine, isAdblockExtension, setupAdblock } from './adblock.mts';
-import { cloudflareResponse, forgetCloudflareSites, setupBrowserUserAgents } from './cloudflare-ua.mts';
 import {
   attachPopups,
   justPressed,
@@ -5146,7 +5145,6 @@ function registerSitePermissionHandlers(): void {
       }
     }
     if (s === browserSession()) forgetWebPushSubscriptions(origin);
-    forgetCloudflareSites(s, origin);
   });
 
   // What a page's navigator.permissions.query reports (permissions-preload.cjs):
@@ -5593,7 +5591,6 @@ function registerBrowserDataHandlers(): void {
       await s.clearStorageData();
       // Service workers went too, and push subscriptions belong to them.
       forgetWebPushSubscriptions();
-      forgetCloudflareSites(s);
     }
   });
 }
@@ -6429,16 +6426,11 @@ app.whenReady().then(() => {
   });
 
   // Browser tabs (and installed apps, which share their session) say they're
-  // Chrome, except to sites that have shown them Cloudflare's challenge
-  // (electron/cloudflare-ua.mts).
-  setupBrowserUserAgents({
-    sessions: [
-      { session: browserSession(), persist: true },
-      { session: privateBrowserSession(), persist: false },
-      { session: torBrowserSession(), persist: false },
-    ],
-    isWebGuest: (contents) => contents.getType() === 'webview' && isBrowserTabSession(contents.session),
-  });
+  // Chrome, as Chromium-based browsers do: Electron's default user agent
+  // names Electron, which sites like YouTube take as a sign of an ad blocker.
+  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
+    s.setUserAgent(s.getUserAgent().replace(/\s(Electron|din)\/\S+/gi, ''));
+  }
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
@@ -6453,10 +6445,9 @@ app.whenReady().then(() => {
     beforeRequest: (s, details) => (s === torBrowserSession() ? onionRequest(details) : null),
     assertShellSender,
     sendToShell,
-    onTopLevelResponse: (url, coop, onionLocation, nsiteLocation, cfMitigated) => {
+    onTopLevelResponse: (url, coop, onionLocation, nsiteLocation) => {
       topLevelResponse(browserSession(), url, coop);
       siteLocationResponse(url, onionLocation, nsiteLocation);
-      cloudflareResponse(browserSession(), url, cfMitigated);
     },
   });
 
@@ -6468,9 +6459,8 @@ app.whenReady().then(() => {
     isWebGuest: (contents) => contents.getType() === 'webview' && isBrowserTabSession(contents.session),
     assertShellSender,
     sendToShell,
-    onTopLevelResponse: (s, url, headers) => {
+    onTopLevelResponse: (_s, url, headers) => {
       siteLocationResponse(url, responseHeader(headers, 'onion-location'), responseHeader(headers, 'nsite-location'));
-      cloudflareResponse(s, url, responseHeader(headers, 'cf-mitigated'));
     },
   });
 
