@@ -55,6 +55,7 @@ import {
   prepareOpenCore,
   prepareWindows,
   pruneDownloads,
+  syncOpenCoreScreen,
   WINDOWS_READY,
   type InstallBoot,
 } from './vm-installers.mts';
@@ -1050,6 +1051,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       }
       // A machine made by hand gets its boot loader the first time it starts.
       if (!openCoreReady(openCoreDir(id))) await prepareOpenCore(openCoreDir(id), config.uuid, AbortSignal.timeout(5 * 60_000));
+      else await syncOpenCoreScreen(openCoreDir(id));
     }
     if (config.tpm) {
       const swtpm = need(t.swtpm, 'swtpm (for the TPM)');

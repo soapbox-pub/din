@@ -294,8 +294,13 @@ const RECOVERY_AGENT = 'InternetRecovery/1.0';
 /** iMac20,1's board, the last Intel Mac's: Apple gives it the newest macOS that runs on Intel. */
 export const MACOS_BOARD = 'Mac-CFF7D910A743CAAF';
 export const MACOS_MODEL = 'iMac20,1';
-/** macOS draws it at twice the scale, as on a Retina display: 1280×800 points. */
-export const MACOS_SCREEN = { width: 2560, height: 1600 };
+/**
+ * 1280×800, drawn at 1×. macOS has no driver for QEMU's VGA, so it draws
+ * everything on the CPU; at 2560×1600, where it chose twice the scale for
+ * the same 1280×800 points, that was four times the pixels, and a click in
+ * Setup Assistant took about 2 s to show instead of 0.3 s.
+ */
+export const MACOS_SCREEN = { width: 1280, height: 800 };
 
 /** Apple's key for the chunklists that come with recovery images (the EFI ROM's). */
 const CHUNKLIST_KEY = createPublicKey({
@@ -1037,7 +1042,7 @@ function openCoreConfig(sample: string, uuid: string): string {
   Object.assign(dict(UEFI.APFS), { MinDate: -1, MinVersion: -1 });
   UEFI.Drivers = OPENCORE_DRIVERS.map((Path) => ({ Arguments: '', Comment: Path, Enabled: true, LoadEarly: false, Path }));
   // The screen QEMU's VGA offers (vms.mts), which macOS keeps: it has no driver to change it.
-  Object.assign(dict(UEFI.Output), { Resolution: `${MACOS_SCREEN.width}x${MACOS_SCREEN.height}@32` });
+  Object.assign(dict(UEFI.Output), { Resolution: MACOS_RESOLUTION });
   // New OVMF's security policy refuses OpenCore's drivers.
   Object.assign(dict(UEFI.Quirks), { DisableSecurityPolicy: true });
   return writePlist(config);
@@ -1060,6 +1065,23 @@ async function openCoreRelease(): Promise<InstallerFile> {
 const openCoreBoot = (dir: string) => path.join(dir, 'EFI', 'OC', 'OpenCore.efi');
 
 export const openCoreReady = (dir: string) => fs.existsSync(openCoreBoot(dir));
+
+const MACOS_RESOLUTION = `${MACOS_SCREEN.width}x${MACOS_SCREEN.height}@32`;
+
+/**
+ * Bring an existing boot loader's screen to `MACOS_SCREEN`, for machines
+ * made when it was another size (QEMU's VGA offers the new one, and OpenCore
+ * would still pick the old).
+ */
+export async function syncOpenCoreScreen(dir: string): Promise<void> {
+  const file = path.join(dir, 'EFI', 'OC', 'config.plist');
+  const config = parsePlist(await fsp.readFile(file, 'utf8')) as Record<string, PlistDict>;
+  const output = config.UEFI?.Output as PlistDict | undefined;
+  if (!output || output.Resolution === MACOS_RESOLUTION) return;
+  output.Resolution = MACOS_RESOLUTION;
+  await fsp.writeFile(`${file}.tmp`, writePlist(config));
+  await fsp.rename(`${file}.tmp`, file);
+}
 
 /**
  * The machine's boot loader in `dir`, a folder QEMU shows it as a FAT drive:
