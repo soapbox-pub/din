@@ -7,6 +7,7 @@
   "din": {
     "permissions": ["games"],
     "folders": ["~/roms"],
+    "fetch": ["thumbnails.libretro.com"],
     "window": { "size": { "width": 1200, "height": 800 }, "frame": "custom" },
     "keywords": ["games", "emulator", "RetroArch", "EmulationStation", "ROMs", "Nintendo", "SNES", "Game Boy", "N64", "Sega", "PlayStation", "controller", "gamepad", "arcade", "retro"]
   }

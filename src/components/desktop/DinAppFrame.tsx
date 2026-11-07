@@ -199,6 +199,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   const fileFolders = permissions.includes('file-folders');
   const fixedFolders = manifest.din.folders ?? [];
   const scopedFs = !permissions.includes('fs') && (fileFolders || fixedFolders.length > 0);
+  // Hosts the app may fetch from without CORS (din.fetch).
+  const fetchHosts = manifest.din.fetch ?? [];
 
   const surface = useRef<GuestSurfaceHandle>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
@@ -1083,6 +1085,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     const apps = getAppsBridge();
     const fs = getFsBridge();
     let fsUrlBase: string | null = null;
+    let fetchGranted = false;
     if (scopedFs && s.fsRoots && fs) {
       const home = (await fs.homedir()).replace(/\/$/, '');
       for (const folder of fixedFolders) {
@@ -1105,6 +1108,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           fsUrlBase = granted;
           s.fsGranted = true;
         }
+      }
+      if (fetchHosts.length > 0) {
+        fetchGranted = await apps.grant(webContentsId, 'fetch', fetchHosts).then(
+          () => true,
+          (e: unknown) => {
+            console.error('din: granting fetch:', e);
+            return false;
+          },
+        );
       }
       if (permissions.includes('camera')) {
         await apps.grantCamera(webContentsId).catch((e: unknown) => console.error('din: granting camera:', e));
@@ -1141,6 +1153,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       powerMode: powerModeOn(),
       fsUrlBase,
       scopedFs,
+      fetch: fetchGranted,
       assistant: permissions.includes('assistant') ? assistantSettings() : null,
       assistantUnread: permissions.includes('assistant') ? unreadAssistantSessions(getNotificationState().notifications) : [],
     };

@@ -1047,6 +1047,56 @@ export function installDin(transport: Transport): void {
   // Filled in once the desktop has granted them.
   const system: DinSystem = {};
 
+  // ---- din.fetch: requests without CORS, to the manifest's `din.fetch` hosts (electron/napp-fetch.mts) ----
+  const NULL_BODY = new Set([101, 103, 204, 205, 304]);
+  const aborted = (signal: AbortSignal) => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+  /** A bridge call, its refusal thrown as fetch's own TypeError. */
+  const fetchCall = async (channel: string, args: unknown[]): Promise<unknown> => {
+    try {
+      return await bridges!.call('fetch', channel, args);
+    } catch (error) {
+      throw new TypeError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
+  };
+  const dinFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const hello = await helloArrived;
+    if (!hello.fetch || !bridges) throw new DinPermissionError('fetch', "This app's manifest names no hosts for din.fetch");
+    await bridges.ready('fetch');
+    const request = new Request(input, init);
+    const { signal } = request;
+    if (signal.aborted) throw aborted(signal);
+    const body = request.body ? new Uint8Array(await request.arrayBuffer()) : null;
+    const head = (await fetchCall('fetch:start', [
+      { url: request.url, method: request.method, headers: [...request.headers], body, redirect: request.redirect },
+    ])) as { id: number; status: number; statusText: string; headers: [string, string][] };
+    const abort = () => void bridges.call('fetch', 'fetch:abort', [head.id]).catch(() => {});
+    signal.addEventListener('abort', abort, { once: true });
+    const nullBody = NULL_BODY.has(head.status) || request.method === 'HEAD';
+    if (nullBody) abort();
+    const stream = nullBody
+      ? null
+      : new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              if (signal.aborted) {
+                controller.error(aborted(signal));
+                return;
+              }
+              const chunk = (await fetchCall('fetch:read', [head.id])) as Uint8Array | null;
+              if (chunk === null) {
+                signal.removeEventListener('abort', abort);
+                controller.close();
+              } else {
+                controller.enqueue(chunk);
+              }
+            },
+            cancel: abort,
+          },
+          { highWaterMark: 0 },
+        );
+    return new Response(stream, { status: head.status, statusText: head.statusText, headers: head.headers });
+  };
+
   const din: Din = {
     version: 1,
     ready,
@@ -1060,6 +1110,7 @@ export function installDin(transport: Transport): void {
     desktop,
     assistant,
     system,
+    fetch: dinFetch,
   };
   Object.defineProperty(window, 'din', { value: din, configurable: false, writable: false, enumerable: true });
 

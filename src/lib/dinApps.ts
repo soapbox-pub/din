@@ -22,6 +22,8 @@ export interface AppsBridge {
    * `roots` scopes an fs grant to those folders.
    */
   grant(webContentsId: number, permission: SystemPermission, roots?: { path: string; writable: boolean }[]): Promise<string | null>;
+  /** `din.fetch`: requests without CORS, only to these hosts (the manifest's `din.fetch`). */
+  grant(webContentsId: number, permission: 'fetch', hosts: string[]): Promise<null>;
   /**
    * `background`: the window may give its app a schedule
    * (registration.periodicSync), and, with `notifications`, the app's worker

@@ -24,6 +24,7 @@ import { ipcMain, MessageChannelMain, net, session, webContents } from 'electron
 import { LOCAL_FILE_SCHEME, serveLocalFile, trashedFrom } from './files.mts';
 import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
 import { argsForDin, argsFromDin, valueForDin } from './windows-paths.mts';
+import { fetchAbort, fetchAbortAll, fetchRead, fetchStart, type NappFetchRequest } from './napp-fetch.mts';
 import { ptyRoutes } from './pty-routes.mts';
 import type { MessagePortMain } from 'electron';
 
@@ -72,6 +73,9 @@ const SYSTEM_PERMISSIONS = {
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
   games: /^games:(status|library|play|stop|setFavorite|setVersion|resumeImage|forgetResume)$/,
   capture: /^capture:(status|pointer|pointerImage|takes|take|rename|projects|project|createProject|openProject|updateProject|importBegin|importEnd|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
+  // din.fetch: requests without CORS to the hosts the manifest's `din.fetch`
+  // names (napp-fetch.mts, answered here, not by an IPC handler).
+  fetch: /^fetch:(start|read|abort)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
 
@@ -91,6 +95,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   vms: /^vms:changed$/,
   games: /^games:changed$/,
   capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
+  fetch: null,
 };
 
 /**
@@ -219,6 +224,13 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     if (typeof permission !== 'string' || !(permission in SYSTEM_PERMISSIONS)) throw new Error('Unknown permission');
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    // fetch: only to these hosts, which the manifest names.
+    if (permission === 'fetch') {
+      const hosts = Array.isArray(roots) ? roots.filter((h): h is string => typeof h === 'string' && FETCH_HOST.test(h)).map((h) => h.toLowerCase()) : [];
+      if (hosts.length === 0) throw new Error('fetch needs the hosts it reaches');
+      grant(contents, 'fetch', null, new Set(hosts));
+      return null;
+    }
     // fs, scoped: only under these folders (and those added later).
     let scope: Map<string, boolean> | null = null;
     if (permission === 'fs' && Array.isArray(roots)) {
@@ -490,6 +502,16 @@ interface Grant {
   appId: string;
   /** For assistant, the conversations this app started (the Assistant app reaches all of them). */
   sessions: Set<string>;
+  /** For fetch, the hosts it may reach. */
+  hosts: Set<string> | null;
+}
+
+/** A host name an app's manifest may give `din.fetch`: a DNS name, no port, no wildcard. */
+const FETCH_HOST = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/i;
+
+/** The napp-fetch.mts site an app window's requests are counted against. */
+function fetchSite(wcId: number): string {
+  return `din-app:${wcId}`;
 }
 
 const grants = new Map<number, Map<SystemPermission, Grant>>();
@@ -505,10 +527,15 @@ export function backgroundGrant(wcId: number): { appId: string; notifications: b
   return backgroundGrants.get(wcId) ?? null;
 }
 
-function grant(contents: Electron.WebContents, permission: SystemPermission, roots: Map<string, boolean> | null = null): void {
+function grant(
+  contents: Electron.WebContents,
+  permission: SystemPermission,
+  roots: Map<string, boolean> | null = null,
+  hosts: Set<string> | null = null,
+): void {
   revoke(contents.id, permission);
   const { port1, port2 } = new MessageChannelMain();
-  const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {}, appId: appIdOf(contents.getURL()) ?? '', sessions: new Set() };
+  const entry: Grant = { port: port1, ptys: new Set(), roots, send: () => {}, appId: appIdOf(contents.getURL()) ?? '', sessions: new Set(), hosts };
   let byPermission = grants.get(contents.id);
   if (!byPermission) grants.set(contents.id, (byPermission = new Map()));
   byPermission.set(permission, entry);
@@ -541,6 +568,20 @@ function grant(contents: Electron.WebContents, permission: SystemPermission, roo
     const refusal = checkCall(permission, channel, args, entry);
     if (refusal) {
       reply({ error: { name: 'DinPermissionError', message: refusal } });
+      return;
+    }
+    if (permission === 'fetch') {
+      const site = fetchSite(contents.id);
+      const allowed = entry.hosts ?? new Set<string>();
+      const fail = (error: unknown) => reply({ error: { name: 'TypeError', message: error instanceof Error ? error.message : String(error) } });
+      if (channel === 'fetch:start') {
+        fetchStart(site, sent[0] as NappFetchRequest, (host) => allowed.has(host)).then((result) => reply({ result }), fail);
+      } else if (channel === 'fetch:read') {
+        fetchRead(site, sent[0]).then((result) => reply({ result }), fail);
+      } else {
+        fetchAbort(site, sent[0]);
+        reply({ result: null });
+      }
       return;
     }
     if (channel === 'pty:release' || channel === 'pty:adopt') {
@@ -828,6 +869,7 @@ function revoke(wcId: number, permission: SystemPermission): void {
   byPermission!.delete(permission);
   if (byPermission!.size === 0) grants.delete(wcId);
   entry.port.close();
+  if (permission === 'fetch') fetchAbortAll(fetchSite(wcId));
   // An app's terminals end with its grant.
   const kill = sendHandlers.get('pty:kill');
   for (const id of entry.ptys) {

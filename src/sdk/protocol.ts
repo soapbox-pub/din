@@ -167,6 +167,8 @@ export interface Hello {
   fsUrlBase: string | null;
   /** `din.system.fs` reaches only some folders (`file-folders`, the manifest's `folders`). */
   scopedFs: boolean;
+  /** `din.fetch` reaches the hosts the manifest's `din.fetch` names. */
+  fetch: boolean;
 }
 
 /** What an app can ask, by method: the params, and what the reply carries. */

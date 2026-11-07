@@ -7,7 +7,7 @@ import { Play } from 'lucide-react';
 import type { Game, GameSystem } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { focusRing } from '@/shared/appChromeStyles';
-import { BoxArt } from './art';
+import { ArtImage, BoxArt } from './art';
 import { backdropOf, systemColors } from './colors';
 import { useResumeImage } from './bridge';
 import { Shelf, type TileContext, type TileSize } from './GameGrid';
@@ -55,11 +55,11 @@ function Hero({ game, system, ctx, couch }: { game: Game; system: GameSystem | u
         style={{ backgroundImage: `linear-gradient(135deg, ${from}, ${to})` }}
       >
         {/* The picture twice: blurred across the whole card, and itself, whole, at its right. */}
-        {backdrop && <img src={backdrop} alt="" aria-hidden className="absolute inset-0 -z-10 size-full scale-110 object-cover opacity-60 blur-2xl saturate-150" />}
+        {backdrop && <ArtImage src={backdrop} alt="" aria-hidden className="absolute inset-0 -z-10 size-full scale-110 object-cover opacity-60 blur-2xl saturate-150" />}
         <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-r from-black/75 via-black/40 to-black/10" />
         {backdrop && (
           <div className="absolute inset-y-0 right-0 -z-10 hidden w-1/2 items-center justify-end p-6 @3xl:flex">
-            <img src={backdrop} alt="" aria-hidden className="max-h-full max-w-full rounded-xl object-contain shadow-2xl [image-rendering:pixelated]" />
+            <ArtImage src={backdrop} alt="" aria-hidden className="max-h-full max-w-full rounded-xl object-contain shadow-2xl [image-rendering:pixelated]" />
           </div>
         )}
         <div className="flex min-w-0 flex-1 items-end gap-6 p-8">

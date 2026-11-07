@@ -4158,7 +4158,7 @@ expose('apps', {
    * Have main open a port from an app straight to a system bridge.
    * @param {number} webContentsId
    * @param {string} permission
-   * @param {{ path: string, writable: boolean }[]} [roots] for fs, the folders it's scoped to (none: the whole filesystem)
+   * @param {{ path: string, writable: boolean }[] | string[]} [roots] for fs, the folders it's scoped to (none: the whole filesystem); for fetch, the hosts it may reach
    * @returns {Promise<string | null>} for fs, the URL base the app loads files by path from
    */
   grant: (webContentsId, permission, roots) => ipcRenderer.invoke('dinos-apps:grant', webContentsId, permission, roots),

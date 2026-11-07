@@ -155,7 +155,7 @@ const publicLookup: net.LookupFunction = (hostname, options, callback) => {
 };
 
 /** Check a URL a request is about to go to; returns it parsed. */
-function checkUrl(raw: string): URL {
+function checkUrl(raw: string, allowHost?: (host: string) => boolean): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -170,6 +170,7 @@ function checkUrl(raw: string): URL {
   }
   // A literal address skips the lookup, so it's checked here.
   if (net.isIP(host) && !isPublicAddress(host)) throw new RefusedError(`${host} is on a private network`);
+  if (allowHost && !allowHost(host.replace(/\.$/, ''))) throw new RefusedError(`This app may not reach ${host}`);
   return url;
 }
 
@@ -276,11 +277,13 @@ function decoded(response: IncomingMessage): Readable {
 }
 
 /**
- * Start a request for `site` (a canonical nsite host). Resolves with the
- * response's status and headers; the body is read with {@link fetchRead}.
- * Rejects with an Error whose message the site sees as fetch's TypeError.
+ * Start a request for `site` (a canonical nsite host, or a built-in app's
+ * window, `din-app:<webContents id>`). Resolves with the response's status
+ * and headers; the body is read with {@link fetchRead}. Rejects with an
+ * Error whose message the site sees as fetch's TypeError. `allowHost`, for
+ * built-in apps, limits the hosts it reaches, redirects included.
  */
-export async function fetchStart(site: string, request: NappFetchRequest): Promise<NappFetchHead> {
+export async function fetchStart(site: string, request: NappFetchRequest, allowHost?: (host: string) => boolean): Promise<NappFetchHead> {
   if (!request || typeof request.url !== 'string' || typeof request.method !== 'string') {
     throw new RefusedError('Invalid request');
   }
@@ -305,7 +308,7 @@ export async function fetchStart(site: string, request: NappFetchRequest): Promi
   active.set(id, entry);
 
   try {
-    let url = checkUrl(request.url);
+    let url = checkUrl(request.url, allowHost);
     let hopMethod = method;
     let hopBody = body;
     let hopHeaders = headers;
@@ -317,7 +320,7 @@ export async function fetchStart(site: string, request: NappFetchRequest): Promi
         response.resume();
         if (request.redirect === 'error') throw new RefusedError('The server redirected');
         if (hop >= MAX_REDIRECTS) throw new RefusedError('Too many redirects');
-        const next = checkUrl(new URL(location, url).href);
+        const next = checkUrl(new URL(location, url).href, allowHost);
         // 303, and 301/302 after a POST, become a bodiless GET, as in fetch.
         if (status === 303 ? hopMethod !== 'HEAD' : (status === 301 || status === 302) && hopMethod === 'POST') {
           hopMethod = 'GET';

@@ -764,7 +764,9 @@ several files in a folder of its own. Main reads them (`electron/games.mts`,
 (regions, revisions, discs) by their No-Intro names (`game-names.mts`),
 picks the copy for the computer's language, and hides BIOS files, bad dumps,
 demos and betas. Box art comes from libretro-thumbnails, matched by name, with
-the list of what it has for a system cached in `~/.cache/din/games/art`.
+the list of what it has for a system cached in `~/.cache/din/games/art`; the
+app fetches each picture once (`din.fetch`), shrinks it and keeps it in its
+own IndexedDB.
 
 Playing a game runs RetroArch with the system's core, full screen on the
 embedded display, as an app of its own named for the game with its box art

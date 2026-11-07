@@ -10,7 +10,7 @@ import type { Game, GameSystem } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { focusRing } from '@/shared/appChromeStyles';
 import { appLink } from '@/shared/launch';
-import { BoxArt } from './art';
+import { ArtImage, BoxArt } from './art';
 import { backdropOf } from './colors';
 import { useResumeImage } from './bridge';
 import { GameMenuItems, type GameAction } from './GameMenu';
@@ -64,7 +64,7 @@ export function Detail({
       {/* The wash: the game's own picture, blurred far back. */}
       {backdrop && (
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[28rem] overflow-hidden">
-          <img src={backdrop} alt="" className="size-full scale-125 object-cover opacity-50 blur-3xl saturate-150 dark:opacity-40" />
+          <ArtImage src={backdrop} alt="" className="size-full scale-125 object-cover opacity-50 blur-3xl saturate-150 dark:opacity-40" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/60 to-background" />
         </div>
       )}
@@ -150,11 +150,10 @@ export function Detail({
             <h2 className="text-lg font-semibold">Pictures</h2>
             <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2">
               {pictures.map((src) => (
-                <img
+                <ArtImage
                   key={src}
                   src={src}
                   alt=""
-                  loading="lazy"
                   onError={(e) => (e.currentTarget.style.display = 'none')}
                   className="w-full rounded-xl bg-foreground/5 object-contain shadow-sm [image-rendering:pixelated]"
                 />

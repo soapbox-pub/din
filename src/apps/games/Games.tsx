@@ -18,6 +18,7 @@ import { ContentPane, EmptyState, PillButton, SearchField, ToolButton } from '@/
 import { focusRing, titleSearch, toolIcon } from '@/shared/appChromeStyles';
 import { appLink } from '@/shared/launch';
 import { toast } from '@/shared/toast';
+import { ArtImage } from './games/art';
 import { backdropOf } from './games/colors';
 import { cleanError, useBridge, useGameActions, useGamesChanges, useLibrary, useResumeImage, useStatus } from './games/bridge';
 import { Detail } from './games/Detail';
@@ -566,7 +567,7 @@ function Couch({
   return (
     <div data-input={input} className="dark relative isolate flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-foreground">
       <div aria-hidden className="absolute inset-0 -z-10">
-        {shown && <img key={shown} src={shown} alt="" className="size-full scale-110 object-cover opacity-35 blur-3xl saturate-150 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-700" />}
+        {shown && <ArtImage key={shown} src={shown} alt="" className="size-full scale-110 object-cover opacity-35 blur-3xl saturate-150 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-700" />}
         <div className="absolute inset-0 bg-gradient-to-b from-neutral-950/30 via-neutral-950/70 to-neutral-950" />
       </div>
       <header className="flex h-20 shrink-0 items-center gap-4 px-8">

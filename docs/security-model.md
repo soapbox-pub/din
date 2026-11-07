@@ -54,7 +54,8 @@ still apply, and moving apps out shrinks what code runs there.
   extensions, ad blocking or permission grants in common with tabs.
 - **Each app page has a strict CSP** in its `index.html` (`default-src
   'none'`, scripts from itself only). Apps that reach the network widen
-  `connect-src` there, in review.
+  `connect-src` there, in review, or name the hosts in their manifest's
+  `din.fetch` to read servers that send no CORS headers.
 - **Built-in apps' guests are created only by `DinAppFrame`**, in their
   partition, and `will-attach-webview` refuses a `din-apps` guest whose
   `src` isn't `din://` (or `din+file://`).

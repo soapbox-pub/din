@@ -71,6 +71,15 @@ export interface Din {
   assistant: DinAssistant;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
+  /**
+   * `fetch`, for the hosts the manifest's `din.fetch` names, without CORS:
+   * the response's body and headers are the app's to read whatever the
+   * server sends. https only, anonymous (no cookies are sent or kept), never
+   * the local network, at most 8 requests in flight. Anything else, or an
+   * app whose manifest names no hosts, rejects (`TypeError`, or
+   * `DinPermissionError` without the grant).
+   */
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
 /** One of `navigator.getInstalledRelatedApps()`'s answers (Getting Installed Related Apps). */
@@ -893,5 +902,10 @@ export interface DinManifest {
      * missing. Media Player.
      */
     folders?: string[];
+    /**
+     * Hosts `din.fetch` reaches without CORS, by name (`thumbnails.libretro.com`):
+     * no port, no wildcard, https only. Built-in apps only. Games.
+     */
+    fetch?: string[];
   };
 }

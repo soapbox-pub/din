@@ -47,6 +47,23 @@ When nsites get `window.din`, the user approves the list at install.
 A manifest's `din.folders` scopes `din.system.fs` to fixed folders instead
 (Media Player's music, videos and skins). Neither reaches anything else.
 
+## `din.fetch`
+
+A server that sends no CORS headers can't be read by an app's page, even
+where its CSP allows it. A manifest's `din.fetch` names hosts (`"fetch":
+["thumbnails.libretro.com"]`, Games, which keeps box art in its own
+IndexedDB) that `din.fetch(input, init)` reaches anyway, with `fetch`'s
+signature and a real streaming `Response` whose body and headers are the
+app's to read. It's the request installed nsites get as `napp.fetch`
+(`electron/napp-fetch.mts`), over a `fetch` bridge port of its own: https
+only, anonymous (no cookies sent or kept), never the local network (checked
+on the address connected to), 8 requests in flight per window, and only the
+named hosts, exactly, redirects included. Names only: no ports or
+wildcards. Built-in apps only, reviewed with the manifest; an app from a
+folder or the `din` command doesn't get it. Without it, `din.fetch` rejects
+with `DinPermissionError`; a host it doesn't name, with `TypeError`, as
+`fetch` does.
+
 Check at runtime with the web's Permissions API, which takes Din's names
 as well as its own: `(await navigator.permissions.query({ name: 'fs' })).state`
 is `granted` or `denied` (never `prompt`: the manifest decided), and the
@@ -74,7 +91,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `games`, `capture`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `games`, `capture`, and `fetch` for `din.fetch`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main

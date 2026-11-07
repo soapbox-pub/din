@@ -59,7 +59,7 @@ export function isComputerRoot(din: string): boolean {
 }
 
 /** Channels whose values are what the user wrote, never translated. */
-const UNTRANSLATED = /^(passwords|mail|clipboard|bunker|nostrd|napp-fetch|push|web-push|secret|askpass):/;
+const UNTRANSLATED = /^(passwords|mail|clipboard|bunker|nostrd|napp-fetch|fetch|push|web-push|secret|askpass):/;
 
 /** For channels whose arguments are partly content: the only ones that may be paths. */
 const PATH_ARGS: Record<string, number[]> = {
