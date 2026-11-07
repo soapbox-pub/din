@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FolderOpen, Gamepad2, Minimize2, RefreshCw, Square } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Gamepad2, RefreshCw, Square } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,18 +15,19 @@ import type { Game, GameSystem, GamesStatus } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { useDin, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { ContentPane, EmptyState, PillButton, SearchField, ToolButton } from '@/shared/appChrome';
-import { focusRing, titleSearch, toolIcon } from '@/shared/appChromeStyles';
+import { titleSearch, toolIcon } from '@/shared/appChromeStyles';
 import { appLink } from '@/shared/launch';
 import { toast } from '@/shared/toast';
-import { ArtImage } from './games/art';
-import { backdropOf } from './games/colors';
-import { cleanError, useBridge, useGameActions, useGamesChanges, useLibrary, useResumeImage, useStatus } from './games/bridge';
-import { Detail } from './games/Detail';
+import { cleanError, useBridge, useGameActions, useGamesChanges, useLibrary, useStatus } from './games/bridge';
+import { Detail, TvDetail } from './games/Detail';
 import { GameGrid, type TileContext } from './games/GameGrid';
 import type { GameAction } from './games/GameMenu';
 import { Home } from './games/Home';
-import { focusFirst, moveFocus, useNavInput, type NavAction } from './games/input';
+import { focusFirst, moveFocus, reveal, useNavInput, type NavAction } from './games/input';
 import { Sidebar } from './games/Sidebar';
+import { playSound, setSoundsOn, soundsOn, type UiSound } from './games/sounds';
+import { TvHome } from './games/TvHome';
+import { TvShell } from './games/TvShell';
 
 const SECTION_KEY = 'games:section';
 
@@ -45,7 +46,7 @@ function TitleBar({ children, className }: { children?: React.ReactNode; classNa
  * browse by system, the game last played up top to pick up where it was
  * left, and Play, which opens it full screen in an emulator Din set up for
  * it (din.system.games, the `games` permission; electron/games.mts). Full
- * screen, it's a TV's: big, dark, and driven by a controller.
+ * screen, it's a TV's (games/TvShell.tsx): big, dark, and driven by a controller.
  */
 export function Games() {
   const bridge = useBridge();
@@ -95,6 +96,14 @@ function Library({ status }: { status: GamesStatus | undefined }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<Game | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [menuWanted, setMenuOpen] = useState(false);
+  const [searchWanted, setSearching] = useState(false);
+  const [sounds, setSounds] = useState(soundsOn);
+  // The TV view's menu and search keyboard belong to it alone.
+  const menuOpen = couch && menuWanted;
+  const searching = couch && searchWanted;
+  /** What was focused before the menu or the search keyboard opened, to go back to. */
+  const lastFocus = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   /** The tile a game's page was opened from, to come back to. */
@@ -110,13 +119,86 @@ function Library({ status }: { status: GamesStatus | undefined }) {
   const running = status?.running ?? null;
   const installed = status?.installed ?? false;
 
+  const couchRef = useRef(couch);
+  useEffect(() => {
+    couchRef.current = couch;
+  });
+
   const setSection = useCallback((next: string) => {
     setSectionState(next);
     setOpenId(null);
     setQuery('');
     localStorage.setItem(SECTION_KEY, next);
     scrollRef.current?.scrollTo({ top: 0 });
+    // On the TV, focus goes with it, so the controller is where the games are.
+    if (couchRef.current) requestAnimationFrame(() => focusFirst(scrollRef.current ?? document));
   }, []);
+
+  // Coming into the TV view, something's focused for the controller to start from.
+  useEffect(() => {
+    if (couch) requestAnimationFrame(() => document.activeElement === document.body && focusFirst(scrollRef.current ?? document));
+  }, [couch]);
+
+  const sound = (name: UiSound) => {
+    if (couchRef.current) playSound(name);
+  };
+
+  /** Focus what was focused before an overlay opened, or the first thing on the page if it's gone. */
+  const restoreFocus = () =>
+    requestAnimationFrame(() => {
+      const el = lastFocus.current;
+      if (el?.isConnected) {
+        el.focus({ preventScroll: true });
+        reveal(el);
+      } else focusFirst(scrollRef.current ?? document);
+    });
+
+  const openMenu = (show: boolean) => {
+    if (show === menuOpen) return;
+    sound(show ? 'open' : 'close');
+    if (show) {
+      lastFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setMenuOpen(true);
+      requestAnimationFrame(() => {
+        const menu = document.querySelector<HTMLElement>('[data-tv-menu]');
+        const el = menu?.querySelector<HTMLElement>('[aria-current="page"]') ?? menu?.querySelector<HTMLElement>('[data-nav]');
+        el?.focus({ preventScroll: true });
+        el?.scrollIntoView({ block: 'nearest' });
+      });
+    } else {
+      setMenuOpen(false);
+      restoreFocus();
+    }
+  };
+
+  const openSearch = () => {
+    sound('open');
+    lastFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setMenuOpen(false);
+    setOpenId(null);
+    setSearching(true);
+  };
+
+  const closeSearch = (done: boolean) => {
+    sound(done ? 'select' : 'close');
+    setSearching(false);
+    if (!done) {
+      restoreFocus();
+      return;
+    }
+    scrollRef.current?.scrollTo({ top: 0 });
+    requestAnimationFrame(() => {
+      const first = scrollRef.current?.querySelector<HTMLElement>('[data-game]');
+      if (first) first.focus();
+      else focusFirst(scrollRef.current ?? document);
+    });
+  };
+
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    setOpenId(null);
+    scrollRef.current?.scrollTo({ top: 0 });
+  };
 
 
   const sectionList = useMemo(() => ['home', 'favorites', 'recent', ...systems.map((s) => `system:${s.id}`)], [systems]);
@@ -150,6 +232,7 @@ function Library({ status }: { status: GamesStatus | undefined }) {
         return;
       }
       if (running?.id === game.id) return;
+      if (couchRef.current) playSound('play');
       actions.play.mutate({ game, options: { fresh } });
     },
     [systemById, installed, running, actions.play],
@@ -225,46 +308,76 @@ function Library({ status }: { status: GamesStatus | undefined }) {
       case 'down':
       case 'left':
       case 'right':
-        moveFocus(action);
+        if (moveFocus(action)) sound('move');
         return;
       case 'accept': {
         const el = document.activeElement;
-        if (el instanceof HTMLElement && el !== document.body) el.click();
-        else focusFirst();
+        if (el instanceof HTMLElement && el !== document.body) {
+          sound(el.closest('[data-key-start],[role="search"]') ? 'type' : 'select');
+          el.click();
+        } else focusFirst();
         return;
       }
       case 'back':
-        if (confirm) setConfirm(null);
+        if (searching) closeSearch(false);
+        else if (menuOpen) openMenu(false);
+        else if (confirm) setConfirm(null);
         else if (open) closeGame();
         else if (query) setQuery('');
         else if (section !== 'home') setSection('home');
+        else return;
+        if (!searching && !menuOpen) sound('back');
         return;
       case 'play': {
+        if (searching) {
+          closeSearch(true);
+          return;
+        }
+        if (menuOpen) return;
         const game = focusedGame();
         if (game) play(game);
         return;
       }
       case 'favorite': {
+        if (searching) {
+          sound('type');
+          setQuery((q) => q.slice(0, -1));
+          return;
+        }
+        if (menuOpen) return;
         const game = focusedGame();
-        if (game) actions.favorite.mutate(game);
+        if (game) {
+          sound('select');
+          actions.favorite.mutate(game);
+        }
         return;
       }
       case 'search':
-        searchRef.current?.focus();
+        if (searching) {
+          sound('type');
+          setQuery((q) => `${q} `);
+        } else if (couch) openSearch();
+        else searchRef.current?.focus();
         return;
       case 'prevSection':
       case 'nextSection': {
+        if (menuOpen || searching || open) return;
         const i = sectionList.indexOf(section);
         const next = sectionList[(i + (action === 'nextSection' ? 1 : sectionList.length - 1)) % sectionList.length];
+        sound('section');
         setSection(next);
         return;
       }
-      case 'fullscreen':
-        toggleFullscreen();
+      case 'menu':
+        if (couch && !searching) openMenu(!menuOpen);
+        return;
+      case 'guide':
+        if (couch) openMenu(!menuOpen);
+        else toggleFullscreen();
         return;
     }
   };
-  const { connected, input } = useNavInput(onNav, !running);
+  const { connected, input } = useNavInput(onNav, !running, couch);
 
   const ctx: TileContext = {
     systemName: (id) => systemById.get(id)?.name ?? id,
@@ -277,6 +390,7 @@ function Library({ status }: { status: GamesStatus | undefined }) {
     onFocusGame: setFocused,
   };
   const size = couch ? 'lg' : 'md';
+  const lastPlayed = useMemo(() => games.reduce<Game | null>((best, g) => (g.lastPlayed && (!best || g.lastPlayed > (best.lastPlayed ?? 0)) ? g : best), null), [games]);
 
   let body: React.ReactNode;
   if (isLoading || !library) {
@@ -316,13 +430,13 @@ function Library({ status }: { status: GamesStatus | undefined }) {
       </EmptyState>
     );
   } else if (open) {
+    const Page = couch ? TvDetail : Detail;
     body = (
-      <Detail
+      <Page
         game={open}
         system={systemById.get(open.system)}
         running={running?.id === open.id}
         installed={installed}
-        couch={couch}
         onPlay={(fresh) => play(open, fresh)}
         onAction={(action) => onAction(open, action)}
         onQuit={() => actions.stop.mutate()}
@@ -331,7 +445,7 @@ function Library({ status }: { status: GamesStatus | undefined }) {
   } else if (listed) {
     const system = section.startsWith('system:') && !query ? systemById.get(section.slice(7)) : undefined;
     body = (
-      <div className="flex flex-col gap-4 px-4 pt-6 pb-10">
+      <div className={cn('flex flex-col gap-4 px-4 pt-6 pb-10', couch && 'gap-8 px-14 pt-10 pb-24')}>
         <SectionHeader title={query ? `Results for “${query}”` : sectionLabel(section)} system={system} count={listed.length} couch={couch} />
         {listed.length ? (
           <GameGrid key={query ? `search:${query}` : section} games={listed} size={size} ctx={ctx} />
@@ -347,7 +461,11 @@ function Library({ status }: { status: GamesStatus | undefined }) {
       </div>
     );
   } else {
-    body = <Home games={games} systems={systems} ctx={ctx} size={size} couch={couch} onSection={setSection} />;
+    body = couch ? (
+      <TvHome games={games} systems={systems} ctx={ctx} focused={focused ?? lastPlayed} onSection={setSection} />
+    ) : (
+      <Home games={games} systems={systems} ctx={ctx} size={size} onSection={setSection} />
+    );
   }
 
   const banners = (
@@ -383,7 +501,7 @@ function Library({ status }: { status: GamesStatus | undefined }) {
 
   const dialogs = (
     <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent className={cn(couch && 'dark text-foreground')}>
         {confirm?.kind === 'startOver' && (
           <>
             <AlertDialogHeader>
@@ -426,27 +544,49 @@ function Library({ status }: { status: GamesStatus | undefined }) {
   );
 
   if (couch) {
+    const launching = actions.play.isPending ? (actions.play.variables?.game ?? null) : null;
     return (
-      <Couch
+      <TvShell
         input={input}
         connected={connected}
-        backdropGame={open ?? focused}
+        backdropGame={open ?? focused ?? lastPlayed}
         sections={sectionList}
         section={query ? null : section}
         sectionLabel={sectionLabel}
-        onSection={setSection}
+        onSection={(id) => {
+          if (id !== section) sound('section');
+          setSection(id);
+        }}
+        systems={systems}
+        favorites={games.filter((g) => g.favorite).length}
         query={query}
-        onQuery={setQuery}
+        onQuery={changeQuery}
+        results={query && listed ? listed.length : null}
+        searching={searching}
         searchRef={searchRef}
-        open={!!open}
-        onBack={open ? closeGame : null}
+        onSearch={openSearch}
+        onSearchDone={() => closeSearch(true)}
+        onSearchClose={() => closeSearch(false)}
+        menuOpen={menuOpen}
+        onMenu={openMenu}
+        sounds={sounds}
+        onSounds={() => {
+          setSoundsOn(!sounds);
+          setSounds(!sounds);
+          if (!sounds) requestAnimationFrame(() => playSound('select'));
+        }}
+        open={open}
+        canGoBack={!!open || !!query || section !== 'home'}
+        onAction={onNav}
         onExit={toggleFullscreen}
         scrollRef={scrollRef}
+        launching={launching}
+        systemName={ctx.systemName}
       >
         {banners}
         {body}
         {dialogs}
-      </Couch>
+      </TvShell>
     );
   }
 
@@ -483,9 +623,9 @@ function Library({ status }: { status: GamesStatus | undefined }) {
 
 function SectionHeader({ title, system, count, couch }: { title: string; system?: GameSystem; count: number; couch: boolean }) {
   return (
-    <header className="flex flex-col gap-1 px-2">
-      <h1 className={cn('font-[family-name:var(--font-title)] font-semibold tracking-tight', couch ? 'text-5xl' : 'text-4xl')}>{title}</h1>
-      <p className="text-base text-muted-foreground">
+    <header className={cn('flex flex-col gap-1 px-2', couch && 'gap-2')}>
+      <h1 className={cn('font-[family-name:var(--font-title)] font-semibold tracking-tight', couch ? 'text-6xl font-bold text-white' : 'text-4xl')}>{title}</h1>
+      <p className={cn('text-base text-muted-foreground', couch && 'text-xl text-white/70')}>
         {system ? `${system.maker} · ${system.year} · ` : ''}
         {count.toLocaleString()} {count === 1 ? 'game' : 'games'}
         {system?.unavailable ? ` · ${system.unavailable}` : ''}
@@ -498,126 +638,6 @@ function Banner({ children }: { children: React.ReactNode }) {
   return (
     <div className="sticky top-0 z-10 px-4 pt-4">
       <div className="glass-surface flex items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-sm">{children}</div>
-    </div>
-  );
-}
-
-/** A controller's button, drawn for the hints along the bottom of the TV view. */
-function ButtonHint({ glyph, label }: { glyph: string; label: string }) {
-  return (
-    <span className="flex items-center gap-2">
-      <span className="grid h-7 min-w-7 place-items-center rounded-full bg-white/15 px-2 text-xs font-bold text-white">{glyph}</span>
-      <span className="text-sm text-white/80">{label}</span>
-    </span>
-  );
-}
-
-/**
- * Full screen, Games is a TV's: dark, over a soft wash of the game in focus,
- * its sections across the top (the shoulder buttons step through them), big
- * tiles, and what a controller's buttons do along the bottom.
- */
-function Couch({
-  children,
-  input,
-  connected,
-  backdropGame,
-  sections,
-  section,
-  sectionLabel,
-  onSection,
-  query,
-  onQuery,
-  searchRef,
-  open,
-  onBack,
-  onExit,
-  scrollRef,
-}: {
-  children: React.ReactNode;
-  input: string;
-  connected: boolean;
-  backdropGame: Game | null;
-  sections: string[];
-  section: string | null;
-  sectionLabel: (id: string) => string;
-  onSection: (id: string) => void;
-  query: string;
-  onQuery: (q: string) => void;
-  searchRef: React.RefObject<HTMLInputElement | null>;
-  open: boolean;
-  onBack: (() => void) | null;
-  onExit: () => void;
-  scrollRef: React.RefObject<HTMLDivElement | null>;
-}) {
-  const { data: resume } = useResumeImage(backdropGame);
-  const backdrop = backdropOf(backdropGame, resume);
-  const [shown, setShown] = useState<string | null>(backdrop);
-  // The wash changes after focus settles, not with every tile passed.
-  useEffect(() => {
-    const t = setTimeout(() => setShown(backdrop), 250);
-    return () => clearTimeout(t);
-  }, [backdrop]);
-  const stripRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = stripRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
-    el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-  }, [section]);
-
-  return (
-    <div data-input={input} className="dark relative isolate flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-foreground">
-      <div aria-hidden className="absolute inset-0 -z-10">
-        {shown && <ArtImage key={shown} src={shown} alt="" className="size-full scale-110 object-cover opacity-35 blur-3xl saturate-150 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-700" />}
-        <div className="absolute inset-0 bg-gradient-to-b from-neutral-950/30 via-neutral-950/70 to-neutral-950" />
-      </div>
-      <header className="flex h-20 shrink-0 items-center gap-4 px-8">
-        {onBack ? (
-          <button type="button" data-nav onClick={onBack} aria-label="Back" className={cn('grid size-11 shrink-0 place-items-center rounded-full bg-white/10 hover:bg-white/15', focusRing)}>
-            <ArrowLeft className="size-5" aria-hidden />
-          </button>
-        ) : (
-          <img src="/icons/apps/games.png" alt="" aria-hidden className="size-9 shrink-0" />
-        )}
-        <div ref={stripRef} role="tablist" aria-label="Sections" className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none]">
-          {!open &&
-            sections.map((id) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                data-nav
-                aria-selected={section === id}
-                aria-current={section === id ? 'page' : undefined}
-                onClick={() => onSection(id)}
-                className={cn(
-                  'h-10 shrink-0 rounded-full px-4 text-base font-medium whitespace-nowrap transition-colors',
-                  focusRing,
-                  section === id ? 'bg-white text-black' : 'text-white/75 hover:bg-white/10 hover:text-white',
-                  'in-data-[input=pad]:focus:ring-[3px] in-data-[input=pad]:focus:ring-white/80',
-                )}
-              >
-                {sectionLabel(id)}
-              </button>
-            ))}
-        </div>
-        <SearchField ref={searchRef} value={query} onValueChange={onQuery} placeholder="Search" aria-label="Search games" className="w-64 shrink-0" />
-        <button type="button" onClick={onExit} aria-label="Exit Full Screen" title="Exit Full Screen" className={cn('grid size-11 shrink-0 place-items-center rounded-full text-white/75 hover:bg-white/10 hover:text-white', focusRing)}>
-          <Minimize2 className="size-5" aria-hidden />
-        </button>
-      </header>
-      <div ref={scrollRef} className="@container min-h-0 flex-1 overflow-y-auto">
-        {children}
-      </div>
-      {connected && (
-        <footer className="flex h-14 shrink-0 items-center justify-end gap-6 px-8">
-          <ButtonHint glyph="A" label="Select" />
-          <ButtonHint glyph="B" label="Back" />
-          <ButtonHint glyph="X" label="Favorite" />
-          <ButtonHint glyph="Y" label="Search" />
-          <ButtonHint glyph="LB RB" label="Sections" />
-          <ButtonHint glyph="START" label="Play" />
-        </footer>
-      )}
     </div>
   );
 }

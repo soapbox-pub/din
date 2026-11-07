@@ -14,23 +14,8 @@ import { ArtImage, BoxArt } from './art';
 import { backdropOf } from './colors';
 import { useResumeImage } from './bridge';
 import { GameMenuItems, type GameAction } from './GameMenu';
-
-function playTimeText(seconds: number): string | null {
-  if (seconds < 60) return null;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} played`;
-  const hours = Math.round((seconds / 3600) * 10) / 10;
-  return `${hours} hour${hours === 1 ? '' : 's'} played`;
-}
-
-function lastPlayedText(at: number | null): string | null {
-  if (!at) return null;
-  const days = Math.floor((Date.now() - at) / 86_400_000);
-  if (days < 1) return 'Played today';
-  if (days < 2) return 'Played yesterday';
-  if (days < 7) return `Played ${days} days ago`;
-  return `Played ${new Date(at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })}`;
-}
+import { lastPlayedText, playTimeText } from './format';
+import { tvRing } from './tv';
 
 const big = 'h-12 gap-2 px-6 text-base [&_svg]:size-5';
 
@@ -39,7 +24,6 @@ export function Detail({
   system,
   running,
   installed,
-  couch,
   onPlay,
   onAction,
   onQuit,
@@ -48,7 +32,6 @@ export function Detail({
   system: GameSystem | undefined;
   running: boolean;
   installed: boolean;
-  couch: boolean;
   onPlay: (fresh?: boolean) => void;
   onAction: (action: GameAction) => void;
   onQuit: () => void;
@@ -68,13 +51,13 @@ export function Detail({
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/60 to-background" />
         </div>
       )}
-      <div className={cn('relative mx-auto flex max-w-5xl flex-col gap-8 px-8 pt-10 pb-12', couch && 'max-w-6xl pt-14')}>
+      <div className="relative mx-auto flex max-w-5xl flex-col gap-8 px-8 pt-10 pb-12">
         <div className="flex flex-col gap-8 @2xl:flex-row @2xl:items-end">
-          <div className={cn('w-48 shrink-0 self-center @2xl:self-end', couch ? 'w-64' : '@2xl:w-56')}>
+          <div className="w-48 shrink-0 self-center @2xl:w-56 @2xl:self-end">
             <BoxArt game={game} systemName={system?.name} eager />
           </div>
           <div className="flex min-w-0 flex-col gap-3 pb-1">
-            <h1 className={cn('font-[family-name:var(--font-title)] font-semibold tracking-tight text-balance', couch ? 'text-5xl' : 'text-4xl @3xl:text-[2.75rem]')}>{game.title}</h1>
+            <h1 className="font-[family-name:var(--font-title)] text-4xl font-semibold tracking-tight text-balance @3xl:text-[2.75rem]">{game.title}</h1>
             {meta && <p className="text-base text-muted-foreground">{meta}</p>}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {running ? (
@@ -187,6 +170,169 @@ export function Detail({
           </section>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A fact about a game in the TV view's game page: a small label over a big value. */
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold tracking-[0.18em] text-white/60 uppercase">{label}</span>
+      <span className="text-xl font-medium text-white">{value}</span>
+    </div>
+  );
+}
+
+const tvButton = cn(
+  'inline-flex h-16 items-center gap-3 rounded-full px-8 text-xl font-semibold outline-none [&_svg]:size-6',
+  'transition-[transform,box-shadow,background-color] duration-150 ease-out motion-reduce:transition-none',
+  'focus-visible:ring-[3px] focus-visible:ring-white in-data-[tv-focus]:focus:scale-105',
+  tvRing,
+);
+
+/**
+ * One game in the TV view: its picture fills the screen behind (the shell
+ * draws it), its box and title stand at the bottom of the first screenful with
+ * Play, big, and what's been played below; the rest is a scroll away.
+ */
+export function TvDetail({
+  game,
+  system,
+  running,
+  installed,
+  onPlay,
+  onAction,
+  onQuit,
+}: {
+  game: Game;
+  system: GameSystem | undefined;
+  running: boolean;
+  installed: boolean;
+  onPlay: (fresh?: boolean) => void;
+  onAction: (action: GameAction) => void;
+  onQuit: () => void;
+}) {
+  const { data: resume } = useResumeImage(game);
+  const playable = !!system?.playable;
+  const pictures = [game.art?.title, game.art?.snap].filter((p): p is string => !!p);
+  const time = playTimeText(game.playTime);
+  const last = lastPlayedText(game.lastPlayed);
+
+  return (
+    <div className="flex flex-col gap-14 pb-16 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+      <div className="flex min-h-[calc(100vh-10rem)] items-end gap-10 px-16 pb-4">
+        <div className="w-60 shrink-0 drop-shadow-[0_24px_48px_rgb(0_0_0/0.6)] motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:duration-500">
+          <BoxArt game={game} systemName={system?.name} eager />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-semibold tracking-[0.2em] text-white/70 uppercase">
+              {system?.name}
+              {system?.maker ? ` · ${system.maker}` : ''}
+            </span>
+            <h1 className="font-[family-name:var(--font-title)] text-7xl leading-[1.02] font-bold tracking-tight text-balance text-white drop-shadow-[0_2px_24px_rgb(0_0_0/0.6)]">
+              {game.title}
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            {running ? (
+              <>
+                <span className="inline-flex h-16 items-center gap-3 rounded-full bg-white/10 px-8 text-xl font-semibold text-white">
+                  <span className="size-3 rounded-full bg-success motion-safe:animate-pulse" aria-hidden />
+                  Playing
+                </span>
+                <button type="button" data-nav data-nav-default data-hint="Quit" onClick={onQuit} className={cn(tvButton, 'bg-white/15 text-white hover:bg-white/25')}>
+                  <Square aria-hidden />
+                  Quit
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                data-nav
+                data-nav-default
+                data-hint={!playable ? (installed ? undefined : 'Install') : game.resumable ? 'Resume' : 'Play'}
+                disabled={!playable && installed}
+                onClick={() => (playable ? onPlay() : void window.open(appLink('settings', { section: 'features' })))}
+                className={cn(tvButton, 'min-w-60 justify-center bg-pigment text-primary-foreground clay-pigment hover:brightness-110 disabled:opacity-50')}
+              >
+                <Play className="fill-current" aria-hidden />
+                {!playable ? (installed ? 'Can’t Play Yet' : 'Install to Play') : game.resumable ? 'Resume' : 'Play'}
+              </button>
+            )}
+            {game.resumable && !running && playable && (
+              <button type="button" data-nav data-hint="Start Over" onClick={() => onAction({ kind: 'startOver' })} className={cn(tvButton, 'bg-white/10 text-white hover:bg-white/20')}>
+                <RotateCcw aria-hidden />
+                Start Over
+              </button>
+            )}
+            <button
+              type="button"
+              data-nav
+              data-hint={game.favorite ? 'Unfavorite' : 'Favorite'}
+              aria-pressed={game.favorite}
+              aria-label={game.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+              title={game.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
+              onClick={() => onAction({ kind: 'favorite' })}
+              className={cn(tvButton, 'size-16 justify-center bg-white/10 px-0 text-white hover:bg-white/20')}
+            >
+              <Star className={cn(game.favorite && 'fill-amber-400 text-amber-400')} aria-hidden />
+            </button>
+          </div>
+          {!playable && system?.unavailable && <p className="max-w-prose text-lg text-white/70">{system.unavailable}</p>}
+          <div className="mt-2 flex flex-wrap gap-x-12 gap-y-4">
+            {system && <Stat label="System" value={`${system.name}${system.year ? `, ${system.year}` : ''}`} />}
+            <Stat label="Play time" value={time ? time.replace(/ played$/, '') : 'Not played yet'} />
+            {last && <Stat label="Last played" value={last.replace(/^Played /, '').replace(/^\w/, (c) => c.toUpperCase())} />}
+            {game.versions.length > 1 && <Stat label="Versions" value={String(game.versions.length)} />}
+          </div>
+        </div>
+      </div>
+
+      {(resume || pictures.length > 0) && (
+        <section aria-label="Pictures" data-nav-row className="flex flex-col gap-4 px-16">
+          <h2 className="text-2xl font-semibold text-white">{resume ? 'Where You Left It' : 'Pictures'}</h2>
+          <div className="flex flex-wrap gap-6">
+            {resume && <img src={resume} alt={`${game.title}, where you left it`} className="h-72 rounded-2xl shadow-2xl [image-rendering:pixelated]" />}
+            {pictures.map((src) => (
+              <ArtImage
+                key={src}
+                src={src}
+                alt=""
+                onError={(e) => (e.currentTarget.style.display = 'none')}
+                className="h-72 rounded-2xl bg-white/5 object-contain shadow-2xl [image-rendering:pixelated]"
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {game.versions.length > 1 && (
+        <section aria-label="Versions" className="flex max-w-4xl flex-col gap-4 px-16">
+          <h2 className="text-2xl font-semibold text-white">Versions</h2>
+          <div className="flex flex-col gap-1">
+            {game.versions.map((v) => (
+              <button
+                key={v.path}
+                type="button"
+                data-nav
+                data-hint="Play This One"
+                onClick={() => onAction({ kind: 'version', path: v.path })}
+                aria-current={v.path === game.path || undefined}
+                className={cn(
+                  'flex h-14 items-center gap-4 rounded-xl px-5 text-left text-lg text-white outline-none focus-visible:ring-[3px] focus-visible:ring-white',
+                  tvRing,
+                  v.path === game.path ? 'bg-white/15 font-semibold' : 'hover:bg-white/10',
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">{v.label}</span>
+                {v.path === game.path && <span className="text-base text-white/70">Plays</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

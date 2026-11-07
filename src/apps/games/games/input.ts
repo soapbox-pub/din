@@ -4,7 +4,8 @@
  * among what's marked `data-nav`, by where it is on the screen, so the grid,
  * the shelves and the sidebar need no wiring of their own. A presses what's
  * focused, B goes back, Start plays the focused game, X makes it a favorite,
- * Y searches, the shoulder buttons step through the sidebar's sections.
+ * Y searches, the shoulder buttons step through the sidebar's sections,
+ * View opens the TV view's menu and the guide button the TV view itself.
  *
  * Controllers are read with the Gamepad API (standard mapping: by position,
  * A the bottom face button). They're ignored while a game is being played
@@ -25,7 +26,8 @@ export type NavAction =
   | 'search'
   | 'prevSection'
   | 'nextSection'
-  | 'fullscreen';
+  | 'menu'
+  | 'guide';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -37,13 +39,17 @@ const BUTTONS: Record<number, NavAction> = {
   3: 'search',
   4: 'prevSection',
   5: 'nextSection',
+  8: 'menu',
   9: 'play',
   12: 'up',
   13: 'down',
   14: 'left',
   15: 'right',
-  16: 'fullscreen',
+  16: 'guide',
 };
+const ARROWS: Record<string, NavAction> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+/** Keys the TV view adds, where there's no text to type into (the hints along its bottom say them). Escape is the system's: it leaves full screen. */
+const TV_KEYS: Record<string, NavAction> = { Backspace: 'back', '/': 'search', '[': 'prevSection', ']': 'nextSection', m: 'menu', p: 'play', f: 'favorite' };
 const DIRECTIONS = new Set<NavAction>(['up', 'down', 'left', 'right']);
 const STICK = 0.55;
 const REPEAT_DELAY = 380;
@@ -75,7 +81,9 @@ export function moveFocus(direction: Direction, root: ParentNode = document): bo
   const fy = from.top + from.height / 2;
   let best: HTMLElement | null = null;
   let bestScore = Infinity;
-  for (const el of root.querySelectorAll<HTMLElement>('[data-nav]')) {
+  // Along a row of the TV view's home, left and right stay in it: its end is its end.
+  const row = direction === 'left' || direction === 'right' ? current.closest('[data-nav-row]') : null;
+  for (const el of (row ?? root).querySelectorAll<HTMLElement>('[data-nav]')) {
     if (el === current || !visible(el)) continue;
     const r = el.getBoundingClientRect();
     const cx = r.left + r.width / 2;
@@ -118,9 +126,30 @@ export function moveFocus(direction: Direction, root: ParentNode = document): bo
   }
   if (!best) return false;
   best.focus({ preventScroll: true });
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  best.scrollIntoView({ block: 'nearest', inline: best.closest('[data-shelf]') ? 'center' : 'nearest', behavior: reduce ? 'auto' : 'smooth' });
+  reveal(best);
   return true;
+}
+
+/**
+ * Scroll what's been focused into view. In a list of rows (`data-nav-row`,
+ * the TV view's home) the row comes to the top, as a console's does, and a
+ * shelf scrolls sideways just far enough to show the tile with room around it.
+ */
+export function reveal(el: HTMLElement): void {
+  const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  const row = el.closest<HTMLElement>('[data-nav-row]');
+  const shelf = el.closest<HTMLElement>('[data-shelf]');
+  if (!row) {
+    el.scrollIntoView({ block: 'nearest', inline: shelf ? 'center' : 'nearest', behavior });
+    return;
+  }
+  row.scrollIntoView({ block: 'start', behavior });
+  if (!shelf) return;
+  const s = shelf.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const room = Math.min(160, s.width / 6);
+  const dx = r.left < s.left + room ? r.left - s.left - room : r.right > s.right - room ? r.right - s.right + room : 0;
+  if (dx) shelf.scrollBy({ left: dx, behavior });
 }
 
 /** The input last used, so the screen can show a controller's buttons or not. */
@@ -131,14 +160,21 @@ export type InputKind = 'pad' | 'pointer' | 'keys';
  * into NavActions. Returns whether a controller is connected and which kind
  * of input was used last.
  */
-export function useNavInput(onAction: (action: NavAction) => void, enabled: boolean): { connected: boolean; input: InputKind } {
+export function useNavInput(
+  onAction: (action: NavAction) => void,
+  enabled: boolean,
+  /** Whether keys beyond the arrows work too (Backspace back, / search), as they do in the TV view. */
+  tv = false,
+): { connected: boolean; input: InputKind } {
   const [connected, setConnected] = useState(false);
   const [input, setInput] = useState<InputKind>('pointer');
   const handler = useRef(onAction);
   const enabledRef = useRef(enabled);
+  const tvRef = useRef(tv);
   useEffect(() => {
     handler.current = onAction;
     enabledRef.current = enabled;
+    tvRef.current = tv;
   });
 
   // Pointer and keys.
@@ -149,7 +185,8 @@ export function useNavInput(onAction: (action: NavAction) => void, enabled: bool
       const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
       const inMenu = !!target?.closest('[role="menu"],[role="dialog"],[role="listbox"]');
       if (typing || inMenu || e.altKey || e.ctrlKey || e.metaKey) return;
-      const action: NavAction | undefined = ({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' } as const)[e.key as 'ArrowUp'];
+      const keys: Record<string, NavAction> = tvRef.current ? { ...ARROWS, ...TV_KEYS } : ARROWS;
+      const action: NavAction | undefined = keys[e.key];
       if (!action) return;
       e.preventDefault();
       setInput('keys');

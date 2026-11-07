@@ -11,7 +11,8 @@ import type { Game } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { focusRing } from '@/shared/appChromeStyles';
 import { BoxArt } from './art';
-import { boxShape, DEFAULT_BOX_SHAPE } from './colors';
+import { tileShape, tileWidth } from './tiles';
+import { tvLift } from './tv';
 import { GameMenuItems, type GameAction } from './GameMenu';
 
 export type TileSize = 'md' | 'lg';
@@ -27,16 +28,8 @@ export interface TileContext {
   onPlay: (game: Game) => void;
   onAction: (game: Game, action: GameAction) => void;
   onFocusGame?: (game: Game) => void;
-}
-
-/** The shape of the tiles in a list: its system's box, or a common one where it mixes systems. */
-function tileShape(system: string | undefined, ctx: TileContext): number {
-  return ctx.mixed || !system ? DEFAULT_BOX_SHAPE : boxShape(system);
-}
-
-/** A tile's width for its size and shape: wider for a wide box, so each box is about as big as a 3:4 one would be. */
-function tileWidth(size: TileSize, shape: number): number {
-  return Math.round((size === 'lg' ? 200 : 148) * Math.sqrt(shape / DEFAULT_BOX_SHAPE));
+  /** Whether tiles have their titles under them (the TV view's home shows the focused one's above the rows instead). */
+  caption?: boolean;
 }
 
 export function GameTile({ game, size, ctx, ...props }: { game: Game; size: TileSize; ctx: TileContext } & Omit<React.ComponentProps<'button'>, 'children'>) {
@@ -48,6 +41,7 @@ export function GameTile({ game, size, ctx, ...props }: { game: Game; size: Tile
           type="button"
           data-nav
           data-game={game.id}
+          data-hint="Details"
           onClick={() => ctx.onOpen(game)}
           onDoubleClick={() => ctx.onPlay(game)}
           onFocus={() => ctx.onFocusGame?.(game)}
@@ -60,17 +54,27 @@ export function GameTile({ game, size, ctx, ...props }: { game: Game; size: Tile
             focusRing,
             // A controller's focus is the tile lifted toward you, as on a TV.
             'in-data-[input=pad]:focus:scale-[1.06] in-data-[input=pad]:focus:bg-foreground/[0.08] in-data-[input=pad]:focus:ring-[3px] in-data-[input=pad]:focus:ring-ring/70',
+            tvLift,
             props.className,
           )}
         >
           <BoxArt game={game} systemName={ctx.systemName(game.system)} shape={tileShape(game.system, ctx)} />
-          <span className="min-w-0 px-0.5">
-            <span className={cn('flex items-center gap-1 font-medium', size === 'lg' ? 'text-base' : 'text-sm')}>
-              <span className="truncate">{game.title}</span>
-              {game.favorite && <Star className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Favorite" />}
+          {ctx.caption === false ? (
+            (game.favorite || ctx.running === game.id) && (
+              <span className="absolute right-3 bottom-3 flex items-center gap-1">
+                {ctx.running === game.id && <span className="rounded-full bg-success px-2 py-0.5 text-xs font-semibold text-white shadow">Playing</span>}
+                {game.favorite && <Star className="size-5 fill-amber-400 text-amber-400 drop-shadow" aria-label="Favorite" />}
+              </span>
+            )
+          ) : (
+            <span className="min-w-0 px-0.5">
+              <span className={cn('flex items-center gap-1 font-medium', size === 'lg' ? 'text-base' : 'text-sm')}>
+                <span className="truncate">{game.title}</span>
+                {game.favorite && <Star className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Favorite" />}
+              </span>
+              {subtitle && <span className={cn('block truncate text-muted-foreground', size === 'lg' ? 'text-sm' : 'text-xs')}>{subtitle}</span>}
             </span>
-            {subtitle && <span className={cn('block truncate text-muted-foreground', size === 'lg' ? 'text-sm' : 'text-xs')}>{subtitle}</span>}
-          </span>
+          )}
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
