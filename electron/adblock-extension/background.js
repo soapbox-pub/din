@@ -124,6 +124,32 @@ chrome.webRequest.onBeforeRequest.addListener(
   ['blocking'],
 );
 
+// Pages and frames get the client hints Chrome sends with them and Electron
+// leaves off (see electron/client-hints.mts, which does the same for the
+// in-memory sessions), whatever the ad blocker's settings: they're this
+// session's, and only a listener here can add them. Valued as this page's
+// own navigator.userAgentData, the same Chromium's.
+const clientHints = (() => {
+  const data = navigator.userAgentData;
+  if (!data) return null;
+  return [
+    { name: 'Sec-CH-UA', value: data.brands.map(({ brand, version }) => `"${brand}";v="${version}"`).join(', ') },
+    { name: 'Sec-CH-UA-Mobile', value: data.mobile ? '?1' : '?0' },
+    { name: 'Sec-CH-UA-Platform', value: `"${data.platform}"` },
+  ];
+})();
+if (clientHints) {
+  chrome.webRequest.onBeforeSendHeaders.addListener(
+    (details) => {
+      const headers = details.requestHeaders ?? [];
+      if (headers.some((h) => h.name.toLowerCase() === 'sec-ch-ua')) return {};
+      return { requestHeaders: [...headers, ...clientHints] };
+    },
+    { urls: ['https://*/*'], types: ['main_frame', 'sub_frame'] },
+    ['blocking', 'requestHeaders'],
+  );
+}
+
 // Every top-level response's COOP goes to the pop-up blocker (popups.mts),
 // and its Onion-Location and Nsite-Location to the address bar
 // (site-locations.mts), blocking on or off: a session.webRequest listener

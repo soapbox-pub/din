@@ -59,6 +59,7 @@ import {
   isUserscriptInstallUrl,
 } from './userscripts.mts';
 import { attachAdblock, ensureAdblockEngine, isAdblockExtension, setupAdblock } from './adblock.mts';
+import { sendNavigationClientHints } from './client-hints.mts';
 import {
   attachPopups,
   justPressed,
@@ -6130,6 +6131,11 @@ app.whenReady().then(() => {
   hardenGuestSession(privateBrowserSession(), { prompts: true });
   hardenGuestSession(torBrowserSession(), { prompts: true });
   secureOnionSites(torBrowserSession());
+  // Pages and frames say they're Chrome in its client hints too, which
+  // Electron leaves off them (electron/client-hints.mts); the persistent
+  // session's come from the ad blocker's extension, Tor's from
+  // secureOnionSites.
+  sendNavigationClientHints(privateBrowserSession());
   hardenGuestSession(devtoolsSession(), { prompts: false });
   // Web pages' notifications go to Din's notification center.
   for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {

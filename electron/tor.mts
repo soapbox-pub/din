@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import { ipcMain } from 'electron';
+import { addNavigationClientHints } from './client-hints.mts';
 import { setTorSocksPort } from './network.mts';
 import { isPlainOnionHost, markTlsOnionHost, tlsOnionHosts, watchTlsOnionHosts } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
@@ -295,21 +296,24 @@ export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): 
  * its CORS answer must match, and the page's is https.
  */
 export function secureOnionSites(s: Electron.Session): void {
-  s.webRequest.onBeforeSendHeaders({ urls: ['https://*.onion/*', 'wss://*.onion/*'] }, (details, callback) => {
+  // The session's one onBeforeSendHeaders listener, so it also gives every
+  // page and frame the client hints Electron leaves off (client-hints.mts).
+  s.webRequest.onBeforeSendHeaders({ urls: ['https://*/*', 'wss://*.onion/*'] }, (details, callback) => {
+    const headers = details.requestHeaders;
+    addNavigationClientHints(details, headers);
     let host: string;
     try {
       const url = new URL(details.url);
-      if (!isPlainOnionHost(url.hostname)) {
-        callback({});
+      if (!url.hostname.endsWith('.onion') || !isPlainOnionHost(url.hostname)) {
+        callback({ requestHeaders: headers });
         return;
       }
       host = url.host;
     } catch {
-      callback({});
+      callback({ requestHeaders: headers });
       return;
     }
     const secure = `https://${host}`;
-    const headers = details.requestHeaders;
     for (const name of Object.keys(headers)) {
       const value = headers[name];
       const header = name.toLowerCase();
