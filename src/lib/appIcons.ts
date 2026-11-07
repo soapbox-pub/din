@@ -24,6 +24,7 @@ export const THEMED_APP_ICONS: Record<string, string[]> = {
   '/icons/apps/devtools.png': ['applications-development'],
   '/icons/apps/file-browser.png': ['system-file-manager', 'org.gnome.Nautilus'],
   '/icons/apps/installer.png': ['calamares', 'system-installer'],
+  '/icons/apps/games.png': ['din-games', 'applications-games', 'input-gaming', 'retroarch', 'org.libretro.RetroArch'],
   '/icons/apps/mail.png': ['din-mail', 'internet-mail'],
   '/icons/apps/media-player.png': ['multimedia-video-player', 'org.gnome.Totem', 'totem'],
   '/icons/apps/messages.png': ['din-messages', 'internet-group-chat'],

@@ -48,7 +48,7 @@ const LIVE = fs.existsSync('/run/din/live');
 const RETRY_MS = 5 * 60_000;
 
 /** The order Settings lists them in; any others follow by id. */
-const ORDER = ['windows', 'vms', 'dictation', 'containers', 'webkit'];
+const ORDER = ['windows', 'vms', 'games', 'dictation', 'containers', 'webkit'];
 
 const STORE_PATH = /^\/nix\/store\/[0-9a-z]{32}-[^/]+$/;
 

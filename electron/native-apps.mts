@@ -1255,6 +1255,62 @@ function extractedAppDirArgv(appDir: string): string[] | null {
   return [runner, '-w', appDir];
 }
 
+/**
+ * Run a program onto the embedded display as an app of its own, named and
+ * drawn as given rather than as the program it is: a game the Games app
+ * plays (electron/games.mts) is "Super Mario World" with its box art in the
+ * Dock, not RetroArch. Its output goes to `log`. Throws, saying why, when
+ * the display can't run.
+ */
+export async function launchAsApp(options: {
+  /** What the app's id is made from, the same each time for the same thing. */
+  key: string;
+  name: string;
+  icon: string | null;
+  categories: string[];
+  argv: string[];
+  cwd: string;
+  env?: Record<string, string>;
+  log?: string;
+}): Promise<ChildProcess> {
+  const display = await requireDisplay();
+  const env = { ...(await appEnvironment(display)), ...options.env };
+  const id = unlistedId(options.key);
+  unlistedApps.set(id, {
+    entry: null,
+    app: {
+      id,
+      desktopId: '',
+      name: options.name,
+      comment: null,
+      icon: options.icon,
+      iconGlyph: false,
+      categories: options.categories,
+      keywords: [],
+      terminal: false,
+      schemes: [],
+    },
+  });
+  let out: number | 'ignore' = 'ignore';
+  if (options.log) {
+    try {
+      fs.mkdirSync(path.dirname(options.log), { recursive: true });
+      out = fs.openSync(options.log, 'w');
+    } catch {
+      out = 'ignore';
+    }
+  }
+  const child = spawn(options.argv[0], options.argv.slice(1), { cwd: options.cwd, env, detached: true, stdio: ['ignore', out, out] });
+  if (typeof out === 'number') fs.closeSync(out);
+  child.unref();
+  const { pid } = child;
+  if (pid) {
+    launchedPids.set(pid, id);
+    child.once('exit', () => launchedPids.delete(pid));
+  }
+  return child;
+}
+
 /** A registry id for an unlisted app, from a name that may be anything. */
 function unlistedId(name: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);

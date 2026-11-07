@@ -70,6 +70,7 @@ const SYSTEM_PERMISSIONS = {
   passwords: /^passwords:(state|create|createWithComputerPassword|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|removePasskey|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|import|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
+  games: /^games:(status|library|play|stop|setFavorite|setVersion|resumeImage|forgetResume)$/,
   capture: /^capture:(status|pointer|pointerImage|takes|take|rename|projects|project|createProject|openProject|updateProject|importBegin|importEnd|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
 } as const;
 export type SystemPermission = keyof typeof SYSTEM_PERMISSIONS;
@@ -88,6 +89,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   phone: /^phone:(changed|messages|incoming)$/,
   // A screen's bytes go to the sender that opened it.
   vms: /^vms:changed$/,
+  games: /^games:changed$/,
   capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
 };
 

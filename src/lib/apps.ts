@@ -284,6 +284,8 @@ export const APPS: readonly AppDefinition[] = [
   // Virtual machines in ~/VMs, run with QEMU and KVM by electron/vms.mts,
   // with their screens in the window.
   dinApp('virtual-machines'),
+  // The games in ~/roms, played full screen in RetroArch by electron/games.mts.
+  dinApp('games'),
   {
     id: 'settings',
     name: 'Settings',

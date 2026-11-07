@@ -81,6 +81,8 @@ export function removalConsequence(feature: Pick<FeatureState, 'id' | 'title'>):
       return 'Windows programs you’ve installed stay on this computer, but won’t open until you install it again.';
     case 'vms':
       return 'Your virtual machines and their disks stay on this computer, but won’t start until you install it again.';
+    case 'games':
+      return 'Your games, saves and where you left them stay on this computer, but won’t play until you install it again.';
     case 'dictation':
       return 'Dictation and Studio’s captions stop working until you install it again.';
     case 'webkit':

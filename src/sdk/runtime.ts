@@ -48,6 +48,7 @@ import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
+import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
 import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
@@ -1188,6 +1189,15 @@ export function installDin(transport: Transport): void {
         v.onDisplayClosed = (cb: (conn: number) => void) => sys.on('vms', 'vms:displayClosed', (conn) => cb(conn as number));
         v.onChanged = (cb: (vms: unknown) => void) => sys.on('vms', 'vms:changed', (list) => cb(list));
         system.vms = v as unknown as VmsBridge;
+      }
+      if (permissions.has('games')) {
+        await sys.ready('games');
+        const g: Record<string, unknown> = {};
+        for (const m of ['status', 'library', 'play', 'stop', 'setFavorite', 'setVersion', 'resumeImage', 'forgetResume']) {
+          g[m] = (...args: unknown[]) => sys.call('games', `games:${m}`, args);
+        }
+        g.onChanged = (cb: (change: unknown) => void) => sys.on('games', 'games:changed', (change) => cb(change));
+        system.games = g as unknown as GamesBridge;
       }
       if (permissions.has('capture')) {
         await sys.ready('capture');

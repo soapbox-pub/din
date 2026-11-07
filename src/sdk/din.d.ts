@@ -31,6 +31,7 @@ import type { VolumesBridge } from '@/lib/volumes';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
+import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
 
 export type Unsubscribe = () => void;
@@ -776,6 +777,8 @@ export type Permission =
   | 'passwords'
   /** QEMU virtual machines in ~/VMs: running them, their screens, snapshots (`din.system.vms`). Virtual Machines. */
   | 'vms'
+  /** The games in ~/roms, and playing them full screen in emulators Din sets up (`din.system.games`). Games. */
+  | 'games'
   /**
    * The camera, the microphone and the whole screen in the app's own page
    * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
@@ -833,6 +836,7 @@ export interface DinSystem {
   phone?: PhoneAppBridge;
   passwords?: PasswordsBridge;
   vms?: VmsBridge;
+  games?: GamesBridge;
   capture?: CaptureBridge;
 }
 

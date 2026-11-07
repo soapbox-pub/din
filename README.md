@@ -753,6 +753,39 @@ optional feature is installed (below); elsewhere Din looks on PATH and in the us
 OVMF folders (`/usr/share/OVMF`, `/usr/share/edk2/ovmf`, …), and needs
 `/dev/kvm` to be read-writable by the user.
 
+### Games
+
+The Games app plays the games in `~/roms`, laid out as RetroArch, EmulationStation
+and Batocera lay them out: a folder per system (`nes`, `snes`, `gba`, `n64`,
+`nds`, `psx`, `dreamcast`…; `electron/game-systems.mts` lists them and the
+other names each goes by), its games in it, zipped or not, a game with
+several files in a folder of its own. Main reads them (`electron/games.mts`,
+`game-library.mts`, the `games` permission), groups each game's copies
+(regions, revisions, discs) by their No-Intro names (`game-names.mts`),
+picks the copy for the computer's language, and hides BIOS files, bad dumps,
+demos and betas. Box art comes from libretro-thumbnails, matched by name, with
+the list of what it has for a system cached in `~/.cache/din/games/art`.
+
+Playing a game runs RetroArch with the system's core, full screen on the
+embedded display, as an app of its own named for the game with its box art
+in the Dock (`launchAsApp` in `electron/native-apps.mts`), where its frames go
+straight to the screen and the performance power mode comes on. Din writes
+RetroArch's settings itself, in `~/.local/share/din/games` (saves, the
+moments games were left at, BIOS files), and never touches
+`~/.config/retroarch`: Vulkan, PipeWire, controllers set up by RetroArch's
+autoconfig profiles, pixel art scaled sharp, the game paused while its window
+isn't in front, and where a game was left saved when it quits and picked up
+when it starts again. Start+Select quits back to the library; the Home button
+or L3+R3 opens RetroArch's menu. The app is driven by a controller as well as
+the mouse (`src/apps/games/games/input.ts`), and full screen it becomes a TV's
+view. GameCube, Wii, 3DS, PS2 and Switch games are listed but can't be played
+yet: their emulators aren't libretro cores.
+
+On DinOS RetroArch and its cores are the Games optional feature, found through
+`DIN_GAMES` (a part per core, all free software in the binary cache);
+elsewhere Din runs `retroarch` from PATH with the cores it finds in the usual
+places.
+
 ### Printing
 
 Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a

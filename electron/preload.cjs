@@ -2062,6 +2062,20 @@ expose('vms', {
   onChanged: (callback) => listen('vms:changed', callback),
 });
 
+// Games (window.dinos.games), backed by electron/games.mts, for the `din
+// games` commands; the Games app has them through its bridge port. Types in
+// src/lib/games.ts.
+/** @type {Record<string, (...args: unknown[]) => unknown>} */
+const games = {};
+for (const method of ['status', 'library', 'play', 'stop', 'setFavorite', 'setVersion', 'resumeImage', 'forgetResume']) {
+  games[method] = (...args) => ipcRenderer.invoke(`games:${method}`, ...args);
+}
+expose('games', {
+  ...games,
+  /** @param {(change: unknown) => void} callback */
+  onChanged: (callback) => listen('games:changed', callback),
+});
+
 // System Monitor bridge (window.dinos.systemMonitor), backed by
 // electron/system-monitor.mts: snapshots of what's running, pushed every few
 // seconds while someone is subscribed, and SIGTERM/SIGKILL for Din's user's

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AppWindow, Ban, Boxes, Download, Globe, Loader2, MoreHorizontal, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
+import { AppWindow, Ban, Boxes, Download, Gamepad2, Globe, Loader2, MoreHorizontal, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +34,7 @@ import { SettingsSection } from '@/shared/settingsSection';
 const ICONS: Record<string, LucideIcon> = {
   windows: AppWindow,
   vms: Monitor,
+  games: Gamepad2,
   dictation: Mic,
   containers: Boxes,
   webkit: Globe,

@@ -141,6 +141,28 @@ let
       size = 470;
       parts = { qemu = pkgs.qemu_kvm; swtpm = pkgs.swtpm; ovmf = pkgs.OVMFFull.fd; };
     };
+    # The Games app's emulators (electron/games.mts, game-systems.mts):
+    # RetroArch, its menu's assets, its controller profiles, the cores' info
+    # and the shaders (sharp-bilinear, for pixel art), and a part for each
+    # core, all free software in the binary cache (Genesis Plus GX, PicoDrive
+    # and Snes9x aren't free, so they'd be built here; SMS Plus GX, BlastEm
+    # and bsnes stand in).
+    games = {
+      title = "Games";
+      description = "RetroArch and its emulators, for the Games app: Nintendo, Sega, PlayStation and more.";
+      size = 410;
+      parts = {
+        retroarch = pkgs.retroarch-bare;
+        assets = pkgs.retroarch-assets;
+        autoconfig = pkgs.retroarch-joypad-autoconfig;
+        core-info = pkgs.libretro-core-info;
+        shaders = pkgs.libretro-shaders-slang;
+      } // lib.mapAttrs' (name: core: lib.nameValuePair "core-${name}" core) {
+        inherit (pkgs.libretro)
+          mesen bsnes sameboy mgba mupen64plus melondsds smsplus-gx blastem beetle-ngp
+          beetle-vb flycast pcsx-rearmed beetle-pce-fast stella prosystem beetle-wswan;
+      };
+    };
     # Dictation's speech recognizer (electron/dictation.mts), and Studio's
     # transcripts (electron/capture.mts): whisper.cpp on the GPU through
     # Vulkan, and Whisper large-v3-turbo quantized to about 550 MB.
@@ -532,6 +554,9 @@ let
     export DIN_QEMU_IMG=${featurePart "vms" "qemu"}/bin/qemu-img
     export DIN_SWTPM=${featurePart "vms" "swtpm"}/bin/swtpm
     export DIN_OVMF=${featurePart "vms" "ovmf"}/FV
+    # Games (electron/games.mts): RetroArch and a part per core, found by
+    # their names in the feature's folder.
+    export DIN_GAMES=${featuresDir}/games
     # Optional features (above, and electron/features.mts).
     export DIN_FEATURES=/etc/dinos/features.json
     export DIN_FEATURES_DIR=${featuresDir}
@@ -1117,6 +1142,8 @@ in
   # it.
   services.udev.packages = [
     pkgs.brightnessctl
+    # Game controllers' raw HID nodes (below).
+    pkgs.game-devices-udev-rules
     libmtpUdevRules
     (pkgs.writeTextDir "lib/udev/rules.d/70-usb-optical-drives.rules" ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080250:*", TAG+="uaccess"
@@ -1125,6 +1152,18 @@ in
       ACTION=="add|remove", SUBSYSTEM=="net", KERNEL=="dinqs0", RUN:="${pkgs.coreutils}/bin/true"
     '')
   ];
+
+  # Game controllers, for the Games app and anything else that plays: the
+  # kernel's own drivers (xpad, hid-playstation, hid-nintendo) handle
+  # Xbox, PlayStation and Switch pads by USB and Bluetooth, and these
+  # rules give the logged-in user what they need beyond evdev, which the
+  # input group already reads: the raw HID nodes of Valve's controllers,
+  # Switch Pro and Joy-Cons, 8BitDo's and others (game-devices-udev-rules,
+  # and steam-hardware's, which brings Steam Input's uinput too), so SDL
+  # sees their gyros, rumble and LEDs (game-devices-udev-rules is in
+  # services.udev.packages, above).
+  hardware.steam-hardware.enable = true;
+  hardware.uinput.enable = true;
 
   # Power profiles for Settings → Power (net.hadess.PowerProfiles over D-Bus,
   # electron/main.mts): power-saver / balanced / performance set the CPU's

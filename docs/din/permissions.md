@@ -41,6 +41,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `capture` | The camera, the microphone and the whole screen in the app's own page (`getUserMedia`; `getDisplayMedia` gives the screen as the shell draws it, with no picker), and `din.system.capture`: projects in `~/Videos/Studio` and their takes, written as they're recorded, and clips the app hands it, the screen recorded with its pointer by wf-recorder, transcripts, and live streams over RTMP through FFmpeg (`electron/capture.mts`). Stream keys stay in main, sealed with the keyring | Studio |
 | `camera` | The camera and the microphone in the app's own page (`getUserMedia`), never the screen. No bridge: main's permission handlers check it (`grantCamera` in `electron/din-apps.mts`) | Camera |
 | `vms` | `din.system.vms`: QEMU virtual machines in `~/VMs` (`src/lib/vms.ts`), run in main by `electron/vms.mts`: creating, starting and stopping them, installing a system on a new one (downloaded by main from the system's own servers, `electron/vm-installers.mts`), their settings and snapshots, and their screens as RFB streams (the bytes go only to the window that opened one). A machine's CD drive takes any path, so this reaches what `fs` reads | Virtual Machines |
+| `games` | `din.system.games`: the games in `~/roms` (`src/lib/games.ts`), read and played by `electron/games.mts`: the library (systems, games and their copies, box art from libretro-thumbnails, favorites, play time), playing a game full screen in RetroArch as an app of its own, quitting it, and where each was left. A game is named by its id and a copy by one of its own paths: the app can't run a file or program of its choosing | Games |
 | `file-folders` | `din.system.fs` scoped to the folders of files the user hands the app, and `din.files.parent(handle)` ([files.md](files.md#some-folders-by-path)) | Preview, Publisher |
 
 A manifest's `din.folders` scopes `din.system.fs` to fixed folders instead
@@ -73,7 +74,7 @@ They don't go through the desktop. When the app connects, the desktop
 checks its grants and asks main for a port from the app straight to each
 granted bridge ([../security-model.md](../security-model.md#how-a-port-is-made)):
 
-Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `capture`
+Bridges with ports of their own: `fs`, `pty`, `assistant`, `assistant-sudo`, `indd`, `volumes`, `mail`, `phone`, `passwords`, `vms`, `games`, `capture`
 (`SYSTEM_PERMISSIONS` in `electron/din-apps.mts`, mirrored in
 `src/lib/dinApps.ts` and `src/sdk/runtime.ts`). A bridge's pushes reach the apps
 granted it: a pty's output goes to the app that spawned it, and what main

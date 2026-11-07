@@ -109,6 +109,7 @@ import { registerMailHandlers } from './mail.mts';
 import { registerPhoneHandlers } from './phone.mts';
 import { registerQuickShareHandlers } from './quickshare.mts';
 import { registerVmsHandlers } from './vms.mts';
+import { registerGamesHandlers } from './games.mts';
 import {
   ensureNightLightTool,
   nightLightStatus,
@@ -6300,6 +6301,7 @@ app.whenReady().then(() => {
   registerPhoneHandlers({ assertShellSender, sendToShell });
   registerQuickShareHandlers({ assertShellSender, sendToShell });
   registerVmsHandlers({ assertShellSender, sendToShell });
+  registerGamesHandlers({ assertShellSender, sendToShell });
   registerTrayHandlers({ assertShellSender, sendToShell });
   registerMenuHandlers({ assertShellSender, sendToShell, shellWindow: () => shellWindow });
   registerOpenUri({ sendToShell });

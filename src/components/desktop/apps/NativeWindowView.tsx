@@ -37,7 +37,7 @@ import { registerDictationTarget } from '@/lib/dictation';
 import { noteNativeInput } from '@/lib/nativeLatency';
 import { useMonitors } from '@/contexts/MonitorsContext';
 import { contains, type Rect } from '@/lib/monitors';
-import { isSteamGame, setGameFullscreen } from '@/lib/gameMode';
+import { isLaunchedGame, isSteamGame, setGameFullscreen } from '@/lib/gameMode';
 
 /**
  * How often the canvas's screen position is re-reported. Pointer and focus
@@ -157,9 +157,9 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
   const syncGameMode = useCallback(() => {
     const host = hostRef.current;
     const surface = getNativeSurface(xid);
-    const game = isSteamGame(surface?.wmClass ?? []) || lockedRef.current;
+    const game = isSteamGame(surface?.wmClass ?? []) || isLaunchedGame(appId) || lockedRef.current;
     setGameFullscreen(xid, !!host && host.matches(':fullscreen') && game);
-  }, [xid]);
+  }, [xid, appId]);
   useEffect(() => () => setGameFullscreen(xid, false), [xid]);
 
   // Dictation while this window has the keyboard types into the app.

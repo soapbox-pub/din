@@ -19,6 +19,7 @@ import { studioArea } from './studio';
 import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
+import { gamesArea } from './games';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
 import { cleanError } from './util';
 
@@ -61,6 +62,7 @@ export const AREAS: readonly Area[] = [
   powerArea,
   datetimeArea,
   vmsArea,
+  gamesArea,
   assistantArea,
   nostrArea,
   featuresArea,
