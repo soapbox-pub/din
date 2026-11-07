@@ -50,11 +50,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1794090021,
-        "narHash": "sha256-NHaovq1vrovzx21Qp525/D5Duyl4n8NpjwQwR9F/rSI=",
+        "lastModified": 1794090951,
+        "narHash": "sha256-WQLsFwo6lV8jlZJrOx3G00vIyRU0j8rACJgxXkiToBI=",
         "ref": "refs/heads/main",
-        "rev": "d2a3f20d03a60bff302c5add0dcb13932de58266",
-        "revCount": 6,
+        "rev": "2a2b4b6b84e0da941ece0360ab1f2e452170e2de",
+        "revCount": 7,
         "type": "git",
         "url": "https://git.shakespeare.diy/npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/din-drive.git"
       },
