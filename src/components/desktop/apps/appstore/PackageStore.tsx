@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, Check, Copy, Info, Loader2, Puzzle, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, Check, Copy, Eye, EyeOff, Info, Loader2, Puzzle, RefreshCw, Trash2, X } from 'lucide-react';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
+import { canTryOn, useTryOn, type TryOn } from '@/components/desktop/apps/appstore/useTryOn';
 import {
   useCopyAddress,
   usePackageAuthor,
@@ -100,7 +101,16 @@ export function PackageStore({
   selected: PackageAddress | null;
   onSelect: (address: PackageAddress | null) => void;
 }) {
-  const handlers = usePackageHandlers(type, onSelect);
+  const base = usePackageHandlers(type, onSelect);
+  const tryOn = useTryOn((pkg) => base.stateOf(pkg).id);
+  // A pointer tried on is the system's for now, but not yet got: Get keeps
+  // it, and its download is Try On's to show.
+  const tryingPointer = (pkg: ThemePackage) => pkg.type === 'cursor' && tryOn.isTrying(pkg);
+  const handlers: PackageHandlers = {
+    ...base,
+    stateOf: (pkg) => (tryingPointer(pkg) ? { id: null, outdated: false, inUse: false, busy: false } : base.stateOf(pkg)),
+    act: (pkg) => (tryingPointer(pkg) ? tryOn.keep() : base.act(pkg)),
+  };
   const { user } = useCurrentUser();
   const following = useFollowingPubkeys();
   const copy = COPY[type];
@@ -126,6 +136,14 @@ export function PackageStore({
     ];
   }, [catalog.packages, following, user]);
 
+  // What's tried on comes off once it's got and worn for real.
+  const triedState = tryOn.trying && handlers.stateOf(tryOn.trying);
+  const triedInUse = !!triedState && triedState.inUse && !triedState.outdated;
+  const { stop } = tryOn;
+  useEffect(() => {
+    if (triedInUse) stop();
+  }, [triedInUse, stop]);
+
   const known =
     selected && catalog.packages.find((pkg) => packageCoordinate(pkg) === packageCoordinate(selected));
 
@@ -147,6 +165,7 @@ export function PackageStore({
             (pkg) => pkg.pubkey === selected.pubkey && pkg.identifier !== selected.identifier,
           )}
           handlers={handlers}
+          tryOn={tryOn}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -158,12 +177,12 @@ export function PackageStore({
                   lookup.isPending ? (
                     <PackageGridSkeleton />
                   ) : lookup.data ? (
-                    <PackageGrid packages={[lookup.data]} handlers={handlers} />
+                    <PackageGrid packages={[lookup.data]} handlers={handlers} tryOn={tryOn} />
                   ) : (
                     <EmptyState message={`No ${copy.noun} is published at that address on your relays.`} />
                   )
                 ) : matches.length > 0 ? (
-                  <PackageGrid packages={matches} handlers={handlers} />
+                  <PackageGrid packages={matches} handlers={handlers} tryOn={tryOn} />
                 ) : catalog.isLoading ? (
                   <PackageGridSkeleton />
                 ) : (
@@ -186,13 +205,13 @@ export function PackageStore({
                 {friends.length > 0 && (
                   <section className="flex flex-col gap-4" aria-label="From people you follow">
                     <SectionHeader title="From People You Follow" />
-                    <PackageGrid packages={friends} handlers={handlers} />
+                    <PackageGrid packages={friends} handlers={handlers} tryOn={tryOn} />
                   </section>
                 )}
                 {others.length > 0 && (
                   <section className="flex flex-col gap-4" aria-label={copy.title}>
                     <SectionHeader title={friends.length ? `More ${copy.title}` : copy.title} subtitle={copy.subtitle} />
-                    <PackageGrid packages={others} handlers={handlers} />
+                    <PackageGrid packages={others} handlers={handlers} tryOn={tryOn} />
                   </section>
                 )}
                 {catalog.hasMore && (
@@ -203,6 +222,7 @@ export function PackageStore({
           </div>
         </div>
       )}
+      {tryOn.trying && <TryOnBar tryOn={tryOn} handlers={handlers} />}
       <DeleteDialog handlers={handlers} />
     </div>
   );
@@ -212,22 +232,24 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function PackageGrid({ packages, handlers }: { packages: ThemePackage[]; handlers: PackageHandlers }) {
+function PackageGrid({ packages, handlers, tryOn }: { packages: ThemePackage[]; handlers: PackageHandlers; tryOn: TryOn }) {
   return (
-    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-5">
       {packages.map((pkg) => (
-        <PackageCard key={packageCoordinate(pkg)} pkg={pkg} handlers={handlers} />
+        <PackageCard key={packageCoordinate(pkg)} pkg={pkg} handlers={handlers} tryOn={tryOn} />
       ))}
     </div>
   );
 }
 
-function PackageCard({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHandlers }) {
+function PackageCard({ pkg, handlers, tryOn }: { pkg: ThemePackage; handlers: PackageHandlers; tryOn: TryOn }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const author = usePackageAuthor(seen ? pkg.pubkey : undefined);
+  const state = handlers.stateOf(pkg);
+  const inUse = state.inUse && !state.outdated;
 
   return (
-    <PackageContextMenu pkg={pkg} handlers={handlers}>
+    <PackageContextMenu pkg={pkg} handlers={handlers} tryOn={tryOn}>
       <div
         ref={ref}
         className="relative flex flex-col overflow-hidden rounded-xl bg-card clay transition-shadow motion-safe:hover:shadow-md"
@@ -238,16 +260,17 @@ function PackageCard({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
           aria-label={`View details for ${pkg.title}`}
           className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         />
-        <PackagePreview pkg={pkg} visible={seen} className="h-28 border-b border-border" />
+        <PackagePreview pkg={pkg} visible={seen} className="h-44 border-b border-border" />
         <div className="flex items-center gap-3 p-4">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold" title={pkg.title}>
+            <p className="truncate text-base font-semibold" title={pkg.title}>
               {pkg.title}
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-sm text-muted-foreground">
               {[author.name ? `by ${author.name}` : null, pkg.size ? formatBytes(pkg.size) : null].filter(Boolean).join(' · ') || COPY[pkg.type].noun}
             </p>
           </div>
+          {canTryOn(pkg) && !inUse && <TryOnButton pkg={pkg} tryOn={tryOn} />}
           <PackagePill pkg={pkg} handlers={handlers} />
         </div>
       </div>
@@ -282,8 +305,10 @@ function PackagePreview({ pkg, visible, className, large = false }: { pkg: Theme
 
   if (pkg.type === 'cursor' || pkg.type === 'skin') {
     const skin = pkg.type === 'skin';
+    // Flex, not grid: a grid's auto row grows to a tall picture's own height
+    // before its h-full resolves, spilling it out of the card.
     return (
-      <div className={cn('grid place-items-center p-4', backdrop, className)} aria-hidden>
+      <div className={cn('flex items-center justify-center overflow-hidden p-4', backdrop, className)} aria-hidden>
         {pkg.image && !failed.has(pkg.image) ? (
           <img
             src={pkg.image}
@@ -292,7 +317,7 @@ function PackagePreview({ pkg, visible, className, large = false }: { pkg: Theme
             draggable={false}
             onError={() => setFailed(new Set([pkg.image as string]))}
             className={cn(
-              'max-h-full max-w-full object-contain',
+              'min-h-0 min-w-0 max-h-full max-w-full object-contain',
               skin ? cn('[image-rendering:pixelated]', large ? 'h-64' : 'h-full') : large ? 'h-24' : 'h-14',
             )}
           />
@@ -355,7 +380,18 @@ function PackagePill({ pkg, handlers }: { pkg: ThemePackage; handlers: PackageHa
 }
 
 /** A theme's right-click menu, mirroring its card's and page's buttons. */
-export function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePackage; handlers: PackageHandlers; children: ReactNode }) {
+export function PackageContextMenu({
+  pkg,
+  handlers,
+  tryOn,
+  children,
+}: {
+  pkg: ThemePackage;
+  handlers: PackageHandlers;
+  /** The App Store's Try On, for a cursor theme or icon set. */
+  tryOn?: TryOn;
+  children: ReactNode;
+}) {
   const state = handlers.stateOf(pkg);
   const copy = useCopyAddress();
   const done = state.inUse && !state.outdated;
@@ -368,6 +404,12 @@ export function PackageContextMenu({ pkg, handlers, children }: { pkg: ThemePack
           {state.outdated ? <RefreshCw aria-hidden /> : state.id ? <Check aria-hidden /> : <ArrowDownToLine aria-hidden />}
           {state.outdated ? 'Update' : state.id ? (pkg.type === 'extension' ? 'Installed' : 'Use') : 'Get'}
         </ContextMenuItem>
+        {tryOn && canTryOn(pkg) && !done && (
+          <ContextMenuItem onSelect={() => (tryOn.isTrying(pkg) ? tryOn.stop() : tryOn.start(pkg))}>
+            {tryOn.isTrying(pkg) ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+            {tryOn.isTrying(pkg) ? 'Stop Trying On' : 'Try On'}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={() => handlers.select(pkg)}>
           <Info aria-hidden />
           View Details
@@ -429,11 +471,13 @@ function PackageDetailPage({
   known,
   more,
   handlers,
+  tryOn,
 }: {
   address: PackageAddress;
   known: ThemePackage | null;
   more: ThemePackage[];
   handlers: PackageHandlers;
+  tryOn: TryOn;
 }) {
   // An extension's release and package are fetched on opening it, when they aren't known yet.
   const lookup = useThemePackage(known && !(known.type === 'extension' && !known.asset) ? null : address);
@@ -487,6 +531,7 @@ function PackageDetailPage({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <PackagePill pkg={pkg} handlers={handlers} />
+              {canTryOn(pkg) && !(state.inUse && !state.outdated) && <TryOnButton pkg={pkg} tryOn={tryOn} />}
               {state.id && (
                 <Button size="sm" variant="ghost" onClick={() => handlers.remove(pkg)} disabled={state.busy} className="h-8 rounded-full px-4">
                   <Trash2 aria-hidden />
@@ -537,10 +582,56 @@ function PackageDetailPage({
         {more.length > 0 && (
           <section className="flex flex-col gap-4" aria-label="More from this creator">
             <SectionHeader title={author.name ? `More from ${author.name}` : 'More from this creator'} />
-            <PackageGrid packages={more} handlers={handlers} />
+            <PackageGrid packages={more} handlers={handlers} tryOn={tryOn} />
           </section>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Try On, or Stop Trying On the one being tried. */
+function TryOnButton({ pkg, tryOn }: { pkg: ThemePackage; tryOn: TryOn }) {
+  const trying = tryOn.isTrying(pkg);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => (trying ? tryOn.stop() : tryOn.start(pkg))}
+      aria-label={trying ? `Stop trying on ${pkg.title}` : `Try on ${pkg.title}`}
+      title={trying ? 'Stop Trying On' : 'Try On'}
+      className="relative z-10 h-8 shrink-0 rounded-full px-4"
+    >
+      {trying && tryOn.loading ? <Loader2 className="animate-spin" aria-hidden /> : trying ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+      {trying ? 'Stop' : 'Try On'}
+    </Button>
+  );
+}
+
+/** Shown while a theme is tried on: what it changed, Get, and taking it off. */
+function TryOnBar({ tryOn, handlers }: { tryOn: TryOn; handlers: PackageHandlers }) {
+  const pkg = tryOn.trying;
+  if (!pkg) return null;
+  return (
+    <div
+      role="region"
+      aria-label="Trying on"
+      className="flex flex-wrap items-center gap-3 border-t border-border bg-card px-4 py-3 shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.2)]"
+    >
+      <Eye className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="min-w-0 flex-1 text-sm">
+        {tryOn.loading ? 'Getting ' : 'Trying on '}
+        <span className="font-semibold">{pkg.title}</span>
+        <span className="text-muted-foreground">
+          {pkg.type === 'cursor'
+            ? ': your pointer everywhere until you stop, when yours comes back.'
+            : ': a few of your apps’ icons, in the Dock and the apps menu.'}
+        </span>
+      </p>
+      <PackagePill pkg={pkg} handlers={handlers} />
+      <Button size="icon" variant="ghost" onClick={tryOn.stop} aria-label="Stop trying on" title="Stop Trying On" className="size-8 rounded-full">
+        <X aria-hidden />
+      </Button>
     </div>
   );
 }
@@ -663,16 +754,16 @@ export function InfoRow({ label, children }: { label: string; children: ReactNod
 
 function PackageGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-5">
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i} className="overflow-hidden rounded-xl bg-card clay">
-          <Skeleton className="h-28 rounded-none" />
+          <Skeleton className="h-44 rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">
-              <Skeleton className="h-4 w-3/5" />
-              <Skeleton className="h-3 w-2/5" />
+              <Skeleton className="h-5 w-3/5" />
+              <Skeleton className="h-4 w-2/5" />
             </div>
-            <Skeleton className="h-8 w-16 rounded-full" />
+            <Skeleton className="h-8 w-20 rounded-full" />
           </div>
         </div>
       ))}

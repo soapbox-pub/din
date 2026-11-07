@@ -30,6 +30,11 @@ export const FILE_ICON_NAMES: Record<FileCategory, string[]> = {
 
 const NO_ICONS: Record<string, string> = {};
 
+/** The installed theme's icons. */
+let installedIcons: Record<string, string> = NO_ICONS;
+/** Icons of a theme being tried on in the App Store, over the installed theme's. */
+let previewIcons: Record<string, string> | null = null;
+/** What the desktop shows: the installed theme's, with any being tried on over them. */
 let desktopIcons: Record<string, string> = NO_ICONS;
 /** The desktop's theme icons that are glyphs to tint (a monochrome theme's), by URL. */
 let desktopGlyphs = new Set<string>();
@@ -48,8 +53,22 @@ function getDesktop(): Record<string, string> {
 
 /** Replace the desktop's theme icons, and say which of them are glyphs, by name. */
 export function setDesktopThemeIcons(icons: Record<string, string>, glyphs: string[]): void {
-  desktopIcons = Object.keys(icons).length > 0 ? icons : NO_ICONS;
+  installedIcons = Object.keys(icons).length > 0 ? icons : NO_ICONS;
   desktopGlyphs = new Set(glyphs.flatMap((name) => (icons[name] ? [icons[name]] : [])));
+  showDesktopIcons();
+}
+
+/**
+ * Show a theme's icons over the installed theme's until called again with
+ * null, without installing it: the App Store's Try On.
+ */
+export function previewDesktopThemeIcons(icons: Record<string, string> | null): void {
+  previewIcons = icons;
+  showDesktopIcons();
+}
+
+function showDesktopIcons(): void {
+  desktopIcons = previewIcons ? { ...installedIcons, ...previewIcons } : installedIcons;
   for (const listener of listeners) listener();
 }
 
