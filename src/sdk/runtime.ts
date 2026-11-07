@@ -53,6 +53,7 @@ import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationD
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import { seedHandles } from '@/shared/handleStore';
+import { TITLE_BAR_CONTROLS } from '@/shared/titleBarControls';
 import {
   bridgeMediaSession,
   grantOf,
@@ -630,10 +631,9 @@ export function installDin(transport: Transport): void {
   // maximizes it and right-clicking opens Din's window menu. Controls and
   // fields inside it, and anything `app-region: no-drag`, keep their own
   // clicks. Each runs after the page's own listeners, which can cancel it.
-  const KEEPS_CLICKS = 'button, input, textarea, select, a[href], [role="tab"], [contenteditable]:not([contenteditable="false"]), [data-window-no-drag]';
   const dragRegion = (target: EventTarget | null): boolean => {
     for (let el = target instanceof Element ? target : null; el; el = el.parentElement) {
-      if (el.matches(KEEPS_CLICKS)) return false;
+      if (el.matches(TITLE_BAR_CONTROLS)) return false;
       const style = getComputedStyle(el);
       const region = style.getPropertyValue('app-region') || style.getPropertyValue('-webkit-app-region');
       if (region === 'drag') return true;

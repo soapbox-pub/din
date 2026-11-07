@@ -6,6 +6,7 @@ import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
 import { windowTile, type AppComponentProps } from '@/lib/apps';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { TITLE_BAR_CONTROLS } from '@/shared/titleBarControls';
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';
 import { getDockTileRect } from '@/lib/dockTiles';
 import { animateFlip, animateGenie, type DockEdge, type GenieRect, type GenieTarget } from '@/lib/genie';
@@ -1330,7 +1331,7 @@ export const Window = memo(function Window({
       // A right press opens the title bar's menu instead.
       if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      if (target.closest('button, input, textarea, [role="tab"], [data-window-no-drag]')) return;
+      if (target.closest(TITLE_BAR_CONTROLS)) return;
       // Presses in menus the title bar's content portals elsewhere (a tab's
       // context menu) bubble here through React, but aren't on the title bar.
       if (!(e.currentTarget as HTMLElement).contains(target)) return;

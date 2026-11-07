@@ -3,6 +3,7 @@ import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import { WindowContextMenu } from '@/components/desktop/WindowContextMenu';
 import { useWindowFrame } from '@/contexts/WindowFrameContext';
 import { cn } from '@/lib/utils';
+import { TITLE_BAR_CONTROLS } from '@/shared/titleBarControls';
 
 const FIELD = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
 
@@ -36,7 +37,9 @@ export function WindowDragRegion({ className, children, ...props }: ComponentPro
           if (!e.currentTarget.contains(e.target as Node)) e.preventDefault();
         }}
         onDoubleClick={(e) => {
-          if (!e.currentTarget.contains(e.target as Node) || (e.target as HTMLElement).closest(FIELD)) return;
+          // Not on a control: two quick clicks on buttons that change under
+          // the pointer (closing tab after tab) would maximize the window.
+          if (!e.currentTarget.contains(e.target as Node) || (e.target as HTMLElement).closest(TITLE_BAR_CONTROLS)) return;
           frame.toggleMaximize();
         }}
         className={cn('touch-none select-none', className)}
