@@ -1027,6 +1027,14 @@ in
     unlockWithDiskPassword = true;
   };
 
+  # Din Drive: the encrypted drive on Nostr and Blossom, mounted at ~/Drive
+  # by a user service once Settings → Drive has set it up (`din-drive init`).
+  # It signs and decrypts through nostrd, so it never holds the keys.
+  services.din-drive = {
+    enable = true;
+    users = [ "din" ];
+  };
+
   # The login keyring (the Secret Service most Linux apps keep passwords and
   # tokens in), with the computer's password, as on any desktop. There's no
   # login screen for pam_gnome_keyring to take the password from, so it comes

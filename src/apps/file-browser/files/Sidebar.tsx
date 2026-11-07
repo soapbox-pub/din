@@ -29,7 +29,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { UnlockVolumeDialog } from '@/shared/UnlockVolumeDialog';
-import { USER_DIRS } from '@/shared/userDirs';
+import { DRIVE_DIR, USER_DIRS } from '@/shared/userDirs';
 import { canDropInto, draggedFiles, dropCopies, takeDrop } from './drag';
 
 interface Place {
@@ -111,6 +111,9 @@ export function Sidebar({
     );
     return [
       { path: home, name: 'Home', icon: Home },
+      ...(present.has(DRIVE_DIR.name)
+        ? [{ path: joinPath(home, DRIVE_DIR.name), name: DRIVE_DIR.name, icon: DRIVE_DIR.icon }]
+        : []),
       ...USER_DIRS.filter((d) => present.has(d.name)).map((d) => ({
         path: joinPath(home, d.name),
         name: d.name,

@@ -8,6 +8,7 @@ import {
   Clock,
   Cloud,
   Dock,
+  FolderLock,
   Grid2x2,
   Info,
   KeyRound,
@@ -51,6 +52,7 @@ export type SectionId =
   | 'password'
   | 'notifications'
   | 'nostr'
+  | 'drive'
   | 'connected'
   | 'assistant'
   | 'themes'
@@ -228,6 +230,13 @@ export const SECTIONS: SettingsSection[] = [
     name: 'Nostr & Storage',
     icon: Cloud,
     search: ['Encrypted sync', 'Relays', 'Blossom servers', 'Nostr links', 'Ask every time', 'sync', 'backup', 'cloud', 'media', 'uploads', 'NIP-65', 'NIP-21', 'default apps', 'open with'],
+  },
+  {
+    id: 'drive',
+    group: 'Account',
+    name: 'Drive',
+    icon: FolderLock,
+    search: ['Din Drive', 'Set Up Drive', 'Trash', 'Empty Trash', 'Restore', 'Up to date', 'Syncing', 'cloud drive', 'Google Drive', 'Dropbox', 'files', 'sync', 'backup', 'encrypted', 'Blossom', 'storage'],
   },
   {
     id: 'connected',

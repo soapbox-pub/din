@@ -138,6 +138,7 @@ import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
+import { registerDriveHandlers } from './drive.mts';
 import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
 import { registerResourceAlertHandlers } from './resource-alerts.mts';
@@ -6366,6 +6367,7 @@ app.whenReady().then(() => {
   registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerFeaturesHandlers({ assertShellSender, sendToShell });
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
+  registerDriveHandlers({ assertShellSender });
   registerPrintingHandlers({
     assertShellSender,
     sendToShell,

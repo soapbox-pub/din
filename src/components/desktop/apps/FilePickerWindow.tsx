@@ -36,7 +36,7 @@ import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useVolumes } from '@/hooks/useVolumes';
 import type { FilePickerOptions, FilePickerResult } from '@/contexts/FilePickerContext';
 import { FileIcon } from '@/shared/FileIcon';
-import { USER_DIRS } from '@/shared/userDirs';
+import { DRIVE_DIR, USER_DIRS } from '@/shared/userDirs';
 import { ContentPane, PillButton, SidebarHeading, SidebarRow, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
 import { focusRing, listRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import {
@@ -267,7 +267,7 @@ function FilePicker({ options, onConfirm, onCancel }: FilePickerProps) {
       const present = new Set(
         (homeListing.data?.entries ?? []).filter((e) => e.kind === 'directory').map((e) => e.name),
       );
-      for (const dir of USER_DIRS) {
+      for (const dir of [DRIVE_DIR, ...USER_DIRS]) {
         if (present.has(dir.name)) places.push({ name: dir.name, path: joinPath(home.data, dir.name), icon: dir.icon });
       }
     }

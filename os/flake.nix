@@ -18,6 +18,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Din Drive, the encrypted drive on Nostr and Blossom mounted at ~/Drive
+    # (configuration.nix, electron/drive.mts). Its repository is
+    # nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din-drive.
+    din-drive = {
+      url = "git+https://git.shakespeare.diy/npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/din-drive.git";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # ngit and git-remote-nostr, for git's nostr:// remotes: Din's own source
     # is one, which system updates fetch (os/din-update.sh). Its repository is
     # nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/relay.ngit.dev/ngit;
@@ -37,7 +45,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, din, nostrd, deckmon, ngit }:
+  outputs = { self, nixpkgs, din, nostrd, din-drive, deckmon, ngit }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -123,14 +131,14 @@
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
-        modules = [ nostrd.nixosModules.default electron revision registry ./configuration.nix ];
+        modules = [ nostrd.nixosModules.default din-drive.nixosModules.default electron revision registry ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
-        modules = [ nostrd.nixosModules.default electron revision registry ./configuration.nix ./debug.nix ];
+        modules = [ nostrd.nixosModules.default din-drive.nixosModules.default electron revision registry ./configuration.nix ./debug.nix ];
       };
 
       packages.${system} = {
@@ -161,6 +169,7 @@
             pkgs = nixpkgs.legacyPackages.${system};
             modules = [
               nostrd.nixosModules.default
+              din-drive.nixosModules.default
               electron
               ./configuration.nix
               # The test driver wants the kernel's messages on its console.

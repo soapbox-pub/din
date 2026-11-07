@@ -268,6 +268,7 @@ import { getFirmwareBridge } from '@/lib/firmware';
 import type { FirmwareState, FirmwareUpdate } from '@/lib/firmware';
 import { useFirmwareState } from '@/hooks/useFirmware';
 import { ConnectedAppsSection } from '@/components/desktop/apps/ConnectedAppsSection';
+import { DriveSettingsSection } from '@/components/desktop/apps/DriveSettingsSection';
 import { AssistantSettingsSection } from '@/components/desktop/apps/AssistantSettingsSection';
 import { WifiSettingsSection } from '@/components/desktop/apps/WifiSettingsSection';
 import { PrintersSettingsSection } from '@/components/desktop/apps/PrintersSettingsSection';
@@ -310,7 +311,8 @@ import type { SectionId } from '@/lib/settingsSections';
  * parts of DinOS kept off the disk until wanted, like Wine and QEMU (OptionalFeaturesSection). Date & Time sets the time zone and clock
  * through `window.dinos.datetime`, and how Din's clocks show the time. Password changes the computer's one password
  * (disk, lock screen, Nostr keys) through `window.dinos.lock`. Nostr & Storage manages Din's encrypted app-data
- * sync, NIP-65 relay list, and Blossom server list. Connected apps lists the
+ * sync, NIP-65 relay list, and Blossom server list. Drive sets up Din Drive, the encrypted drive at ~/Drive,
+ * and shows whether it's in sync and its trash (DriveSettingsSection). Connected apps lists the
  * sites and apps that may use the account through Din's signer
  * (ConnectedAppsSection). Assistant turns OpenCode, the AI agent, on or off
  * and connects its providers (AssistantSettingsSection). The Appearance group's
@@ -457,6 +459,8 @@ export function Settings({ params, windowId }: AppComponentProps) {
       </SectionShell>
     ) : id === 'nostr' ? (
       <NostrStorageSection />
+    ) : id === 'drive' ? (
+      <DriveSettingsSection />
     ) : id === 'connected' ? (
       <ConnectedAppsSection />
     ) : id === 'assistant' ? (

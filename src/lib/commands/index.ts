@@ -5,6 +5,7 @@ import { calendarArea } from './calendar';
 import { contactsArea } from './contacts';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
+import { driveArea } from './drive';
 import { extensionsArea } from './extensions';
 import { featuresArea } from './features';
 import { firewallArea } from './firewall';
@@ -59,6 +60,7 @@ export const AREAS: readonly Area[] = [
   keyboardArea,
   printersArea,
   disksArea,
+  driveArea,
   powerArea,
   datetimeArea,
   vmsArea,
@@ -99,6 +101,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   power: 'power',
   password: { not: 'the password and what sudo asks for are only changed by hand' },
   nostr: 'nostr',
+  drive: 'drive',
   connected: { not: 'giving apps the signer is only done by hand' },
   datetime: 'datetime',
   background: 'background',

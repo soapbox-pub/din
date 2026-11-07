@@ -51,6 +51,8 @@
 //   - window.dinos.indd: InDesign documents read into IDML, for Publisher
 //   - window.dinos.volumes: USB sticks and SD cards, mounted as they're plugged in
 //     and ejected from the Files sidebar
+//   - window.dinos.drive: Din Drive, the encrypted drive at ~/Drive, for
+//     Settings → Drive
 //   - window.dinos.systemMonitor: running processes, CPU, memory and disks, and
 //     ending them, for the System Monitor app
 //   - window.dinos.bluetoothLogin: receive the account key from a phone over
@@ -1867,6 +1869,28 @@ expose('printing', {
     ipcRenderer.on('printing:event', handler);
     return () => ipcRenderer.removeListener('printing:event', handler);
   },
+});
+
+// Drive bridge (window.dinos.drive), backed by electron/drive.mts: Din Drive,
+// the encrypted drive mounted at ~/Drive, for Settings → Drive and `din drive`.
+expose('drive', {
+  /** Whether din-drive is installed, and the running drive's status. */
+  state: () => ipcRenderer.invoke('drive:state'),
+
+  /** Find or create the account's drive and mount it; resolves to its status. */
+  setUp: () => ipcRenderer.invoke('drive:setup'),
+
+  /** The top level of the drive's trash, newest first. */
+  trash: () => ipcRenderer.invoke('drive:trash'),
+
+  /**
+   * Put an item back where it was.
+   * @param {string} id
+   */
+  restore: (id) => ipcRenderer.invoke('drive:restore', id),
+
+  /** Delete everything in the trash for good; resolves to how many items. */
+  emptyTrash: () => ipcRenderer.invoke('drive:emptyTrash'),
 });
 
 // Volumes bridge (window.dinos.volumes), backed by electron/volumes.mts: removable
