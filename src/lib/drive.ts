@@ -42,9 +42,13 @@ export interface DriveState {
   status: DriveStatus | null;
 }
 
-export interface DriveBridge {
+/** What an app granted the `drive` permission has (`din.system.drive`): seeing whether it's on, and turning it on. */
+export interface DriveSetupBridge {
   state(): Promise<DriveState>;
   setUp(): Promise<DriveStatus>;
+}
+
+export interface DriveBridge extends DriveSetupBridge {
   trash(): Promise<DriveTrashItem[]>;
   restore(id: string): Promise<void>;
   emptyTrash(): Promise<number>;
@@ -61,6 +65,12 @@ declare global {
 export function getDriveBridge(): DriveBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.dinos?.drive;
+}
+
+/** Checking on and turning on Drive, from the desktop or an app granted `drive` (Files). */
+export function getDriveSetupBridge(): DriveSetupBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.din?.system.drive ?? window.dinos?.drive;
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */

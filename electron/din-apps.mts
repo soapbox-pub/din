@@ -67,6 +67,8 @@ const SYSTEM_PERMISSIONS = {
   'assistant-sudo': /^assistant:(passwords|answerPassword|approve)$/,
   indd: /^indd:convert$/,
   volumes: /^volumes:(state|mount|unlock|eject)$/,
+  // Checking on Din Drive and turning it on; its trash stays the desktop's.
+  drive: /^drive:(state|setup)$/,
   mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|labels|createLabel|updateLabel|deleteLabel|setLabels|markAllRead|avatar|avatarLookups|setAvatarLookups|inboxTabs|setInboxTabs|tabCounts|tabRules|setTabRule|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
   passwords: /^passwords:(state|create|createWithComputerPassword|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|removePasskey|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|import|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
@@ -88,6 +90,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   'assistant-sudo': null,
   indd: null,
   volumes: /^volumes:(changed|event)$/,
+  drive: null,
   mail: /^mail:changed$/,
   passwords: /^passwords:changed$/,
   phone: /^phone:(changed|messages|incoming)$/,

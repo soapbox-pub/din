@@ -32,6 +32,9 @@ import {
   sortEntriesBy,
 } from '@/lib/fs';
 import type { FsEntry } from '@/lib/fs';
+import { useDriveState } from '@/hooks/useDrive';
+import { DriveWelcome } from '@/shared/DriveWelcome';
+import { DRIVE_DIR } from '@/shared/userDirs';
 import { isDelimitedText, isExtractable, isLayeredImage, isMediaPlayerFile, isPhotoEditable, isPlayableAudio, isPlayableVideo, isTextFile, isVectorEditable, isViewableImage } from '@/lib/fileTypes';
 import {
   invalidateListings,
@@ -586,6 +589,11 @@ function FileBrowserTab({
   // Until the user navigates, the current directory is the home directory.
   const cwd = historyIndex >= 0 ? history[historyIndex] : (home.data ?? null);
   const isTrash = cwd !== null && cwd === trash.data;
+  // ~/Drive before Drive is on: an offer to turn it on instead of a listing.
+  const drive = useDriveState(10_000);
+  const driveOff =
+    cwd !== null && home.data !== undefined && cwd === joinPath(home.data, DRIVE_DIR.name) &&
+    drive.data?.available === true && drive.data.status === null;
 
   useEffect(() => {
     onCwdChange(tabId, cwd);
@@ -1781,7 +1789,9 @@ function FileBrowserTab({
             </div>
           )}
 
-          {listing.isLoading || cwd === null ? (
+          {driveOff ? (
+            <DriveWelcome onReady={() => cwd && refresh(cwd)} />
+          ) : listing.isLoading || cwd === null ? (
             <ListSkeleton />
           ) : listing.isError ? (
             <div className="grid flex-1 place-items-center p-6">

@@ -24,7 +24,9 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useToast } from '@/hooks/useToast';
+import { useDriveState } from '@/hooks/useDrive';
 import { cleanDriveError, describeDrive, getDriveBridge, type DriveTrashItem } from '@/lib/drive';
+import { DriveWelcome } from '@/shared/DriveWelcome';
 import { formatBytes } from '@/lib/fs';
 import { cn } from '@/lib/utils';
 import { settingsCard, settingsEmpty, settingsGroup } from '@/shared/settingsChromeStyles';
@@ -35,8 +37,8 @@ const POLL_MS = 3_000;
 
 /**
  * Settings → Drive: Din Drive, the encrypted drive on Nostr and Blossom that
- * din-drive mounts at ~/Drive (electron/drive.mts). Setting it up finds the
- * account's drive, or creates one; once it's mounted this shows whether it's
+ * din-drive mounts at ~/Drive (electron/drive.mts). Until it's on, the same
+ * welcome as Files' (DriveWelcome); once it's mounted this shows whether it's
  * in sync, where it keeps things, and its trash, where things deleted from it
  * wait 30 days before they're gone for good.
  */
@@ -45,17 +47,10 @@ export function DriveSettingsSection() {
   const { open } = useWindowActions();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [settingUp, setSettingUp] = useState(false);
   const [emptying, setEmptying] = useState(false);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
 
-  const stateQuery = useQuery({
-    queryKey: ['drive', 'state'],
-    queryFn: () => bridge!.state(),
-    enabled: !!bridge,
-    refetchInterval: POLL_MS,
-  });
-  const state = stateQuery.data ?? null;
+  const state = useDriveState(POLL_MS).data ?? null;
   const trashQuery = useQuery({
     queryKey: ['drive', 'trash'],
     queryFn: () => bridge!.trash(),
@@ -68,16 +63,6 @@ export function DriveSettingsSection() {
 
   const failed = (title: string) => (error: unknown) =>
     toast({ title, description: cleanDriveError(error), variant: 'destructive' });
-
-  const setUp = () => {
-    if (!bridge) return;
-    setSettingUp(true);
-    bridge
-      .setUp()
-      .then(() => refresh())
-      .catch(failed('Couldn’t set up Drive'))
-      .finally(() => setSettingUp(false));
-  };
 
   const restore = (item: DriveTrashItem) => {
     bridge
@@ -110,19 +95,7 @@ export function DriveSettingsSection() {
       ) : !state.available ? (
         <SettingsFallback icon={CloudOff}>Din Drive isn’t on this computer.</SettingsFallback>
       ) : !status ? (
-        <SettingsFallback
-          icon={Cloud}
-          action={
-            <Button className="bg-pigment clay-pigment" onClick={setUp} disabled={settingUp}>
-              {settingUp && <Loader2 className="size-4.5 animate-spin" aria-hidden />}
-              {settingUp ? 'Setting Up…' : 'Set Up Drive'}
-            </Button>
-          }
-        >
-          Keep your files in Drive, in Files, and have them on every computer you sign in to. They’re encrypted on this
-          computer before they’re stored on your Blossom servers, and only your account can read them. If you already
-          have a drive, this finds it.
-        </SettingsFallback>
+        <DriveWelcome />
       ) : (
         <>
           <DetailsHero

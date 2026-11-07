@@ -28,6 +28,7 @@ import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
+import type { DriveSetupBridge } from '@/lib/drive';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
@@ -778,6 +779,8 @@ export type Permission =
   | 'indd'
   /** Removable disks: list, mount, unlock, eject (`din.system.volumes`). Files. */
   | 'volumes'
+  /** Din Drive, the encrypted drive at ~/Drive: whether it's on, and turning it on (`din.system.drive`). Files. */
+  | 'drive'
   /** IMAP and SMTP accounts: read, file and send mail (`din.system.mail`). Mail. */
   | 'mail'
   /** The user's phones' text messages: read, send, mark read (`din.system.phone`). Messages. */
@@ -840,6 +843,7 @@ export interface DinSystem {
   assistant?: AssistantBridge;
   indd?: InddBridge;
   volumes?: VolumesBridge;
+  drive?: DriveSetupBridge;
   mail?: MailBridge;
   /** Phones' messages. Adding, pairing and forgetting phones are Settings', not the app's. */
   phone?: PhoneAppBridge;

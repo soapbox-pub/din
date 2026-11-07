@@ -45,6 +45,7 @@ import type { AssistantBridge } from '@/lib/assistant';
 import type { InddBridge } from '@/lib/indd';
 import type { MailBridge } from '@/lib/mail';
 import type { VolumesBridge } from '@/lib/volumes';
+import type { DriveSetupBridge } from '@/lib/drive';
 import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
@@ -1186,6 +1187,13 @@ export function installDin(transport: Transport): void {
         v.onChanged = (cb: (state: unknown) => void) => sys.on('volumes', 'volumes:changed', (s) => cb(s));
         v.onEvent = (cb: (event: unknown) => void) => sys.on('volumes', 'volumes:event', (e) => cb(e));
         system.volumes = v as unknown as VolumesBridge;
+      }
+      if (permissions.has('drive')) {
+        await sys.ready('drive');
+        system.drive = {
+          state: () => sys.call('drive', 'drive:state', []),
+          setUp: () => sys.call('drive', 'drive:setup', []),
+        } as unknown as DriveSetupBridge;
       }
       if (permissions.has('indd')) {
         await sys.ready('indd');

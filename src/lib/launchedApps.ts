@@ -85,6 +85,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'assistant-sudo': 'Approve administrator commands for the Assistant',
   indd: 'Convert InDesign documents',
   volumes: 'Mount and eject disks',
+  drive: 'See whether Drive is on, and turn it on',
   mail: 'Read and send email from your mail accounts',
   phone: 'Read and send text messages from your phones',
   passwords: 'See and change all your saved passwords',

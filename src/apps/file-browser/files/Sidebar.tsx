@@ -20,6 +20,7 @@ import { cleanVolumesError, getVolumesBridge, type Volume } from '@/lib/volumes'
 import { useDirectory } from '@/hooks/useFileSystem';
 import type { Bookmark } from '@/hooks/useFileSystem';
 import { useVolumeActions, useVolumes } from '@/hooks/useVolumes';
+import { useDriveState } from '@/hooks/useDrive';
 import { EjectIcon } from '@/components/icons/EjectIcon';
 import {
   ContextMenu,
@@ -104,6 +105,10 @@ export function Sidebar({
     };
   }, []);
 
+  // Drive shows wherever din-drive is installed, set up or not: before it's on,
+  // ~/Drive in Files offers to turn it on (FileBrowser's DriveWelcome).
+  const driveAvailable = useDriveState(10_000).data?.available === true;
+
   const places = useMemo<Place[]>(() => {
     if (!home) return [];
     const present = new Set(
@@ -111,7 +116,7 @@ export function Sidebar({
     );
     return [
       { path: home, name: 'Home', icon: Home },
-      ...(present.has(DRIVE_DIR.name)
+      ...(present.has(DRIVE_DIR.name) || driveAvailable
         ? [{ path: joinPath(home, DRIVE_DIR.name), name: DRIVE_DIR.name, icon: DRIVE_DIR.icon }]
         : []),
       ...USER_DIRS.filter((d) => present.has(d.name)).map((d) => ({
@@ -121,7 +126,7 @@ export function Sidebar({
       })),
       ...(trashDir ? [{ path: trashDir, name: 'Trash', icon: Trash2, trash: true }] : []),
     ];
-  }, [home, homeListing.data, trashDir]);
+  }, [home, homeListing.data, trashDir, driveAvailable]);
 
   const favorites = bookmarks.map<Place>((b) => ({
     path: b.path,
