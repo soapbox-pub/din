@@ -27,6 +27,7 @@ import { ConversationList } from './messages/ConversationList';
 import { conversationKey, displayName } from './messages/format';
 import { Recipients, type Recipient } from './messages/Recipients';
 import { Thread } from './messages/Thread';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 type Selection =
   | { kind: 'thread'; phoneId: string; threadId: string; addresses: string[] }
@@ -216,7 +217,7 @@ export function Messages() {
           aria-label="Conversations"
           className={cn('flex min-w-0 shrink-0 flex-col', narrow ? 'flex-1' : 'w-80')}
         >
-          <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/messages.png" />} title="Messages">
+          <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/messages.png')} />} title="Messages">
             <ToolButton label="Check for new messages" onClick={refresh}>
               <RefreshCw {...toolIcon} />
             </ToolButton>

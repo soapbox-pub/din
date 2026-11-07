@@ -1,9 +1,18 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, Ref, RefObject } from 'react';
 import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
-import { createGuest, guest, GUEST_EVENTS, guestId, isGuestFullscreen, type GuestElement } from '@/platform/guest';
+import {
+  createGuest,
+  guest,
+  GUEST_EVENTS,
+  guestId,
+  guestSessionReady,
+  isGuestFullscreen,
+  prepareGuestSession,
+  type GuestElement,
+} from '@/platform/guest';
 
 /** Imperative controls of a guest surface. */
 export interface GuestSurfaceHandle {
@@ -74,8 +83,47 @@ export interface GuestSurfaceProps {
  * The one component that embeds a guest: a built-in app, an nsite, a web
  * page, an extension popup, DevTools. It owns the engine element and keeps
  * it in step with the desktop: zoom, visibility, and (opt-in) file drops.
+ *
+ * The first guest in a partition waits for main to ready it
+ * (prepareGuestSession: the browser's ad blocker, before any page in its
+ * session loads). Until then the surface is empty and its handle does
+ * nothing, as before a guest attaches.
  */
-export function GuestSurface({
+export function GuestSurface({ ref, ...props }: GuestSurfaceProps) {
+  const [ready, setReady] = useState(() => guestSessionReady(props.partition));
+  const inner = useRef<GuestSurfaceHandle>(null);
+  useImperativeHandle(ref, () => ({
+    element: () => inner.current?.element() ?? null,
+    id: () => inner.current?.id() ?? null,
+    reload: () => inner.current?.reload(),
+    reloadIgnoringCache: () => inner.current?.reloadIgnoringCache(),
+    loadURL: (url) => inner.current?.loadURL(url),
+    goBack: () => inner.current?.goBack(),
+    goForward: () => inner.current?.goForward(),
+    focus: () => inner.current?.focus(),
+    toggleFullscreen: () => inner.current?.toggleFullscreen(),
+    executeJavaScript: (code) => inner.current?.executeJavaScript(code) ?? Promise.reject(new Error('No guest')),
+    insertCSS: async (css) => {
+      await inner.current?.insertCSS(css);
+    },
+  }), []);
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    void prepareGuestSession(props.partition).then(() => {
+      if (live) setReady(true);
+    });
+    return () => {
+      live = false;
+    };
+    // The partition is fixed for the surface's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!ready) return <div className={props.className ?? 'relative h-full w-full'} style={{ display: 'flex', ...props.style }} />;
+  return <PreparedGuestSurface ref={inner} {...props} />;
+}
+
+function PreparedGuestSurface({
   ref,
   src,
   partition,

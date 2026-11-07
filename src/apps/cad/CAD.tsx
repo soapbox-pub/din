@@ -67,6 +67,7 @@ import { useCadAssistant } from './cad/useCadAssistant';
 import { unitsName } from './cad/assistant';
 import { canWrite, fileTypes, pickFiles, pickSaveFile, windowLaunchFile, writeFile } from '@/shared/fileHandles';
 import { forgetHandle, loadHandle, storeHandle } from '@/shared/handleStore';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const SETTINGS_KEY = 'din:cad:settings';
 const RECENT_KEY = 'din:cad:recent';
@@ -1715,7 +1716,7 @@ function CADWindow() {
           <Menu.Root modal={false}>
             <Menu.Trigger asChild>
               <button type="button" aria-label="Application menu" title="Application menu" className={cn('mr-1 flex h-7 items-center gap-1 rounded-[3px] px-1.5 hover:bg-white/10', FOCUS)}>
-                <img src="/icons/apps/cad.png" alt="" className="size-5" draggable={false} />
+                <img {...bundledIconProps('/icons/apps/cad.png')} alt="" className="size-5" draggable={false} />
                 <span className="text-[11px] text-[#a9b2bf]">▾</span>
               </button>
             </Menu.Trigger>
@@ -2164,7 +2165,7 @@ function CADWindow() {
       {dialog?.kind === 'about' && (
         <Dialog title="About CAD" onCancel={() => setDialog(null)} cancelLabel="Close" width={440}>
           <div className="flex gap-4">
-            <img src="/icons/apps/cad.png" alt="" className="size-16" />
+            <img {...bundledIconProps('/icons/apps/cad.png')} alt="" className="size-16" />
             <div className="space-y-2 text-[12.5px] text-[#c4ccd7]">
               <p className="text-[15px] font-semibold text-white">CAD</p>
               <p>2D drafting that opens DWG drawings from AutoCAD R13 through AutoCAD 2018 and later and DXF files of any version, and saves AutoCAD 2000 DWG files every AutoCAD and DWG viewer reads, or AutoCAD 2004 DXF for programs that only take DXF.</p>
@@ -2320,7 +2321,7 @@ function StartPage({ error, recent, onNew, onOpen, onOpenRecent }: { error: stri
     <div className="absolute inset-0 overflow-y-auto bg-[#212830]">
       <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 p-8">
         <div className="flex items-center gap-5">
-          <img src="/icons/apps/cad.png" alt="" className="size-20 drop-shadow-[0_6px_14px_rgba(0,0,0,0.4)]" draggable={false} />
+          <img {...bundledIconProps('/icons/apps/cad.png')} alt="" className="size-20 drop-shadow-[0_6px_14px_rgba(0,0,0,0.4)]" draggable={false} />
           <div>
             <h1 className="text-[40px] leading-tight font-semibold tracking-tight text-white">CAD</h1>
             <p className="text-[18px] text-[#a9b2bf]">Draw and edit DWG and DXF drawings, the AutoCAD way.</p>

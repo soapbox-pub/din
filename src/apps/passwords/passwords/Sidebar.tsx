@@ -7,6 +7,7 @@ import { SidebarHeading, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/sh
 import { sidebarRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import type { PasswordList } from '@/lib/passwords';
 import { itemsIn, sameSection, type Section } from './vault';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** A section's icon, in the accent as every sidebar row's. */
 function Badge({ icon: Icon }: { icon: ComponentType<{ className?: string; strokeWidth?: number }> }) {
@@ -82,7 +83,7 @@ export function Sidebar({
   const trashed = itemsIn(list, { type: 'trash' }).length;
   return (
     <nav aria-label="Sections" className={cn('flex h-full shrink-0 flex-col', sidebarWidthClass, className)}>
-      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/passwords.png" />} title="Passwords">
+      <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/passwords.png')} />} title="Passwords">
         {actions}
       </SidebarTitle>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-2 [&>*]:shrink-0">

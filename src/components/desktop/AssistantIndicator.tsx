@@ -32,6 +32,7 @@ import {
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { trayFooter, trayHeader, trayRowClass, trayTitle } from './trayPanel';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const ASSISTANT_APP_ID = 'assistant';
 
@@ -103,7 +104,7 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
   return (
     <div className="flex max-h-[min(36rem,80vh)] flex-col">
       <div className={cn(trayHeader, 'justify-start gap-2.5')}>
-        <img src="/icons/apps/assistant.png" alt="" className="size-6 object-contain" />
+        <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="size-6 object-contain" />
         <h2 className={cn(trayTitle, 'flex-1')}>Assistant</h2>
         <Button
           variant="ghost"

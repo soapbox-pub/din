@@ -41,6 +41,7 @@ import { cancelDictation, elementTarget, getDictationState, startDictation } fro
 import { ASSISTANT_APP_ID, assistantNotificationKey } from '@/lib/assistantNotifications';
 import { closeNotification, closeNotificationByKey, notify } from '@/lib/notificationCenter';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
 
@@ -369,7 +370,7 @@ const QuickPrompt = memo(function QuickPrompt() {
           <DialogPrimitive.Title className="sr-only">Ask the assistant</DialogPrimitive.Title>
           <div className="glass-surface rounded-3xl p-2">
             <div className="flex items-center gap-2 px-3 pb-1 pt-2">
-              <img src="/icons/apps/assistant.png" alt="" className="size-6 object-contain" />
+              <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="size-6 object-contain" />
               <p className="text-sm font-medium text-muted-foreground">Ask the assistant</p>
             </div>
             {ready ? (

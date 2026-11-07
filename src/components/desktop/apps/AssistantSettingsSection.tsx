@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
 import { SettingsSection } from '@/shared/settingsSection';
 import { SettingsToken } from '@/shared/settingsChrome';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /**
  * Settings → Assistant: whether Din keeps OpenCode running, the state of
@@ -39,7 +40,7 @@ export function AssistantSettingsSection() {
         <>
           <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
             <div className="flex min-w-0 items-start gap-3">
-              <img src="/icons/apps/assistant.png" alt="" className="size-10 shrink-0 object-contain" />
+              <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="size-10 shrink-0 object-contain" />
               <div className="min-w-0">
                 <Label htmlFor="assistant-enabled" className="cursor-pointer text-sm">
                   Assistant

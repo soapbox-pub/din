@@ -7,7 +7,8 @@
 //     extension Din ships (electron/adblock-extension/), through
 //     chrome.webRequest. A session.webRequest listener would be simpler, but
 //     it silently switches chrome.webRequest off for every extension the user
-//     installs (see the warning in main.mts).
+//     installs (see the warning in main.mts). The extension starts with the
+//     session's first page, which waits until it's blocking (prepareAdblock).
 //   - Network requests in the private session go through session.webRequest
 //     directly: extensions never run there, so nothing is lost.
 //   - Cosmetic filters run in both: Ghostery's page preload asks this process
@@ -30,7 +31,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { app, ipcMain, utilityProcess, webContents } from 'electron';
-import { FiltersEngine, Request } from '@ghostery/adblocker';
+import type { FiltersEngine, Request } from '@ghostery/adblocker';
 import { parse as parseDomain } from 'tldts-experimental';
 
 const require = createRequire(import.meta.url);
@@ -138,9 +139,21 @@ function activeFor(contents: Electron.WebContents): boolean {
 
 // --- The engine ------------------------------------------------------------
 
+let ghosteryModule: typeof import('@ghostery/adblocker') | null = null;
+
+/**
+ * Ghostery's engine, loaded with the first engine (when a browser tab is
+ * opened): until then the main process doesn't hold its code. Everything
+ * that matches requests runs only once there's an engine.
+ */
+function ghostery(): typeof import('@ghostery/adblocker') {
+  ghosteryModule ??= require('@ghostery/adblocker') as typeof import('@ghostery/adblocker');
+  return ghosteryModule;
+}
+
 function loadEngine(): boolean {
   try {
-    engine = FiltersEngine.deserialize(new Uint8Array(fs.readFileSync(engineFile())));
+    engine = ghostery().FiltersEngine.deserialize(new Uint8Array(fs.readFileSync(engineFile())));
     return true;
   } catch {
     engine = null;
@@ -229,7 +242,7 @@ function isExtensionSender(event: Electron.IpcMainEvent | Electron.IpcMainInvoke
 // --- Network blocking in the private session -------------------------------
 
 function requestOf(details: Electron.OnBeforeRequestListenerDetails | Electron.OnHeadersReceivedListenerDetails): Request {
-  return Request.fromRawDetails({
+  return ghostery().Request.fromRawDetails({
     requestId: `${details.id}`,
     tabId: details.webContentsId,
     url: details.url,
@@ -393,6 +406,49 @@ export function ensureAdblockEngine(): void {
   if (engineWanted) return;
   engineWanted = true;
   loadEngine();
+  // A page that didn't wait for prepareAdblock (the desktop does) still starts the extension.
+  void prepareAdblock();
+}
+
+/** The persistent browser session, where the extension blocks. */
+let extensionSession: Electron.Session | null = null;
+let extensionReady: Promise<void> | null = null;
+let extensionStarted: (() => void) | null = null;
+/** Pages wait no longer than this for the extension, should it never say it's ready. */
+const EXTENSION_READY_TIMEOUT_MS = 5000;
+
+/**
+ * Start the extension, and resolve once it blocks: its listeners are up and
+ * it has the engine. It's a renderer of its own (~30 MB with the engine), so
+ * it starts with the first page in the browser session (a tab, an installed
+ * web app, a site's service worker), which waits for this, rather than at
+ * login for a session that may never browse. Never rejects: a page waits
+ * EXTENSION_READY_TIMEOUT_MS at the most, and an extension that fails to
+ * load leaves pages unblocked, as it always did.
+ */
+export function prepareAdblock(): Promise<void> {
+  const s = extensionSession;
+  if (!s) return Promise.resolve();
+  extensionReady ??= new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      console.error('adblock: the extension didn’t say it was ready; pages load anyway');
+      resolve();
+    }, EXTENSION_READY_TIMEOUT_MS);
+    extensionStarted = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    s.extensions.loadExtension(EXTENSION_DIR).catch((error: unknown) => {
+      console.error('adblock: failed to load the extension:', error);
+      extensionStarted?.();
+    });
+  });
+  return extensionReady;
+}
+
+/** prepareAdblock, for the browser session; any other session needs nothing. */
+export function prepareSession(s: Electron.Session): Promise<void> {
+  return s === extensionSession ? prepareAdblock() : Promise.resolve();
 }
 
 /** Whether an installed extension is the ad blocker (hidden from the list). */
@@ -473,9 +529,11 @@ export function setupAdblock(options: {
     if (!isExtensionSender(event) || typeof url !== 'string') return;
     options.onTopLevelResponse(url, text(coop), text(onion), text(nsite));
   });
-  options.browserSession.extensions.loadExtension(EXTENSION_DIR).catch((error) => {
-    console.error('adblock: failed to load the extension:', error);
+  ipcMain.on('adblock-ext:ready', (event) => {
+    if (isExtensionSender(event)) extensionStarted?.();
   });
+  // The extension starts with the session's first page (prepareAdblock).
+  extensionSession = options.browserSession;
 
   for (const s of options.privateSessions) blockInSession(s);
 

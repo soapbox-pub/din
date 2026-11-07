@@ -3,6 +3,7 @@ import { Search, X } from 'lucide-react';
 import { WindowControls, WindowDragRegion } from '@/sdk/react';
 import { cn } from '@/lib/utils';
 import { emptyStateClass, flushPane, focusRing, sidebarHeadingClass, sidebarRowClass, toolButtonBase } from './appChromeStyles';
+import { bundledIconProps } from './iconSizes';
 
 /*
  * The chrome Din's apps share: toolbars and their buttons, sidebar rows,
@@ -348,7 +349,7 @@ export function SidebarTitle({
 
 /** An app's own icon as a sidebar's title shows it. */
 export function SidebarTitleIcon({ src }: { src: string }) {
-  return <img src={src} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />;
+  return <img {...bundledIconProps(src)} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />;
 }
 
 /**

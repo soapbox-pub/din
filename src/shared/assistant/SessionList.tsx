@@ -33,6 +33,7 @@ import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify
 import { cn } from '@/lib/utils';
 import { SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
 import { focusRing, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass } from '@/shared/appChromeStyles';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** How many conversations a project shows before "Show more". */
 const PROJECT_LIMIT = 5;
@@ -348,7 +349,7 @@ export function SessionList({
       style={style}
       className={cn(sidebarWidthClass, 'shrink-0 flex-col', className)}>
       {/* The window's title bar runs across the list's top, so it drags the window too. */}
-      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/assistant.png" />} title="Assistant">
+      <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/assistant.png')} />} title="Assistant">
         {menu}
         <ToolButton label="New conversation" onClick={() => onNew()}>
           <SquarePen className="size-4.5" strokeWidth={1.75} aria-hidden />

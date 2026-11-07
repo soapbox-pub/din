@@ -23,6 +23,9 @@ if (location.origin === EXTENSION_ORIGIN) {
     /** The serialized filter engine, or null before the first one is built. */
     engine: () => ipcRenderer.invoke('adblock-ext:engine'),
 
+    /** Its listeners are up and it has the engine (or knows there's none yet): pages may load. */
+    ready: () => ipcRenderer.send('adblock-ext:ready'),
+
     /** @param {[string, string[]][]} reports newly blocked URLs, by site */
     reportBlocked: (reports) => ipcRenderer.send('adblock-ext:blocked', reports),
 

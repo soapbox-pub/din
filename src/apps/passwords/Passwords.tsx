@@ -49,6 +49,7 @@ import {
   type PasswordsWindow,
   type Section,
 } from './passwords/vault';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** What a launch asks for: an item to show (the browser's "Open in Passwords"). */
 function launchedItem({ params }: Launch): string | null {
@@ -603,7 +604,7 @@ function EmptyList({
 function NothingSelected({ count, autoUnlock }: { count: number; autoUnlock: boolean }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <img src="/icons/apps/passwords.png" alt="" className="size-20 opacity-90" />
+      <img {...bundledIconProps('/icons/apps/passwords.png')} alt="" className="size-20 opacity-90" />
       <p className="text-lg font-medium">{count === 1 ? '1 item' : `${count} items`}</p>
       <p className="flex max-w-xs items-center gap-1.5 text-sm text-muted-foreground">
         <Lock className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />

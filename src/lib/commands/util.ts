@@ -23,9 +23,19 @@ export function command(
   return { path: [area, verb], summary, params, run };
 }
 
-/** Pick one of several things by id, or by a name that matches only it (case-insensitively, whole or in part). */
+/**
+ * Pick one of several things by id (the first of its keys), or by a name
+ * that matches only it (case-insensitively, whole or in part). An id wins
+ * over a name, so `calculator` is Din's Calculator even beside a Linux app
+ * called Calculator.
+ */
 export function pick<T>(items: readonly T[], query: string, keys: (item: T) => (string | number | null | undefined)[], what: string): T {
   const q = query.toLowerCase();
+  const byId = items.filter((item) => {
+    const id = keys(item)[0];
+    return id !== null && id !== undefined && String(id).toLowerCase() === q;
+  });
+  if (byId.length === 1) return byId[0];
   const exact = items.filter((item) => keys(item).some((k) => k !== null && k !== undefined && String(k).toLowerCase() === q));
   if (exact.length === 1) return exact[0];
   const partial = exact.length > 1 ? exact : items.filter((item) => keys(item).some((k) => typeof k === 'string' && k.toLowerCase().includes(q)));

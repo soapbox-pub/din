@@ -164,8 +164,12 @@ dinAdblock.onEngineChanged(() => {
   loadEngine().catch((error) => console.error('adblock: engine reload failed', error));
 });
 
+// This page starts with the browser session's first page, which waits for
+// `ready` (prepareAdblock in electron/adblock.mts), so nothing loads before
+// the filters are in.
 dinAdblock
   .settings()
   .then(applySettings)
   .then(loadEngine)
-  .catch((error) => console.error('adblock: startup failed', error));
+  .catch((error) => console.error('adblock: startup failed', error))
+  .finally(() => dinAdblock.ready());

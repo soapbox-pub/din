@@ -54,6 +54,7 @@ import {
 import { isInstalledSite, nsiteStoreReady, parseCanonicalHost } from './nsite-store.mts';
 import { badgeFromSite, closeSiteNotification, setAppBadge, setSiteNotificationHandlers, showSiteNotification } from './notifications.mts';
 import { adoptTags, forgetSite, PeriodicSyncError, registerSyncRunner, registerTag, tagsOf, unregisterTag } from './periodic-sync.mts';
+import { prepareSession } from './adblock.mts';
 import { WorkerEvents, type DispatchResult } from './worker-events.mts';
 
 /** A capability a site asks the user for, as main.mts files it. */
@@ -263,6 +264,7 @@ const events = new WorkerEvents({
     statusChanged();
   },
   onWorker: (worker) => attach(worker),
+  prepare: prepareSession,
 });
 
 /**

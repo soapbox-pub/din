@@ -9,6 +9,7 @@ import { STATE_LABELS } from './bridge';
 import type { VmAction } from './actions';
 import { VmActionItems } from './ActionItems';
 import { OsBadge } from './fields';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const DOT: Record<VmState, string> = {
   stopped: 'bg-muted-foreground/50',
@@ -57,7 +58,7 @@ export function Sidebar({
 }) {
   return (
     <nav aria-label="Virtual machines" className={cn('flex h-full shrink-0 flex-col', sidebarWidthClass, className)}>
-      <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/virtual-machines.png" />} title="Virtual Machines">
+      <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/virtual-machines.png')} />} title="Virtual Machines">
         <ToolButton label="New virtual machine" title="New Virtual Machine" onClick={onNew}>
           <Plus {...toolIcon} />
         </ToolButton>

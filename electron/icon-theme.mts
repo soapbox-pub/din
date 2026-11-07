@@ -377,8 +377,35 @@ function installedThemes(): { id: string; name: string }[] {
 // Data URLs
 // ---------------------------------------------------------------------------
 
-/** icon path -> data URL, so shared icons are encoded once. */
+/**
+ * icon path -> data URL, so icons asked for again and again (a tray item's,
+ * a notification's, one many apps share) are encoded once. It keeps the
+ * most recently used, ICON_CACHE_CHARS of them (the Map's order is least
+ * recent first), not every icon on the system: the shell keeps what it was
+ * sent, and every app's icon together is megabytes.
+ */
 const iconDataUrls = new Map<string, string | null>();
+const ICON_CACHE_CHARS = 512 * 1024;
+let iconCacheChars = 0;
+
+function cacheIconDataUrl(file: string, url: string | null): void {
+  const old = iconDataUrls.get(file);
+  if (old) iconCacheChars -= old.length;
+  iconDataUrls.delete(file);
+  iconDataUrls.set(file, url);
+  if (url) iconCacheChars += url.length;
+  for (const [oldest, oldUrl] of iconDataUrls) {
+    if (iconCacheChars <= ICON_CACHE_CHARS) break;
+    iconDataUrls.delete(oldest);
+    if (oldUrl) iconCacheChars -= oldUrl.length;
+  }
+}
+
+function forgetIconDataUrl(file: string): void {
+  const old = iconDataUrls.get(file);
+  if (old) iconCacheChars -= old.length;
+  iconDataUrls.delete(file);
+}
 
 /**
  * Inline an icon file as a data: URL. The shell's CSP allows `img-src
@@ -390,7 +417,10 @@ const iconDataUrls = new Map<string, string | null>();
  */
 function iconDataUrl(file: string): string | null {
   const cached = iconDataUrls.get(file);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    cacheIconDataUrl(file, cached);
+    return cached;
+  }
 
   let url: string | null;
   try {
@@ -417,7 +447,7 @@ function iconDataUrl(file: string): string | null {
   } catch {
     url = null;
   }
-  iconDataUrls.set(file, url);
+  cacheIconDataUrl(file, url);
   return url;
 }
 
@@ -884,7 +914,7 @@ async function installPublished(manifest: unknown): Promise<{ id: string; missin
 
   // An updated theme keeps its paths, so what was read from them is stale.
   const dir = path.join(base, id) + path.sep;
-  for (const file of iconDataUrls.keys()) if (file.startsWith(dir)) iconDataUrls.delete(file);
+  for (const file of [...iconDataUrls.keys()]) if (file.startsWith(dir)) forgetIconDataUrl(file);
   forgetIconIndex();
 
   const have = new Set(['hicolor', ...installedThemes().map((t) => t.id)]);

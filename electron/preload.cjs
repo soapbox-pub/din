@@ -811,6 +811,17 @@ expose('guestVisibility', {
   set: (webContentsId, hidden) => ipcRenderer.send('guestVisibility:set', webContentsId, hidden),
 });
 
+// Guest session bridge (window.dinos.guestSession), backed by the
+// guestSession:prepare handler in main.mts: what a session needs running
+// before its first page loads (the browser's: its ad blocker).
+expose('guestSession', {
+  /**
+   * @param {string} partition
+   * @returns {Promise<void>}
+   */
+  prepare: (partition) => ipcRenderer.invoke('guestSession:prepare', partition),
+});
+
 // Guest file drop bridge (window.dinos.guestFileDrop), backed by the
 // guestFileDrop:* handler in main.mts: replays a drag of files from Files
 // into a <webview> page, so the page can take them as files.

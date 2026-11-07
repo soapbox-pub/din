@@ -15,13 +15,46 @@ export interface GuestFileDropBridge {
   send(webContentsId: number, type: 'over' | 'drop' | 'cancel', x: number, y: number, paths: string[]): void;
 }
 
+/** Has main start what a session needs before its first page loads (the browser's: its ad blocker). */
+export interface GuestSessionBridge {
+  prepare(partition: string): Promise<void>;
+}
+
 declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */
     guestVisibility?: GuestVisibilityBridge;
     /** Present only inside the Electron shell. */
     guestFileDrop?: GuestFileDropBridge;
+    /** Present only inside the Electron shell. */
+    guestSession?: GuestSessionBridge;
   }
+}
+
+const preparing = new Map<string, Promise<void>>();
+const prepared = new Set<string>();
+
+/** Whether a partition's pages can load now, without waiting on prepareGuestSession. */
+export function guestSessionReady(partition: string): boolean {
+  return prepared.has(partition) || !window.dinos?.guestSession;
+}
+
+/**
+ * Have main ready a partition for pages, once per partition: the first
+ * guest in each waits a round trip, and the browser's first page waits for
+ * its ad blocker to be blocking. Never rejects: a failure is main's to report.
+ */
+export function prepareGuestSession(partition: string): Promise<void> {
+  let ready = preparing.get(partition);
+  if (!ready) {
+    ready = (window.dinos?.guestSession?.prepare(partition) ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => {
+        prepared.add(partition);
+      });
+    preparing.set(partition, ready);
+  }
+  return ready;
 }
 
 /** A guest's host element in the desktop's document. Opaque outside src/platform. */

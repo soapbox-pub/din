@@ -14,7 +14,6 @@ import {
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CursorThemeView } from '@/shared/CursorThemeView';
 import { FileIcon } from '@/shared/FileIcon';
 
 /** Cap for text reads; bigger files show read-only, truncated. */
@@ -24,6 +23,8 @@ const TEXT_MAX_CHARS = 512 * 1024;
 
 /** pdf.js is big: it's loaded the first time a PDF is shown. */
 const PdfView = lazy(() => import('@/shared/PdfView'));
+/** The cursor converter too: the first time a cursor theme is shown. */
+const CursorThemeView = lazy(() => import('@/shared/CursorThemeView').then((m) => ({ default: m.CursorThemeView })));
 
 export interface FileViewerBodyProps {
   path: string;
@@ -85,7 +86,13 @@ export function FileViewerBody({
       </Suspense>
     );
   }
-  if (isCursorTheme(name)) return <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />;
+  if (isCursorTheme(name)) {
+    return (
+      <Suspense fallback={null}>
+        <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />
+      </Suspense>
+    );
+  }
   if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
   if (category === 'document' || category === 'disk' || category === 'program' || category === 'image' || category === 'video') {
     return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;

@@ -45,6 +45,7 @@ The surface keeps the guest in step with the desktop on its own:
 | Zoom | The interface zoom times `pageZoom`, reapplied on every `dom-ready` (the engine resets it, and a mismatch offsets hit-testing) |
 | Visibility | `dinos.guestVisibility`, from the window's visibility and `hidden` |
 | File drops | With `acceptFileDrops`, a cover during a Files drag forwards it to `dinos.guestFileDrop` |
+| The session | The first guest in each partition waits for `dinos.guestSession.prepare(partition)` before its element is made (`prepareGuestSession`, once per partition). Main starts what the session needs: for the browser's, its ad blocker's extension, which runs only once something browses and must be blocking before the first request. Until then the surface is empty and its handle does nothing |
 
 Other guest plumbing goes through `guest.ts` helpers rather than the
 element: `GuestInputHost` (pointer forwarding, `findGuest`),

@@ -41,6 +41,7 @@ import { useCalendarData, usePubkey, usePublish, writeRelays } from './calendar/
 import { Sidebar } from './calendar/Sidebar';
 import { CALENDAR_COLORS, localSource, NOSTR, sourcesOf, useSourcePrefs, type Source, type SourceId } from './calendar/sources';
 import { TimeGrid } from './calendar/TimeGrid';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const VIEW_KEY = 'din:calendar:view';
 const SIDEBAR_KEY = 'din:calendar:sidebar';
@@ -414,7 +415,7 @@ export function Calendar() {
       <div className="relative flex h-full text-foreground">
         {showSidebar && (
           <aside aria-label="Calendars" className={`flex shrink-0 flex-col ${sidebarWidthClass}`}>
-            <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/calendar.png" />} title="Calendar">
+            <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/calendar.png')} />} title="Calendar">
               <ToolButton label="Hide sidebar" onClick={() => { localStorage.setItem(SIDEBAR_KEY, 'hidden'); setSidebarOpen(false); }}>
                 <PanelLeft {...toolIcon} />
               </ToolButton>

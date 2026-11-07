@@ -1,10 +1,9 @@
-import { memo, useContext, useRef, type ComponentProps, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useContext, useRef, type ComponentProps, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, FolderOpen, SquareArrowOutUpRight } from 'lucide-react';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { FileLinkBaseContext, filePathOfHref } from '@/shared/assistant/fileLinks';
-import { useHighlightedCode } from '@/shared/assistant/highlight';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -166,10 +165,16 @@ function FileLink({ path, className, children }: { path: string; className: stri
   );
 }
 
+/**
+ * Syntax coloring, with CodeMirror's language support (some 300 KB), loaded
+ * with the first code block shown: until then, and in a window with none,
+ * code is plain.
+ */
+const HighlightedCode = lazy(() => import('@/shared/assistant/highlight').then((m) => ({ default: m.HighlightedCode })));
+
 /** A fenced block, its syntax colored, with its language and a copy button above it. */
 function CodeBlock({ language, code }: { language?: string; code: string }) {
   const ref = useRef<HTMLPreElement>(null);
-  const highlighted = useHighlightedCode(code, language);
   return (
     <div className="my-4 overflow-hidden rounded-xl bg-muted/60 first:mt-0 last:mb-0">
       <div className="flex items-center justify-between py-1 pl-4 pr-1.5">
@@ -177,7 +182,11 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
         <CopyButton text={() => ref.current?.textContent ?? ''} label="Copy code" showLabel />
       </div>
       <pre ref={ref} className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed">
-        <code>{highlighted}</code>
+        <code>
+          <Suspense fallback={code}>
+            <HighlightedCode code={code} language={language} />
+          </Suspense>
+        </code>
       </pre>
     </div>
   );

@@ -50,6 +50,7 @@ import {
 } from './paint/raster';
 import { setSoundEnabled, sfx, startScribble, scribbleSpeed, stopScribble, type ScribbleKind } from './paint/sounds';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const MAX_UNDO = 40;
 const MAX_BYTES = 256 * 1024 * 1024;
@@ -1926,7 +1927,7 @@ export function Paint() {
       {dialog === 'about' && (
         <RetroDialog title="About Paint" onClose={() => setDialog(null)} className="w-[22rem]">
           <div className="flex gap-3">
-            <img src="/icons/apps/paint.png" alt="" className="size-12 shrink-0" />
+            <img {...bundledIconProps('/icons/apps/paint.png')} alt="" className="size-12 shrink-0" />
             <div className="space-y-2">
               <p className="font-bold">Din Paint</p>
               <p>Version 1.0 for Din</p>

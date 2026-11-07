@@ -72,10 +72,10 @@ import path from 'node:path';
 import dns from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import { app, ipcMain, net, powerMonitor, safeStorage } from 'electron';
-import { ImapFlow, type FetchMessageObject, type FetchQueryObject, type ListResponse, type MessageAddressObject, type MessageStructureObject, type SearchObject } from 'imapflow';
-import { createTransport } from 'nodemailer';
-import MailComposer from 'nodemailer/lib/mail-composer';
-import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
+import type { ImapFlow, FetchMessageObject, FetchQueryObject, ListResponse, MessageAddressObject, MessageStructureObject, SearchObject } from 'imapflow';
+import type { createTransport } from 'nodemailer';
+import type MailComposer from 'nodemailer/lib/mail-composer';
+import type { simpleParser, AddressObject, ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
@@ -351,12 +351,45 @@ async function discover(email: string): Promise<MailSettings> {
 // Connections
 // ---------------------------------------------------------------------------
 
+// IMAP, SMTP and MIME are 2.5 MB of source with what they bring in, which
+// the main process would hold from startup whether or not there's an
+// account. They're loaded the first time Mail talks to a server, or parses
+// a message: every way there awaits mailLibs() first (watch() runs itself
+// again once they're in), and from then on they're `libs`.
+
+interface MailLibs {
+  ImapFlow: typeof ImapFlow;
+  createTransport: typeof createTransport;
+  MailComposer: typeof MailComposer;
+  simpleParser: typeof simpleParser;
+}
+
+let libs: MailLibs | null = null;
+let loadingLibs: Promise<MailLibs> | null = null;
+
+function mailLibs(): Promise<MailLibs> {
+  loadingLibs ??= Promise.all([import('imapflow'), import('nodemailer'), import('nodemailer/lib/mail-composer'), import('mailparser')]).then(
+    ([imap, mailer, composer, parser]) =>
+      (libs = { ImapFlow: imap.ImapFlow, createTransport: mailer.createTransport, MailComposer: composer.default, simpleParser: parser.simpleParser }),
+    (error: unknown) => {
+      loadingLibs = null;
+      throw error;
+    },
+  );
+  return loadingLibs;
+}
+
+function loadedLibs(): MailLibs {
+  if (!libs) throw new Error('Mail’s libraries aren’t loaded');
+  return libs;
+}
+
 function isLocal(host: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
 function imapClient(server: MailServer, password: string, idle?: { autoIdleDelay: number; maxIdleTime: number }): ImapFlow {
-  return new ImapFlow({
+  return new (loadedLibs().ImapFlow)({
     ...idle,
     host: server.host,
     port: server.port,
@@ -374,7 +407,7 @@ function imapClient(server: MailServer, password: string, idle?: { autoIdleDelay
 }
 
 function smtpTransport(server: MailServer, password: string) {
-  return createTransport({
+  return loadedLibs().createTransport({
     host: server.host,
     port: server.port,
     secure: server.secure,
@@ -659,6 +692,7 @@ function listen(a: StoredAccount, client: ImapFlow): void {
 }
 
 async function connection(a: StoredAccount, touch = true): Promise<ImapFlow> {
+  await mailLibs();
   const s = sessionOf(a.id, touch);
   if (s.client?.usable) {
     watch(a, s);
@@ -699,6 +733,15 @@ const RETRY_MAX_MS = 5 * 60_000;
  */
 function watch(a: StoredAccount, s: Session): void {
   if (s.watching) return;
+  if (!libs) {
+    mailLibs().then(
+      () => {
+        if (sessions.get(a.id) === s && accounts.includes(a)) watch(a, s);
+      },
+      (error: unknown) => console.error('mail:', error),
+    );
+    return;
+  }
   s.watching = true;
   if (s.retry) clearTimeout(s.retry);
   s.retry = null;
@@ -1535,7 +1578,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
   const kept = store.summaries(mailbox, [uid]).get(uid)?.summary;
   const stored = kept && store.body(mailbox, uid);
   if (kept && stored) {
-    const entry = { summary: kept, mail: await simpleParser(stored) };
+    const entry = { summary: kept, mail: await (await mailLibs()).simpleParser(stored) };
     remember(key, entry);
     return entry;
   }
@@ -1545,7 +1588,7 @@ async function parsedMessage(a: StoredAccount, mailbox: string, uid: number): Pr
     if (!meta) throw new Error('That message is gone.');
     if ((meta.size ?? 0) > MAX_MESSAGE_BYTES) throw new Error('That message is too big to open here.');
     const raw = ((meta.size ?? 0) > SKIM_BYTES && (await skimmedMessage(client, uid, meta.bodyStructure))) || (await wholeMessage(client, uid));
-    const mail = await simpleParser(raw);
+    const mail = await loadedLibs().simpleParser(raw);
     const entry = { summary: summary(meta, isGmail(client)), mail };
     if (store.box(mailbox)) {
       store.putSummaries(mailbox, [entry.summary]);
@@ -2120,7 +2163,7 @@ function outgoing(v: unknown): OutgoingMessage {
 }
 
 function composer(a: StoredAccount, m: OutgoingMessage, messageId: string): MailComposer {
-  return new MailComposer({
+  return new (loadedLibs().MailComposer)({
     messageId,
     from: { name: a.fullName, address: a.email },
     to: m.to,
@@ -2138,6 +2181,7 @@ function composer(a: StoredAccount, m: OutgoingMessage, messageId: string): Mail
 
 /** The message as sent; `keepBcc` for the copies kept in Sent and Drafts. */
 async function buildRaw(a: StoredAccount, m: OutgoingMessage, messageId: string, keepBcc: boolean): Promise<Buffer> {
+  await mailLibs();
   const node = composer(a, m, messageId).compile();
   node.keepBcc = keepBcc;
   return new Promise((resolve, reject) => node.build((error, raw) => (error ? reject(error) : resolve(raw))));
@@ -2421,6 +2465,7 @@ async function unsubscribeMessage(a: StoredAccount, mailbox: string, uid: number
 // ---------------------------------------------------------------------------
 
 async function verify(imap: MailServer, smtp: MailServer, password: string): Promise<void> {
+  await mailLibs();
   const client = imapClient(imap, password);
   client.on('error', () => {});
   try {
