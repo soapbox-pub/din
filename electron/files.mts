@@ -1072,21 +1072,33 @@ interface FoundEntry {
   mtimeMs: number | null;
 }
 
-/** Paths beneath `root` whose names contain `query` (any case), by fd. */
+/**
+ * A search's words: a name matches when it contains every one, in any order
+ * and any case, so "tenna 3d" finds tenna-key-3d.
+ */
+function findWords(query: string): string[] {
+  return query.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Paths beneath `root` whose names contain every word of `query` (any case), by fd. */
 async function fdFind(root: string, query: string, hidden: boolean, signal: AbortSignal): Promise<string[]> {
+  const [first, ...rest] = findWords(query);
+  if (first === undefined) return [];
   const { stdout } = await runCommand('fd', [
     '--fixed-strings', '--ignore-case', '--no-ignore', '--print0', '--color', 'never',
     '--max-results', String(MAX_FIND + 1),
     ...(hidden ? ['--hidden'] : []),
     ...FIND_SKIPPED_DIRS.flatMap((d) => ['--exclude', d]),
-    '--', query, root,
+    ...rest.flatMap((word) => ['--and', word]),
+    '--', first, root,
   ], { timeout: FIND_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, signal });
   return stdout.split('\0').filter(Boolean).map((p) => path.normalize(p));
 }
 
 /** The same, by walking breadth first, for systems without fd. */
 async function walkFind(root: string, query: string, hidden: boolean, signal: AbortSignal): Promise<string[]> {
-  const needle = query.toLowerCase();
+  const words = findWords(query);
+  if (words.length === 0) return [];
   const skipped = new Set(FIND_SKIPPED_DIRS);
   const found: string[] = [];
   let budget = MAX_FIND_SCAN;
@@ -1105,7 +1117,8 @@ async function walkFind(root: string, query: string, hidden: boolean, signal: Ab
         if (!hidden && (d.name.startsWith('.') || isWindowsHidden(d.name))) continue;
         budget--;
         const p = path.join(dir, d.name);
-        if (d.name.toLowerCase().includes(needle)) found.push(p);
+        const name = d.name.toLowerCase();
+        if (words.every((word) => name.includes(word))) found.push(p);
         if (d.isDirectory() && !skipped.has(d.name)) next.push(p);
       }
     }
@@ -1118,7 +1131,7 @@ async function walkFind(root: string, query: string, hidden: boolean, signal: Ab
 const finds = new Map<number, AbortController>();
 
 /**
- * Files and folders beneath `root` whose names contain `query`, as entries
+ * Files and folders beneath `root` whose names contain `query`'s words, as entries
  * named by their path relative to it. A window's new search stops its last.
  */
 async function findFiles(sender: number, root: string, query: string, hidden: boolean) {

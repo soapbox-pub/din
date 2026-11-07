@@ -103,8 +103,6 @@ let adoption: Promise<unknown> | null = null;
 let nextTabId = 0;
 const newTabId = () => `files-${nextTabId++}`;
 
-/** How long type-ahead keeps adding to what's been typed (ms). */
-const TYPEAHEAD_MS = 1000;
 /** How long typing in the search field pauses before subfolders are searched (ms). */
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -580,7 +578,6 @@ function FileBrowserTab({
   const [focused, setFocused] = useState(false);
   const [columns, setColumns] = useState(1);
   const [menuFor, setMenuFor] = useState<'items' | 'background'>('background');
-  const typeahead = useRef({ text: '', at: 0 });
   const startingRef = useRef(new Set<string>());
   const rootRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -612,8 +609,12 @@ function FileBrowserTab({
     if (needle && searchContents && !isTrash) {
       items = foundCurrent ? found.data.entries : [];
     } else if (needle) {
-      const lower = needle.toLowerCase();
-      const matches = (name: string) => basename(name).toLowerCase().includes(lower);
+      // Every word, in any order, as the search of subfolders matches them.
+      const words = needle.toLowerCase().split(/\s+/);
+      const matches = (name: string) => {
+        const lower = basename(name).toLowerCase();
+        return words.every((word) => lower.includes(word));
+      };
       items = items.filter((e) => matches(e.name));
       // The last search's finds narrow as the next one is typed.
       const deeper = isTrash ? [] : (found.data?.entries ?? []).filter((e) => e.name.includes('/') && matches(e.name));
@@ -1412,34 +1413,26 @@ function FileBrowserTab({
         else selectOnly(null);
         return;
       case ' ':
-        if (typeahead.current.text === '' || Date.now() - typeahead.current.at > TYPEAHEAD_MS) {
-          handled();
-          if (quickLook) setQuickLook(false);
-          else if (cursor ?? selectedNames[0]) {
-            if (!cursor) setCursor(selectedNames[0]);
-            setQuickLook(true);
-          }
-          return;
+        handled();
+        if (quickLook) setQuickLook(false);
+        else if (cursor ?? selectedNames[0]) {
+          if (!cursor) setCursor(selectedNames[0]);
+          setQuickLook(true);
         }
-        break;
+        return;
     }
 
-    // Type-ahead: typing a name's first letters selects it.
-    if (e.key.length === 1) {
-      const now = Date.now();
-      const t = typeahead.current;
-      t.text = now - t.at > TYPEAHEAD_MS ? e.key.toLowerCase() : t.text + e.key.toLowerCase();
-      t.at = now;
-      const from = index === -1 ? 0 : t.text.length === 1 ? index + 1 : index;
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[(from + i) % entries.length];
-        if (basename(entry.name).toLowerCase().startsWith(t.text)) {
-          handled();
-          selectOnly(entry.name);
-          reveal();
-          return;
-        }
-      }
+    // Typing searches: the first character opens the search field with it,
+    // and the rest go straight into the field.
+    if (e.key.length === 1 && !ctrl && !e.altKey) {
+      handled();
+      const text = (filter ?? '') + e.key;
+      setFilter(text);
+      requestAnimationFrame(() => {
+        const field = filterRef.current;
+        field?.focus();
+        field?.setSelectionRange(text.length, text.length);
+      });
     }
   };
 

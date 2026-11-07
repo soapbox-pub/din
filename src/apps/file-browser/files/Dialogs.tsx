@@ -357,7 +357,7 @@ const SHORTCUTS: [string, string][] = [
   ['Back / forward', 'Alt+← / Alt+→'],
   ['Home folder', 'Alt+Home'],
   ['Type a location', 'Ctrl+L'],
-  ['Search this folder and subfolders', 'Ctrl+F'],
+  ['Search this folder and subfolders', 'Start typing · Ctrl+F'],
   ['Select all', 'Ctrl+A'],
   ['Copy / cut / paste', 'Ctrl+C / Ctrl+X / Ctrl+V'],
   ['Undo', 'Ctrl+Z'],
