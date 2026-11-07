@@ -691,6 +691,13 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
   args.push(
     '-display', 'none',
     '-vnc', `unix:${opt(path.join(rundir, 'vnc.sock'))}`,
+    // Nothing connects to it: it's here for its steady 30 ms look at the
+    // screen. QEMU looks for changes as often as its fastest display asks,
+    // and VNC alone asks less and less often while the screen sits still
+    // (up to 3 s), so the first change after a pause, the pointer moving
+    // or what a click did, showed up to a step late: 420 ms for what the
+    // guest drew in 250.
+    '-spice', `unix=on,addr=${opt(path.join(rundir, 'refresh.sock'))},disable-ticketing=on`,
     '-qmp', `unix:${opt(path.join(rundir, 'qmp.sock'))},server=on,wait=off`,
     '-pidfile', path.join(rundir, 'qemu.pid'),
   );
