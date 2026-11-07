@@ -8,7 +8,7 @@ import { useEffect, useState, type ComponentProps, type Ref } from 'react';
 import type { Game } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { useCachedArt } from './artCache';
-import { systemColors } from './colors';
+import { DEFAULT_BOX_SHAPE, systemColors } from './colors';
 
 /** How far off screen a tile starts looking for its picture, so it's there by the time it scrolls in. */
 const NEAR = '600px';
@@ -42,44 +42,46 @@ export function ArtImage({ src, alt = '', ...props }: Omit<ComponentProps<'img'>
 }
 
 /** A cover for a game with no box art: its title on its system's colors. */
-export function MadeCover({ game, systemName, className, ref }: { game: Game; systemName?: string; className?: string; ref?: Ref<HTMLDivElement> }) {
+export function MadeCover({ game, systemName, shape = DEFAULT_BOX_SHAPE, className, ref }: { game: Game; systemName?: string; shape?: number; className?: string; ref?: Ref<HTMLDivElement> }) {
   const [from, to] = systemColors(game.system);
   return (
     <div
       ref={ref}
-      className={cn('flex aspect-[3/4] w-full flex-col justify-between overflow-hidden rounded-lg p-3 text-left text-white shadow-md', className)}
-      style={{ backgroundImage: `linear-gradient(160deg, ${from}, ${to})` }}
+      className={cn('flex w-full flex-col justify-between overflow-hidden rounded-lg p-3 text-left text-white shadow-md', className)}
+      style={{ aspectRatio: shape, backgroundImage: `linear-gradient(160deg, ${from}, ${to})` }}
       aria-hidden
     >
       <span className="text-[10px] font-semibold tracking-wide text-white/70 uppercase">{systemName}</span>
-      <span className="line-clamp-4 text-base leading-tight font-semibold text-balance">{game.title}</span>
+      <span className={cn('text-base leading-tight font-semibold text-balance', shape > 1 ? 'line-clamp-2' : 'line-clamp-4')}>{game.title}</span>
     </div>
   );
 }
 
 /**
- * A game's box art, sitting on the tile's floor as a box would on a shelf,
- * whatever shape it is; its made cover where there's none or it won't load.
+ * A game's box art, sitting on the floor of a box `shape` wide over high, as
+ * a box would on a shelf, and fitting inside it whatever shape it is; its made
+ * cover where there's none or it won't load.
  */
-export function BoxArt({ game, systemName, className, eager }: { game: Game; systemName?: string; className?: string; eager?: boolean }) {
+export function BoxArt({ game, systemName, shape = DEFAULT_BOX_SHAPE, className, eager }: { game: Game; systemName?: string; shape?: number; className?: string; eager?: boolean }) {
   const [ref, near] = useNearScreen(eager);
   const [failed, setFailed] = useState<string | null>(null);
   const remote = game.art?.boxart ?? null;
   const src = useCachedArt(remote, near);
   // Still looking it up: an empty space the size of a box, not a made cover that would then be swapped.
   if (game.art === null || (remote && src === undefined)) {
-    return <div ref={ref} className={cn('aspect-[3/4] w-full rounded-lg bg-foreground/[0.06]', className)} aria-hidden />;
+    return <div ref={ref} className={cn('w-full rounded-lg bg-foreground/[0.06]', className)} style={{ aspectRatio: shape }} aria-hidden />;
   }
-  if (!src || failed === src) return <MadeCover ref={ref} game={game} systemName={systemName} className={className} />;
+  if (!src || failed === src) return <MadeCover ref={ref} game={game} systemName={systemName} shape={shape} className={className} />;
   return (
-    <div ref={ref} className={cn('flex aspect-[3/4] w-full items-end justify-center', className)}>
+    // The picture is placed absolutely: a box sized by aspect-ratio grows to fit what's in its flow, so a taller cover would stretch it and its row.
+    <div ref={ref} className={cn('relative w-full', className)} style={{ aspectRatio: shape }}>
       <img
         src={src}
         alt=""
         draggable={false}
         decoding="async"
         onError={() => setFailed(src)}
-        className="max-h-full max-w-full rounded-md object-contain shadow-[0_6px_16px_-6px_rgb(0_0_0/0.45)]"
+        className="absolute bottom-0 left-1/2 max-h-full max-w-full -translate-x-1/2 rounded-md object-contain shadow-[0_6px_16px_-6px_rgb(0_0_0/0.45)]"
       />
     </div>
   );

@@ -1,4 +1,4 @@
-/** Each system's colors, and a game's backdrop picture, for what Games draws. */
+/** Each system's colors and box shape, and a game's backdrop picture, for what Games draws. */
 import type { Game } from '@/lib/games';
 
 /** Each system's colors for the covers Din makes: two stops of a gradient. */
@@ -33,6 +33,45 @@ const SYSTEM_COLORS: Record<string, [string, string]> = {
 
 export function systemColors(system: string): [string, string] {
   return SYSTEM_COLORS[system] ?? ['#4b5563', '#1f2937'];
+}
+
+/** The shape of a box in a list that mixes systems, and of a system's whose shape isn't known. */
+export const DEFAULT_BOX_SHAPE = 3 / 4;
+
+/**
+ * Each system's box, width over height, as libretro-thumbnails has its front
+ * covers (the median of its USA covers, measured): the shape of the tiles in a
+ * list of the system's games, so its boxes fill them and stand in even rows.
+ * Covers of another shape (a Japanese Super Famicom box among American Super
+ * Nintendo ones) fit inside.
+ */
+const BOX_SHAPES: Record<string, number> = {
+  nes: 5 / 7,
+  fds: 1,
+  snes: 4 / 3, // USA and Europe 1.4, Japan 0.55
+  virtualboy: 1,
+  n64: 4 / 3, // USA and Europe 1.37, Japan 0.71
+  gb: 1,
+  gbc: 1,
+  gba: 4 / 5, // some 1, some 0.55
+  gamecube: 5 / 7,
+  nds: 9 / 8,
+  wii: 5 / 7,
+  '3ds': 9 / 8,
+  mastersystem: 5 / 7,
+  genesis: 5 / 7,
+  gamegear: 5 / 7,
+  dreamcast: 1,
+  psx: 1,
+  ps2: 5 / 7,
+  ngp: 7 / 8,
+  ngpc: 1,
+  atari2600: 5 / 7,
+  atari7800: 5 / 7,
+};
+
+export function boxShape(system: string): number {
+  return BOX_SHAPES[system] ?? DEFAULT_BOX_SHAPE;
 }
 
 /** A screenshot or title screen of a game, for a backdrop, or null to show none. */

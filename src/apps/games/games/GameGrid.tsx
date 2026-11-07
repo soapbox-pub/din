@@ -11,6 +11,7 @@ import type { Game } from '@/lib/games';
 import { cn } from '@/lib/utils';
 import { focusRing } from '@/shared/appChromeStyles';
 import { BoxArt } from './art';
+import { boxShape, DEFAULT_BOX_SHAPE } from './colors';
 import { GameMenuItems, type GameAction } from './GameMenu';
 
 export type TileSize = 'md' | 'lg';
@@ -26,6 +27,16 @@ export interface TileContext {
   onPlay: (game: Game) => void;
   onAction: (game: Game, action: GameAction) => void;
   onFocusGame?: (game: Game) => void;
+}
+
+/** The shape of the tiles in a list: its system's box, or a common one where it mixes systems. */
+function tileShape(system: string | undefined, ctx: TileContext): number {
+  return ctx.mixed || !system ? DEFAULT_BOX_SHAPE : boxShape(system);
+}
+
+/** A tile's width for its size and shape: wider for a wide box, so each box is about as big as a 3:4 one would be. */
+function tileWidth(size: TileSize, shape: number): number {
+  return Math.round((size === 'lg' ? 200 : 148) * Math.sqrt(shape / DEFAULT_BOX_SHAPE));
 }
 
 export function GameTile({ game, size, ctx, ...props }: { game: Game; size: TileSize; ctx: TileContext } & Omit<React.ComponentProps<'button'>, 'children'>) {
@@ -52,7 +63,7 @@ export function GameTile({ game, size, ctx, ...props }: { game: Game; size: Tile
             props.className,
           )}
         >
-          <BoxArt game={game} systemName={ctx.systemName(game.system)} />
+          <BoxArt game={game} systemName={ctx.systemName(game.system)} shape={tileShape(game.system, ctx)} />
           <span className="min-w-0 px-0.5">
             <span className={cn('flex items-center gap-1 font-medium', size === 'lg' ? 'text-base' : 'text-sm')}>
               <span className="truncate">{game.title}</span>
@@ -85,15 +96,10 @@ export function GameGrid({ games, size, ctx, className }: { games: Game[]; size:
     return () => observer.disconnect();
   }, [shown, games.length]);
 
+  const shape = tileShape(games[0]?.system, ctx);
   return (
     <div className={className}>
-      <div
-        role="list"
-        className={cn(
-          'grid gap-x-2 gap-y-4',
-          size === 'lg' ? 'grid-cols-[repeat(auto-fill,minmax(200px,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(148px,1fr))]',
-        )}
-      >
+      <div role="list" className="grid gap-x-2 gap-y-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tileWidth(size, shape)}px, 1fr))` }}>
         {games.slice(0, shown).map((game) => (
           <div role="listitem" key={game.id} className="min-w-0">
             <GameTile game={game} size={size} ctx={ctx} />
@@ -122,6 +128,7 @@ export function Shelf({
   onSeeAll?: () => void;
 }) {
   if (!games.length) return null;
+  const width = tileWidth(size, tileShape(games[0].system, ctx)) + 12;
   return (
     <section className="min-w-0" aria-label={title}>
       <div className="flex items-baseline gap-3 px-6">
@@ -136,7 +143,7 @@ export function Shelf({
       </div>
       <div data-shelf className="flex snap-x scroll-px-6 gap-2 overflow-x-auto px-4 pt-2 pb-4 [scrollbar-width:none]">
         {games.map((game) => (
-          <div key={game.id} className={cn('shrink-0 snap-start', size === 'lg' ? 'w-52' : 'w-40')}>
+          <div key={game.id} className="shrink-0 snap-start" style={{ width }}>
             <GameTile game={game} size={size} ctx={ctx} />
           </div>
         ))}
