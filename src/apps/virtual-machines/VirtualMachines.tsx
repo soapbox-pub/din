@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -24,7 +25,7 @@ import { useDin, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } 
 import { toast } from '@/shared/toast';
 import { formatBytes, formatMemory, isOn, OS_LABELS, STATE_LABELS, useBridge, usePickDiscImage, useVms, useVmsStatus } from './vms/bridge';
 import { Console, type ConsoleHandle } from './vms/Console';
-import { vmMenuItems, type VmAction } from './vms/actions';
+import { POWER_ACTIONS, vmMenuItems, type VmAction } from './vms/actions';
 import { VmActionItems } from './vms/ActionItems';
 import { CdromField, OsBadge } from './vms/fields';
 import { Gallery } from './vms/Gallery';
@@ -348,9 +349,22 @@ function Machines({ bridge, status }: { bridge: VmsBridge; status: VmsStatus }) 
                   <IconButton label="Full Screen" onClick={() => consoleRef.current?.fullscreen()} disabled={!on}>
                     <Expand {...toolIcon} />
                   </IconButton>
-                  <IconButton label="Shut Down" onClick={() => act(vm, 'shutdown')} disabled={working || !on}>
-                    <Power {...toolIcon} />
-                  </IconButton>
+                  {/* Right-click for the rest of the power actions, Force Off
+                      among them. The span takes the click while the button is
+                      disabled (it has no pointer events then), as it is while
+                      a machine that won't stop is stopping. */}
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <span className="grid">
+                        <IconButton label="Shut Down" onClick={() => act(vm, 'shutdown')} disabled={working || !on}>
+                          <Power {...toolIcon} />
+                        </IconButton>
+                      </span>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">
+                      <VmActionItems vm={vm} kind="context" only={POWER_ACTIONS} onAction={(action) => act(vm, action)} />
+                    </ContextMenuContent>
+                  </ContextMenu>
                 </>
               )}
               <DropdownMenu>

@@ -13,6 +13,9 @@ export interface ActionItem {
   destructive?: boolean;
 }
 
+/** What the power button's right-click menu offers. */
+export const POWER_ACTIONS: readonly VmAction[] = ['shutdown', 'reset', 'forceStop'];
+
 /** What can be done to a machine as it is now, in groups. */
 export function vmActions(vm: VmInfo): ActionItem[][] {
   const off = vm.state === 'stopped';
