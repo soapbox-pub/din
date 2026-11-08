@@ -69,6 +69,7 @@ pub fn start(state: &mut State) -> Option<u32> {
         }
     };
     let display = xwayland.display_number();
+    state.xdisplay = Some(display);
     let handle = state.handle.clone();
     state
         .handle
@@ -120,6 +121,13 @@ impl State {
         };
         for event in events {
             self.wire.json(event.to_json());
+        }
+    }
+
+    /// Take what X apps said about a drag into them (xdnd.rs).
+    pub fn poll_xdnd(&mut self) {
+        if self.xdnd.as_mut().is_some_and(|xdnd| !xdnd.poll()) {
+            self.xdnd = None;
         }
     }
 

@@ -30,6 +30,7 @@ mod state;
 mod stats;
 mod tray;
 mod wire;
+mod xdnd;
 mod xwayland;
 
 use std::{
@@ -180,6 +181,7 @@ fn main() {
     event_loop
         .run(Some(Duration::from_millis(16)), &mut state, |state| {
             state.poll_tray();
+            state.poll_xdnd();
             state.flush();
             let _ = state.dh.flush_clients();
         })

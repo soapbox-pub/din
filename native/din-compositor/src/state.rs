@@ -368,6 +368,11 @@ pub struct State {
     pub x11_clipboard: Option<Arc<Contents>>,
     /// The X tray, hosted for Xwayland's apps (tray.rs).
     pub tray: Option<crate::tray::Tray>,
+    /// Xwayland's display number, once it's up.
+    pub xdisplay: Option<u32>,
+    /// Drags into X apps, which take them by XDND, not Wayland's data
+    /// device (xdnd.rs); connected on the first drag over one.
+    pub xdnd: Option<crate::xdnd::Xdnd>,
     /// Files being dragged in from the shell (they stay readable after the
     /// drop, until the app has them), and whether the drag is under way.
     pub drag: Option<Arc<Contents>>,
@@ -488,6 +493,8 @@ impl State {
             xwm: None,
             x11_clipboard: None,
             tray: None,
+            xdisplay: None,
+            xdnd: None,
             drag: None,
             dragging: false,
             pointer_focus: None,

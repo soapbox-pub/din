@@ -143,7 +143,7 @@ which the app's other windows read in their `drop`, and a `dragend` whose
 |---|---|
 | App → app | The token, as above |
 | App → web page or nsite | The desktop replays the drop into the page as real files through the DevTools protocol (`guestFileDrop` in `electron/main.mts`): while a drag of files is registered, `GuestSurface` covers pages that take file drops and forwards the drag there |
-| App → native window | The desktop hands the paths to the embedded display, as today |
+| App → native window | The desktop hands the paths to the embedded display, which drags them on into the app: by Wayland's data device, or by XDND for an X app on Xwayland (`native/din-compositor/src/xdnd.rs`) |
 | App → Dock tile | The desktop takes the drop and opens the files in the tile's app, if it opens them (`src/lib/dockDrop.ts`) |
 | Web page → app | An ordinary web drag: read `e.dataTransfer` |
 | Desktop (Screenshot's thumbnail) → app | The desktop starts a Din drag itself; targets can't tell the difference |

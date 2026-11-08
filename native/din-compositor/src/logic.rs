@@ -1190,8 +1190,32 @@ impl State {
             let start = GrabStartData { focus: None, button: 0x110, location };
             let (dh, seat) = (self.dh.clone(), self.seat.clone());
             start_dnd(&dh, &seat, self, SERIAL_COUNTER.next_serial(), Some(start), None, metadata);
+            self.xdnd_begin();
         }
         self.motion(id, x, y, None);
+        self.xdnd_over(id, x, y);
+    }
+
+    /// A drag starts: X apps can take it too (xdnd.rs), once there's an X
+    /// connection for it.
+    fn xdnd_begin(&mut self) {
+        let Some(contents) = self.drag.clone() else { return };
+        if self.xdnd.is_none() {
+            self.xdnd = self.xdisplay.and_then(crate::xdnd::Xdnd::start);
+        }
+        if let Some(xdnd) = self.xdnd.as_mut() {
+            xdnd.begin(contents);
+        }
+    }
+
+    /// The drag is over window `id` at a point in it: an X window hears of
+    /// it by XDND (a Wayland one has it from the data device already).
+    fn xdnd_over(&mut self, id: u32, x: f64, y: f64) {
+        let (location, _) = self.hit(id, x, y);
+        let window = self.toplevels.iter().find(|t| t.id == id).and_then(|t| t.x11()).map(|x11| x11.window_id());
+        if let Some(xdnd) = self.xdnd.as_mut() {
+            xdnd.over(window, location.x, location.y);
+        }
     }
 
     /// The drag is over: dropped on whatever the pointer is over now (which
@@ -1199,6 +1223,9 @@ impl State {
     fn drag_end(&mut self, cancel: bool) {
         if !self.dragging {
             return;
+        }
+        if let Some(xdnd) = self.xdnd.as_mut() {
+            if cancel { xdnd.cancel() } else { xdnd.drop() }
         }
         if cancel {
             self.leave();
@@ -1239,7 +1266,15 @@ impl State {
             "key" => self.key(num("keycode") as u32, message["down"] == true),
             "keymap" => self.set_keymap(message),
             "monitors" => self.set_monitors(message),
-            "leave" => self.leave(),
+            "leave" => {
+                // A drag that left its window leaves an X app's too.
+                if self.dragging
+                    && let Some(xdnd) = self.xdnd.as_mut()
+                {
+                    xdnd.over(None, 0.0, 0.0);
+                }
+                self.leave();
+            }
             "clipboard" => {
                 if let Some(contents) = Contents::from_shell(message) {
                     self.set_clipboard(contents);
@@ -1254,6 +1289,7 @@ impl State {
             "drag-drop" => {
                 if self.dragging {
                     self.motion(id, num("x"), num("y"), None);
+                    self.xdnd_over(id, num("x"), num("y"));
                     self.drag_end(false);
                 }
             }

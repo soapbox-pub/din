@@ -102,7 +102,7 @@ impl Contents {
     }
 
     /// The contents as `mime`, if they come in that type.
-    fn bytes(&self, mime: &str) -> Option<Vec<u8>> {
+    pub fn bytes(&self, mime: &str) -> Option<Vec<u8>> {
         let uris = || self.files.iter().map(|path| file_uri(path)).collect::<Vec<_>>();
         match mime {
             _ if self.files.is_empty() && (mime == URI_LIST || mime == GNOME_FILES) => None,
