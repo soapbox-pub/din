@@ -95,11 +95,16 @@ impl State {
         Some((location.x.clamp(min.x, max.0), location.y.clamp(min.y, max.1)).into())
     }
 
-    /// Relative motion to the surface under the pointer.
+    /// Relative motion to the surface under the pointer, if there's any.
     pub fn relative_motion(&mut self, dx: f64, dy: f64) {
-        if dx == 0.0 && dy == 0.0 {
-            return;
+        if dx != 0.0 || dy != 0.0 {
+            self.send_relative_motion(dx, dy);
         }
+    }
+
+    /// Relative motion to the surface under the pointer, even none: one that
+    /// goes with an absolute motion keeps Xwayland on one device (logic.rs, motion).
+    pub fn send_relative_motion(&mut self, dx: f64, dy: f64) {
         let Some(pointer) = self.seat.get_pointer() else { return };
         let focus = self.pointer_focus.clone();
         let event = RelativeMotionEvent {

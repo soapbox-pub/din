@@ -947,10 +947,28 @@ impl State {
                 clamped
             }
         };
+        // Xwayland posts a motion on its relative pointer device only when
+        // relative motion comes in the same frame, and on its absolute one
+        // otherwise, while wheel turns always go to the relative one. Each
+        // switch between them is a DeviceChanged, after which Chromium (and
+        // anything else that reads XI2 scroll valuators) takes the next wheel
+        // turn as its new starting point and scrolls nothing: a click or
+        // wheel turn re-reporting where the pointer already is, as an
+        // absolute motion alone, lost every turn of the wheel in X apps. So
+        // a pointer that hasn't moved isn't moved, and one that has always
+        // carries its relative motion, even a zero one.
+        if location == previous && focus == self.pointer_focus {
+            if dx != 0.0 || dy != 0.0 {
+                self.relative_motion(dx, dy);
+                pointer.frame(self);
+            }
+            self.activate_constraint();
+            return hit;
+        }
         let event = MotionEvent { location, serial: SERIAL_COUNTER.next_serial(), time: self.now_ms() };
         pointer.motion(self, focus.clone(), &event);
         self.pointer_focus = focus;
-        self.relative_motion(dx, dy);
+        self.send_relative_motion(dx, dy);
         pointer.frame(self);
         self.activate_constraint();
         hit
