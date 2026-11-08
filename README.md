@@ -320,7 +320,10 @@ builds run at idle priority, and the timer's runs wait for AC power.
 Before it builds, the updater asks Nix (`--dry-run`) how much the update
 downloads, and makes sure root has that plus 4 GB free for the store and
 `/home` 10 GB for build scratch (`nix.settings.build-dir`). If not, it drops
-systems beyond the boot menu's five from the profile and collects garbage;
+systems from the profile and collects garbage: first ones that were staged
+and never started (a newer build took their place; an activation script
+notes every system that boots or is switched to in `/var/lib/dinos/ran`),
+keeping the newest, the next boot's, then those beyond the boot menu's five;
 if that's still not enough it stops and says why. Every update prunes the
 profile the same way after staging, and `min-free`/`max-free` have Nix make
 room on its own if a build runs short anyway. Settings → About shows the

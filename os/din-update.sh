@@ -106,7 +106,10 @@
 # in /home) its scratch space. It collects garbage if there isn't,
 # and gives up with the reason if that's not enough. After staging, systems
 # beyond the boot menu's (configuration.nix) leave the profile, so their
-# store paths can go at the next collection.
+# store paths can go at the next collection. Before those, so the boot
+# menu's places go to systems that ran, systems that were staged and never
+# started go: ones newer builds took the place of (drop_unrun). The newest,
+# the next boot's, stays.
 
 DEFAULT_URL=nostr://npub10qdp2fc9ta6vraczxrcs8prqnv69fru2k6s2dj48gqjcylulmtjsg9arpj/git.shakespeare.diy/din
 # Din's repository before Team Soapbox led it; checkouts following it move to
@@ -135,6 +138,10 @@ BOOTED=/run/booted-system
 BUILD_DIR=/home/.nix-build
 # Systems kept in the profile: the boot menu's (configurationLimit).
 KEEP_GENERATIONS=5
+# Every system that has run here, booted or switched to, one store path a
+# line after a `# since <epoch>` line: written by the din-ran activation
+# script (configuration.nix).
+RAN=/var/lib/dinos/ran
 UPSTREAM_REF=refs/heads/upstream
 SYSTEM_REF=refs/heads/system
 # The user's copy of Din, and whose it is.
@@ -635,10 +642,51 @@ check_space() {
     fail "Not enough space to update: building needs $(gib "$BUILD_DIR_BYTES") free in /home, and has $(gib "$build_free")."
 }
 
-# Systems beyond the boot menu's leave the profile. The running one always
-# stays: it's a GC root of its own.
+# Systems that were staged and never started leave the profile, then those
+# beyond the boot menu's. The running one always stays: it's a GC root of
+# its own.
 prune_generations() {
+  local dropped
+  dropped=$(drop_unrun)
   nix-env --profile "$PROFILE" --delete-generations "+$KEEP_GENERATIONS" >/dev/null 2>&1 || true
+  # The boot menu listed the dropped systems, whose store paths the next
+  # collection takes; it lists what the profile has now.
+  if [[ -n $dropped ]]; then
+    "$(readlink -f "$PROFILE")/bin/switch-to-configuration" boot </dev/null >&2 ||
+      echo "Couldn't update the boot menu" >&2
+  fi
+}
+
+# Drop the profile's systems that never ran (RAN): staged, then replaced by
+# a newer build before anything started them. Never the newest, the next
+# boot's, nor the running or booted one; and not one from before RAN began,
+# which may have run with nothing to say so. Prints the generations dropped.
+drop_unrun() {
+  local since newest current booted link gen path made
+  local -a gens=()
+  [[ -f $RAN ]] || return 0
+  since=$(sed -n '1s/^# since //p' "$RAN")
+  [[ $since =~ ^[0-9]+$ ]] || return 0
+  newest=$(readlink -f "$PROFILE")
+  current=$(readlink -f /run/current-system)
+  booted=$(readlink -f "$BOOTED")
+  for link in "$PROFILE"-*-link; do
+    [[ -L $link ]] || continue
+    gen=${link#"$PROFILE"-}
+    gen=${gen%-link}
+    [[ $gen =~ ^[0-9]+$ ]] || continue
+    path=$(readlink -f "$link")
+    if [[ $path == "$newest" || $path == "$current" || $path == "$booted" ]]; then continue; fi
+    # When the generation was made: the link's own time.
+    made=$(stat -c %Y "$link")
+    ((made > since)) || continue
+    grep -qxF "$path" "$RAN" && continue
+    gens+=("$gen")
+  done
+  ((${#gens[@]})) || return 0
+  echo "Dropping systems that were staged and never started: generations ${gens[*]}" >&2
+  nix-env --profile "$PROFILE" --delete-generations "${gens[@]}" >/dev/null 2>&1 || return 0
+  echo "${gens[*]}"
 }
 
 # Nix's machine-readable log (--log-format internal-json) on stdin, as

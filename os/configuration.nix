@@ -1476,6 +1476,17 @@ in
       IOSchedulingClass = "idle";
     };
   };
+  # Every system that runs here, at boot or switched to, is noted for the
+  # updater, which drops systems that were staged and never started before
+  # ones that ran (os/din-update.sh's drop_unrun). Staging one for the next
+  # boot (`switch-to-configuration boot`) doesn't activate it. The first line
+  # says when the list began: systems from before it may have run.
+  system.activationScripts.din-ran = ''
+    ran=/var/lib/dinos/ran
+    mkdir -p /var/lib/dinos
+    [[ -s $ran ]] || echo "# since $(date +%s)" >"$ran"
+    grep -qxF "$systemConfig" "$ran" || echo "$systemConfig" >>"$ran"
+  '';
   systemd.timers.din-update = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
