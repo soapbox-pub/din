@@ -59,6 +59,7 @@ export const AppConfigSchema = z.object({
   dockMagnificationScale: z.number().min(1).max(3),
   dockSize: z.number().min(32).max(160),
   dockStyle: z.enum(['none', 'modern', 'classic']),
+  hiddenBadges: z.array(z.string()),
   taskbarStyle: z.enum(['tall', 'slim']),
   taskbarPosition: z.enum(['bottom', 'top', 'left', 'right']),
   taskbarButtons: z.enum(['combine', 'separate']),

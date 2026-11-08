@@ -192,6 +192,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppDataSyncStatus } from '@/hooks/useAppData';
 import { setDoNotDisturb, useNotificationCenter } from '@/lib/notificationCenter';
 import { NotificationSitesList } from '@/components/desktop/apps/NotificationSitesList';
+import { HiddenBadgesList } from '@/components/desktop/apps/HiddenBadgesList';
 import { BackgroundActivity } from '@/components/desktop/apps/BackgroundActivity';
 import { PushServiceSetting } from '@/components/desktop/apps/PushServiceSetting';
 import { useToast } from '@/hooks/useToast';
@@ -3706,7 +3707,8 @@ function ClockOptions() {
 
 /**
  * Do Not Disturb, which applies to every notification and stays on this
- * computer, the apps and sites allowed to notify (NotificationSitesList), and
+ * computer, the apps and sites allowed to notify (NotificationSitesList), the
+ * apps whose badge is hidden (HiddenBadgesList), and
  * the push service websites' notifications come through (PushServiceSetting).
  */
 function NotificationsSection() {
@@ -3733,6 +3735,7 @@ function NotificationsSection() {
           onCheckedChange={(checked) => updateConfig((current) => ({ ...current, resourceAlerts: checked }))}
         />
         <NotificationSitesList />
+        <HiddenBadgesList />
         <PushServiceSetting />
       </div>
     </SectionShell>

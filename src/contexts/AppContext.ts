@@ -197,6 +197,12 @@ export interface AppConfig {
    * frosted panel since Big Sur) or classic (Leopard's glass shelf).
    */
   dockStyle: DockStyle;
+  /**
+   * Apps whose badge the Dock and taskbar don't show, by app id, until the
+   * user shows it again (src/lib/hiddenBadges.ts). Their notifications still
+   * come.
+   */
+  hiddenBadges: string[];
   /** The taskbar's build: tall (Windows 7) or slim (Windows Vista). */
   taskbarStyle: TaskbarStyle;
   /** The screen edge the taskbar runs along: bottom, top, left, or right. */

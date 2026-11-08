@@ -893,6 +893,7 @@ const DockItem = memo(function DockItem({
       activeWindowId={activeWindowId}
       controls={controls}
       isPinned={isPinned}
+      badge={badge}
       bar="dock"
       onTogglePin={onTogglePin}
       onUninstall={onUninstall}

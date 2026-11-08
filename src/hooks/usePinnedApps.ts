@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { useAppData } from '@/hooks/useAppData';
 import { useNotificationCenter } from '@/lib/notificationCenter';
 import { useAppBadges, type AppBadge } from '@/lib/appBadges';
+import { useAppContext } from '@/hooks/useAppContext';
+import { hiddenBadges } from '@/lib/hiddenBadges';
 
 /** Apps kept in the Dock (or taskbar) out of the box. */
 const DEFAULT_PINNED = ['file-browser', 'settings', 'web-browser', 'app-store'];
@@ -27,9 +29,11 @@ export function usePinnedApps() {
  * says which tile an app's windows go under): what the tile's apps set on it
  * themselves (navigator.setAppBadge() from built-in apps, web apps and
  * nsites, a Linux app's LauncherEntry), else a count of their unread
- * notifications.
+ * notifications. None for a tile whose badge the user hid (hiddenBadges).
  */
 export function useTileBadges(tileOf: (appId: string) => string): (tile: string) => AppBadge | null {
+  const { config } = useAppContext();
+  const hidden = hiddenBadges(config);
   const { notifications } = useNotificationCenter();
   const unread = new Map<string, number>();
   for (const n of notifications) {
@@ -40,6 +44,7 @@ export function useTileBadges(tileOf: (appId: string) => string): (tile: string)
   }
   const appBadges = useAppBadges();
   return (tile) => {
+    if (hidden.includes(tile)) return null;
     let own: AppBadge | null = null;
     for (const [id, badge] of appBadges) {
       if (tileOf(id) !== tile) continue;

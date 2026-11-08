@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
+import { Bell, BellOff, Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -6,6 +6,9 @@ import {
 } from '@/components/ui/context-menu';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import type { MenuAboveContentProps } from '@/hooks/useMenuAbove';
+import { useAppContext } from '@/hooks/useAppContext';
+import type { AppBadge } from '@/lib/appBadges';
+import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
 import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
 import { cn } from '@/lib/utils';
@@ -13,7 +16,7 @@ import { cn } from '@/lib/utils';
 /**
  * A Dock or taskbar tile's right-click menu: its app's windows by what
  * they're showing, the app's own actions, a new window, pin or unpin, add to
- * the desktop, close, and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
+ * the desktop, hide or show its badge, close, and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
  * Given `taskWindow`, it's the menu of that one window's taskbar button, which
  * leads with what can be done to the window and closes it alone.
  */
@@ -23,6 +26,7 @@ export function TileMenuContent({
   activeWindowId,
   controls,
   isPinned,
+  badge,
   bar,
   onTogglePin,
   onUninstall,
@@ -34,6 +38,8 @@ export function TileMenuContent({
   activeWindowId: string | null;
   controls: DockControls;
   isPinned: boolean;
+  /** The badge the tile shows, which "Hide badge" hides. */
+  badge: AppBadge | null;
   bar: 'dock' | 'taskbar';
   onTogglePin: (appId: string) => void;
   /** Present only for apps that can be uninstalled. */
@@ -49,6 +55,8 @@ export function TileMenuContent({
   above?: MenuAboveContentProps;
 }) {
   const { open, focus, minimize, closeAll } = controls;
+  const { config, updateConfig } = useAppContext();
+  const badgeHidden = hiddenBadges(config).includes(app.id);
   return (
     <ContextMenuContent className="z-[10000] w-52" {...above}>
       {taskWindow && (
@@ -120,6 +128,15 @@ export function TileMenuContent({
         )}
       </ContextMenuItem>
       <AddToDesktopItem appId={app.id} />
+      {badgeHidden ? (
+        <ContextMenuItem onSelect={() => updateConfig((c) => withBadgeHidden(c, app.id, false))}>
+          <Bell aria-hidden /> Show badge
+        </ContextMenuItem>
+      ) : badge !== null && (
+        <ContextMenuItem onSelect={() => updateConfig((c) => withBadgeHidden(c, app.id, true))}>
+          <BellOff aria-hidden /> Hide badge
+        </ContextMenuItem>
+      )}
       {taskWindow ? (
         <>
           <ContextMenuSeparator />

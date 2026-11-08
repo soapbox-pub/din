@@ -16,6 +16,7 @@ import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSi
 import { websiteLabel } from '@/lib/nsiteApps';
 import { getNativeAppsBridge, resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
+import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
@@ -375,7 +376,7 @@ export const desktopIconsArea: Area = {
 
 export const notificationsArea: Area = {
   name: 'notifications',
-  summary: 'Notifications: list, send, dismiss (Do Not Disturb is under din settings)',
+  summary: 'Notifications: list, send, dismiss, hide an app’s badge (Do Not Disturb is under din settings)',
   commands: [
     command('notifications', 'list', 'Notifications in the list, newest first', [], () => ({
       data: getNotificationState().notifications.map((n) => ({
@@ -413,6 +414,28 @@ export const notificationsArea: Area = {
     }),
     command('notifications', 'clear', 'Dismiss them all', [], () => {
       clearNotifications();
+    }),
+    command('notifications', 'hide-badge', 'Stop showing an app’s badge on its Dock or taskbar icon (its notifications still come)', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+    ], (args, ctx) => {
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      ctx.updateConfig((c) => withBadgeHidden(c, app.id, true));
+      return { text: `${app.name}’s badge is hidden` };
+    }),
+    command('notifications', 'show-badge', 'Show an app’s badge again', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+    ], (args, ctx) => {
+      const hidden = hiddenBadges(ctx.config);
+      const app = pick(
+        [...ctx.apps.apps.filter((a) => hidden.includes(a.id)), ...hidden.filter((id) => !ctx.apps.getApp(id)).map((id) => ({ id, name: id }))],
+        args.string('app'), (a) => [a.id, a.name], 'app with a hidden badge',
+      );
+      ctx.updateConfig((c) => withBadgeHidden(c, app.id, false));
+      return { text: `${app.name}’s badge shows again` };
+    }),
+    command('notifications', 'hidden-badges', 'The apps whose badge is hidden', [], (_args, ctx) => {
+      const rows = hiddenBadges(ctx.config).map((id) => ({ id, name: appRow(ctx, id) }));
+      return { data: rows, text: rows.map((r) => `${r.id}\t${r.name}`).join('\n') || 'No badges are hidden' };
     }),
   ],
 };

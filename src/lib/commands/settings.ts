@@ -120,6 +120,7 @@ export const CONFIG_FIELDS_ELSEWHERE: Partial<Record<keyof AppConfig, string>> =
   profileThemeMetadata: 'the profile theme itself, kept in step by the desktop',
   localTheme: 'the theme editor in Settings → Themes (not yet a command)',
   displayZoom: 'din display set <monitor> --zoom',
+  hiddenBadges: 'din notifications hide-badge / show-badge',
 };
 
 export const SETTING_FIELDS: (keyof AppConfig)[] = SETTINGS.flatMap((s) => (s.field ? [s.field] : []));
