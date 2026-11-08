@@ -1121,6 +1121,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       if (permissions.includes('camera')) {
         await apps.grantCamera(webContentsId).catch((e: unknown) => console.error('din: granting camera:', e));
       }
+      if (permissions.includes('microphone')) {
+        await apps.grantMicrophone(webContentsId).catch((e: unknown) => console.error('din: granting microphone:', e));
+      }
       if (permissions.includes('background')) {
         await apps
           .grantBackground(webContentsId, { notifications: permissions.includes('notifications') })

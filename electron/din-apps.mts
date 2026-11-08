@@ -181,23 +181,29 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   // since choosing to record in the app is the choice. One granted camera
   // (Camera) has the camera and the microphone, never the screen:
   // getDisplayMedia arrives as 'media' naming no device, so a request must
-  // name only video and audio.
+  // name only video and audio. One granted microphone (the Assistant) has
+  // the microphone alone: a request must name only audio.
   const allowed = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock']);
   const captures = (contents: Electron.WebContents | null | undefined) => !!contents && grants.get(contents.id)?.has('capture') === true;
   const cameras = (contents: Electron.WebContents | null | undefined) => !!contents && cameraGrants.has(contents.id);
+  const microphones = (contents: Electron.WebContents | null | undefined) => !!contents && microphoneGrants.has(contents.id);
   const devicesOnly = (types: readonly string[]) => types.length > 0 && types.every((t) => t === 'video' || t === 'audio');
-  s.setPermissionRequestHandler((contents, permission, callback, details) =>
+  const audioOnly = (types: readonly string[]) => types.length > 0 && types.every((t) => t === 'audio');
+  s.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const types = 'mediaTypes' in details ? (details.mediaTypes ?? []) : [];
     callback(
       allowed.has(permission) ||
         ((permission === 'media' || permission === 'display-capture') && captures(contents)) ||
-        (permission === 'media' && cameras(contents) && devicesOnly('mediaTypes' in details ? (details.mediaTypes ?? []) : [])),
-    ),
-  );
+        (permission === 'media' && cameras(contents) && devicesOnly(types)) ||
+        (permission === 'media' && microphones(contents) && audioOnly(types)),
+    );
+  });
   s.setPermissionCheckHandler(
     (contents, permission, _origin, details) =>
       allowed.has(permission) ||
       (permission === 'media' && captures(contents)) ||
-      (permission === 'media' && cameras(contents) && (details.mediaType === 'video' || details.mediaType === 'audio')),
+      (permission === 'media' && cameras(contents) && (details.mediaType === 'video' || details.mediaType === 'audio')) ||
+      (permission === 'media' && microphones(contents) && details.mediaType === 'audio'),
   );
   s.setDisplayMediaRequestHandler((request, callback) => {
     const requester = request.frame ? webContents.fromFrame(request.frame) : undefined;
@@ -276,6 +282,14 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
     if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
     cameraGrants.add(contents.id);
+  });
+
+  // `microphone`: the microphone alone in the app's page, as `camera` is checked.
+  ipcMain.handle('dinos-apps:grantMicrophone', (event, wcId) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    microphoneGrants.add(contents.id);
   });
 
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
@@ -524,6 +538,9 @@ const backgroundGrants = new Map<number, { appId: string; notifications: boolean
 
 /** Windows the desktop granted `camera`, by webContents id. */
 const cameraGrants = new Set<number>();
+
+/** Windows the desktop granted `microphone`, by webContents id. */
+const microphoneGrants = new Set<number>();
 
 /** What the desktop granted an app window for its worker, or null without `background`. */
 export function backgroundGrant(wcId: number): { appId: string; notifications: boolean } | null {
@@ -891,6 +908,7 @@ function revokeAll(wcId: number): void {
   for (const permission of Object.keys(SYSTEM_PERMISSIONS) as SystemPermission[]) revoke(wcId, permission);
   backgroundGrants.delete(wcId);
   cameraGrants.delete(wcId);
+  microphoneGrants.delete(wcId);
   for (const [token, grant] of fileUrls) {
     if (grant.wcId === wcId) fileUrls.delete(token);
   }

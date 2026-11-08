@@ -1374,14 +1374,14 @@ export function installStoredHandles(host: StoredHandlesHost): void {
 const DIN_PERMISSIONS: Record<Permission, true> = {
   nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
   assistant: true, 'assistant-sudo': true, indd: true, volumes: true, drive: true, mail: true, phone: true, passwords: true, vms: true, games: true,
-  capture: true, camera: true, 'file-folders': true,
+  capture: true, camera: true, microphone: true, 'file-folders': true,
 };
 
 /** The web's permission names whose powers Din permissions grant (any one of them). */
 const WEB_PERMISSIONS: Record<string, Permission[]> = {
   'periodic-background-sync': ['background'],
   camera: ['camera', 'capture'],
-  microphone: ['camera', 'capture'],
+  microphone: ['microphone', 'camera', 'capture'],
   'display-capture': ['capture'],
 };
 

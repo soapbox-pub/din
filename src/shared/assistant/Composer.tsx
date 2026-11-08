@@ -1,12 +1,16 @@
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, AudioLines, Mic, Paperclip, Plus, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey, loadDraftFiles, saveDraftFiles } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { DRAG_MIME } from '@/sdk';
+import { attachmentOf, canRecordAudio, fileUri, saveRecording, splitAttachedPaths, withAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
+import { RecordingBar } from '@/shared/assistant/RecordingBar';
+import { useAudioRecorder } from '@/shared/assistant/useAudioRecorder';
 import { ToastViewport } from '@/shared/Toaster';
 
 /** Pasted pictures past this size are left out; the request would be too big. */
@@ -18,11 +22,6 @@ const STOP_ESCAPE_MS = 1500;
 export interface ComposerHandle {
   /** Replace what's written with `text` and `files` (an undone message, back to edit). */
   fill: (text: string, files?: PromptAttachment[]) => void;
-}
-
-/** A file:// URL for a path, each segment escaped. */
-function fileUri(path: string): string {
-  return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 /** Names of pictures, which are attached rather than written in as paths. */
@@ -117,10 +116,14 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
 
 /**
  * Where the user writes to the agent. Enter sends and Shift+Enter starts a
- * new line. Files come from Din's file picker, or are pasted or dropped in
+ * new line. The + menu attaches files from Din's file picker, or records
+ * the microphone into a file that's attached (not dictation: the sound
+ * itself, for the agent to work on). Files are also pasted or dropped in
  * (pictures, and files copied or dragged from Files: pictures among them
- * are attached and other files written in as their paths), and go along
- * with the message. While the agent works, a message sent
+ * are attached and other files written in as their paths). Pictures and
+ * PDFs go to the model with the message; any other attached file goes as
+ * its path at the end of the text (`withAttachedPaths`), since OpenCode
+ * would drop it, and the agent opens it with its tools. While the agent works, a message sent
  * steers it, and Stop (or Escape twice) interrupts it. The mic button dictates into it, the
  * same as Super+H does anywhere. Shift+Tab switches agents, given
  * `onCycleAgent`.
@@ -228,8 +231,10 @@ export function Composer({
 
   useImperativeHandle(handleRef, () => ({
     fill: (value, attached = []) => {
-      setText(value);
-      setFiles(attached);
+      // Files sent as their paths come back as attachments.
+      const sent = splitAttachedPaths(value);
+      setText(sent.text);
+      setFiles([...attached, ...sent.paths.map(attachmentOf).filter((f) => !attached.some((a) => a.uri === f.uri))]);
       const textarea = ref.current;
       if (!textarea) return;
       textarea.focus();
@@ -237,22 +242,73 @@ export function Composer({
     },
   }));
 
-  const canSend = !disabled && !busy && text.trim().length > 0;
+  const recorder = useAudioRecorder();
+  const [canRecord, setCanRecord] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void canRecordAudio().then((can) => live && setCanRecord(can));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const startRecording = () => {
+    // In the message, where Escape discards it and Enter sends it.
+    ref.current?.focus();
+    recorder.start().catch((error: unknown) =>
+      host.notify({
+        title: 'Couldn’t use the microphone',
+        description: error instanceof Error ? error.message : undefined,
+        destructive: true,
+      }),
+    );
+  };
+
+  /** Stop recording and attach it; resolves with the attachment, or null. */
+  const finishRecording = async (): Promise<PromptAttachment | null> => {
+    const result = await recorder.stop();
+    if (!result) return null;
+    try {
+      const file = attachmentOf(await saveRecording(result.audio, result.extension));
+      setFiles((current) => [...current, file]);
+      return file;
+    } catch (error) {
+      host.notify({
+        title: 'Couldn’t save the recording',
+        description: error instanceof Error ? error.message : undefined,
+        destructive: true,
+      });
+      return null;
+    } finally {
+      ref.current?.focus();
+    }
+  };
+
+  const recording = recorder.state !== 'idle';
+  const canSend = !disabled && !busy && (text.trim().length > 0 || files.length > 0 || recorder.recording);
 
   const send = async (message: string) => {
-    if (disabled || busy || !message) return;
-    const sent = { text: message, files };
+    if (disabled || busy) return;
+    // Sending while it records sends the recording too.
+    const recorded = recorder.recording ? await finishRecording() : null;
+    const attached = recorded ? [...files.filter((f) => f.uri !== recorded.uri), recorded] : files;
+    if (!message && attached.length === 0) return;
     const command = parseSlashCommand(message);
     const known = command && onCommand && commands.some((c) => c.name === command.name) ? command : null;
     setText('');
     setFiles([]);
     try {
-      if (known) await onCommand!(known.name, known.args, sent.files);
-      else await onSubmit(sent.text, sent.files);
+      if (known) {
+        const out = withAttachedPaths(known.args, attached);
+        await onCommand!(known.name, out.text, out.files);
+      } else {
+        const out = withAttachedPaths(message, attached);
+        await onSubmit(out.text, out.files);
+      }
     } catch {
       // Give it back to try again.
-      setText(sent.text);
-      setFiles(sent.files);
+      setText(message);
+      setFiles(attached);
     }
   };
 
@@ -329,8 +385,8 @@ export function Composer({
   };
 
   /**
-   * Files on this computer, pasted or dropped: pictures attached, as the
-   * paperclip attaches them, and anything else written in as its path.
+   * Files on this computer, pasted or dropped: pictures attached, as Attach
+   * Files attaches them, and anything else written in as its path.
    */
   const takePaths = (paths: string[]) => {
     const name = (path: string) => path.split('/').pop() || path;
@@ -472,6 +528,12 @@ export function Composer({
             onCycleAgent();
             return;
           }
+          if (event.key === 'Escape' && recorder.recording) {
+            event.preventDefault();
+            event.stopPropagation();
+            recorder.discard();
+            return;
+          }
           if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && escapeToStop()) {
             event.preventDefault();
             event.stopPropagation();
@@ -494,20 +556,45 @@ export function Composer({
         className="field-sizing-content max-h-60 min-h-11 w-full resize-none bg-transparent px-2 py-1.5 text-base leading-relaxed outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
       <div className="flex items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => void attach()}
-          disabled={disabled}
-          aria-label="Attach files"
-          title="Attach files"
-          className="size-8 text-muted-foreground hover:text-foreground"
-        >
-          <Paperclip className="size-4" aria-hidden />
-        </Button>
-        <div className="flex min-w-0 flex-1 items-center gap-1">{toolbar}</div>
-        {dictation.available && (
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={disabled || recording}
+              aria-label="Add"
+              title="Attach files or record audio"
+              className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" onCloseAutoFocus={(event) => event.preventDefault()}>
+            <DropdownMenuItem onSelect={() => void attach()}>
+              <Paperclip aria-hidden /> Attach Files…
+            </DropdownMenuItem>
+            {canRecord && (
+              <DropdownMenuItem onSelect={startRecording}>
+                <AudioLines aria-hidden /> Record Audio
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {recorder.recording ? (
+          <RecordingBar
+            startedAt={recorder.startedAt}
+            analyser={recorder.analyser}
+            onStop={() => void finishRecording()}
+            onDiscard={() => {
+              recorder.discard();
+              ref.current?.focus();
+            }}
+          />
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-1">{toolbar}</div>
+        )}
+        {dictation.available && !recording && (
           <Button
             type="button"
             variant="ghost"

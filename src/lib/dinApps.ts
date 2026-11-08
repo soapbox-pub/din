@@ -32,6 +32,8 @@ export interface AppsBridge {
   grantBackground(webContentsId: number, options: { notifications: boolean }): Promise<void>;
   /** `camera`: the app's page may use the camera and the microphone, not the screen. */
   grantCamera(webContentsId: number): Promise<void>;
+  /** `microphone`: the app's page may use the microphone, not the camera or the screen. */
+  grantMicrophone(webContentsId: number): Promise<void>;
   /** An app's worker opened (`url`) or focused (`focus`) a window, after a click on one of its notifications. */
   onWorkerOpen(callback: (request: { appId: string; url: string | null; focus: boolean }) => void): () => void;
   /** Another folder an app's scoped fs grant reaches. */

@@ -803,6 +803,8 @@ export type Permission =
    * never the screen. Camera.
    */
   | 'camera'
+  /** The microphone alone in the app's own page (getUserMedia). The Assistant's Record Audio. */
+  | 'microphone'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.

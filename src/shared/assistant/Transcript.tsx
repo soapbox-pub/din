@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { Markdown } from '@/shared/assistant/Markdown';
@@ -285,12 +286,15 @@ function QueuedBubble({
   onCancel?: () => void;
   onSendNow?: () => void;
 }) {
+  const { text, paths } = splitAttachedPaths(message.payload.text);
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-      <Attachments files={message.payload.files} />
-      <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
-        {message.payload.text}
-      </div>
+      <Attachments files={message.payload.files} paths={paths} />
+      {text.trim() && (
+        <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
+          {text}
+        </div>
+      )}
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Clock className="size-3" aria-hidden />
         {message.delivery === 'steer' ? 'Sending at its next step' : 'Queued until it’s done'}
@@ -320,31 +324,36 @@ function QueuedBubble({
   );
 }
 
-function Attachments({ files = [] }: { files?: PromptFile[] }) {
-  if (files.length === 0) return null;
+/** A message's files, and those it named by path at the end of its text (`withAttachedPaths`). */
+function Attachments({ files = [], paths = [] }: { files?: PromptFile[]; paths?: string[] }) {
+  if (files.length === 0 && paths.length === 0) return null;
   return (
     <ul className="flex flex-wrap items-end justify-end gap-1.5" aria-label="Attachments">
       {files.map((file, index) => (
         <AttachmentItem key={index} file={{ ...file, uri: file.source?.type === 'uri' ? file.source.uri : undefined }} />
+      ))}
+      {paths.map((path) => (
+        <AttachmentItem key={path} file={attachmentOf(path)} />
       ))}
     </ul>
   );
 }
 
 function UserBubble({ message, onFork }: { message: UserMessage; onFork?: () => void }) {
-  const hasText = !!message.text.trim();
+  const { text, paths } = splitAttachedPaths(message.text);
+  const hasText = !!text.trim();
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-      <Attachments files={message.files} />
+      <Attachments files={message.files} paths={paths} />
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={!hasText && !onFork}>
-          <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground">
-            {message.text}
+          <div className={cn('whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground', !hasText && 'hidden')}>
+            {text}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
           {hasText && (
-            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(message.text).catch(() => {})}>
+            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(text).catch(() => {})}>
               <Copy aria-hidden /> Copy
             </ContextMenuItem>
           )}
@@ -367,7 +376,7 @@ function UserBubble({ message, onFork }: { message: UserMessage; onFork?: () => 
             <GitFork className="size-4" aria-hidden />
           </button>
         )}
-        {hasText && <CopyButton text={message.text} label="Copy message" />}
+        {hasText && <CopyButton text={text} label="Copy message" />}
       </div>
     </div>
   );

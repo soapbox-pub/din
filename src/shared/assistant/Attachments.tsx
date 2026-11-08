@@ -1,21 +1,14 @@
-import { useEffect, useState } from 'react';
-import { FileText, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Copy, ExternalLink, FileText, FolderOpen, Pause, Play, X } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { fileUrl } from '@/lib/fs';
 import { cn } from '@/lib/utils';
+import { AUDIO_NAME, pathOfFileUri } from '@/shared/assistant/attachedFiles';
+import { useAssistantHost } from '@/shared/assistant/host';
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
-
-/** The local path of a `file:` URI, or null. */
-function pathOfFileUri(uri: string): string | null {
-  if (!uri.startsWith('file://')) return null;
-  try {
-    return decodeURIComponent(new URL(uri).pathname);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Where to load a picture from, when an attachment is one: a pasted
@@ -96,6 +89,13 @@ export function AttachmentItem({
   const [broken, setBroken] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const name = file.name ?? file.mime ?? 'Attachment';
+  const path = file.uri ? pathOfFileUri(file.uri) : null;
+  const audio = !!path && (file.mime ? file.mime.startsWith('audio/') : AUDIO_NAME.test(path));
+  const withMenu = (item: ReactNode) => (
+    <AttachmentMenu path={path} onRemove={onRemove}>
+      {item}
+    </AttachmentMenu>
+  );
   const remove = onRemove && (
     <button
       type="button"
@@ -108,7 +108,7 @@ export function AttachmentItem({
   );
 
   if (src && broken !== src) {
-    return (
+    return withMenu(
       <li className={cn('group/attachment relative', className)}>
         <button
           type="button"
@@ -127,23 +127,94 @@ export function AttachmentItem({
         </button>
         {remove && <div className="absolute right-1 top-1 rounded bg-background/90 shadow-sm">{remove}</div>}
         <ImageLightbox src={src} name={name} open={open} onOpenChange={setOpen} />
-      </li>
+      </li>,
     );
   }
 
-  return (
+  return withMenu(
     <li
       className={cn(
         'flex max-w-56 items-center gap-1.5 rounded-xl bg-card clay px-2 py-1 text-xs text-muted-foreground',
         remove && 'pr-1',
+        audio && 'pl-1',
         className,
       )}
     >
-      <FileText className="size-3.5 shrink-0" aria-hidden />
-      <span className="truncate" title={name}>
+      {audio && path ? <AudioToggle path={path} name={name} /> : <FileText className="size-3.5 shrink-0" aria-hidden />}
+      <span className="truncate" title={path ?? name}>
         {name}
       </span>
       {remove}
-    </li>
+    </li>,
+  );
+}
+
+/** Play and pause a recording or other sound file, loaded once it's first played. */
+function AudioToggle({ path, name }: { path: string; name: string }) {
+  const player = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(
+    () => () => {
+      player.current?.pause();
+      player.current = null;
+    },
+    [path],
+  );
+  const toggle = async () => {
+    let el = player.current;
+    if (!el) {
+      el = new Audio(await fileUrl(path));
+      el.onplay = () => setPlaying(true);
+      el.onpause = el.onended = () => setPlaying(false);
+      player.current = el;
+    }
+    if (el.paused) void el.play().catch(() => setPlaying(false));
+    else el.pause();
+  };
+  const Icon = playing ? Pause : Play;
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      aria-label={`${playing ? 'Pause' : 'Play'} ${name}`}
+      className="grid size-5 shrink-0 place-items-center rounded-full text-ink-accent hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <Icon className="size-3 fill-current" aria-hidden />
+    </button>
+  );
+}
+
+/**
+ * An attachment's right-click menu: open it, show it in its folder, copy
+ * its path (a file on this computer), and in the composer, take it off.
+ */
+function AttachmentMenu({ path, onRemove, children }: { path: string | null; onRemove?: () => void; children: ReactNode }) {
+  const host = useAssistantHost();
+  if (!path && !onRemove) return children;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        {path && (
+          <>
+            <ContextMenuItem onSelect={() => host.openPath(path, 'file')}>
+              <ExternalLink aria-hidden /> Open
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => host.showInFolder(path)}>
+              <FolderOpen aria-hidden /> Show in Folder
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(path).catch(() => {})}>
+              <Copy aria-hidden /> Copy Path
+            </ContextMenuItem>
+          </>
+        )}
+        {path && onRemove && <ContextMenuSeparator />}
+        {onRemove && (
+          <ContextMenuItem variant="destructive" onSelect={onRemove}>
+            <X aria-hidden /> Remove
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

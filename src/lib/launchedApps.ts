@@ -93,6 +93,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   games: 'Play the games in your games folder',
   capture: 'Use the camera, the microphone and the screen, and go live',
   camera: 'Use the camera and the microphone',
+  microphone: 'Use the microphone',
   'file-folders': 'Reach the folders of files you give it',
 };
 

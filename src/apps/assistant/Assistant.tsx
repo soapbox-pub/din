@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
+import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
@@ -146,11 +147,15 @@ const UNDONE_COMMANDS: SlashCommand[] = [
   ...CONVERSATION_COMMANDS.slice(4),
 ];
 
-/** A user message's files that can be attached again (pasted ones aren't kept). */
+/**
+ * A user message's files that can be attached again (pasted ones aren't
+ * kept), those sent as their paths at the end of its text among them.
+ */
 function reattachable(message: UserMessage): PromptAttachment[] {
-  return (message.files ?? []).flatMap((file) =>
-    file.source?.type === 'uri' ? [{ uri: file.source.uri, name: file.name }] : [],
-  );
+  return [
+    ...(message.files ?? []).flatMap((file) => (file.source?.type === 'uri' ? [{ uri: file.source.uri, name: file.name }] : [])),
+    ...splitAttachedPaths(message.text).paths.map(attachmentOf),
+  ];
 }
 
 /** A new conversation has the server's and /connect: there is nothing yet to compact or rename. */
@@ -563,7 +568,7 @@ function AssistantWindow() {
       { sessionID, before: message?.id },
       {
         onSuccess: (session) => {
-          if (message) saveDraft(session.id, message.text, reattachable(message));
+          if (message) saveDraft(session.id, splitAttachedPaths(message.text).text, reattachable(message));
           setState((prev) => placeTab(prev, newAssistantTab(session.id)));
           setListOpen(false);
         },

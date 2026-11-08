@@ -17,6 +17,7 @@
       "assistant",
       "assistant-sudo",
       "fs",
+      "microphone",
       "notifications"
     ],
     "window": {
