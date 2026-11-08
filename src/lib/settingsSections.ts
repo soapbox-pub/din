@@ -194,7 +194,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Keyboard',
     icon: Keyboard,
-    search: ['Keyboard layout', 'Layouts', 'Add Layout…', 'The layout everything on this computer types with.', 'Switch layouts', 'Ctrl+Space', 'input source', 'input menu', 'language', 'input', 'typing', 'QWERTY', 'Dvorak', 'Colemak', 'AZERTY'],
+    search: ['Keyboard layout', 'Layouts', 'Add Layout…', 'The layout everything on this computer types with.', 'Switch layouts', 'Ctrl+Space', 'input source', 'input menu', 'language', 'input', 'typing', 'QWERTY', 'Dvorak', 'Colemak', 'AZERTY', 'Grammar', 'Check grammar as you type', 'Suggest style improvements', 'English', 'Forget Ignored Issues', 'grammar check', 'proofreading', 'writing', 'style', 'Grammarly', 'Harper', 'dialect', 'British', 'American'],
   },
   {
     id: 'mouse',

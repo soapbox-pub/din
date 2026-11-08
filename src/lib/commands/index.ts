@@ -21,6 +21,7 @@ import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { gamesArea } from './games';
+import { grammarArea } from './grammar';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
 import { cleanError } from './util';
 
@@ -58,6 +59,7 @@ export const AREAS: readonly Area[] = [
   displayArea,
   brightnessArea,
   keyboardArea,
+  grammarArea,
   printersArea,
   disksArea,
   driveArea,

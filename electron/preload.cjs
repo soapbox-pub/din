@@ -53,6 +53,8 @@
 //     and ejected from the Files sidebar
 //   - window.dinos.drive: Din Drive, the encrypted drive at ~/Drive, for
 //     Settings → Drive
+//   - window.dinos.grammar: checking grammar as you type in every text field,
+//     for Settings → Keyboard
 //   - window.dinos.systemMonitor: running processes, CPU, memory and disks, and
 //     ending them, for the System Monitor app
 //   - window.dinos.bluetoothLogin: receive the account key from a phone over
@@ -1891,6 +1893,39 @@ expose('drive', {
 
   /** Delete everything in the trash for good; resolves to how many items. */
   emptyTrash: () => ipcRenderer.invoke('drive:emptyTrash'),
+});
+
+// Grammar bridge (window.dinos.grammar), backed by electron/grammar.mts:
+// checking grammar as you type in every text field, for Settings → Keyboard
+// and `din grammar`.
+expose('grammar', {
+  /** The settings, how many issues are ignored, and the rules turned off. */
+  state: () => ipcRenderer.invoke('grammar:state'),
+
+  /**
+   * Change some of the settings; resolves to the new state.
+   * @param {{ enabled?: boolean, style?: boolean, dialect?: string }} change
+   */
+  configure: (change) => ipcRenderer.invoke('grammar:configure', change),
+
+  /**
+   * Turn one rule off, or back on, by name.
+   * @param {string} name
+   * @param {boolean} on
+   */
+  setRule: (name, on) => ipcRenderer.invoke('grammar:setRule', name, on),
+
+  /** Every rule, with what it looks for. */
+  rules: () => ipcRenderer.invoke('grammar:rules'),
+
+  /**
+   * Check some text; resolves to what's wrong in it.
+   * @param {string} text
+   */
+  check: (text) => ipcRenderer.invoke('grammar:checkText', text),
+
+  /** Stop ignoring the issues the user chose to ignore. */
+  forgetIgnored: () => ipcRenderer.invoke('grammar:forgetIgnored'),
 });
 
 // Volumes bridge (window.dinos.volumes), backed by electron/volumes.mts: removable

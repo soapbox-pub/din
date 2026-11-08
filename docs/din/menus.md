@@ -90,3 +90,15 @@ Right-clicking a title bar the app draws (anything `app-region: drag`, as
 Maximize, tiling, Move to Workspace, Move to Display, Close), drawn by the
 desktop.
 The app doesn't build it.
+
+## Text fields' menus
+
+A text field's right-click menu is Din's: spelling's guesses for a
+misspelled word, the fixes for a grammar issue (electron/grammar.mts), then
+Cut, Copy, Paste and Select All. Grammar is checked as you type in every
+field Chromium spell-checks, with a blue wavy underline under what's
+wrong. A field that isn't prose (an address, a name, code) should say
+`spellcheck="false"`, which turns off both; to keep spelling but not
+grammar, put `data-din-grammar="off"` on it or on anything around it.
+Code editors (CodeMirror, Monaco, Ace) and terminals (xterm.js) are left
+alone already.

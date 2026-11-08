@@ -56,7 +56,7 @@ let
     pname = "din";
     version = "0.1.0";
     src = din-src;
-    npmDepsHash = "sha256-eE19+T5K5BhOyDMVzXyRELwSTAX3QaKJZ4HahRvAGOI=";
+    npmDepsHash = "sha256-GVRMi9n7vdYaedyXLi0I5oiBEva0Xoj41GQ1ZStGG04=";
 
     # The electron npm package (used by `npm run dev` on dev machines) tries
     # to download its binary in a postinstall hook; the VM uses nixpkgs
@@ -102,6 +102,10 @@ let
         mkdir -p "$(dirname $out/share/din/$dir)"
         cp -rT $dir $out/share/din/$dir
       done
+      # The grammar checker (electron/grammar-worker.mts) loads Harper's slim
+      # WebAssembly build from its file; the full one and the two copies
+      # inlined as base64 are 74 MB of nothing.
+      rm $out/share/din/node_modules/harper.js/dist/{harper_wasm_bg.wasm,binaryInlined.js,slimBinaryInlined.js}
       runHook postInstall
     '';
   };

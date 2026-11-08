@@ -12,6 +12,8 @@ import {
   Bomb,
   Bot,
   Check,
+  RotateCcw,
+  SpellCheck,
   CircleArrowUp,
   Clock,
   Cpu,
@@ -143,7 +145,8 @@ import {
 import { getMouseBridge } from '@/lib/mouse';
 import { cleanLockError, getLockBridge, type SudoMode } from '@/lib/lock';
 import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { GRAMMAR_DIALECTS, getGrammarBridge, ruleDescription, ruleName, type GrammarDialect, type GrammarRule, type GrammarState } from '@/lib/grammar';
 import {
   describeZone,
   getDateTimeBridge,
@@ -2778,7 +2781,157 @@ function MouseSection() {
  * xkeyboard-config's list, removed and reordered; on DinOS, with more than
  * one, the menu bar and Ctrl+Space switch between them.
  */
+/**
+ * Settings → Keyboard: the keyboard's layouts, and checking grammar as you
+ * type in every text field.
+ */
 function KeyboardSection() {
+  return (
+    <SectionShell title="Keyboard">
+      <KeyboardLayouts />
+      <GrammarSettings />
+    </SectionShell>
+  );
+}
+
+/**
+ * Checking grammar as you type, in every text field on Din (electron/grammar.mts):
+ * on or off, style suggestions, which English, the rules turned off from a
+ * right-click's Turn Off This Rule, and the issues ignored. `din grammar`
+ * does the same.
+ */
+function GrammarSettings() {
+  const bridge = getGrammarBridge();
+  const queryClient = useQueryClient();
+  const state = useQuery({ queryKey: ['grammar-state'], queryFn: () => bridge!.state(), enabled: !!bridge });
+  const [error, setError] = useState<string | null>(null);
+  if (!bridge) return null;
+
+  const change = (run: () => Promise<GrammarState>) => {
+    setError(null);
+    run().then(
+      (next) => queryClient.setQueryData(['grammar-state'], next),
+      (e: unknown) => setError(cleanBridgeError(e)),
+    );
+  };
+
+  return (
+    <>
+      <SubHeading>Grammar</SubHeading>
+      {state.isLoading || !state.data ? (
+        <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')} aria-hidden>
+          <Skeleton className="size-4 bg-foreground/10" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-40 bg-foreground/10" />
+            <Skeleton className="h-3 w-64 bg-foreground/10" />
+          </div>
+        </div>
+      ) : (
+        <GrammarControls state={state.data} change={change} bridge={bridge} />
+      )}
+      {(error || state.isError) && (
+        <p role="alert" className="text-sm text-destructive">
+          {error ?? 'Could not read the grammar settings.'}
+        </p>
+      )}
+    </>
+  );
+}
+
+function cleanBridgeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
+
+function GrammarControls({
+  state,
+  change,
+  bridge,
+}: {
+  state: GrammarState;
+  change: (run: () => Promise<GrammarState>) => void;
+  bridge: NonNullable<ReturnType<typeof getGrammarBridge>>;
+}) {
+  return (
+    <>
+      <SettingsGroup>
+        <SettingSwitchRow
+          id="grammar-enabled"
+          icon={SpellCheck}
+          label="Check grammar as you type"
+          description="Grammar problems get a blue underline in any text field, as misspellings get a red one. Right-click one to fix it. Checked on this computer: what you type never leaves it."
+          checked={state.enabled}
+          onCheckedChange={(enabled) => change(() => bridge.configure({ enabled }))}
+        />
+        <SettingSwitchRow
+          id="grammar-style"
+          label="Suggest style improvements"
+          description="Wordy, redundant or hard-to-read phrasing too, not just what’s wrong."
+          checked={state.style}
+          disabled={!state.enabled}
+          onCheckedChange={(style) => change(() => bridge.configure({ style }))}
+        />
+        <ChoiceRow<GrammarDialect>
+          label="English"
+          description="Spellings and usage differ between them: colour or color, at the weekend or on the weekend."
+          value={state.dialect}
+          choices={GRAMMAR_DIALECTS}
+          onChange={(dialect) => change(() => bridge.configure({ dialect }))}
+        />
+      </SettingsGroup>
+
+      {state.disabledRuleInfo.length > 0 && (
+        <>
+          <p className="px-1 text-xs text-muted-foreground">Rules you turned off from a right-click menu:</p>
+          <ul aria-label="Grammar rules turned off" className={settingsGroup}>
+            {state.disabledRuleInfo.map((rule) => (
+              <GrammarRuleRow key={rule.name} rule={rule} onTurnOn={() => change(() => bridge.setRule(rule.name, true))} />
+            ))}
+          </ul>
+        </>
+      )}
+
+      {state.ignored > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => change(() => bridge.forgetIgnored())}>
+            <RotateCcw aria-hidden />
+            Forget Ignored Issues
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            {state.ignored === 1 ? 'One issue you ignored isn’t underlined.' : `${state.ignored} issues you ignored aren’t underlined.`}
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** A rule turned off: what it looks for, and turning it back on, from its button or a right-click. */
+function GrammarRuleRow({ rule, onTurnOn }: { rule: GrammarRule; onTurnOn: () => void }) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="flex items-center gap-3 px-4 py-2.5">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm">{ruleName(rule.name)}</span>
+            {rule.description && <span className="block text-xs text-muted-foreground">{ruleDescription(rule.description)}</span>}
+          </span>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={onTurnOn}>
+            Turn On
+          </Button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={onTurnOn}>
+          <Check aria-hidden />
+          Turn On
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function KeyboardLayouts() {
   const bridge = getKeyboardBridge();
   const status = useKeyboardStatus();
   const setLayouts = useSetKeyboardLayouts();
@@ -2788,18 +2941,18 @@ function KeyboardSection() {
 
   if (!bridge) {
     return (
-      <SectionShell title="Keyboard">
+      <>
         <FallbackCard icon={Keyboard}>
           Keyboard layouts need the Din desktop shell; they aren't available in
           a plain browser.
         </FallbackCard>
-      </SectionShell>
+      </>
     );
   }
 
   if (status.isLoading) {
     return (
-      <SectionShell title="Keyboard">
+      <>
         <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')} aria-hidden>
           <Skeleton className="size-4 bg-foreground/10" />
           <div className="flex-1 space-y-2">
@@ -2807,15 +2960,15 @@ function KeyboardSection() {
             <Skeleton className="h-3 w-56 bg-foreground/10" />
           </div>
         </div>
-      </SectionShell>
+      </>
     );
   }
 
   if (status.isError || !status.data) {
     return (
-      <SectionShell title="Keyboard">
+      <>
         <FallbackCard>Could not read the keyboard layout.</FallbackCard>
-      </SectionShell>
+      </>
     );
   }
 
@@ -2833,7 +2986,7 @@ function KeyboardSection() {
   const changer = (next: KeyboardLayoutChoice[] | null) => (canChange && next ? () => change(next) : undefined);
 
   return (
-    <SectionShell title="Keyboard">
+    <>
       <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
         <SettingsToken icon={Keyboard} />
         <div className="min-w-0">
@@ -2934,7 +3087,7 @@ function KeyboardSection() {
           {restart.error instanceof Error ? restart.error.message : 'Could not restart Din.'}
         </p>
       )}
-    </SectionShell>
+    </>
   );
 }
 

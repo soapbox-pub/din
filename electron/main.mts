@@ -30,6 +30,7 @@ import {
   registerDinApps,
 } from './din-apps.mts';
 import { registerDinAppWorkers } from './din-app-workers.mts';
+import { grammarMenuItems, registerGrammarHandlers, registerGrammarPreload } from './grammar.mts';
 import { periodicSyncPermissionChanged, registerPeriodicSyncHandlers } from './periodic-sync.mts';
 import {
   attachWidgetGuest,
@@ -40,6 +41,7 @@ import {
   WIDGET_SCHEME,
   widgetOf,
   WIDGETS_PARTITION,
+  widgetsSession,
 } from './widgets.mts';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -4033,6 +4035,7 @@ function popupEditMenu(contents: Electron.WebContents, params: Electron.ContextM
   if (!params.isEditable) return;
   const { editFlags } = params;
   const menu = new Menu();
+  for (const item of grammarMenuItems(contents, params)) menu.append(item);
   if (params.misspelledWord) {
     for (const suggestion of params.dictionarySuggestions) {
       menu.append(new MenuItem({ label: suggestion.replace(/&/g, '&&'), click: () => contents.replaceMisspelling(suggestion) }));
@@ -6239,6 +6242,9 @@ app.whenReady().then(() => {
     },
     WIDGET_PRELOAD,
   );
+  // Grammar checking in every text field: the desktop's, apps', widgets'
+  // and web pages', but not Tor's (electron/grammar.mts).
+  registerGrammarPreload([session.defaultSession, appsSession(), widgetsSession(), browserSession(), privateBrowserSession()]);
   registerDinLaunch({
     sendToShell,
     hasShell: () => !!shellWindow && !shellWindow.webContents.isDestroyed(),
@@ -6368,6 +6374,7 @@ app.whenReady().then(() => {
   registerFeaturesHandlers({ assertShellSender, sendToShell });
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
   registerDriveHandlers({ assertShellSender });
+  registerGrammarHandlers({ assertShellSender });
   registerPrintingHandlers({
     assertShellSender,
     sendToShell,
@@ -7218,6 +7225,7 @@ app.on('web-contents-created', (_event, contents) => {
   // actions, plus any items extensions registered via chrome.contextMenus
   // (e.g. uBlock Origin's "Block element...").
   contents.on('context-menu', (_e, params) => {
+    const grammar = grammarMenuItems(contents, params);
     let menu = buildChromeContextMenu({
       params,
       webContents: contents,
@@ -7314,6 +7322,9 @@ app.on('web-contents-created', (_event, contents) => {
       );
       menu = replaced;
     }
+    // The fixes for a grammar issue right-clicked in a field, first, as
+    // spelling's are.
+    grammar.forEach((item, index) => menu.insert(index, item));
     // Chrome's "Print…" on the page itself, just above "Inspect".
     if (params.mediaType === 'none' && !params.linkURL && !params.isEditable && !selection) {
       const at = Math.max(0, menu.items.length - 1);
