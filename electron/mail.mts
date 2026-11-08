@@ -186,7 +186,14 @@ function seal(password: string): string {
 }
 
 function unseal(sealed: string): string {
-  if (sealed.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'));
+  if (sealed.startsWith('enc:')) {
+    try {
+      return safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'));
+    } catch {
+      // The keyring's key was replaced (Chromium writes a new one when it can't read it), and the old one is gone.
+      throw new Error('Mail can’t read this account’s saved password, because the login keyring’s key changed. Enter the password again in the account’s settings.');
+    }
+  }
   if (sealed.startsWith('plain:')) return Buffer.from(sealed.slice(6), 'base64').toString('utf8');
   return '';
 }
@@ -742,11 +749,19 @@ function watch(a: StoredAccount, s: Session): void {
     );
     return;
   }
+  // Without its password the account waits for it to be typed again (updateAccount watches anew).
+  let password: string;
+  try {
+    password = unseal(a.password);
+  } catch (error) {
+    console.error('mail:', error instanceof Error ? error.message : error);
+    return;
+  }
   s.watching = true;
   if (s.retry) clearTimeout(s.retry);
   s.retry = null;
   // It idles right away, and renews the IDLE now and then for servers that drop quiet ones.
-  const client = imapClient(a.imap, unseal(a.password), { autoIdleDelay: 500, maxIdleTime: 5 * 60_000 });
+  const client = imapClient(a.imap, password, { autoIdleDelay: 500, maxIdleTime: 5 * 60_000 });
   listen(a, client);
   s.watcher = client;
   client.on('close', () => {
