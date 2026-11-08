@@ -604,7 +604,16 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
     '-nodefaults',
     '-no-user-config',
   ];
-  if (mac) args.push('-device', `isa-applesmc,osk=${APPLE_SMC_KEY}`, '-smbios', 'type=2');
+  if (mac) {
+    args.push(
+      '-device', `isa-applesmc,osk=${APPLE_SMC_KEY}`, '-smbios', 'type=2',
+      // The PIT's missed ticks dropped, not made up: making them up keeps
+      // AMD's AVIC off for the whole machine, so every interrupt and IPI
+      // traps to KVM (about 6,000 a second in Setup Assistant, and half the
+      // machine's exits). macOS keeps time by the TSC and doesn't miss them.
+      '-global', 'kvm-pit.lost_tick_policy=discard',
+    );
+  }
   if (config.firmware === 'uefi') {
     const firmware = need(t.firmware, 'UEFI firmware (OVMF)');
     args.push(
