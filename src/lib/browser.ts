@@ -138,6 +138,11 @@ export interface BrowserBridge {
   /** Subscribe to find-in-page match results. Returns an unsubscribe fn. */
   onFindResult(callback: (result: FindResult) => void): () => void;
   /**
+   * Subscribe to files dropped on a tab (`wcId`) whose page didn't take
+   * them, to open in tabs of their own. Returns an unsubscribe fn.
+   */
+  onFilesDropped(callback: (drop: { wcId: number; paths: string[] }) => void): () => void;
+  /**
    * Subscribe to download progress for browser tabs. Every download saves to
    * ~/Downloads; updates arrive keyed by a stable `id`, tagged with the
    * initiating tab's `wcId`. Returns an unsubscribe fn.

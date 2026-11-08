@@ -38,7 +38,10 @@ import { useTorStatus } from '@/hooks/useTor';
 import { useSiteLocations } from '@/hooks/useSiteLocations';
 import { NsiteIcon } from '@/components/icons/NsiteIcon';
 import { OnionIcon } from '@/components/icons/OnionIcon';
+import { activeFileDrag } from '@/components/desktop/apps/files/dnd';
+import { acceptDrag, DRAG_MIME } from '@/lib/dinDrag';
 import {
+  localFileUrl,
   resolveNavigation,
   sanitizeImageUrl,
   sanitizeUrl,
@@ -633,6 +636,35 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   );
 
   /**
+   * Files dropped on the tabs, or on a page that didn't take them: each opens
+   * in a new tab, from `index` (never among the pinned ones), the first one
+   * in front. `parentId` nests them under the page they were dropped on.
+   */
+  const openLocalFiles = useCallback((paths: string[], index: number, parentId: string | null = null) => {
+    const opened = paths.flatMap((p) => {
+      const url = localFileUrl(p);
+      return url ? [createTab(url, null, parentId)] : [];
+    });
+    if (opened.length === 0) return;
+    setTabs((ts) => {
+      const at = Math.min(Math.max(index, ts.filter((t) => t.pinned).length), ts.length);
+      return [...ts.slice(0, at), ...opened, ...ts.slice(at)];
+    });
+    focusOnActivate.current = true;
+    setActiveId(opened[0].id);
+  }, []);
+
+  // A page that didn't take the files dropped on it (electron/main.mts):
+  // they open beside it. Every window hears it; the one with the tab acts.
+  useEffect(() => {
+    return getBrowserBridge()?.onFilesDropped(({ wcId, paths }) => {
+      const index = tabsRef.current.findIndex((t) => t.wcId === wcId);
+      if (index < 0) return;
+      openLocalFiles(paths, index + 1, tabsRef.current[index].id);
+    });
+  }, [openLocalFiles]);
+
+  /**
    * Pin or unpin a tab. Either way it lands where the pinned tabs meet the
    * rest, like Chrome; a pinned tab leaves the tree it was in.
    */
@@ -841,12 +873,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         onTogglePin={togglePin}
         onNewTab={openNewTab}
         onMoveTab={(id, to) => setTabs((ts) => pinnedFirst(moveItem(ts, id, to)))}
+        onDropFiles={openLocalFiles}
         transfer={transfer}
         menu={tabMenu}
       />,
     );
     return () => setTitlebar(null);
-  }, [treeTabs, tabs, activeId, selectTab, closeTab, togglePin, openNewTab, transfer, tabMenu, setTitlebar]);
+  }, [treeTabs, tabs, activeId, selectTab, closeTab, togglePin, openNewTab, openLocalFiles, transfer, tabMenu, setTitlebar]);
 
   /** Collapse/expand a subtree in the tree sidebar. */
   const toggleCollapsed = useCallback((id: string) => {
@@ -2206,6 +2239,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onToggleCollapsed={toggleCollapsed}
             onMoveTab={moveTab}
             onMoveTabToEnd={moveTabToEnd}
+            onDropFiles={openLocalFiles}
             transfer={transfer}
             menu={tabMenu}
             style={chromeTokens}
@@ -2746,6 +2780,7 @@ function TabStrip({
   onTogglePin,
   onNewTab,
   onMoveTab,
+  onDropFiles,
   transfer,
   menu,
 }: {
@@ -2757,6 +2792,8 @@ function TabStrip({
   onNewTab: () => void;
   /** Move a tab to a new index; tabs are dragged to reorder them. */
   onMoveTab: (id: string, toIndex: number) => void;
+  /** Open files dropped on the strip in new tabs, from `index`. */
+  onDropFiles: (paths: string[], index: number) => void;
   /** Let tabs move between browser windows (see useTabTransfer). */
   transfer: TabTransferOptions;
   menu: BrowserTabMenu;
@@ -2786,6 +2823,19 @@ function TabStrip({
     if (start < list.scrollLeft) list.scrollLeft = start;
     else if (end > list.scrollLeft + list.clientWidth) list.scrollLeft = end - list.clientWidth;
   }, [activeId, tabs.length]);
+  // Files land between the tabs either side of the pointer.
+  const fileDrop = useFileDropTarget((e) => {
+    const list = e.currentTarget;
+    const els = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
+    const left = list.getBoundingClientRect().left - list.scrollLeft;
+    const index = els.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return e.clientX < r.left + r.width / 2;
+    });
+    const at = index < 0 ? els.length : index;
+    const edge = at < els.length ? els[at].getBoundingClientRect().left - 2 : (els.at(-1)?.getBoundingClientRect().right ?? left) + 2;
+    return { index: at, offset: Math.round(edge - left) };
+  }, onDropFiles);
   return (
     <StripContextMenu menu={menu}>
       <div
@@ -2800,8 +2850,16 @@ function TabStrip({
           // There's no scrollbar, so the wheel scrolls the tabs sideways.
           if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
         }}
-        className={tabListClass}
+        {...fileDrop.props}
+        className={cn(tabListClass, 'relative')}
       >
+        {fileDrop.spot && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-2 w-0.5 -translate-x-1/2 rounded-full bg-ink-accent"
+            style={{ left: fileDrop.spot.offset }}
+          />
+        )}
         {tabs.map((tab) => (
           <TabButton
             key={tab.id}
@@ -3002,6 +3060,47 @@ function TabButton({
   );
 }
 
+/** Where files dropped on a tab strip would open: before the tab at `index`, drawn at `offset` px. */
+interface FileDropSpot {
+  index: number;
+  offset: number;
+}
+
+/**
+ * Files dragged from Files onto a tab strip, which open in new tabs where
+ * they're dropped, as Chrome's do. `locate` says where, for the drop and the
+ * marker shown meanwhile; spread `props` on the strip.
+ */
+function useFileDropTarget(locate: (e: React.DragEvent<HTMLElement>) => FileDropSpot, onDrop: (paths: string[], index: number) => void) {
+  const [spot, setSpot] = useState<FileDropSpot | null>(null);
+  const props = {
+    onDragOver: (e: React.DragEvent<HTMLElement>) => {
+      if (!activeFileDrag(e)) return;
+      // The strip takes it; nothing under the window does.
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      const next = locate(e);
+      setSpot((prev) => (prev?.index === next.index && prev.offset === next.offset ? prev : next));
+    },
+    onDragLeave: (e: React.DragEvent<HTMLElement>) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSpot(null);
+    },
+    onDrop: (e: React.DragEvent<HTMLElement>) => {
+      const drag = activeFileDrag(e);
+      setSpot(null);
+      if (!drag) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // An app's drag (Files') hears it was taken, as a copy: the files stay put.
+      const token = e.dataTransfer.getData(DRAG_MIME);
+      if (token) acceptDrag(token, 'copy');
+      onDrop(drag.paths, locate(e).index);
+    },
+  };
+  return { spot, props };
+}
+
 /**
  * Where a dragged tab lands relative to the row it's dropped on: as a sibling
  * just 'before' or 'after' it, or nested 'inside' as its first child.
@@ -3058,10 +3157,13 @@ function TreeTabStrip({
   onToggleCollapsed,
   onMoveTab,
   onMoveTabToEnd,
+  onDropFiles,
   transfer,
   menu,
   style,
 }: {
+  /** Open files dropped on the sidebar in new tabs, from `index`. */
+  onDropFiles: (paths: string[], index: number) => void;
   tabs: Tab[];
   activeId: string;
   collapsed: Set<string>;
@@ -3093,12 +3195,15 @@ function TreeTabStrip({
   const [dragId, setDragId] = useState<string | null>(null);
   // A drag is hovering the trailing (move-to-top-level) drop zone.
   const [endHover, setEndHover] = useState(false);
+  // Files dropped anywhere on it open at the end of the tree, above New Tab.
+  const fileDrop = useFileDropTarget(() => ({ index: tabs.length, offset: 0 }), onDropFiles);
   return (
     <StripContextMenu menu={menu}>
       <div
         role="tablist"
         aria-label="Browser tabs"
         aria-orientation="vertical"
+        {...fileDrop.props}
         style={style}
         className="flex w-64 shrink-0 flex-col gap-0.5 overflow-y-auto px-2 pb-2 text-foreground [&>*]:shrink-0"
       >
@@ -3143,6 +3248,7 @@ function TreeTabStrip({
             }}
           />
         ))}
+        {fileDrop.spot && <span aria-hidden className="pointer-events-none mx-1 h-0.5 shrink-0 rounded-full bg-ink-accent" />}
         {/* The new-tab button sits at the bottom of the tab list (Firefox-style). */}
         <button
           type="button"

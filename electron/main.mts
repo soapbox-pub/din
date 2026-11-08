@@ -1810,10 +1810,62 @@ function registerGuestFileDropHandlers(): void {
       dispatchGuestDrag(guest, drag, 'dragOver', x, y, paths);
       return;
     }
+    // Files a web page doesn't take open in tabs of their own, as Chrome
+    // opens them (though Chrome replaces the page with them).
+    const tab = type === 'drop' && paths.length > 0 && isBrowserTabSession(guest.session) && !isAppGuest(guest) &&
+      !guest.getURL().startsWith('chrome-extension://');
+    if (tab) watchGuestDrop(guest, drag);
     dispatchGuestDrag(guest, drag, type === 'drop' ? 'drop' : 'dragCancel', x, y, paths);
+    if (tab) {
+      drag.queue = drag.queue.then(async () => {
+        if (!(await guestTookDrop(guest))) sendToShell('browser:filesDropped', { wcId: guest.id, paths });
+      });
+    }
     guestDrags.delete(guest.id);
     void drag.queue.then(() => releaseDebugger(guest, 'file-drop'));
   });
+}
+
+/** Din's own world in a page, for seeing whether it took a drop. */
+const FILE_DROP_WORLD_ID = 1_339;
+
+/**
+ * Before a drop: see whether the page takes it. A page that takes files
+ * cancels the drop event (or it lands on a file input, whose own default
+ * takes them); a page that doesn't never sees it, since its dragover went
+ * uncancelled, or lets it be. Read once the event is over, whoever handled it.
+ */
+const WATCH_DROP = `(() => {
+  const state = { taken: false };
+  const onDrop = (e) => setTimeout(() => {
+    state.taken = e.defaultPrevented || (e.target instanceof HTMLInputElement && e.target.type === 'file');
+  }, 0);
+  state.stop = () => window.removeEventListener('drop', onDrop, { capture: true });
+  window.addEventListener('drop', onDrop, { capture: true, once: true });
+  window.dinFileDrop = state;
+})(); void 0`;
+
+const READ_DROP = `new Promise((resolve) => setTimeout(() => {
+  const state = window.dinFileDrop;
+  window.dinFileDrop = undefined;
+  state?.stop();
+  resolve(state ? state.taken : true);
+}, 50))`;
+
+function watchGuestDrop(guest: Electron.WebContents, drag: GuestDrag): void {
+  drag.queue = drag.queue
+    .then(() => guest.isDestroyed() ? undefined : guest.executeJavaScriptInIsolatedWorld(FILE_DROP_WORLD_ID, [{ code: WATCH_DROP }]))
+    .catch(() => {});
+}
+
+/** Whether the page took the drop just made; when there's no telling, it did. */
+async function guestTookDrop(guest: Electron.WebContents): Promise<boolean> {
+  if (guest.isDestroyed()) return true;
+  try {
+    return (await guest.executeJavaScriptInIsolatedWorld(FILE_DROP_WORLD_ID, [{ code: READ_DROP }])) !== false;
+  } catch {
+    return true;
+  }
 }
 
 function dispatchGuestDrag(

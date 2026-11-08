@@ -3052,6 +3052,21 @@ expose('browser', {
   },
 
   /**
+   * Subscribe to files dropped on a tab (`wcId`) whose page didn't take them,
+   * which the browser opens in tabs of their own. Returns an unsubscribe fn.
+   * @param {(drop: { wcId: number, paths: string[] }) => void} callback
+   */
+  onFilesDropped: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, paths: string[] }} drop
+     */
+    const listener = (_event, drop) => callback(drop);
+    ipcRenderer.on('browser:filesDropped', listener);
+    return () => ipcRenderer.removeListener('browser:filesDropped', listener);
+  },
+
+  /**
    * Subscribe to download progress for browser tabs. Every download is saved
    * to ~/Downloads; each update carries { id, wcId, url, filename, savePath,
    * state, receivedBytes, totalBytes, paused }, where `state` is
