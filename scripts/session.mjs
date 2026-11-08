@@ -296,9 +296,9 @@ export DIN_DESKTOP_SESSION=1
 export DIN_SESSION_RELEASE="$release"
 export DIN_COMPOSITOR="$here/bin/din-compositor"
 export DIN_FD_ADDON="$here/lib/libdin_fd.so"
-# Full-screen games straight to the screen (the compositor's session/
-# direct.rs), while it's being tried out: on with a file named direct here.
-[ -e "$session/direct" ] && export DIN_DIRECT=1
+# Full-screen games go straight to the screen (the compositor's session/
+# direct.rs); a file named no-direct here leaves them to Din instead.
+[ -e "$session/no-direct" ] && export DIN_DIRECT=0
 ${profile ? `# A profiling build: the shell's measurements and the compositor's stats go to
 # stderr, and from there to the journal.
 export DIN_PROFILE=1 DIN_COMPOSITOR_STATS=1

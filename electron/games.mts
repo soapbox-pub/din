@@ -16,6 +16,9 @@
 //   - Where a game was left is saved when it quits and picked up when it
 //     starts again (savestate_auto_save/load), with a picture of the moment
 //     for the library. In-game saves are kept too. Both are per system.
+//   - Little lag: two swapchain images, automatic frame delay, and a frame
+//     of run-ahead on the cores that can (RUN_AHEAD_CORES); the frames go
+//     straight to the screen (the compositor's session/direct.rs).
 //   - Pixel art is scaled sharp (sharp-bilinear), never blurred or uneven.
 //   - The window pauses the game when it isn't the one in front.
 //   - Start+Select quits back to the library; Escape does on a keyboard;
@@ -39,7 +42,7 @@ import { app, ipcMain, nativeImage, net } from 'electron';
 import type { Game, GameSystem, GamesChange, GamesLibrary, GamesStatus, PlayOptions, RunningGame } from '../src/lib/games.ts';
 import { ArtIndex, scanSystem, systemFolders, type ScannedGame, type ScannedSystem } from './game-library.mts';
 import { regionPreference } from './game-names.mts';
-import { CORE_OPTIONS, type SystemDef } from './game-systems.mts';
+import { CORE_OPTIONS, RUN_AHEAD_CORES, type SystemDef } from './game-systems.mts';
 import { launchAsApp } from './native-apps.mts';
 
 const execFileAsync = promisify(execFile);
@@ -373,7 +376,8 @@ function status(): GamesStatus {
 }
 
 /** RetroArch's settings: written each time, so they're always Din's. */
-function retroarchConfig(t: Tools, core: string): string {
+function retroarchConfig(t: Tools, core: string, def: SystemDef): string {
+  const runAhead = RUN_AHEAD_CORES.has(def.core ?? '');
   const values: Record<string, string | boolean | number> = {
     config_save_on_exit: false,
     // Full screen, through Vulkan, on the GPU.
@@ -381,6 +385,17 @@ function retroarchConfig(t: Tools, core: string): string {
     video_fullscreen: true,
     video_windowed_fullscreen: true,
     video_vsync: true,
+    // As little between a button and the screen as can be: two buffers
+    // rather than three (a frame of waiting fewer), and the frame run as late
+    // before the refresh as it reliably finishes, starting at half a frame.
+    video_max_swapchain_images: 2,
+    video_frame_delay: 0,
+    video_frame_delay_auto: true,
+    // A frame ahead where the core can (RUN_AHEAD_CORES), without a word.
+    preemptive_frames_enable: runAhead,
+    run_ahead_enabled: false,
+    run_ahead_frames: 1,
+    run_ahead_hide_warnings: true,
     video_smooth: false,
     video_shader_enable: true,
     audio_driver: 'pipewire',
@@ -545,8 +560,11 @@ async function play(id: unknown, options: unknown): Promise<void> {
   await Promise.all([prepareSystemFolder(def, scanned), mergeCoreOptions()]);
   const content = await unpacked(def, file);
   const config = path.join(RA, 'retroarch.cfg');
-  await fsp.writeFile(config, retroarchConfig(t, core));
-  const argv = [t.retroarch, '--config', config, '-L', core];
+  await fsp.writeFile(config, retroarchConfig(t, core, def));
+  // Verbose, so the log says how the last game ran: on quitting, how full
+  // the audio buffer kept (and how near running dry: crackle) and how
+  // evenly frames reached the screen.
+  const argv = [t.retroarch, '--verbose', '--config', config, '-L', core];
   if (opts.fresh) {
     const fresh = path.join(RA, 'fresh.cfg');
     await fsp.writeFile(fresh, 'savestate_auto_load = "false"\n');

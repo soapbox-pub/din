@@ -94,13 +94,13 @@ struct Client {
 }
 
 impl Direct {
-    /// Only with DIN_DIRECT=1, for now; without it, full-screen windows are
-    /// shown by Din.
+    /// On unless DIN_DIRECT=0, which leaves full-screen windows to Din (to
+    /// tell whether something wrong with a game is this path's doing).
     pub fn bind() -> Self {
         let dir = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()));
         let path = dir.join("din-direct");
         let _ = std::fs::remove_file(&path);
-        let listener = if std::env::var("DIN_DIRECT").as_deref() != Ok("1") {
+        let listener = if std::env::var("DIN_DIRECT").as_deref() == Ok("0") {
             None
         } else {
             let listener = UnixListener::bind(&path).and_then(|listener| {

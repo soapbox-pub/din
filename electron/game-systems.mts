@@ -113,3 +113,12 @@ export const CORE_OPTIONS: Record<string, string> = {
   // The Dreamcast drawn at twice its resolution.
   'reicast_internal_resolution': '1280x960',
 };
+
+/**
+ * Cores that run a frame ahead (RetroArch's preemptive frames): when a
+ * button changes, the last frame is replayed from a savestate with it, so
+ * the game answers a frame sooner than the console itself did. Only cores
+ * whose savestates are quick and exact, of systems light enough to run a
+ * frame twice; elsewhere it would stutter or go wrong.
+ */
+export const RUN_AHEAD_CORES = new Set(['mesen', 'bsnes', 'sameboy', 'mgba', 'smsplus', 'mednafen_pce_fast']);
