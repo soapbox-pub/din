@@ -43,6 +43,7 @@ use std::{
         unix::net::{UnixListener, UnixStream},
     },
     path::PathBuf,
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
@@ -84,6 +85,56 @@ pub struct Direct {
     /// The buffer last shown, once the client's been told it's in a frame:
     /// each show is told once, however many frames it's drawn in.
     latched: Option<u32>,
+    /// How evenly the game being shown reaches the screen, logged when it
+    /// goes back to Din's window.
+    pacing: Option<Pacing>,
+    /// The buffer last on screen.
+    presented: Option<u32>,
+}
+
+/// A game's frames on screen while it's shown: how many, and the gaps
+/// between them, in refreshes. A game at the display's rate has a new frame
+/// every refresh; a refresh with none is one it missed (a stutter, and the
+/// audio running short).
+struct Pacing {
+    since: Instant,
+    frames: u32,
+    last: Option<Instant>,
+    /// Gaps of two refreshes or more, and the longest.
+    missed: u32,
+    longest: Duration,
+}
+
+impl Pacing {
+    fn new() -> Self {
+        Self { since: Instant::now(), frames: 0, last: None, missed: 0, longest: Duration::ZERO }
+    }
+
+    fn frame(&mut self, refresh: Duration) {
+        let now = Instant::now();
+        if let Some(last) = self.last.replace(now) {
+            let gap = now - last;
+            self.longest = self.longest.max(gap);
+            if gap * 2 >= refresh * 3 {
+                self.missed += 1;
+            }
+        }
+        self.frames += 1;
+    }
+
+    fn report(&self) {
+        let seconds = self.since.elapsed().as_secs_f64();
+        if self.frames < 2 || seconds <= 0.0 {
+            return;
+        }
+        info!(
+            "direct: {} frames in {seconds:.1}s ({:.1} a second), {} late, the longest gap {:.1}ms",
+            self.frames,
+            f64::from(self.frames) / seconds,
+            self.missed,
+            self.longest.as_secs_f64() * 1000.0,
+        );
+    }
 }
 
 struct Client {
@@ -117,6 +168,8 @@ impl Direct {
             shown: None,
             awaiting: None,
             latched: None,
+            pacing: None,
+            presented: None,
         }
     }
 
@@ -203,6 +256,9 @@ impl State {
         self.direct.buffers.clear();
         self.direct.awaiting = None;
         self.direct.latched = None;
+        if let Some(pacing) = self.direct.pacing.take() {
+            pacing.report();
+        }
         if let Some((_, rect)) = self.direct.shown.take() {
             self.queue_redraw_rect(rect);
         }
@@ -283,7 +339,10 @@ impl State {
                 // through Din's window for good.
                 self.direct.latched = None;
                 match self.direct.shown.replace((id, rect)) {
-                    None => info!("direct: showing a game at {rect:?}"),
+                    None => {
+                        info!("direct: showing a game at {rect:?}");
+                        self.direct.pacing = Some(Pacing::new());
+                    }
                     Some((_, before)) if before != rect => self.queue_redraw_rect(before),
                     Some(_) => {}
                 }
@@ -297,6 +356,9 @@ impl State {
     fn direct_hide(&mut self) {
         self.direct.awaiting = None;
         self.direct.latched = None;
+        if let Some(pacing) = self.direct.pacing.take() {
+            pacing.report();
+        }
         if let Some((_, rect)) = self.direct.shown.take() {
             info!("direct: back to Din's window");
             self.queue_redraw_rect(rect);
@@ -350,6 +412,16 @@ impl State {
         }
         if let Some(id) = self.direct.awaiting.take() {
             self.direct.send(&json!({ "type": "presented", "buffer": id }));
+            // A new frame of the game's, rather than the last one drawn again
+            // (the pointer moved over it).
+            if self.direct.presented != Some(id) {
+                self.direct.presented = Some(id);
+                let refresh = output.current_mode().map_or(60_000, |mode| mode.refresh.max(1000));
+                let refresh = Duration::from_secs_f64(1000.0 / f64::from(refresh));
+                if let Some(pacing) = self.direct.pacing.as_mut() {
+                    pacing.frame(refresh);
+                }
+            }
         }
     }
 

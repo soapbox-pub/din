@@ -16,9 +16,9 @@
 //   - Where a game was left is saved when it quits and picked up when it
 //     starts again (savestate_auto_save/load), with a picture of the moment
 //     for the library. In-game saves are kept too. Both are per system.
-//   - Little lag: two swapchain images, automatic frame delay, and a frame
-//     of run-ahead on the cores that can (RUN_AHEAD_CORES); the frames go
-//     straight to the screen (the compositor's session/direct.rs).
+//   - Little lag: a frame of run-ahead on the cores that can
+//     (RUN_AHEAD_CORES), and the frames straight to the screen (the
+//     compositor's session/direct.rs, which logs how evenly they came).
 //   - Pixel art is scaled sharp (sharp-bilinear), never blurred or uneven.
 //   - The window pauses the game when it isn't the one in front.
 //   - Start+Select quits back to the library; Escape does on a keyboard;
@@ -385,12 +385,16 @@ function retroarchConfig(t: Tools, core: string, def: SystemDef): string {
     video_fullscreen: true,
     video_windowed_fullscreen: true,
     video_vsync: true,
-    // As little between a button and the screen as can be: two buffers
-    // rather than three (a frame of waiting fewer), and the frame run as late
-    // before the refresh as it reliably finishes, starting at half a frame.
-    video_max_swapchain_images: 2,
+    // Three buffers, and each frame run as soon as the last is taken. The
+    // screen's compositor frees a game's buffer only once the next one is on
+    // screen (session/direct.rs), so with two the game could start a frame
+    // only at a refresh and had to finish it before the next one's deadline,
+    // and a frame delay (which counts from the frame callback, sent as the
+    // last frame is latched, just before the refresh) left it less still:
+    // frames missed, and the audio ran dry.
+    video_max_swapchain_images: 3,
     video_frame_delay: 0,
-    video_frame_delay_auto: true,
+    video_frame_delay_auto: false,
     // A frame ahead where the core can (RUN_AHEAD_CORES), without a word.
     preemptive_frames_enable: runAhead,
     run_ahead_enabled: false,
