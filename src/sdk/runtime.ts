@@ -824,6 +824,7 @@ export function installDin(transport: Transport): void {
   const files: DinFiles = {
     path: (handle) => grantFor(handle).path,
     url: async (handle) => request('files.url', { handle: await idOf(handle) }),
+    pageUrl: async (handle) => request('files.pageUrl', { handle: await idOf(handle) }),
     parent: async (handle) => {
       const p = await request('files.parent', { handle: await idOf(handle) });
       return p ? (wrap(p) as FileSystemDirectoryHandle) : null;

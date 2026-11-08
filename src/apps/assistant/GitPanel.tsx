@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -10,7 +10,6 @@ import {
   ExternalLink,
   GitBranch,
   LoaderCircle,
-  PanelRightClose,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -27,9 +26,8 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { WindowControls, WindowDragRegion } from '@/sdk/react';
 import { PillButton, ToolButton } from '@/shared/appChrome';
-import { focusRing, sidebarHeadingClass, toolIcon } from '@/shared/appChromeStyles';
+import { focusRing, sidebarHeadingClass } from '@/shared/appChromeStyles';
 import { LoadMore } from '@/shared/assistant/LoadMore';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { useHomeDirectory } from '@/hooks/useAssistant';
@@ -118,17 +116,12 @@ export function GitBranchChip({ directory, open, onToggle }: { directory: string
 // The panel
 // ---------------------------------------------------------------------------
 
+/** The Git tab of the side pane (SidePanel.tsx), under its title bar. */
 export function GitPanel({
   directory,
-  onClose,
-  className,
-  style,
 }: {
   /** The folder the conversation works in; the panel shows the repository it's in. */
   directory: string | undefined;
-  onClose: () => void;
-  className?: string;
-  style?: CSSProperties;
 }) {
   const { data: status, isLoading, error } = useGitStatus(directory);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -136,14 +129,7 @@ export function GitPanel({
   const sync = useGitOperations(directory, repo);
 
   return (
-    <aside aria-label="Git" style={style} className={cn('flex min-h-0 shrink-0 flex-col text-foreground', className)}>
-      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1 px-3">
-        <ToolButton label="Hide Git (Ctrl+Shift+G)" onClick={onClose}>
-          <PanelRightClose {...toolIcon} aria-hidden />
-        </ToolButton>
-        <span className="flex-1" />
-        <WindowControls />
-      </WindowDragRegion>
+    <div role="tabpanel" aria-label="Git" className="flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {!directory ? (
           <EmptyCard>Start a conversation in a folder to see its repository here.</EmptyCard>
@@ -160,7 +146,7 @@ export function GitPanel({
           </>
         )}
       </div>
-    </aside>
+    </div>
   );
 }
 

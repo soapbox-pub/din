@@ -1601,6 +1601,9 @@ in
   # directory: making apps and widgets, and changing DinOS. They point at
   # Din's docs and API types, which come along in /etc/din.
   environment.etc."opencode/skills".source = ./opencode/skills;
+  # And its plugins: `preview`, which shows a page beside the conversation
+  # in the Assistant.
+  environment.etc."opencode/plugins".source = ./opencode/plugins;
   environment.etc."din/docs".source = din-root + "/docs";
   # The optional features Settings offers (above, and electron/features.mts).
   environment.etc."dinos/features.json".source = featuresManifest;

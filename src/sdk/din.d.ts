@@ -394,6 +394,16 @@ export interface DinFiles {
    */
   url(handle: FileSystemFileHandle): Promise<string>;
   /**
+   * For apps with `preview`: a URL an `<iframe>` in the app can show an HTML
+   * file from as a web page, its scripts, styles and pictures loading by
+   * relative path from its folder (and folders under it) and nothing
+   * outside it. The page runs sandboxed in an opaque origin of its own and
+   * gets none of the app's permissions. Refused for a file directly in home,
+   * or in a folder holding it or Din's own files. Good while this page stays
+   * loaded. Not available outside Electron.
+   */
+  pageUrl(handle: FileSystemFileHandle): Promise<string>;
+  /**
    * For apps with `file-folders`: the folder a file is in, as a handle (and
    * `din.system.fs` reaches it by path). Null without the permission, and
    * for a folder (whose parent the user didn't hand over).
@@ -815,6 +825,13 @@ export type Permission =
   | 'camera'
   /** The microphone alone in the app's own page (getUserMedia). The Assistant's Record Audio. */
   | 'microphone'
+  /**
+   * Frames of web pages beside the app's own: a server on this computer
+   * (`http://localhost`, `127.0.0.1` or `[::1]`, any port) and HTML files
+   * through `din.files.pageUrl`. The app's CSP names them in `frame-src`. The
+   * Assistant's preview pane.
+   */
+  | 'preview'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.

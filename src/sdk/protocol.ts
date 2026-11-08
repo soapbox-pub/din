@@ -242,6 +242,7 @@ export interface Requests {
   /** These `unstoredHandles` are in the app's IndexedDB now. */
   'files.stored': [{ tokens: string[] }, void];
   'files.url': [{ handle: string }, string];
+  'files.pageUrl': [{ handle: string }, string];
   'files.fromPath': [{ path: string }, HandleData];
   'files.upload': [{ handle: string }, BlossomBlob];
 

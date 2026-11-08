@@ -189,8 +189,12 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
   const microphones = (contents: Electron.WebContents | null | undefined) => !!contents && microphoneGrants.has(contents.id);
   const devicesOnly = (types: readonly string[]) => types.length > 0 && types.every((t) => t === 'video' || t === 'audio');
   const audioOnly = (types: readonly string[]) => types.length > 0 && types.every((t) => t === 'audio');
+  // A page an app previews in a frame (a server on this computer, a page's
+  // folder) is none of the app: it gets none of the app's permissions.
+  const previewedPage = (url: string | undefined) => !!url && (/^https?:/i.test(url) || url.startsWith(`${LOCAL_FILE_SCHEME}:`));
   s.setPermissionRequestHandler((contents, permission, callback, details) => {
     const types = 'mediaTypes' in details ? (details.mediaTypes ?? []) : [];
+    if (previewedPage(details.requestingUrl)) return callback(false);
     callback(
       allowed.has(permission) ||
         ((permission === 'media' || permission === 'display-capture') && captures(contents)) ||
@@ -199,11 +203,13 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     );
   });
   s.setPermissionCheckHandler(
-    (contents, permission, _origin, details) =>
-      allowed.has(permission) ||
-      (permission === 'media' && captures(contents)) ||
-      (permission === 'media' && cameras(contents) && (details.mediaType === 'video' || details.mediaType === 'audio')) ||
-      (permission === 'media' && microphones(contents) && details.mediaType === 'audio'),
+    (contents, permission, origin, details) =>
+      !previewedPage(origin) &&
+      !previewedPage(details.requestingUrl) &&
+      (allowed.has(permission) ||
+        (permission === 'media' && captures(contents)) ||
+        (permission === 'media' && cameras(contents) && (details.mediaType === 'video' || details.mediaType === 'audio')) ||
+        (permission === 'media' && microphones(contents) && details.mediaType === 'audio')),
   );
   s.setDisplayMediaRequestHandler((request, callback) => {
     const requester = request.frame ? webContents.fromFrame(request.frame) : undefined;
@@ -292,6 +298,41 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     microphoneGrants.add(contents.id);
   });
 
+  // `preview`: frames of a server on this computer and of pages it's given
+  // URLs for (pageUrl). No port: navigation is checked against this.
+  ipcMain.handle('dinos-apps:grantPreview', (event, wcId) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    previewGrants.add(contents.id);
+  });
+
+  // A URL an app granted `preview` can frame a web page from: the HTML file
+  // the desktop checked it may read, under a token whose files are only
+  // those in the page's own folder, so its scripts, styles and pictures load
+  // and nothing beside them does. Never a folder holding home or Din's own
+  // files: the page would reach all of it.
+  ipcMain.handle('dinos-apps:pageUrl', (event, wcId, file) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || !previewGrants.has(contents.id)) throw new Error('Not an app that previews pages');
+    if (typeof file !== 'string' || !path.isAbsolute(file) || file.includes('\0') || isProtectedPath(file)) throw new Error('No such file');
+    let real: string;
+    try {
+      real = fs.realpathSync.native(file);
+      if (!fs.statSync(real).isFile()) throw new Error('Not a file');
+    } catch {
+      throw new Error('No such file');
+    }
+    const root = path.dirname(real);
+    if (holdsHomeOrProtected(root)) throw new Error('Put the page in a folder of its own: its whole folder is shown with it');
+    const appId = appIdOf(contents.getURL());
+    if (!appId) throw new Error('Not an app');
+    const token = randomUUID();
+    pageUrls.set(token, { root, wcId: contents.id });
+    return `${LOCAL_FILE_SCHEME}://${token}/${encodeURIComponent(path.basename(real))}`;
+  });
+
   ipcMain.handle('dinos-apps:revoke', (event, wcId, permission) => {
     opts.assertShellSender(event);
     if (typeof wcId === 'number' && typeof permission === 'string') revoke(wcId, permission as SystemPermission);
@@ -375,14 +416,17 @@ export function attachAppGuest(contents: Electron.WebContents, src: string, send
   // frame showing a file it holds, as printFile prints a PDF or a picture.
   const home = (url: string) =>
     appId !== null && (appIdOf(url) === appId || (/^blob:/i.test(url) && appIdOf(url.slice(5)) === appId));
-  // Pinned to its own origin: scheme and host, top frame and subframes.
+  // Pinned to its own origin: scheme and host, top frame and subframes. An
+  // app granted `preview` frames pages beside its own: a server on this
+  // computer, or a page it was given a URL for (pageUrl), never a top frame.
+  const previewed = (url: string, isMainFrame: boolean) => !isMainFrame && previewGrants.has(contents.id) && previewable(url, contents.id);
   contents.on('will-frame-navigate', (event) => {
-    if (home(event.url)) return;
+    if (home(event.url) || previewed(event.url, event.isMainFrame)) return;
     event.preventDefault();
     if (event.isMainFrame && (/^(https?|nsite):\/\//i.test(event.url) || /^blossom:/i.test(event.url))) send('crx:openTab', { url: event.url });
   });
   contents.on('will-redirect', (event) => {
-    if (!home(event.url)) event.preventDefault();
+    if (!home(event.url) && !previewed(event.url, event.isMainFrame)) event.preventDefault();
   });
   contents.setWindowOpenHandler(({ url }) => {
     if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) send('crx:openTab', { url });
@@ -481,6 +525,8 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
   } catch {
     return notFound();
   }
+  const page = pageUrls.get(token);
+  if (page) return servePageFile(request, page.root);
   const grant = fileUrls.get(token);
   if (grant) {
     // Still the file it was, not a link swapped in since.
@@ -502,6 +548,51 @@ function serveFileUrl(request: Request): Promise<Response> | Response {
 
 /** Apps granted fs, by the token of the URL base they load files from. */
 const fsUrlBases = new Map<string, { wcId: number; appId: string }>();
+
+/** Pages apps preview, by the token of the folder their files come from. */
+const pageUrls = new Map<string, { root: string; wcId: number }>();
+
+/** Windows the desktop granted `preview`, by webContents id. */
+const previewGrants = new Set<number>();
+
+/** http on this computer's loopback address, any port: a development server. */
+function isLoopbackHttp(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]');
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a frame in this window may show `url`: a development server, or one of its own pages. */
+function previewable(url: string, wcId: number): boolean {
+  if (isLoopbackHttp(url)) return true;
+  try {
+    const u = new URL(url);
+    return u.protocol === `${LOCAL_FILE_SCHEME}:` && pageUrls.get(u.hostname)?.wcId === wcId;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A file of a previewed page, by its path under the page's folder (a
+ * folder's index.html for a path ending in /). Readable by the page itself,
+ * whose origin is opaque: nothing outside the folder is served.
+ */
+function servePageFile(request: Request, root: string): Promise<Response> | Response {
+  let file: string;
+  try {
+    const pathname = decodeURIComponent(new URL(request.url).pathname);
+    file = path.resolve(root, `.${pathname.endsWith('/') ? `${pathname}index.html` : pathname}`);
+  } catch {
+    return notFound();
+  }
+  const real = realish(file);
+  if ((real !== root && !real.startsWith(root + path.sep)) || isProtectedPath(real)) return notFound();
+  return serveLocalFile(request, real, { 'access-control-allow-origin': '*' }, { page: true });
+}
 
 // ---------------------------------------------------------------------------
 // System bridge ports
@@ -909,6 +1000,10 @@ function revokeAll(wcId: number): void {
   backgroundGrants.delete(wcId);
   cameraGrants.delete(wcId);
   microphoneGrants.delete(wcId);
+  previewGrants.delete(wcId);
+  for (const [token, page] of pageUrls) {
+    if (page.wcId === wcId) pageUrls.delete(token);
+  }
   for (const [token, grant] of fileUrls) {
     if (grant.wcId === wcId) fileUrls.delete(token);
   }

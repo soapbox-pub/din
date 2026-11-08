@@ -4298,6 +4298,12 @@ expose('apps', {
    */
   grantMicrophone: (webContentsId) => ipcRenderer.invoke('dinos-apps:grantMicrophone', webContentsId),
   /**
+   * `preview`: the app's page may frame a server on this computer and pages it's given URLs for.
+   * @param {number} webContentsId
+   * @returns {Promise<void>}
+   */
+  grantPreview: (webContentsId) => ipcRenderer.invoke('dinos-apps:grantPreview', webContentsId),
+  /**
    * An app's service worker opened a window (clients.openWindow: `url`) or
    * focused one (WindowClient.focus: `focus`), after a click on one of its
    * notifications. Returns an unsubscribe fn.
@@ -4355,6 +4361,15 @@ expose('apps', {
    * @returns {Promise<string>}
    */
   fileUrl: (webContentsId, path) => ipcRenderer.invoke('dinos-apps:fileUrl', webContentsId, path),
+  /**
+   * A URL an app window granted `preview` can frame an HTML file from, its
+   * folder's files with it and nothing else, good while that window's page
+   * stays loaded.
+   * @param {number} webContentsId
+   * @param {string} path
+   * @returns {Promise<string>}
+   */
+  pageUrl: (webContentsId, path) => ipcRenderer.invoke('dinos-apps:pageUrl', webContentsId, path),
   /**
    * Force quit an app window: kill its renderer process.
    * @param {number} webContentsId

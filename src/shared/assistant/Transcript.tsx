@@ -1,5 +1,6 @@
 import { createContext, createElement, memo, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
+  AppWindow,
   Bot,
   Braces,
   ChevronRight,
@@ -28,6 +29,7 @@ import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFil
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { Markdown } from '@/shared/assistant/Markdown';
+import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
 import {
   tildify,
   toolTaskID,
@@ -548,6 +550,7 @@ function Turn({
       )}
       {workErrors.map(render)}
       {after.map(render)}
+      <TurnPreviews items={turn.items} />
       {turn.idle?.outcome === 'failed' && turn.idle.error && (
         <ErrorBanner message={turn.idle.error.message ?? 'The assistant stopped with an error'} />
       )}
@@ -566,6 +569,36 @@ function Turn({
           <CopyButton text={reply} label="Copy reply" />
         </div>
       )}
+    </div>
+  );
+}
+
+/** The pages a turn previewed, each a card that shows its tab beside the conversation. */
+function TurnPreviews({ items }: { items: SessionMessage[] }) {
+  const open = useContext(PreviewOpenContext);
+  if (!open) return null;
+  const previews = previewsOf(items);
+  if (previews.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {previews.map((preview) => (
+        <button
+          key={preview.uri}
+          type="button"
+          onClick={() => open(preview.uri)}
+          title={`Show ${preview.uri}`}
+          className="flex w-full max-w-md min-w-0 items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <AppWindow className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{preview.title}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {preview.target.kind === 'server' ? preview.target.url : preview.target.path}
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      ))}
     </div>
   );
 }
@@ -733,6 +766,7 @@ const counted = (one: string, many: string) => (n: number) => (n === 1 ? one : m
 const fixed = (text: string) => () => text;
 
 const TOOL_KINDS: [RegExp, ToolKind][] = [
+  [/(^|__)preview$/, { icon: AppWindow, active: fixed('Showing'), past: fixed('Showed'), count: counted('showed a page', 'showed # pages'), target: (input) => str(input.title) ?? str(input.uri), distinct: true }],
   [/^(read|view|cat)$/, { icon: FileText, active: fixed('Reading'), past: fixed('Read'), count: counted('read a file', 'read # files'), target: filePath, distinct: true }],
   [/^(write|edit|patch|multiedit|apply_patch)/, { icon: FilePen, active: fixed('Editing'), past: fixed('Edited'), count: counted('edited a file', 'edited # files'), target: filePath, distinct: true }],
   [/^(execute|code)/, { icon: Braces, active: fixed('Running code'), past: fixed('Ran code'), count: counted('ran code', 'ran code # times'), target: (input) => str(input.description) }],

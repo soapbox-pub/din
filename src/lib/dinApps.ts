@@ -34,6 +34,8 @@ export interface AppsBridge {
   grantCamera(webContentsId: number): Promise<void>;
   /** `microphone`: the app's page may use the microphone, not the camera or the screen. */
   grantMicrophone(webContentsId: number): Promise<void>;
+  /** `preview`: the app's page may frame a server on this computer and pages it's given URLs for (`pageUrl`). */
+  grantPreview(webContentsId: number): Promise<void>;
   /** An app's worker opened (`url`) or focused (`focus`) a window, after a click on one of its notifications. */
   onWorkerOpen(callback: (request: { appId: string; url: string | null; focus: boolean }) => void): () => void;
   /** Another folder an app's scoped fs grant reaches. */
@@ -50,6 +52,8 @@ export interface AppsBridge {
   sinceInput(webContentsId: number): Promise<number | null>;
   revoke(webContentsId: number, permission: SystemPermission): Promise<void>;
   fileUrl(webContentsId: number, path: string): Promise<string>;
+  /** A URL a window granted `preview` frames an HTML file from, with its folder's files and nothing else. */
+  pageUrl(webContentsId: number, path: string): Promise<string>;
   kill(webContentsId: number): Promise<void>;
   onResponsive(callback: (e: { webContentsId: number; responsive: boolean }) => void): () => void;
   /** Open a folder as an app (src/lib/fileApps.ts); resolves with its id and its manifest as found, untrusted. */

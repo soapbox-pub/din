@@ -120,7 +120,9 @@ import { cn } from '@/lib/utils';
 import { ContentPane, ToolButton } from '@/shared/appChrome';
 import { SIDEBAR_WIDTH, flushPane } from '@/shared/appChromeStyles';
 import { intentOf, type LaunchIntent } from './intents';
-import { GitBranchChip, GitPanel } from './GitPanel';
+import { GitBranchChip } from './GitPanel';
+import { SidePanel, type SideTab } from './SidePanel';
+import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
 
 const SUGGESTIONS = [
@@ -200,6 +202,18 @@ const clampGitWidth = (width: number) => Math.min(MAX_LIST_WIDTH, Math.max(MIN_G
 function loadGitWidth(): number {
   const width = Number(localStorage.getItem(GIT_WIDTH_KEY));
   return width ? clampGitWidth(width) : SIDEBAR_WIDTH;
+}
+
+const PREVIEW_WIDTH_KEY = 'din.assistant.preview-width';
+const DEFAULT_PREVIEW_WIDTH = 560;
+const MIN_PREVIEW_WIDTH = 320;
+const MAX_PREVIEW_WIDTH = 1600;
+
+const clampPreviewWidth = (width: number) => Math.min(MAX_PREVIEW_WIDTH, Math.max(MIN_PREVIEW_WIDTH, width));
+
+function loadPreviewWidth(): number {
+  const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
+  return width ? clampPreviewWidth(width) : DEFAULT_PREVIEW_WIDTH;
 }
 
 /** The window's width (px) from which the Git panel sits beside the conversation: `@5xl/assistant`. */
@@ -358,9 +372,19 @@ function AssistantWindow() {
   if (wide && gitOver) setGitOver(false);
   const gitShown = wide ? gitOpen : gitOver;
   const setGitShown = wide ? setGitOpen : setGitOver;
-  const toggleGit = () => setGitShown((open) => !open);
+  // The pane holds Git and the pages the agent previewed, a tab each; its
+  // width is Git's narrow one or a page's wider one, by the tab shown.
+  const [sideTab, setSideTab] = useState<SideTab>('git');
   const [gitWidth, setGitWidth] = useState(loadGitWidth);
   useEffect(() => (gitWidth === SIDEBAR_WIDTH ? localStorage.removeItem(GIT_WIDTH_KEY) : localStorage.setItem(GIT_WIDTH_KEY, String(gitWidth))), [gitWidth]);
+  const [previewWidth, setPreviewWidth] = useState(loadPreviewWidth);
+  useEffect(
+    () => (previewWidth === DEFAULT_PREVIEW_WIDTH ? localStorage.removeItem(PREVIEW_WIDTH_KEY) : localStorage.setItem(PREVIEW_WIDTH_KEY, String(previewWidth))),
+    [previewWidth],
+  );
+  // Each preview's reloads, by URI, so its frame starts again.
+  const [reloads, setReloads] = useState<Record<string, number>>({});
+  const reloadPreview = (uri: string) => setReloads((prev) => ({ ...prev, [uri]: (prev[uri] ?? 0) + 1 }));
   const defaultDirectory = useAssistantDirectory();
 
   // Single instance: a relaunch (a notification, the menu bar) brings new
@@ -476,6 +500,32 @@ function AssistantWindow() {
   const activeDirectory = activeTab.sessionID
     ? sessions[sessionIDs.indexOf(activeTab.sessionID)]?.session?.location.directory
     : (activeTab.directory ?? defaultDirectory);
+
+  // The pages the selected conversation's agent previewed. One it shows now
+  // opens the pane on its tab (sliding it over a narrow window's
+  // conversation), or reloads the tab it has.
+  const { data: activeTranscript } = useSessionMessages(activeTab.sessionID ?? null);
+  const { previews, close: closePreview, reopen: reopenPreview } = useSessionPreviews(activeTab.sessionID ?? null, activeTranscript?.messages, (preview: Preview) => {
+    setSideTab(preview.uri);
+    reloadPreview(preview.uri);
+    setGitShown(true);
+  });
+  /** A preview's card in the transcript: its tab, brought back if it was closed. */
+  const showPreview = (uri: string) => {
+    reopenPreview(uri);
+    setSideTab(uri);
+    setGitShown(true);
+  };
+  const shownTab: SideTab = sideTab !== 'git' && previews.some((p) => p.uri === sideTab) ? sideTab : 'git';
+  const gitTabShown = gitShown && shownTab === 'git';
+  // Ctrl+Shift+G, the branch under the composer and the menu: Git, in the pane.
+  const toggleGit = () => {
+    if (gitTabShown) setGitShown(false);
+    else {
+      setSideTab('git');
+      setGitShown(true);
+    }
+  };
 
   const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
 
@@ -610,18 +660,25 @@ function AssistantWindow() {
     e.stopPropagation();
   };
 
-  /** Drag a sidebar's edge: the list's (`1`, growing rightward) or the Git panel's (`-1`). */
+  // The side pane's width: Git's, or a page's.
+  const previewShown = shownTab !== 'git';
+  const sideWidth = previewShown ? previewWidth : gitWidth;
+  const setSideWidth = (width: number) => (previewShown ? setPreviewWidth(clampPreviewWidth(width)) : setGitWidth(clampGitWidth(width)));
+  const sideMin = previewShown ? MIN_PREVIEW_WIDTH : MIN_GIT_WIDTH;
+  const sideMax = previewShown ? MAX_PREVIEW_WIDTH : MAX_LIST_WIDTH;
+
+  /** Drag a sidebar's edge: the list's (`1`, growing rightward) or the side pane's (`-1`). */
   const startResize = (e: React.PointerEvent<HTMLDivElement>, side: 1 | -1 = 1) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = side === 1 ? listWidth : gitWidth;
+    const startWidth = side === 1 ? listWidth : sideWidth;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) =>
       side === 1
         ? setListWidth(clampListWidth(startWidth + ev.clientX - startX))
-        : setGitWidth(clampGitWidth(startWidth - (ev.clientX - startX)));
+        : setSideWidth(startWidth - (ev.clientX - startX));
     const up = () => {
       target.removeEventListener('pointermove', move);
       target.removeEventListener('pointerup', up);
@@ -646,7 +703,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
-        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitShown} onToggleGit={toggleGit} />}
+        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitTabShown} onToggleGit={toggleGit} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -734,13 +791,13 @@ function AssistantWindow() {
                 : null
             }
           />
-          {/* In a window wide enough for it, the Git panel can always be shown from here. */}
+          {/* In a window wide enough for it, the side pane can always be shown from here, as it was left. */}
           {wide && !gitShown && (
-            <ToolButton label="Show Git (Ctrl+Shift+G)" onClick={() => setGitOpen(true)}>
+            <ToolButton label={previews.length > 0 ? 'Show Git and previews' : 'Show Git (Ctrl+Shift+G)'} onClick={() => setGitOpen(true)}>
               <PanelRightOpen className="size-4.5" strokeWidth={1.75} aria-hidden />
             </ToolButton>
           )}
-          {/* With the Git panel open, the window's controls are at its top instead. */}
+          {/* With the side pane open, the window's controls are at its top instead. */}
           {!gitShown && <WindowControls />}
         </WindowDragRegion>
         <ContentPane
@@ -753,6 +810,7 @@ function AssistantWindow() {
               : flushPane,
           )}
         >
+          <PreviewOpenContext value={showPreview}>
           {activeTab.sessionID ? (
             <Conversation
               key={activeTab.sessionID}
@@ -765,7 +823,7 @@ function AssistantWindow() {
               onOpenSession={choose}
               onFork={(message) => activeTab.sessionID && forkSession(activeTab.sessionID, message)}
               onAddProvider={addProvider}
-              gitOpen={gitShown}
+              gitOpen={gitTabShown}
               onToggleGit={toggleGit}
             />
           ) : (
@@ -778,6 +836,7 @@ function AssistantWindow() {
               onAddProvider={addProvider}
             />
           )}
+          </PreviewOpenContext>
         </ContentPane>
       </div>
       {gitShown && (
@@ -785,17 +844,17 @@ function AssistantWindow() {
           <div
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize the Git panel"
-            aria-valuenow={gitWidth}
-            aria-valuemin={MIN_GIT_WIDTH}
-            aria-valuemax={MAX_LIST_WIDTH}
+            aria-label="Resize the side pane"
+            aria-valuenow={sideWidth}
+            aria-valuemin={sideMin}
+            aria-valuemax={sideMax}
             tabIndex={0}
             title="Drag to resize, double-click to reset"
             onPointerDown={(e) => startResize(e, -1)}
-            onDoubleClick={() => setGitWidth(SIDEBAR_WIDTH)}
+            onDoubleClick={() => setSideWidth(previewShown ? DEFAULT_PREVIEW_WIDTH : SIDEBAR_WIDTH)}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowLeft') setGitWidth((w) => clampGitWidth(w + 16));
-              else if (e.key === 'ArrowRight') setGitWidth((w) => clampGitWidth(w - 16));
+              if (e.key === 'ArrowLeft') setSideWidth(sideWidth + 16);
+              else if (e.key === 'ArrowRight') setSideWidth(sideWidth - 16);
               else return;
               e.preventDefault();
             }}
@@ -804,16 +863,25 @@ function AssistantWindow() {
           {/* Narrower, it slides over the conversation, as the list does. */}
           <button
             type="button"
-            aria-label="Hide Git"
+            aria-label="Hide the side pane"
             className="absolute inset-0 z-10 bg-background/40 @5xl/assistant:hidden"
             onClick={() => setGitShown(false)}
           />
-          <GitPanel
-            key={activeDirectory}
+          <SidePanel
             directory={activeDirectory}
-            onClose={() => setGitShown(false)}
-            style={{ width: gitWidth }}
-            className="absolute inset-y-0 right-0 z-20 max-w-[85%] bg-background shadow-xl @5xl/assistant:static @5xl/assistant:max-w-none @5xl/assistant:bg-transparent @5xl/assistant:shadow-none"
+            previews={previews}
+            tab={shownTab}
+            onTab={setSideTab}
+            onClosePreview={closePreview}
+            reloads={reloads}
+            onReload={reloadPreview}
+            onHide={() => setGitShown(false)}
+            style={{ width: sideWidth }}
+            className={cn(
+              'absolute inset-y-0 right-0 z-20 bg-background shadow-xl @5xl/assistant:static @5xl/assistant:bg-transparent @5xl/assistant:shadow-none',
+              // A page may be wide, but the conversation keeps room beside it.
+              previewShown ? 'max-w-[92%] @5xl/assistant:max-w-[70%]' : 'max-w-[85%] @5xl/assistant:max-w-none',
+            )}
           />
         </>
       )}

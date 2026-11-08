@@ -801,6 +801,15 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         if (!apps || guestId === null) throw new Error('File URLs are only available inside Din');
         return apps.fileUrl(guestId, g.path);
       },
+      // An HTML file to frame as a web page, its folder's files with it.
+      'files.pageUrl': async ({ handle }) => {
+        need('preview');
+        const g = await usableGrant(handle);
+        if (g.kind !== 'file') throw new Error('Only a file can be shown as a page');
+        const apps = getAppsBridge();
+        if (!apps || guestId === null) throw new Error('Pages are only available inside Din');
+        return apps.pageUrl(guestId, g.path);
+      },
       'files.fromPath': async ({ path: raw }) => {
         const path = normalizePath(raw);
         if (!path) throw new Error('An absolute path is required');
@@ -1138,6 +1147,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       }
       if (permissions.includes('microphone')) {
         await apps.grantMicrophone(webContentsId).catch((e: unknown) => console.error('din: granting microphone:', e));
+      }
+      if (permissions.includes('preview')) {
+        await apps.grantPreview(webContentsId).catch((e: unknown) => console.error('din: granting preview:', e));
       }
       if (permissions.includes('background')) {
         await apps

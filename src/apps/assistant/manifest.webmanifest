@@ -18,7 +18,8 @@
       "assistant-sudo",
       "fs",
       "microphone",
-      "notifications"
+      "notifications",
+      "preview"
     ],
     "window": {
       "size": {

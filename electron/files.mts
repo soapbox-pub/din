@@ -1524,12 +1524,33 @@ export function registerLocalFileProtocol(shellOrigin: string): void {
   });
 }
 
+/** And for a page shown in an app's preview frame, what a web page is made of. */
+const PAGE_MIME: Record<string, string> = {
+  ...MIME,
+  html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
+  js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8',
+  css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8',
+  map: 'application/json; charset=utf-8', wasm: 'application/wasm',
+  xml: 'application/xml; charset=utf-8', csv: 'text/csv; charset=utf-8',
+  md: 'text/markdown; charset=utf-8', woff: 'font/woff', woff2: 'font/woff2',
+  ttf: 'font/ttf', otf: 'font/otf', glb: 'model/gltf-binary', gltf: 'model/gltf+json',
+};
+
+/**
+ * A page's own sandbox, whoever frames it or opens it: script runs, but in
+ * an opaque origin of its own, so it never shares one with what framed it,
+ * nor reads a file over fetch that its URL's CORS doesn't hand it.
+ */
+const PAGE_SANDBOX = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock';
+
 /**
  * A local file as an HTTP response: its type, Range requests (so video can
  * seek), and never as a document that could run script. `cors` names who
- * may read it.
+ * may read it. With `page`, a file of a web page an app previews (pageUrl
+ * in din-apps.mts): HTML and script are served as what they are, and a
+ * document runs sandboxed in an opaque origin.
  */
-export async function serveLocalFile(request: Request, file: string, cors: Record<string, string>): Promise<Response> {
+export async function serveLocalFile(request: Request, file: string, cors: Record<string, string>, { page = false }: { page?: boolean } = {}): Promise<Response> {
   {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response(null, { status: 405, headers: cors });
@@ -1545,7 +1566,7 @@ export async function serveLocalFile(request: Request, file: string, cors: Recor
 
     // An SVG is a document: never let one run script in this origin.
     const safety = {
-      'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+      'content-security-policy': page ? PAGE_SANDBOX : "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
       'x-content-type-options': 'nosniff',
     };
 
@@ -1564,7 +1585,7 @@ export async function serveLocalFile(request: Request, file: string, cors: Recor
     const ext = path.extname(file).slice(1).toLowerCase();
     const headers: Record<string, string> = {
       ...cors,
-      'content-type': MIME[ext] ?? 'application/octet-stream',
+      'content-type': (page ? PAGE_MIME : MIME)[ext] ?? 'application/octet-stream',
       'accept-ranges': 'bytes',
       'cache-control': 'no-cache',
       ...safety,

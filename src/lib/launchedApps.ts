@@ -95,6 +95,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   capture: 'Use the camera, the microphone and the screen, and go live',
   camera: 'Use the camera and the microphone',
   microphone: 'Use the microphone',
+  preview: 'Show web servers running on this computer, and web pages from your files',
   'file-folders': 'Reach the folders of files you give it',
 };
 

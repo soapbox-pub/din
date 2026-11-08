@@ -72,6 +72,7 @@ await observer.observe(handle);
 | `path(handle)` | The full path, to show (a Recent list's folder, Copy Path), and stable for the same file, to compare handles by. Knowing it grants nothing |
 | `parent(handle)` | With `file-folders`, a file's folder as a handle (null for a folder) |
 | `url(handle)` | A `din-file://<token>/<name>` URL to load it from instead of `getFile()` (`<img>`, `<audio>`, `<video>`, `fetch` with Range), streamed by main. For media and anything big |
+| `pageUrl(handle)` | With `preview`, a URL to frame an HTML file from as a sandboxed web page, its folder's files loading with it ([Web pages](#web-pages)) |
 
 ## Saving
 
@@ -163,6 +164,19 @@ the app's window; main serves it on the apps' session with Range support
 don't exist there). The URL lasts as long as the page: a reload or a
 closed window ends it. The app's CSP must allow `din-file:` where it
 loads it (`img-src`, `media-src`, `connect-src`).
+
+### Web pages
+
+`din.files.pageUrl(handle)`, for an app with `preview`, is the same kind of
+URL for an HTML file shown as a web page in an `<iframe>` (the Assistant's
+preview pane). Its token serves the page's folder and what's under it, so
+`./app.js` and `./style.css` load, and nothing outside it: main refuses a
+file directly in home or in a folder holding it or Din's own files, since
+the page would reach all of that. Each file is served with its web type and
+a CSP `sandbox` that runs the page's script in an opaque origin, readable
+by the page itself (`access-control-allow-origin: *`), never sharing the
+app's origin, permissions or files. The app's CSP must allow `din-file:` in
+`frame-src`.
 
 ### Some folders by path
 
