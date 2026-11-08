@@ -12,8 +12,6 @@ import { useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { ToolButton } from '@/shared/appChrome';
 import { flushPane, focusRing, toolIcon } from '@/shared/appChromeStyles';
 import { useAssistantHost } from '@/shared/assistant/host';
-import { useHomeDirectory } from '@/hooks/useAssistant';
-import { tildify } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { GitPanel } from './GitPanel';
 import type { Preview } from '@/shared/assistant/previews';
@@ -85,7 +83,7 @@ export function SidePanel({
         <WindowControls />
       </WindowDragRegion>
       {shown ? (
-        <PreviewView key={shown.uri} preview={shown} reload={reloads[shown.uri] ?? 0} onReload={() => onReload(shown.uri)} />
+        <PreviewView key={shown.uri} preview={shown} reload={reloads[shown.uri] ?? 0} />
       ) : (
         <GitPanel key={directory} directory={directory} />
       )}
@@ -158,7 +156,7 @@ function SideTabButton({
   );
 }
 
-/** What a preview offers, in its tab's right-click menu and its toolbar alike. */
+/** What a preview offers, in its tab's right-click menu. */
 function usePreviewActions(preview: Preview) {
   const { openUrl, showInFolder, notify } = useAssistantHost();
   const { target } = preview;
@@ -229,34 +227,15 @@ function usePageUrl(path: string | null): { url?: string; error?: string } {
   return state?.path === path ? state : {};
 }
 
-/** A preview: its toolbar (reload, where it is, opening it elsewhere) over the page. */
-function PreviewView({ preview, reload, onReload }: { preview: Preview; reload: number; onReload: () => void }) {
-  const home = useHomeDirectory();
-  const actions = usePreviewActions(preview);
+/** A preview: the page, right under the pane's tabs (its tab's right-click menu reloads it, opens it elsewhere or copies where it is). */
+function PreviewView({ preview, reload }: { preview: Preview; reload: number }) {
   const { target } = preview;
   const file = usePageUrl(target.kind === 'file' ? target.path : null);
   const src = target.kind === 'server' ? target.url : file.url;
-  const address = target.kind === 'server' ? target.url : tildify(target.path, home);
 
   return (
     <div role="tabpanel" aria-label={preview.title} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-1 px-2">
-        <ToolButton label="Reload" onClick={onReload}>
-          <RotateCw {...toolIcon} aria-hidden />
-        </ToolButton>
-        <input
-          readOnly
-          value={address}
-          aria-label={target.kind === 'server' ? 'Address' : 'File'}
-          title={target.kind === 'server' ? target.url : target.path}
-          onFocus={(e) => e.currentTarget.select()}
-          className={cn('h-8 min-w-0 flex-1 truncate rounded-full bg-foreground/[0.06] px-3 text-sm text-muted-foreground', focusRing)}
-        />
-        <ToolButton label={actions.openLabel} onClick={actions.open}>
-          {target.kind === 'server' ? <ExternalLink {...toolIcon} aria-hidden /> : <FolderOpen {...toolIcon} aria-hidden />}
-        </ToolButton>
-      </div>
-      <div className={cn('mr-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white clay', flushPane)}>
+      <div className={cn('mr-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl rounded-tl-none bg-white clay', flushPane)}>
         {src ? (
           <iframe
             key={`${src}#${reload}`}
