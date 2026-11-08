@@ -53,9 +53,23 @@ export interface Rect extends Point, Size {}
 // The whole object
 // ---------------------------------------------------------------------------
 
+/**
+ * What the app is running on. `desktop` is a window among others, which the
+ * user moves, resizes, minimizes and closes. `phone` is a phone's screen,
+ * where the app is the whole of it and the phone does the rest (Din Phone):
+ * there is no window to move, resize or maximize, no window controls are
+ * wanted, and the app lays itself out for a finger.
+ */
+export type FormFactor = 'desktop' | 'phone';
+
 export interface Din {
   /** Which version of this API the desktop speaks. */
   readonly version: 1;
+  /**
+   * What the app is running on (see FormFactor); `desktop` until the hello.
+   * Also the root element's `data-form-factor`, for CSS.
+   */
+  readonly formFactor: FormFactor;
   /**
    * Resolves once the desktop has said hello: until then the launch, window
    * state, theme and permissions read as empty, and calls queue.

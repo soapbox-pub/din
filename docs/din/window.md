@@ -9,6 +9,22 @@ Every app window is a Din window: the desktop places it, tiles it,
 snaps it, minimizes it into the Dock, lists it in the switcher. The app
 decides what's inside, and how much of the frame it draws itself.
 
+## On a phone
+
+`din.formFactor` says what the app runs on: `desktop`, a window among
+others, or `phone`, where the app has a phone's whole screen and the phone
+does what a window manager would (Din Phone: each app is an Android task of
+its own). The root element carries it as `data-form-factor` for CSS, and
+`useFormFactor()` gives it to React.
+
+On a phone there's no window to move, resize, maximize or snap. The
+runtime starts no gestures from `app-region: drag`, `WindowDragRegion` is
+just the bar, `<WindowControls>` draws nothing, and the shared `TabStrip`
+shows the tab you're in with a count of tabs that opens a sheet of them all.
+What an app asks of the window that a phone doesn't have (bounds, a shape,
+a menu bar) is taken and forgotten. An app whose header holds only its
+tabs and the window controls needs nothing else to look right there.
+
 ## State
 
 The window's state is the web's own. A page in a webview would otherwise

@@ -29,6 +29,7 @@ import type {
   DinTheme,
   DinWindow,
   DragInfo,
+  FormFactor,
   FrameStyle,
   MenuItem,
   Nip07,
@@ -539,6 +540,9 @@ export function installDin(transport: Transport): void {
   let helloed = false;
   const states = new Emitter<void>();
   const snaps = new Emitter<Snap | null>();
+  // A phone's screen has no window to move, resize or maximize: the title
+  // bar's gestures below do nothing there.
+  let formFactor: FormFactor = 'desktop';
   installWindowState({ state: () => (helloed ? state : null), onChange: (cb) => states.on(cb) });
   const styles = new Emitter<FrameStyle>();
   const tabHovers = new Emitter<{ x: number; y: number } | null>();
@@ -644,6 +648,7 @@ export function installDin(transport: Transport): void {
     return false;
   };
   window.addEventListener('pointerdown', (e) => {
+    if (formFactor === 'phone') return;
     if (e.defaultPrevented || e.button !== 0 || !e.isPrimary || !dragRegion(e.target)) return;
     e.preventDefault();
     // The move is handed to the desktop only once the pointer has moved a
@@ -664,10 +669,12 @@ export function installDin(transport: Transport): void {
     window.addEventListener('pointercancel', stop);
   });
   window.addEventListener('dblclick', (e) => {
+    if (formFactor === 'phone') return;
     if (e.defaultPrevented || e.button !== 0 || !dragRegion(e.target)) return;
     void request(state.maximized ? 'window.restore' : 'window.maximize');
   });
   window.addEventListener('contextmenu', (e) => {
+    if (formFactor === 'phone') return;
     if (e.defaultPrevented || !dragRegion(e.target)) return;
     e.preventDefault();
     tell('window.menu', { at: point(e) });
@@ -1111,6 +1118,9 @@ export function installDin(transport: Transport): void {
 
   const din: Din = {
     version: 1,
+    get formFactor() {
+      return formFactor;
+    },
     ready,
     app,
     window: win,
@@ -1161,6 +1171,8 @@ export function installDin(transport: Transport): void {
     helloed = true;
     states.emit();
     frameStyle = hello.frameStyle;
+    formFactor = hello.formFactor ?? 'desktop';
+    document.documentElement.dataset.formFactor = formFactor;
     takeTheme(hello.theme);
     applyTheme(hello.theme, loadedFaces);
     markAccessibility();

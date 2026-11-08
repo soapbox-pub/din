@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Din } from '@/sdk/din';
-import { DinContext, frameControlClasses, useDin, useFrameStyle, useMediaQuery } from '@/sdk/react/hooks';
+import { DinContext, frameControlClasses, useDin, useFormFactor, useFrameStyle, useMediaQuery } from '@/sdk/react/hooks';
 
 export function DinProvider({ din, children }: { din: Din; children: ReactNode }) {
   return <DinContext.Provider value={din}>{children}</DinContext.Provider>;
@@ -19,14 +19,23 @@ const MAXIMIZED = '(display-state: maximized)';
  * pressing its empty space moves the window, double-clicking maximizes it
  * and right-clicking opens Din's window menu (the runtime does each).
  * Buttons, tabs, fields and `[data-window-no-drag]` inside keep their own
- * clicks, and fields their native menu.
+ * clicks, and fields their native menu. On a phone there's no window to
+ * move, and it's just the bar.
  */
 export function WindowDragRegion({ className, ...props }: ComponentProps<'div'>) {
-  return <div {...props} className={cn('touch-none select-none [app-region:drag]', className)} />;
+  const phone = useFormFactor() === 'phone';
+  return <div {...props} className={cn(phone ? 'select-none' : 'touch-none select-none [app-region:drag]', className)} />;
 }
 
-/** Minimize, maximize and close, in the title bar's colors. */
+/**
+ * Minimize, maximize and close, in the title bar's colors. Nothing on a
+ * phone, where the phone's own navigation does all three.
+ */
 export function WindowControls({ className }: { className?: string }) {
+  return useFormFactor() === 'phone' ? null : <DesktopWindowControls className={className} />;
+}
+
+function DesktopWindowControls({ className }: { className?: string }) {
   const din = useDin();
   const maximized = useMediaQuery(MAXIMIZED);
   const { muted, hover } = frameControlClasses(useFrameStyle());

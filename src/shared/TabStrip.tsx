@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/components/ui/drawer';
 import { useDragReorder, type WindowMoveGesture } from '@/hooks/useDragReorder';
 import { TabContextMenu, type TabTransfer } from '@/shared/TabContextMenu';
 import {
@@ -40,24 +41,19 @@ export interface TabDescriptor {
  *
  * Used by the Terminal, Files and Assistant apps; the Web Browser has its own richer
  * variant (favicons, loading state) but the same interaction model.
+ *
+ * On a phone (din.formFactor) a strip of tabs is too small to hit, and there
+ * is no window to drag: the bar shows the tab you're in, with a count of
+ * them that opens a sheet of them all, as a phone's browser does
+ * (PhoneTabs).
  */
-export function TabStrip({
-  tabs,
-  activeId,
-  label,
-  newTabLabel = 'New tab',
-  onActivate,
-  onClose,
-  onNew,
-  newTabMenuLabel = 'New tab',
-  onMove,
-  transfer,
-  moveWindow,
-  tabMenuItems,
-  onReopen,
-  onTabMenuCloseAutoFocus,
-  editing,
-}: {
+export function TabStrip(props: TabStripProps) {
+  // Fixed for the page's life: the hello has come before an app renders.
+  const phone = typeof window !== 'undefined' && window.din?.formFactor === 'phone';
+  return phone ? <PhoneTabs {...props} /> : <DesktopTabStrip {...props} />;
+}
+
+interface TabStripProps {
   tabs: TabDescriptor[];
   activeId: string;
   /** Accessible label for the tablist (e.g. "Terminal tabs"). */
@@ -83,7 +79,160 @@ export function TabStrip({
   onTabMenuCloseAutoFocus?: (event: Event) => void;
   /** A tab whose title is being edited, and the field to show in its place. */
   editing?: { id: string; editor: ReactNode } | null;
-}) {
+}
+
+/**
+ * Tabs on a phone: the bar holds the tab you're in, a count of them and a
+ * new-tab button, and the count opens a sheet listing them, where a tap
+ * switches, the cross closes, and a long press opens a tab's menu (the same
+ * one a right-click opens on a desktop). A phone has one window, so tabs
+ * don't move between windows, and they stay in the order they were opened.
+ */
+function PhoneTabs({
+  tabs,
+  activeId,
+  label,
+  newTabLabel = 'New tab',
+  newTabMenuLabel = 'New tab',
+  onActivate,
+  onClose,
+  onNew,
+  tabMenuItems,
+  onReopen,
+  onTabMenuCloseAutoFocus,
+  editing,
+}: TabStripProps) {
+  const [open, setOpen] = useState(false);
+  const active = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const control = 'grid size-10 shrink-0 place-items-center rounded-full text-foreground/80 active:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60';
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
+        {active?.icon && <span className="grid shrink-0 place-items-center opacity-80 empty:hidden">{active.icon}</span>}
+        {editing && active && editing.id === active.id ? (
+          <span className="min-w-0 flex-1">{editing.editor}</span>
+        ) : (
+          <span className="min-w-0 truncate">{active?.title}</span>
+        )}
+      </div>
+      <button
+        type="button"
+        aria-label={`${label}: ${tabs.length} open`}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className={control}
+      >
+        <span className="grid size-6 place-items-center rounded-md border-[1.5px] border-current text-xs font-semibold tabular-nums">
+          {tabs.length > 99 ? ':)' : tabs.length}
+        </span>
+      </button>
+      <button type="button" aria-label={newTabLabel} onClick={onNew} className={control}>
+        <Plus className="size-5" strokeWidth={1.75} />
+      </button>
+
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerContent className="max-h-[85dvh]">
+          <DrawerTitle className="px-5 pt-2 text-base font-semibold">{label}</DrawerTitle>
+          <DrawerDescription className="sr-only">Tap a tab to switch to it; hold one for more.</DrawerDescription>
+          <div role="tablist" aria-label={label} className="flex min-h-0 flex-col gap-1 overflow-y-auto px-3 py-3">
+            {tabs.map((tab, index) => (
+              <TabContextMenu
+                key={tab.id}
+                tabId={tab.id}
+                onClose={() => onClose(tab.id)}
+                onNew={() => {
+                  setOpen(false);
+                  onNew();
+                }}
+                newLabel={newTabMenuLabel}
+                onCloseOthers={() => tabs.filter((t) => t.id !== tab.id).forEach((t) => onClose(t.id))}
+                canCloseOthers={tabs.length > 1}
+                onCloseToRight={() => tabs.slice(index + 1).forEach((t) => onClose(t.id))}
+                canCloseToRight={index < tabs.length - 1}
+                items={tabMenuItems?.(tab.id)}
+                onReopen={onReopen}
+                onCloseAutoFocus={(e) => {
+                  onTabMenuCloseAutoFocus?.(e);
+                  // A rename from the menu edits the title in the bar.
+                  if (e.defaultPrevented) setOpen(false);
+                }}
+                disabled={editing?.id === tab.id}
+              >
+                <div
+                  role="tab"
+                  aria-selected={tab.id === activeId}
+                  tabIndex={0}
+                  onClick={() => {
+                    onActivate(tab.id);
+                    setOpen(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onActivate(tab.id);
+                      setOpen(false);
+                    }
+                  }}
+                  className={cn(
+                    'flex min-h-14 select-none items-center gap-3 rounded-xl pl-4 pr-1 text-sm',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                    tab.id === activeId ? 'bg-foreground/[0.08] font-medium text-foreground' : 'text-foreground/80 active:bg-foreground/[0.05]',
+                  )}
+                >
+                  {tab.icon && <span className="grid size-5 shrink-0 place-items-center opacity-80 empty:hidden">{tab.icon}</span>}
+                  <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+                  <button
+                    type="button"
+                    aria-label={`Close ${tab.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClose(tab.id);
+                      if (tabs.length === 1) setOpen(false);
+                    }}
+                    className="grid size-11 shrink-0 place-items-center rounded-full text-foreground/60 active:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    <X className="size-4.5" />
+                  </button>
+                </div>
+              </TabContextMenu>
+            ))}
+          </div>
+          <div className="px-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onNew();
+              }}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-foreground/[0.06] text-sm font-medium active:bg-foreground/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <Plus className="size-4.5" strokeWidth={1.75} />
+              {newTabLabel}
+            </button>
+          </div>
+        </DrawerContent>
+      </Drawer>
+    </div>
+  );
+}
+
+function DesktopTabStrip({
+  tabs,
+  activeId,
+  label,
+  newTabLabel = 'New tab',
+  onActivate,
+  onClose,
+  onNew,
+  newTabMenuLabel = 'New tab',
+  onMove,
+  transfer,
+  moveWindow,
+  tabMenuItems,
+  onReopen,
+  onTabMenuCloseAutoFocus,
+  editing,
+}: TabStripProps) {
   const reorder = useDragReorder({
     ids: tabs.map((t) => t.id),
     onMove,
