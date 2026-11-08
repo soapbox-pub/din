@@ -98,6 +98,8 @@ export interface NsiteAppInfo {
   id?: string | null;
   /** The https origins its manifest's `scope_extensions` ask for. */
   scopeExtensions?: string[];
+  /** Its manifest's `shortcuts`: a name and a path on the site each. */
+  shortcuts?: { name: string; path: string }[];
 }
 
 /**
@@ -166,6 +168,8 @@ const DOWNLOAD_CONCURRENCY = 4;
 
 /** Websites one site's `scope_extensions` may ask for. */
 const MAX_SCOPE_EXTENSIONS = 8;
+/** At most this many of a site's manifest shortcuts are kept. */
+const MAX_SHORTCUTS = 8;
 
 /** How long a website's association is trusted before it's fetched again. */
 const LINKS_RECHECK_MS = 24 * 60 * 60_000;
@@ -495,7 +499,18 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     nostr,
     id,
     scopeExtensions,
+    shortcuts: parseShortcuts(value.shortcuts),
   };
+}
+
+function parseShortcuts(raw: unknown): NonNullable<NsiteAppInfo['shortcuts']> {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const { name, path } = entry as Record<string, unknown>;
+    const label = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+    return label && isScopePath(path) && !/[\s\\]/.test(path) ? [{ name: label, path }] : [];
+  }).slice(0, MAX_SHORTCUTS);
 }
 
 function parseNostrHandler(raw: unknown): NsiteAppInfo['nostr'] {

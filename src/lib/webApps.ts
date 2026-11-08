@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeNostrHandler, type NostrHandler } from '@/lib/nostrUri';
+import { normalizeShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
 
 /**
  * User-installed web apps ("install this website as an app", like a PWA
@@ -29,6 +30,19 @@ export interface WebApp {
    * `protocol_handlers` at install time. The URL is on the app's own origin.
    */
   nostr?: NostrHandler;
+  /**
+   * Its manifest's `shortcuts` at install time, for the jump list on its
+   * Dock and launcher tiles. Each is on the app's own origin.
+   */
+  shortcuts?: WebAppShortcut[];
+}
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** Zod schema for the stored `web-apps` list. */
@@ -43,6 +57,10 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
       .unknown()
       .transform((value) => normalizeNostrHandler(value) ?? undefined)
       .optional(),
+    shortcuts: z.unknown().optional(),
+  }).transform(({ shortcuts, ...app }) => {
+    const kept = normalizeShortcuts(shortcuts, originOf(app.url));
+    return kept.length > 0 ? { ...app, shortcuts: kept } : app;
   }),
 );
 

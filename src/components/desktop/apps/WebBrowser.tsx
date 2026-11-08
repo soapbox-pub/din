@@ -171,6 +171,7 @@ import {
   WEBBROWSER_PRIVATE_PARTITION,
   WEBBROWSER_TOR_PARTITION,
   type BrowserViewHandle,
+  type InstallManifest,
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
@@ -192,7 +193,7 @@ import {
 import { NostrPage } from '@/components/desktop/apps/NostrPage';
 import { ExtensionsPage, type ExtensionsPageProps } from '@/components/desktop/apps/ExtensionsPage';
 import { isExtensionCatalogLoaded, loadExtensionCatalog, subscribeExtensionCatalog } from '@/lib/extensionCatalog';
-import { isNostrUri, type NostrHandler } from '@/lib/nostrUri';
+import { isNostrUri } from '@/lib/nostrUri';
 import { findDevicePreset, type DevicePreset } from '@/lib/devicePresets';
 import { cleanPrintingError, printPage } from '@/lib/printing';
 
@@ -2171,8 +2172,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           collectIcons={() =>
             views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
           }
-          collectNostrHandler={() =>
-            views.current.get(activeTab.id)?.collectNostrHandler() ?? Promise.resolve(null)
+          collectManifest={() =>
+            views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [] })
           }
         />}
 
@@ -4874,14 +4875,14 @@ function InstallSiteButton({
   favicon,
   themeColor,
   collectIcons,
-  collectNostrHandler,
+  collectManifest,
 }: {
   url: string;
   pageTitle: string | null;
   favicon: string | null;
   themeColor: string | null;
   collectIcons: () => Promise<IconCandidate[]>;
-  collectNostrHandler: () => Promise<NostrHandler | null>;
+  collectManifest: () => Promise<InstallManifest>;
 }) {
   const { installWebApp, findWebAppByUrl, installNsiteApp, findNsiteApp, getApp } =
     useInstalledApps();
@@ -4899,8 +4900,8 @@ function InstallSiteButton({
   // filled in asynchronously when the popover opens. Null until resolved, so
   // the preview shows the reported-favicon baseline in the meantime.
   const [resolvedIcon, setResolvedIcon] = useState<string | null>(null);
-  // How the site opens nostr: links, read from its manifest with the icons.
-  const [nostrHandler, setNostrHandler] = useState<NostrHandler | null>(null);
+  // How the site opens nostr: links, and its shortcuts, read from its manifest with the icons.
+  const [manifest, setManifest] = useState<InstallManifest | null>(null);
 
   const site = useMemo(() => {
     if (nsiteHost) {
@@ -4962,9 +4963,9 @@ function InstallSiteButton({
         .catch(() => {
           /* Leave the baseline icon in place. */
         });
-      setNostrHandler(null);
-      collectNostrHandler()
-        .then(setNostrHandler)
+      setManifest(null);
+      collectManifest()
+        .then(setManifest)
         .catch(() => {
           /* Installed without one. */
         });
@@ -4994,7 +4995,8 @@ function InstallSiteButton({
       url: site.url,
       icon: effectiveIcon,
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
-      nostr: nostrHandler ?? undefined,
+      nostr: manifest?.nostr ?? undefined,
+      shortcuts: manifest?.shortcuts,
     });
     if (!webApp) return;
     setOpen(false);

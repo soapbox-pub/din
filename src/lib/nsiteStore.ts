@@ -38,6 +38,11 @@ export interface NsiteAppInfo {
   id?: string | null;
   /** The https origins the manifest's `scope_extensions` ask for. */
   scopeExtensions?: string[];
+  /**
+   * The manifest's `shortcuts`, for the jump list on the app's Dock and
+   * launcher tiles: a name and a path on the site each.
+   */
+  shortcuts?: { name: string; path: string }[];
 }
 
 /**

@@ -8,9 +8,18 @@ import {
   parseNostrProtocolHandler,
   type NostrHandler,
 } from '@/lib/nostrUri';
+import { parseManifestShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
 import { shownUrl } from '@/lib/tor';
 import { getBrowserBridge } from '@/lib/browser';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
+
+/** What a page's web app manifest says for installing its site as an app. */
+export interface InstallManifest {
+  nostr: NostrHandler | null;
+  shortcuts: WebAppShortcut[];
+}
+
+const NO_INSTALL_MANIFEST: InstallManifest = { nostr: null, shortcuts: [] };
 
 /**
  * The Electron session partition for the Web Browser app's tabs and for
@@ -80,10 +89,11 @@ export interface BrowserViewHandle {
    */
   collectIcons: () => Promise<IconCandidate[]>;
   /**
-   * How the page's web app manifest says the site opens `nostr:` links, or
-   * null. Not yet checked against the site's origin. Webview only.
+   * What the page's web app manifest says for installing the site as an app:
+   * how it opens `nostr:` links (or null) and its shortcuts. Not yet checked
+   * against the site's origin. Webview only.
    */
-  collectNostrHandler: () => Promise<NostrHandler | null>;
+  collectManifest: () => Promise<InstallManifest>;
   /**
    * The page's current selection text (for pre-filling the find bar).
    * Webview only; the iframe fallback resolves to an empty string.
@@ -231,7 +241,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       toggleFullscreen: () => {},
       // The iframe fallback can't reach into cross-origin guest DOM.
       collectIcons: () => Promise.resolve([]),
-      collectNostrHandler: () => Promise.resolve(null),
+      collectManifest: () => Promise.resolve(NO_INSTALL_MANIFEST),
       getSelectionText: () => Promise.resolve(''),
     }), [onLoadStart]);
 
@@ -312,15 +322,19 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           return [];
         }
       },
-      collectNostrHandler: async () => {
-        if (!surface.current) return null;
+      collectManifest: async () => {
+        if (!surface.current) return NO_INSTALL_MANIFEST;
         try {
           const result: unknown = await surface.current.executeJavaScript(COLLECT_PROTOCOL_HANDLERS_JS);
-          if (typeof result !== 'object' || result === null) return null;
+          if (typeof result !== 'object' || result === null) return NO_INSTALL_MANIFEST;
           const { base, manifest } = result as { base?: unknown; manifest?: unknown };
-          return typeof base === 'string' ? parseNostrProtocolHandler(manifest, base) : null;
+          if (typeof base !== 'string') return NO_INSTALL_MANIFEST;
+          return {
+            nostr: parseNostrProtocolHandler(manifest, base),
+            shortcuts: parseManifestShortcuts(manifest, base, null),
+          };
         } catch {
-          return null;
+          return NO_INSTALL_MANIFEST;
         }
       },
       getSelectionText: async () => {

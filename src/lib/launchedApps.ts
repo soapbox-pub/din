@@ -11,6 +11,7 @@ import type { ComponentType } from 'react';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { WEB_APP_ICON } from '@/lib/appIcons';
 import { normalizeThemeColor } from '@/lib/themeColor';
+import { manifestActions } from '@/lib/dinApps';
 import type { DinManifest, FrameMode, Permission } from '@/sdk/din';
 
 const LaunchedAppFrame = lazy(() =>
@@ -272,6 +273,7 @@ export function manifestDefinition(appId: string, manifest: DinManifest, compone
     floating: manifest.din.window?.floating,
     keywords: manifest.din.keywords,
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
+    actions: manifestActions(manifest),
   };
 }
 

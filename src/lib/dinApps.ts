@@ -140,6 +140,22 @@ export function linkedAppId(url: unknown): string | null {
   return null;
 }
 
+type ManifestShortcut = NonNullable<DinManifest['shortcuts']>[number];
+
+/** What a launch names a shortcut by: its `din.id`, or its `url` for a plain web app manifest's. */
+function shortcutKey(s: ManifestShortcut): string {
+  return s.din?.id ?? s.url;
+}
+
+/**
+ * A manifest's shortcuts as the Dock's and launcher's jump list (AppDefinition
+ * `actions`): each launches the app with its `din.params` and `shortcut`, which
+ * launchUrl turns back into the shortcut's `url`.
+ */
+export function manifestActions(manifest: DinManifest): { label: string; params: Record<string, unknown> }[] | undefined {
+  return manifest.shortcuts?.map((s) => ({ label: s.name, params: { ...s.din?.params, shortcut: shortcutKey(s) } }));
+}
+
 /**
  * A launch's `targetURL`: the app's own URL (`din://<id>/`, wherever the
  * page is served from), at the shortcut's `url` when a shortcut launched it
@@ -147,7 +163,7 @@ export function linkedAppId(url: unknown): string | null {
  */
 export function launchUrl(id: string, manifest: DinManifest, shortcut: string | null, params: Record<string, unknown>): string {
   const base = isFileAppId(id) ? `din+file://${id.slice('file-'.length)}/` : `din://${id}/`;
-  const path = (shortcut ? manifest.shortcuts?.find((s) => s.din?.id === shortcut)?.url : undefined) ?? manifest.start_url ?? '/';
+  const path = (shortcut ? manifest.shortcuts?.find((s) => shortcutKey(s) === shortcut)?.url : undefined) ?? manifest.start_url ?? '/';
   const own = new URL(base);
   let url: URL;
   try {

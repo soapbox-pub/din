@@ -12,6 +12,7 @@
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { parseNostrProtocolHandler } from '@/lib/nostrUri';
+import { parseManifestShortcuts } from '@/lib/webAppShortcuts';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
 
 /**
@@ -209,9 +210,10 @@ const FAVICON_SIZE = 64;
  * Bumped whenever the derivation changes what it produces, so info stored by
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
  * 4: favicons are kept too; 5: and how it opens nostr: links; 6: and its
- * manifest id and scope_extensions, so installed sites can open websites' links).
+ * manifest id and scope_extensions, so installed sites can open websites' links;
+ * 7: and its shortcuts).
  */
-export const NSITE_APP_INFO_VERSION = 6;
+export const NSITE_APP_INFO_VERSION = 7;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -415,6 +417,15 @@ function pickNostrHandler(webManifest: unknown, manifestPath: string): NsiteAppI
   return { path: `${url.pathname}${url.search}${url.hash}`, kinds: handler.kinds };
 }
 
+/** The manifest's shortcuts, each a path on the site itself. */
+function pickShortcuts(webManifest: unknown, manifestPath: string): NonNullable<NsiteAppInfo['shortcuts']> {
+  const origin = 'https://nsite.invalid';
+  return parseManifestShortcuts(webManifest, `${origin}${manifestPath}`, origin).map((s) => {
+    const url = new URL(s.url);
+    return { name: s.name, path: `${url.pathname}${url.search}${url.hash}` };
+  });
+}
+
 /**
  * The manifest's id and the websites it extends its scope to. The id is a
  * path on the site: `id` resolved against the start URL's origin, or the
@@ -615,6 +626,7 @@ export async function deriveNsiteAppDetails(
     nostr: null,
     id: null,
     scopeExtensions: [],
+    shortcuts: [],
     description: null,
     installable: false,
   };
@@ -636,6 +648,7 @@ export async function deriveNsiteAppDetails(
     candidates.push(...collectFromWebManifest(webManifest, manifestBase));
     info.installable = isInstallable(webManifest, manifestBase, paths);
     info.nostr = pickNostrHandler(webManifest, manifestPath);
+    info.shortcuts = pickShortcuts(webManifest, manifestPath);
     Object.assign(info, pickScope(webManifest, manifestPath));
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {

@@ -7,7 +7,7 @@ import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID } from '@/lib/settingsWindows';
-import { dinManifest, dinManifests, manifestIcon, manifestSize } from '@/lib/dinApps';
+import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
   import('@/components/desktop/DinAppFrame').then((m) => ({ default: m.DinAppFrame })),
@@ -182,10 +182,7 @@ function dinApp(id: string): AppDefinition {
     hidden: manifest.din.hidden,
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
     dockAs: manifest.din.dockAs,
-    actions: manifest.shortcuts?.map((s) => ({
-      label: s.name,
-      params: { ...s.din?.params, ...(s.din?.id ? { shortcut: s.din.id } : {}) },
-    })),
+    actions: manifestActions(manifest),
   };
 }
 

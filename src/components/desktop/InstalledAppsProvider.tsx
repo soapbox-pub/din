@@ -18,6 +18,7 @@ import {
 import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { normalizeNostrHandler } from '@/lib/nostrUri';
+import { normalizeShortcuts, shortcutActions } from '@/lib/webAppShortcuts';
 import { useAppData } from '@/hooks/useAppData';
 import {
   canonicalHostOfUrl,
@@ -81,12 +82,14 @@ function webAppComponent(webApp: WebApp, favicon?: string, nsiteHost?: string): 
       // A link routed into this app (see BrowserExtensionHost) arrives as a
       // `url` launch param, so the window opens at that deep link instead of
       // the app's home URL. WebAppFrame re-checks it shares the app's origin.
+      // A shortcut chosen again goes there again (`actionAt`).
       const initialUrl =
         typeof props.params?.url === 'string' ? props.params.url : undefined;
       return (
         <WebAppFrame
           url={url}
           initialUrl={initialUrl}
+          navigateAt={props.params?.actionAt}
           name={name}
           icon={icon}
           favicon={favicon}
@@ -120,6 +123,7 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
     web: true,
     // Only a handler on the app's own origin: the window is pinned to it.
     ...(webApp.nostr && sameOrigin(webApp.nostr.url, webApp.url) ? { nostr: webApp.nostr } : {}),
+    actions: shortcutActions(normalizeShortcuts(webApp.shortcuts, originOfUrl(webApp.url))),
   };
 }
 
@@ -146,11 +150,16 @@ function nsiteAppToDefinition(
     themeColor: summary?.app?.themeColor ?? undefined,
   }, themed ?? summary?.app?.favicon ?? undefined, entry.host);
   const handler = summary?.app?.nostr;
+  const base = nsiteAppUrl(entry.host).slice(0, -1);
+  const shortcuts = summary?.app?.shortcuts ?? [];
   return {
     ...definition,
     web: false,
+    actions: shortcuts.length > 0
+      ? shortcuts.map((s) => ({ label: s.name, params: { url: `${base}${s.path}` } }))
+      : undefined,
     ...(handler
-      ? { nostr: { url: `${nsiteAppUrl(entry.host).slice(0, -1)}${handler.path}`, kinds: handler.kinds } }
+      ? { nostr: { url: `${base}${handler.path}`, kinds: handler.kinds } }
       : {}),
   };
 }
@@ -396,19 +405,21 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         requestInstall(host);
         return entry;
       },
-      installWebApp: ({ name, url, icon, themeColor, nostr }) => {
+      installWebApp: ({ name, url, icon, themeColor, nostr, shortcuts }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
         const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
         const handler = normalizeNostrHandler(nostr);
+        const kept = normalizeShortcuts(shortcuts, originOfUrl(safeUrl));
         const webApp = createWebApp({
           name: trimmedName,
           url: safeUrl,
           icon: safeIcon,
           themeColor: safeThemeColor,
           ...(handler && sameOrigin(handler.url, safeUrl) ? { nostr: handler } : {}),
+          ...(kept.length > 0 ? { shortcuts: kept } : {}),
         });
         setWebApps((prev) => [...prev, webApp]);
         return webApp;

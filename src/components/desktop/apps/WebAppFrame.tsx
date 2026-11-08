@@ -35,6 +35,7 @@ import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 export function WebAppFrame({
   url,
   initialUrl,
+  navigateAt,
   name,
   icon,
   favicon,
@@ -43,6 +44,8 @@ export function WebAppFrame({
 }: {
   url: string;
   initialUrl?: string;
+  /** Changes when the app is asked to go to `initialUrl` again (a shortcut chosen twice). */
+  navigateAt?: unknown;
   name: string;
   icon: LucideIcon | string;
   /** Drawn in the title bar instead of the icon, when the site has one. */
@@ -85,13 +88,14 @@ export function WebAppFrame({
   // without remounting. The webview's src is fixed at mount, so drive the
   // navigation imperatively. `src` already covers the initial deep link, so
   // only react to *changes* after mount.
-  const lastNavigated = useRef(src);
+  const lastNavigated = useRef({ src, at: navigateAt });
   useEffect(() => {
-    if (src && src !== lastNavigated.current) {
-      lastNavigated.current = src;
+    const last = lastNavigated.current;
+    if (src && (src !== last.src || (deepLink && navigateAt !== last.at))) {
       viewRef.current?.loadURL(src);
     }
-  }, [src]);
+    lastNavigated.current = { src, at: navigateAt };
+  }, [src, deepLink, navigateAt]);
 
   const onThemeColorChange = useCallback(
     (color: string | null) => setPageColor(color ?? themeColor ?? null),

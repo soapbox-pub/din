@@ -3,6 +3,7 @@ import type { AppDefinition } from '@/lib/apps';
 import type { WebApp } from '@/lib/webApps';
 import type { NsiteAppEntry } from '@/lib/nsiteApps';
 import type { NostrHandler } from '@/lib/nostrUri';
+import type { WebAppShortcut } from '@/lib/webAppShortcuts';
 import type { FileAppEntry, OpenedFolder } from '@/lib/fileApps';
 
 /** A website whose links an installed nsite opens (InstalledAppsManager.linkedWebsites). */
@@ -32,7 +33,7 @@ export interface InstalledAppsManager {
    * entry, or `null` if the URL was invalid.
    */
   installWebApp: (
-    input: { name: string; url: string; icon?: string; themeColor?: string; nostr?: NostrHandler },
+    input: { name: string; url: string; icon?: string; themeColor?: string; nostr?: NostrHandler; shortcuts?: WebAppShortcut[] },
   ) => WebApp | null;
   /** Find an installed web app by its exact start URL. */
   findWebAppByUrl: (url: string) => WebApp | undefined;
