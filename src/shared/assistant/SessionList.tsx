@@ -32,7 +32,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
-import { focusRing, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass } from '@/shared/appChromeStyles';
+import { focusRing, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import { bundledIconProps } from '@/shared/iconSizes';
 
 /** How many conversations a project shows before "Show more". */
@@ -498,7 +498,7 @@ export function SessionList({
                       className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                       onClick={() => onNew(project.root)}
                     >
-                      <Plus className="size-4" aria-hidden />
+                      <Plus {...toolIcon} aria-hidden />
                     </ToolButton>
                   </div>
                   {open && (
