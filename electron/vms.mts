@@ -415,6 +415,20 @@ async function info(id: string): Promise<VmInfo> {
   };
 }
 
+/** How far along each install has got: macOS's installer frees space on the disk on its way, which isn't going back. */
+const installHighWater = new Map<string, number>();
+
+/** The disk filling is the best sign of how far along it is; done is the installer turning the machine off. */
+function installProgress(id: string, stored: StoredInstall, filled: number): number {
+  if (stored.step === 'download' || stored.error) {
+    installHighWater.delete(id);
+    return 0;
+  }
+  const progress = Math.max(installHighWater.get(id) ?? 0, Math.min(0.97, filled));
+  installHighWater.set(id, progress);
+  return progress;
+}
+
 function installInfo(id: string, config: StoredConfig, diskUsed: number): VmInstall | null {
   const stored = config.install;
   if (!stored) return null;
@@ -432,8 +446,7 @@ function installInfo(id: string, config: StoredConfig, diskUsed: number): VmInst
     phase: stored.error ? 'failed' : stored.step !== 'download' ? 'installing' : (live?.phase ?? 'resolving'),
     receivedBytes: live?.received ?? 0,
     totalBytes: live?.total ?? 0,
-    // The disk filling is the best sign of how far along it is; done is the installer turning the machine off.
-    progress: stored.step !== 'download' ? Math.min(0.97, diskUsed / installedBytes) : 0,
+    progress: installProgress(id, stored, diskUsed / installedBytes),
     error: stored.error,
     manualUrl,
   };

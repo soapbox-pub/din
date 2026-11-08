@@ -1113,8 +1113,12 @@ export async function prepareOpenCore(dir: string, uuid: string, signal: AbortSi
 /** What the script in Recovery says on the first serial port. */
 export const MACOS_STARTED = 'DIN-MACOS-STARTED';
 export const MACOS_FAILED = 'DIN-MACOS-FAILED';
-/** The command vms.mts types into Recovery's Terminal. */
-export const MACOS_COMMAND = 'sh /Volumes/DINSETUP/install.sh';
+/**
+ * The commands vms.mts types into Recovery's Terminal (letters, digits,
+ * spaces, slashes, dots and dashes alone). Recovery doesn't always mount
+ * the answer drive by itself (started from a USB drive, it didn't).
+ */
+export const MACOS_COMMAND = 'diskutil mount DINSETUP\nsh /Volumes/DINSETUP/install.sh';
 
 /**
  * Run in Recovery: erase the machine's disk (the biggest internal one) and
@@ -1149,8 +1153,7 @@ say ${MACOS_FAILED} "Apple’s installer stopped."
 /** What the finishing script in Recovery says on the first serial port. */
 export const MACOS_FINISHING = 'DIN-MACOS-FINISHING';
 export const MACOS_FINISHED = 'DIN-MACOS-FINISHED';
-/** The command vms.mts types into Recovery's Terminal once macOS is on the disk. */
-export const MACOS_FINISH_COMMAND = 'sh /Volumes/DINSETUP/finish.sh';
+export const MACOS_FINISH_COMMAND = 'diskutil mount DINSETUP\nsh /Volumes/DINSETUP/finish.sh';
 
 /**
  * Run in Recovery once Apple's installer has put macOS on the disk and
