@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import type { CSSProperties, Ref, RefObject } from 'react';
-import { activeFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
+import { activeFileDrag, dropStaleFileDrag, fileDragActive, subscribeFileDrag } from '@/components/desktop/apps/files/dnd';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useWindowVisible } from '@/contexts/WindowVisibleContext';
 import { createGuest, guest, GUEST_EVENTS, guestId, isGuestFullscreen, type GuestElement } from '@/platform/guest';
@@ -250,8 +250,8 @@ export function GuestSurface({
     guest.executeJavaScript(el, 'document.fullscreenElement && document.exitFullscreen().catch(() => {})').catch(() => {});
   }, [pageHidden]);
 
-  // Files dragged from Files: the drag goes to the page as paths it can't
-  // open, so the desktop covers the page and has main drop the files
+  // Files dragged from Files (or any app, or the desktop): the drag goes to
+  // the page as paths it can't open, so the desktop covers the page and has main drop the files
   // themselves into it (see guestFileDrop in electron/main.mts).
   const fileDrag = useSyncExternalStore(subscribeFileDrag, fileDragActive);
   const fileDropBridge = acceptFileDrops ? window.dinos?.guestFileDrop : undefined;
@@ -282,6 +282,8 @@ export function GuestSurface({
       {fileDrag && fileDropBridge && (
         <div
           className="absolute inset-0 z-10"
+          onPointerMove={dropStaleFileDrag}
+          onPointerDown={dropStaleFileDrag}
           onDragOver={(event) => {
             if (!activeFileDrag(event)) return;
             event.preventDefault();

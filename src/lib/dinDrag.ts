@@ -79,6 +79,19 @@ export function finishDrag(token: string, dropEffect: string): DinDragEntry | nu
   return entry;
 }
 
+/**
+ * Stop treating the current drag as under way, for when its end was never
+ * heard (its source's window closed mid-drag): a surface that sees pointer
+ * events knows no drag is going on, since none come during one. It stays
+ * registered, so a late drop or dragend still finds it.
+ */
+export function forgetCurrentDrag(): void {
+  if (!current) return;
+  current = null;
+  setDragPoint(null);
+  changed();
+}
+
 export function currentDrag(): DinDragEntry | null {
   return current;
 }

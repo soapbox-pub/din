@@ -11,7 +11,7 @@
  * here for the duration.
  */
 
-import { DRAG_MIME, currentDrag, finishDrag, registerDrag } from '@/lib/dinDrag';
+import { DRAG_MIME, currentDrag, finishDrag, forgetCurrentDrag, registerDrag, subscribeDrag } from '@/lib/dinDrag';
 
 export const FILES_MIME = 'application/x-din-files';
 
@@ -29,15 +29,26 @@ function setActive(drag: ActiveDrag | null): void {
   for (const listener of listeners) listener();
 }
 
-/** Hear when a drag of files starts or ends (for useSyncExternalStore). */
+/**
+ * Hear when a drag of files starts or ends (for useSyncExternalStore): one
+ * this document started, or one an app registered with the broker.
+ */
 export function subscribeFileDrag(listener: () => void): () => void {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  const unsubscribe = subscribeDrag(listener);
+  return () => {
+    listeners.delete(listener);
+    unsubscribe();
+  };
 }
 
-/** Whether files are being dragged anywhere in the shell right now. */
+/**
+ * Whether files are being dragged anywhere in the shell right now, from this
+ * document or from an app (Files' own window, whose drags reach the desktop
+ * by token, src/lib/dinDrag.ts).
+ */
 export function fileDragActive(): boolean {
-  return active !== null;
+  return active !== null || currentDrag()?.kind === 'files';
 }
 
 /** The token of the drag this document started, for apps to take it by (src/lib/dinDrag.ts). */
@@ -85,6 +96,16 @@ export function activeFileDrag(e: React.DragEvent): ActiveDrag | null {
   const app = e.dataTransfer.types.includes(DRAG_MIME) ? currentDrag() : null;
   if (app?.kind !== 'files' || app.source === 'din') return null;
   return { paths: app.paths, folders: new Set(app.folders ? app.paths : []) };
+}
+
+/**
+ * A pointer event reached a surface that covers itself for file drags, so no
+ * drag is under way (none come during one): an app's drag whose end never
+ * came (its window closed mid-drag) stops covering pages.
+ */
+export function dropStaleFileDrag(): void {
+  const app = currentDrag();
+  if (app && app.source !== 'din') forgetCurrentDrag();
 }
 
 /** Whether a drop should copy (Ctrl held) rather than move. */
