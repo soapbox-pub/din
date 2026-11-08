@@ -808,6 +808,8 @@ function AssistantWindow() {
             gitShown
               ? '@5xl/assistant:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:mr-0 @max-5xl/assistant:[[data-screen-right]_&]:rounded-tr-none @max-5xl/assistant:[[data-screen-right]_&]:rounded-br-none [[data-screen-bottom]_&]:mb-0 [[data-screen-bottom]_&]:rounded-bl-none [[data-screen-bottom]_&]:rounded-br-none'
               : flushPane,
+            // Beside a page, its top-right corner is square, as the page's top-left is.
+            gitShown && previewShown && '@5xl/assistant:rounded-tr-none',
           )}
         >
           <PreviewOpenContext value={showPreview}>
