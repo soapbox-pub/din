@@ -150,6 +150,9 @@ let
   # in it, and with that run code in Din's main process, which sudo trusts
   # to approve commands (os/din-password.py). Electron's
   # EnableNodeCliInspectArguments fuse turns off that and --inspect alike.
+  # GrantFileProtocolExtraPrivileges goes off too, so a local page the Web
+  # Browser opens is as in Chrome, an opaque origin that can show the files
+  # beside it but not fetch them (electron/local-files.mts reads it back).
   # Fuses are bytes in the binary after a sentinel, so only the binary is
   # copied and changed; the rest of the build is linked, and the wrapper
   # points at the copy.
@@ -171,6 +174,10 @@ let
     inspect = fuses + 2 + 3  # EnableNodeCliInspectArguments
     assert data[inspect] in b"01", "Electron's inspector fuse is gone"
     data[inspect] = ord("0")
+    assert data[fuses + 1] > 7, "Electron's file-privileges fuse is gone"
+    files = fuses + 2 + 7  # GrantFileProtocolExtraPrivileges
+    assert data[files] in b"01", "Electron's file-privileges fuse is gone"
+    data[files] = ord("0")
     open(sys.argv[2], "wb").write(data)
     EOF
     chmod 555 $out/libexec/electron/electron

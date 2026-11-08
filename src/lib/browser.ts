@@ -123,6 +123,12 @@ export interface BrowserBridge {
    */
   preconnect(url: string): void;
   /**
+   * Let tabs show a `file:` URL the user asked for, and the folder it's in:
+   * tabs refuse every other local file. In the persistent session, or
+   * (`isPrivate`) the private one. Call it just before loading the URL.
+   */
+  allowLocalFile(url: string, isPrivate: boolean): void;
+  /**
    * Search a tab (`wcId`) for `text`. An empty text clears the highlight.
    * Match counts arrive via onFindResult.
    */

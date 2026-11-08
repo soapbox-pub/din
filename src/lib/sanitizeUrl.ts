@@ -162,6 +162,26 @@ export function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
+ * The file: URL for a local address the user typed: a `file:` URL on this
+ * computer (no host but `localhost`), or an absolute path, which may have
+ * spaces in it. Null for anything else.
+ */
+export function localFileUrl(input: string): string | null {
+  if (/^file:/i.test(input)) {
+    try {
+      const url = new URL(input);
+      if (url.protocol !== 'file:' || (url.hostname !== '' && url.hostname !== 'localhost')) return null;
+      url.hostname = '';
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+  if (!input.startsWith('/') || input.startsWith('//')) return null;
+  return `file://${input.split('/').map((part) => encodeURIComponent(part)).join('/')}`;
+}
+
+/**
  * Turn a query-or-URL string into a navigable http/https/nsite URL, or one of
  * the browser's own internal pages. If it looks like a bare search term, hand
  * it to a search engine instead. Bare loopback
@@ -191,6 +211,13 @@ export function resolveNavigation(input: string): string | null {
   // A Blossom link (`blossom:<sha256>.<ext>`), which has no `://`.
   const blossom = parseBlossomUri(trimmed);
   if (blossom) return blossom.uri;
+
+  // A local file or folder, as a file: URL or an absolute path. Only from
+  // here, what the user typed or picked: every other way into a tab
+  // (sanitizeNavigationUrl, isAllowedTabUrl) refuses them, and main serves a
+  // tab only the folders asked for this way (electron/local-files.mts).
+  const local = localFileUrl(trimmed);
+  if (local) return local;
 
   // nsite addresses first, so a bare `npub1…` or `naddr1…` isn't mistaken for
   // a search term.

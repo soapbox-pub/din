@@ -3009,6 +3009,15 @@ expose('browser', {
   preconnect: (url) => ipcRenderer.send('browser:preconnect', url),
 
   /**
+   * Let a tab show a local file the user asked for, and the folder it's in,
+   * in the persistent session or (`isPrivate`) the private one. Sent, not
+   * invoked: it reaches main before the tab's load that follows it.
+   * @param {string} url
+   * @param {boolean} isPrivate
+   */
+  allowLocalFile: (url, isPrivate) => ipcRenderer.send('browser:allowLocalFile', url, isPrivate),
+
+  /**
    * Search a browser tab (`wcId`) for `text`. `options.forward` (default
    * true) sets direction; `options.findNext` continues the current search
    * (Enter/Shift+Enter); `options.matchCase` makes it case-sensitive. An

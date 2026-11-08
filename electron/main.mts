@@ -55,6 +55,7 @@ import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import { installChromeWebStore } from 'electron-chrome-web-store';
 import { extensionAccess, registerBrowserExtensionHandlers } from './browser-extensions.mts';
 import { DevtoolsBridge } from './devtools-bridge.mts';
+import { allowLocalFile, allowLocalFileNavigation, serveLocalFile } from './local-files.mts';
 import {
   registerUserscriptHandlers,
   attachUserscripts,
@@ -4810,9 +4811,10 @@ function registerPromptBridge(): void {
 //     the clipboard: what's copied could name who's browsing.
 //   - everything else is denied: keyboard lock, external protocol handlers,
 //     device pickers (HID/serial/USB/Bluetooth), ...
-// Guest sessions also refuse file:// outright: nothing legitimate loads local
-// files into a tab, and an extension could otherwise point one at Din's own
-// profile directory (chrome.tabs.update skips the address bar's checks).
+// Guest sessions also refuse file://: an extension could otherwise point a tab
+// at Din's own profile directory (chrome.tabs.update skips the address bar's
+// checks). The browser's normal and private sessions serve the folders the
+// user opened in a tab, and only those (electron/local-files.mts).
 // ---------------------------------------------------------------------------
 
 const ALWAYS_ALLOWED_PERMISSIONS = new Set([
@@ -5107,7 +5109,8 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     callback();
   });
 
-  s.protocol.handle('file', () => new Response('Local files cannot be opened here.', {
+  const localFiles = s === browserSession() || s === privateBrowserSession();
+  s.protocol.handle('file', (request) => localFiles ? serveLocalFile(s, request) : new Response('Local files cannot be opened here.', {
     status: 403,
     headers: { 'content-type': 'text/plain; charset=utf-8' },
   }));
@@ -5641,6 +5644,14 @@ function registerBrowserPreconnectHandler(): void {
       return;
     }
     browserSession().preconnect({ url: origin, numSockets: 1 });
+  });
+
+  // A file: URL the user asked a tab for (the address bar, a bookmark,
+  // history): its folder may be served in that window's session from now on.
+  // Sent just before the tab loads it, down the same pipe, so it lands first.
+  ipcMain.on('browser:allowLocalFile', (event, url: unknown, isPrivate: unknown) => {
+    if (!isShellSender(event) || typeof url !== 'string' || !/^file:/i.test(url)) return;
+    allowLocalFile(isPrivate === true ? privateBrowserSession() : browserSession(), url);
   });
 }
 
@@ -7034,6 +7045,8 @@ app.on('web-contents-created', (_event, contents) => {
       }
     });
     contents.once('destroyed', () => cancelNostrRequestsFor(contents.id, 'The page was closed'));
+    // A local folder's page links up to the folders above it.
+    contents.on('will-navigate', (event) => allowLocalFileNavigation(contents.session, contents.getURL(), event.url));
     attachFileChooserInterception(contents);
     attachSelectionColor(contents);
     // Pop-ups need a click (electron/popups.mts); a tab one opened is linked

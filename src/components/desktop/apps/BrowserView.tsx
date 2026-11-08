@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { RotateCw, Unplug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
@@ -9,6 +9,7 @@ import {
   type NostrHandler,
 } from '@/lib/nostrUri';
 import { shownUrl } from '@/lib/tor';
+import { getBrowserBridge } from '@/lib/browser';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 
 /**
@@ -173,7 +174,8 @@ export interface BrowserViewProps {
  *
  * Surfaces only ever receive https URLs (and view-source: views of them) -
  * plus chrome-extension:// URLs on the webview surface, for extension
- * options/dashboard pages (validated upstream, see `isAllowedTabUrl`).
+ * options/dashboard pages (validated upstream, see `isAllowedTabUrl`), and
+ * file: URLs the user asked for (`resolveNavigation`).
  */
 export const BrowserView = forwardRef<BrowserViewHandle, BrowserViewProps>(
   function BrowserView(props, ref) {
@@ -279,10 +281,25 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
   ) {
     const surface = useRef<GuestSurfaceHandle>(null);
 
+    // Tabs show only the local files the user asked for (electron/local-files.mts),
+    // and what reaches a tab's surface from the browser was asked for: the
+    // address bar, a bookmark, history. Pages never get here. Told just before
+    // the load, so main has it first.
+    const allowLocal = useCallback((url: string) => {
+      if (installedApp || !/^file:/i.test(url)) return;
+      if (partition !== WEBBROWSER_PARTITION && partition !== WEBBROWSER_PRIVATE_PARTITION) return;
+      getBrowserBridge()?.allowLocalFile(url, partition === WEBBROWSER_PRIVATE_PARTITION);
+    }, [installedApp, partition]);
+    // The first URL, before GuestSurface's layout effect attaches the guest.
+    useState(() => allowLocal(src));
+
     useImperativeHandle(ref, () => ({
       reload: () => surface.current?.reload(),
       reloadIgnoringCache: () => surface.current?.reloadIgnoringCache(),
-      loadURL: (url: string) => surface.current?.loadURL(url),
+      loadURL: (url: string) => {
+        allowLocal(url);
+        surface.current?.loadURL(url);
+      },
       goBack: () => surface.current?.goBack(),
       goForward: () => surface.current?.goForward(),
       focus: () => surface.current?.focus(),
@@ -316,7 +333,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           return '';
         }
       },
-    }), []);
+    }), [allowLocal]);
 
     // The page's renderer went away: it crashed, ran out of memory, or was
     // ended from the System Monitor. The engine leaves the guest blank, so say
