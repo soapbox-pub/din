@@ -48,7 +48,12 @@
 #       it needs the computer to restart. Prints what's left: `din`,
 #       `reboot`, or nothing (`needs_for`). Not one of the commands Din runs
 #       without asking, as it builds what the user wrote; sudo asks, for that
-#       commit and no other, as it would for `nixos-rebuild switch`.
+#       commit and no other, as it would for `nixos-rebuild switch`. The
+#       newest `local` wins: one asked for while another commit (or any
+#       update) is being built stops that build and starts its own, and the
+#       one set aside fails saying so; one asked for the commit already being
+#       built waits for that build. A system being installed (the `install`
+#       step) or switched to is never cut short: the newer one waits for it.
 #   din-update run
 #       The update itself, as din-update.service. Writes its progress to
 #       STATE as it goes.
@@ -118,6 +123,12 @@ REQUEST=/run/din-update.request
 RESULT=/var/lib/dinos/result
 PROFILE=/nix/var/nix/profiles/system
 LOCK=/run/din-update.lock
+# Held by `local` while it decides what the service builds, and while it
+# switches to what was built: one caller at a time.
+LOCAL_LOCK=/run/din-update-local.lock
+# The commit the newest `local` asked for, while it's being built. A run
+# that sees it change (a newer `local`) has been set aside.
+WANTED=/run/din-update.wanted
 UNIT=din-update.service
 SHELL_UNIT=din-shell.service
 BOOTED=/run/booted-system
@@ -478,16 +489,67 @@ restart_din() {
   systemctl restart --no-block "$SHELL_UNIT"
 }
 
+wanted() {
+  cat "$WANTED" 2>/dev/null || true
+}
+
+# Whether a newer `local` has asked for a commit other than $1. One that has
+# finished (and cleared WANTED) sets nothing aside.
+superseded() {
+  local now
+  now=$(wanted)
+  [[ -n $now && $now != "$1" ]]
+}
+
+# The commit this `local` asked for, cleared from WANTED as it ends unless a
+# newer one has taken its place.
+local_commit=""
+forget_wanted() {
+  [[ -n $local_commit ]] || return 0
+  flock 8
+  [[ $(wanted) != "$local_commit" ]] || rm -f "$WANTED"
+}
+
+set_aside() {
+  die "Commit ${1:0:7} was set aside: commit $(wanted | cut -c1-7) was asked for since."
+}
+
 # `local`: have the service build commit $1 of ~/DinOS (run_local), then
-# switch to it as `apply` would.
+# switch to it as `apply` would. A build of anything else stops for it.
 build_local() {
   local commit=$1 next
   is_live && die "A live system isn't updated."
   [[ $commit =~ ^[0-9a-f]{40}$ ]] || die "usage: din-update local <commit>"
-  running && die "An update is running. Try again when it finishes."
-  echo "local $commit" >"$REQUEST"
-  # A oneshot: this waits for the run, whose failure is in STATE.
-  systemctl start "$UNIT" 2>/dev/null || true
+  exec 8>"$LOCAL_LOCK"
+  flock 8
+  local_commit=$commit
+  trap forget_wanted EXIT
+  if running && [[ $(wanted) == "$commit" ]]; then
+    echo "Commit ${commit:0:7} is being built already; waiting for it" >&2
+  else
+    # Written before the run's step is read: a run checks WANTED once it's
+    # at `install` (stage), so either it sees this and stops itself, or
+    # this sees it installing and waits.
+    echo "$commit" >"$WANTED"
+    while running && [[ $(jq -r '.step // ""' "$STATE" 2>/dev/null) == install ]]; do sleep 1; done
+    if running; then
+      echo "Stopping the build of $(jq -r '.target // "an update"' "$STATE" 2>/dev/null) for commit ${commit:0:7}" >&2
+      # Nix stops the build when its client goes.
+      systemctl stop "$UNIT"
+    fi
+    echo "local $commit" >"$REQUEST"
+    systemctl start --no-block "$UNIT"
+  fi
+  flock -u 8
+  # Until the run (and its queued start) is done, or a newer `local` has
+  # taken its place.
+  while running || [[ -n $(systemctl show -p Job --value "$UNIT" 2>/dev/null) ]]; do
+    superseded "$commit" && set_aside "$commit"
+    sleep 1
+  done
+  # One switch at a time, and none to a commit set aside meanwhile.
+  flock 8
+  superseded "$commit" && set_aside "$commit"
   load_state
   [[ $phase != failed ]] || die "${error:-The update failed.}"
   next=$(readlink -f "$PROFILE")
@@ -612,6 +674,8 @@ progress_of() {
 # what a failure to build it is keyed by (`failed`): the tip, or for a
 # merge both of its sides.
 what="" attempt="" merging=false
+# WANTED as the run started (run): a change means it's been set aside.
+wanted_at_start=""
 
 # A build that failed: the user's to fix if it's their changes.
 fail_build() {
@@ -665,7 +729,15 @@ check_security() {
 run() {
   if is_live; then exit 0; fi
   exec 9>"$LOCK"
-  flock -n 9 || die "An update is already running."
+  # One that was asked for waits out a switch (`apply`, `local`'s).
+  if [[ -e $REQUEST ]]; then
+    flock -w 600 9 || die "An update is already running."
+  else
+    flock -n 9 || die "An update is already running."
+  fi
+  wanted_at_start=$(wanted)
+  # A run stopped for a newer `local` may have left git's lock behind.
+  rm -f "$SRC/.git/index.lock"
   load_state
 
   local manual=false replace=false request=""
@@ -842,6 +914,14 @@ stage() {
   [[ $(revision_of "$built") == "$target" ]] || fail "${what^} didn't build as itself."
 
   set_step install
+  # A newer `local` asked for something else while this built: it's
+  # waiting to start, having seen this at `install` or about to stop it.
+  if superseded "$wanted_at_start"; then
+    echo "Not installing $target: commit $(wanted) was asked for since"
+    rm -f "$RESULT"
+    finish
+    exit 0
+  fi
   update_features "$built"
   nix-env --profile "$PROFILE" --set "$built"
   rm -f "$RESULT"

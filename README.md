@@ -352,6 +352,9 @@ with `din update local` (the assistant's `dinos` skill,
 and runs `din-update local <commit>` through sudo, which asks the user
 ("Allow the assistant to update Din?"). The service builds that commit like
 any update, then the command switches to it and Din restarts if it changed.
+The newest `local` wins: asked for while another commit (or any update)
+builds, it stops that build and starts its own, and the one set aside says
+so; an install or switch under way finishes first.
 Updates keep them: when the
 commit the newest system was built from isn't in the followed branch, the
 updater merges the branch's tip into that exact commit, which the user

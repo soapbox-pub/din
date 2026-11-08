@@ -50,6 +50,11 @@ developer's own checkout of Din; work in it all the same.
    - "It starts when the computer restarts": the kernel, initrd, kernel
      parameters, modules or firmware changed, which load only at startup.
      Ask the user to restart the computer; never reboot it yourself.
+   - "Commit … was set aside: commit … was asked for since": another
+     `din update local` (another agent's, say) asked for a newer commit,
+     and the newest one asked for is what gets built. Nothing to retry
+     unless your commit isn't in that one; then merge and run it again.
+     One asked for the same commit just waits for that build.
 
    A setting in `/etc` that a running service reads only at startup
    (PipeWire's, say) waits for that service to restart, which this can't
