@@ -1120,8 +1120,8 @@ export const MACOS_COMMAND = 'sh /Volumes/DINSETUP/install.sh';
  * Run in Recovery: erase the machine's disk (the biggest internal one) and
  * have Apple's installer download and install macOS onto it, agreeing to
  * Apple's licence as autounattend.xml does Microsoft's. The installer
- * restarts the machine to go on, and macOS's Setup Assistant greets the
- * user at the end.
+ * restarts the machine to go on, and ends at Setup Assistant, where Din
+ * takes over again with macosFinishScript.
  */
 function macosInstallScript(): string {
   return `#!/bin/sh
@@ -1146,11 +1146,155 @@ say ${MACOS_FAILED} "Apple’s installer stopped."
 `;
 }
 
-/** Get macOS ready to install by itself: its recovery image, and the script in `dir`/seed. */
+/** What the finishing script in Recovery says on the first serial port. */
+export const MACOS_FINISHING = 'DIN-MACOS-FINISHING';
+export const MACOS_FINISHED = 'DIN-MACOS-FINISHED';
+/** The command vms.mts types into Recovery's Terminal once macOS is on the disk. */
+export const MACOS_FINISH_COMMAND = 'sh /Volumes/DINSETUP/finish.sh';
+
+/**
+ * Run in Recovery once Apple's installer has put macOS on the disk and
+ * Setup Assistant is waiting, in its place: an administrator account named
+ * for this computer's user with no password, which macOS logs into by
+ * itself (as Windows' and Linux's are), this computer's time zone and
+ * region, and Setup Assistant marked done, its screens for the account
+ * answered. Setup Assistant draws its blurred, animated screens on the CPU
+ * (macOS has no driver for QEMU's display), and a click there took seconds.
+ * Then it turns the machine off, and vms.mts starts macOS.
+ *
+ * Also, for a machine with no GPU: Reduce Transparency on, so macOS doesn't
+ * blur what's behind its menus and windows every frame; never asleep (a
+ * sleeping machine looks frozen, and its disk doesn't come back from it);
+ * and QEMU's USB keyboard known as an ANSI one, so Keyboard Setup Assistant
+ * doesn't ask.
+ */
+function macosFinishScript(): string {
+  const { username, fullName } = account();
+  const { lang, timezone } = locale();
+  const appleLocale = lang.replace(/\..*$/, '');
+  const country = appleLocale.split('_')[1] ?? 'US';
+  const tz = /^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*$/.test(timezone) ? timezone : 'UTC';
+  return `#!/bin/sh
+# Din's hands-free end to macOS's setup, run in Recovery's Terminal.
+say() { echo "$*"; ( echo "$*" > /dev/cu.serial1 ) 2>/dev/null & }
+fail() { say "${MACOS_FAILED} $*"; exit 1; }
+U='${username}'
+NAME='${fullName}'
+say ${MACOS_FINISHING}
+
+# The installed system's volumes, mounted (Recovery mounts them, not always both).
+volume() {
+  for dev in $(diskutil apfs list | sed -n "s/.*Volume Disk (Role):[^d]*\\(disk[0-9s]*\\) ($1).*/\\1/p"); do
+    diskutil mount "$dev" >/dev/null 2>&1
+    mp=$(diskutil info -plist "$dev" | plutil -extract MountPoint raw -o - - 2>/dev/null)
+    [ -d "$mp/$2" ] && { echo "$mp"; return; }
+  done
+}
+data=$(volume Data private/var/db/dslocal/nodes/Default)
+system=$(volume System "System/Library/User Template")
+[ -n "$data" ] && [ -n "$system" ] || fail "There’s no macOS on the disk to finish setting up."
+info="$system/System/Library/CoreServices/SystemVersion.plist"
+version=$(plutil -extract ProductVersion raw -o - "$info")
+build=$(plutil -extract ProductBuildVersion raw -o - "$info")
+
+plist() { # a file, then its dictionary's XML
+  printf '<?xml version="1.0" encoding="UTF-8"?>\\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\\n<plist version="1.0">\\n<dict>\\n%s\\n</dict>\\n</plist>\\n' "$2" > "$1"
+}
+
+# The account.
+node="$data/private/var/db/dslocal/nodes/Default"
+user="/Local/Default/Users/$U"
+if ! dscl -f "$node" localhost -read "$user" >/dev/null 2>&1; then
+  dscl -f "$node" localhost -create "$user" || fail "The account couldn’t be made."
+  dscl -f "$node" localhost -create "$user" RealName "$NAME"
+  dscl -f "$node" localhost -create "$user" UniqueID 501
+  dscl -f "$node" localhost -create "$user" PrimaryGroupID 20
+  dscl -f "$node" localhost -create "$user" UserShell /bin/zsh
+  dscl -f "$node" localhost -create "$user" NFSHomeDirectory "/Users/$U"
+  dscl -f "$node" localhost -passwd "$user" '' || fail "The account couldn’t be given its password."
+  dscl -f "$node" localhost -append /Local/Default/Groups/admin GroupMembership "$U"
+  guid=$(dscl -f "$node" localhost -read "$user" GeneratedUID | awk '{print $2}')
+  [ -n "$guid" ] && dscl -f "$node" localhost -append /Local/Default/Groups/admin GroupMembers "$guid"
+fi
+home="$data/Users/$U"
+if [ ! -d "$home" ]; then
+  mkdir -p "$home"
+  ditto "$system/System/Library/User Template/Non_localized" "$home"
+  ditto "$system/System/Library/User Template/English.lproj" "$home"
+fi
+mkdir -p "$home/Library/Preferences"
+seen=
+for k in DidSeeAccessibility DidSeeActivationLock DidSeeAppearanceSetup DidSeeApplePaySetup DidSeeAvatarSetup \\
+  DidSeeCloudSetup DidSeeiCloudLoginForStorageServices DidSeeIntelligence DidSeeLockdownMode DidSeePrivacy \\
+  DidSeeScreenTime DidSeeSiriSetup DidSeeSyncSetup DidSeeSyncSetup2 DidSeeTermsOfAddress DidSeeTouchIDSetup \\
+  DidSeeTrueTone DidSeeTrueTonePrivacy DidSeeUpdateSetup DidSeeWallpaper SkipFirstLoginOptimization; do
+  seen="$seen<key>$k</key><true/>"
+done
+for k in LastSeenCloudProductVersion LastSeenDiagnosticsProductVersion LastSeenSiriProductVersion \\
+  LastSeenIntelligenceProductVersion LastSeenAgeRangeSelectionProductVersion LastPreLoginTasksPerformedVersion; do
+  seen="$seen<key>$k</key><string>$version</string>"
+done
+seen="$seen<key>LastSeenBuddyBuildVersion</key><string>$build</string><key>LastPreLoginTasksPerformedBuild</key><string>$build</string>"
+seen="$seen<key>LastPrivacyBundleVersion</key><integer>2</integer><key>InitialAccountOnMac</key><false/>"
+plist "$home/Library/Preferences/com.apple.SetupAssistant.plist" "$seen"
+plist "$home/Library/Preferences/com.apple.universalaccess.plist" '<key>reduceTransparency</key><true/>'
+plist "$home/Library/Preferences/.GlobalPreferences.plist" '<key>AppleLocale</key><string>${appleLocale}</string><key>Country</key><string>${country}</string>'
+chown -R 501:20 "$home"
+
+# Setup Assistant done. The licence was agreed to for Apple's installer
+# (--agreetolicense), so its cookie asking to show it again goes, as Setup
+# Assistant removes it once it's agreed to.
+touch "$data/private/var/db/.AppleSetupDone" "$data/private/var/db/.AppleDiagnosticsSetupDone"
+rm -f "$data/private/var/db/.AppleSetupTermsOfService" "$data/private/var/db/.RunLanguageChooserToo"
+
+# Logged into by itself: the empty password, obfuscated as loginwindow
+# wants it (XORed with its key, padded to a multiple of 12 bytes).
+plist "$data/Library/Preferences/com.apple.loginwindow.plist" "<key>autoLoginUser</key><string>$U</string>"
+printf '\\175\\211\\122\\043\\322\\274\\335\\352\\243\\271\\037\\175' > "$data/private/etc/kcpassword"
+chmod 600 "$data/private/etc/kcpassword"
+mkdir -p "$data/private/etc/sudoers.d"
+echo "$U ALL=(ALL) NOPASSWD: ALL" > "$data/private/etc/sudoers.d/90-din"
+chmod 440 "$data/private/etc/sudoers.d/90-din"
+
+plist "$data/Library/Preferences/com.apple.PowerManagement.plist" '<key>AC Power</key><dict><key>System Sleep Timer</key><integer>0</integer><key>Display Sleep Timer</key><integer>0</integer><key>Disk Sleep Timer</key><integer>0</integer><key>Automatic Restart On Power Loss</key><integer>0</integer></dict>'
+plist "$data/Library/Preferences/com.apple.keyboardtype.plist" '<key>keyboardtype</key><dict><key>1-1575-0</key><integer>40</integer></dict>'
+ln -sf "/var/db/timezone/zoneinfo/${tz}" "$data/private/etc/localtime"
+g="$data/Library/Preferences/.GlobalPreferences.plist"
+/usr/libexec/PlistBuddy -c "Delete :AppleLocale" "$g" >/dev/null 2>&1
+/usr/libexec/PlistBuddy -c "Delete :Country" "$g" >/dev/null 2>&1
+/usr/libexec/PlistBuddy -c "Add :AppleLocale string ${appleLocale}" -c "Add :Country string ${country}" "$g"
+
+say ${MACOS_FINISHED}
+sync
+shutdown -h now
+`;
+}
+
+/** Get macOS ready to install by itself: its recovery image, and the scripts in `dir`/seed. */
 export async function prepareMacos(image: string, dir: string): Promise<InstallBoot> {
   const seedDir = path.join(dir, 'seed');
   await fsp.rm(dir, { recursive: true, force: true });
   await fsp.mkdir(seedDir, { recursive: true });
   await fsp.writeFile(path.join(seedDir, 'install.sh'), macosInstallScript());
+  await fsp.writeFile(path.join(seedDir, 'finish.sh'), macosFinishScript());
   return { seedDir, seedLabel: 'DINSETUP', disk: image };
+}
+
+/** OpenCore's ScanPolicy: APFS and HFS+ volumes on USB devices alone. */
+const SCAN_USB_ONLY = 0x200303;
+
+/**
+ * A copy of the machine's boot loader in `dst` that sees only USB drives,
+ * so it starts the recovery image vms.mts plugs in as one, by itself,
+ * instead of the macOS now on the disk.
+ */
+export async function prepareRecoveryOpenCore(src: string, dst: string): Promise<void> {
+  await fsp.rm(dst, { recursive: true, force: true });
+  await fsp.cp(src, dst, { recursive: true });
+  const file = path.join(dst, 'EFI', 'OC', 'config.plist');
+  const config = parsePlist(await fsp.readFile(file, 'utf8')) as Record<string, PlistDict>;
+  const misc = config.Misc as PlistDict;
+  Object.assign(misc.Security as PlistDict, { ScanPolicy: SCAN_USB_ONLY });
+  Object.assign(misc.Boot as PlistDict, { HideAuxiliary: false, ShowPicker: false });
+  await fsp.writeFile(file, writePlist(config));
 }

@@ -113,9 +113,7 @@ export function NewVmForm({
           </span>
         }
         description={
-          system === 'macos'
-            ? 'It installs by itself; at the end, macOS’s Setup Assistant asks you a few questions. Everything here can be changed later in Settings.'
-            : systemName
+          systemName
               ? 'It sets itself up without asking anything. Everything here can be changed later in Settings.'
               : 'Choose the installer’s disc image, and the machine is set up to suit it.'
         }

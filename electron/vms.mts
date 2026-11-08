@@ -47,12 +47,16 @@ import {
   INSTALLERS_DIR,
   MACOS_COMMAND,
   MACOS_FAILED,
+  MACOS_FINISH_COMMAND,
+  MACOS_FINISHED,
+  MACOS_FINISHING,
   MACOS_SCREEN,
   MACOS_STARTED,
   openCoreReady,
   prepareLinux,
   prepareMacos,
   prepareOpenCore,
+  prepareRecoveryOpenCore,
   prepareWindows,
   pruneDownloads,
   syncOpenCoreScreen,
@@ -217,8 +221,13 @@ async function qemuImg(...args: string[]): Promise<string> {
 interface StoredInstall {
   installer: VmInstallerId;
   label: string;
-  /** Getting the disc image ready, then the installer running in the machine. */
-  step: 'download' | 'install';
+  /**
+   * Getting the disc image ready, then the installer running in the
+   * machine. macOS goes on: Apple's installer running from the disk by
+   * itself until Setup Assistant shows ('apple'), then Din's script in
+   * Recovery setting it up in Setup Assistant's place ('finish').
+   */
+  step: 'download' | 'install' | 'apple' | 'finish';
   /** A disc image of the user's to install from, instead of downloading. */
   iso: string | null;
   /** The download's name in ~/VMs/.installers, once it's known. */
@@ -262,6 +271,8 @@ const logPath = (id: string) => path.join(dirOf(id), 'qemu.log');
 /** The installer's kernel and answer file, while it's being installed. */
 const installDir = (id: string) => path.join(dirOf(id), 'install');
 const openCoreDir = (id: string) => path.join(dirOf(id), 'opencore');
+/** macOS's boot loader for starting Din's recovery image again, to finish setting it up. */
+const recoveryOpenCoreDir = (id: string) => path.join(installDir(id), 'opencore');
 const runDir = (config: StoredConfig) => path.join(RUN_ROOT, config.uuid);
 
 function requireId(id: unknown): string {
@@ -290,7 +301,7 @@ function cleanInstall(value: unknown): StoredInstall | null {
   return {
     installer: raw.installer,
     label: str(raw.label) ?? '',
-    step: raw.step === 'install' ? 'install' : 'download',
+    step: raw.step === 'install' || raw.step === 'apple' || raw.step === 'finish' ? raw.step : 'download',
     iso: cleanPath(raw.iso),
     download: str(raw.download),
     boot:
@@ -418,11 +429,11 @@ function installInfo(id: string, config: StoredConfig, diskUsed: number): VmInst
   return {
     installer: stored.installer,
     label: stored.label,
-    phase: stored.error ? 'failed' : stored.step === 'install' ? 'installing' : (live?.phase ?? 'resolving'),
+    phase: stored.error ? 'failed' : stored.step !== 'download' ? 'installing' : (live?.phase ?? 'resolving'),
     receivedBytes: live?.received ?? 0,
     totalBytes: live?.total ?? 0,
     // The disk filling is the best sign of how far along it is; done is the installer turning the machine off.
-    progress: stored.step === 'install' ? Math.min(0.97, diskUsed / installedBytes) : 0,
+    progress: stored.step !== 'download' ? Math.min(0.97, diskUsed / installedBytes) : 0,
     error: stored.error,
     manualUrl,
   };
@@ -631,6 +642,10 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
   }
   // An installer's kernel (-kernel), or OpenCore, takes the first place to start from itself.
   const boot = config.install?.step === 'install' ? config.install.boot : null;
+  // macOS on the disk, set up by Din's script in its recovery image, which
+  // is plugged in as a USB drive, the only kind this boot loader looks at.
+  const finish = mac && config.install?.step === 'finish' ? config.install.boot : null;
+  const script = boot ?? finish;
   const first = boot?.kernel || mac ? 1 : 0;
   args.push(
     '-drive', `if=none,id=disk0,format=qcow2,discard=unmap,file=${opt(diskPath(id))}`,
@@ -653,13 +668,17 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
     args.push(
       // macOS has no PS/2 driver.
       '-device', 'usb-kbd,bus=xhci.0',
-      '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'opencore', dir: openCoreDir(id), label: 'OPENCORE', 'read-only': true }),
+      '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'opencore', dir: finish ? recoveryOpenCoreDir(id) : openCoreDir(id), label: 'OPENCORE', 'read-only': true }),
       '-device', 'usb-storage,bus=xhci.0,drive=opencore,removable=on,bootindex=0',
     );
     if (boot?.disk) {
       // Recovery, on a disk of its own with its writes kept aside (it won't start read-only).
       const format = /\.dmg$/i.test(boot.disk) ? 'dmg' : 'raw';
       args.push('-drive', `if=none,id=recovery,format=${format},snapshot=on,file=${opt(boot.disk)}`, '-device', 'ide-hd,bus=ide.2,drive=recovery');
+    }
+    if (finish?.disk) {
+      const format = /\.dmg$/i.test(finish.disk) ? 'dmg' : 'raw';
+      args.push('-drive', `if=none,id=recovery,format=${format},snapshot=on,file=${opt(finish.disk)}`, '-device', 'usb-storage,bus=xhci.0,drive=recovery,removable=on');
     }
   }
   if (!mac) {
@@ -683,16 +702,16 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
     // file on the FAT drive below. Its reboot at the end turns the machine
     // off instead, which is how Din hears it's done.
     args.push('-kernel', boot.kernel, '-initrd', boot.initrd ?? '', '-append', boot.append ?? '', '-action', 'reboot=shutdown');
-  } else if (boot) {
+  } else if (script) {
     // Windows Setup, which restarts several times on its way, says it's done
     // on the first serial port (vm-installers' answer file), and Din's
-    // script in macOS's Recovery says there how it's going.
+    // scripts in macOS's Recovery say there how they're going.
     args.push('-chardev', `file,id=ser0,path=${opt(path.join(rundir, 'serial.log'))}`, '-device', 'isa-serial,chardev=ser0');
   }
-  if (boot) {
+  if (script) {
     // The answer file, on a FAT drive QEMU makes from a folder.
     args.push(
-      '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'seed', dir: boot.seedDir, label: boot.seedLabel, 'read-only': true }),
+      '-blockdev', JSON.stringify({ driver: 'vvfat', 'node-name': 'seed', dir: script.seedDir, label: script.seedLabel, 'read-only': true }),
       '-device', 'usb-storage,bus=xhci.0,drive=seed,removable=on,id=seeddev',
     );
   }
@@ -958,11 +977,16 @@ async function exited(id: string, m: Machine): Promise<void> {
   for (const [conn, d] of displays) if (d.id === id) closeDisplay(conn);
   // swtpm ends with QEMU, unless QEMU never reached it.
   m.stopTpm?.();
+  // Din's script finishing macOS's setup says so before it turns the machine off.
+  const finished =
+    m.config.install?.step === 'finish' &&
+    (await fsp.readFile(path.join(m.rundir, 'serial.log'), 'latin1').catch(() => '')).includes(MACOS_FINISHED);
   void fsp.rm(m.rundir, { recursive: true, force: true });
   m.markExited();
   changed();
   // An installer turning the machine off by itself is it finishing.
   if (byGuest && !m.poweredDown && m.config.install?.step === 'install' && m.config.install.boot?.kernel) void finishInstall(id);
+  if (byGuest && !m.poweredDown && finished) void finishInstall(id);
 }
 
 /** Machines still running from before Din (re)started, found by their pidfiles. */
@@ -993,6 +1017,7 @@ async function rediscover(): Promise<void> {
       const qmp = await Qmp.connect(path.join(rundir, 'qmp.sock'), Date.now() + 2000, async () => alive(pid));
       if (!qmp) throw new Error('It stopped.');
       await attach(id, m, qmp);
+      watchMacosSetup(id, m);
     } catch (error) {
       console.error(`vms: reconnecting to ${id} failed`, error);
       machines.delete(id);
@@ -1068,6 +1093,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       // A machine made by hand gets its boot loader the first time it starts.
       if (!openCoreReady(openCoreDir(id))) await prepareOpenCore(openCoreDir(id), config.uuid, AbortSignal.timeout(5 * 60_000));
       else await syncOpenCoreScreen(openCoreDir(id));
+      if (config.install?.step === 'finish') await prepareRecoveryOpenCore(openCoreDir(id), recoveryOpenCoreDir(id));
     }
     if (config.tpm) {
       const swtpm = need(t.swtpm, 'swtpm (for the TPM)');
@@ -1092,7 +1118,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
     }
     await attach(id, m, qmp);
     if (config.install?.step === 'install' && config.install.installer === 'windows') void pressAnyKey(m);
-    if (config.install?.step === 'install' && config.install.installer === 'macos') void startMacosInstall(m);
+    watchMacosSetup(id, m);
   } catch (error) {
     if (machines.get(id) === m) {
       m.stopping = true;
@@ -1309,7 +1335,7 @@ async function keepOnlyUsedDownloads(): Promise<void> {
   for (const id of await ids()) {
     const config = await readConfig(id).catch(() => null);
     if (config?.cdrom?.startsWith(INSTALLERS_DIR)) keep.add(config.cdrom);
-    const disk = config?.install?.step === 'install' ? config.install.boot?.disk : undefined;
+    const disk = config?.install && config.install.step !== 'download' ? config.install.boot?.disk : undefined;
     if (disk?.startsWith(INSTALLERS_DIR)) keep.add(disk);
     if (config?.install?.download && config.install.step === 'download') keep.add(path.join(INSTALLERS_DIR, config.install.download));
   }
@@ -1318,8 +1344,8 @@ async function keepOnlyUsedDownloads(): Promise<void> {
 
 /**
  * Windows Setup is done (it said so on the serial port, at its first
- * logon), or macOS's installer has taken over from Din: take the disc and
- * answer drive out while it runs, and it's an ordinary machine.
+ * logon): take the disc and answer drive out while it runs, and it's an
+ * ordinary machine.
  */
 async function finishSaidInstall(id: string, m: Machine): Promise<void> {
   try {
@@ -1356,19 +1382,18 @@ async function pressAnyKey(m: Machine): Promise<void> {
 /**
  * Recovery has no answer file: once it's showing, open its Terminal
  * (Shift-Command-T) and, once the Terminal's window has appeared, type the
- * command that runs vm-installers' script, until the script says it's
- * begun. Nothing's typed into Recovery's own window, where Return would
- * choose what's selected. Once macOS's installer has started from the
- * disk, Recovery isn't shown again and nothing's typed.
+ * command that runs one of vm-installers' scripts, until it's `begun`.
+ * Nothing's typed into Recovery's own window, where Return would choose
+ * what's selected.
  */
-async function startMacosInstall(m: Machine): Promise<void> {
+async function typeInRecovery(m: Machine, command: string, begun: () => Promise<boolean>): Promise<void> {
   const file = path.join(m.rundir, 'screen.ppm');
   const live = () => !!m.qmp && !m.qmp.closed;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let last: Screen | null = null;
   for (const until = Date.now() + 20 * 60_000; Date.now() < until && live(); ) {
     await sleep(5000);
-    if (await macosBegun(m)) return;
+    if (await begun()) return;
     const before = await screenshot(m, file);
     // Recovery, and settled: nothing else is opening by itself.
     const settled = !!before && !!last && recoveryShowing(before) && !windowOpened(last, before);
@@ -1379,7 +1404,7 @@ async function startMacosInstall(m: Machine): Promise<void> {
     const after = await screenshot(m, file);
     last = after;
     if (!after || !windowOpened(before, after)) continue;
-    await typeText(m, `${MACOS_COMMAND}\n`);
+    await typeText(m, `${command}\n`);
     // The script says it's begun at once; the disk fills within a minute or two.
     await sleep(45_000);
     last = null;
@@ -1395,17 +1420,69 @@ async function macosBegun(m: Machine): Promise<boolean> {
   return (await diskSize(m.config.name)).used > 1024 ** 3;
 }
 
+/** What's left of installing macOS, for the step it's at, once it's running. */
+function watchMacosSetup(id: string, m: Machine): void {
+  const install = m.config.install;
+  if (install?.installer !== 'macos' || install.error) return;
+  const said = async (what: string) => (await fsp.readFile(path.join(m.rundir, 'serial.log'), 'latin1').catch(() => '')).includes(what);
+  if (install.step === 'install') void typeInRecovery(m, MACOS_COMMAND, () => macosBegun(m));
+  else if (install.step === 'apple') void awaitSetupAssistant(id, m);
+  else if (install.step === 'finish') void typeInRecovery(m, MACOS_FINISH_COMMAND, () => said(MACOS_FINISHING));
+}
+
 /**
  * macOS's installer restarting the machine, once Din's script has begun, is
  * Apple's installer taking over: it goes on from the disk by itself, on the
- * screen, and ends at Setup Assistant, which is the user's to answer.
+ * screen, restarting a few times, until Setup Assistant shows.
  */
 async function installerRestarted(id: string, m: Machine): Promise<void> {
   const install = m.config.install;
   if (install?.step !== 'install' || install.installer !== 'macos' || finishing.has(id)) return;
   if (!(await macosBegun(m)) || finishing.has(id)) return;
   finishing.add(id);
-  await finishSaidInstall(id, m).finally(() => finishing.delete(id));
+  try {
+    await writeInstall(id, { step: 'apple' });
+    m.config.install = { ...install, step: 'apple' };
+    await m.qmp?.execute('device_del', { id: 'seeddev' }).catch(() => {});
+  } catch (error) {
+    console.error(`vms: installing ${id} went wrong`, error);
+    return;
+  } finally {
+    finishing.delete(id);
+  }
+  void awaitSetupAssistant(id, m);
+}
+
+/**
+ * Once Setup Assistant shows, macOS is on the disk: start the machine
+ * again in Din's recovery image to set it up in Setup Assistant's place
+ * (vm-installers' macosFinishScript). Seen twice, ten seconds apart, so a
+ * frame on its way somewhere else isn't taken for it.
+ */
+async function awaitSetupAssistant(id: string, m: Machine): Promise<void> {
+  const file = path.join(m.rundir, 'screen.ppm');
+  const live = () => !!m.qmp && !m.qmp.closed && machines.get(id) === m && m.config.install?.step === 'apple';
+  let seen = 0;
+  while (live()) {
+    await new Promise((r) => setTimeout(r, 10_000));
+    if (!live() || m.state !== 'running') continue;
+    const screen = await screenshot(m, file);
+    seen = screen && setupAssistantShowing(screen) ? seen + 1 : 0;
+    if (seen < 2 || finishing.has(id)) continue;
+    finishing.add(id);
+    try {
+      await forceStop(id);
+      await writeInstall(id, { step: 'finish' });
+      await start(id);
+    } catch (error) {
+      console.error(`vms: finishing installing ${id} failed`, error);
+      errors.set(id, error instanceof Error ? error.message : String(error));
+      changed();
+    } finally {
+      finishing.delete(id);
+    }
+    return;
+  }
 }
 
 interface Screen {
@@ -1450,6 +1527,33 @@ function recoveryShowing(screen: Screen): boolean {
   return light > 30 && bar / samples > 12 && bar / samples < 90;
 }
 
+/** The share of a part of the screen (given in fractions of it) that's grey within `lo`-`hi`. */
+function greyShare(screen: Screen, x0: number, x1: number, y0: number, y1: number, lo: number, hi: number): number {
+  let grey = 0;
+  let samples = 0;
+  for (let y = Math.floor(y0 * screen.height); y < y1 * screen.height; y += 4) {
+    for (let x = Math.floor(x0 * screen.width); x < x1 * screen.width; x += 4, samples++) {
+      const rgb = pixelAt(screen, x, y);
+      if (Math.min(...rgb) >= lo && Math.max(...rgb) <= hi && Math.max(...rgb) - Math.min(...rgb) < 10) grey++;
+    }
+  }
+  return samples ? grey / samples : 0;
+}
+
+/**
+ * Whether Setup Assistant is showing: a light card in the middle of a
+ * light grey screen, with a darker grey band along its foot for its
+ * buttons, on every page (dimmed under a sheet, too). The installer's
+ * screens before it are black, or the Apple logo on grey with nothing
+ * around it.
+ */
+function setupAssistantShowing(screen: Screen): boolean {
+  const sides = Math.min(greyShare(screen, 0.015, 0.17, 0.3, 0.7, 205, 245), greyShare(screen, 0.83, 0.985, 0.3, 0.7, 205, 245));
+  const card = greyShare(screen, 0.2, 0.8, 0.19, 0.75, 185, 255);
+  const foot = greyShare(screen, 0.23, 0.68, 0.81, 0.86, 90, 175);
+  return sides > 0.9 && card > 0.6 && foot > 0.6;
+}
+
 /** Whether a window appeared between two screenshots: a good part of the screen changed. */
 function windowOpened(before: Screen, after: Screen): boolean {
   if (before.width !== after.width || before.height !== after.height) return false;
@@ -1487,9 +1591,9 @@ setInterval(() => {
   let busy = false;
   for (const [id, m] of machines) {
     const install = m.config.install;
-    if (install?.step !== 'install' || m.state !== 'running') continue;
+    if (!install || install.step === 'download' || m.state !== 'running') continue;
     busy = true;
-    if (install.boot?.kernel || finishing.has(id)) continue;
+    if (install.step === 'apple' || install.boot?.kernel || finishing.has(id)) continue;
     void fsp.readFile(path.join(m.rundir, 'serial.log'), 'utf8').then(
       (text) => {
         if (finishing.has(id)) return;
@@ -1498,7 +1602,7 @@ setInterval(() => {
           install.error = failed[1].trim();
           void writeInstall(id, { error: install.error }).catch(() => {});
         }
-        if (install.installer === 'macos' || !text.includes(WINDOWS_READY)) return;
+        if (install.installer === 'macos' || install.step !== 'install' || !text.includes(WINDOWS_READY)) return;
         finishing.add(id);
         void finishSaidInstall(id, m).finally(() => finishing.delete(id));
       },

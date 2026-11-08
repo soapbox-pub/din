@@ -738,9 +738,19 @@ Recovery has no answer file, so once its menu bar shows (Din reads the screen
 over QMP) Din opens its Terminal with Shift-Command-T and types one command,
 which runs a script on the answer drive: it erases the disk and runs
 Apple's `startosinstall`, which downloads the full installer and restarts
-the machine to install it. That restart is Din's part done: it takes the
-answer drive out, and the app shows the screen, where Apple's installer
-goes on through its own restarts to Setup Assistant, which the user answers.
+the machine to install it. Din takes the answer drive out, and Apple's
+installer goes on through its own restarts to Setup Assistant, which Din
+answers in its own way: once Setup Assistant's card shows on the screen, it
+turns the machine off and starts it again in the recovery image, plugged in
+as a USB drive with a copy of OpenCore that looks only at USB drives, and
+types a second command. That script makes the account (the computer's
+user's name, an administrator with no password, logged into automatically
+and with passwordless `sudo`), sets this computer's time zone and region,
+marks Setup Assistant done, turns on Reduce Transparency (macOS draws
+everything on the CPU, and blurring what's behind its menus and windows
+every frame is what makes it crawl), keeps it from sleeping (its disk
+doesn't come back from sleep in QEMU), then turns the machine off, says so
+on the serial port, and Din starts macOS at its desktop.
 
 Windows machines get what Windows 11's installer checks for and has drivers
 for: UEFI with Secure Boot and Microsoft's keys (OVMF's `OVMF_VARS.ms.fd`), a
@@ -748,7 +758,8 @@ TPM 2.0 (swtpm), a SATA disk, an e1000e network card and Hyper-V
 enlightenments. macOS gets an Intel CPU model (on AMD hosts too, with the
 TSC's rate given so it can still be saved running), QEMU's Apple SMC, USB
 input and a SATA SSD, and no sound (it has no driver for QEMU's); its
-screen is 2560×1600, which macOS draws at Retina scale. Linux gets virtio, and its screen follows the window's size.
+screen is 1280×800, since it has no driver for QEMU's display and draws
+every pixel on the CPU. Linux gets virtio, and its screen follows the window's size.
 The clipboard is shared with guests running spice-vdagent; sound goes through
 PipeWire. Snapshots are qcow2's own: taken while running, they keep memory
 too and come back running.

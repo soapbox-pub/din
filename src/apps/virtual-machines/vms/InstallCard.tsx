@@ -53,8 +53,8 @@ function describe(install: VmInstall, name: string, rate: number): { title: stri
     case 'installing':
       return {
         title: `Setting up ${install.label || name}…`,
-        detail: install.installer === 'macos' ? 'Apple’s installer takes over on the screen once it’s ready.' : 'It restarts by itself when it’s done.',
-        value: install.installer === 'macos' ? null : install.progress,
+        detail: install.installer === 'macos' ? 'It restarts a few times on its way, and can take an hour.' : 'It restarts by itself when it’s done.',
+        value: install.progress,
       };
     case 'failed':
       return { title: `${name} couldn’t be installed`, detail: install.error ?? '', value: null };
