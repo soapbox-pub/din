@@ -78,7 +78,8 @@ export function AttachmentItem({
   compact,
   onRemove,
 }: {
-  file: { uri?: string; mime?: string; data?: string; name?: string };
+  /** `path`: the file on this computer it is, when `uri` is its data rather than a file:// URL. */
+  file: { uri?: string; mime?: string; data?: string; name?: string; path?: string };
   className?: string;
   /** A smaller thumbnail, as in the composer. */
   compact?: boolean;
@@ -89,7 +90,7 @@ export function AttachmentItem({
   const [broken, setBroken] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const name = file.name ?? file.mime ?? 'Attachment';
-  const path = file.uri ? pathOfFileUri(file.uri) : null;
+  const path = file.path ?? (file.uri ? pathOfFileUri(file.uri) : null);
   const audio = !!path && (file.mime ? file.mime.startsWith('audio/') : AUDIO_NAME.test(path));
   const withMenu = (item: ReactNode) => (
     <AttachmentMenu path={path} onRemove={onRemove}>

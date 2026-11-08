@@ -37,6 +37,7 @@ import {
   type PromptFile,
   type QueuedMessage,
   type SessionMessage,
+  type ToolContent,
   type ToolState,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
@@ -701,6 +702,7 @@ function ToolStep({ step }: { step: ToolPart }) {
   const kind = toolKind(step.name);
   const target = toolTarget(kind, state);
   const output = toolOutput(state);
+  const images = toolImages(state);
   const diff = 'metadata' in state ? state.metadata?.diff : undefined;
   const command = state.status !== 'streaming' && kind.command ? str(state.input.command, false) : undefined;
   const input = state.status === 'streaming' ? state.input : (command ?? JSON.stringify(state.input, null, 2));
@@ -727,6 +729,7 @@ function ToolStep({ step }: { step: ToolPart }) {
             input && <OutputBlock label={command ? 'Command' : 'Input'} text={input} />
           )}
           {output && <OutputBlock label="Output" text={output} />}
+          <Pictures files={images} label={output ? undefined : 'Output'} />
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -842,13 +845,53 @@ function doneLabel(steps: Step[]): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** Whether a tool's file is a picture it carries (a picture it read), which shows as one. */
+function isPicture(c: ToolContent): boolean {
+  return c.type === 'file' && !!c.uri && (c.uri.startsWith('data:image/') || (c.mime?.startsWith('image/') ?? false));
+}
+
 function toolOutput(state: ToolState): string {
   if (state.status === 'completed' || state.status === 'error') {
     return (state.content ?? [])
+      .filter((c) => !isPicture(c))
       .map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.name ?? c.mime ?? 'file'}]`))
       .join('\n');
   }
   return '';
+}
+
+/** The pictures a call returned, named for their files (a read's names its path). */
+function toolImages(state: ToolState): PictureFile[] {
+  if (state.status !== 'completed' && state.status !== 'error') return [];
+  return (state.content ?? []).filter(isPicture).map((c) => {
+    const path = c.name?.startsWith('/') ? c.name : undefined;
+    return { uri: c.uri, mime: c.mime, name: path?.split('/').pop() || c.name || c.mime, path };
+  });
+}
+
+type PictureFile = { uri?: string; mime?: string; name?: string; path?: string };
+
+/** Pictures a step or notice produced, as thumbnails that open big. */
+function Pictures({ files, label }: { files: PictureFile[]; label?: string }) {
+  if (files.length === 0) return null;
+  return (
+    <div>
+      {label && <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>}
+      <ul className="flex flex-wrap gap-1.5" aria-label="Pictures">
+        {files.map((file, index) => (
+          <AttachmentItem key={`${file.path ?? ''}:${index}`} file={file} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The pictures an image request saved, from its report ("Saved image: /path/x.png (model)."). */
+const SAVED_IMAGE = /(?<=^|[\s:"'(])(\/[^\n]*?\.(?:png|jpe?g|webp|gif|avif))(?=[\s).,;]|$)/gi;
+
+function savedImages(report: string): PictureFile[] {
+  const paths = new Set(Array.from(report.matchAll(SAVED_IMAGE), (m) => m[1]));
+  return [...paths].map((path) => attachmentOf(path));
 }
 
 function OutputBlock({ label, text }: { label: string; text: string }) {
@@ -983,6 +1026,7 @@ function BackgroundDone({ message }: { message: SyntheticMessage }) {
         <div className="mb-2 ml-5 mt-1 space-y-2 rounded-lg bg-muted/50 p-2.5">
           {source === 'shell' && full && <OutputBlock label="Command" text={full} />}
           {body && <OutputBlock label={source === 'shell' ? 'Output' : 'Result'} text={body} />}
+          {/image/i.test(source) && state !== 'error' && <Pictures files={savedImages(body)} />}
         </div>
       </CollapsibleContent>
     </Collapsible>
