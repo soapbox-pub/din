@@ -96,6 +96,9 @@ async function lint(text: string): Promise<GrammarIssue[]> {
       const kind = found.lint_kind();
       if (SKIPPED_KINDS.has(kind) || (!style && STYLE_KINDS.has(kind))) continue;
       const span = found.span();
+      // "window.din" and "file.txt" aren't two sentences: a sentence starts
+      // after a space (or a quote or bracket), never straight after a dot.
+      if (rule === 'SentenceCapitalization' && span.start > 0 && /[\p{L}\p{N}._/\\~-]/u.test(text[span.start - 1])) continue;
       const suggestions: GrammarSuggestion[] = [];
       for (const s of found.suggestions()) {
         const suggestion = suggestionOf(found, s.kind(), s.get_replacement_text());

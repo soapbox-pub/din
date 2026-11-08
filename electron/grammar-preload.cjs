@@ -289,7 +289,22 @@ async function check(field) {
   const after = read(field);
   // Typed into while it was being checked: the next check is on its way.
   if (after.text !== before.text) return;
-  show(field, marks, after);
+  show(field, marks.filter((mark) => !misspelled(mark.text)), after);
+}
+
+/**
+ * Whether Chromium underlines a word of this text as misspelled. An issue
+ * that touches one isn't shown: two underlines on one word, red and blue,
+ * just say the same thing twice (Harper calls "dinphone" a typo for "din
+ * phone", and its sentence lowercase, where Chromium already says it's no
+ * word), and the issue comes back once the spelling is fixed.
+ * @param {string} text
+ */
+function misspelled(text) {
+  for (const [word] of text.matchAll(/[\p{L}\p{M}][\p{L}\p{M}'’]*/gu)) {
+    if (webFrame.isWordMisspelled(word)) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
