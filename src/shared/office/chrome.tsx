@@ -1149,89 +1149,96 @@ export function Backstage({
         }
       }}
     >
-      <nav className="office-backstage-nav flex w-[176px] shrink-0 flex-col py-2 pl-1.5 text-[#1e395b]" aria-label="File">
-        <button type="button" onClick={onClose} aria-label="Back" title="Back" className={cn('office-orb mx-1.5 mb-3 grid size-8 place-items-center', FOCUS)}>
-          <ArrowLeft className="size-[18px] [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))] [stroke-width:3]" />
-        </button>
-        {nav.map((item, i) =>
-          item ? (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                if (item.id === 'save') onSave();
-                else if (item.id === 'close') onCloseDocument();
-                else if (item.id === 'print') onPrint?.();
-                else onPage(item.id);
-              }}
-              className={cn(
-                'mb-px flex h-9 items-center gap-3 rounded-[3px] px-4 text-left text-[13.5px] focus-visible:outline-none',
-                item.id === page ? 'office-gloss relative -mr-px rounded-r-none' : 'office-hover mr-1.5 focus-visible:ring-1 focus-visible:ring-[#f0c75c]',
-              )}
-            >
-              <span className={item.id === page ? undefined : 'text-[var(--office-accent)]'}>{item.icon}</span>
-              {item.label}
-            </button>
-          ) : (
-            <span key={`sep${i}`} className="my-2 mr-3 ml-2 h-px bg-[#c5d2e3] shadow-[0_1px_0_#fff]" />
-          ),
-        )}
-      </nav>
-      <div className="min-w-0 flex-1 overflow-y-auto px-10 py-8 select-text">
-        {page === 'home' && (
-          <>
-            <h1 className={H1}>{greeting}</h1>
-            <TemplateRow templates={templates} />
-            <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
-          </>
-        )}
-        {page === 'new' && (
-          <>
-            <h1 className={H1}>New</h1>
-            <TemplateRow templates={templates} />
-          </>
-        )}
-        {page === 'open' && (
-          <>
-            <h1 className={H1}>Open</h1>
-            <div className="mb-6 flex gap-2">
-              <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onBrowse} />
-            </div>
-            <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
-          </>
-        )}
-        {page === 'info' && (
-          <>
-            <h1 className={H1}>Info</h1>
-            {info}
-          </>
-        )}
-        {page === 'saveAs' && (
-          <>
-            <h1 className={H1}>Save As</h1>
-            <p className="mb-4 max-w-lg text-[13px] text-[#616161]">
-              {path ? `This file is in ${folderOf(path)}.` : 'This file hasn’t been saved yet.'} Choose a folder and a name.
-            </p>
-            <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onSaveAs} />
-          </>
-        )}
-        {page === 'export' && (
-          <>
-            <h1 className={H1}>Export</h1>
-            <div className="max-w-xl space-y-1">
-              {exports.map((x) => (
-                <button key={x.label} type="button" onClick={x.onClick} className={cn('office-select flex w-full items-start gap-4 rounded-[3px] p-3 text-left', FOCUS)}>
-                  <span className="mt-0.5 text-[var(--office-accent)] [&>svg]:size-8">{x.icon}</span>
-                  <span>
-                    <span className="block text-[14px] font-semibold">{x.label}</span>
-                    <span className="block text-[12.5px] text-[#5a6779]">{x.description}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        <span className="sr-only">{ACCENTS[app].name}</span>
+      {/* The Backstage covers the title bar, so its sidebar and the strip
+          above its page move the window in its place. */}
+      <WindowDragRegion className="flex w-[176px] shrink-0">
+        <nav className="office-backstage-nav flex min-w-0 flex-1 flex-col py-2 pl-1.5 text-[#1e395b]" aria-label="File">
+          <button type="button" onClick={onClose} aria-label="Back" title="Back" className={cn('office-orb mx-1.5 mb-3 grid size-8 place-items-center', FOCUS)}>
+            <ArrowLeft className="size-[18px] [filter:drop-shadow(0_1px_1px_rgba(0,0,0,0.4))] [stroke-width:3]" />
+          </button>
+          {nav.map((item, i) =>
+            item ? (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (item.id === 'save') onSave();
+                  else if (item.id === 'close') onCloseDocument();
+                  else if (item.id === 'print') onPrint?.();
+                  else onPage(item.id);
+                }}
+                className={cn(
+                  'mb-px flex h-9 items-center gap-3 rounded-[3px] px-4 text-left text-[13.5px] focus-visible:outline-none',
+                  item.id === page ? 'office-gloss relative -mr-px rounded-r-none' : 'office-hover mr-1.5 focus-visible:ring-1 focus-visible:ring-[#f0c75c]',
+                )}
+              >
+                <span className={item.id === page ? undefined : 'text-[var(--office-accent)]'}>{item.icon}</span>
+                {item.label}
+              </button>
+            ) : (
+              <span key={`sep${i}`} className="my-2 mr-3 ml-2 h-px bg-[#c5d2e3] shadow-[0_1px_0_#fff]" />
+            ),
+          )}
+        </nav>
+      </WindowDragRegion>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <WindowDragRegion className="h-8 shrink-0" />
+        <div className="min-w-0 flex-1 overflow-y-auto px-10 pb-8 select-text">
+          {page === 'home' && (
+            <>
+              <h1 className={H1}>{greeting}</h1>
+              <TemplateRow templates={templates} />
+              <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
+            </>
+          )}
+          {page === 'new' && (
+            <>
+              <h1 className={H1}>New</h1>
+              <TemplateRow templates={templates} />
+            </>
+          )}
+          {page === 'open' && (
+            <>
+              <h1 className={H1}>Open</h1>
+              <div className="mb-6 flex gap-2">
+                <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onBrowse} />
+              </div>
+              <RecentList recent={recent} onOpen={onOpenRecent} onShowInFiles={onShowRecentInFiles} />
+            </>
+          )}
+          {page === 'info' && (
+            <>
+              <h1 className={H1}>Info</h1>
+              {info}
+            </>
+          )}
+          {page === 'saveAs' && (
+            <>
+              <h1 className={H1}>Save As</h1>
+              <p className="mb-4 max-w-lg text-[13px] text-[#616161]">
+                {path ? `This file is in ${folderOf(path)}.` : 'This file hasn’t been saved yet.'} Choose a folder and a name.
+              </p>
+              <BackstageTile icon={<FolderOpen className="size-8 fill-[#f8d775] text-[#c19c00]" />} label="Browse" onClick={onSaveAs} />
+            </>
+          )}
+          {page === 'export' && (
+            <>
+              <h1 className={H1}>Export</h1>
+              <div className="max-w-xl space-y-1">
+                {exports.map((x) => (
+                  <button key={x.label} type="button" onClick={x.onClick} className={cn('office-select flex w-full items-start gap-4 rounded-[3px] p-3 text-left', FOCUS)}>
+                    <span className="mt-0.5 text-[var(--office-accent)] [&>svg]:size-8">{x.icon}</span>
+                    <span>
+                      <span className="block text-[14px] font-semibold">{x.label}</span>
+                      <span className="block text-[12.5px] text-[#5a6779]">{x.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <span className="sr-only">{ACCENTS[app].name}</span>
+        </div>
       </div>
     </div>
   );
