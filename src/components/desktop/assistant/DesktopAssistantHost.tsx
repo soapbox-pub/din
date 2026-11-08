@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/useToast';
 import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { appForFile } from '@/lib/fileTypes';
 import { getFileClipboard } from '@/lib/fileClipboard';
+import { holdMedia } from '@/lib/mediaPause';
 import { parentPath } from '@/lib/fs';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
 
@@ -62,6 +63,7 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
       notify: ({ title, description, destructive }) =>
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,
+      pauseMedia: holdMedia,
     }),
     [config.assistantDirectory, config.assistantColorfulReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast],
   );

@@ -34,6 +34,27 @@ any other source. The runtime reads the session (`src/sdk/standards.ts`):
   play (Media Player with a queue). It isn't listed, but a play key
   pressed with nothing else playing calls the handler.
 
+## Pausing other media while recording: `din.desktop.pauseMedia()`
+
+An app that records the user's voice pauses what's playing elsewhere, as
+iOS and Android do, and plays it again after. No permission:
+
+```ts
+const resume = din.desktop.pauseMedia(); // before opening the microphone
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+// … record …
+resume();
+```
+
+Everything in Din's media controls pauses (the Media Player, web pages,
+other apps, native apps), and when the last hold is released, after a
+moment, what it paused plays again, unless the user played it again
+meanwhile or it went away (`src/lib/mediaPause.ts`). Only the focused
+window's call counts, as for the microphone; the window closing or
+reloading releases it. Settings → Sound's "Pause media while recording"
+(`din settings set sound.pause-media false`) turns it off for every app.
+Din's dictation, and so `SpeechRecognition`, does it by itself.
+
 ## Printing: `window.print()`
 
 An app prints as a web page does, with no permission: `window.print()`

@@ -176,6 +176,12 @@ export interface AppConfig {
    */
   restoreWindows: boolean;
   /**
+   * Whether what's playing (music, videos, other apps) pauses while the
+   * microphone records your voice, for dictation and the assistant's Record
+   * Audio, and plays again after (src/lib/mediaPause.ts).
+   */
+  pauseMediaWhileRecording: boolean;
+  /**
    * The menu bar and Dock (default), or a taskbar along an edge of the
    * screen in their place, with the Start menu, open windows and status icons.
    */

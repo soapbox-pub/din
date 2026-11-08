@@ -31,6 +31,7 @@ import {
   LayoutDashboard,
   Loader2,
   Mic,
+  Pause,
   MicOff,
   Minus,
   Monitor,
@@ -2400,6 +2401,7 @@ function SoundSection() {
   const { setVolume, setMuted } = useAudioMutations();
   const devices = useAudioDevices();
   const streams = useAudioStreams();
+  const { config, updateConfig } = useAppContext();
   const { setDefault, selectPort, setNodeVolume, setNodeMuted, test } = useAudioDeviceMutations();
 
   const serverVolume = status.data?.volume ?? 0;
@@ -2601,6 +2603,14 @@ function SoundSection() {
           )}
           <InputVolumeRow />
           <MicTest />
+          <SettingSwitchRow
+            id="pause-media-recording"
+            icon={Pause}
+            label="Pause media while recording"
+            description="Music, videos and other apps pause while dictation or the assistant’s Record Audio listens, and play again when it’s done."
+            checked={config.pauseMediaWhileRecording !== false}
+            onCheckedChange={(checked) => updateConfig((current) => ({ ...current, pauseMediaWhileRecording: checked }))}
+          />
 
           {/* Per-application volume */}
           <SoundGroupHeading icon={Volume2}>App volume</SoundGroupHeading>

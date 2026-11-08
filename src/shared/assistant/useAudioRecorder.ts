@@ -11,15 +11,18 @@ interface Session {
   /** Resolves with the recording once it's stopped, or null when discarded. */
   done: Promise<Blob | null>;
   discard: boolean;
+  /** Plays again what `pauseMedia` paused. */
+  releaseMedia: () => void;
 }
 
 /**
  * Recording the microphone, for the composer's Record Audio: whether it's
  * on, for how long, an analyser for a level meter, and starting, stopping
  * (resolving with the sound and its file extension) or discarding it. A
- * recording going when the composer goes is discarded.
+ * recording going when the composer goes is discarded. `pauseMedia` pauses
+ * what's playing elsewhere while it records, until the function it returns.
  */
-export function useAudioRecorder() {
+export function useAudioRecorder(pauseMedia?: () => () => void) {
   const session = useRef<Session | null>(null);
   const [state, setState] = useState<'idle' | 'starting' | 'recording'>('idle');
   const [startedAt, setStartedAt] = useState(0);
@@ -28,6 +31,7 @@ export function useAudioRecorder() {
   const end = (s: Session) => {
     s.stream.getTracks().forEach((t) => t.stop());
     void s.context.close().catch(() => {});
+    s.releaseMedia();
     if (session.current === s) {
       session.current = null;
       setAnalyser(null);
@@ -49,10 +53,13 @@ export function useAudioRecorder() {
   const start = async () => {
     if (session.current || state !== 'idle') return;
     setState('starting');
+    // Quiet before the microphone opens, so it doesn't hear the music.
+    const releaseMedia = pauseMedia?.() ?? (() => {});
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch (error) {
+      releaseMedia();
       setState('idle');
       throw error;
     }
@@ -63,7 +70,20 @@ export function useAudioRecorder() {
     node.fftSize = 256;
     context.createMediaStreamSource(stream).connect(node);
     const chunks: Blob[] = [];
-    const s: Session = { recorder, stream, context, chunks, discard: false, done: Promise.resolve(null) };
+    let released = false;
+    const s: Session = {
+      recorder,
+      stream,
+      context,
+      chunks,
+      discard: false,
+      done: Promise.resolve(null),
+      releaseMedia: () => {
+        if (released) return;
+        released = true;
+        releaseMedia();
+      },
+    };
     s.done = new Promise((resolve) => {
       recorder.ondataavailable = (e) => e.data.size > 0 && chunks.push(e.data);
       recorder.onstop = () => {

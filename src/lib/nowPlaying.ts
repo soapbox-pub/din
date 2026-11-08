@@ -190,6 +190,16 @@ export function useNowPlaying(): MediaSource[] {
   return useSyncExternalStore(subscribe, () => snapshot);
 }
 
+/** useNowPlaying's list, outside React. */
+export function getNowPlaying(): MediaSource[] {
+  return snapshot;
+}
+
+/** Hear each change to getNowPlaying's list. Returns an unsubscribe. */
+export function subscribeNowPlaying(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
 export function controlMedia(id: string, action: MediaAction): void {
   for (const local of locals) {
     if (local.current()?.id === id) {

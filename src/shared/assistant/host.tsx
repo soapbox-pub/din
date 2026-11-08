@@ -39,6 +39,11 @@ export interface AssistantHost {
    * A hook, so called on every render of the composer.
    */
   useDictation(ref: RefObject<HTMLTextAreaElement | null>): { available: boolean; active: boolean; toggle: () => void };
+  /**
+   * Pause what's playing elsewhere while Record Audio records, until the
+   * function returned is called (src/lib/mediaPause.ts).
+   */
+  pauseMedia(): () => void;
 }
 
 export const AssistantHostContext = createContext<AssistantHost | null>(null);

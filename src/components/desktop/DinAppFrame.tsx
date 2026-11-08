@@ -45,6 +45,7 @@ import { areaFor } from '@/lib/monitors';
 import { isDarkThemeColor } from '@/lib/themeColor';
 import { fileClipboardInfo, getFileClipboard, setFileClipboard, subscribeFileClipboard } from '@/lib/fileClipboard';
 import { registerMediaSource, type MediaSource } from '@/lib/nowPlaying';
+import { holdMedia } from '@/lib/mediaPause';
 import {
   cancelDictation,
   isDictationMissing,
@@ -292,6 +293,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     push({ type: 'moveEnd' });
     for (const resolve of moveEnded.current.splice(0)) resolve();
   }, [push]);
+  /** Plays again what `din.desktop.pauseMedia()` paused, while the app holds it. */
+  const mediaHold = useRef<(() => void) | null>(null);
+  const releaseMedia = useCallback(() => {
+    mediaHold.current?.();
+    mediaHold.current = null;
+  }, []);
+  useEffect(() => releaseMedia, [releaseMedia]);
   /** The app's SpeechRecognition session, which owns Din's dictation while it listens. */
   const speech = useRef<{ id: number; owner: object; ended: boolean } | null>(null);
   const endSpeech = useCallback((s: { id: number; owner: object; ended: boolean }) => {
@@ -824,6 +832,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         media.current.session = next;
         media.current.notify();
       },
+      'media.hold': ({ on }) => {
+        if (!on) releaseMedia();
+        // Only the window the user is in, as for the microphone.
+        else if (!mediaHold.current && live.current.isTop) mediaHold.current = holdMedia();
+      },
       'desktop.setWallpaper': async ({ handle }) => {
         need('wallpaper');
         if (!background) throw new Error('No desktop to set');
@@ -1034,6 +1047,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   /** Start serving a newly connected document's port. */
   const serve = useCallback(async (port: MessagePort, webContentsId: number | null) => {
     session.current?.port.close();
+    // A reloaded page holds nothing.
+    releaseMedia();
     const s = {
       port,
       grants: new Map<string, Grant>(),
@@ -1435,6 +1450,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           onGone={() => {
             setGone(true);
             session.current = null;
+            releaseMedia();
             setCloseGuard(windowId, null);
             setMenus(null);
           }}

@@ -112,6 +112,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
       },
       notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
       useDictation: (ref) => useAppDictation(ref),
+      pauseMedia: () => din.desktop.pauseMedia(),
     }),
     [din, settings.directory, settings.colorfulReplies],
   );

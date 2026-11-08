@@ -984,7 +984,17 @@ export function installDin(transport: Transport): void {
     report: (session) => tell('media.setSession', { session }),
     onAction: (cb) => mediaActions.on(cb),
   });
+  let mediaHolds = 0;
   const desktop: DinDesktop = {
+    pauseMedia: () => {
+      if (mediaHolds++ === 0) tell('media.hold', { on: true });
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        if (--mediaHolds === 0) tell('media.hold', { on: false });
+      };
+    },
     setWallpaper: async (file) => {
       await ready;
       need('wallpaper');

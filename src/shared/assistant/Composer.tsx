@@ -242,7 +242,7 @@ export function Composer({
     },
   }));
 
-  const recorder = useAudioRecorder();
+  const recorder = useAudioRecorder(host.pauseMedia);
   const [canRecord, setCanRecord] = useState(false);
   useEffect(() => {
     let live = true;

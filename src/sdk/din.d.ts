@@ -659,6 +659,16 @@ export interface DinDesktop {
    * when Din can't change the cursor on this system.
    */
   setCursor(file: FileSystemHandle): Promise<void>;
+  /**
+   * Pause what's playing elsewhere (music, videos, other apps) while the app
+   * records the user's voice, and call the function returned when it stops:
+   * what was paused plays again, unless the user played it again meanwhile.
+   * Only the focused window's pause; calls in a window the user isn't in,
+   * or with Settings → Sound's "Pause media while recording" off, do nothing.
+   * Takes no permission. The window closing releases it. Din's dictation
+   * (SpeechRecognition) does this by itself.
+   */
+  pauseMedia(): () => void;
 }
 
 // ---------------------------------------------------------------------------

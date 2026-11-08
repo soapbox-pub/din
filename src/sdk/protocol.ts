@@ -246,6 +246,8 @@ export interface Requests {
   'files.upload': [{ handle: string }, BlossomBlob];
 
   'media.setSession': [{ session: MediaReport | null }, void];
+  /** `din.desktop.pauseMedia()`: other media paused while `on`, resumed after. */
+  'media.hold': [{ on: boolean }, void];
   'desktop.setWallpaper': [{ handle: string }, void];
   'desktop.setCursor': [{ handle: string }, void];
   /** SpeechRecognition's start(): listen until a pause, or with `continuous` until stop(). */

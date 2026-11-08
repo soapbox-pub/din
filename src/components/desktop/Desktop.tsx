@@ -13,6 +13,7 @@ import { ScreenshotHost } from './ScreenshotHost';
 import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
 import { Taskbar } from './Taskbar';
+import { setPauseMediaWhileRecording } from '@/lib/mediaPause';
 import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { VolumeOsd } from './VolumeOsd';
@@ -273,6 +274,7 @@ function DesktopSession() {
     [config.tilingEnabled, config.tilingGap],
   );
   const taskbar = config.desktopLayout === 'taskbar';
+  useEffect(() => setPauseMediaWhileRecording(config.pauseMediaWhileRecording !== false), [config.pauseMediaWhileRecording]);
   const tilingRef = useRef(tiling);
   const getTiling = useCallback(() => tilingRef.current, []);
 

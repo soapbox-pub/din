@@ -20,6 +20,7 @@
  */
 import { getAudioBridge } from '@/lib/audio';
 import { getFeaturesBridge } from '@/lib/features';
+import { holdMedia } from '@/lib/mediaPause';
 import { guestId, isGuestElement } from '@/platform/guest';
 
 /** Why dictation can't start on DinOS before its optional feature is installed. */
@@ -252,6 +253,8 @@ interface Session {
   ended: boolean;
   /** The microphone was muted, and was unmuted for this session. */
   remute: boolean;
+  /** Plays again what was paused while listening (src/lib/mediaPause.ts). */
+  releaseMedia: (() => void) | null;
 }
 
 let session: Session | null = null;
@@ -275,6 +278,8 @@ function stopRecording(): void {
   void session.context?.close().catch(() => {});
   session.stream = null;
   session.context = null;
+  session.releaseMedia?.();
+  session.releaseMedia = null;
   if (session.remute) {
     session.remute = false;
     remuting = getAudioBridge()?.setInputMuted(true).catch(() => {}) ?? Promise.resolve();
@@ -381,6 +386,7 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     previewing: null,
     ended: false,
     remute: false,
+    releaseMedia: null,
   };
   session = current;
   setState({ ...IDLE, status: 'listening', held: current.held, owner: target.owner ?? null });
@@ -399,6 +405,8 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     if (session === current) fail(cleanError(error));
   });
 
+  // Quiet before the microphone opens, so it doesn't hear the music.
+  current.releaseMedia = holdMedia();
   let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
