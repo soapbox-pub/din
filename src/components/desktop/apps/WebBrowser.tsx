@@ -3617,7 +3617,9 @@ function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
       case 'missing':
         return {
           title: "Tor isn't running",
-          detail: 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
+          detail: tor?.canInstall
+            ? 'Onion sites open through Tor. Set it up in Settings → Wi-Fi, or start Tor or Tor Browser, and this page loads once Din finds it.'
+            : 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
           offline: false,
         };
       case 'connecting':

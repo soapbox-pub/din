@@ -14,14 +14,29 @@
 // names in DIN_TOR and the shell's user runs through sudo without a
 // password, like the time zone's helper.
 //
+// Elsewhere, where no Tor is running, Settings → Wi-Fi's Set Up Tor gets one
+// of Din's own, as Settings → Assistant's Install OpenCode does: the Tor
+// Project's Expert Bundle for Linux, downloaded into ~/.local/share/din/tor,
+// its checksum taken from the release's signed list (checked against the Tor
+// Browser Developers' key where gpg is there to check it), and run by Din as
+// the user, from login while it's on, on a SOCKS port of its own. Din looks
+// for a newer bundle now and then, and moves to it. A torrc there is read
+// too, for bridges and the like.
+//
 // The onion services sites name (Onion-Location) are site-locations.mts's.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
-import { ipcMain } from 'electron';
+import os from 'node:os';
+import path from 'node:path';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { app, ipcMain } from 'electron';
 import { setTorSocksPort } from './network.mts';
 import { isPlainOnionHost, markTlsOnionHost, tlsOnionHosts, watchTlsOnionHosts } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
@@ -30,9 +45,30 @@ const HELPER = process.env.DIN_TOR;
 /** Where DinOS keeps Tor turned off (os/din-tor.sh). */
 const OFF_FILE = '/var/lib/din/tor-off';
 
+/** Din's own Tor, where it isn't DinOS's. */
+const OWN_DIR = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'din/tor');
+const OWN_BUNDLE = path.join(OWN_DIR, 'bundle');
+const OWN_BINARY = path.join(OWN_BUNDLE, 'tor/tor');
+const OWN_VERSION_FILE = path.join(OWN_DIR, 'version');
+const OWN_OFF_FILE = path.join(OWN_DIR, 'off');
+const OWN_CONTROL = path.join(OWN_DIR, 'control');
+/** Clear of a system Tor's 9050 and Tor Browser's 9150, so they can run beside it. */
+const OWN_SOCKS_PORT = 9250;
+
+/** The Expert Bundle's names for the machines it's built for. */
+const BUNDLE_ARCH: Partial<Record<string, string>> = { x64: 'x86_64', arm64: 'aarch64' };
+const DIST_URL = 'https://dist.torproject.org/torbrowser';
+/** The Tor Browser Developers' signing key, which signs each release's checksums. */
+const SIGNING_KEY = 'EF6E286DDA85EA2A4BA7DE684E2C6E8793298290';
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const UPDATE_CHECK_MS = 24 * 60 * 60_000;
+/** How long to wait before starting Din's own Tor again after it stopped on its own. */
+const RESTART_DELAYS_MS = [2_000, 10_000, 30_000, 60_000];
+
 /** A system Tor's SOCKS port, then Tor Browser's. */
 const SOCKS_PORTS = [9050, 9150];
 const CONTROL_TARGETS: net.NetConnectOpts[] = [
+  { path: OWN_CONTROL },
   { path: '/run/tor/control' },
   { path: '/var/run/tor/control' },
   { host: '127.0.0.1', port: 9051 },
@@ -45,7 +81,7 @@ const STARTING_POLL_MS = 3_000;
 const IDLE_POLL_MS = 15_000;
 
 interface TorStatus {
-  /** Whether Din can turn Tor on and off here (DinOS). */
+  /** Whether Din can turn Tor on and off here: DinOS, or where Din has a Tor of its own. */
   canToggle: boolean;
   /** Whether Tor is set to run; null where Din doesn't manage it. */
   enabled: boolean | null;
@@ -55,12 +91,33 @@ interface TorStatus {
   progress: number | null;
   /** Tor's word for what it's doing, e.g. "Loading relay descriptors". */
   summary: string | null;
+  /** Whether Din can set up a Tor of its own here (not DinOS, which has one). */
+  canInstall: boolean;
+  /** The version of Din's own Tor (the bundle's, "16.0"), or null where it has none. */
+  installed: string | null;
+  /** What setting up or updating Din's own Tor is doing, or null. */
+  installing: string | null;
+  /** Why setting up or running Din's own Tor last failed, or null. */
+  error: string | null;
 }
 
 type AssertSender = (event: Electron.IpcMainInvokeEvent) => void;
 
 let sendToShell: (channel: string, payload?: unknown) => void = () => {};
-let status: TorStatus = { canToggle: Boolean(HELPER), enabled: null, port: null, progress: null, summary: null };
+let status: TorStatus = {
+  canToggle: Boolean(HELPER),
+  enabled: null,
+  port: null,
+  progress: null,
+  summary: null,
+  canInstall: canInstall(),
+  installed: null,
+  installing: null,
+  error: null,
+};
+/** What install and Din's own Tor say, which refresh() folds into the status. */
+let installing: string | null = null;
+let ownError: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Finding Tor
@@ -193,12 +250,28 @@ function schedule(): void {
   pollTimer = setTimeout(() => void refresh(), delay);
 }
 
-/** Look for Tor again, and tell the shell if anything changed. */
+let queued: Promise<TorStatus> | null = null;
+
+/**
+ * Look for Tor again, and tell the shell if anything changed. Asked while
+ * looking, it looks once more after, since what it was asked about (Din's
+ * own Tor starting, a step of setting it up) may have come too late for
+ * this look.
+ */
 function refresh(): Promise<TorStatus> {
-  refreshing ??= (async () => {
+  if (refreshing) {
+    queued ??= refreshing.catch(() => {}).then(() => {
+      queued = null;
+      return refresh();
+    });
+    return queued;
+  }
+  refreshing = (async () => {
     try {
+      const installed = HELPER ? null : ownVersion();
+      const ports = installed && ownEnabled() ? [OWN_SOCKS_PORT, ...SOCKS_PORTS] : SOCKS_PORTS;
       let port: number | null = null;
-      for (const candidate of SOCKS_PORTS) {
+      for (const candidate of ports) {
         if (await socksAnswers(candidate)) {
           port = candidate;
           break;
@@ -206,11 +279,15 @@ function refresh(): Promise<TorStatus> {
       }
       const phase = port === null ? null : await bootstrap();
       const next: TorStatus = {
-        canToggle: Boolean(HELPER),
-        enabled: HELPER ? !fs.existsSync(OFF_FILE) : null,
+        canToggle: Boolean(HELPER) || installed !== null,
+        enabled: HELPER ? !fs.existsSync(OFF_FILE) : installed ? ownEnabled() : null,
         port,
         progress: phase?.progress ?? null,
         summary: phase?.summary ?? null,
+        canInstall: canInstall(),
+        installed,
+        installing,
+        error: ownError,
       };
       if (JSON.stringify(next) !== JSON.stringify(status)) {
         status = next;
@@ -239,6 +316,312 @@ async function helper(args: string[]): Promise<void> {
     // The helper says what went wrong on its last line.
     const reason = error instanceof CommandError ? error.stderr.trim().split('\n').pop() : '';
     throw reason ? new Error(reason) : error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Din's own Tor
+// ---------------------------------------------------------------------------
+
+function canInstall(): boolean {
+  return !HELPER && process.platform === 'linux' && BUNDLE_ARCH[process.arch] !== undefined;
+}
+
+/** The version of the bundle Din has set up, or null. */
+function ownVersion(): string | null {
+  try {
+    fs.accessSync(OWN_BINARY, fs.constants.X_OK);
+    return fs.readFileSync(OWN_VERSION_FILE, 'utf8').trim() || '?';
+  } catch {
+    return null;
+  }
+}
+
+function ownEnabled(): boolean {
+  return !fs.existsSync(OWN_OFF_FILE);
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function setInstalling(step: string | null): void {
+  installing = step;
+  void refresh();
+}
+
+let child: ChildProcess | null = null;
+let restartTimer: NodeJS.Timeout | null = null;
+let restarts = 0;
+
+/** Start Din's own Tor, where it's set up and on and not running already. */
+function startOwn(): void {
+  if (HELPER || child || !ownVersion() || !ownEnabled()) return;
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = null;
+  // Tor won't open a control socket in, or keep its keys in, a directory
+  // anyone else can read.
+  fs.mkdirSync(path.join(OWN_DIR, 'data'), { recursive: true, mode: 0o700 });
+  fs.chmodSync(OWN_DIR, 0o700);
+  fs.chmodSync(path.join(OWN_DIR, 'data'), 0o700);
+  fs.rmSync(OWN_CONTROL, { force: true });
+  const bundleData = path.join(OWN_BUNDLE, 'data');
+  const proc = spawn(
+    OWN_BINARY,
+    [
+      // The bundle's own torrc-defaults is Tor Browser's, and names its
+      // pluggable transports where Tor Browser keeps them: none of it here.
+      '--defaults-torrc', path.join(OWN_DIR, 'torrc-defaults'),
+      '-f', path.join(OWN_DIR, 'torrc'),
+      '--ignore-missing-torrc',
+      '--DataDirectory', path.join(OWN_DIR, 'data'),
+      '--SocksPort', `127.0.0.1:${OWN_SOCKS_PORT}`,
+      '--ControlSocket', OWN_CONTROL,
+      '--CookieAuthentication', '1',
+      '--GeoIPFile', path.join(bundleData, 'geoip'),
+      '--GeoIPv6File', path.join(bundleData, 'geoip6'),
+      '--AvoidDiskWrites', '1',
+      // It goes when Din does, however Din goes.
+      '--__OwningControllerProcess', String(process.pid),
+      '--Log', 'notice stdout',
+    ],
+    {
+      // The bundle's tor is linked against the libraries beside it.
+      env: { ...process.env, LD_LIBRARY_PATH: path.dirname(OWN_BINARY) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  child = proc;
+  let tail = '';
+  const keep = (chunk: Buffer) => {
+    tail = (tail + chunk.toString()).slice(-4000);
+    // Running long enough to connect: a later exit starts over at the shortest wait.
+    if (/Bootstrapped 100%/.test(tail)) {
+      restarts = 0;
+      if (ownError) {
+        ownError = null;
+        void refresh();
+      }
+    }
+  };
+  proc.stdout?.on('data', keep);
+  proc.stderr?.on('data', keep);
+  proc.on('error', (error) => {
+    if (child === proc) child = null;
+    ownError = `Tor didn’t start: ${error.message}`;
+    void refresh();
+  });
+  proc.on('exit', (code, signal) => {
+    if (child !== proc) return;
+    child = null;
+    if (ownVersion() && ownEnabled()) {
+      // Tor's last [warn] or [err] says why, as "Could not bind to 127.0.0.1:9250: Address already in use".
+      const reason = tail
+        .split('\n')
+        .filter((line) => /\[(warn|err)\]/.test(line))
+        .pop()
+        ?.replace(/^.*?\[(warn|err)\]\s*/, '');
+      ownError = reason || `Tor stopped (${signal ?? code})`;
+      console.warn('[tor] stopped:', ownError);
+      const delay = RESTART_DELAYS_MS[Math.min(restarts++, RESTART_DELAYS_MS.length - 1)];
+      restartTimer = setTimeout(startOwn, delay);
+    }
+    void refresh();
+  });
+  void refresh();
+}
+
+/** Stop Din's own Tor, if it's running. */
+function stopOwn(): Promise<void> {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = null;
+  const proc = child;
+  if (!proc) return Promise.resolve();
+  child = null;
+  return new Promise((resolve) => {
+    const kill = setTimeout(() => proc.kill('SIGKILL'), 5_000);
+    proc.once('exit', () => {
+      clearTimeout(kill);
+      resolve();
+    });
+    proc.kill('SIGTERM');
+  });
+}
+
+async function fetchOk(url: string): Promise<Response> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`The Tor Project’s server answered ${response.status} for ${path.basename(new URL(url).pathname)}`);
+  return response;
+}
+
+/** The newest Tor Browser release, whose Expert Bundle is the Tor to get. */
+async function latestVersion(): Promise<string> {
+  const arch = BUNDLE_ARCH[process.arch];
+  const response = await fetchOk(`https://aus1.torproject.org/torbrowser/update_3/release/download-linux-${arch}.json`);
+  const { version } = (await response.json()) as { version?: unknown };
+  if (typeof version !== 'string' || !/^\d+(\.\d+)*$/.test(version)) throw new Error('The Tor Project didn’t say which release is newest');
+  return version;
+}
+
+function isNewer(latest: string, current: string): boolean {
+  const a = latest.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+function execGpg(args: string[], home: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('gpg', ['--batch', '--no-tty', ...args], { env: { ...process.env, GNUPGHOME: home }, timeout: 60_000 }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(new Error(stderr.trim().split('\n').pop() || error.message), { code: error.code }));
+      else resolve(stdout);
+    });
+  });
+}
+
+/**
+ * Check the release's checksums are signed by the Tor Browser Developers,
+ * with their key from torproject.org's Web Key Directory in a keyring of its
+ * own. Where there's no gpg, HTTPS from the Tor Project's server is all
+ * there is, as for OpenCode's installer.
+ */
+async function verifySums(sums: string, signature: string): Promise<void> {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'din-tor-gpg-'));
+  try {
+    try {
+      await execGpg(['--version'], home);
+    } catch (error) {
+      if ((error as { code?: unknown }).code === 'ENOENT') return;
+      throw error;
+    }
+    fs.writeFileSync(path.join(home, 'sums.txt'), sums);
+    fs.writeFileSync(path.join(home, 'sums.txt.asc'), signature);
+    await execGpg(['--auto-key-locate', 'nodefault,wkd', '--locate-keys', 'torbrowser@torproject.org'], home);
+    const out = await execGpg(['--status-fd', '1', '--verify', path.join(home, 'sums.txt.asc'), path.join(home, 'sums.txt')], home).catch(() => '');
+    // VALIDSIG's last field is the primary key's fingerprint.
+    const valid = out.split('\n').find((line) => line.startsWith('[GNUPG:] VALIDSIG '));
+    if (valid?.trim().split(' ').pop() !== SIGNING_KEY) throw new Error('The Tor release isn’t signed by the Tor Browser Developers');
+  } finally {
+    execFile('gpgconf', ['--kill', 'all'], { env: { ...process.env, GNUPGHOME: home } }, () => {
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+  }
+}
+
+let installation: Promise<void> | null = null;
+
+/**
+ * Download the newest Expert Bundle, check it, and put it in place of the
+ * one there is, restarting Din's own Tor on it if it was running.
+ */
+function installBundle(version?: string): Promise<void> {
+  installation ??= (async () => {
+    const arch = BUNDLE_ARCH[process.arch];
+    if (!canInstall() || !arch) throw new Error('Din can’t set up Tor on this computer');
+    const work = path.join(OWN_DIR, 'bundle.new');
+    try {
+      setInstalling('Finding the newest Tor');
+      const release = version ?? (await latestVersion());
+      const name = `tor-expert-bundle-linux-${arch}-${release}.tar.gz`;
+      const base = `${DIST_URL}/${release}`;
+
+      setInstalling('Checking the release’s signature');
+      const [sums, signature] = await Promise.all([
+        fetchOk(`${base}/sha256sums-signed-build.txt`).then((r) => r.text()),
+        fetchOk(`${base}/sha256sums-signed-build.txt.asc`).then((r) => r.text()),
+      ]);
+      await verifySums(sums, signature);
+      const expected = sums
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .find(([, file]) => file === name)?.[0];
+      if (!expected) throw new Error(`Tor ${release} has no bundle for this computer`);
+
+      setInstalling(`Downloading Tor ${release}`);
+      fs.rmSync(work, { recursive: true, force: true });
+      fs.mkdirSync(work, { recursive: true, mode: 0o700 });
+      const archive = path.join(work, name);
+      const response = await fetchOk(`${base}/${name}`);
+      if (!response.body) throw new Error('The download was empty');
+      const hash = createHash('sha256');
+      await pipeline(
+        Readable.fromWeb(response.body as import('node:stream/web').ReadableStream),
+        new Transform({
+          transform(chunk: Buffer, _encoding, done) {
+            hash.update(chunk);
+            done(null, chunk);
+          },
+        }),
+        fs.createWriteStream(archive),
+      );
+      if (hash.digest('hex') !== expected) throw new Error('The Tor download didn’t match its checksum');
+
+      setInstalling(`Installing Tor ${release}`);
+      await runCommand('tar', ['-xzf', archive, '-C', work, 'tor', 'data'], { timeout: 120_000 });
+      fs.rmSync(archive);
+
+      await stopOwn();
+      const old = path.join(OWN_DIR, 'bundle.old');
+      fs.rmSync(old, { recursive: true, force: true });
+      if (fs.existsSync(OWN_BUNDLE)) fs.renameSync(OWN_BUNDLE, old);
+      fs.renameSync(work, OWN_BUNDLE);
+      fs.rmSync(old, { recursive: true, force: true });
+      fs.writeFileSync(OWN_VERSION_FILE, `${release}\n`);
+      startOwn();
+    } catch (error) {
+      fs.rmSync(work, { recursive: true, force: true });
+      throw error;
+    } finally {
+      installation = null;
+      setInstalling(null);
+    }
+  })();
+  return installation;
+}
+
+/** Set up Din's own Tor, and turn it on. */
+async function install(): Promise<void> {
+  fs.mkdirSync(OWN_DIR, { recursive: true, mode: 0o700 });
+  fs.rmSync(OWN_OFF_FILE, { force: true });
+  ownError = null;
+  restarts = 0;
+  try {
+    if (!ownVersion()) await installBundle();
+    else startOwn();
+  } catch (error) {
+    ownError = messageOf(error);
+    void refresh();
+    throw error;
+  }
+}
+
+let lastUpdateCheck = 0;
+
+/** Move Din's own Tor to a newer release, if there is one, at most daily. */
+async function checkForUpdate(): Promise<void> {
+  const current = ownVersion();
+  if (!current || installation || Date.now() - lastUpdateCheck < UPDATE_CHECK_MS) return;
+  lastUpdateCheck = Date.now();
+  try {
+    const latest = await latestVersion();
+    if (current === '?' || isNewer(latest, current)) await installBundle(latest);
+  } catch (error) {
+    console.warn('[tor] update failed:', messageOf(error));
+  }
+}
+
+async function setOwnEnabled(enabled: boolean): Promise<void> {
+  if (!ownVersion()) throw new Error('Set up Tor first');
+  if (enabled) {
+    fs.rmSync(OWN_OFF_FILE, { force: true });
+    restarts = 0;
+    startOwn();
+  } else {
+    fs.writeFileSync(OWN_OFF_FILE, '');
+    ownError = null;
+    await stopOwn();
   }
 }
 
@@ -380,6 +763,15 @@ export function registerTorHandlers(options: {
   const { assertShellSender } = options;
   sendToShell = options.sendToShell;
   void refresh();
+  if (canInstall()) {
+    startOwn();
+    void checkForUpdate();
+    setInterval(() => void checkForUpdate(), UPDATE_CHECK_MS).unref();
+  }
+  app.on('will-quit', () => {
+    if (restartTimer) clearTimeout(restartTimer);
+    child?.kill('SIGTERM');
+  });
 
   ipcMain.handle('tor:status', (event) => {
     assertShellSender(event);
@@ -394,7 +786,14 @@ export function registerTorHandlers(options: {
   ipcMain.handle('tor:set-enabled', async (event, enabled: unknown) => {
     assertShellSender(event);
     if (typeof enabled !== 'boolean') throw new Error('Invalid setting');
-    await helper([enabled ? 'on' : 'off']);
+    if (HELPER) await helper([enabled ? 'on' : 'off']);
+    else await setOwnEnabled(enabled);
+    return refresh();
+  });
+
+  ipcMain.handle('tor:install', async (event) => {
+    assertShellSender(event);
+    await install();
     return refresh();
   });
 

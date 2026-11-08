@@ -615,12 +615,13 @@ expose('vpn', {
 
 /**
  * @typedef {{ canToggle: boolean, enabled: boolean | null, port: number | null,
- *   progress: number | null, summary: string | null }} TorStatus
+ *   progress: number | null, summary: string | null, canInstall: boolean,
+ *   installed: string | null, installing: string | null, error: string | null }} TorStatus
  */
 
 // Tor bridge (window.dinos.tor), backed by the tor:* handlers in electron/tor.mts:
 // whether there's a Tor and how far it has got connecting, turning it on and
-// off on DinOS.
+// off on DinOS, and elsewhere setting up a Tor of Din's own.
 expose('tor', {
   /** @returns {Promise<TorStatus>} */
   status: () => ipcRenderer.invoke('tor:status'),
@@ -629,11 +630,18 @@ expose('tor', {
   refresh: () => ipcRenderer.invoke('tor:refresh'),
 
   /**
-   * Turn Tor on or off (DinOS only).
+   * Turn Tor on or off (DinOS's, or Din's own once it's set up).
    * @param {boolean} enabled
    * @returns {Promise<TorStatus>}
    */
   setEnabled: (enabled) => ipcRenderer.invoke('tor:set-enabled', enabled),
+
+  /**
+   * Set up a Tor of Din's own (not on DinOS): download the Tor Project's
+   * Expert Bundle into ~/.local/share/din/tor and run it.
+   * @returns {Promise<TorStatus>}
+   */
+  install: () => ipcRenderer.invoke('tor:install'),
 
   /**
    * Subscribe to status changes. Returns an unsubscribe fn.

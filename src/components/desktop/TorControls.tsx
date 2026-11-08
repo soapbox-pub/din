@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { OnionIcon } from '@/components/icons/OnionIcon';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
@@ -12,6 +13,7 @@ import { settingsCard } from '@/shared/settingsChromeStyles';
 
 /** One line on where Tor stands. */
 function describe(status: TorStatus): string {
+  if (status.installing) return `${status.installing}…`;
   switch (torState(status)) {
     case 'ready':
       return 'Connected. Onion sites open in the Web Browser.';
@@ -22,14 +24,17 @@ function describe(status: TorStatus): string {
     case 'off':
       return "Off. Onion sites won't open.";
     case 'missing':
-      return "Not running. Start Tor or Tor Browser and Din uses it for onion sites.";
+      return status.canInstall
+        ? 'Not running. Set up Tor, or start Tor or Tor Browser, and Din uses it for onion sites.'
+        : 'Not running. Start Tor or Tor Browser and Din uses it for onion sites.';
   }
 }
 
 /**
- * Settings → Wi-Fi's Tor section: where Tor stands, and on DinOS a switch
- * to turn it on and off. Only .onion addresses go through Tor; the rest of
- * the computer's traffic doesn't. Renders nothing outside the Electron shell.
+ * Settings → Wi-Fi's Tor section: where Tor stands, and a switch to turn it
+ * on and off on DinOS or once Din has a Tor of its own, which elsewhere Set
+ * Up gets it. Only .onion addresses go through Tor; the rest of the
+ * computer's traffic doesn't. Renders nothing outside the Electron shell.
  */
 export function TorControls() {
   const bridge = getTorBridge();
@@ -39,15 +44,18 @@ export function TorControls() {
 
   if (!bridge || !status) return null;
   const state = torState(status);
+  const installing = status.installing !== null;
+  const canSetUp = status.canInstall && !status.installed && state === 'missing';
+  const problem = error ?? status.error;
 
-  const setEnabled = (enabled: boolean) => {
+  const act = (action: () => Promise<unknown>) => {
     setPending(true);
     setError(null);
-    bridge
-      .setEnabled(enabled)
+    action()
       .catch((e: unknown) => setError(cleanTorError(e)))
       .finally(() => setPending(false));
   };
+  const setEnabled = (enabled: boolean) => act(() => bridge.setEnabled(enabled));
 
   return (
     <div className="mt-6">
@@ -58,7 +66,7 @@ export function TorControls() {
       <div className={settingsCard}>
         <div className="flex items-center gap-3 px-4 py-2.5">
           <span className={cn(trayTokenClass(state === 'ready'), 'size-9')}>
-            {state === 'connecting' ? (
+            {state === 'connecting' || installing ? (
               <Loader2 className="size-4.5 motion-safe:animate-spin" aria-hidden />
             ) : (
               <OnionIcon className="size-4.5" />
@@ -72,7 +80,19 @@ export function TorControls() {
               {describe(status)}
             </p>
           </div>
-          {status.canToggle && (
+          {(canSetUp || installing) && (
+            <Button
+              size="sm"
+              className="shrink-0"
+              disabled={pending || installing}
+              title="Downloads Tor from the Tor Project into ~/.local/share/din/tor"
+              onClick={() => act(() => bridge.install())}
+            >
+              {(pending || installing) && <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden />}
+              Set Up Tor
+            </Button>
+          )}
+          {status.canToggle && !installing && (
             <Switch
               id="tor-enabled"
               checked={status.enabled === true}
@@ -92,10 +112,12 @@ export function TorControls() {
         <p className={cn(trayRuleTop, 'px-4 py-2.5 text-xs text-muted-foreground')}>
           Only .onion addresses go through Tor. Everything else connects as usual, so this doesn't hide
           your IP address from other sites.
+          {status.installed &&
+            ` Tor ${status.installed} is Din’s own, in ~/.local/share/din/tor, and Din keeps it up to date.`}
         </p>
-        {error && (
+        {problem && (
           <p role="alert" className="px-4 py-1.5 text-xs text-destructive">
-            {error}
+            {problem}
           </p>
         )}
       </div>
