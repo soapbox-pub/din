@@ -123,17 +123,22 @@ impl Canvas {
         for (row, out) in rgba.chunks_exact_mut(w * 4).enumerate() {
             let start = (rect.loc.y as usize + row) * stride + rect.loc.x as usize;
             for (&p, px) in pixels[start..start + w].iter().zip(out.chunks_exact_mut(4)) {
-                let a = p >> 24;
-                // Opaque is the overwhelming case: a pure byte swizzle.
-                let p = if a == 255 || a == 0 {
-                    p
-                } else {
-                    let un = |c: u32| ((c & 0xff) * 255 / a).min(255);
-                    (a << 24) | (un(p >> 16) << 16) | (un(p >> 8) << 8) | un(p)
-                };
-                px.copy_from_slice(&(((p & 0xff00ff00) | ((p >> 16) & 0xff) | ((p & 0xff) << 16)).to_le_bytes()));
+                px.copy_from_slice(&straight_rgba(p));
             }
         }
         Patch { x: rect.loc.x, y: rect.loc.y, width: rect.size.w, height: rect.size.h, rgba }
     }
+}
+
+/// A premultiplied ARGB word (pixman's, an XCursor file's) as straight RGBA bytes.
+pub fn straight_rgba(p: u32) -> [u8; 4] {
+    let a = p >> 24;
+    // Opaque is the overwhelming case: a pure byte swizzle.
+    let p = if a == 255 || a == 0 {
+        p
+    } else {
+        let un = |c: u32| ((c & 0xff) * 255 / a).min(255);
+        (a << 24) | (un(p >> 16) << 16) | (un(p >> 8) << 8) | un(p)
+    };
+    ((p & 0xff00ff00) | ((p >> 16) & 0xff) | ((p & 0xff) << 16)).to_le_bytes()
 }

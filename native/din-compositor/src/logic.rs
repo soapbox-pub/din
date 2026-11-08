@@ -712,7 +712,12 @@ impl State {
         let mut canvas = None;
         let patches = render(&mut self.renderer, &mut canvas, &surface, bbox, 1.0);
         if let Some(patch) = patches.first() {
-            self.wire.cursor(patch.width, patch.height, hotspot.x - bbox.loc.x, hotspot.y - bbox.loc.y, &patch.rgba);
+            let (xhot, yhot) = (hotspot.x - bbox.loc.x, hotspot.y - bbox.loc.y);
+            // The theme's own cursor goes by name (theme_cursor.rs).
+            match self.theme_cursors.name(patch.width, patch.height, xhot, yhot, &patch.rgba) {
+                Some(name) => self.wire.cursor_name(name),
+                None => self.wire.cursor(patch.width, patch.height, xhot, yhot, &patch.rgba),
+            }
         }
         self.frame_done(&surface);
     }

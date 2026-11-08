@@ -358,6 +358,8 @@ pub struct State {
     /// The toplevel the shell gave the keyboard (0: none).
     pub focused: u32,
     pub cursor_surface: Option<WlSurface>,
+    /// The pointer theme's images, to send as names (theme_cursor.rs).
+    pub theme_cursors: crate::theme_cursor::ThemeCursors,
     /// What apps copied, and whether it came from X.
     pub clipboard_tx: Sender<(Contents, bool)>,
     pub handle: LoopHandle<'static, State>,
@@ -487,6 +489,7 @@ impl State {
             awaiting_frame: Vec::new(),
             focused: 0,
             cursor_surface: None,
+            theme_cursors: crate::theme_cursor::ThemeCursors::new(),
             clipboard_tx,
             handle,
             xwayland_shell_state,

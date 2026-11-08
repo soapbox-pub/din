@@ -28,6 +28,7 @@ mod logic;
 mod session;
 mod state;
 mod stats;
+mod theme_cursor;
 mod tray;
 mod wire;
 mod xdnd;

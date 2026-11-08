@@ -16,13 +16,21 @@ pub const KIND_CURSOR: u8 = 3;
 
 pub struct Wire {
     out: io::BufWriter<io::Stdout>,
-    /// The cursor image Din has, hashed, while it's an image and not a name.
-    cursor: Option<u64>,
+    /// The cursor Din has.
+    cursor: Cursor,
+}
+
+#[derive(PartialEq)]
+enum Cursor {
+    Unknown,
+    Name(String),
+    /// An image, hashed.
+    Image(u64),
 }
 
 impl Wire {
     pub fn new() -> Self {
-        Self { out: io::BufWriter::with_capacity(1 << 20, io::stdout()), cursor: None }
+        Self { out: io::BufWriter::with_capacity(1 << 20, io::stdout()), cursor: Cursor::Unknown }
     }
 
     fn record(&mut self, kind: u8, header: &[u8], body: &[u8]) {
@@ -40,9 +48,13 @@ impl Wire {
         self.record(KIND_JSON, &[], &body);
     }
 
-    /// A named cursor (cursor-shape-v1 names are CSS names), or "none".
+    /// A named cursor (cursor-shape-v1 names are CSS names), or "none", sent
+    /// only when it's a change.
     pub fn cursor_name(&mut self, name: &str) {
-        self.cursor = None;
+        if matches!(&self.cursor, Cursor::Name(n) if n == name) {
+            return;
+        }
+        self.cursor = Cursor::Name(name.to_string());
         self.json(serde_json::json!({ "type": "cursor-name", "name": name }));
     }
 
@@ -58,11 +70,11 @@ impl Wire {
         let mut hasher = DefaultHasher::new();
         header.hash(&mut hasher);
         rgba.hash(&mut hasher);
-        let hash = hasher.finish();
-        if self.cursor == Some(hash) {
+        let hash = Cursor::Image(hasher.finish());
+        if self.cursor == hash {
             return;
         }
-        self.cursor = Some(hash);
+        self.cursor = hash;
         self.record(KIND_CURSOR, &header, rgba);
     }
 
