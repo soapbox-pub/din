@@ -15,6 +15,8 @@ export interface ShownMenu {
   /** Where it was right-clicked, in the desktop window's DIPs (a page's too). */
   x: number;
   y: number;
+  /** The guest (WebContents id) right-clicked, or null for the desktop's own document. */
+  guest: number | null;
   items: MenuItem[];
 }
 

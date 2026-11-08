@@ -89,7 +89,10 @@ export function showMenu(contents: WebContents, menu: Menu, x: number, y: number
   shown.clear();
   const token = nextToken++;
   shown.set(token, { contents, items });
-  send('menus:show', { token, x, y, items: entries });
+  // Which guest it's for, so the desktop can give it focus back before the
+  // chosen item runs (none for the desktop's own text fields).
+  const guest = contents.id === window.webContents.id ? null : contents.id;
+  send('menus:show', { token, x, y, guest, items: entries });
 }
 
 /** Register the menus IPC surface (window.dinos.menus in the preload). */
@@ -107,7 +110,11 @@ export function registerMenuHandlers(options: {
     shown.delete(token);
     const item = menu?.items.get(id);
     if (!menu || !item || menu.contents.isDestroyed()) return;
-    // Back to the page first, so a role (Paste, Select All) lands in it.
+    // The desktop has already given the page focus back (MenuHost), which
+    // only it can do: what acts on the focused field (a spelling
+    // suggestion, Paste, Select All) goes to whatever the desktop's
+    // document has focused, and a guest's focus() from here doesn't change
+    // that, though isFocused() then says it did (verified on Electron 43).
     if (!menu.contents.isFocused()) menu.contents.focus();
     item.click(undefined, shell() ?? undefined, menu.contents);
   });

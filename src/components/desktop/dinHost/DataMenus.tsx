@@ -165,12 +165,15 @@ export function PointMenu({
   items,
   onAction,
   onClose,
+  onCloseAutoFocus,
   children,
 }: {
   at: { x: number; y: number };
   items?: MenuItem[];
   onAction?: (id: string) => void;
   onClose: () => void;
+  /** Once it has closed and gone, when it would give focus back (preventDefault to place it yourself). */
+  onCloseAutoFocus?: (event: Event) => void;
   children?: ReactNode;
 }) {
   const trigger = useRef<HTMLDivElement>(null);
@@ -185,7 +188,7 @@ export function PointMenu({
       <ContextMenuTrigger asChild>
         <div ref={trigger} aria-hidden className="pointer-events-none fixed left-0 top-0 size-0" />
       </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-56">
+      <ContextMenuContent className="min-w-56" onCloseAutoFocus={onCloseAutoFocus}>
         {children ?? <Items items={items ?? []} kit={KITS.context} onAction={(id) => onAction?.(id)} />}
       </ContextMenuContent>
     </ContextMenu>
