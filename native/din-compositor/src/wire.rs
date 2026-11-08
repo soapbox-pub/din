@@ -6,6 +6,8 @@
 //! images in binary. Window pixels don't come this way at all - they stream
 //! straight to the renderer (frames.rs).
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 
 pub const KIND_JSON: u8 = 0;
@@ -14,11 +16,13 @@ pub const KIND_CURSOR: u8 = 3;
 
 pub struct Wire {
     out: io::BufWriter<io::Stdout>,
+    /// The cursor image Din has, hashed, while it's an image and not a name.
+    cursor: Option<u64>,
 }
 
 impl Wire {
     pub fn new() -> Self {
-        Self { out: io::BufWriter::with_capacity(1 << 20, io::stdout()) }
+        Self { out: io::BufWriter::with_capacity(1 << 20, io::stdout()), cursor: None }
     }
 
     fn record(&mut self, kind: u8, header: &[u8], body: &[u8]) {
@@ -36,12 +40,29 @@ impl Wire {
         self.record(KIND_JSON, &[], &body);
     }
 
+    /// A named cursor (cursor-shape-v1 names are CSS names), or "none".
+    pub fn cursor_name(&mut self, name: &str) {
+        self.cursor = None;
+        self.json(serde_json::json!({ "type": "cursor-name", "name": name }));
+    }
+
+    /// A cursor image, sent only when it differs from the one Din has: apps
+    /// recommit their cursor surfaces unchanged (Xwayland on every set), and
+    /// each image Din gets is a new CSS cursor it has to load.
     pub fn cursor(&mut self, width: i32, height: i32, xhot: i32, yhot: i32, rgba: &[u8]) {
         let mut header = Vec::with_capacity(16);
         header.extend_from_slice(&(width as u32).to_le_bytes());
         header.extend_from_slice(&(height as u32).to_le_bytes());
         header.extend_from_slice(&xhot.to_le_bytes());
         header.extend_from_slice(&yhot.to_le_bytes());
+        let mut hasher = DefaultHasher::new();
+        header.hash(&mut hasher);
+        rgba.hash(&mut hasher);
+        let hash = hasher.finish();
+        if self.cursor == Some(hash) {
+            return;
+        }
+        self.cursor = Some(hash);
         self.record(KIND_CURSOR, &header, rgba);
     }
 

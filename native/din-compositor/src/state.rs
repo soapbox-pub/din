@@ -920,11 +920,11 @@ impl SeatHandler for State {
         match image {
             CursorImageStatus::Hidden => {
                 self.cursor_surface = None;
-                self.wire.json(serde_json::json!({ "type": "cursor-name", "name": "none" }));
+                self.wire.cursor_name("none");
             }
             CursorImageStatus::Named(icon) => {
                 self.cursor_surface = None;
-                self.wire.json(serde_json::json!({ "type": "cursor-name", "name": icon.name() }));
+                self.wire.cursor_name(icon.name());
             }
             CursorImageStatus::Surface(surface) => {
                 self.cursor_surface = Some(surface);

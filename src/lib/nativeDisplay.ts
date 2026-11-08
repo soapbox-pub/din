@@ -524,31 +524,88 @@ function connectFrameStream(url: string): void {
   frameStream = ws;
 }
 
-/** Mirror the app's cursor onto every native canvas, via a CSS variable. */
-function setCursor(cursor: Extract<WorkerMessage, { type: 'cursor' }>): void {
-  if ('name' in cursor) {
-    // Cursor-shape names are CSS cursor names; anything else is untrusted
-    // text headed for a style property, so only plain names pass.
-    const name = /^[a-z-]+$/.test(cursor.name) ? cursor.name : 'default';
-    document.documentElement.style.setProperty(NATIVE_CURSOR_VAR, name);
-    return;
+/**
+ * Cursor images already turned into data URLs, by their pixels, oldest
+ * first: an animated cursor (one Xwayland animates for an X app) sends its
+ * frames over and over, and each is encoded once.
+ */
+const cursorUrls = new Map<string, string>();
+const MAX_CURSOR_URLS = 64;
+/** Bumped by every cursor message, so an image still decoding when a newer one comes is dropped. */
+let cursorSeq = 0;
+/** The image cursor showing now, as a CSS cursor entry, for the next to fall back on. */
+let shownCursor: string | null = null;
+
+/** Width, height, hotspot and two 32-bit hashes of the pixels. */
+function cursorKey(cursor: { width: number; height: number; xhot: number; yhot: number; data: Uint8Array }): string {
+  let fnv = 0x811c9dc5;
+  let djb = 5381;
+  const { data } = cursor;
+  for (let i = 0; i < data.length; i += 1) {
+    fnv = Math.imul(fnv ^ data[i], 0x01000193);
+    djb = (Math.imul(djb, 33) + data[i]) | 0;
   }
-  if (cursor.width === 0 || cursor.height === 0) return;
+  return `${cursor.width}x${cursor.height}@${cursor.xhot},${cursor.yhot}#${fnv >>> 0}.${djb >>> 0}`;
+}
+
+function cursorUrl(cursor: Extract<WorkerMessage, { type: 'cursor'; width: number }>): string | null {
+  const key = cursorKey(cursor);
+  const cached = cursorUrls.get(key);
+  if (cached) {
+    cursorUrls.delete(key);
+    cursorUrls.set(key, cached);
+    return cached;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = cursor.width;
   canvas.height = cursor.height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return null;
   const pixels = new Uint8ClampedArray(
     cursor.data.buffer,
     cursor.data.byteOffset,
     cursor.data.byteLength,
   );
   ctx.putImageData(new ImageData(pixels, cursor.width, cursor.height), 0, 0);
-  document.documentElement.style.setProperty(
-    NATIVE_CURSOR_VAR,
-    `url(${canvas.toDataURL()}) ${cursor.xhot} ${cursor.yhot}, default`,
-  );
+  const url = canvas.toDataURL();
+  cursorUrls.set(key, url);
+  const oldest = cursorUrls.keys().next().value;
+  if (cursorUrls.size > MAX_CURSOR_URLS && oldest !== undefined) cursorUrls.delete(oldest);
+  return url;
+}
+
+/**
+ * Mirror the app's cursor onto every native canvas, via a CSS variable.
+ *
+ * A url() cursor shows its fallback until its image has loaded, so a new
+ * image goes up only once decoded, and falls back on the one before it, not
+ * on `default`: falling back to the pointer's own (animated) theme between
+ * an app's frames made the pointer flicker, its animation starting over.
+ */
+function setCursor(cursor: Extract<WorkerMessage, { type: 'cursor' }>): void {
+  const seq = ++cursorSeq;
+  if ('name' in cursor) {
+    // Cursor-shape names are CSS cursor names; anything else is untrusted
+    // text headed for a style property, so only plain names pass.
+    const name = /^[a-z-]+$/.test(cursor.name) ? cursor.name : 'default';
+    shownCursor = null;
+    document.documentElement.style.setProperty(NATIVE_CURSOR_VAR, name);
+    return;
+  }
+  if (cursor.width === 0 || cursor.height === 0) return;
+  const url = cursorUrl(cursor);
+  if (!url) return;
+  const entry = `url(${url}) ${cursor.xhot} ${cursor.yhot}`;
+  if (entry === shownCursor) return;
+  const image = new Image();
+  image.src = url;
+  const show = () => {
+    if (seq !== cursorSeq) return;
+    const fallback = shownCursor ? `${shownCursor}, ` : '';
+    shownCursor = entry;
+    document.documentElement.style.setProperty(NATIVE_CURSOR_VAR, `${entry}, ${fallback}default`);
+  };
+  image.decode().then(show, show);
 }
 
 // ---------------------------------------------------------------------------
