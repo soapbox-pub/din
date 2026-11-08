@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -3400,6 +3400,101 @@ function TreeTabRow({
  *    override is applied over CDP; this is just the visual frame + scroll).
  */
 /**
+ * The layout every full-surface browser interstitial shares (a failed load, an
+ * untrusted certificate): a clay icon, a large headline, a plain-language
+ * explanation with what to try, the actions, and the technical details
+ * (address, Chromium's error code) folded away behind Details.
+ */
+function Interstitial({
+  icon,
+  tone = 'neutral',
+  title,
+  children,
+  actions,
+  details,
+}: {
+  icon: ReactNode;
+  tone?: 'neutral' | 'danger';
+  title: ReactNode;
+  children: ReactNode;
+  actions: ReactNode;
+  /** `[label, value]` rows shown under Details, in a monospace face. */
+  details: [string, string][];
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const detailsId = useId();
+  return (
+    <div className="@container absolute inset-0 z-20 overflow-auto bg-background">
+      <div className="flex min-h-full items-center justify-center px-6 py-12 @2xl:px-12">
+        <div className="w-full max-w-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-300">
+          <div
+            className={cn(
+              'mb-8 flex size-16 items-center justify-center rounded-2xl clay',
+              tone === 'danger' ? 'bg-destructive/12 text-destructive' : 'bg-card text-ink-accent',
+            )}
+          >
+            {icon}
+          </div>
+          <h2 className="font-[family-name:var(--font-title)] text-3xl font-semibold leading-tight tracking-tight text-balance @lg:text-4xl">
+            {title}
+          </h2>
+          <div className="mt-4 space-y-4 text-lg leading-relaxed text-pretty text-muted-foreground">{children}</div>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            {actions}
+            {details.length > 0 && (
+              <Button
+                size="lg"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-expanded={showDetails}
+                aria-controls={detailsId}
+                onClick={() => setShowDetails((v) => !v)}
+              >
+                Details
+                <ChevronDown
+                  className={cn('size-4.5 motion-safe:transition-transform', showDetails && 'rotate-180')}
+                  strokeWidth={1.75}
+                />
+              </Button>
+            )}
+          </div>
+          {showDetails && (
+            <dl id={detailsId} className="mt-6 space-y-3 rounded-xl bg-foreground/[0.04] p-4 text-sm">
+              {details.map(([label, value]) => (
+                <div key={label} className="space-y-0.5">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="font-mono break-all select-text">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A host named in an interstitial's explanation, set off from the prose. */
+function Host({ children }: { children: ReactNode }) {
+  return <span className="font-medium break-all text-foreground">{children}</span>;
+}
+
+/** Things to try, under an interstitial's explanation. */
+function Tips({ tips }: { tips: string[] }) {
+  if (tips.length === 0) return null;
+  return (
+    <ul className="space-y-1.5">
+      {tips.map((tip) => (
+        <li key={tip} className="flex gap-3">
+          <span aria-hidden className="mt-3 size-1.5 shrink-0 rounded-full bg-foreground/30" />
+          <span>{tip}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
  * Full-surface interstitial shown when a tab's TLS certificate can't be
  * trusted (self-signed / private-CA host). Mirrors a browser's "your
  * connection isn't private" page: the risky "proceed" path is gated behind a
@@ -3417,118 +3512,108 @@ function CertificateWarning({
   const [confirming, setConfirming] = useState(false);
   const code = info.error.replace(/^net::/, '');
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
-      <div className="w-full max-w-md space-y-5 rounded-2xl bg-card p-6 clay">
-        <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
-            <ShieldAlert className="size-5" strokeWidth={1.75} />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold leading-tight">
-              Your connection isn't private
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Din couldn't verify the identity of{' '}
-              <span className="break-all font-medium text-foreground">{info.host}</span>.
-              Its security certificate isn't trusted (self-signed or issued by a
-              private authority).
-            </p>
-          </div>
-        </div>
-
-        <dl className="space-y-1.5 rounded-xl bg-foreground/[0.04] p-3 text-xs">
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Error</dt>
-            <dd className="font-mono">{code}</dd>
-          </div>
-          <div className="flex min-w-0 justify-between gap-3">
-            <dt className="shrink-0 text-muted-foreground">Fingerprint</dt>
-            <dd className="truncate font-mono" title={info.fingerprint}>
-              {info.fingerprint}
-            </dd>
-          </div>
-        </dl>
-
-        {!confirming ? (
-          <div className="flex flex-col gap-2">
-            <Button className="w-full" onClick={onBack}>
-              Back to safety
+    <Interstitial
+      tone="danger"
+      icon={<ShieldAlert className="size-8" strokeWidth={1.5} />}
+      title="Your connection isn't private"
+      details={[
+        ['Error', code],
+        ['Certificate fingerprint', info.fingerprint],
+      ]}
+      actions={
+        confirming ? (
+          <>
+            <Button size="lg" variant="destructive" onClick={onProceed}>
+              Trust and Continue
             </Button>
-            <Button
-              variant="ghost"
-              className="w-full text-muted-foreground"
-              onClick={() => setConfirming(true)}
-            >
-              Proceed anyway
+            <Button size="lg" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
             </Button>
-          </div>
+          </>
         ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Only continue if you trust this host and expected a private
-              certificate. An attacker could be impersonating{' '}
-              <span className="break-all font-medium text-foreground">{info.host}</span>{' '}
-              to steal your data. Din will remember this certificate next time.
-            </p>
-            <div className="flex flex-col gap-2">
-              <Button variant="destructive" className="w-full" onClick={onProceed}>
-                Trust this certificate and continue
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => setConfirming(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <>
+            <Button size="lg" onClick={onBack} autoFocus>
+              Back to Safety
+            </Button>
+            <Button size="lg" variant="ghost" className="text-muted-foreground" onClick={() => setConfirming(true)}>
+              Proceed Anyway
+            </Button>
+          </>
+        )
+      }
+    >
+      <p>
+        Din couldn't verify that this is really <Host>{info.host}</Host>. Its
+        certificate is self-signed or issued by a private authority, so someone
+        could be posing as it to read what you send.
+      </p>
+      {confirming && (
+        <p className="rounded-xl bg-destructive/10 p-4 text-base text-foreground">
+          Only continue if you run this server or expected a private certificate.
+          Din will remember this certificate and won't ask again.
+        </p>
+      )}
+    </Interstitial>
   );
 }
 
+/** Whether a host is this computer (a dev server's, say). */
+function isLocalHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h) || h === '0.0.0.0';
+}
+
 /**
- * Map a failed load to a friendly headline + explanation. Falls back to a
- * generic message carrying Chromium's raw error string for anything unmapped.
- * An onion site's failure is mostly Tor's, so it says where Tor stands.
+ * Map a failed load to a friendly headline, an explanation and things to try.
+ * Falls back to a generic message for anything unmapped; Chromium's raw error
+ * code is always under Details. An onion site's failure is mostly Tor's, so it
+ * says where Tor stands.
  */
 function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
   title: string;
-  detail: string;
+  detail: ReactNode;
+  tips: string[];
   offline: boolean;
 } {
-  let host: string | null = null;
+  let url: URL | null = null;
   try {
-    host = new URL(info.url).host || null;
+    url = new URL(info.url);
   } catch {
     // Malformed URL: fall back to the generic "this site" phrasing.
   }
+  const host = url?.host || null;
+  const local = !!url && isLocalHost(url.hostname);
+  const port = url ? url.port || (url.protocol === 'https:' ? '443' : '80') : null;
+  const site = (fallback: string) => (host ? <Host>{host}</Host> : fallback);
+
   if (isOnionUrl(info.url) && info.errorDescription !== 'ERR_INTERNET_DISCONNECTED') {
     switch (tor ? torState(tor) : 'missing') {
       case 'off':
         return {
           title: 'Tor is turned off',
           detail: 'Onion sites open through Tor. Turn it on in Settings → Wi-Fi, and this page loads once Tor connects.',
+          tips: [],
           offline: false,
         };
       case 'missing':
         return {
           title: "Tor isn't running",
           detail: 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
+          tips: [],
           offline: false,
         };
       case 'connecting':
         return {
           title: 'Tor is still connecting',
           detail: `This page loads once Tor has connected${tor?.progress != null ? ` (${tor.progress}% so far)` : ''}.`,
+          tips: [],
           offline: false,
         };
       case 'ready':
         return {
           title: "This onion site can't be reached",
-          detail: `${host ?? 'The site'} didn't answer through Tor. It may be offline, or the address may be wrong.`,
+          detail: <>{site('The site')} didn't answer through Tor.</>,
+          tips: ['The site may be offline. Onion sites come and go more often than others.', 'Check that the address is complete; onion addresses are long.'],
           offline: false,
         };
     }
@@ -3537,43 +3622,64 @@ function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
     case 'ERR_NAME_NOT_RESOLVED':
     case 'ERR_NAME_RESOLUTION_FAILED':
       return {
-        title: "This site can't be reached",
-        detail: `We couldn't find the server for ${host ?? 'this address'}. Check the address for typos.`,
+        title: "This site can't be found",
+        detail: <>Din couldn't find a server at {site('this address')}.</>,
+        tips: ['Check the address for typos.', 'If it worked before, the site may have moved or shut down.'],
         offline: false,
       };
     case 'ERR_INTERNET_DISCONNECTED':
       return {
         title: "You're offline",
-        detail: 'There is no internet connection. Check your network and try again.',
+        detail: "There's no internet connection. This page reloads by itself once you're back online.",
+        tips: ['Check your Wi-Fi or network cable.'],
         offline: true,
       };
     case 'ERR_CONNECTION_REFUSED':
+      return local
+        ? {
+            title: 'Nothing is running here',
+            detail: <>Nothing on this computer is answering at {site('this address')}.</>,
+            tips: [`If it's a development server, check that it's running and listening on port ${port}.`],
+            offline: false,
+          }
+        : {
+            title: "This site can't be reached",
+            detail: <>{site('The server')} refused the connection.</>,
+            tips: ['The site may be down. Try again in a few minutes.', 'Check the address, including any port number.'],
+            offline: false,
+          };
     case 'ERR_CONNECTION_RESET':
     case 'ERR_CONNECTION_CLOSED':
     case 'ERR_CONNECTION_FAILED':
       return {
         title: "This site can't be reached",
-        detail: `${host ?? 'The server'} refused to connect.`,
+        detail: <>The connection to {site('the server')} was cut off.</>,
+        tips: local
+          ? ['If it\'s a development server, check its output for a crash.']
+          : ['Try again in a moment.', 'A VPN, firewall or proxy could be getting in the way.'],
         offline: false,
       };
     case 'ERR_CONNECTION_TIMED_OUT':
     case 'ERR_TIMED_OUT':
       return {
-        title: 'This site took too long to respond',
-        detail: `${host ?? 'The server'} didn't respond in time. It may be down or too busy.`,
+        title: 'This site took too long',
+        detail: <>{site('The server')} didn't respond in time.</>,
+        tips: ['It may be down or very busy. Try again in a moment.'],
         offline: false,
       };
     case 'ERR_ADDRESS_UNREACHABLE':
     case 'ERR_NETWORK_CHANGED':
       return {
         title: "This site can't be reached",
-        detail: `The network path to ${host ?? 'the server'} is unavailable.`,
+        detail: <>Din can't reach {site('the server')} from this network.</>,
+        tips: ['If you just switched networks, reload.', 'If the server is on your local network, check that it\'s on.'],
         offline: false,
       };
     default:
       return {
         title: "This page couldn't load",
-        detail: `Something went wrong loading ${host ?? 'this page'}.`,
+        detail: <>Something went wrong loading {site('this page')}.</>,
+        tips: [],
         offline: false,
       };
   }
@@ -3583,7 +3689,7 @@ function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
  * Full-surface interstitial shown when a tab's main-frame load fails at the
  * network level (DNS failure, connection refused, timeout, offline, ...).
  * Chromium would otherwise show its own generic error page; this branded one
- * offers a Retry that re-requests the failed URL.
+ * offers a Reload that re-requests the failed URL.
  */
 export function LoadErrorPage({
   info,
@@ -3594,7 +3700,7 @@ export function LoadErrorPage({
 }) {
   const tor = useTorStatus();
   const onion = isOnionUrl(info.url);
-  const { title, detail, offline } = describeLoadError(info, tor);
+  const { title, detail, tips, offline } = describeLoadError(info, tor);
   const code = info.errorDescription || `Error ${info.errorCode}`;
   const Icon = offline ? WifiOff : onion ? OnionIcon : Globe;
 
@@ -3621,29 +3727,23 @@ export function LoadErrorPage({
     };
   }, [onRetry]);
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center overflow-auto bg-background p-6">
-      <div className="w-full max-w-md space-y-5 text-center">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-foreground/10 text-foreground/75 clay">
-          <Icon className="size-7" strokeWidth={1.5} />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold leading-tight">{title}</h2>
-          <p className="text-sm text-muted-foreground">{detail}</p>
-          {info.url && (
-            <p className="break-all font-mono text-xs text-muted-foreground">
-              {info.url}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col items-center gap-3">
-          <Button onClick={onRetry} className="min-w-32">
-            <RotateCw className="size-4.5" strokeWidth={1.75} />
-            Reload
-          </Button>
-          <span className="font-mono text-xs text-muted-foreground">{code}</span>
-        </div>
-      </div>
-    </div>
+    <Interstitial
+      icon={<Icon className="size-8" strokeWidth={1.5} />}
+      title={title}
+      details={[
+        ...(info.url ? [['Address', info.url] as [string, string]] : []),
+        ['Error', code],
+      ]}
+      actions={
+        <Button size="lg" onClick={onRetry}>
+          <RotateCw className="size-4.5" strokeWidth={1.75} />
+          Reload
+        </Button>
+      }
+    >
+      <p>{detail}</p>
+      <Tips tips={tips} />
+    </Interstitial>
   );
 }
 
