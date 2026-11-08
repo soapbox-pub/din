@@ -17,8 +17,8 @@
 // Elsewhere, where no Tor is running, Settings → Wi-Fi's Set Up Tor gets one
 // of Din's own, as Settings → Assistant's Install OpenCode does: the Tor
 // Project's Expert Bundle for Linux, downloaded into ~/.local/share/din/tor,
-// its checksum taken from the release's signed list (checked against the Tor
-// Browser Developers' key where gpg is there to check it), and run by Din as
+// its checksum taken from the release's list, signed by the Tor Browser
+// Developers' key (which takes gpg to check: no gpg, no Tor), and run by Din as
 // the user, from login while it's on, on a SOCKS port of its own. Din looks
 // for a newer bundle now and then, and moves to it. A torrc there is read
 // too, for bridges and the like.
@@ -484,8 +484,8 @@ function execGpg(args: string[], home: string): Promise<string> {
 /**
  * Check the release's checksums are signed by the Tor Browser Developers,
  * with their key from torproject.org's Web Key Directory in a keyring of its
- * own. Where there's no gpg, HTTPS from the Tor Project's server is all
- * there is, as for OpenCode's installer.
+ * own. Without gpg there's no setting Tor up: HTTPS from the Tor Project's
+ * server alone isn't enough for the program onion sites trust.
  */
 async function verifySums(sums: string, signature: string): Promise<void> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'din-tor-gpg-'));
@@ -493,7 +493,9 @@ async function verifySums(sums: string, signature: string): Promise<void> {
     try {
       await execGpg(['--version'], home);
     } catch (error) {
-      if ((error as { code?: unknown }).code === 'ENOENT') return;
+      if ((error as { code?: unknown }).code === 'ENOENT') {
+        throw new Error('Setting up Tor needs gpg, to check the Tor Project’s signature. Install GnuPG and try again.', { cause: error });
+      }
       throw error;
     }
     fs.writeFileSync(path.join(home, 'sums.txt'), sums);
