@@ -1029,9 +1029,32 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // download is saved to ~/Downloads by the main process; the shelf gives the
   // otherwise-silent save visible feedback plus open / show-in-folder actions.
   const [downloads, setDownloads] = useState<DownloadInfo[]>([]);
+  const downloadsRef = useRef(downloads);
+  useEffect(() => {
+    downloadsRef.current = downloads;
+  }, [downloads]);
   const dismissDownload = useCallback((id: number) => {
     setDownloads((prev) => prev.filter((d) => d.id !== id));
   }, []);
+  const cancelDownload = useCallback(
+    (id: number) => void browserBridge?.cancelDownload(id).catch(() => {}),
+    [browserBridge],
+  );
+  // Clear All hides what's finished; one still downloading stays, since its
+  // chip is the only place to see or cancel it.
+  const clearFinishedDownloads = useCallback(() => {
+    setDownloads((prev) => prev.filter((d) => d.state === 'progressing'));
+  }, []);
+  // Closing the window stops its downloads: nothing would show them after,
+  // or let them be canceled.
+  useEffect(
+    () => () => {
+      for (const d of downloadsRef.current) {
+        if (d.state === 'progressing') void browserBridge?.cancelDownload(d.id).catch(() => {});
+      }
+    },
+    [browserBridge],
+  );
 
   // --- Find-in-page (Ctrl+F) ----------------------------------------------
   // The find bar's state. The query is shared across tabs (Firefox-style);
@@ -2319,7 +2342,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           downloads={downloads}
           bridge={browserBridge}
           onDismiss={dismissDownload}
-          onClearAll={() => setDownloads([])}
+          onCancel={cancelDownload}
+          onClearAll={clearFinishedDownloads}
         />
       )}
 
@@ -3873,11 +3897,13 @@ function DownloadShelf({
   downloads,
   bridge,
   onDismiss,
+  onCancel,
   onClearAll,
 }: {
   downloads: DownloadInfo[];
   bridge: BrowserBridge | undefined;
   onDismiss: (id: number) => void;
+  onCancel: (id: number) => void;
   onClearAll: () => void;
 }) {
   return (
@@ -3890,6 +3916,7 @@ function DownloadShelf({
             download={d}
             bridge={bridge}
             onDismiss={() => onDismiss(d.id)}
+            onCancel={() => onCancel(d.id)}
             onClearAll={onClearAll}
           />
         ))}
@@ -3901,16 +3928,21 @@ function DownloadShelf({
   );
 }
 
-/** One download's chip in the shelf: name, progress, and completed actions. */
+/**
+ * One download's chip in the shelf: name, progress, Cancel while it's
+ * downloading, and open / show-in-folder once it's done.
+ */
 function DownloadChip({
   download,
   bridge,
   onDismiss,
+  onCancel,
   onClearAll,
 }: {
   download: DownloadInfo;
   bridge: BrowserBridge | undefined;
   onDismiss: () => void;
+  onCancel: () => void;
   onClearAll: () => void;
 }) {
   const { open } = useWindowActions();
@@ -3924,6 +3956,7 @@ function DownloadChip({
   };
   const showInFolder = () => open('file-browser', { path: parentPath(savePath), select: filename });
   const failed = state === 'cancelled' || state === 'interrupted';
+  const active = state === 'progressing';
   const pct =
     totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : null;
   const subtitle = done
@@ -3973,7 +4006,9 @@ function DownloadChip({
               <FolderOpen className="size-4" strokeWidth={1.75} />
             </ToolButton>
           )}
-          <ToolButton size="sm" label="Dismiss" onClick={onDismiss}>
+          {/* While it downloads, the X stops it (the chip stays, as Canceled);
+              hiding it instead would leave it running out of sight. */}
+          <ToolButton size="sm" label={active ? 'Cancel Download' : 'Dismiss'} onClick={active ? onCancel : onDismiss}>
             <X className="size-4" strokeWidth={1.75} />
           </ToolButton>
         </div>
@@ -3985,7 +4020,11 @@ function DownloadChip({
           Copy Link
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onDismiss}>Dismiss</ContextMenuItem>
+        {active ? (
+          <ContextMenuItem variant="destructive" onSelect={onCancel}>Cancel Download</ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={onDismiss}>Dismiss</ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={onClearAll}>Clear All</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

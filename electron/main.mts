@@ -5556,6 +5556,9 @@ function registerCertificateHandling(): void {
 
 let nextDownloadId = 1;
 
+/** Downloads still in flight, by id, so the shelf can cancel them. */
+const activeDownloads = new Map<number, Electron.DownloadItem>();
+
 /**
  * A path in ~/Downloads for `filename`, suffixed ` (n)` before the extension
  * if needed so a new download never clobbers an existing file. The download
@@ -5614,15 +5617,27 @@ function registerBrowserDownloadHandlers(): void {
         totalBytes: item.getTotalBytes(),
       });
     };
+    activeDownloads.set(id, item);
     report('progressing');
     item.on('updated', (_e, state) =>
       report(state === 'interrupted' ? 'interrupted' : 'progressing'),
     );
-    item.once('done', (_e, state) => report(state));
+    item.once('done', (_e, state) => {
+      activeDownloads.delete(id);
+      report(state);
+    });
   };
   browserSession().on('will-download', onWillDownload);
   privateBrowserSession().on('will-download', onWillDownload);
   torBrowserSession().on('will-download', onWillDownload);
+
+  // Stop a download in flight: its chip's Cancel, or its browser window
+  // closing. Chromium deletes the partial file and reports 'cancelled'.
+  ipcMain.handle('browser:cancelDownload', (event, id) => {
+    assertShellSender(event);
+    if (typeof id !== 'number') return;
+    activeDownloads.get(id)?.cancel();
+  });
 
   // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else
   // opens in Din's own apps from the renderer; the OS default handler isn't

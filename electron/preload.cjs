@@ -3093,6 +3093,13 @@ expose('browser', {
   openDownload: (savePath) => ipcRenderer.invoke('browser:openDownload', savePath),
 
   /**
+   * Stop a download in flight (its `id` from onDownload). Its last report
+   * arrives with state 'cancelled'.
+   * @param {number} id
+   */
+  cancelDownload: (id) => ipcRenderer.invoke('browser:cancelDownload', id),
+
+  /**
    * What a site (`origin`) has been allowed or blocked, and whether the user
    * accepted an untrusted certificate for its host. `isPrivate` reads the
    * private window's session instead of the persistent one.

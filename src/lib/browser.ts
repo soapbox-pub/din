@@ -150,6 +150,8 @@ export interface BrowserBridge {
   onDownload(callback: (info: DownloadInfo) => void): () => void;
   /** Run a completed download that is a Windows program. */
   openDownload(savePath: string): Promise<void>;
+  /** Stop a download in flight; its last update arrives as 'cancelled'. */
+  cancelDownload(id: number): Promise<void>;
   /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.
