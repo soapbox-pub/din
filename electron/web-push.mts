@@ -65,6 +65,7 @@ import {
   unregisterTag,
 } from './periodic-sync.mts';
 import { DEFAULT_PUSH_SERVER, PushService, type AckCode, type UnregisterCode } from './push-service.mts';
+import { prepareSession } from './adblock.mts';
 import { WorkerEvents } from './worker-events.mts';
 
 export interface WebPushOptions {
@@ -234,7 +235,7 @@ function scopeFor(caller: Caller, params: unknown): string {
 // ---------------------------------------------------------------------------
 
 const attached = new WeakSet<Electron.ServiceWorkerMain>();
-const events = new WorkerEvents({ prefix: 'web-push', log, onWorker: (worker) => attach(worker) });
+const events = new WorkerEvents({ prefix: 'web-push', log, onWorker: (worker) => attach(worker), prepare: prepareSession });
 
 /** Wire up a running worker's IPC, if it's a website's. */
 function attach(worker: Electron.ServiceWorkerMain): void {

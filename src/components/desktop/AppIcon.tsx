@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { THEMED_APP_ICONS, WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { bundledIconProps } from '@/shared/iconSizes';
 import { isGlyphIcon, themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 /**
@@ -79,7 +80,7 @@ export function AppIcon({
   ) : (
     <img
       ref={cancelLoadOnUnmount}
-      src={shown}
+      {...bundledIconProps(shown)}
       alt=""
       aria-hidden
       draggable={false}
@@ -94,7 +95,7 @@ export function AppIcon({
     <span aria-hidden className={cn('relative inline-block', className)}>
       {img}
       <img
-        src={WEB_APP_ICON}
+        {...bundledIconProps(WEB_APP_ICON)}
         alt=""
         draggable={false}
         className="absolute -bottom-[4%] -right-[4%] size-[42%] drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.45)]"

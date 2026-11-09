@@ -65,7 +65,6 @@ import { onCode, recentCodes } from './phone-codes.mts';
 import { deleteSecret, lookupSecret, storeSecret } from './secret-service.mts';
 
 const require = createRequire(import.meta.url);
-const kdbxweb = require('kdbxweb') as typeof import('kdbxweb');
 
 const KDF_WORKER = path.join(import.meta.dirname, `passwords-kdf${path.extname(import.meta.filename)}`);
 const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
@@ -237,22 +236,34 @@ function runKdf(request: KdfRequest): Promise<Uint8Array> {
   });
 }
 
-kdbxweb.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type, version) => {
-  if (version !== 0x13) throw new Error('This vault uses an old version of Argon2. Open it in KeePassXC and save it again.');
-  const saltId = Buffer.from(salt).toString('base64');
-  if (knownKey && !bypassKnownKey && knownKey.salt === saltId) return arrayBuffer(knownKey.key);
-  const key = await runKdf({
-    password: new Uint8Array(password),
-    salt: new Uint8Array(salt),
-    memory,
-    iterations,
-    length,
-    parallelism,
-    type,
+let kdbxwebModule: typeof import('kdbxweb') | null = null;
+
+/**
+ * KeePass's library, loaded the first time a vault is opened, made or
+ * imported: a computer that never uses Passwords doesn't hold it.
+ */
+function kdbx(): typeof import('kdbxweb') {
+  if (kdbxwebModule) return kdbxwebModule;
+  const kdbxweb = require('kdbxweb') as typeof import('kdbxweb');
+  kdbxweb.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type, version) => {
+    if (version !== 0x13) throw new Error('This vault uses an old version of Argon2. Open it in KeePassXC and save it again.');
+    const saltId = Buffer.from(salt).toString('base64');
+    if (knownKey && !bypassKnownKey && knownKey.salt === saltId) return arrayBuffer(knownKey.key);
+    const key = await runKdf({
+      password: new Uint8Array(password),
+      salt: new Uint8Array(salt),
+      memory,
+      iterations,
+      length,
+      parallelism,
+      type,
+    });
+    lastDerived = { salt: saltId, key };
+    return arrayBuffer(key);
   });
-  lastDerived = { salt: saltId, key };
-  return arrayBuffer(key);
-});
+  kdbxwebModule = kdbxweb;
+  return kdbxweb;
+}
 
 // ---------------------------------------------------------------------------
 // The vault
@@ -335,17 +346,17 @@ function usesArgon2(db: Kdbx): boolean {
   const uuid = db.header.kdfParameters?.get('$UUID');
   if (!(uuid instanceof ArrayBuffer)) return false;
   const id = Buffer.from(uuid).toString('base64');
-  return id === kdbxweb.Consts.KdfId.Argon2id || id === kdbxweb.Consts.KdfId.Argon2d;
+  return id === kdbx().Consts.KdfId.Argon2id || id === kdbx().Consts.KdfId.Argon2d;
 }
 
 function useOurKdf(db: Kdbx): void {
   if (db.versionMajor < 4) db.upgrade();
-  db.setKdf(kdbxweb.Consts.KdfId.Argon2id);
+  db.setKdf(kdbx().Consts.KdfId.Argon2id);
   const params = db.header.kdfParameters;
   if (!params) return;
-  const { ValueType } = kdbxweb.VarDictionary;
-  params.set('M', ValueType.UInt64, new kdbxweb.Int64(KDF_MEMORY));
-  params.set('I', ValueType.UInt64, new kdbxweb.Int64(KDF_ITERATIONS));
+  const { ValueType } = kdbx().VarDictionary;
+  params.set('M', ValueType.UInt64, new (kdbx().Int64)(KDF_MEMORY));
+  params.set('I', ValueType.UInt64, new (kdbx().Int64)(KDF_ITERATIONS));
   params.set('P', ValueType.UInt32, KDF_PARALLELISM);
 }
 
@@ -363,7 +374,7 @@ function pinKdfSalt(db: Kdbx): void {
       freshSalt.delete(db);
       return;
     }
-    if (salt instanceof ArrayBuffer) header.kdfParameters?.set('S', kdbxweb.VarDictionary.ValueType.Bytes, salt);
+    if (salt instanceof ArrayBuffer) header.kdfParameters?.set('S', kdbx().VarDictionary.ValueType.Bytes, salt);
   };
 }
 
@@ -402,7 +413,7 @@ async function rememberKey(): Promise<void> {
 }
 
 function isWrongKey(error: unknown): boolean {
-  return error instanceof kdbxweb.KdbxError && error.code === kdbxweb.Consts.ErrorCodes.InvalidKey;
+  return error instanceof kdbx().KdbxError && error.code === kdbx().Consts.ErrorCodes.InvalidKey;
 }
 
 function opened(db: Kdbx, stamp: string | null): void {
@@ -420,10 +431,10 @@ async function unlockWithPassword(password: string): Promise<void> {
   lastDerived = null;
   const stamp = await fileStamp();
   if (!stamp) throw new Error('There are no passwords to unlock yet');
-  const credentials = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password));
+  const credentials = new (kdbx().Credentials)(kdbx().ProtectedValue.fromString(password));
   let db: Kdbx;
   try {
-    db = await kdbxweb.Kdbx.load(await readVaultFile(), credentials);
+    db = await kdbx().Kdbx.load(await readVaultFile(), credentials);
   } catch (error) {
     if (isWrongKey(error)) throw new Error('That password is incorrect', { cause: error });
     throw error;
@@ -467,9 +478,9 @@ async function createFromKeyring(): Promise<AutoUnlock> {
   lastDerived = null;
   // The key stands in for the password, as in unlockFromKeyring: KDF runs
   // with its salt answer with it.
-  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('')), 'Passwords');
+  const db = kdbx().Kdbx.create(new (kdbx().Credentials)(kdbx().ProtectedValue.fromString('')), 'Passwords');
   useOurKdf(db);
-  db.header.kdfParameters?.set('S', kdbxweb.VarDictionary.ValueType.Bytes, arrayBuffer(salt));
+  db.header.kdfParameters?.set('S', kdbx().VarDictionary.ValueType.Bytes, arrayBuffer(salt));
   opened(db, null);
   try {
     await save();
@@ -499,7 +510,7 @@ async function unlockFromKeyring(): Promise<AutoUnlock> {
   try {
     const stamp = await fileStamp();
     // The key stands in for the password: KDF runs with its salt answer with it.
-    const db = await kdbxweb.Kdbx.load(await readVaultFile(), new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('')));
+    const db = await kdbx().Kdbx.load(await readVaultFile(), new (kdbx().Credentials)(kdbx().ProtectedValue.fromString('')));
     lastDerived = key;
     opened(db, stamp);
     return 'unlocked';
@@ -538,7 +549,7 @@ async function create(password: string): Promise<void> {
   if (!password) throw new Error('A password is needed');
   knownKey = null;
   lastDerived = null;
-  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password)), 'Passwords');
+  const db = kdbx().Kdbx.create(new (kdbx().Credentials)(kdbx().ProtectedValue.fromString(password)), 'Passwords');
   useOurKdf(db);
   opened(db, null);
   await save();
@@ -576,7 +587,7 @@ export function computerPasswordSet(password: string): Promise<void> {
 /** Read in what another app saved meanwhile. */
 async function mergeFromDisk(open: OpenVault): Promise<boolean> {
   try {
-    const remote = await kdbxweb.Kdbx.load(await readVaultFile(), open.db.credentials);
+    const remote = await kdbx().Kdbx.load(await readVaultFile(), open.db.credentials);
     open.db.merge(remote);
     open.stamp = await fileStamp();
     return true;
@@ -614,12 +625,12 @@ async function save(): Promise<void> {
 async function isVaultPassword(password: string): Promise<boolean> {
   const open = vault;
   if (!open || !knownKey || !open.db.header.kdfParameters) return false;
-  const credentials = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password));
+  const credentials = new (kdbx().Credentials)(kdbx().ProtectedValue.fromString(password));
   await credentials.ready;
   bypassKnownKey = true;
   let key: ArrayBuffer;
   try {
-    key = await kdbxweb.KeyEncryptorKdf.encrypt(await credentials.getHash(), open.db.header.kdfParameters);
+    key = await kdbx().KeyEncryptorKdf.encrypt(await credentials.getHash(), open.db.header.kdfParameters);
   } finally {
     bypassKnownKey = false;
   }
@@ -631,7 +642,7 @@ async function isVaultPassword(password: string): Promise<boolean> {
 async function setVaultPassword(password: string): Promise<void> {
   const open = vault;
   if (!open) throw new Error('Passwords is locked');
-  await open.db.credentials.setPassword(kdbxweb.ProtectedValue.fromString(password));
+  await open.db.credentials.setPassword(kdbx().ProtectedValue.fromString(password));
   freshSalt.add(open.db);
   await save();
 }
@@ -669,7 +680,7 @@ function fieldText(entry: KdbxEntry, name: string): string {
 }
 
 function setField(entry: KdbxEntry, name: string, value: string, isProtected: boolean): void {
-  entry.fields.set(name, isProtected ? kdbxweb.ProtectedValue.fromString(value) : value);
+  entry.fields.set(name, isProtected ? kdbx().ProtectedValue.fromString(value) : value);
 }
 
 function otpOf(entry: KdbxEntry): string {
@@ -920,14 +931,14 @@ function addImported(db: Kdbx, item: ImportedItem, keys: Set<string>): boolean {
 }
 
 async function readKdbx(data: Uint8Array, opts: Record<string, unknown>): Promise<Kdbx> {
-  const pw = typeof opts.password === 'string' && opts.password ? kdbxweb.ProtectedValue.fromString(password(opts.password)) : null;
+  const pw = typeof opts.password === 'string' && opts.password ? kdbx().ProtectedValue.fromString(password(opts.password)) : null;
   const keyFile = opts.keyFile ? arrayBuffer(bytesOf(opts.keyFile, 'key file')) : null;
   if (!pw && !keyFile) throw new Error('A KeePass file needs its password');
   const derived = lastDerived;
   // Even a copy of this vault, with its salt, is opened with what was typed.
   bypassKnownKey = true;
   try {
-    return await kdbxweb.Kdbx.load(arrayBuffer(data), new kdbxweb.Credentials(pw, keyFile));
+    return await kdbx().Kdbx.load(arrayBuffer(data), new (kdbx().Credentials)(pw, keyFile));
   } catch (error) {
     if (isWrongKey(error)) throw new Error(keyFile ? 'That password or key file is incorrect' : 'That password is incorrect', { cause: error });
     throw error;

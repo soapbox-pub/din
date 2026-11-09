@@ -61,7 +61,7 @@ import {
   attachUserscripts,
   isUserscriptInstallUrl,
 } from './userscripts.mts';
-import { attachAdblock, ensureAdblockEngine, isAdblockExtension, setupAdblock } from './adblock.mts';
+import { attachAdblock, ensureAdblockEngine, isAdblockExtension, prepareAdblock, setupAdblock } from './adblock.mts';
 import { sendNavigationClientHints } from './client-hints.mts';
 import {
   attachPopups,
@@ -219,6 +219,11 @@ const INDEX = path.join(DIST, 'index.html');
 // registerSchemesAsPrivileged REPLACES the full list, and importing
 // electron-chrome-extensions above already registered the crx scheme
 // (extension action icons) - so it must be re-declared here.
+//
+// `codeCache` keeps V8's compiled code for a scheme's scripts, as Chromium
+// does for http(s) and for nothing else unless asked: without it, the
+// desktop and every app window compiled all of their JavaScript afresh
+// each time they loaded.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'app',
@@ -226,6 +231,7 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
+      codeCache: true,
     },
   },
   {
@@ -240,6 +246,7 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       stream: true,
       allowServiceWorkers: true,
+      codeCache: true,
     },
   },
   {
@@ -251,6 +258,7 @@ protocol.registerSchemesAsPrivileged([
       supportFetchAPI: true,
       stream: true,
       allowServiceWorkers: true,
+      codeCache: true,
     },
   },
   {
@@ -6352,6 +6360,11 @@ app.whenReady().then(() => {
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
   registerGuestVisibilityHandlers();
+  // What a session needs running before its first page loads (GuestSurface waits for it).
+  ipcMain.handle('guestSession:prepare', (event, partition: unknown) => {
+    assertShellSender(event);
+    return partition === WEBBROWSER_PARTITION ? prepareAdblock() : undefined;
+  });
   registerGuestFileDropHandlers();
   registerMonitorsHandlers();
   registerPowerHandlers();

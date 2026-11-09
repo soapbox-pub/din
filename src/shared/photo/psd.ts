@@ -1,4 +1,4 @@
-import { readPsd, writePsdUint8Array, type Color, type Layer as PsdLayer, type LayerMaskData, type Psd } from 'ag-psd';
+import type { Color, Layer as PsdLayer, LayerMaskData, Psd } from 'ag-psd';
 import { colorToRgb } from './adjust';
 import { allLayers, blankLayer, ctx2d, makeCanvas, type Doc, type Layer, type LayerKind, type Mask, type TextData } from './model';
 import { ORA_MIME, readOraDoc, writeOraDoc } from './ora';
@@ -136,8 +136,12 @@ function fromPsdLayer(pl: PsdLayer): Layer {
   };
 }
 
-/** Read a PSD into a document. Throws a sentence a person can read. */
-export function readPsdDoc(bytes: Uint8Array): Doc {
+/**
+ * Read a PSD into a document. Throws a sentence a person can read.
+ * Photoshop's format (ag-psd, with its zlib) loads with the first PSD read
+ * or written, not with every window of the apps that can.
+ */
+export async function readPsdDoc(bytes: Uint8Array): Promise<Doc> {
   if (bytes.length < 26 || String.fromCharCode(...bytes.subarray(0, 4)) !== '8BPS') {
     throw new Error('It isn’t a Photoshop file.');
   }
@@ -145,6 +149,7 @@ export function readPsdDoc(bytes: Uint8Array): Doc {
   if (version === 2) throw new Error('It’s a Large Document (PSB), which Photo Editor can’t open yet.');
   const depth = (bytes[22] << 8) | bytes[23];
   if (depth !== 8) throw new Error(`It uses ${depth} bits per channel; Photo Editor opens 8-bit documents.`);
+  const { readPsd } = await import('ag-psd');
   let psd: Psd;
   try {
     psd = readPsd(bytes, { skipThumbnail: true });
@@ -326,7 +331,7 @@ function toPsdLayer(l: Layer, usedIds: Set<number>): PsdLayer {
 }
 
 /** A PSD of the document, composite included so viewers that only read that see it right. */
-export function writePsdDoc(doc: Doc): Uint8Array {
+export async function writePsdDoc(doc: Doc): Promise<Uint8Array> {
   const src = doc.source ?? { width: doc.width, height: doc.height };
   const resources = { ...(src.imageResources ?? {}) };
   // These index into the layer list as it was; they'd point at the wrong layers now.
@@ -353,6 +358,7 @@ export function writePsdDoc(doc: Doc): Uint8Array {
     imageData: undefined,
   };
   const invalidateTextLayers = allLayers(doc.layers).some((l) => l.kind === 'text' && l.textEdited);
+  const { writePsdUint8Array } = await import('ag-psd');
   return writePsdUint8Array(psd, { generateThumbnail: true, trimImageData: true, invalidateTextLayers, noBackground: !doc.layers[0] || doc.layers[0].name !== 'Background' });
 }
 

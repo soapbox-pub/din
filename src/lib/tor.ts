@@ -1,7 +1,8 @@
 /**
  * Tor, through the `window.dinos.tor` bridge (electron/preload.cjs, backed by
  * electron/tor.mts): whether Din has found a Tor and how far it has got
- * connecting, and turning it on and off on DinOS. Browser tabs on onion sites
+ * connecting, turning it on and off on DinOS, and elsewhere setting up a Tor
+ * of Din's own. Browser tabs on onion sites
  * run in a session of their own (WEBBROWSER_TOR_PARTITION) that goes through
  * Tor.
  *
@@ -12,7 +13,7 @@
 import { parseBlossomUri } from '@/lib/blossomUri';
 
 export interface TorStatus {
-  /** Whether Din can turn Tor on and off here (DinOS). */
+  /** Whether Din can turn Tor on and off here: DinOS, or where Din has a Tor of its own. */
   canToggle: boolean;
   /** Whether Tor is set to run; null where Din doesn't manage it. */
   enabled: boolean | null;
@@ -22,12 +23,22 @@ export interface TorStatus {
   progress: number | null;
   /** Tor's word for what it's doing, e.g. "Loading relay descriptors". */
   summary: string | null;
+  /** Whether Din can set up a Tor of its own here (not DinOS, which has one). */
+  canInstall: boolean;
+  /** The version of Din's own Tor ("16.0"), or null where it has none. */
+  installed: string | null;
+  /** What setting up or updating Din's own Tor is doing, or null. */
+  installing: string | null;
+  /** Why setting up or running Din's own Tor last failed, or null. */
+  error: string | null;
 }
 
 export interface TorBridge {
   status(): Promise<TorStatus>;
   refresh(): Promise<TorStatus>;
   setEnabled(enabled: boolean): Promise<TorStatus>;
+  /** Set up a Tor of Din's own: the Tor Project's Expert Bundle, in ~/.local/share/din/tor. */
+  install(): Promise<TorStatus>;
   onStatus(callback: (status: TorStatus) => void): () => void;
   /** A browser tab's page went to or from an onion site, to be loaded in the other session. */
   onMoveTab(callback: (move: { wcId: number; url: string }) => void): () => void;

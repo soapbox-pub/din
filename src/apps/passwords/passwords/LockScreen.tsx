@@ -5,12 +5,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cleanPasswordsError } from '@/lib/passwords';
 import { useBridge } from './vault';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
       <div className="w-full max-w-sm space-y-6 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95">
-        <img src="/icons/apps/passwords.png" alt="" className="mx-auto size-24 drop-shadow-md" />
+        <img {...bundledIconProps('/icons/apps/passwords.png')} alt="" className="mx-auto size-24 drop-shadow-md" />
         {children}
       </div>
     </div>

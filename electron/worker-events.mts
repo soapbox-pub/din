@@ -30,6 +30,8 @@ export interface WorkerEventsOptions {
   onOutcome?: (site: string, type: string, outcome: string, ms: number) => void;
   /** A worker was started for an event: the caller's own IPC goes on it here. */
   onWorker?: (worker: Electron.ServiceWorkerMain) => void;
+  /** What the session needs running before a worker starts in it (the browser's ad blocker). */
+  prepare?: (s: Electron.Session) => Promise<void>;
 }
 
 export class WorkerEvents {
@@ -74,6 +76,7 @@ export class WorkerEvents {
     };
     let worker: Electron.ServiceWorkerMain;
     try {
+      await this.#options.prepare?.(s);
       worker = await s.serviceWorkers.startWorkerForScope(scope);
     } catch (error) {
       outcome(`not delivered, no worker: ${error instanceof Error ? error.message : error}`);

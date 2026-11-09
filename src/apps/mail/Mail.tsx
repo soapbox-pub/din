@@ -1,11 +1,13 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { parseMailto } from '@/lib/mailto';
 import { restoredState, windowLaunch, type Launch } from '@/shared/launch';
 import { blankSeed, escapeHtml, parseAddresses, type ComposeSeed } from './mail/format';
-import { Compose } from './mail/Compose';
 import { Viewer } from './mail/Viewer';
 import { savedCompose } from './mail/restore';
 import './mail/mail.css';
+
+/** A message being written: its editor (TipTap) loads only in a window that writes one, not the viewer. */
+const Compose = lazy(() => import('./mail/Compose').then((m) => ({ default: m.Compose })));
 
 /**
  * A window is a viewer (mailboxes, list, message) or, launched with
@@ -34,5 +36,11 @@ export function Mail() {
   // A message being written comes back as it was left, not as it was started.
   const saved = useMemo(() => savedCompose(restoredState()), []);
   const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(windowLaunch())), [saved]);
-  return seed ? <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} /> : <Viewer />;
+  return seed ? (
+    <Suspense>
+      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} />
+    </Suspense>
+  ) : (
+    <Viewer />
+  );
 }

@@ -15,7 +15,6 @@ import {
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CursorThemeView } from '@/shared/CursorThemeView';
 import { FileIcon } from '@/shared/FileIcon';
 import { decodeText, encodeText, isUtf16, type TextEncoding } from '@/shared/textEncoding';
 
@@ -28,6 +27,8 @@ const TEXT_MAX_CHARS = 512 * 1024;
 const PdfView = lazy(() => import('@/shared/PdfView'));
 /** So is three.js: it's loaded the first time a 3D model is shown. */
 const ModelView = lazy(() => import('@/shared/model/ModelView'));
+/** The cursor converter too: the first time a cursor theme is shown. */
+const CursorThemeView = lazy(() => import('@/shared/CursorThemeView').then((m) => ({ default: m.CursorThemeView })));
 
 export interface FileViewerBodyProps {
   path: string;
@@ -96,7 +97,13 @@ export function FileViewerBody({
       </Suspense>
     );
   }
-  if (isCursorTheme(name)) return <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />;
+  if (isCursorTheme(name)) {
+    return (
+      <Suspense fallback={null}>
+        <CursorThemeView key={path} path={path} mtimeMs={mtimeMs} onUse={onUseCursor} />
+      </Suspense>
+    );
+  }
   if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
   if (category === 'document' || category === 'disk' || category === 'model' || category === 'program' || category === 'image' || category === 'video') {
     return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;

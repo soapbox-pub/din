@@ -76,6 +76,7 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
 import { contains, workAreas, type WorkArea } from '@/lib/monitors';
+import { restoreCursorTryOn } from '@/lib/cursorTryOn';
 
 /** How long after a click a window it opens still counts as opened by it. */
 const LAUNCH_POINTER_MS = 2000;
@@ -196,6 +197,8 @@ const SessionOverlays = memo(function SessionOverlays() {
  * desktopLayout and taskbarPosition).
  */
 export function Desktop() {
+  // A pointer the App Store was trying on when Din last quit goes back.
+  useEffect(() => void restoreCursorTryOn(), []);
   return (
     <InstalledAppsProvider>
       <DesktopSession />

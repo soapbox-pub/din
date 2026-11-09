@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Copy, Info, Paintbrush, Undo2, X } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, Info, Paintbrush, Undo2, X } from 'lucide-react';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import { ThemeSwatch } from '@/components/desktop/ThemeSwatch';
@@ -37,6 +37,16 @@ interface ThemeHandlers {
   select: (theme: ThemeDefinition) => void;
   use: (theme: ThemeDefinition) => void;
   isWorn: (theme: ThemeDefinition) => boolean;
+  /** Wear a theme without adding it to the user's themes, until it's stopped or used. */
+  tryOn: (theme: ThemeDefinition) => void;
+  stopTrying: () => void;
+  isTrying: (theme: ThemeDefinition) => boolean;
+}
+
+/** A theme being tried on, and what was worn before it. */
+interface Trial {
+  theme: ThemeDefinition;
+  previous: ThemeSnapshot;
 }
 
 /** What was worn before a run of themes was put on, and what that run added to the user's themes. */
@@ -50,13 +60,14 @@ interface Streak {
  * The App Store's Themes: named themes (kind 36767) from the catalog's
  * publishers, the people the user follows, and the user (useThemeCatalog).
  *
- * Clicking a theme wears it at once and adds it to the user's themes, which
- * Settings → Themes lists. A bar then offers Revert, which puts back
- * what was worn before the first theme clicked and takes back what the
- * clicks added.
+ * Clicking a theme opens its page. Try On wears it without adding it to
+ * anything, until Stop Trying On (or leaving the Themes page) puts back what
+ * was worn before. Use wears it and adds it to the user's themes, which
+ * Settings → Themes lists. A bar then offers Revert, which puts back what
+ * was worn before the first theme used and takes back what Use added.
  *
- * Themes clicked are only tried on: the profile theme is published when the
- * bar is dismissed, the Themes page closes, or a while passes untouched, so
+ * Themes used are held: the profile theme is published when the bar is
+ * dismissed, the Themes page closes, or a while passes untouched, so
  * clicking around doesn't publish every theme on the way.
  */
 export function ThemeStore({
@@ -74,29 +85,70 @@ export function ThemeStore({
   const actions = useThemeActions();
   const { toast } = useToast();
   const [streak, setStreak] = useState<Streak | null>(null);
+  const [trial, setTrial] = useState<Trial | null>(null);
 
-  const { commit } = editor;
-  useEffect(() => commit, [commit]);
+  // Leaving takes off what's being tried on, and sends what was used.
+  const { commit, restore } = editor;
+  const leave = useRef(() => {});
+  useEffect(() => {
+    leave.current = () => {
+      if (trial) restore(trial.previous);
+      else commit();
+    };
+  }, [trial, restore, commit]);
+  useEffect(() => () => leave.current(), []);
+
+  const sameTheme = (a: ThemeDefinition, b: ThemeDefinition) => a.pubkey === b.pubkey && a.identifier === b.identifier;
+  const isTrying = (theme: ThemeDefinition) => !!trial && sameTheme(trial.theme, theme);
 
   const isWorn = (theme: ThemeDefinition) =>
+    !isTrying(theme) &&
     !!editor.theme &&
     editor.theme.source?.pubkey === theme.pubkey &&
     editor.theme.source.identifier === theme.identifier &&
     sameThemeLook(editor.theme, theme.theme);
 
-  const use = (theme: ThemeDefinition) => {
-    if (isWorn(theme)) return;
-    const previous = editor.snapshot();
+  const wear = (theme: ThemeDefinition, failure: string): boolean => {
     try {
       editor.apply(theme.theme, { hold: true });
+      return true;
     } catch (error) {
       toast({
-        title: 'Couldn’t use this theme',
+        title: failure,
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      return false;
+    }
+  };
+
+  const tryOn = (theme: ThemeDefinition) => {
+    if (isTrying(theme) || isWorn(theme)) return;
+    const previous = trial?.previous ?? editor.snapshot();
+    if (wear(theme, 'Couldn’t try on this theme')) setTrial({ theme, previous });
+  };
+
+  const stopTrying = () => {
+    if (!trial) return;
+    try {
+      editor.restore(trial.previous);
+    } catch (error) {
+      toast({
+        title: 'Couldn’t take it off',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });
       return;
     }
+    setTrial(null);
+  };
+
+  const use = (theme: ThemeDefinition) => {
+    if (isWorn(theme)) return;
+    // What was worn before trying on is what Revert puts back.
+    const previous = trial?.previous ?? editor.snapshot();
+    if (!isTrying(theme) && !wear(theme, 'Couldn’t use this theme')) return;
+    setTrial(null);
     const adds = !actions.isAdded(theme);
     if (adds) actions.add(theme);
     setStreak((prev) => ({
@@ -126,6 +178,9 @@ export function ThemeStore({
     select: (theme) => onSelect({ pubkey: theme.pubkey, identifier: theme.identifier }),
     use,
     isWorn,
+    tryOn,
+    stopTrying,
+    isTrying,
   };
 
   const query = search.trim();
@@ -194,7 +249,7 @@ export function ThemeStore({
               <section className="flex flex-col gap-4" aria-label="Themes">
                 <SectionHeader
                   title="Themes"
-                  subtitle="Colors, fonts and pictures for your desktop, from Din’s publishers and the people you follow. Click one to wear it."
+                  subtitle="Colors, fonts and pictures for your desktop, from Din’s publishers and the people you follow. Try one on to see it on your desktop."
                 />
                 {catalog.isLoading ? (
                   <ThemeGridSkeleton />
@@ -218,7 +273,9 @@ export function ThemeStore({
           </div>
         </div>
       )}
-      {streak && (
+      {trial ? (
+        <TryOnBar theme={trial.theme} handlers={handlers} />
+      ) : streak && (
         <RevertBar
           theme={streak.current}
           onRevert={revert}
@@ -244,7 +301,7 @@ function useThemeAuthor(pubkey: string | undefined) {
 
 function ThemeGrid({ themes, handlers }: { themes: ThemeDefinition[]; handlers: ThemeHandlers }) {
   return (
-    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-5">
       {themes.map((theme) => (
         <ThemeCard key={themeCoordinate(theme)} theme={theme} handlers={handlers} />
       ))}
@@ -264,8 +321,8 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
       >
         <button
           type="button"
-          onClick={() => handlers.use(theme)}
-          aria-label={`Use ${theme.title}`}
+          onClick={() => handlers.select(theme)}
+          aria-label={`View details for ${theme.title}`}
           className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         />
         {seen ? (
@@ -275,13 +332,14 @@ function ThemeCard({ theme, handlers }: { theme: ThemeDefinition; handlers: Them
         )}
         <div className="flex items-center gap-3 p-4">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold" title={theme.title}>
+            <p className="truncate text-base font-semibold" title={theme.title}>
               {theme.title}
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-sm text-muted-foreground">
               {author.name ? `by ${author.name}` : 'Theme'}
             </p>
           </div>
+          {!handlers.isWorn(theme) && <TryOnThemeButton theme={theme} handlers={handlers} />}
           <UseThemePill theme={theme} handlers={handlers} />
         </div>
       </div>
@@ -311,6 +369,12 @@ function ThemeContextMenu({
           <Paintbrush aria-hidden />
           Use
         </ContextMenuItem>
+        {!handlers.isWorn(theme) && (
+          <ContextMenuItem onSelect={() => (handlers.isTrying(theme) ? handlers.stopTrying() : handlers.tryOn(theme))}>
+            {handlers.isTrying(theme) ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+            {handlers.isTrying(theme) ? 'Stop Trying On' : 'Try On'}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onSelect={() => handlers.select(theme)}>
           <Info aria-hidden />
           View Details
@@ -418,8 +482,8 @@ function ThemeDetailPage({
         <div className="flex flex-col gap-6 @5xl:flex-row @5xl:items-center">
           <button
             type="button"
-            onClick={() => handlers.use(theme)}
-            aria-label={`Use ${theme.title}`}
+            onClick={() => (handlers.isTrying(theme) ? handlers.stopTrying() : handlers.tryOn(theme))}
+            aria-label={handlers.isTrying(theme) ? `Stop trying on ${theme.title}` : `Try on ${theme.title}`}
             className="w-full max-w-2xl shrink-0 overflow-hidden rounded-2xl border border-border shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 @5xl:w-3/5"
           >
             <ThemeSwatch theme={theme.theme} />
@@ -441,6 +505,7 @@ function ThemeDetailPage({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <UseThemePill theme={theme} handlers={handlers} />
+              {!handlers.isWorn(theme) && <TryOnThemeButton theme={theme} handlers={handlers} />}
               <Button
                 size="sm"
                 variant="ghost"
@@ -507,6 +572,47 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/** Try On, or Stop Trying On the one being tried. */
+function TryOnThemeButton({ theme, handlers }: { theme: ThemeDefinition; handlers: ThemeHandlers }) {
+  const trying = handlers.isTrying(theme);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => (trying ? handlers.stopTrying() : handlers.tryOn(theme))}
+      aria-label={trying ? `Stop trying on ${theme.title}` : `Try on ${theme.title}`}
+      title={trying ? 'Stop Trying On' : 'Try On'}
+      className="relative z-10 h-8 shrink-0 rounded-full px-4"
+    >
+      {trying ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+      {trying ? 'Stop' : 'Try On'}
+    </Button>
+  );
+}
+
+/** Shown while a theme is tried on: Use keeps it, the X takes it off. */
+function TryOnBar({ theme, handlers }: { theme: ThemeDefinition; handlers: ThemeHandlers }) {
+  const author = useThemeAuthor(theme.pubkey);
+
+  return (
+    <div
+      role="region"
+      aria-label="Trying on"
+      className="flex flex-wrap items-center gap-3 border-t border-border bg-card px-4 py-3 shadow-[0_-4px_16px_-8px_rgb(0_0_0/0.2)]"
+    >
+      <Eye className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="min-w-0 flex-1 truncate text-sm">
+        Trying on <span className="font-semibold">{theme.title}</span>
+        {author.name && <span className="text-muted-foreground"> by {author.name}</span>}
+      </p>
+      <UseThemePill theme={theme} handlers={handlers} />
+      <Button size="icon" variant="ghost" onClick={handlers.stopTrying} aria-label="Stop trying on" title="Stop Trying On" className="size-8 rounded-full">
+        <X aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
 /** Shown once a theme is put on: Revert goes back to what was worn before. */
 function RevertBar({
   theme,
@@ -543,16 +649,16 @@ function RevertBar({
 
 function ThemeGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @7xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] gap-5">
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i} className="overflow-hidden rounded-xl bg-card clay">
           <Skeleton className="aspect-video rounded-none" />
           <div className="flex items-center gap-3 p-4">
             <div className="min-w-0 flex-1 space-y-2">
-              <Skeleton className="h-4 w-3/5" />
-              <Skeleton className="h-3 w-2/5" />
+              <Skeleton className="h-5 w-3/5" />
+              <Skeleton className="h-4 w-2/5" />
             </div>
-            <Skeleton className="h-8 w-16 rounded-full" />
+            <Skeleton className="h-8 w-20 rounded-full" />
           </div>
         </div>
       ))}

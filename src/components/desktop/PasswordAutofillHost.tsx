@@ -10,6 +10,7 @@ import { portalContainer } from '@/lib/portalContainer';
 import { findGuest } from '@/platform/guest';
 import { formatAddress } from '@/shared/phone';
 import { useGuestBox, type Box } from './guestBox';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const LIST_WIDTH = 320;
 const OFFER_WIDTH = 340;
@@ -402,7 +403,7 @@ function OfferBubble({
       className="fixed z-[10000] glass-surface space-y-3 rounded-xl p-4 text-popover-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2"
     >
       <div className="flex items-start gap-3">
-        <img src="/icons/apps/passwords.png" alt="" className="size-9 shrink-0" />
+        <img {...bundledIconProps('/icons/apps/passwords.png')} alt="" className="size-9 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">{offer.update ? 'Update your password?' : 'Save this password?'}</p>
           <p className="truncate text-xs text-muted-foreground">

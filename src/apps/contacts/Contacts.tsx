@@ -50,6 +50,7 @@ import { ContactList, type ListItem } from './contacts/List';
 import { contactMenu, phoneContactMenu, type ContactAction } from './contacts/menu';
 import { CONTACT_DRAG, sameSource, type Source } from './contacts/model';
 import { Sidebar } from './contacts/Sidebar';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const SORT_KEY = 'din:contacts:sort';
 const SIDEBAR_KEY = 'din:contacts:sidebar';
@@ -499,7 +500,7 @@ export function Contacts() {
         {header(<><span className="flex-1" /><WindowControls /></>, 'px-3')}
         <div className="grid flex-1 place-items-center bg-background p-8">
           <div className="flex max-w-sm flex-col items-center text-center">
-            <img src="/icons/apps/contacts.png" alt="" className="mb-4 size-28 drop-shadow-md" />
+            <img {...bundledIconProps('/icons/apps/contacts.png')} alt="" className="mb-4 size-28 drop-shadow-md" />
             <h1 className="font-[family-name:var(--font-title)] text-2xl font-semibold">Contacts</h1>
             <p className="mt-2 text-[15px] text-muted-foreground">Contacts keeps your address book on this computer, so it needs the Din desktop app.</p>
           </div>
@@ -541,7 +542,7 @@ export function Contacts() {
     <div className="relative flex h-full text-foreground" onDragOver={(e) => !e.dataTransfer.types.includes(CONTACT_DRAG) && e.preventDefault()} onDrop={onDrop}>
       {showSidebar && (
         <aside aria-label="Groups" className={cn('flex shrink-0 flex-col', sidebarWidthClass)}>
-          <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/contacts.png" />} title="Contacts">
+          <SidebarTitle icon={<SidebarTitleIcon {...bundledIconProps('/icons/apps/contacts.png')} />} title="Contacts">
             <ToolButton label="New contact" onClick={newContact}>
               <Plus {...toolIcon} />
             </ToolButton>

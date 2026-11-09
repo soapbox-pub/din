@@ -124,6 +124,7 @@ import { GitBranchChip } from './GitPanel';
 import { SidePanel, type SideTab } from './SidePanel';
 import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const SUGGESTIONS = [
   'What’s taking up the most space in my home folder?',
@@ -1529,7 +1530,7 @@ function NewConversation({
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="relative">
               <div aria-hidden className="absolute inset-2 rounded-full bg-primary/25 blur-2xl motion-safe:animate-pulse" />
-              <img src="/icons/apps/assistant.png" alt="" className="relative size-24 object-contain drop-shadow-sm" />
+              <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="relative size-24 object-contain drop-shadow-sm" />
             </div>
             <h1 className="text-3xl font-semibold tracking-tight @xl/assistant:text-4xl">What can I help with?</h1>
             <p className="max-w-md text-muted-foreground">

@@ -151,6 +151,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { BarsStaggeredIcon } from '@/components/icons/BarsStaggeredIcon';
@@ -2541,6 +2542,56 @@ function AddressBar({
     }
   };
 
+  // The bar draws its own right-click menu, for Paste and Go. Opening it
+  // takes focus from the field, which hides its selection; closing it puts
+  // focus and the selection back, without the select-all a click's focus does.
+  const menuSelection = useRef<{ start: number; end: number } | null>(null);
+  const restoringFocus = useRef(false);
+  const [canPaste, setCanPaste] = useState(true);
+  const [canCopy, setCanCopy] = useState(false);
+
+  const refocus = () => {
+    const input = inputRef.current;
+    if (!input) return null;
+    restoringFocus.current = true;
+    input.focus();
+    restoringFocus.current = false;
+    const at = menuSelection.current;
+    if (at) input.setSelectionRange(at.start, at.end);
+    return input;
+  };
+
+  const onMenuOpenChange = (menuOpen: boolean) => {
+    if (!menuOpen) return;
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? 0;
+    const end = input?.selectionEnd ?? 0;
+    menuSelection.current = { start, end };
+    setCanCopy(start !== end);
+    setCanPaste(true);
+    navigator.clipboard?.readText().then(
+      (text) => setCanPaste(text.length > 0),
+      () => {},
+    );
+  };
+
+  const pasteText = () => navigator.clipboard?.readText().catch(() => '') ?? Promise.resolve('');
+
+  const paste = () => {
+    void pasteText().then((text) => {
+      if (text && refocus()) document.execCommand('insertText', false, text);
+    });
+  };
+
+  const pasteAndGo = () => {
+    void pasteText().then((text) => {
+      const raw = text.trim();
+      if (!raw) return;
+      dismiss();
+      onNavigate(raw, true);
+    });
+  };
+
   // Typing hides it, along with the site's icon.
   const showOnion = !!onionLocation && !open;
   const showNsite = !!nsiteLocation && !open;
@@ -2559,58 +2610,108 @@ function AddressBar({
       ) : (
         site
       )}
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="url"
-        role="combobox"
-        aria-label="Address and search bar"
-        aria-expanded={show}
-        aria-autocomplete="both"
-        aria-controls="address-bar-suggestions"
-        aria-activedescendant={
-          highlighted >= 0 ? `address-bar-suggestion-${highlighted}` : undefined
-        }
-        value={value}
-        onChange={(e) => {
-          const input = e.currentTarget;
-          const text = input.value;
-          const native = e.nativeEvent as InputEvent;
-          // Only complete when the user is adding text at the end of the
-          // line: deleting, or editing mid-string, must leave it alone (so
-          // Backspace really does get you from "reddit.com" back to "red"),
-          // and a half-composed IME sequence isn't a URL yet.
-          const forward =
-            !native.isComposing &&
-            !(native.inputType ?? '').startsWith('delete') &&
-            input.selectionStart === text.length &&
-            input.selectionEnd === text.length;
+      <ContextMenu onOpenChange={onMenuOpenChange}>
+        <ContextMenuTrigger asChild>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="url"
+            role="combobox"
+            aria-label="Address and search bar"
+            aria-expanded={show}
+            aria-autocomplete="both"
+            aria-controls="address-bar-suggestions"
+            aria-activedescendant={
+              highlighted >= 0 ? `address-bar-suggestion-${highlighted}` : undefined
+            }
+            value={value}
+            onChange={(e) => {
+              const input = e.currentTarget;
+              const text = input.value;
+              const native = e.nativeEvent as InputEvent;
+              // Only complete when the user is adding text at the end of the
+              // line: deleting, or editing mid-string, must leave it alone (so
+              // Backspace really does get you from "reddit.com" back to "red"),
+              // and a half-composed IME sequence isn't a URL yet.
+              const forward =
+                !native.isComposing &&
+                !(native.inputType ?? '').startsWith('delete') &&
+                input.selectionStart === text.length &&
+                input.selectionEnd === text.length;
 
-          setTyped(text);
-          setHighlighted(-1);
-          setOpen(text.trim().length > 0);
-          if (forward) complete(input, text);
-          else {
-            onChangeValue(text);
-            onPredict?.(text);
-          }
-        }}
-        onKeyDown={onKeyDown}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={dismiss}
-        placeholder="Search or type a URL"
-        spellCheck={false}
-        autoComplete="off"
-        className={cn(
-          'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
-          // Room for what sits at the end: each badge, and the star.
-          [
-            ['pr-3', 'pr-9'],
-            ['pr-20', 'pr-28'],
-            ['pr-36', 'pr-44'],
-          ][Number(showOnion) + Number(showNsite)][end ? 1 : 0],
-        )}
-      />
+              setTyped(text);
+              setHighlighted(-1);
+              setOpen(text.trim().length > 0);
+              if (forward) complete(input, text);
+              else {
+                onChangeValue(text);
+                onPredict?.(text);
+              }
+            }}
+            onKeyDown={onKeyDown}
+            onFocus={(e) => {
+              if (!restoringFocus.current) e.currentTarget.select();
+            }}
+            onBlur={dismiss}
+            placeholder="Search or type a URL"
+            spellCheck={false}
+            autoComplete="off"
+            className={cn(
+              'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
+              // Room for what sits at the end: each badge, and the star.
+              [
+                ['pr-3', 'pr-9'],
+                ['pr-20', 'pr-28'],
+                ['pr-36', 'pr-44'],
+              ][Number(showOnion) + Number(showNsite)][end ? 1 : 0],
+            )}
+          />
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          className="min-w-56"
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            refocus();
+          }}
+        >
+          <ContextMenuItem
+            disabled={!canCopy}
+            onSelect={() => {
+              if (refocus()) document.execCommand('cut');
+            }}
+          >
+            Cut
+            <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canCopy}
+            onSelect={() => {
+              if (refocus()) document.execCommand('copy');
+            }}
+          >
+            Copy
+            <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem disabled={!canPaste} onSelect={paste}>
+            Paste
+            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem disabled={!canPaste} onSelect={pasteAndGo}>
+            Paste and Go
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!value}
+            onSelect={() => {
+              menuSelection.current = { start: 0, end: value.length };
+              refocus();
+            }}
+          >
+            Select All
+            <ContextMenuShortcut>Ctrl+A</ContextMenuShortcut>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {(showOnion || showNsite || end) && (
         // Keep a click from selecting the address first.
         <div
@@ -3729,7 +3830,9 @@ function describeLoadError(info: LoadErrorInfo, tor: TorStatus | null): {
       case 'missing':
         return {
           title: "Tor isn't running",
-          detail: 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
+          detail: tor?.canInstall
+            ? 'Onion sites open through Tor. Set it up in Settings → Wi-Fi, or start Tor or Tor Browser, and this page loads once Din finds it.'
+            : 'Onion sites open through Tor. Start Tor or Tor Browser, and this page loads once Din finds it.',
           tips: [],
           offline: false,
         };

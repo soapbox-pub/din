@@ -43,7 +43,12 @@ function useLanguage(name: string | undefined): LanguageSupport | undefined {
  * `code` with its syntax colored, as React elements, or the plain text while
  * the language loads or when it isn't one CodeMirror knows.
  */
-export function useHighlightedCode(code: string, language: string | undefined): ReactNode {
+/** useHighlightedCode as a component, for loading this module only where there's code (see Markdown's CodeBlock). */
+export function HighlightedCode({ code, language }: { code: string; language: string | undefined }) {
+  return <>{useHighlightedCode(code, language)}</>;
+}
+
+function useHighlightedCode(code: string, language: string | undefined): ReactNode {
   const support = useLanguage(language);
   const dark = useIsDark();
 

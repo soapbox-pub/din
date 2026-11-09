@@ -31,6 +31,7 @@ import { DialogButton, Overlay } from '@/shared/dialogs';
 import { ContentPane, PillButton, SearchField, ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
 import { SIDEBAR_WIDTH, focusRing, searchRow, titleSearch } from '@/shared/appChromeStyles';
 import { toast } from '@/shared/toast';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 const SELECTION_KEY = 'din:mail:selection';
 const SIDEBAR_KEY = 'din:mail:sidebar';
@@ -139,7 +140,7 @@ function Welcome({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="grid flex-1 place-items-center p-8">
       <div className="max-w-sm text-center">
-        <img src="/icons/apps/mail.png" alt="" className="mx-auto mb-4 size-28 drop-shadow-md" />
+        <img {...bundledIconProps('/icons/apps/mail.png')} alt="" className="mx-auto mb-4 size-28 drop-shadow-md" />
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Mail</h1>
         <p className="mt-2 text-[15px] text-muted-foreground">Read and send email from iCloud, Gmail, Fastmail, Yahoo or any account with IMAP.</p>
         <PillButton variant="primary" onClick={onAdd} className="mt-6 h-10 px-5 text-[15px] shadow-sm">
@@ -800,14 +801,14 @@ export function Viewer() {
     <WindowDragRegion className="flex h-12 shrink-0 items-center pr-3">
       {showSidebar && !noAccounts ? (
         <div className="flex h-full shrink-0 items-center gap-2 pr-2 pl-3.75" style={{ width: sidebarWidth }}>
-          <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
+          <img {...bundledIconProps('/icons/apps/mail.png')} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
           <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
           {sidebarToggle}
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2 pl-2">
           {sidebarToggle}
-          <img src="/icons/apps/mail.png" alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
+          <img {...bundledIconProps('/icons/apps/mail.png')} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
           <h1 className="truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
         </div>
       )}

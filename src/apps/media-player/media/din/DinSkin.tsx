@@ -12,12 +12,13 @@ import { RadioView } from './RadioView';
 import { SkinChooser } from './SkinChooser';
 import { Transport } from './Transport';
 import { useTintVars } from './useThemeTint';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** Now Playing, Library, Radio and Skins, in the window's title bar like a browser's tabs. */
 function TitlebarTabs({ tab, showList }: { tab: DinTab; showList: boolean }) {
   return (
     <WindowDragRegion className="flex h-9 shrink-0 items-center gap-1 pr-3 pl-2">
-      <img src="/icons/apps/media-player.png" alt="" draggable={false} className="mx-1 size-4 shrink-0" />
+      <img {...bundledIconProps('/icons/apps/media-player.png')} alt="" draggable={false} className="mx-1 size-4 shrink-0" />
       <div role="tablist" aria-label="Media Player" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
         {TABS.map((t) => (
           <button

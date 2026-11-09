@@ -99,6 +99,7 @@ import { FileViewerBody } from '@/shared/FileViewerBody';
 import { canDropInto, draggedFiles, dropCopies, endFilesDrag, startFilesDrag, takeDrop } from './files/drag';
 import { broadcastInvalidate, onInvalidate, popUndo, pushUndo, runUndo } from './files/windows';
 import { openUploadWindow } from './files/upload';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** The tab this window was opened for, if any: read once per window. */
 let adoption: Promise<unknown> | null = null;
@@ -369,7 +370,7 @@ export function FileBrowser() {
         </div>
       ) : (
         <>
-          <img src="/icons/apps/file-browser.png" alt="" className="size-4 shrink-0" />
+          <img {...bundledIconProps('/icons/apps/file-browser.png')} alt="" className="size-4 shrink-0" />
           <span className="flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium">Files</span>
         </>
       )}

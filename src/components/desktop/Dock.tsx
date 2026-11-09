@@ -844,7 +844,9 @@ const DockItem = memo(function DockItem({
         if (e.button === 1) open(app.id);
       }}
       className={cn(
-        'pointer-events-auto absolute inset-x-[5%] bottom-[12.5%] grid aspect-square place-items-center rounded-xl',
+        // Fixed tracks, so the icon's 82% is of the tile: an auto track
+        // grows with the icon's srcset (sizes="auto") intrinsic size.
+        'pointer-events-auto absolute inset-x-[5%] bottom-[12.5%] grid aspect-square grid-cols-[100%] grid-rows-[100%] place-items-center rounded-xl',
         'group-data-hidden/dock:pointer-events-none',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'motion-reduce:hover:-translate-y-1 motion-reduce:transition-transform',

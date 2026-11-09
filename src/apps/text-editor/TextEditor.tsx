@@ -64,6 +64,7 @@ import {
 import { useIsDark } from '@/hooks/useIsDark';
 import { pickFiles, pickFolder, pickSaveFile, windowLaunchFiles } from '@/shared/fileHandles';
 import { decodeText, encodeText, isUtf16, type TextEncoding } from '@/shared/textEncoding';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** Bigger files than this aren't opened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -1063,7 +1064,7 @@ export function TextEditor() {
         </div>
       ) : (
         <>
-          <SidebarTitleIcon src="/icons/apps/text-editor.png" />
+          <SidebarTitleIcon {...bundledIconProps('/icons/apps/text-editor.png')} />
           <span className="flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">{windowTitle}</span>
         </>
       )}

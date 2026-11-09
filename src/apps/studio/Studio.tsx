@@ -31,6 +31,7 @@ import { ProjectSwitcher } from './ui/ProjectSwitcher';
 import { Segmented } from './ui/Segmented';
 import { Stage } from './ui/Stage';
 import { TakeView, type ItemChange } from './ui/TakeView';
+import { bundledIconProps } from '@/shared/iconSizes';
 
 /** What Add Clips offers to pick. */
 const CLIP_TYPES = [
@@ -828,7 +829,7 @@ export function Studio() {
     <div className="@container/studio flex h-full flex-col text-foreground">
       <WindowDragRegion className="relative flex h-12 shrink-0 items-center gap-2 px-3">
         <div className="flex items-center gap-2 pl-0.5">
-          <SidebarTitleIcon src="/icons/apps/studio.png" />
+          <SidebarTitleIcon {...bundledIconProps('/icons/apps/studio.png')} />
           <span className="hidden font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90 @4xl/studio:inline">Studio</span>
         </div>
         <ProjectSwitcher projects={projects} current={project} disabled={phase !== 'idle'} onSelect={selectProject} onNew={() => void newProject()} />

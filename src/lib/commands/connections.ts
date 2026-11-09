@@ -2,7 +2,7 @@ import { getWifiBridge, signalLabel, bandLabel } from '@/lib/wifi';
 import { getBluetoothBridge, describeDevice, deviceKind, sortDevices, type BluetoothDevice } from '@/lib/bluetooth';
 import { getVpnBridge } from '@/lib/vpn';
 import { getTorBridge, torState } from '@/lib/tor';
-import type { Area, Param } from './types';
+import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /** `din wifi`, `din bluetooth`, `din vpn`, `din tor`: what Settings → Wi-Fi and Bluetooth and the menu bar's network menus do. */
@@ -167,6 +167,22 @@ export const torArea: Area = {
     command('tor', 'enable', 'Turn Tor on or off', [ON], async (args) => {
       const status = await call(need(getTorBridge(), 'Tor').setEnabled(args.bool('on')));
       return { data: status, text: torState(status) };
+    }),
+    command('tor', 'setup', 'Set up a Tor of Din’s own where the system has none, as Settings → Wi-Fi’s Set Up Tor does (asking on screen first)', [], async (_args, ctx) => {
+      const bridge = need(getTorBridge(), 'Tor');
+      const current = await call(bridge.status());
+      if (!current.canInstall) throw new CommandError('Din can’t set up Tor here: DinOS has its own, or this computer isn’t one the Tor Project builds for');
+      if (!current.installed) {
+        const ok = await ctx.confirm({
+          title: 'Set up Tor?',
+          description: 'Din downloads Tor from the Tor Project into ~/.local/share/din/tor, runs it for onion sites while it’s on, and keeps it up to date.',
+          action: 'Set Up',
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+        ctx.progress?.({ text: 'Downloading Tor' });
+      }
+      const status = await call(bridge.install());
+      return { data: status, text: `Tor ${status.installed ?? ''}: ${torState(status)}` };
     }),
   ],
 };
