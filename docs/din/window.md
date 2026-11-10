@@ -11,11 +11,15 @@ decides what's inside, and how much of the frame it draws itself.
 
 ## On a phone
 
-`din.formFactor` says what the app runs on: `desktop`, a window among
-others, or `phone`, where the app has a phone's whole screen and the phone
-does what a window manager would (Din Phone: each app is an Android task of
-its own). The root element carries it as `data-form-factor` for CSS, and
-`useFormFactor()` gives it to React.
+An app asks whether it's on a phone as a web page would:
+`navigator.userAgentData.mobile` (User-Agent Client Hints). There the app
+has a phone's whole screen and the phone does what a window manager would
+(Din Phone: each app is an Android task of its own). The host says so in
+its hello, and the runtime makes `mobile` true then, whatever the engine
+says of itself (`installMobile` in `src/sdk/standards.ts`), with
+`getHighEntropyValues(['formFactors'])` answering `Mobile`. In Din's own
+windows it's Electron's, false. It's set before the app renders and doesn't
+change.
 
 On a phone there's no window to move, resize, maximize or snap. The
 runtime starts no gestures from `app-region: drag`, `WindowDragRegion` is

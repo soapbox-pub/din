@@ -42,14 +42,14 @@ export interface TabDescriptor {
  * Used by the Terminal, Files and Assistant apps; the Web Browser has its own richer
  * variant (favicons, loading state) but the same interaction model.
  *
- * On a phone (din.formFactor) a strip of tabs is too small to hit, and there
+ * On a phone (`navigator.userAgentData.mobile`) a strip of tabs is too small to hit, and there
  * is no window to drag: the bar shows the tab you're in, with a count of
  * them that opens a sheet of them all, as a phone's browser does
  * (PhoneTabs).
  */
 export function TabStrip(props: TabStripProps) {
   // Fixed for the page's life: the hello has come before an app renders.
-  const phone = typeof window !== 'undefined' && window.din?.formFactor === 'phone';
+  const phone = typeof navigator !== 'undefined' && navigator.userAgentData?.mobile === true;
   return phone ? <PhoneTabs {...props} /> : <DesktopTabStrip {...props} />;
 }
 

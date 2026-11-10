@@ -17,7 +17,6 @@ import type {
   WindowChrome,
   AssistantSettings,
   Edge,
-  FormFactor,
   RelatedApplication,
   OpenWithApp,
 } from '@/sdk/din';
@@ -170,8 +169,12 @@ export interface Hello {
   scopedFs: boolean;
   /** `din.fetch` reaches the hosts the manifest's `din.fetch` names. */
   fetch: boolean;
-  /** What the app runs on; a desktop when absent (Din's own desktop says nothing). */
-  formFactor?: FormFactor;
+  /**
+   * What the app runs on; a desktop when absent (Din's own desktop says
+   * nothing). On `phone` the runtime makes `navigator.userAgentData.mobile`
+   * true, which is how apps ask.
+   */
+  formFactor?: 'desktop' | 'phone';
 }
 
 /** What an app can ask, by method: the params, and what the reply carries. */

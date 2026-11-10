@@ -54,23 +54,9 @@ export interface Rect extends Point, Size {}
 // The whole object
 // ---------------------------------------------------------------------------
 
-/**
- * What the app is running on. `desktop` is a window among others, which the
- * user moves, resizes, minimizes and closes. `phone` is a phone's screen,
- * where the app is the whole of it and the phone does the rest (Din Phone):
- * there is no window to move, resize or maximize, no window controls are
- * wanted, and the app lays itself out for a finger.
- */
-export type FormFactor = 'desktop' | 'phone';
-
 export interface Din {
   /** Which version of this API the desktop speaks. */
   readonly version: 1;
-  /**
-   * What the app is running on (see FormFactor); `desktop` until the hello.
-   * Also the root element's `data-form-factor`, for CSS.
-   */
-  readonly formFactor: FormFactor;
   /**
    * Resolves once the desktop has said hello: until then the launch, window
    * state, theme and permissions read as empty, and calls queue.
@@ -105,10 +91,40 @@ export interface RelatedApplication {
   id?: string;
 }
 
+/** What `navigator.userAgentData.getHighEntropyValues` can answer (User-Agent Client Hints). */
+export interface UADataValues {
+  brands?: { brand: string; version: string }[];
+  mobile?: boolean;
+  platform?: string;
+  architecture?: string;
+  bitness?: string;
+  formFactors?: string[];
+  fullVersionList?: { brand: string; version: string }[];
+  model?: string;
+  platformVersion?: string;
+  wow64?: boolean;
+}
+
 declare global {
+  /** User-Agent Client Hints' `navigator.userAgentData`, which TypeScript's DOM types don't have yet. */
+  interface NavigatorUAData {
+    readonly brands: { brand: string; version: string }[];
+    /**
+     * On a phone: there the app is the whole screen and the phone does what
+     * a window manager would (Din Phone), so there's no window to move,
+     * resize or maximize and the app lays itself out for a finger. The
+     * runtime makes it true when the host says it's a phone.
+     */
+    readonly mobile: boolean;
+    readonly platform: string;
+    getHighEntropyValues(hints: string[]): Promise<UADataValues>;
+    toJSON(): UADataValues;
+  }
   interface Navigator {
     /** The manifest's `related_applications` that are installed and can be opened now. */
     getInstalledRelatedApps(): Promise<RelatedApplication[]>;
+    /** Chromium's; absent in other engines. */
+    readonly userAgentData?: NavigatorUAData;
   }
   interface Window {
     /** Defined by Din, before any of the page's scripts run, in every app it hosts (din:// apps, later nsites). */

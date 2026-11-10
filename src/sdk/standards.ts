@@ -16,6 +16,7 @@
  * - Focus, visibility, `display-state`, `screenX` and the rest answer for
  *   the page's own window on the desktop.
  * - `navigator.permissions.query` answers what the app was granted.
+ * - `navigator.userAgentData.mobile` says whether it's on a phone.
  *
  * Part of the runtime's bundle, so nothing here may have side effects on
  * import.
@@ -27,6 +28,7 @@ import type {
   Permission,
   PickerOptions,
   SaveFilePickerOptions,
+  UADataValues,
   Unsubscribe,
 } from '@/sdk/din';
 import type { FileTypeFilter, MediaAction, MediaReport, OpenFileOptions, SaveFileOptions, WindowState } from '@/sdk/protocol';
@@ -1423,4 +1425,39 @@ export function installPermissionsQuery(host: PermissionsHost): void {
       return status as PermissionStatus;
     },
   });
+}
+
+/**
+ * User-Agent Client Hints' `navigator.userAgentData.mobile`, true on a phone
+ * (the host's hello says so: Din Phone, where each app is the phone's whole
+ * screen) whatever the engine says of itself, so `mobile` is how an app asks
+ * whether it's on a phone. `getHighEntropyValues` and `toJSON` agree, and
+ * `formFactors` says `Mobile`. An engine without userAgentData (it's
+ * Chromium's) gets one with no brands.
+ */
+export function installMobile(): void {
+  const data: NavigatorUAData =
+    navigator.userAgentData ??
+    ({
+      brands: [],
+      mobile: true,
+      platform: '',
+      getHighEntropyValues: async (hints: string[]): Promise<UADataValues> => ({ brands: [], mobile: true, platform: '', ...(hints.includes('formFactors') ? { formFactors: [] } : {}) }),
+      toJSON: () => ({ brands: [], mobile: true, platform: '' }),
+    } satisfies NavigatorUAData);
+  const high = data.getHighEntropyValues.bind(data);
+  const json = data.toJSON.bind(data);
+  Object.defineProperties(data, {
+    mobile: { get: () => true, configurable: true, enumerable: true },
+    getHighEntropyValues: {
+      configurable: true,
+      writable: true,
+      value: async (hints: string[]): Promise<UADataValues> => {
+        const values = await high(hints);
+        return { ...values, mobile: true, ...(values.formFactors ? { formFactors: ['Mobile'] } : {}) };
+      },
+    },
+    toJSON: { configurable: true, writable: true, value: () => ({ ...json(), mobile: true }) },
+  });
+  if (!navigator.userAgentData) Object.defineProperty(navigator, 'userAgentData', { value: data, configurable: true, enumerable: true });
 }

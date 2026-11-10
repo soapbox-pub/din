@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Din } from '@/sdk/din';
-import { DinContext, frameControlClasses, useDin, useFormFactor, useFrameStyle, useMediaQuery } from '@/sdk/react/hooks';
+import { DinContext, frameControlClasses, useDin, useFrameStyle, useMediaQuery } from '@/sdk/react/hooks';
 
 export function DinProvider({ din, children }: { din: Din; children: ReactNode }) {
   return <DinContext.Provider value={din}>{children}</DinContext.Provider>;
@@ -23,7 +23,8 @@ const MAXIMIZED = '(display-state: maximized)';
  * move, and it's just the bar.
  */
 export function WindowDragRegion({ className, ...props }: ComponentProps<'div'>) {
-  const phone = useFormFactor() === 'phone';
+  // Fixed for the page's life: the hello has come before an app renders.
+  const phone = navigator.userAgentData?.mobile === true;
   return <div {...props} className={cn(phone ? 'select-none' : 'touch-none select-none [app-region:drag]', className)} />;
 }
 
@@ -32,7 +33,7 @@ export function WindowDragRegion({ className, ...props }: ComponentProps<'div'>)
  * phone, where the phone's own navigation does all three.
  */
 export function WindowControls({ className }: { className?: string }) {
-  return useFormFactor() === 'phone' ? null : <DesktopWindowControls className={className} />;
+  return navigator.userAgentData?.mobile === true ? null : <DesktopWindowControls className={className} />;
 }
 
 function DesktopWindowControls({ className }: { className?: string }) {

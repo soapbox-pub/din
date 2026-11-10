@@ -1,6 +1,6 @@
 /** React hooks over window.din (docs/din/README.md). */
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { Din, DragInfo, FormFactor, FrameStyle, Menu, Permission, Snap, ThemeSnapshot } from '@/sdk/din';
+import type { Din, DragInfo, FrameStyle, Menu, Permission, Snap, ThemeSnapshot } from '@/sdk/din';
 
 export const DinContext = createContext<Din | null>(null);
 
@@ -10,16 +10,6 @@ export function useDin(): Din {
   const din = useContext(DinContext);
   if (!din) throw new Error('useDin must be used inside a DinProvider');
   return din;
-}
-
-/**
- * What the app runs on (din.formFactor): `desktop`, or `phone`, where it has
- * the whole screen and lays out for a finger. `desktop` outside a
- * DinProvider (code shared with the desktop). Fixed once the app has
- * started, as startApp waits for the hello.
- */
-export function useFormFactor(): FormFactor {
-  return useContext(DinContext)?.formFactor ?? 'desktop';
 }
 
 /** The connected window.din, or null outside a DinProvider (code shared with the desktop). */
