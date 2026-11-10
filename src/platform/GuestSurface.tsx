@@ -87,17 +87,23 @@ export interface GuestSurfaceProps {
  * The first guest in a partition waits for main to ready it
  * (prepareGuestSession: the browser's ad blocker, before any page in its
  * session loads). Until then the surface is empty and its handle does
- * nothing, as before a guest attaches.
+ * nothing, as before a guest attaches, except that the last `loadURL` is
+ * where it starts.
  */
 export function GuestSurface({ ref, ...props }: GuestSurfaceProps) {
   const [ready, setReady] = useState(() => guestSessionReady(props.partition));
+  // A URL asked for while the partition is readied is the one it starts on.
+  const [early, setEarly] = useState<string | null>(null);
   const inner = useRef<GuestSurfaceHandle>(null);
   useImperativeHandle(ref, () => ({
     element: () => inner.current?.element() ?? null,
     id: () => inner.current?.id() ?? null,
     reload: () => inner.current?.reload(),
     reloadIgnoringCache: () => inner.current?.reloadIgnoringCache(),
-    loadURL: (url) => inner.current?.loadURL(url),
+    loadURL: (url) => {
+      if (inner.current) inner.current.loadURL(url);
+      else setEarly(url);
+    },
     goBack: () => inner.current?.goBack(),
     goForward: () => inner.current?.goForward(),
     focus: () => inner.current?.focus(),
@@ -120,7 +126,7 @@ export function GuestSurface({ ref, ...props }: GuestSurfaceProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   if (!ready) return <div className={props.className ?? 'relative h-full w-full'} style={{ display: 'flex', ...props.style }} />;
-  return <PreparedGuestSurface ref={inner} {...props} />;
+  return <PreparedGuestSurface ref={inner} {...props} src={early ?? props.src} />;
 }
 
 function PreparedGuestSurface({

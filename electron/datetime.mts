@@ -4,8 +4,10 @@
 // They're systemd-timedated's, read through timedatectl, which needs no
 // privileges. Changing them does: on DinOS that's os/din-time.sh, which
 // DinOS's launcher names in DIN_TIME and the shell's user runs through sudo
-// without a password, like the keyboard layout's helper. Elsewhere they're
-// shown but not changed - the desktop's own settings do that.
+// without a password, like the keyboard layout's helper. Elsewhere Din runs
+// timedatectl as the user, and timedated asks polkit, which asks for the
+// administrator's password in Din (electron/polkit-agent.mts) or in the
+// desktop's own agent.
 //
 // Chromium watches /etc/localtime, so Din's clock (and every page's Date)
 // follows a new time zone without a restart.
@@ -15,7 +17,8 @@
 // nearby WiFi networks, looked up in BeaconDB), looks the place up in
 // tz-lookup's map of the world's zones, and makes that the time zone, when
 // Din starts, when the network comes back, after a sleep, and every hour
-// (so it follows the computer when it travels). Picking a zone, on the map
+// (so it follows the computer when it travels). That's DinOS's alone:
+// elsewhere each change could ask for a password. Picking a zone, on the map
 // or the list, is for when it's off. The map asks here for the zone at the
 // point clicked, so the lookup's table is only in this process.
 //
@@ -90,8 +93,8 @@ async function status(): Promise<DateTimeStatus> {
     timeZone: zone && ZONE_NAME.test(zone) ? zone : Intl.DateTimeFormat().resolvedOptions().timeZone,
     automatic: values?.has('NTP') ? values.get('NTP') === 'yes' : null,
     synchronized: values?.get('NTPSynchronized') === 'yes',
-    canChange: Boolean(HELPER) && values !== null,
-    canAutomatic: Boolean(HELPER) && canAutomatic,
+    canChange: values !== null,
+    canAutomatic,
     zoneDetection: HELPER && values !== null ? detection : null,
   };
 }
@@ -186,12 +189,29 @@ async function zoneAt(latitude: number, longitude: number): Promise<string | nul
   return nearest;
 }
 
+/** timedatectl's arguments for what din-time is asked, off DinOS. */
+function timedatectlArgs([action, value]: string[]): string[] {
+  switch (action) {
+    case 'zone':
+      return ['set-timezone', value];
+    case 'automatic':
+      return ['set-ntp', value === 'on' ? 'true' : 'false'];
+    case 'set':
+      return ['set-time', value];
+    default:
+      throw new Error('Din doesn’t set the time zone by itself on this system');
+  }
+}
+
+/** Long enough to type a password into polkit's prompt. */
+const POLKIT_TIMEOUT_MS = 10 * 60_000;
+
 async function helper(args: string[]): Promise<void> {
-  if (!HELPER) throw new Error('Din can\'t change the date and time on this system');
   try {
-    await runCommand('sudo', ['-n', HELPER, ...args], { timeout: 15_000 });
+    if (HELPER) await runCommand('sudo', ['-n', HELPER, ...args], { timeout: 15_000 });
+    else await runCommand('timedatectl', timedatectlArgs(args), { timeout: POLKIT_TIMEOUT_MS });
   } catch (error) {
-    // The helper says what went wrong on its last line.
+    // The helper, and timedatectl, say what went wrong on its last line.
     const reason = error instanceof CommandError ? error.stderr.trim().split('\n').pop() : '';
     throw reason ? new Error(reason) : error;
   }
@@ -328,7 +348,8 @@ export function registerDateTimeHandlers(options: {
     assertShellSender(event);
     if (typeof automatic !== 'boolean') throw new Error('automatic must be a boolean');
     await helper(['automatic', automatic ? 'on' : 'off']);
-    if (automatic) {
+    // Off DinOS the system's own time zone is left alone (startZoneDetection).
+    if (automatic && HELPER) {
       wasOffline = false;
       detection = 'pending';
       nextAttempt = 0;

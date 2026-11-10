@@ -14,9 +14,12 @@
 // os/din-keyboard.sh, which DinOS's launcher names in DIN_KEYBOARD and the
 // shell's user runs through sudo without a password, like the updater's
 // helper. din-shell reads the layout when it starts, so native apps switch at
-// once and Din's own windows after Din restarts. On GNOME it's the desktop's
-// input sources, which switch everything at once. Elsewhere the layout is
-// shown but not changed.
+// once and Din's own windows after Din restarts. In Din's login session on
+// another Linux (scripts/session.mjs), where Din is the desktop, the layout
+// is the user's own, in USER_LAYOUT_FILE: din-shell takes it at once, and the
+// session hands it to din-shell at the next login. On GNOME it's the
+// desktop's input sources, which switch everything at once. Elsewhere the
+// layout is shown but not changed.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -52,6 +55,8 @@ const DEFAULT_KEYMAP: Keymap = { rules: '', model: '', layout: 'us', variant: ''
 
 const HELPER = process.env.DIN_KEYBOARD;
 const LAYOUT_FILE = '/var/lib/din/keyboard';
+/** The layout of Din's login session elsewhere, as XKB_DEFAULT_* lines (scripts/session.mjs reads it). */
+const USER_LAYOUT_FILE = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'din', 'keyboard');
 
 /**
  * What a keymap field may contain. The values end up as setxkbmap arguments
@@ -234,11 +239,11 @@ async function fromXorgConf(file: string): Promise<Keymap | null> {
   });
 }
 
-/** DinOS's layout file, as XKB_DEFAULT_* lines (os/din-keyboard.sh). */
-async function fromLayoutFile(): Promise<Keymap | null> {
+/** DinOS's layout file, or the session's, as XKB_DEFAULT_* lines (os/din-keyboard.sh). */
+async function fromLayoutFile(file = LAYOUT_FILE): Promise<Keymap | null> {
   let text: string;
   try {
-    text = await fs.readFile(LAYOUT_FILE, 'utf8');
+    text = await fs.readFile(file, 'utf8');
   } catch {
     return null;
   }
@@ -262,6 +267,7 @@ async function fromLayoutFile(): Promise<Keymap | null> {
 async function detectSystemKeymap(): Promise<Keymap | null> {
   if (HELPER) return (await fromLayoutFile()) ?? fromEnvironment();
   const sources = [
+    async () => (ownsLayout() ? fromLayoutFile(USER_LAYOUT_FILE) : null),
     async () => fromEnvironment(),
     fromGnome,
     fromKde,
@@ -405,9 +411,33 @@ function activeIndex(groups: LayoutChoice[]): number {
   return 0;
 }
 
+/** Whether the layout is Din's own: its login session on another Linux, on din-shell. */
+function ownsLayout(): boolean {
+  return !HELPER && onShell && process.env.DIN_DESKTOP_SESSION === '1';
+}
+
 /** Whether Settings can change the system's layouts here. */
 function canChange(): boolean {
-  return Boolean(HELPER) || isGnome();
+  return Boolean(HELPER) || ownsLayout() || isGnome();
+}
+
+/** Keep the session's layouts, with the model and options it has. */
+async function writeUserLayouts(choices: LayoutChoice[]): Promise<void> {
+  const keymap = withGroups(system ?? DEFAULT_KEYMAP, choices);
+  const text = [
+    ['RULES', keymap.rules],
+    ['MODEL', keymap.model],
+    ['LAYOUT', keymap.layout],
+    ['VARIANT', keymap.variant],
+    ['OPTIONS', keymap.options],
+  ]
+    .filter(([, value]) => value)
+    .map(([name, value]) => `XKB_DEFAULT_${name}=${value}\n`)
+    .join('');
+  await fs.mkdir(path.dirname(USER_LAYOUT_FILE), { recursive: true });
+  const temp = `${USER_LAYOUT_FILE}.${process.pid}`;
+  await fs.writeFile(temp, text);
+  await fs.rename(temp, USER_LAYOUT_FILE);
 }
 
 /** Whether Din switches between the layouts: on din-shell, with more than one. */
@@ -503,6 +533,8 @@ async function setGnomeLayouts(choices: LayoutChoice[]): Promise<void> {
 async function setSystemLayouts(choices: LayoutChoice[]): Promise<void> {
   if (HELPER) {
     await runCommand('sudo', ['-n', HELPER, 'set', ...helperArgs(choices)], { timeout: 15_000 });
+  } else if (ownsLayout()) {
+    await writeUserLayouts(choices);
   } else if (isGnome()) {
     await setGnomeLayouts(choices);
   } else {

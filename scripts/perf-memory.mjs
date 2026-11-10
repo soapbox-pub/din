@@ -105,6 +105,8 @@ process.on("exit", () => {
   for (const fn of cleanups) fn();
 });
 process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+process.on("SIGHUP", () => process.exit(129));
 
 const home = opt("home", "") ? resolve(opt("home", "")) : mkdtempSync(join(tmpdir(), "din-perf-memory-"));
 if (opt("home", "") || flag("keep-home")) cleanups.push(() => console.log(`kept Din's home: ${home}`));
@@ -148,7 +150,10 @@ const env = {
   XDG_DATA_HOME: join(home, ".local/share"),
   DBUS_SESSION_BUS_ADDRESS: "disabled:",
 };
-for (const name of ["DIN_DEV_URL", "DIN_DESKTOP_SESSION", "DIN_SOCKET", "DIN_PROFILE", "ELECTRON_RUN_AS_NODE"]) delete env[name];
+// None of the session's: DIN_NOSTRD_SOCKET would hand it the user's signer,
+// DIN_POLKIT_AGENT a second agent on the system bus, and so on.
+for (const name of Object.keys(env)) if (name.startsWith("DIN_")) delete env[name];
+delete env.ELECTRON_RUN_AS_NODE;
 if (display) {
   env.DISPLAY = display;
   delete env.WAYLAND_DISPLAY;

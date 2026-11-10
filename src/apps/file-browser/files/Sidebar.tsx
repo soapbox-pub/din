@@ -21,6 +21,7 @@ import { useDirectory } from '@/hooks/useFileSystem';
 import type { Bookmark } from '@/hooks/useFileSystem';
 import { useVolumeActions, useVolumes } from '@/hooks/useVolumes';
 import { useDriveState } from '@/hooks/useDrive';
+import { useInstallableFeature } from '@/hooks/useFeatures';
 import { EjectIcon } from '@/components/icons/EjectIcon';
 import {
   ContextMenu,
@@ -29,6 +30,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 import { UnlockVolumeDialog } from '@/shared/UnlockVolumeDialog';
 import { DRIVE_DIR, USER_DIRS } from '@/shared/userDirs';
 import { canDropInto, draggedFiles, dropCopies, takeDrop } from './drag';
@@ -331,84 +333,91 @@ function SidebarItem({
 }) {
   const volume = place.volume;
   const busy = volume?.busy ?? null;
+  // A phone waiting on an optional feature: the button that installs it.
+  const needsFeature = useInstallableFeature(volume?.needsFeature);
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            'group flex items-center rounded-md',
-            dropping
-              ? 'bg-selected text-foreground ring-2 ring-ring/60'
-              : active
-                ? 'bg-foreground/10 font-medium text-foreground'
-                : 'hover:bg-foreground/5',
-          )}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-        >
-          <button
-            type="button"
-            onClick={() => onNavigate(place.path)}
-            onAuxClick={(e) => {
-              if (e.button === 1) onOpenInNewTab(place.path);
-            }}
-            title={place.path || volume?.needs || volume?.device}
-            aria-current={active ? 'location' : undefined}
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
             className={cn(
-              'flex min-h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm',
-              focusRing,
-              volume && !volume.mountPoint && 'text-muted-foreground',
+              'group flex items-center rounded-md',
+              dropping
+                ? 'bg-selected text-foreground ring-2 ring-ring/60'
+                : active
+                  ? 'bg-foreground/10 font-medium text-foreground'
+                  : 'hover:bg-foreground/5',
             )}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
           >
-            <place.icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
-            {volume?.needs ? (
-              <span className="min-w-0">
-                <span className="block truncate">{place.name}</span>
-                <span className="block text-xs leading-snug text-muted-foreground">{volume.needs}</span>
+            <button
+              type="button"
+              onClick={() => onNavigate(place.path)}
+              onAuxClick={(e) => {
+                if (e.button === 1) onOpenInNewTab(place.path);
+              }}
+              title={place.path || volume?.needs || volume?.device}
+              aria-current={active ? 'location' : undefined}
+              className={cn(
+                'flex min-h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm',
+                focusRing,
+                volume && !volume.mountPoint && 'text-muted-foreground',
+              )}
+            >
+              <place.icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
+              {volume?.needs ? (
+                <span className="min-w-0">
+                  <span className="block truncate">{place.name}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">
+                    {needsFeature ? `Needs ${needsFeature.title}` : volume.needs}
+                  </span>
+                </span>
+              ) : (
+                <span className="truncate">{place.name}</span>
+              )}
+              {volume?.locked && (
+                <>
+                  <Lock className="ml-auto size-3 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="sr-only">(locked)</span>
+                </>
+              )}
+            </button>
+            {volume && (busy ? (
+              <span className="flex size-6 shrink-0 items-center justify-center" role="status">
+                <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
+                <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
               </span>
             ) : (
-              <span className="truncate">{place.name}</span>
-            )}
-            {volume?.locked && (
-              <>
-                <Lock className="ml-auto size-3 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="sr-only">(locked)</span>
-              </>
-            )}
-          </button>
-          {volume && (busy ? (
-            <span className="flex size-6 shrink-0 items-center justify-center" role="status">
-              <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
-              <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
-            </span>
+              <ToolButton size="xs" label={`Eject ${place.name}`} title={`Eject “${place.name}”`} onClick={() => onEject(volume)} className="mr-0.5">
+                <EjectIcon className="size-3.5" />
+              </ToolButton>
+            ))}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onSelect={() => onNavigate(place.path)}>{volume?.locked ? 'Unlock…' : 'Open'}</ContextMenuItem>
+          <ContextMenuItem onSelect={() => onOpenInNewTab(place.path)}>Open in New Tab</ContextMenuItem>
+          <ContextMenuItem onSelect={() => onOpenInNewWindow(place.path)}>Open in New Window</ContextMenuItem>
+          <ContextMenuSeparator />
+          {volume ? (
+            <ContextMenuItem disabled={busy !== null} onSelect={() => onEject(volume)}>
+              Eject “{place.name}”
+            </ContextMenuItem>
+          ) : place.trash ? (
+            <ContextMenuItem variant="destructive" onSelect={onEmptyTrash}>
+              Empty Trash…
+            </ContextMenuItem>
+          ) : bookmarked ? (
+            <ContextMenuItem onSelect={() => onRemoveBookmark(place.path)}>Remove from Favorites</ContextMenuItem>
           ) : (
-            <ToolButton size="xs" label={`Eject ${place.name}`} title={`Eject “${place.name}”`} onClick={() => onEject(volume)} className="mr-0.5">
-              <EjectIcon className="size-3.5" />
-            </ToolButton>
-          ))}
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={() => onNavigate(place.path)}>{volume?.locked ? 'Unlock…' : 'Open'}</ContextMenuItem>
-        <ContextMenuItem onSelect={() => onOpenInNewTab(place.path)}>Open in New Tab</ContextMenuItem>
-        <ContextMenuItem onSelect={() => onOpenInNewWindow(place.path)}>Open in New Window</ContextMenuItem>
-        <ContextMenuSeparator />
-        {volume ? (
-          <ContextMenuItem disabled={busy !== null} onSelect={() => onEject(volume)}>
-            Eject “{place.name}”
-          </ContextMenuItem>
-        ) : place.trash ? (
-          <ContextMenuItem variant="destructive" onSelect={onEmptyTrash}>
-            Empty Trash…
-          </ContextMenuItem>
-        ) : bookmarked ? (
-          <ContextMenuItem onSelect={() => onRemoveBookmark(place.path)}>Remove from Favorites</ContextMenuItem>
-        ) : (
-          <ContextMenuItem onSelect={() => onAddBookmark(place.path)}>Add to Favorites</ContextMenuItem>
-        )}
-        {place.path && <ContextMenuItem onSelect={() => onProperties(place.path)}>Properties</ContextMenuItem>}
-      </ContextMenuContent>
-    </ContextMenu>
+            <ContextMenuItem onSelect={() => onAddBookmark(place.path)}>Add to Favorites</ContextMenuItem>
+          )}
+          {place.path && <ContextMenuItem onSelect={() => onProperties(place.path)}>Properties</ContextMenuItem>}
+        </ContextMenuContent>
+      </ContextMenu>
+      {needsFeature && <FeatureInstallButton feature={needsFeature.id} inline className="mb-1 pl-9" />}
+    </>
   );
 }

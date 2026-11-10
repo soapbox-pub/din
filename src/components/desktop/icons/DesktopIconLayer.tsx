@@ -408,7 +408,8 @@ function IconImage({ icon, px }: { icon: DesktopIcon; px: number }) {
     const app = entryApp(icon.entry, icon.name, getApp);
     if (app) {
       return (
-        <span className={cn('grid shrink-0 place-items-center text-white', shadow)} style={{ width: px, height: px }} aria-hidden>
+        // Fixed tracks, as the Dock's: an auto track grows with the icon's srcset (sizes="auto") intrinsic size.
+        <span className={cn('grid shrink-0 grid-cols-[100%] grid-rows-[100%] place-items-center text-white', shadow)} style={{ width: px, height: px }} aria-hidden>
           <AppIcon icon={app.icon} web={app.web} className="size-full" />
         </span>
       );

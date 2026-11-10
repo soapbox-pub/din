@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/useToast';
 import {
   cleanFirewallError,
   describeRule,
+  featurePortsAllowed,
   FIREWALL_PROTOCOLS,
   getFirewallBridge,
   parsePorts,
@@ -36,13 +37,26 @@ import { SettingsSection, SettingsSubHeading } from '@/shared/settingsSection';
 /**
  * Settings → Firewall: the ports other devices may connect to, besides
  * those Din's own features use, and letting more in for an app Din doesn't
- * know about (a game server, a file-sharing program). On DinOS only; the
- * rules are os/din-firewall.sh's.
+ * know about (a game server, a file-sharing program). On DinOS the rules are
+ * os/din-firewall.sh's; where firewalld runs they're firewalld's, and Din's
+ * own features' ports are let in with the rest (electron/firewall.mts).
  */
 export function FirewallSettingsSection() {
   const bridge = getFirewallBridge();
   const status = useFirewallStatus();
   const { toast } = useToast();
+
+  const [allowingFeatures, setAllowingFeatures] = useState(false);
+  const allowFeatures = () => {
+    if (!bridge) return;
+    setAllowingFeatures(true);
+    bridge
+      .allowFeatures()
+      .catch((error: unknown) =>
+        toast({ title: 'Couldn’t allow Din’s features', description: cleanFirewallError(error), variant: 'destructive' }),
+      )
+      .finally(() => setAllowingFeatures(false));
+  };
 
   const remove = (rule: FirewallRule) => {
     bridge?.remove(rule).catch((error: unknown) =>
@@ -82,11 +96,31 @@ export function FirewallSettingsSection() {
               <p className="text-sm font-medium text-foreground">
                 {status.active === false ? 'The firewall isn’t running' : 'The firewall is on'}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Other devices can connect to this computer only on the ports below, and on the ones Din’s own
-                features use: Quick Share, AirPlay and LocalSend. What you start yourself, like a game server or a
-                file-sharing app, may need its port let in here.
-              </p>
+              {status.manager === 'firewalld' ? (
+                <p className="text-xs text-muted-foreground">
+                  Other devices can only connect on the ports below, plus any your system already allows. Changes
+                  ask for your password.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Other devices can connect to this computer only on the ports below, and on the ones Din’s own
+                  features use: Quick Share, AirPlay and LocalSend. What you start yourself, like a game server or a
+                  file-sharing app, may need its port let in here.
+                </p>
+              )}
+              {status.manager === 'firewalld' && !featurePortsAllowed(status.rules) && (
+                <>
+                  <p className="text-xs text-muted-foreground">Quick Share, AirPlay and LocalSend need their ports allowed.</p>
+                  <Button variant="outline" size="sm" className="mt-2" onClick={allowFeatures} disabled={allowingFeatures}>
+                    {allowingFeatures ? (
+                      <Loader2 className="size-4.5 motion-safe:animate-spin" aria-hidden />
+                    ) : (
+                      <Shield className="size-4.5" strokeWidth={1.75} aria-hidden />
+                    )}
+                    Allow Din’s Features
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 

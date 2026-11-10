@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
+import { notifyWithFeature } from '@/lib/featureNotifications';
 import { getVolumesBridge } from '@/lib/volumes';
 import { UnlockVolumeDialog, type LockedVolume } from '@/shared/UnlockVolumeDialog';
 
@@ -89,14 +90,15 @@ export function VolumesHost() {
           return;
         case 'waiting':
           waiting.add(event.id);
-          notify({
+          // Phones over USB, where it isn't installed, with its Install button.
+          void notifyWithFeature({
             source: SOURCE,
             title: `“${event.name}” is plugged in`,
             body: event.needs,
             replaceKey: waitingKey(event.id),
             resident: true,
             onClose: () => waiting.delete(event.id),
-          });
+          }, event.feature);
           return;
         case 'unreadable':
           notify({

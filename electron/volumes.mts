@@ -92,6 +92,8 @@ export interface Volume {
   phone?: 'android' | 'iphone';
   /** What a phone is waiting on the user for before it opens, e.g. "Unlock the iPhone and tap Trust." */
   needs?: string | null;
+  /** The optional feature it's waiting on ("phones": jmtpfs and ifuse), for its Install button. */
+  needsFeature?: string | null;
 }
 
 export interface VolumesState {
@@ -106,7 +108,7 @@ export type VolumeEvent =
   | { type: 'ejected'; name: string }
   | { type: 'pulled'; name: string }
   | { type: 'unreadable'; name: string; error: string }
-  | { type: 'waiting'; id: string; name: string; needs: string };
+  | { type: 'waiting'; id: string; name: string; needs: string; feature: string | null };
 
 type Interfaces = Map<string, Map<string, unknown>>;
 

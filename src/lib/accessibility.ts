@@ -70,6 +70,42 @@ export const COLOR_FILTER_NAMES: Record<ColorFilter, string> = {
   tritanopia: 'Blue-yellow (tritanopia)',
 };
 
+// How each colour blindness sees (Machado, Oliveira and Fernandes, 2009),
+// and where what it loses is moved to: din-shell's, so Settings can picture
+// a filter as the screen will show it.
+const PROTANOPIA = [0.152286, 1.052583, -0.204868, 0.114503, 0.786281, 0.099216, -0.003882, -0.048116, 1.051998];
+const DEUTERANOPIA = [0.367322, 0.860646, -0.227968, 0.280085, 0.672501, 0.047413, -0.011820, 0.042940, 0.968881];
+const TRITANOPIA = [1.255528, -0.076749, -0.178779, -0.078411, 0.930809, 0.147602, 0.004733, 0.691367, 0.303900];
+const RED_GREEN_SHIFT = [0, 0, 0, 0.7, 1, 0, 0.7, 0, 1];
+const BLUE_YELLOW_SHIFT = [1, 0, 0.7, 0, 1, 0.7, 0, 0, 0];
+const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+function daltonize(simulated: number[], shift: number[]): number[] {
+  const lost = IDENTITY.map((value, i) => value - simulated[i]);
+  return IDENTITY.map((value, i) => {
+    const row = Math.floor(i / 3);
+    const col = i % 3;
+    return value + [0, 1, 2].reduce((sum, k) => sum + shift[row * 3 + k] * lost[k * 3 + col], 0);
+  });
+}
+
+/**
+ * The colour matrix FILTER is, row by row for RGB (din-shell's
+ * accessibility.rs), or undefined for none and invert, which aren't matrices.
+ */
+export function colorFilterMatrix(filter: ColorFilter): number[] | undefined {
+  switch (filter) {
+    case 'grayscale': {
+      const luma = [0.2126, 0.7152, 0.0722];
+      return [...luma, ...luma, ...luma];
+    }
+    case 'protanopia': return daltonize(PROTANOPIA, RED_GREEN_SHIFT);
+    case 'deuteranopia': return daltonize(DEUTERANOPIA, RED_GREEN_SHIFT);
+    case 'tritanopia': return daltonize(TRITANOPIA, BLUE_YELLOW_SHIFT);
+    default: return undefined;
+  }
+}
+
 declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */

@@ -700,12 +700,12 @@ expose('tor', {
 
 /**
  * @typedef {{ protocol: 'tcp' | 'udp' | 'both', from: number, to: number, name: string }} FirewallRule
- * @typedef {{ canChange: boolean, active: boolean | null, rules: FirewallRule[] }} FirewallStatus
+ * @typedef {{ canChange: boolean, manager: 'dinos' | 'firewalld' | null, active: boolean | null, rules: FirewallRule[] }} FirewallStatus
  */
 
 // Firewall bridge (window.dinos.firewall), backed by the firewall:* handlers
 // in electron/firewall.mts: the ports the user has let other devices connect
-// to, on DinOS.
+// to, on DinOS and where firewalld runs.
 expose('firewall', {
   /** @returns {Promise<FirewallStatus>} */
   status: () => ipcRenderer.invoke('firewall:status'),
@@ -723,6 +723,12 @@ expose('firewall', {
    * @returns {Promise<FirewallStatus>}
    */
   remove: (rule) => ipcRenderer.invoke('firewall:remove', rule),
+
+  /**
+   * With firewalld: let in the ports Din's own features listen on.
+   * @returns {Promise<FirewallStatus>}
+   */
+  allowFeatures: () => ipcRenderer.invoke('firewall:allowFeatures'),
 
   /**
    * Subscribe to changes. Returns an unsubscribe fn.
@@ -2597,17 +2603,18 @@ expose('airplay', {
 
 // System packages bridge (window.dinos.packages), backed by
 // electron/system-packages.mts: installing what a feature needs from the host
-// system's package manager.
+// system's package manager. Settings → Optional Features does the same off
+// DinOS, through the features bridge.
 expose('packages', {
   /**
    * Whether what a feature needs is installed, and the command that would install it.
-   * @param {'xvfb'} feature
+   * @param {string} feature The feature's id in system-packages.mts's CATALOG ('xvfb')
    */
   status: (feature) => ipcRenderer.invoke('packages:status', feature),
 
   /**
    * Install it, asking for the administrator password in Din.
-   * @param {'xvfb'} feature
+   * @param {string} feature The feature's id in system-packages.mts's CATALOG ('xvfb')
    */
   install: (feature) => ipcRenderer.invoke('packages:install', feature),
 });

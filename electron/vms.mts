@@ -39,6 +39,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { ipcMain } from 'electron';
 import { trash } from './files.mts';
+import { canInstall } from './system-packages.mts';
 import {
   download,
   forgetPartial,
@@ -188,7 +189,7 @@ function status(): VmsStatus {
   return {
     available: missing.length === 0,
     missing,
-    optionalFeature: (!t.qemu || !t.qemuImg) && Boolean(process.env.DIN_FEATURES),
+    optionalFeature: (!t.qemu || !t.qemuImg) && (Boolean(process.env.DIN_FEATURES) || canInstall('vms')),
     secureBoot: !!t.firmware?.varsMs,
     tpm: !!t.swtpm,
     dir: VMS_DIR,

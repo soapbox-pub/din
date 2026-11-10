@@ -74,6 +74,9 @@ const SYSTEM_PERMISSIONS = {
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
   games: /^games:(status|library|play|stop|setFavorite|setVersion|resumeImage|forgetResume)$/,
+  // Installing the optional feature something of the app's needs (Studio's
+  // transcripts, Files' archives), as Settings → Optional Features does.
+  features: /^features:(state|install)$/,
   capture: /^capture:(status|pointer|pointerImage|takes|take|rename|projects|project|createProject|openProject|updateProject|importBegin|importEnd|begin|end|open|write|close|transcribe|destinations|saveDestination|removeDestination|streamStart|streamWrite|streamStop)$/,
   // din.fetch: requests without CORS to the hosts the manifest's `din.fetch`
   // names (napp-fetch.mts, answered here, not by an IPC handler).
@@ -99,6 +102,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   games: /^games:changed$/,
   capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
   fetch: null,
+  features: /^features:changed$/,
 };
 
 /**

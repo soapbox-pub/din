@@ -34,6 +34,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
+import type { AppFeaturesBridge } from '@/lib/features';
 
 export type Unsubscribe = () => void;
 
@@ -847,6 +848,12 @@ export type Permission =
    */
   | 'preview'
   /**
+   * Optional features (`din.system.features`): whether one is installed,
+   * and installing it, as Settings → Optional Features does, for what the
+   * app does that needs one (Files' archives, Studio's transcripts).
+   */
+  | 'features'
+  /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.
    * Preview (stepping through a folder, archives), Publisher (linked
@@ -894,6 +901,11 @@ export interface DinSystem {
   vms?: VmsBridge;
   games?: GamesBridge;
   capture?: CaptureBridge;
+  /**
+   * Optional features (Settings → Optional Features): what's installed, and
+   * installing one the app needs. Not removing them, which is Settings'.
+   */
+  features?: AppFeaturesBridge;
 }
 
 // ---------------------------------------------------------------------------

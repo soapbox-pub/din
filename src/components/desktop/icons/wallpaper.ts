@@ -204,6 +204,10 @@ export function useWallpaper() {
   const fail = (title: string, error: unknown) => toast({ title, description: cleanFsError(error), variant: 'destructive' });
 
   const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    // A drag from the wallpaper never selects text (the layer is select-none),
+    // and a click there clears any selection made elsewhere, as a click on
+    // the empty desktop does on any other.
+    if (e.button === 0) window.getSelection()?.removeAllRanges();
     if (!icons.shown) return;
     if (e.button === 2) icons.setSelected(new Set());
     if (e.button !== 0) return;

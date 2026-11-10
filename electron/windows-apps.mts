@@ -34,6 +34,7 @@ import { parsePalette } from './gtk-theme.mts';
 import { LIGHT_STYLE, lookRegistry } from './wine-theme.mts';
 import { sandboxed, windowsShellDir } from './wine-sandbox.mts';
 import { closeSystemNotification, notifyFromSystem } from './notifications.mts';
+import { canInstall } from './system-packages.mts';
 
 export { windowsShellDir };
 
@@ -77,10 +78,15 @@ export function wineBinary(): string | null {
   return process.env.DIN_WINE || which('wine') || which('wine64');
 }
 
-/** Why Windows programs can't open: on DinOS, Wine is an optional feature. */
-const NO_WINE = process.env.DIN_FEATURES
-  ? 'Windows programs need Windows apps, an optional feature: install it in Settings → Optional Features'
-  : 'Windows programs need Wine, which isn’t installed';
+/**
+ * Why Windows programs can't open: Wine is an optional feature, DinOS's or
+ * the system's package (electron/system-packages.mts).
+ */
+export function noWine(name = 'Windows programs'): string {
+  return process.env.DIN_FEATURES || canInstall('windows')
+    ? `${name} can’t open yet. Install Windows apps in Settings → Optional Features.`
+    : 'Windows programs need Wine, which isn’t installed.';
+}
 
 /** Din's Wine prefix: the hidden "Windows installation" every program shares. */
 export function winePrefix(): string {
@@ -467,7 +473,7 @@ export async function ensurePrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
 
 async function setUpPrefix(baseEnv: NodeJS.ProcessEnv): Promise<void> {
   const wine = wineBinary();
-  if (!wine) throw new Error(NO_WINE);
+  if (!wine) throw new Error(noWine());
   const prefix = winePrefix();
   const marker = path.join(prefix, '.din-version');
 
@@ -694,7 +700,7 @@ export function programForShortcut(shortcut: { name: string; folder: string | nu
 export async function runUninstaller(program: InstalledProgram, baseEnv: NodeJS.ProcessEnv): Promise<void> {
   await ensurePrefix(baseEnv);
   const wine = wineBinary();
-  if (!wine) throw new Error(NO_WINE);
+  if (!wine) throw new Error(noWine());
   const command = await wineCommand([wine, 'uninstaller', '--remove', program.key], baseEnv);
   await new Promise<void>((resolve, reject) => {
     execFile(command.argv[0], command.argv.slice(1), { env: command.env, cwd: path.join(winePrefix(), 'drive_c'), timeout: 0 }, (error, _stdout, stderr) => {
@@ -738,6 +744,6 @@ export async function windowsProgramCommand(
 ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
   await ensurePrefix(baseEnv);
   const wine = wineBinary();
-  if (!wine) throw new Error(NO_WINE);
+  if (!wine) throw new Error(noWine());
   return wineCommand([wine, 'start', '/unix', file], baseEnv, { cwd: path.dirname(file), share: [file] });
 }

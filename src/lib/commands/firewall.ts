@@ -1,5 +1,6 @@
 import {
   describeRule,
+  featurePortsAllowed,
   FIREWALL_PROTOCOLS,
   getFirewallBridge,
   parsePorts,
@@ -24,7 +25,7 @@ function ruleKey(args: Args): FirewallRuleKey {
 
 export const firewallArea: Area = {
   name: 'firewall',
-  summary: 'The ports other devices may connect to (DinOS)',
+  summary: 'The ports other devices may connect to (DinOS, or firewalld)',
   commands: [
     command('firewall', 'status', 'Whether the firewall is on, and the ports let in', [], async () => {
       const status = await call(firewall().status());
@@ -60,6 +61,18 @@ export const firewallArea: Area = {
         throw new CommandError(`${describeRule(key)} isn’t one of the ports let in; din firewall status lists them`);
       }
       return { data: await call(firewall().remove(key)), text: `${describeRule(key)} is shut` };
+    }),
+    command('firewall', 'features', 'Let in the ports Din’s own features use, where the firewall is firewalld (asks on screen first)', [], async (_args, ctx) => {
+      const status = await call(firewall().status());
+      if (status.manager !== 'firewalld') throw new CommandError('Only where the firewall is firewalld: DinOS lets them in itself');
+      if (featurePortsAllowed(status.rules)) return { data: status, text: 'Din’s features are let in already' };
+      const ok = await ctx.confirm({
+        title: 'Let other devices connect to Din’s features?',
+        description: 'Quick Share (TCP 47331), LocalSend (TCP and UDP 53317) and AirPlay (UDP 7010-7039). Each answers only while you use it.',
+        action: 'Allow',
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      return { data: await call(firewall().allowFeatures()), text: 'Quick Share, LocalSend and AirPlay are let in' };
     }),
   ],
 };

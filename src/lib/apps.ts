@@ -96,6 +96,8 @@ export interface AppDefinition {
    * (see src/lib/nativeDisplay.ts).
    */
   native?: boolean;
+  /** The optional feature a native app needs to run (Windows apps, for a Windows program). */
+  feature?: string;
   /**
    * A native app that runs in a terminal (Terminal=true, e.g. htop).
    * Launching one opens a Terminal window running it in place of a shell.

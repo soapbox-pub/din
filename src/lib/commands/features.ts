@@ -4,7 +4,8 @@ import { call, command, need, pick } from './util';
 
 /**
  * `din features`: Settings → Optional Features, DinOS's parts kept off the
- * disk until wanted (electron/features.mts), installed and removed with the
+ * disk until wanted, or on another Linux what Din's features need from the
+ * system's packages (electron/features.mts), installed and removed with the
  * same bridge calls its buttons make.
  */
 
@@ -23,7 +24,7 @@ async function feature(query: string): Promise<FeatureState> {
 
 export const featuresArea: Area = {
   name: 'features',
-  summary: 'Optional features: Wine, QEMU, Whisper and more, installed when wanted',
+  summary: 'Optional features: Wine, QEMU, Whisper and more, installed when wanted (from the system’s packages off DinOS)',
   commands: [
     command('features', 'list', 'Each optional feature, and whether it’s installed', [], async () => {
       const { live, features: all } = await list();
@@ -59,6 +60,7 @@ export const featuresArea: Area = {
         return { text: `${f.title} won’t download` };
       }
       if (!f.installed) return { text: `${f.title} isn’t installed` };
+      if (!f.removable) throw new CommandError(`Remove ${f.title} with your system’s package manager`);
       const ok = await ctx.confirm({
         title: `Remove ${f.title}?`,
         description: `A command asked to remove it. ${removalConsequence(f)}`,

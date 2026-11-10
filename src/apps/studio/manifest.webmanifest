@@ -21,7 +21,8 @@
   ],
   "din": {
     "permissions": [
-      "capture"
+      "capture",
+      "features"
     ],
     "folders": [
       "~/Videos/Studio"

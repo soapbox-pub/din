@@ -96,6 +96,11 @@ export function useScreenRecorder(): RecorderStatus {
   return useSyncExternalStore(subscribe, () => current, () => UNAVAILABLE);
 }
 
+/** Ask main again, as after wf-recorder is installed. */
+export function refreshScreenRecorder(): void {
+  getScreenRecorderBridge()?.status().then(set, () => {});
+}
+
 /** Start recording; rejects with main's reason when it can't. */
 export function startRecording(request: RecordingRequest): Promise<RecorderStatus> {
   const bridge = getScreenRecorderBridge();

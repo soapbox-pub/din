@@ -32,6 +32,18 @@
  *   running           the build a session is running now, which isn't deleted
  *   crashes           how many times running Din has failed in a row
  *
+ * In your own folders it adds Din as the session's handler for the links and
+ * folders native apps open (xdg-open, the desktop portal), as DinOS has it:
+ *
+ *   ~/.local/share/applications/din-open.desktop
+ *                     runs current/bin/din-open, which hands them to the
+ *                     running Din over the session bus (electron/open-uri.mts)
+ *   ~/.config/din-mimeapps.list
+ *                     makes it the default for http(s), nostr: and nsite:
+ *                     links and folders, read only in Din's session
+ *                     (XDG_CURRENT_DESKTOP=Din), so your other desktop keeps
+ *                     its own browser and file manager
+ *
  * The password is asked for once, by sudo, to install the files the login
  * screen reads, which no user can write:
  *
@@ -61,6 +73,20 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
 const SESSION = path.join(DATA_HOME, "din", "session");
 const RELEASES = path.join(SESSION, "releases");
+const CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+const APPLICATIONS = path.join(DATA_HOME, "applications");
+/** Din as the handler for what native apps open, and the session's defaults naming it. */
+const LINK_HANDLER = path.join(APPLICATIONS, "din-open.desktop");
+const SESSION_MIMEAPPS = path.join(CONFIG_HOME, "din-mimeapps.list");
+/** The ports Settings → Firewall let into firewalld (electron/firewall.mts's USER_RULES_FILE). */
+const FIREWALL_RULES = path.join(DATA_HOME, "din", "firewall");
+const LINK_TYPES = [
+  "x-scheme-handler/http",
+  "x-scheme-handler/https",
+  "x-scheme-handler/nsite",
+  "x-scheme-handler/nostr",
+  "inode/directory",
+];
 
 const WRAPPER = "/usr/local/bin/din-session";
 const DESKTOP_FILE = "/usr/share/wayland-sessions/din.desktop";
@@ -296,6 +322,9 @@ export DIN_DESKTOP_SESSION=1
 export DIN_SESSION_RELEASE="$release"
 export DIN_COMPOSITOR="$here/bin/din-compositor"
 export DIN_FD_ADDON="$here/lib/libdin_fd.so"
+# polkit's prompts (pkexec, timedatectl, udisks, fwupd…) are asked in Din:
+# without an agent in the session, polkit refuses them all.
+export DIN_POLKIT_AGENT="$here/bin/din-polkit-agent"
 # Full-screen games go straight to the screen (the compositor's session/
 # direct.rs); a file named no-direct here leaves them to Din instead.
 [ -e "$session/no-direct" ] && export DIN_DIRECT=0
@@ -303,12 +332,29 @@ ${profile ? `# A profiling build: the shell's measurements and the compositor's 
 # stderr, and from there to the journal.
 export DIN_PROFILE=1 DIN_COMPOSITOR_STATS=1
 ` : ""}
+# The user's services (the desktop portal, which opens Flatpaks' links) are
+# told which desktop this is, so they read din-mimeapps.list.
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+  dbus-update-activation-environment --systemd XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE || true
+fi
+
 # The pointer the compositor draws before Din sets its own, from GSettings.
 if command -v gsettings >/dev/null 2>&1; then
   theme=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'")
   size=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | sed 's/.* //')
   [ -n "$theme" ] && export XCURSOR_THEME="$theme"
   case "$size" in ""|*[!0-9]*) ;; *) export XCURSOR_SIZE="$size" ;; esac
+fi
+
+# The keyboard layout Settings → Keyboard keeps for this session
+# (electron/keyboard.mts), which the compositor starts with.
+layout_file="\${XDG_CONFIG_HOME:-$HOME/.config}/din/keyboard"
+if [ -r "$layout_file" ]; then
+  while IFS='=' read -r key value; do
+    case $key in
+      XKB_DEFAULT_RULES|XKB_DEFAULT_MODEL|XKB_DEFAULT_LAYOUT|XKB_DEFAULT_VARIANT|XKB_DEFAULT_OPTIONS) export "$key=$value" ;;
+    esac
+  done < "$layout_file"
 fi
 
 # The login screen's session, through AccountsService.
@@ -373,6 +419,31 @@ exec "$@"
 `;
 }
 
+/**
+ * polkit's authentication agent, on the system's Python: PyGObject and
+ * polkit's typelibs (Polkit-1.0, PolkitAgent-1.0), which desktops with
+ * polkit have.
+ */
+function polkitAgentScript() {
+  return `#!/bin/sh
+# polkit's authentication agent for Din's session (electron/polkit-agent.mts).
+# Written by Din's scripts/session.mjs.
+here=$(dirname "$(readlink -f "$0")")
+exec python3 -I "$here/../os/din-polkit-agent.py" "$@"
+`;
+}
+
+/** The links and folders native apps open, handed to the running Din (electron/open-uri.mts). */
+function dinOpenScript() {
+  return `#!/bin/sh
+# Din's session's handler for links and folders (din-open.desktop): hands
+# them to Din, which opens links in its Web Browser and folders in Files.
+# Written by Din's scripts/session.mjs.
+[ "$#" -gt 0 ] || exit 0
+exec busctl --user -- call pub.soapbox.Din /pub/soapbox/Din org.freedesktop.Application Open 'asa{sv}' "$#" "$@" 0
+`;
+}
+
 async function build({ profile = false } = {}) {
   const problems = missingBuildTools();
   if (problems.length > 0) throw new Failure(problems.join("\n\n"));
@@ -417,11 +488,15 @@ async function build({ profile = false } = {}) {
   // sudo's askpass helper (electron/system-packages.mts), at ../os.
   fs.mkdirSync(path.join(staging, "os"));
   copy(path.join(ROOT, "os/din-askpass.py"), path.join(staging, "os/din-askpass.py"));
+  // polkit's authentication agent (electron/polkit-agent.mts), at ../os.
+  copy(path.join(ROOT, "os/din-polkit-agent.py"), path.join(staging, "os/din-polkit-agent.py"));
 
   fs.mkdirSync(path.join(staging, "bin"));
   fs.mkdirSync(path.join(staging, "lib"));
   copy(path.join(ROOT, "native/din-compositor/target/release/din-compositor"), path.join(staging, "bin/din-compositor"));
   copy(path.join(ROOT, "native/din-fd/target/release/libdin_fd.so"), path.join(staging, "lib/libdin_fd.so"));
+  fs.writeFileSync(path.join(staging, "bin/din-polkit-agent"), polkitAgentScript(), { mode: 0o755 });
+  fs.writeFileSync(path.join(staging, "bin/din-open"), dinOpenScript(), { mode: 0o755 });
 
   fs.writeFileSync(path.join(staging, "din-session"), sessionScript({ profile }), { mode: 0o755 });
   fs.writeFileSync(path.join(staging, "din"), dinScript(), { mode: 0o755 });
@@ -581,15 +656,35 @@ fi`,
   }
 }
 
-async function removeSystemFiles() {
+/**
+ * The ports Settings → Firewall let into firewalld (electron/firewall.mts
+ * keeps them here), as firewall-cmd names them: "8080/tcp".
+ */
+function firewallPorts() {
+  const ports = [];
+  for (const line of (readText(FIREWALL_RULES) ?? "").split("\n")) {
+    const [protocol, range] = line.trim().split(/\s+/);
+    const match = /^(\d{1,5})(?:-(\d{1,5}))?$/.exec(range ?? "");
+    if (!match || !["tcp", "udp", "both"].includes(protocol)) continue;
+    for (const p of protocol === "both" ? ["tcp", "udp"] : [protocol]) ports.push(`${range}/${p}`);
+  }
+  return which("firewall-cmd") ? ports : [];
+}
+
+/** Take Din off the login screen, and shut the ports it let into firewalld. */
+async function removeSystemFiles(ports = []) {
   log("Taking Din off the login screen. sudo asks for your password…");
   await asRoot(
     `if [ -f ${APPARMOR_PROFILE} ]; then
   command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${APPARMOR_PROFILE} 2>/dev/null
   rm -f ${APPARMOR_PROFILE}
 fi
-rm -f ${WRAPPER} ${DESKTOP_FILE} ${LIGHTDM_CONFIG}`,
-    [],
+rm -f ${WRAPPER} ${DESKTOP_FILE} ${LIGHTDM_CONFIG}
+for port in "$@"; do
+  firewall-cmd --quiet --permanent --remove-port="$port" 2>/dev/null || true
+  firewall-cmd --quiet --remove-port="$port" 2>/dev/null || true
+done`,
+    ports,
   );
 }
 
@@ -641,6 +736,72 @@ function previousSession() {
 // Commands
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Din as the session's handler for links and folders
+// ---------------------------------------------------------------------------
+
+function linkHandlerEntry() {
+  // Quoted only when it has to be: xdg-utils' xdg-open can't read a quoted Exec.
+  const program = path.join(SESSION, "current", "bin", "din-open");
+  const exec = /\s/.test(program) ? `"${program}"` : program;
+  return `[Desktop Entry]
+Type=Application
+Name=Din
+Comment=Opens links in Din's Web Browser and folders in Files, in Din's session
+Exec=${exec} %U
+MimeType=${LINK_TYPES.join(";")};
+NoDisplay=true
+OnlyShowIn=Din;
+`;
+}
+
+/**
+ * A mimeapps.list's TEXT with its [Default Applications] naming HANDLER for
+ * LINK_TYPES, or with null, naming nothing for them; the rest as it was.
+ */
+function withDefaults(text, handler) {
+  const ours = handler ? LINK_TYPES.map((type) => `${type}=${handler}`) : [];
+  const lines = [];
+  let inDefaults = false;
+  let found = false;
+  for (const line of text.split("\n")) {
+    const header = /^\s*\[(.*)\]\s*$/.exec(line);
+    if (header) {
+      inDefaults = header[1] === "Default Applications";
+      lines.push(line);
+      if (inDefaults && !found) lines.push(...ours);
+      found ||= inDefaults;
+    } else if (!(inDefaults && LINK_TYPES.includes(line.split("=")[0].trim()))) {
+      lines.push(line);
+    }
+  }
+  if (!found && ours.length > 0) lines.push("[Default Applications]", ...ours);
+  // A section left with nothing in it goes.
+  const kept = lines.filter((line, i) => {
+    if (!/^\s*\[/.test(line)) return true;
+    const next = lines.slice(i + 1).find((l) => l.trim() !== "");
+    return next !== undefined && !/^\s*\[/.test(next);
+  });
+  return kept.join("\n").trim();
+}
+
+function installLinkHandler() {
+  writeText(LINK_HANDLER, linkHandlerEntry().trimEnd());
+  writeText(SESSION_MIMEAPPS, withDefaults(readText(SESSION_MIMEAPPS) ?? "", "din-open.desktop"));
+  if (which("update-desktop-database")) output("update-desktop-database", [APPLICATIONS]);
+}
+
+function removeLinkHandler() {
+  fs.rmSync(LINK_HANDLER, { force: true });
+  const text = readText(SESSION_MIMEAPPS);
+  if (text !== null) {
+    const rest = withDefaults(text, null);
+    if (rest) writeText(SESSION_MIMEAPPS, rest);
+    else fs.rmSync(SESSION_MIMEAPPS, { force: true });
+  }
+  if (which("update-desktop-database")) output("update-desktop-database", [APPLICATIONS]);
+}
+
 function requireInstalled() {
   if (!releaseInfo("current")) throw new Failure("Din isn't installed as a session. Run `npm run session:install` first.");
 }
@@ -660,6 +821,7 @@ async function install({ makeDefault }) {
   if (!systemFilesCurrent()) await installSystemFiles();
   activate(id);
   prune();
+  installLinkHandler();
   fs.rmSync(path.join(SESSION, "uninstalled"), { force: true });
   warnMissingRuntimeTools();
   if (makeDefault) {
@@ -679,6 +841,7 @@ async function update({ profile }) {
   if (!systemFilesCurrent()) await installSystemFiles();
   activate(id);
   prune();
+  installLinkHandler();
   warnMissingRuntimeTools();
   log(process.env.DIN_SESSION_RELEASE ? "Updated. Log out and back in to use the new build." : "Updated. The next login runs the new build.");
 }
@@ -706,7 +869,11 @@ function restore() {
 
 async function uninstall() {
   if (defaultSession() === SESSION_NAME) restore();
-  if (systemFilesPresent() || fs.existsSync(APPARMOR_PROFILE)) await removeSystemFiles();
+  // Ports Din let in stay open otherwise, with nothing left that lists them.
+  const ports = firewallPorts();
+  if (systemFilesPresent() || fs.existsSync(APPARMOR_PROFILE) || ports.length > 0) await removeSystemFiles(ports);
+  fs.rmSync(FIREWALL_RULES, { force: true });
+  removeLinkHandler();
   if (process.env.DIN_SESSION_RELEASE) {
     // This Din runs from one of the builds; the session deletes it as it ends.
     writeText(path.join(SESSION, "uninstalled"), "");

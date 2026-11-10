@@ -38,7 +38,7 @@ export function DesktopMenu() {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div aria-hidden className="absolute inset-0" {...wallpaper} />
+        <div aria-hidden className="absolute inset-0 select-none" {...wallpaper} />
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
         {icons.dir && (

@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
 import { useDin, usePermission, useWindowIcon, useWindowTitle } from '@/sdk/react';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 import { FileViewerBody } from '@/shared/FileViewerBody';
 import { onLaunchFiles, windowLaunchFiles } from '@/shared/fileHandles';
 import { appLink } from '@/shared/launch';
@@ -260,9 +261,12 @@ export function Preview() {
         </ContextMenuContent>
       </ContextMenu>
       {extractError !== null && (
-        <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">
-          {extractError}
-        </p>
+        <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-3 py-1.5">
+          <p role="alert" className="min-w-0 flex-1 text-xs text-destructive">
+            {extractError}
+          </p>
+          <FeatureInstallButton feature="archives" inline onInstalled={extract} />
+        </div>
       )}
       {printError !== null && (
         <p role="alert" className="shrink-0 border-t border-border/60 px-3 py-1.5 text-xs text-destructive">

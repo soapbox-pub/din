@@ -1243,7 +1243,7 @@ function transcribe(folder: string): Promise<void> {
     const tool = ffmpeg();
     if (!tools || !tool) {
       throw new Error(process.env.DIN_FEATURES && !tools
-        ? 'Transcripts need Dictation & transcripts, an optional feature: install it in Settings → Optional Features'
+        ? 'Transcripts aren’t set up yet. Install Dictation & transcripts in Settings → Optional Features.'
         : 'Transcription isn’t available here');
     }
     const take = await readTake(folder);

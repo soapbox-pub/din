@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ContentPane, SegmentedControl, StatusBar, ToolButton, Toolbar } from '@/shared/appChrome';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
+import { featureForFile } from '@/lib/features';
 import { focusRing, toolIcon } from '@/shared/appChromeStyles';
 import {
   cleanFsError,
@@ -486,7 +488,8 @@ type Dialog =
   | { type: 'emptyTrash' }
   | { type: 'shortcuts' };
 
-type Status = { kind: 'busy' | 'error' | 'info'; text: string } | null;
+/** `feature`: the optional feature what failed needs, whose Install button goes beside it. */
+type Status = { kind: 'busy' | 'error' | 'info'; text: string; feature?: string } | null;
 
 /** Grouped item counts for messages: "3 items", "“notes.txt”". */
 function describe(names: string[]): string {
@@ -752,13 +755,13 @@ function FileBrowserTab({
   // ---- Operations ------------------------------------------------------------
 
   const run = useCallback(
-    async (label: string, fn: () => Promise<void>) => {
+    async (label: string, fn: () => Promise<void>, feature?: string) => {
       setStatus({ kind: 'busy', text: label });
       try {
         await fn();
         setStatus((s) => (s?.kind === 'busy' && s.text === label ? null : s));
       } catch (error) {
-        setStatus({ kind: 'error', text: cleanFsError(error) });
+        setStatus({ kind: 'error', text: cleanFsError(error), feature });
       }
     },
     [],
@@ -826,7 +829,7 @@ function FileBrowserTab({
           .fromPath(target)
           .then((handle) => din.app.openFiles([handle]))
           .then(() => setStatus((s) => (s?.text === `Opening ${file.name}…` ? null : s)))
-          .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error) }))
+          .catch((error: unknown) => setStatus({ kind: 'error', text: cleanFsError(error), feature: featureForFile(file.name) ?? undefined }))
           .finally(() => {
             // Wine takes a moment more to put the window up.
             setTimeout(() => startingRef.current.delete(target), 3_000);
@@ -1057,7 +1060,7 @@ function FileBrowserTab({
             pushUndo(din, `extraction of ${describe(made.map(basename))}`, { kind: 'trash', paths: made });
           }
         }
-      });
+      }, 'archives');
     },
     [din, cwd, fs, run, refresh],
   );
@@ -2101,6 +2104,9 @@ function FileBrowserTab({
           >
             {status?.text}
           </span>
+          {status?.kind === 'error' && (
+            <FeatureInstallButton feature={status.feature} inline className="shrink-0" onInstalled={() => setStatus(null)} />
+          )}
           {status && status.kind !== 'busy' && (
             <button
               type="button"

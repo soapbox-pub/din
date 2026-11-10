@@ -672,7 +672,7 @@ export function Dock({
           // a mid-slide dock can't catch clicks. Tiles take their clicks on
           // their buttons alone, so the backdrop between them gets its own.
           className={cn(
-            'group/dock relative flex items-end',
+            'group/dock relative flex select-none items-end',
             layout.padding,
             hidden ? 'pointer-events-none' : 'pointer-events-auto',
           )}

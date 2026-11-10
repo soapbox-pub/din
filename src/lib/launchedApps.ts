@@ -97,10 +97,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   microphone: 'Use the microphone',
   preview: 'Show web servers running on this computer, and web pages from your files',
   'file-folders': 'Reach the folders of files you give it',
+  features: 'Install optional features it needs',
 };
 
 /** Permissions only a built-in app's reviewed manifest gets, never one the user is asked about. */
-const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo']);
+const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo', 'features']);
 
 const FRAMES: readonly FrameMode[] = ['standard', 'custom', 'none'];
 

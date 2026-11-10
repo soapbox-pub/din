@@ -16,7 +16,8 @@
     "permissions": [
       "cursor",
       "file-folders",
-      "wallpaper"
+      "wallpaper",
+      "features"
     ],
     "window": {
       "size": {

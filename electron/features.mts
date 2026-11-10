@@ -22,6 +22,14 @@
 // itself from a live USB stick (/run/din/live): the stick is slow and small,
 // and the computer it's installed onto downloads them instead.
 //
+// Off DinOS, they're the system's packages instead (electron/
+// system-packages.mts): the same features where the distribution packages
+// them, and the other tools Din's features use that DinOS has built in
+// (screen recording, brightness, archives…), each installed with the
+// system's package manager, asking for the administrator password in Din.
+// Those aren't removed here: what else uses them is the package manager's
+// to know.
+//
 // A system update downloads the new versions of installed features before
 // it switches (os/din-update.sh); one it couldn't (offline, say) keeps working
 // as it was, and is brought up to date here soon after Din starts. A
@@ -37,6 +45,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { ipcMain, net } from 'electron';
+import * as systemPackages from './system-packages.mts';
 
 const MANIFEST = process.env.DIN_FEATURES;
 const DIR = process.env.DIN_FEATURES_DIR;
@@ -99,10 +108,23 @@ export interface FeatureState {
   busy: { action: FeatureAction; phase: FeaturePhase; progress: number | null } | null;
   /** Why its last action failed, until the next one. */
   error: string | null;
+  /** Whether Din removes it here: DinOS's own, not the system's packages. */
+  removable: boolean;
+  /** The command that installs it from the system's packages, to show; null on DinOS. */
+  command: string | null;
+  /**
+   * Some of it is here and this isn't ("unar", "7-Zip"): the system's
+   * packages, where someone installed only some of them. Empty otherwise.
+   */
+  missing: string[];
 }
 
 export interface FeaturesState {
-  /** False off DinOS, where there's nothing to install this way. */
+  /** Where they come from: DinOS's own, or the system's package manager. */
+  source: 'dinos' | 'packages';
+  /** The package manager, as a person would know it ("dnf", "apt-get"); null on DinOS. */
+  packageManager: string | null;
+  /** False where there's nothing to install this way. */
   available: boolean;
   /** Running from a live USB stick, where wanted features don't download by themselves. */
   live: boolean;
@@ -238,11 +260,47 @@ function byOrder(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
+/** Off DinOS: the system's packages. */
+const fromPackages = !DIR;
+
+/** The system's packages' features: those it packages, and any already here. */
+function packagesState(): FeaturesState {
+  const manager = systemPackages.packageManager();
+  const ids = Object.keys(systemPackages.CATALOG).filter((id) => systemPackages.canInstall(id) || systemPackages.isInstalled(id));
+  return {
+    source: 'packages',
+    packageManager: manager?.binary ?? null,
+    available: manager !== null && ids.length > 0,
+    live: false,
+    features: ids.map((id) => {
+      const entry = systemPackages.CATALOG[id];
+      const installed = systemPackages.isInstalled(id);
+      return {
+        id,
+        title: entry.title,
+        description: entry.description,
+        size: entry.size,
+        installed,
+        current: installed,
+        wanted: installed,
+        busy: busy.get(id) ?? null,
+        error: errors.get(id) ?? null,
+        removable: false,
+        command: systemPackages.installCommand(id)?.join(' ') ?? null,
+        missing: installed ? [] : systemPackages.missingParts(id),
+      };
+    }),
+  };
+}
+
 function state(): FeaturesState {
+  if (fromPackages) return packagesState();
   const manifest = readManifest();
   const ids = Object.keys(manifest).sort(byOrder);
   const choices = readChoices();
   return {
+    source: 'dinos',
+    packageManager: null,
     available: Boolean(DIR) && ids.length > 0,
     live: LIVE,
     features: ids.map((id) => {
@@ -258,6 +316,9 @@ function state(): FeaturesState {
         wanted: isWanted(id, entry, choices, installed),
         busy: busy.get(id) ?? null,
         error: errors.get(id) ?? null,
+        removable: true,
+        command: null,
+        missing: [],
       };
     }),
   };
@@ -448,7 +509,9 @@ function enqueue(id: string, action: FeatureAction, work: () => Promise<void>): 
   errors.delete(id);
   notify(true);
   const next = queue.then(async () => {
-    busy.set(id, { action, phase: action === 'remove' ? 'removing' : 'downloading', progress: null });
+    // The package manager says nothing of its progress here.
+    const installing = fromPackages ? 'building' : 'downloading';
+    busy.set(id, { action, phase: action === 'remove' ? 'removing' : installing, progress: null });
     notify(true);
     try {
       await work();
@@ -464,8 +527,27 @@ function enqueue(id: string, action: FeatureAction, work: () => Promise<void>): 
   return next;
 }
 
+const installedListeners = new Set<(id: string) => void>();
+
+/** Hear of each feature as it's installed, for what was waiting on it (phones plugged in). */
+export function onInstalled(listener: (id: string) => void): () => void {
+  installedListeners.add(listener);
+  return () => installedListeners.delete(listener);
+}
+
+function installed(id: string): void {
+  for (const listener of installedListeners) listener(id);
+}
+
 /** Install a feature, or bring an installed one up to this system's version. */
 export function install(id: unknown): Promise<void> {
+  if (fromPackages) {
+    if (!systemPackages.isCatalogued(id) || !systemPackages.canInstall(id)) {
+      return Promise.reject(new Error(`There’s no optional feature “${String(id)}” to install here`));
+    }
+    if (systemPackages.isInstalled(id)) return Promise.resolve();
+    return enqueue(id, 'install', () => systemPackages.install(id)).then(() => installed(id));
+  }
   const [key] = entryFor(id);
   // Chosen before it downloads, so a restart halfway doesn't forget it.
   choose(key, 'wanted');
@@ -476,12 +558,12 @@ export function install(id: unknown): Promise<void> {
 function fetchFeature(key: string): Promise<void> {
   const [, entry] = entryFor(key);
   if (isCurrent(key, entry)) return Promise.resolve();
-  return enqueue(key, 'install', () => fetchParts(key, entry));
+  return enqueue(key, 'install', () => fetchParts(key, entry)).then(() => installed(key));
 }
 
 /** Install every feature that isn't. */
 export async function installAll(): Promise<void> {
-  const pending = state().features.filter((f) => !f.current && !f.busy);
+  const pending = state().features.filter((f) => !f.current && !f.busy && (!fromPackages || f.command));
   const results = await Promise.allSettled(pending.map((f) => install(f.id)));
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (failed > 0) throw new Error(failed === 1 ? 'One feature couldn’t be installed' : `${failed} features couldn’t be installed`);
@@ -492,6 +574,10 @@ export async function installAll(): Promise<void> {
  * computer and hasn't downloaded yet won't.
  */
 export function remove(id: unknown): Promise<void> {
+  if (fromPackages) {
+    const manager = systemPackages.packageManager();
+    return Promise.reject(new Error(`Remove it with your system’s package manager${manager ? ` (${manager.binary})` : ''}.`));
+  }
   const [key] = entryFor(id);
   if (busy.get(key)?.action === 'install') return Promise.reject(new Error('Wait for it to finish installing'));
   choose(key, 'declined');

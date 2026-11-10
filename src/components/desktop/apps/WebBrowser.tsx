@@ -2561,8 +2561,11 @@ function AddressBar({
     return input;
   };
 
+  const closedOutside = useRef(false);
+
   const onMenuOpenChange = (menuOpen: boolean) => {
     if (!menuOpen) return;
+    closedOutside.current = false;
     const input = inputRef.current;
     const start = input?.selectionStart ?? 0;
     const end = input?.selectionEnd ?? 0;
@@ -2580,6 +2583,22 @@ function AddressBar({
   const paste = () => {
     void pasteText().then((text) => {
       if (text && refocus()) document.execCommand('insertText', false, text);
+    });
+  };
+
+  // Not execCommand('copy') from the item: while the menu is open its focus
+  // trap holds focus, so the field's selection isn't what would be copied.
+  const copy = () => {
+    const at = menuSelection.current;
+    const text = at ? (inputRef.current?.value ?? '').slice(at.start, at.end) : '';
+    if (!text) return Promise.resolve(false);
+    return navigator.clipboard?.writeText(text).then(() => true, () => false) ?? Promise.resolve(false);
+  };
+
+  // Deleted once the menu has closed, as paste inserts, so it's undoable.
+  const cut = () => {
+    void copy().then((copied) => {
+      if (copied && refocus()) document.execCommand('delete');
     });
   };
 
@@ -2669,26 +2688,21 @@ function AddressBar({
         </ContextMenuTrigger>
         <ContextMenuContent
           className="min-w-56"
+          onInteractOutside={() => {
+            closedOutside.current = true;
+          }}
           onCloseAutoFocus={(e) => {
+            // Dismissed by a click elsewhere: focus goes where that was, as Radix does.
+            if (closedOutside.current) return;
             e.preventDefault();
             refocus();
           }}
         >
-          <ContextMenuItem
-            disabled={!canCopy}
-            onSelect={() => {
-              if (refocus()) document.execCommand('cut');
-            }}
-          >
+          <ContextMenuItem disabled={!canCopy} onSelect={cut}>
             Cut
             <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
           </ContextMenuItem>
-          <ContextMenuItem
-            disabled={!canCopy}
-            onSelect={() => {
-              if (refocus()) document.execCommand('copy');
-            }}
-          >
+          <ContextMenuItem disabled={!canCopy} onSelect={() => void copy()}>
             Copy
             <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
           </ContextMenuItem>

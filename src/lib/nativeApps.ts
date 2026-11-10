@@ -15,6 +15,7 @@
 import { endLaunching, startLaunching } from '@/lib/appLaunches';
 import { closeNotification, notify } from '@/lib/notificationCenter';
 import { cleanPackageError, getSystemPackagesBridge, type SystemPackagesBridge } from '@/lib/systemPackages';
+import { notifyWithFeature } from '@/lib/featureNotifications';
 
 /** Registry id prefix for native apps, e.g. `native:org.gnome.Calculator`. */
 export const NATIVE_APP_PREFIX = 'native:';
@@ -178,7 +179,7 @@ function cleanNativeAppError(error: unknown): string {
  * (uninstalled since the last scan, no Xvfb) shouldn't take down the click
  * handler that asked for it.
  */
-export function launchNativeApp(app: { id: string; name: string }, uri?: string): void {
+export function launchNativeApp(app: { id: string; name: string; feature?: string }, uri?: string): void {
   const bridge = getNativeAppsBridge();
   if (!bridge) return;
   startLaunching(app.id);
@@ -201,12 +202,17 @@ export function launchNativeApp(app: { id: string; name: string }, uri?: string)
       });
       return;
     }
-    notify({
-      source: { name: 'Din' },
-      title: `Couldn’t open ${app.name}`,
-      body: cleanNativeAppError(error),
-      history: true,
-    });
+    // With the Install button for the optional feature it needs (Windows apps), if that's missing.
+    await notifyWithFeature(
+      {
+        source: { name: 'Din' },
+        title: `Couldn’t open ${app.name}`,
+        body: cleanNativeAppError(error),
+        history: true,
+      },
+      app.feature,
+      () => launchNativeApp(app, uri),
+    );
   });
 }
 
@@ -271,7 +277,7 @@ export function uninstallNativeApp(app: { id: string; name: string }): void {
 }
 
 /** Install Xvfb, then open the app it was missing for. */
-function installXvfbThenLaunch(packages: SystemPackagesBridge, app: { id: string; name: string }, uri?: string): void {
+function installXvfbThenLaunch(packages: SystemPackagesBridge, app: { id: string; name: string; feature?: string }, uri?: string): void {
   const progress = notify({
     source: { name: 'Din' },
     title: 'Installing Xvfb…',

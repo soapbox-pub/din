@@ -69,7 +69,11 @@ export function tryOnSystemCursor(installed: string | null, install: () => Promi
     const bridge = getSystemCursorBridge();
     if (!bridge) throw new Error('The cursor can’t be changed here');
     // Taking off a theme got only to try it removes it, so it's got again.
-    const removed = await takeOff(false);
+    // One that can't be put back (its theme gone) doesn't stop every try after it.
+    const removed = await takeOff(false).catch(() => {
+      write(null);
+      return null;
+    });
     if (installed && installed === removed) installed = null;
     const status = await bridge.status();
     if (!status.canChange) throw new Error('Din can’t change the pointer on this computer');
@@ -91,11 +95,16 @@ export function tryOnSystemCursor(installed: string | null, install: () => Promi
 async function takeOff(keep: boolean): Promise<string | null> {
   const saved = read();
   if (!saved) return null;
-  write(null);
-  if (keep) return null;
   const bridge = getSystemCursorBridge();
-  if (!bridge) return null;
-  await bridge.set(saved.previous);
+  if (keep || !bridge) {
+    write(null);
+    return null;
+  }
+  // A pointer chosen in Settings meanwhile stays on.
+  const current = saved.tried ? await bridge.status().catch(() => null) : null;
+  if (!current || current.theme === saved.tried) await bridge.set(saved.previous);
+  // Forgotten only once it's back, so a failure leaves it for the next try.
+  write(null);
   if (!saved.remove || !saved.tried || saved.tried === saved.previous.theme) return null;
   await bridge.removeTheme(saved.tried).catch(() => {});
   return saved.tried;

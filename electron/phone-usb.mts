@@ -30,6 +30,8 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { onInstalled } from './features.mts';
+import { canInstall } from './system-packages.mts';
 import type { Volume, VolumeEvent } from './volumes.mts';
 
 const SYSFS_USB = '/sys/bus/usb/devices';
@@ -75,7 +77,12 @@ const FILE_TRANSFER = 'On the phone, choose File transfer in its USB notificatio
 const UNLOCK_ANDROID = 'Unlock the phone to open it.';
 const TRUST_IPHONE = 'Unlock the iPhone and tap Trust.';
 const DENIED_IPHONE = 'Unplug the iPhone, plug it in again, then tap Trust.';
-const NO_TOOLS = 'This computer can’t open phones.';
+/** What's said where jmtpfs or ifuse is missing. */
+function noTools(): string {
+  return canInstall('phones')
+    ? 'Can’t open phones yet. Install Phones over USB in Settings → Optional Features.'
+    : 'This computer can’t open phones.';
+}
 
 type PhoneKind = 'android' | 'iphone';
 
@@ -297,7 +304,7 @@ function setNeeds(phone: UsbPhone, needs: string | null): void {
   phone.needs = needs;
   if (needs && phone.told !== needs && !phone.ejected) {
     phone.told = needs;
-    announce({ type: 'waiting', id: phone.id, name: phone.name, needs });
+    announce({ type: 'waiting', id: phone.id, name: phone.name, needs, feature: needs === noTools() ? 'phones' : null });
   }
   if (!needs) phone.told = null;
   onChanged();
@@ -323,7 +330,7 @@ function advance(phone: UsbPhone): void {
     (error: Error) => {
       if (phones.get(phone.id) !== phone || phone.ejected) return;
       if (phone.needs) {
-        if (phone.needs !== NO_TOOLS && phone.needs !== DENIED_IPHONE) retryLater(phone);
+        if (phone.needs !== noTools() && phone.needs !== DENIED_IPHONE) retryLater(phone);
         return;
       }
       console.error(`phone-usb: mounting ${phone.name} failed`, error);
@@ -385,7 +392,7 @@ async function pairIphone(phone: UsbPhone): Promise<void> {
     throw waitOn(phone, needs, cause);
   };
   if (!phone.udid) {
-    const out = await run('idevice_id', ['-l']).catch((error) => (missing(error) ? fail(NO_TOOLS) : ''));
+    const out = await run('idevice_id', ['-l']).catch((error) => (missing(error) ? fail(noTools()) : ''));
     const serial = phone.device.serial.replace(/-/g, '').toLowerCase();
     const udids = out.split('\n').map((l) => l.trim()).filter(Boolean);
     phone.udid = udids.find((u) => u.replace(/-/g, '').toLowerCase() === serial) ?? (udids.length === 1 ? udids[0] : null);
@@ -396,7 +403,7 @@ async function pairIphone(phone: UsbPhone): Promise<void> {
   try {
     await run('idevicepair', ['-u', udid, attempt % PAIR_EVERY === 0 ? 'pair' : 'validate']);
   } catch (error) {
-    if (missing(error)) fail(NO_TOOLS, error);
+    if (missing(error)) fail(noTools(), error);
     const message = (error as Error).message;
     if (/denied/i.test(message)) fail(DENIED_IPHONE, error);
     if (/no device found/i.test(message)) phone.udid = null;
@@ -418,7 +425,7 @@ async function mountIphone(phone: UsbPhone, mountPoint: string): Promise<void> {
   try {
     await run('ifuse', [mountPoint, '--udid', phone.udid!], MOUNT_TIMEOUT_MS);
   } catch (error) {
-    if (missing(error)) throw waitOn(phone, NO_TOOLS, error);
+    if (missing(error)) throw waitOn(phone, noTools(), error);
     if (/lockdownd|passcode|locked/i.test((error as Error).message)) throw waitOn(phone, TRUST_IPHONE, error);
     throw new Error(`The iPhone didn’t open: ${(error as Error).message}`, { cause: error });
   }
@@ -429,7 +436,7 @@ async function mountAndroid(phone: UsbPhone, mountPoint: string): Promise<void> 
   try {
     await run('jmtpfs', [`-device=${busnum},${devnum}`, mountPoint], MOUNT_TIMEOUT_MS);
   } catch (error) {
-    throw waitOn(phone, missing(error) ? NO_TOOLS : UNLOCK_ANDROID, error);
+    throw waitOn(phone, missing(error) ? noTools() : UNLOCK_ANDROID, error);
   }
   // A locked phone answers, but with no storage to show.
   const entries = await fs.promises.readdir(mountPoint).catch(() => []);
@@ -490,6 +497,7 @@ export function phoneVolumes(): Volume[] {
     busy: phone.busy,
     phone: phone.kind,
     needs: phone.mountPoint ? null : phone.needs,
+    needsFeature: !phone.mountPoint && phone.needs === noTools() ? 'phones' : null,
   }));
 }
 
@@ -505,7 +513,7 @@ export async function mountPhone(id: string): Promise<string> {
   try {
     return await mount(phone);
   } catch (error) {
-    if (phone.needs && phone.needs !== NO_TOOLS && phone.needs !== DENIED_IPHONE) retryLater(phone);
+    if (phone.needs && phone.needs !== noTools() && phone.needs !== DENIED_IPHONE) retryLater(phone);
     throw error;
   }
 }
@@ -540,6 +548,15 @@ export function startPhones(options: { changed: () => void; announce: (event: Vo
   announce = options.announce;
   if (started || process.platform !== 'linux') return;
   started = true;
+  // Phones waiting on the tools to open them, once they're installed.
+  onInstalled((id) => {
+    if (id !== 'phones') return;
+    for (const phone of phones.values()) {
+      if (phone.needs !== noTools()) continue;
+      setNeeds(phone, null);
+      advance(phone);
+    }
+  });
   void clearStaleMounts().finally(() => {
     watch();
     rescan();

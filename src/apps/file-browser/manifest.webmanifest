@@ -25,7 +25,8 @@
       "volumes",
       "drive",
       "notifications",
-      "wallpaper"
+      "wallpaper",
+      "features"
     ],
     "window": {
       "size": {

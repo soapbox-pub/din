@@ -18,7 +18,8 @@ import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { ipcMain, nativeImage, protocol } from 'electron';
 import { programInfo } from './pe-icon.mts';
-import { CommandError, runCommand } from './system.mts';
+import { canInstall } from './system-packages.mts';
+import { CommandError, runCommand, which } from './system.mts';
 import { isWindowsHidden, nativePath } from './windows-paths.mts';
 
 const fsp = fs.promises;
@@ -397,6 +398,12 @@ const NO_PASSPHRASE = 'din-no-passphrase';
 
 type ArchiveTool = 'bsdtar' | '7zz' | 'unar';
 
+/** That no archive tool is here, and where to get them if Din can. */
+function noArchiveTool(make = false): Error {
+  if (canInstall('archives')) return new Error(`Can’t ${make ? 'make' : 'open'} this archive yet. Install Archives in Settings → Optional Features.`);
+  return new Error(make ? 'No program to make this kind of archive is installed' : 'No program to open this kind of archive is installed');
+}
+
 function isMissing(error: unknown): boolean {
   return error instanceof CommandError && error.code === 'ENOENT';
 }
@@ -483,6 +490,9 @@ async function runArchiveTool(
     ]
     : [];
   const script = 'tool=$1; limit=$2; shift 2; command -v "$tool" >/dev/null || exit 127; ulimit -v "$limit"; exec nice -n 10 "$@" </dev/null';
+  // p7zip's 7z where there's no 7zz (Fedora packages only p7zip): the same
+  // commands and switches, from an older 7-Zip.
+  if (file === '7zz' && !which('7zz') && which('7z')) file = '7z';
   try {
     return await runCommand('sh', ['-c', script, 'sh', file, String(memoryLimitKiB()), ...sandbox, file, ...args], {
       timeout: options.timeout ?? ARCHIVE_TIMEOUT_MS,
@@ -636,7 +646,7 @@ async function inspectArchive(archive: string, signal?: AbortSignal): Promise<Ar
       : await run('tar', ['-tf', archive]);
     return { entries: stdout.split('\n').filter(Boolean), bytes: null };
   } catch (e) {
-    throw isMissing(e) ? new Error('No program to open this kind of archive is installed') : archiveError(e);
+    throw isMissing(e) ? noArchiveTool() : archiveError(e);
   }
 }
 
@@ -742,7 +752,7 @@ async function extractInto(archive: string, dest: string, signal: AbortSignal): 
     }
     return { damaged: [], incomplete: false };
   } catch (error) {
-    throw isMissing(error) ? new Error('No program to open this kind of archive is installed') : archiveError(error);
+    throw isMissing(error) ? noArchiveTool() : archiveError(error);
   }
 }
 
@@ -917,7 +927,7 @@ async function compress(dir: string, names: string[], outName: string): Promise<
     return out;
   } catch (error) {
     await fsp.rm(out, { force: true });
-    throw isMissing(error) ? new Error('No program to make this kind of archive is installed') : toolError(error);
+    throw isMissing(error) ? noArchiveTool(true) : toolError(error);
   }
 }
 

@@ -281,6 +281,7 @@ export const SECTIONS: SettingsSection[] = [
     search: [
       'Install All', 'Install', 'Remove', 'Windows apps', 'Virtual machines', 'Dictation & transcripts', 'Web view for Linux apps', 'Linux containers',
       'Wine', 'QEMU', 'Whisper', 'WebKitGTK', 'Tauri', 'Podman', 'Docker', 'distrobox', 'add-ons', 'components', 'download', 'disk space', 'storage', 'packages',
+      'Linux apps', 'Xvfb', 'Screen recording', 'wf-recorder', 'Archives', '7-Zip', 'RAR', 'Phones over USB', 'Print previews', 'dnf', 'apt',
     ],
   },
   {

@@ -6,8 +6,12 @@
  * Electron shell.
  */
 
-/** What a feature needs: Xvfb, for Linux apps. */
-export type PackageFeature = 'xvfb';
+/**
+ * A feature whose programs come from the system's packages
+ * (electron/system-packages.mts's CATALOG): Xvfb for Linux apps, and the
+ * rest Settings → Optional Features lists off DinOS.
+ */
+export type PackageFeature = 'xvfb' | 'windows' | 'vms' | 'containers' | 'webkit' | 'screen-recording' | 'archives' | 'phones' | 'printing';
 
 export interface PackageStatus {
   installed: boolean;

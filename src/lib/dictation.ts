@@ -20,14 +20,15 @@
  */
 import { getAudioBridge } from '@/lib/audio';
 import { getFeaturesBridge } from '@/lib/features';
+import { notifyWithFeature } from '@/lib/featureNotifications';
 import { holdMedia } from '@/lib/mediaPause';
 import { guestId, isGuestElement } from '@/platform/guest';
 
 /** Why dictation can't start on DinOS before its optional feature is installed. */
-export const DICTATION_NEEDS_FEATURE = 'Dictation needs Dictation & transcripts, in Settings → Optional Features';
+export const DICTATION_NEEDS_FEATURE = 'Dictation isn’t installed yet. Install Dictation & transcripts in Settings → Optional Features.';
 const DICTATION_DOWNLOADING = 'Dictation hasn’t finished downloading';
 const DICTATION_WAITING = 'Dictation downloads when this computer is online';
-const DICTATION_LIVE = 'Dictation comes with DinOS once it’s installed, or install it now in Settings → Optional Features';
+const DICTATION_LIVE = 'Dictation downloads once DinOS is installed. To get it now, install Dictation & transcripts in Settings → Optional Features.';
 
 /** Whether dictation stopped for not being on this computer (yet), for SpeechRecognition's error code. */
 export function isDictationMissing(message: string | null): boolean {
@@ -50,6 +51,8 @@ async function missingReason(): Promise<string> {
   const features = getFeaturesBridge();
   if (!features) return 'Dictation isn’t available here';
   const state = await features.state().catch(() => null);
+  // Off DinOS it isn't one: distributions don't package whisper.cpp's programs.
+  if (state?.source === 'packages') return 'Dictation isn’t available here';
   const feature = state?.features.find((f) => f.id === 'dictation');
   if (!state || !feature) return DICTATION_NEEDS_FEATURE;
   if (feature.busy?.action === 'install') {
@@ -263,6 +266,10 @@ let errorTimer: ReturnType<typeof setTimeout> | null = null;
 let remuting: Promise<unknown> = Promise.resolve();
 
 function fail(message: string): void {
+  // The pill goes in a few seconds: a missing feature's Install button stays in a notification.
+  if (message === DICTATION_NEEDS_FEATURE || message === DICTATION_LIVE) {
+    void notifyWithFeature({ source: { name: 'Dictation' }, title: 'Dictation isn’t installed', body: message, replaceKey: 'dictation:feature' }, 'dictation');
+  }
   stopRecording();
   session = null;
   setState({ ...IDLE, status: 'error', error: message });

@@ -100,8 +100,10 @@ import {
   MIN_TEXT_SIZE,
   TEXT_SIZE_STEP,
   clampTextSize,
+  colorFilterMatrix,
   getAccessibilityBridge,
 } from '@/lib/accessibility';
+import type { ColorFilter } from '@/lib/accessibility';
 import { useApplyDisplayLayout, useDisplayStatus } from '@/hooks/useDisplay';
 import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
@@ -4071,13 +4073,17 @@ function AccessibilitySection() {
           />
 
           <SubHeading>Color filters</SubHeading>
-          <ChoiceRow
+          <ColorFilterDefs />
+          <PicturedChoices
             label="Color filter"
-            description="Changes the colors of everything on the screen, Linux apps included. Screenshots keep the real colors. The color blindness filters move the colors you can’t tell apart to ones you can."
+            options={COLOR_FILTERS.map((value) => ({ value, name: COLOR_FILTER_NAMES[value] }))}
             value={config.colorFilter}
-            choices={COLOR_FILTERS.map((value) => ({ value, name: COLOR_FILTER_NAMES[value] }))}
             onChange={(colorFilter) => set({ colorFilter })}
+            preview={(value) => <ColorFilterPreview filter={value} />}
           />
+          <p className="text-xs text-muted-foreground">
+            Changes the colors of everything on the screen, Linux apps included. Screenshots keep the real colors. The color blindness filters move the colors you can’t tell apart to ones you can.
+          </p>
 
           <SubHeading>Keyboard</SubHeading>
           <SettingsGroup>
@@ -4113,6 +4119,44 @@ function AccessibilitySection() {
         </FallbackCard>
       )}
     </SectionShell>
+  );
+}
+
+/** The colors the color filters' pictures are of: the spectrum, which each filter changes differently. */
+const COLOR_FILTER_SPECTRUM = 'linear-gradient(to right, #e53935, #fb8c00, #fdd835, #43a047, #1e88e5, #8e24aa)';
+
+const colorFilterId = (filter: ColorFilter) => `settings-color-filter-${filter}`;
+
+/** The color filters that are matrices, as SVG filters for their pictures to use. */
+function ColorFilterDefs() {
+  return (
+    <svg aria-hidden className="absolute size-0">
+      {COLOR_FILTERS.map((filter) => {
+        const matrix = colorFilterMatrix(filter);
+        if (!matrix) return null;
+        const values = [0, 1, 2].map((row) => `${matrix.slice(row * 3, row * 3 + 3).join(' ')} 0 0`).join(' ') + ' 0 0 0 1 0';
+        return (
+          <filter key={filter} id={colorFilterId(filter)} colorInterpolationFilters="sRGB">
+            <feColorMatrix type="matrix" values={values} />
+          </filter>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** A small window of colors over the spectrum, as FILTER shows them. */
+function ColorFilterPreview({ filter }: { filter: ColorFilter }) {
+  const css = filter === 'invert' ? 'invert(1)' : colorFilterMatrix(filter) ? `url(#${colorFilterId(filter)})` : undefined;
+  return (
+    <span className="absolute inset-0" style={{ background: COLOR_FILTER_SPECTRUM, filter: css }}>
+      <span className="absolute inset-x-1/5 top-3 bottom-3 flex items-center justify-center gap-1 rounded-sm bg-white shadow">
+        <span className="size-3 rounded-full bg-[#e53935]" />
+        <span className="size-3 rounded-full bg-[#43a047]" />
+        <span className="size-3 rounded-full bg-[#1e88e5]" />
+        <span className="size-3 rounded-full bg-[#fdd835]" />
+      </span>
+    </span>
   );
 }
 
@@ -4449,7 +4493,7 @@ function PicturedChoices<T extends string>({
   preview: (value: T) => React.ReactNode;
 }) {
   return (
-    <div className={cn('grid gap-2', options.length === 4 ? 'grid-cols-4' : options.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} role="radiogroup" aria-label={label}>
+    <div className={cn('grid gap-2', options.length === 4 ? 'grid-cols-4' : options.length % 3 === 0 ? 'grid-cols-3' : 'grid-cols-2')} role="radiogroup" aria-label={label}>
       {options.map((option) => {
         const active = value === option.value;
         return (
@@ -4467,7 +4511,7 @@ function PicturedChoices<T extends string>({
             <span aria-hidden className={cn('relative flex h-16 w-full flex-col justify-end overflow-hidden rounded-lg', PREVIEW_WALLPAPER)}>
               {preview(option.value)}
             </span>
-            <span className="text-xs">{option.name}</span>
+            <span className="text-center text-xs">{option.name}</span>
           </button>
         );
       })}

@@ -1,6 +1,26 @@
 import { useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AppWindow, Ban, Boxes, Download, Gamepad2, Globe, Loader2, MoreHorizontal, Mic, Monitor, PackagePlus, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
+import {
+  AppWindow,
+  Archive,
+  Ban,
+  Boxes,
+  Download,
+  Gamepad2,
+  Globe,
+  Loader2,
+  MoreHorizontal,
+  Mic,
+  Monitor,
+  PackagePlus,
+  Printer,
+  RotateCcw,
+  Smartphone,
+  SquareTerminal,
+  Trash2,
+  TriangleAlert,
+  Video,
+} from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,12 +58,19 @@ const ICONS: Record<string, LucideIcon> = {
   dictation: Mic,
   containers: Boxes,
   webkit: Globe,
+  xvfb: SquareTerminal,
+  'screen-recording': Video,
+  archives: Archive,
+  phones: Smartphone,
+  printing: Printer,
 };
 
 /**
  * Settings → Optional Features: the parts of DinOS that aren't on the disk
  * until they're wanted (electron/features.mts), each installed or removed
- * here, or all installed at once. `din features` does the same.
+ * here, or all installed at once. On another Linux, what Din's features
+ * need from the system's packages, installed with its package manager.
+ * `din features` does the same.
  */
 export function OptionalFeaturesSection() {
   const bridge = getFeaturesBridge();
@@ -53,7 +80,8 @@ export function OptionalFeaturesSection() {
   const [resettingWindows, setResettingWindows] = useState(false);
 
   const list = features.data?.features ?? [];
-  const missing = list.filter((f) => !f.installed && !f.busy);
+  const fromPackages = features.data?.source === 'packages';
+  const missing = list.filter((f) => !f.installed && !f.busy && (!fromPackages || f.command));
   const missingSize = missing.reduce((sum, f) => sum + f.size, 0);
 
   const failed = (title: string) => (error: unknown) =>
@@ -91,11 +119,17 @@ export function OptionalFeaturesSection() {
         )
       }
     >
-      <p className="text-sm text-muted-foreground">
-        Parts of DinOS that take a lot of space, kept off the disk until you want them. Each downloads from the
-        internet when you install it, and comes back to the size it was when you remove it. Dictation comes with
-        DinOS, and downloads in the background once it’s installed.
-      </p>
+      {fromPackages ? (
+        <p className="text-sm text-muted-foreground">
+          Extras some of Din’s features need. Installing one asks for your password.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Parts of DinOS that take a lot of space, kept off the disk until you want them. Each downloads from the
+          internet when you install it, and comes back to the size it was when you remove it. Dictation comes with
+          DinOS, and downloads in the background once it’s installed.
+        </p>
+      )}
 
       {!bridge ? (
         <Fallback>Optional features are DinOS’s; they aren’t available in a plain browser.</Fallback>
@@ -195,11 +229,13 @@ function FeatureRow({
   const Icon = ICONS[feature.id] ?? PackagePlus;
   const busy = feature.busy;
   const progress = busy && busy.phase !== 'waiting' && busy.progress !== null ? busy.progress : null;
+  // The system's packages, once installed, are the system's to remove: nothing to offer.
+  const hasMenu = !feature.installed || !feature.current || feature.removable || onReset !== undefined;
 
   return (
     <li>
       <ContextMenu>
-        <ContextMenuTrigger asChild>
+        <ContextMenuTrigger asChild disabled={!hasMenu}>
           <div className="flex items-center gap-3 py-3 pr-2 pl-4">
             <span
               className={cn(
@@ -231,7 +267,7 @@ function FeatureRow({
             </div>
             {busy ? (
               <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-            ) : feature.installed || feature.wanted ? (
+            ) : !hasMenu ? null : feature.installed || feature.wanted ? (
               <div className="flex shrink-0 items-center gap-1">
                 {!feature.installed && (
                   <Button variant="outline" size="sm" onClick={onInstall}>
@@ -251,9 +287,9 @@ function FeatureRow({
                 </DropdownMenu>
               </div>
             ) : (
-              <Button variant="outline" size="sm" onClick={onInstall}>
+              <Button variant="outline" size="sm" onClick={onInstall} title={feature.command ?? undefined}>
                 <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
-                Install
+                {feature.missing.length > 0 ? 'Install Missing' : 'Install'}
               </Button>
             )}
           </div>
@@ -286,7 +322,7 @@ function FeatureMenuItems({
       {(!feature.installed || !feature.current) && (
         <Item disabled={busy} onSelect={onInstall}>
           <Download aria-hidden />
-          {feature.installed ? 'Update Now' : feature.wanted ? 'Download Now' : 'Install'}
+          {feature.installed ? 'Update Now' : feature.wanted ? 'Download Now' : feature.missing.length > 0 ? 'Install Missing' : 'Install'}
         </Item>
       )}
       {!feature.installed && feature.wanted && (
@@ -301,7 +337,7 @@ function FeatureMenuItems({
           Reset Windows Apps…
         </Item>
       )}
-      {feature.installed && (
+      {feature.installed && feature.removable && (
         <Item variant="destructive" disabled={busy} onSelect={onRemove}>
           <Trash2 aria-hidden />
           Remove…

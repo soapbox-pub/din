@@ -8,6 +8,7 @@ import { typeLabel } from '@/lib/fileTypes';
 import { useDiskUsage, useFsDetails } from '@/hooks/useFileSystem';
 import { FileIcon } from '@/shared/FileIcon';
 import { DialogButton, Overlay } from '@/shared/dialogs';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 
 export { DialogButton, Overlay };
 
@@ -132,6 +133,7 @@ export function CompressDialog({
             {error}
           </p>
         )}
+        {error && <FeatureInstallButton feature="archives" className="mt-2" />}
         <div className="mt-4 flex justify-end gap-2">
           <DialogButton onClick={onCancel} disabled={pending}>
             Cancel

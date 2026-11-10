@@ -5,7 +5,24 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { startService, type Service } from './services.mts';
+
+/** A program on PATH, or null. */
+export function which(command: string): string | null {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, command);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Not here.
+    }
+  }
+  return null;
+}
 
 /** A failed command, shaped like execFile's errors. */
 export class CommandError extends Error {

@@ -6,8 +6,10 @@
 // keeps LVFS's list of releases current. This runs fwupdmgr, whose path
 // DinOS's launcher names in DIN_FWUPDMGR, as the shell's user; polkit lets it
 // install firmware LVFS signed without a password (os/configuration.nix).
-// Where DIN_FWUPDMGR isn't set (a dev machine, another distro) the bridge
-// reports itself unavailable.
+// Elsewhere it's the system's fwupdmgr, where fwupd is installed (Fedora and
+// Ubuntu have it from the start), and polkit asks for what its rules want
+// a password for (electron/polkit-agent.mts); without one the bridge reports
+// itself unavailable.
 //
 // Updates are looked for a little after Din starts and every six hours
 // after, but never installed by themselves: firmware is riskier than the
@@ -22,8 +24,9 @@
 import { spawn } from 'node:child_process';
 import { ipcMain } from 'electron';
 import { saveBeforeStopping } from './session-save.mts';
+import { which } from './system.mts';
 
-const FWUPDMGR = process.env.DIN_FWUPDMGR;
+const FWUPDMGR = process.env.DIN_FWUPDMGR || (process.platform === 'linux' ? which('fwupdmgr') : null);
 
 // Every prompt fwupdmgr could stop at is either Din's to make or not worth
 // making: reporting history to LVFS, refreshing old metadata (the timer

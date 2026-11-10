@@ -34,6 +34,7 @@ import {
   ensurePrefix,
   isWindowsProgram,
   isWineCommand,
+  noWine,
   wineBinary,
   wineCommand,
   wineEnvironment,
@@ -652,7 +653,7 @@ async function launch(appId: string, uri?: string, file?: string): Promise<void>
     // it all the same, and Din's colors as they are now.
     await ensurePrefix(env);
     const wine = wineBinary();
-    if (!wine) throw new Error(`${entry.name} needs Windows apps: install it in Settings → Optional Features`);
+    if (!wine) throw new Error(noWine(entry.name));
     const cwd = entry.cwd ?? undefined;
     const share = [...(cwd ? [cwd] : []), ...(file !== undefined ? [file] : [])];
     const command = await wineCommand([wine, ...argv.slice(1)], env, { cwd, share });

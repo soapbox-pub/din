@@ -12,7 +12,7 @@ import { encodeLaunchParams } from '@/shared/launch';
 export const DIN_APPS_PARTITION = 'persist:din-apps';
 
 /** Permissions whose bridges get a port of their own to main (SYSTEM_PERMISSIONS in electron/din-apps.mts). */
-export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'assistant-sudo', 'indd', 'volumes', 'drive', 'mail', 'phone', 'passwords', 'vms', 'games', 'capture'] as const;
+export const SYSTEM_PERMISSIONS = ['fs', 'pty', 'assistant', 'assistant-sudo', 'indd', 'volumes', 'drive', 'mail', 'phone', 'passwords', 'vms', 'games', 'capture', 'features'] as const;
 export type SystemPermission = (typeof SYSTEM_PERMISSIONS)[number];
 
 /** What the desktop's preload exposes for hosting apps (electron/preload.cjs). */

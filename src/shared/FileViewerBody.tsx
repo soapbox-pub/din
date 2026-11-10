@@ -15,6 +15,7 @@ import {
 } from '@/lib/fileTypes';
 import { useFileContent } from '@/hooks/useFileSystem';
 import { Skeleton } from '@/components/ui/skeleton';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 import { FileIcon } from '@/shared/FileIcon';
 import { decodeText, encodeText, isUtf16, type TextEncoding } from '@/shared/textEncoding';
 
@@ -279,7 +280,10 @@ function ArchiveView({ path, onExtract }: { path: string; onExtract?: () => void
         {listing.isLoading ? (
           <TextSkeleton />
         ) : listing.isError ? (
-          <p className="p-4 text-sm text-muted-foreground">{cleanFsError(listing.error)}</p>
+          <div className="flex flex-col items-start gap-3 p-4">
+            <p className="text-sm text-muted-foreground">{cleanFsError(listing.error)}</p>
+            <FeatureInstallButton feature="archives" onInstalled={() => void listing.refetch()} />
+          </div>
         ) : (
           <ul>
             {listing.data!.entries.map((entry, i) => {

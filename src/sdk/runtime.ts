@@ -52,6 +52,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
+import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
 import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
@@ -1297,6 +1298,14 @@ export function installDin(transport: Transport): void {
         c.onProjectChanged = (cb: (project: unknown) => void) => sys.on('capture', 'capture:projectChanged', (p) => cb(p));
         c.onStreamEnded = (cb: (ended: unknown) => void) => sys.on('capture', 'capture:streamEnded', (e) => cb(e));
         system.capture = c as unknown as CaptureBridge;
+      }
+      if (permissions.has('features')) {
+        await sys.ready('features');
+        system.features = {
+          state: () => sys.call('features', 'features:state', []),
+          install: (id) => sys.call('features', 'features:install', [id]),
+          onChanged: (cb) => sys.on('features', 'features:changed', (s) => cb(s as FeaturesState)),
+        } as AppFeaturesBridge;
       }
     }
 

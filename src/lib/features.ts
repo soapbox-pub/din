@@ -5,9 +5,11 @@
  * DinOS's optional features are parts of the system that aren't on the disk
  * until someone wants them: Wine for Windows apps, QEMU for virtual machines,
  * Whisper for dictation, WebKitGTK for some Linux apps, and Podman for
- * containers. Settings → Optional Features and `din features` install and
- * remove them. Absent in a plain browser; callers feature-detect via
- * `getFeaturesBridge()`.
+ * containers. On another Linux they're the system's packages instead, with
+ * the other tools Din's features use (screen recording, archives, phones…),
+ * installed with its package manager and never removed by Din. Settings →
+ * Optional Features and `din features` install and remove them. Absent in a
+ * plain browser; callers feature-detect via `getFeaturesBridge()`.
  */
 
 export type FeatureAction = 'install' | 'remove';
@@ -31,10 +33,23 @@ export interface FeatureState {
   busy: { action: FeatureAction; phase: FeaturePhase; progress: number | null } | null;
   /** Why its last action failed, until the next one. */
   error: string | null;
+  /** Whether Din removes it here: DinOS's own, not the system's packages. */
+  removable: boolean;
+  /** The command that installs it from the system's packages, to show; null on DinOS. */
+  command: string | null;
+  /**
+   * Some of it is here and this isn't ("unar", "7-Zip"): the system's
+   * packages, where someone installed only some of them. Empty otherwise.
+   */
+  missing: string[];
 }
 
 export interface FeaturesState {
-  /** False off DinOS, where there's nothing to install this way. */
+  /** Where they come from: DinOS's own, or the system's package manager. */
+  source: 'dinos' | 'packages';
+  /** The package manager ("dnf", "apt-get"); null on DinOS. */
+  packageManager: string | null;
+  /** False where there's nothing to install this way. */
   available: boolean;
   /** Running from a live USB stick, where wanted features don't download by themselves. */
   live: boolean;
@@ -49,6 +64,9 @@ export interface FeaturesBridge {
   onChanged(callback: (state: FeaturesState) => void): () => void;
 }
 
+/** What an app with the `features` permission has (`din.system.features`): no removing. */
+export type AppFeaturesBridge = Pick<FeaturesBridge, 'state' | 'install' | 'onChanged'>;
+
 declare global {
   interface Dinos {
     /** Present only inside the Electron shell. */
@@ -60,6 +78,34 @@ declare global {
 export function getFeaturesBridge(): FeaturesBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.dinos?.features;
+}
+
+/**
+ * Reading and installing features, from the desktop or an app granted
+ * `features` (its own port to main), or undefined in neither.
+ */
+export function getAppFeaturesBridge(): AppFeaturesBridge | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.din?.system.features ?? window.dinos?.features;
+}
+
+/** A feature by its id. */
+export function findFeature(state: FeaturesState | undefined, id: string | null | undefined): FeatureState | undefined {
+  if (!id || !state?.available) return undefined;
+  return state.features.find((f) => f.id === id);
+}
+
+/**
+ * The feature a file needs to open, by its kind: Windows programs need
+ * Windows apps (Wine). Null for anything else.
+ */
+export function featureForFile(name: string): string | null {
+  return /\.(exe|msi|bat|cmd|lnk)$/i.test(name) ? 'windows' : null;
+}
+
+/** Whether Din can install a feature here and hasn't: DinOS's own, or a package the system has. */
+export function canInstallFeature(state: FeaturesState | undefined, feature: FeatureState | undefined): feature is FeatureState {
+  return !!feature && !feature.installed && (state?.source !== 'packages' || feature.command !== null);
 }
 
 /** Strip Electron's IPC error prefix so users see just the underlying message. */
@@ -94,6 +140,12 @@ export function removalConsequence(feature: Pick<FeatureState, 'id' | 'title'>):
   }
 }
 
+/** What of a partly installed feature isn't here: "unar", "unar and 7-Zip". */
+export function listMissing(feature: Pick<FeatureState, 'missing'>): string {
+  const names = feature.missing;
+  return names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 /** What a feature is doing, or whether it's there, in a few words. */
 export function describeFeature(feature: FeatureState, live = false): string {
   const busy = feature.busy;
@@ -106,6 +158,7 @@ export function describeFeature(feature: FeatureState, live = false): string {
   }
   if (feature.installed && !feature.current) return 'Installed · an update is waiting';
   if (feature.installed) return 'Installed';
+  if (feature.missing.length > 0) return `Partly installed · ${listMissing(feature)} missing`;
   const size = `about ${formatFeatureSize(feature.size)}`;
   if (feature.wanted) {
     if (live) return `Downloads once DinOS is installed · ${size}`;

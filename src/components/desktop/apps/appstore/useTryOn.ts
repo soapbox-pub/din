@@ -55,10 +55,28 @@ function iconTriesQuery(pkg: IconPackage) {
   };
 }
 
+// Which App Store window's try-on is worn: there's one pointer and one set
+// of icons for them all, so one window's starting takes off another's, and
+// that one's closing or stopping leaves alone what it no longer wears.
+let wearer: object | null = null;
+const wearerChanged = new Set<() => void>();
+
+function setWearer(next: object | null): void {
+  wearer = next;
+  for (const changed of wearerChanged) changed();
+}
+
 /** Take off whatever's tried on; resolves once the pointer's put back. */
-function takeOff(): Promise<void> {
+function takeOffAny(): Promise<void> {
   previewDesktopThemeIcons(null);
   return endSystemCursorTryOn().catch(() => {});
+}
+
+/** Take off what `me` tried on, if it's still worn. */
+function takeOff(me: object): Promise<void> {
+  if (wearer !== me) return Promise.resolve();
+  setWearer(null);
+  return takeOffAny();
 }
 
 /** Whether a published theme can be tried on before getting it. */
@@ -89,8 +107,22 @@ export function useTryOn(installedId: (pkg: ThemePackage) => string | null): Try
   const [loading, setLoading] = useState(false);
   // Which start is current, so one superseded or stopped mid-download puts nothing on.
   const run = useRef(0);
+  const [me] = useState(() => ({}));
 
-  useEffect(() => () => void takeOff(), []);
+  useEffect(() => {
+    // Another window's try-on took this one's off.
+    const changed = () => {
+      if (wearer === me) return;
+      run.current++;
+      setTrying(null);
+      setLoading(false);
+    };
+    wearerChanged.add(changed);
+    return () => {
+      wearerChanged.delete(changed);
+      void takeOff(me);
+    };
+  }, [me]);
 
   const refreshPointer = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['cursor'] });
@@ -106,13 +138,18 @@ export function useTryOn(installedId: (pkg: ThemePackage) => string | null): Try
     },
     [refreshPointer],
   );
-  const stop = useCallback(() => end(takeOff()), [end]);
-  const keep = useCallback(() => end(endSystemCursorTryOn(true)), [end]);
+  const stop = useCallback(() => end(takeOff(me)), [end, me]);
+  const keep = useCallback(() => {
+    if (wearer !== me) return end(Promise.resolve());
+    setWearer(null);
+    end(endSystemCursorTryOn(true));
+  }, [end, me]);
 
   const start = (pkg: ThemePackage) => {
     if (!canTryOn(pkg)) return;
+    void takeOffAny();
+    setWearer(me);
     const id = ++run.current;
-    void takeOff();
     setTrying(pkg);
     setLoading(true);
     void (async () => {

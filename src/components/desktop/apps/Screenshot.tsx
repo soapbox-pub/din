@@ -25,6 +25,8 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { CaptureOverlay, type Session } from '@/components/desktop/CaptureOverlay';
+import { FeatureInstallNote } from '@/shared/FeatureInstall';
+import { useInstallableFeature } from '@/hooks/useFeatures';
 import { appForFile } from '@/lib/fileTypes';
 import { getFsBridge, cleanFsError, localFileUrl, parentPath } from '@/lib/fs';
 import {
@@ -43,6 +45,7 @@ import {
 import {
   formatRecordingTime,
   getScreenRecorderBridge,
+  refreshScreenRecorder,
   startRecording,
   stopRecording,
   useScreenRecorder,
@@ -173,6 +176,9 @@ export function Screenshot({ windowId }: AppComponentProps) {
   // The file of the recording this window started, to show when it ends.
   const ownRecording = useRef<string | null>(null);
   const recording = kind === 'video' && recorder.available;
+  // Without wf-recorder, the Video tab offers to install it, where Din can.
+  const recorderToInstall = useInstallableFeature('screen-recording');
+  const installing = kind === 'video' && !recorder.available && recorderToInstall !== undefined;
 
   const endSession = useCallback(() => {
     activeRef.current = false;
@@ -485,63 +491,71 @@ export function Screenshot({ windowId }: AppComponentProps) {
               label="Capture"
               size="md"
               className="mx-auto"
-              value={recording ? 'video' : 'photo'}
+              value={recording || installing ? 'video' : 'photo'}
               options={withIcons(KINDS).map((o) =>
-                o.value === 'video' && !recorder.available
-                  ? { ...o, disabled: true, title: 'Screen recording needs DinOS' }
+                o.value === 'video' && !recorder.available && !recorderToInstall
+                  ? { ...o, disabled: true, title: 'Screen recording isn’t available here' }
                   : o,
               )}
               onValueChange={setKind}
               disabled={busy}
             />
-            <div className={settingsGroup}>
-              <ChoiceRow label="Capture">
-                <SegmentedControl label="Capture mode" size="md" value={mode} options={withIcons(MODES)} onValueChange={setMode} disabled={busy} />
-              </ChoiceRow>
-              {recording && (
-                <ChoiceRow label="Sound">
-                  <SegmentedControl label="Sound" size="md" value={audio} options={withIcons(SOUNDS)} onValueChange={setAudio} disabled={busy} />
-                </ChoiceRow>
-              )}
-              <ChoiceRow label="Delay">
-                <SegmentedControl
-                  label="Capture delay"
-                  size="md"
-                  value={String(delay)}
-                  options={DELAYS.map((d) => ({ value: String(d), label: d === 0 ? 'None' : `${d} s` }))}
-                  onValueChange={(d) => setDelay(Number(d) as Delay)}
+            {installing ? (
+              <FeatureInstallNote feature="screen-recording" onInstalled={refreshScreenRecorder} className="py-6">
+                Screen recording isn’t installed yet.
+              </FeatureInstallNote>
+            ) : (
+              <>
+                <div className={settingsGroup}>
+                  <ChoiceRow label="Capture">
+                    <SegmentedControl label="Capture mode" size="md" value={mode} options={withIcons(MODES)} onValueChange={setMode} disabled={busy} />
+                  </ChoiceRow>
+                  {recording && (
+                    <ChoiceRow label="Sound">
+                      <SegmentedControl label="Sound" size="md" value={audio} options={withIcons(SOUNDS)} onValueChange={setAudio} disabled={busy} />
+                    </ChoiceRow>
+                  )}
+                  <ChoiceRow label="Delay">
+                    <SegmentedControl
+                      label="Capture delay"
+                      size="md"
+                      value={String(delay)}
+                      options={DELAYS.map((d) => ({ value: String(d), label: d === 0 ? 'None' : `${d} s` }))}
+                      onValueChange={(d) => setDelay(Number(d) as Delay)}
+                      disabled={busy}
+                    />
+                  </ChoiceRow>
+                </div>
+
+                {error && (
+                  <p role="alert" className="px-1 text-center text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+
+                <PillButton
+                  variant="primary"
+                  className={cn('h-10 w-full text-sm [&_svg]:size-4.5', recording && stopClass)}
+                  onClick={() => void startSession(mode)}
                   disabled={busy}
-                />
-              </ChoiceRow>
-            </div>
+                >
+                  {busy ? (
+                    <Loader2 className="animate-spin" aria-hidden />
+                  ) : recording ? (
+                    <Video strokeWidth={1.75} aria-hidden />
+                  ) : (
+                    <Camera strokeWidth={1.75} aria-hidden />
+                  )}
+                  {recording ? 'Start Recording' : 'Take Screenshot'}
+                </PillButton>
 
-            {error && (
-              <p role="alert" className="px-1 text-center text-sm text-destructive">
-                {error}
-              </p>
+                <p className="px-1 text-center text-xs leading-snug text-muted-foreground">
+                  {recording
+                    ? 'Recordings are saved in Videos › Screen Recordings.'
+                    : 'Print Screen takes the whole screen, Shift+Print Screen an area.'}
+                </p>
+              </>
             )}
-
-            <PillButton
-              variant="primary"
-              className={cn('h-10 w-full text-sm [&_svg]:size-4.5', recording && stopClass)}
-              onClick={() => void startSession(mode)}
-              disabled={busy}
-            >
-              {busy ? (
-                <Loader2 className="animate-spin" aria-hidden />
-              ) : recording ? (
-                <Video strokeWidth={1.75} aria-hidden />
-              ) : (
-                <Camera strokeWidth={1.75} aria-hidden />
-              )}
-              {recording ? 'Start Recording' : 'Take Screenshot'}
-            </PillButton>
-
-            <p className="px-1 text-center text-xs leading-snug text-muted-foreground">
-              {recording
-                ? 'Recordings are saved in Videos › Screen Recordings.'
-                : 'Print Screen takes the whole screen, Shift+Print Screen an area.'}
-            </p>
           </div>
         </div>
       )}

@@ -31,6 +31,8 @@ import { cleanFsError, getFsBridge, isHiddenEntry, isValidEntryName, joinPath } 
 import type { WorkArea } from '@/lib/monitors';
 import { openPath } from '@/lib/openPath';
 import { areaGrid, cellsRect, placedCells } from '@/lib/widgetGrid';
+import { toastWithFeature } from '@/lib/featureNotifications';
+import { featureForFile } from '@/lib/features';
 
 type Places = Record<string, IconPlace>;
 
@@ -240,8 +242,9 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     });
   }, [icons, layout, areas, gridFor, blocked, setStored]);
 
-  const fail = useCallback((title: string, error: unknown) => {
-    toast({ title, description: cleanFsError(error), variant: 'destructive' });
+  /** `feature`: the optional feature what failed needs, whose Install button goes on the toast. */
+  const fail = useCallback((title: string, error: unknown, feature: string | null = null) => {
+    void toastWithFeature(toast, { title, description: cleanFsError(error), variant: 'destructive' }, feature);
   }, [toast]);
 
   const byName = useCallback((name: string) => icons.find((i) => i.name === name), [icons]);
@@ -250,7 +253,7 @@ export function DesktopIconsProvider({ children }: { children: ReactNode }) {
     for (const name of list) {
       const icon = byName(name);
       if (!icon) continue;
-      await openPath(icon.path, icon.kind, { open: openApp, openUrl, getApp }).catch((error: unknown) => fail(`Couldn’t open ${icon.label}`, error));
+      await openPath(icon.path, icon.kind, { open: openApp, openUrl, getApp }).catch((error: unknown) => fail(`Couldn’t open ${icon.label}`, error, featureForFile(icon.path)));
     }
   }, [byName, openApp, openUrl, getApp, fail]);
 

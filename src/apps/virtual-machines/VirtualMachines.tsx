@@ -35,6 +35,7 @@ import { SettingsWindow } from './vms/SettingsWindow';
 import { openVmWindow, useVmWindowMessages, type VmWindow } from './vms/windows';
 import { Sidebar, StateDot } from './vms/Sidebar';
 import { SnapshotList, TakeSnapshotDialog } from './vms/Snapshots';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 import { appLink, windowLaunch, type Launch } from '@/shared/launch';
 
 const SELECTED_KEY = 'virtual-machines:selected';
@@ -104,12 +105,12 @@ export function VirtualMachines() {
     body = (
       <div className="m-auto max-w-md space-y-3 p-8 text-center">
         <Monitor className="mx-auto size-10 text-muted-foreground" aria-hidden />
-        <h1 className="text-lg font-semibold">Install Virtual machines to use this app</h1>
-        <p className="text-sm text-muted-foreground">
-          QEMU, which runs the machines, is an optional feature of DinOS, about 470 MB. Install it in Settings →
-          Optional Features, and this window is ready as soon as it’s done.
-        </p>
-        <Button onClick={() => void window.open(appLink('settings', { section: 'features' }))}>Open Optional Features</Button>
+        <h1 className="text-lg font-semibold">Virtual machines aren’t installed yet</h1>
+        <p className="text-sm text-muted-foreground">This window is ready as soon as they are.</p>
+        <FeatureInstallButton
+          feature="vms"
+          fallback={<Button onClick={() => void window.open(appLink('settings', { section: 'features' }))}>Open Optional Features</Button>}
+        />
       </div>
     );
   } else if (!status.available) {

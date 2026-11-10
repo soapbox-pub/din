@@ -162,6 +162,9 @@ function authenticateCommand(reply: string[]): string | null {
   const cookieFile = replyValue(auth, 'COOKIEFILE');
   if (methods.includes('COOKIE') && cookieFile) {
     try {
+      // Whatever answers on a control port names the file, so only what
+      // could be Tor's cookie (32 bytes, always) is read and sent: not a key.
+      if (fs.statSync(cookieFile).size !== 32) return null;
       return `AUTHENTICATE ${fs.readFileSync(cookieFile).toString('hex')}`;
     } catch {
       return null;
@@ -270,7 +273,9 @@ function refresh(): Promise<TorStatus> {
   refreshing = (async () => {
     try {
       const installed = HELPER ? null : ownVersion();
-      const ports = installed && ownEnabled() ? [OWN_SOCKS_PORT, ...SOCKS_PORTS] : SOCKS_PORTS;
+      // Din's own port only while its own Tor holds it: anything else could
+      // answer SOCKS there while it's stopped or restarting.
+      const ports = installed && ownEnabled() && ownListening ? [OWN_SOCKS_PORT, ...SOCKS_PORTS] : SOCKS_PORTS;
       let port: number | null = null;
       for (const candidate of ports) {
         if (await socksAnswers(candidate)) {
@@ -354,10 +359,19 @@ function setInstalling(step: string | null): void {
 let child: ChildProcess | null = null;
 let restartTimer: NodeJS.Timeout | null = null;
 let restarts = 0;
+/** While Din quits, or the bundle is being put in place of the one there was. */
+let quitting = false;
+let replacing = false;
+/**
+ * Whether Din's own Tor has opened its SOCKS port. Tor exits when it can't,
+ * so while that Tor runs, the port is its.
+ */
+let ownListening = false;
+const OWN_LISTENER = new RegExp(`Opened Socks listener.* on 127\\.0\\.0\\.1:${OWN_SOCKS_PORT}\\b`);
 
 /** Start Din's own Tor, where it's set up and on and not running already. */
 function startOwn(): void {
-  if (HELPER || child || !ownVersion() || !ownEnabled()) return;
+  if (HELPER || child || quitting || replacing || !ownVersion() || !ownEnabled()) return;
   if (restartTimer) clearTimeout(restartTimer);
   restartTimer = null;
   // Tor won't open a control socket in, or keep its keys in, a directory
@@ -396,6 +410,10 @@ function startOwn(): void {
   let tail = '';
   const keep = (chunk: Buffer) => {
     tail = (tail + chunk.toString()).slice(-4000);
+    if (child === proc && !ownListening && OWN_LISTENER.test(tail)) {
+      ownListening = true;
+      void refresh();
+    }
     // Running long enough to connect: a later exit starts over at the shortest wait.
     if (/Bootstrapped 100%/.test(tail)) {
       restarts = 0;
@@ -408,13 +426,17 @@ function startOwn(): void {
   proc.stdout?.on('data', keep);
   proc.stderr?.on('data', keep);
   proc.on('error', (error) => {
-    if (child === proc) child = null;
+    if (child === proc) {
+      child = null;
+      ownListening = false;
+    }
     ownError = `Tor didn’t start: ${error.message}`;
     void refresh();
   });
   proc.on('exit', (code, signal) => {
     if (child !== proc) return;
     child = null;
+    ownListening = false;
     if (ownVersion() && ownEnabled()) {
       // Tor's last [warn] or [err] says why, as "Could not bind to 127.0.0.1:9250: Address already in use".
       const reason = tail
@@ -439,6 +461,7 @@ function stopOwn(): Promise<void> {
   const proc = child;
   if (!proc) return Promise.resolve();
   child = null;
+  ownListening = false;
   return new Promise((resolve) => {
     const kill = setTimeout(() => proc.kill('SIGKILL'), 5_000);
     proc.once('exit', () => {
@@ -505,7 +528,9 @@ async function verifySums(sums: string, signature: string): Promise<void> {
     const out = await execGpg(['--status-fd', '1', '--verify', path.join(home, 'sums.txt.asc'), path.join(home, 'sums.txt')], home).catch(() => '');
     // VALIDSIG's last field is the primary key's fingerprint.
     const valid = out.split('\n').find((line) => line.startsWith('[GNUPG:] VALIDSIG '));
-    if (valid?.trim().split(' ').pop() !== SIGNING_KEY) throw new Error('The Tor release isn’t signed by the Tor Browser Developers');
+    // gpg says VALIDSIG for a revoked key's signature too.
+    const revoked = out.split('\n').some((line) => line.startsWith('[GNUPG:] REVKEYSIG '));
+    if (revoked || valid?.trim().split(' ').pop() !== SIGNING_KEY) throw new Error('The Tor release isn’t signed by the Tor Browser Developers');
   } finally {
     execFile('gpgconf', ['--kill', 'all'], { env: { ...process.env, GNUPGHOME: home } }, () => {
       fs.rmSync(home, { recursive: true, force: true });
@@ -565,13 +590,19 @@ function installBundle(version?: string): Promise<void> {
       await runCommand('tar', ['-xzf', archive, '-C', work, 'tor', 'data'], { timeout: 120_000 });
       fs.rmSync(archive);
 
-      await stopOwn();
-      const old = path.join(OWN_DIR, 'bundle.old');
-      fs.rmSync(old, { recursive: true, force: true });
-      if (fs.existsSync(OWN_BUNDLE)) fs.renameSync(OWN_BUNDLE, old);
-      fs.renameSync(work, OWN_BUNDLE);
-      fs.rmSync(old, { recursive: true, force: true });
-      fs.writeFileSync(OWN_VERSION_FILE, `${release}\n`);
+      // The switch turned on meanwhile mustn't start the old one as it goes.
+      replacing = true;
+      try {
+        await stopOwn();
+        const old = path.join(OWN_DIR, 'bundle.old');
+        fs.rmSync(old, { recursive: true, force: true });
+        if (fs.existsSync(OWN_BUNDLE)) fs.renameSync(OWN_BUNDLE, old);
+        fs.renameSync(work, OWN_BUNDLE);
+        fs.rmSync(old, { recursive: true, force: true });
+        fs.writeFileSync(OWN_VERSION_FILE, `${release}\n`);
+      } finally {
+        replacing = false;
+      }
       startOwn();
     } catch (error) {
       fs.rmSync(work, { recursive: true, force: true });
@@ -605,7 +636,8 @@ let lastUpdateCheck = 0;
 /** Move Din's own Tor to a newer release, if there is one, at most daily. */
 async function checkForUpdate(): Promise<void> {
   const current = ownVersion();
-  if (!current || installation || Date.now() - lastUpdateCheck < UPDATE_CHECK_MS) return;
+  // Not while it's off: asking the Tor Project's servers says Tor's here.
+  if (!current || !ownEnabled() || installation || Date.now() - lastUpdateCheck < UPDATE_CHECK_MS) return;
   lastUpdateCheck = Date.now();
   try {
     const latest = await latestVersion();
@@ -621,6 +653,7 @@ async function setOwnEnabled(enabled: boolean): Promise<void> {
     fs.rmSync(OWN_OFF_FILE, { force: true });
     restarts = 0;
     startOwn();
+    void checkForUpdate();
   } else {
     fs.writeFileSync(OWN_OFF_FILE, '');
     ownError = null;
@@ -775,8 +808,8 @@ export function registerTorHandlers(options: {
     setInterval(() => void checkForUpdate(), UPDATE_CHECK_MS).unref();
   }
   app.on('will-quit', () => {
-    if (restartTimer) clearTimeout(restartTimer);
-    child?.kill('SIGTERM');
+    quitting = true;
+    void stopOwn();
   });
 
   ipcMain.handle('tor:status', (event) => {

@@ -108,9 +108,10 @@ export function ThemeStore({
     editor.theme.source.identifier === theme.identifier &&
     sameThemeLook(editor.theme, theme.theme);
 
-  const wear = (theme: ThemeDefinition, failure: string): boolean => {
+  // A theme tried on is never published by itself; one used is held a while.
+  const wear = (theme: ThemeDefinition, failure: string, hold: true | 'until-commit' = true): boolean => {
     try {
-      editor.apply(theme.theme, { hold: true });
+      editor.apply(theme.theme, { hold });
       return true;
     } catch (error) {
       toast({
@@ -125,7 +126,7 @@ export function ThemeStore({
   const tryOn = (theme: ThemeDefinition) => {
     if (isTrying(theme) || isWorn(theme)) return;
     const previous = trial?.previous ?? editor.snapshot();
-    if (wear(theme, 'Couldn’t try on this theme')) setTrial({ theme, previous });
+    if (wear(theme, 'Couldn’t try on this theme', 'until-commit')) setTrial({ theme, previous });
   };
 
   const stopTrying = () => {
@@ -147,7 +148,7 @@ export function ThemeStore({
     if (isWorn(theme)) return;
     // What was worn before trying on is what Revert puts back.
     const previous = trial?.previous ?? editor.snapshot();
-    if (!isTrying(theme) && !wear(theme, 'Couldn’t use this theme')) return;
+    if (!wear(theme, 'Couldn’t use this theme')) return;
     setTrial(null);
     const adds = !actions.isAdded(theme);
     if (adds) actions.add(theme);

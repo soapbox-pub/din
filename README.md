@@ -111,8 +111,20 @@ Electron's sandbox start, and with LightDM a setting that keeps sessions on VT
 7 and up, away from the console login prompts that would otherwise read what's
 typed in Din (Fedora's LightDM starts at VT 1). If Din fails three times running just after
 logging in, the login screen goes back to your old desktop. In the session,
-the account menu has **Log out**. DinOS-only parts (updates, the Installer,
-the lock screen, nostrd) stay off. `scripts/session.mjs` has the details.
+the account menu has **Log out**, and what asks polkit for the password
+(pkexec, `timedatectl`, firmware updates) asks in Din, through
+`os/din-polkit-agent.py` on the system's Python and PyGObject. Settings
+works the system the way DinOS's does: Date & Time through timedated, the
+keyboard layout as the session's own (`~/.config/din/keyboard`, which the
+compositor starts with), the firewall through firewalld where it runs,
+firmware through the system's fwupd, and Optional Features from the
+system's packages (below). Links and folders native apps open come to Din,
+as on DinOS: installing (and updating) adds `din-open.desktop` to
+`~/.local/share/applications` and makes it the default for web, `nostr:` and
+`nsite:` links and folders in `~/.config/din-mimeapps.list`, which only Din's
+session reads, so your other desktop keeps its browser. Uninstalling shuts
+the ports Settings → Firewall let into firewalld. DinOS-only parts (updates, the Installer, the
+lock screen, nostrd) stay off. `scripts/session.mjs` has the details.
 
 Building it needs Rust 1.85 or newer ([rustup](https://rustup.rs); distribution
 packages are often older) and the compositor's libraries:
@@ -922,6 +934,26 @@ removed.
 A new optional feature is an entry in `dinFeatures` with a title,
 description, size and package (and `default = true` if it comes with the
 computer), whose users look for it under its link.
+
+On another Linux, Settings → Optional Features and `din features` are the
+system's own packages instead (`electron/system-packages.mts`): the same
+features where the distribution packages them, and the tools DinOS has
+built in that Din's features need (Xvfb for Linux apps, wf-recorder for
+screen recording, bsdtar/7-Zip/unar for archives, jmtpfs and ifuse for
+phones, Poppler for print previews), each installed with apt, dnf, pacman,
+zypper, xbps or apk through `sudo -A`, the password asked in Din. Din
+doesn't remove them; that's the package manager's. Each entry in `CATALOG`
+names what shows it's there and its packages per package manager, and one a
+distribution doesn't package isn't offered there. What can't open for want of
+one says where to get it ("… Install Archives in Settings → Optional
+Features."), and an Install button goes beside it: `FeatureInstallButton`
+(`src/shared/FeatureInstall.tsx`) in Screenshot, Files, Preview, Studio and
+Virtual Machines (apps with the `features` permission), and on the desktop's
+notifications (`src/lib/featureNotifications.ts`). Which feature is never
+read from the message: each place names the one what it does needs (an
+archive Archives, a `.exe` Windows apps, a phone's `needsFeature`), and the
+button shows only while that feature isn't installed. Dictation isn't among them: distributions don't package whisper.cpp's
+programs.
 
 ### Updating npm dependencies
 

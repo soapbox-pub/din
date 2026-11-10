@@ -73,11 +73,22 @@ function runPublish() {
   });
 }
 
-/** Publish the latest of a run of edits, once they settle. */
-function schedulePublish(publish: () => Promise<unknown>, delay = PUBLISH_DELAY_MS) {
+/**
+ * Publish the latest of a run of edits, once they settle, or with a null
+ * delay only once it's committed.
+ */
+function schedulePublish(publish: () => Promise<unknown>, delay: number | null = PUBLISH_DELAY_MS) {
   clearTimeout(publishTimer);
   pendingPublish = publish;
-  publishTimer = setTimeout(runPublish, delay);
+  if (delay !== null) publishTimer = setTimeout(runPublish, delay);
+}
+
+/** How long `apply` waits to publish: until it settles, a while, or a commit. */
+type Hold = boolean | 'until-commit';
+
+function holdDelay(hold: Hold): number | null {
+  if (hold === 'until-commit') return null;
+  return hold ? HOLD_DELAY_MS : PUBLISH_DELAY_MS;
 }
 
 function cancelPublish() {
@@ -110,10 +121,11 @@ export function useDesktopThemeEditor() {
 
   /**
    * Wear a theme as the profile theme now, and publish it once edits
-   * settle, or with `hold` once it's committed or HOLD_DELAY_MS passes.
+   * settle, or with `hold` once it's committed or HOLD_DELAY_MS passes
+   * ('until-commit': only once it's committed).
    */
   const applyProfile = useCallback(
-    (next: ProfileTheme, { hold = false }: { hold?: boolean } = {}) => {
+    (next: ProfileTheme, { hold = false }: { hold?: Hold } = {}) => {
       if (!pubkey) return;
       // updatedAt stays put until the event is out, so NostrSync doesn't
       // look the theme up again on every edit.
@@ -144,7 +156,7 @@ export function useDesktopThemeEditor() {
               }
             : current,
         );
-      }, hold ? HOLD_DELAY_MS : PUBLISH_DELAY_MS);
+      }, holdDelay(hold));
     },
     [pubkey, updateConfig, publishEvent],
   );
@@ -165,11 +177,12 @@ export function useDesktopThemeEditor() {
   /**
    * Wear a custom theme: the profile theme while syncing, else this
    * computer's. A theme with a local background can't be the profile theme.
-   * `hold` is for trying a theme on: it goes out on `commit`, not as soon
-   * as it settles.
+   * `hold` is for clicking around themes: it goes out on `commit`, or once
+   * a while passes, not as soon as it settles. A theme tried on is held
+   * 'until-commit', so it never goes out by itself.
    */
   const apply = useCallback(
-    (next: DesktopTheme, options?: { hold?: boolean }) => {
+    (next: DesktopTheme, options?: { hold?: Hold }) => {
       if (syncing) {
         const asProfile = toProfileTheme(next);
         if (!asProfile) throw new Error('A background on this computer can’t go in your profile theme.');

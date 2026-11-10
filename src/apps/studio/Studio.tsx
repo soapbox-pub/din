@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cleanCaptureError, type CaptureRect, type CaptureStatus, type LiveStatus, type ProjectChange, type ProjectInfo, type ProjectItem, type StudioAspect, type StudioScene } from '@/lib/capture';
 import { SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
+import { FeatureInstallButton } from '@/shared/FeatureInstall';
 import { toolIcon } from '@/shared/appChromeStyles';
 import { canOpenApp, onLaunch, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { useCloseGuard, useDin, useDocumentVisible, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -126,6 +127,8 @@ export function Studio() {
   const [fresh, setFresh] = useState<string | null>(null);
   const [importing, setImporting] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The optional feature the notice's failure needs, for its Install button, while the notice says it. */
+  const [noticeFeature, setNoticeFeature] = useState<{ notice: string; feature: string } | null>(null);
   const [canAssist, setCanAssist] = useState(false);
   const { projects, loading, put, refresh } = useProjects(capture);
   const project = (settings.project && projects.find((p) => p.path === settings.project)) || null;
@@ -514,7 +517,11 @@ export function Studio() {
   useEffect(() => onLaunch((launch) => perform(actionOf(launch))), [perform]);
 
   // ---- the project ----
-  const fail = useCallback((what: string) => (e: unknown) => setNotice(`${what}: ${cleanCaptureError(e)}`), []);
+  const fail = useCallback((what: string, feature?: string) => (e: unknown) => {
+    const text = `${what}: ${cleanCaptureError(e)}`;
+    setNotice(text);
+    setNoticeFeature(feature ? { notice: text, feature } : null);
+  }, []);
   const changeProject = useCallback(
     (path: string, change: ProjectChange) => capture?.updateProject(path, change).then(put, fail('Couldn’t change the project')),
     [capture, put, fail],
@@ -643,7 +650,7 @@ export function Studio() {
         setRenaming(item.take.path);
         break;
       case 'transcribe':
-        void capture?.transcribe(item.take.path).catch(fail(`Couldn’t transcribe ${item.take.title}`));
+        void capture?.transcribe(item.take.path).catch(fail(`Couldn’t transcribe ${item.take.title}`, 'dictation'));
         break;
       case 'trash':
         setTrashing({ item });
@@ -872,6 +879,7 @@ export function Studio() {
               {(notice || live?.behind) && (
                 <div role="status" className="mx-auto mt-3 flex max-w-xl items-start gap-3 rounded-xl bg-neutral-800 px-4 py-2.5 text-sm text-white shadow-lg">
                   <span className="flex-1">{notice ?? 'Your connection is falling behind the stream. Viewers may see it stutter.'}</span>
+                  <FeatureInstallButton feature={noticeFeature?.notice === notice ? noticeFeature.feature : null} className="text-foreground" onInstalled={() => setNotice(null)} />
                   {notice && (
                     <button type="button" onClick={() => setNotice(null)} className="text-white/60 outline-none hover:text-white focus-visible:underline">
                       Dismiss

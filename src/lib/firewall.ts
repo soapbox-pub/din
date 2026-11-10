@@ -1,9 +1,10 @@
 /**
  * The firewall, through the `window.dinos.firewall` bridge
  * (electron/preload.cjs, backed by electron/firewall.mts): the ports the
- * user has let other devices connect to, and letting more in, on DinOS.
- * Din's own features' ports are DinOS's (os/configuration.nix) and aren't
- * listed here.
+ * user has let other devices connect to, and letting more in, on DinOS
+ * and where firewalld runs. Din's own features' ports are DinOS's
+ * (os/configuration.nix) and aren't listed there; with firewalld, Din lets
+ * them in when asked (`allowFeatures`), and lists them with the rest.
  *
  * In a plain browser (`npm run dev:browser`) the bridge is absent; callers
  * feature-detect via `getFirewallBridge()`.
@@ -21,8 +22,10 @@ export interface FirewallRule {
 }
 
 export interface FirewallStatus {
-  /** Whether Din can change the firewall here (DinOS). */
+  /** Whether Din can change the firewall here (DinOS, or firewalld). */
   canChange: boolean;
+  /** Which firewall Din changes: DinOS's own, or firewalld; null where it doesn't. */
+  manager: 'dinos' | 'firewalld' | null;
   /** Whether the firewall is running; null where Din can't tell. */
   active: boolean | null;
   /** The ports the user has let in. */
@@ -35,6 +38,8 @@ export interface FirewallBridge {
   status(): Promise<FirewallStatus>;
   allow(rule: FirewallRule): Promise<FirewallStatus>;
   remove(rule: FirewallRuleKey): Promise<FirewallStatus>;
+  /** With firewalld: let in the ports Din's own features listen on (Quick Share, LocalSend, AirPlay). */
+  allowFeatures(): Promise<FirewallStatus>;
   onStatus(callback: (status: FirewallStatus) => void): () => void;
 }
 
@@ -84,4 +89,16 @@ export function parsePorts(text: string): { from: number; to: number } | { error
 export function cleanFirewallError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+}
+
+/** The ports Din's own features listen on, as electron/firewall.mts lets them into firewalld. */
+const FEATURE_RULES: FirewallRuleKey[] = [
+  { protocol: 'tcp', from: 47331, to: 47331 },
+  { protocol: 'both', from: 53317, to: 53317 },
+  { protocol: 'udp', from: 7010, to: 7039 },
+];
+
+/** Whether every one of Din's own features' ports is among RULES. */
+export function featurePortsAllowed(rules: FirewallRuleKey[]): boolean {
+  return FEATURE_RULES.every((f) => rules.some((r) => r.protocol === f.protocol && r.from === f.from && r.to === f.to));
 }

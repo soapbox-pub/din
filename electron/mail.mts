@@ -2538,8 +2538,9 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   const sameServer = (x: typeof imap, y: typeof imap) => x.host === y.host && x.port === y.port && x.user === y.user;
   const typed = typeof p.password === 'string' && p.password ? p.password : null;
   if (!typed && (!sameServer(imap, a.imap) || !sameServer(smtp, a.smtp))) throw new Error('Enter the password for the new server settings.');
-  const password = typed ?? unseal(a.password);
-  if (servers) await verify(imap, smtp, password);
+  // Only a server change needs the saved one: a name or signature can still
+  // be edited while it can't be read.
+  if (servers) await verify(imap, smtp, typed ?? unseal(a.password));
   if (typeof p.name === 'string') a.name = p.name.trim().slice(0, 100) || a.name;
   if (typeof p.fullName === 'string') a.fullName = p.fullName.trim().slice(0, 200).replace(/[\r\n]/g, ' ');
   if (typeof p.signature === 'string') a.signature = p.signature.slice(0, 10_000);

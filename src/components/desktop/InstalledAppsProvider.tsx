@@ -192,6 +192,8 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
     icon: app.icon ?? NATIVE_APP_ICON,
     component: NativeWindowView,
     native: true,
+    // A Windows program in Din's prefix runs on Wine.
+    ...(app.uninstallable ? { feature: 'windows' } : {}),
     terminal: app.terminal,
     keywords: [...app.keywords, ...app.categories],
     // Desktop entries can't say which kinds they show.
