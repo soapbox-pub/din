@@ -692,7 +692,15 @@ function useVisibleAgents<T = AgentInfo[]>(select?: (agents: AgentInfo[]) => T) 
   const ready = useAssistantReady();
   return useQuery({
     queryKey: assistantKeys.agents,
-    queryFn: async () => (await assistantApi.agents()).filter((agent) => !agent.hidden),
+    queryFn: async () => {
+      const agents = await assistantApi.agents();
+      // A server that has just started answers with no agents for a moment
+      // (it always has Build): failing lets the query try again and keeps
+      // the agents it had, where taking the empty list would hide the
+      // Agent menu until the window reopens.
+      if (agents.length === 0) throw new Error('OpenCode hasn’t loaded its agents yet');
+      return agents.filter((agent) => !agent.hidden);
+    },
     select,
     enabled: ready,
     staleTime: 5 * 60_000,
