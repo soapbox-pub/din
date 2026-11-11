@@ -25,7 +25,7 @@ talks about guests by element or by id:
   hidden={backgroundTab}             // with the window's visibility, drives document.visibilityState
   acceptFileDrops                    // Files drags arrive as real files (web pages)
   onAttach={(id) => …}               // the guest id, once attached
-  onDomReady onLoadStart onLoadEnd onLoadError onTitle onFavicons onThemeColor onNavigate onGone
+  onDomReady onLoadStart onLoadEnd onLoadError onTitle onFavicons onThemeColor onNavigate onTargetUrl onGone
 />
 ```
 

@@ -220,5 +220,6 @@ export const GUEST_EVENTS = {
   themeColor: 'did-change-theme-color',
   navigate: 'did-navigate',
   navigateInPage: 'did-navigate-in-page',
+  targetUrl: 'update-target-url',
   gone: 'render-process-gone',
 } as const;

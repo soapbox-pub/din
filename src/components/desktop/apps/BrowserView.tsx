@@ -354,6 +354,25 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     // what happened and offer a reload (which starts a fresh renderer).
     const [gone, setGone] = useState(false);
 
+    // Where the link under the pointer leads, shown at the page's bottom left
+    // as browsers do. It goes at once when a page loads, and a moment after
+    // the pointer leaves a link otherwise, so moving between links doesn't
+    // make it blink.
+    const [targetUrl, setTargetUrl] = useState('');
+    const hideTarget = useRef<number | null>(null);
+    const showTarget = useCallback((url: string) => {
+      if (hideTarget.current !== null) window.clearTimeout(hideTarget.current);
+      hideTarget.current = null;
+      if (url) setTargetUrl(shownUrl(url));
+      else hideTarget.current = window.setTimeout(() => setTargetUrl(''), 150);
+    }, []);
+    const clearTarget = useCallback(() => {
+      if (hideTarget.current !== null) window.clearTimeout(hideTarget.current);
+      hideTarget.current = null;
+      setTargetUrl('');
+    }, []);
+    useEffect(() => clearTarget, [clearTarget]);
+
     // The page loading next draws over whatever the guest showed last, and
     // until it draws, the engine keeps that frame up: a backdrop, never a
     // cover. Before a guest's first page that's the element's own theme
@@ -388,6 +407,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           onAttach={onWebContentsId}
           onLoadStart={() => {
             setGone(false);
+            clearTarget();
             onLoadStart?.();
           }}
           onLoadEnd={onLoadEnd}
@@ -407,16 +427,35 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
               canForward,
             );
           }}
+          onTargetUrl={showTarget}
           onGone={() => {
             setGone(true);
+            clearTarget();
             onLoadEnd?.();
           }}
         />
+        {targetUrl && !hidden && !gone && <LinkStatus url={targetUrl} />}
         {gone && <PageGone onReload={() => surface.current?.reload()} />}
       </div>
     );
   },
 );
+
+/**
+ * The status bubble: where the link under the pointer leads. It never takes
+ * the pointer, so the page under it stays clickable. The URL is the page's
+ * own and only ever rendered as text.
+ */
+function LinkStatus({ url }: { url: string }) {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[min(32rem,calc(100%-1rem))] truncate rounded-lg glass-surface px-2 py-1 text-xs text-foreground"
+    >
+      {url}
+    </div>
+  );
+}
 
 /** Shown over a page whose renderer is gone, with a way to start it again. */
 function PageGone({ onReload }: { onReload: () => void }) {

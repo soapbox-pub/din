@@ -75,6 +75,11 @@ export interface GuestSurfaceProps {
   onThemeColor?: (color: string | null) => void;
   /** A committed main-frame navigation: the URL, the raw current URL, and history. */
   onNavigate?: (url: string, currentUrl: string, canGoBack: boolean, canGoForward: boolean) => void;
+  /**
+   * The URL a link under the pointer (or focused by keyboard) leads to, or ''
+   * once there's none: what a browser shows in its status bubble. Untrusted.
+   */
+  onTargetUrl?: (url: string) => void;
   /** The guest's renderer went away (crashed, killed, out of memory). */
   onGone?: () => void;
 }
@@ -150,6 +155,7 @@ function PreparedGuestSurface({
   onFavicons,
   onThemeColor,
   onNavigate,
+  onTargetUrl,
   onGone,
 }: GuestSurfaceProps) {
   const windowVisible = useWindowVisible();
@@ -240,6 +246,10 @@ function PreparedGuestSurface({
   useGuestEvent(elRef, GUEST_EVENTS.navigateInPage, onNavigate && ((e, el) => {
     const { url, isMainFrame } = e as Event & { url?: string; isMainFrame?: boolean };
     if (isMainFrame) reportNavigation(el, url);
+  }));
+  useGuestEvent(elRef, GUEST_EVENTS.targetUrl, onTargetUrl && ((e) => {
+    const { url } = e as Event & { url?: string };
+    onTargetUrl(typeof url === 'string' ? url : '');
   }));
   useGuestEvent(elRef, GUEST_EVENTS.gone, onGone && (() => onGone()));
 
