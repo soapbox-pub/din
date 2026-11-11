@@ -1703,7 +1703,7 @@ export function Paint() {
           <div className="relative inline-block p-[3px] pr-4 pb-4 align-top">
             <div
               ref={pageRef}
-              className="relative"
+              className="relative touch-none"
               style={{ width: cw, height: ch, cursor: CURSORS[tool] ?? 'crosshair' }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -1824,7 +1824,7 @@ export function Paint() {
                   role="separator"
                   aria-label={dir === 'e' ? 'Drag to change the width' : dir === 's' ? 'Drag to change the height' : 'Drag to change the size'}
                   onPointerDown={(e) => onHandleDown(e, dir)}
-                  className="absolute size-[5px] bg-[#000080]"
+                  className="absolute size-[5px] touch-none bg-[#000080]"
                   style={{
                     left: dir === 's' ? cw / 2 - 2 : cw,
                     top: dir === 'e' ? ch / 2 - 2 : ch,
