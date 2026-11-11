@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type ComponentProps } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, BellOff, Globe, RotateCcw } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
@@ -24,6 +24,10 @@ import { SettingsToken } from '@/shared/settingsChrome';
 interface Site {
   origin: string;
   allow: boolean;
+  /** What an allowed website calls itself, from its web app manifest. */
+  name?: string | null;
+  /** Its icon, as a data URL. */
+  icon?: string | null;
 }
 
 const QUERY_KEY = ['site-permissions', 'notifications'];
@@ -108,14 +112,19 @@ function SiteRows({
     .map((site) => {
       const appId = findAppIdForUrl(`${site.origin}/`);
       const app = appId ? getApp(appId) : undefined;
-      return { ...site, app, name: app?.name ?? siteName(site.origin) };
+      return {
+        ...site,
+        app,
+        name: app?.name ?? site.name ?? siteName(site.origin),
+        icon: app?.icon ?? site.icon ?? null,
+      };
     })
     .sort((a, b) => Number(b.allow) - Number(a.allow) || a.name.localeCompare(b.name));
 
   return (
     <ul className={settingsGroup}>
-      {rows.map(({ origin, allow, app, name }) => (
-        <SiteRow key={origin} origin={origin} allow={allow} app={app} name={name} onSet={onSet} />
+      {rows.map(({ origin, allow, app, name, icon }) => (
+        <SiteRow key={origin} origin={origin} allow={allow} app={app} name={name} icon={icon} onSet={onSet} />
       ))}
     </ul>
   );
@@ -126,12 +135,14 @@ function SiteRow({
   allow,
   app,
   name,
+  icon,
   onSet,
 }: {
   origin: string;
   allow: boolean;
   app: ReturnType<ReturnType<typeof useInstalledApps>['getApp']>;
   name: string;
+  icon: ComponentProps<typeof AppIcon>['icon'] | null;
   onSet: (origin: string, allow: boolean | null) => void;
 }) {
   const { open } = useWindowActions();
@@ -144,8 +155,8 @@ function SiteRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <li className="flex items-center gap-3 px-4 py-3">
-          {app ? (
-            <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" />
+          {icon ? (
+            <AppIcon icon={icon} className="size-8 shrink-0 rounded-md" />
           ) : (
             <SettingsToken icon={Globe} />
           )}

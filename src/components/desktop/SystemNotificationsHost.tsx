@@ -75,7 +75,7 @@ export function SystemNotificationsHost() {
       const app = appId ? getAppRef.current(appId) : undefined;
       const origin = n.guest?.remembered ? n.guest.origin : undefined;
       if (app && app.id !== 'web-browser') return { appId: app.id, name: app.name, origin };
-      return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin };
+      return { name: n.appName, icon: n.icon ?? getAppRef.current('web-browser')?.icon, origin };
     };
 
     /** A website's worker's notification is from its installed web app, if it has one, or from the Web Browser. */
@@ -83,7 +83,7 @@ export function SystemNotificationsHost() {
       const appId = findAppIdForUrlRef.current(`${worker.origin}/`);
       const app = appId ? getAppRef.current(appId) : undefined;
       if (app) return { appId: app.id, name: app.name, origin: worker.origin };
-      return { name: n.appName, icon: getAppRef.current('web-browser')?.icon, origin: worker.origin };
+      return { name: n.appName, icon: n.icon ?? getAppRef.current('web-browser')?.icon, origin: worker.origin };
     };
 
     /** Open an installed nsite, at a page of its own or where it was. */

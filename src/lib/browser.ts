@@ -170,7 +170,13 @@ export interface BrowserBridge {
    */
   clearSiteData(origin: string, isPrivate: boolean): Promise<void>;
   /** Every site with a remembered answer for a capability (not private windows'). */
-  listSitePermissions(capability: SiteCapability): Promise<{ origin: string; allow: boolean }[]>;
+  /**
+   * A website allowed to notify also comes with what it calls itself and its
+   * icon (a data URL), as read from its web app manifest, when known.
+   */
+  listSitePermissions(
+    capability: SiteCapability,
+  ): Promise<{ origin: string; allow: boolean; name?: string | null; icon?: string | null }[]>;
   /** A remembered answer changed. Returns an unsubscribe fn. */
   onSitePermissionsChanged(callback: () => void): () => void;
 }

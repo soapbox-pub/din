@@ -130,6 +130,14 @@ import { registerOpenUri } from './open-uri.mts';
 import { attachLaunchedGuest, registerDinLaunch, serveLaunched } from './din-launch.mts';
 import { registerDinFileApps } from './din-file-apps.mts';
 import { registerNotificationHandlers } from './notifications.mts';
+import {
+  cachedSiteIdentity,
+  configureSiteIdentities,
+  ensureSiteIdentity,
+  forgetSiteIdentity,
+  refreshSiteIdentity,
+  siteIdentity,
+} from './site-identities.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
 import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
 import { forgetWebPushSubscriptions, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
@@ -5011,6 +5019,11 @@ function decide(s: Electron.Session, origin: string, capability: SiteCapability,
   nappPermissionChanged(origin, capability, allow);
   webPushPermissionChanged(origin, capability, allow);
   periodicSyncPermissionChanged(origin, capability, allow);
+  // A website allowed to notify is named and drawn as itself (site-identities.mts).
+  if (capability === 'notifications') {
+    if (allow) void refreshSiteIdentity(origin);
+    else forgetSiteIdentity(origin);
+  }
   sendToShell('site-permissions:changed');
 }
 
@@ -5253,10 +5266,19 @@ function registerSitePermissionHandlers(): void {
   ipcMain.handle('site-permissions:list', (event, capability) => {
     assertShellSender(event);
     if (!SITE_CAPABILITIES.includes(capability)) throw new Error('Invalid capability');
-    const sites: { origin: string; allow: boolean }[] = [];
+    const sites: { origin: string; allow: boolean; name?: string | null; icon?: string | null }[] = [];
     for (const [k, allow] of persistedDecisions()) {
       const [origin, answered] = k.split('\u0000');
-      if (answered === capability) sites.push({ origin, allow });
+      if (answered !== capability) continue;
+      if (capability !== 'notifications' || !allow) {
+        sites.push({ origin, allow });
+        continue;
+      }
+      // Sites allowed before their names were kept are looked up now; the
+      // list hears site-permissions:changed when one comes in.
+      ensureSiteIdentity(origin);
+      const identity = cachedSiteIdentity(origin);
+      sites.push({ origin, allow, name: identity?.name ?? null, icon: identity?.icon ?? null });
     }
     return sites;
   });
@@ -6424,7 +6446,9 @@ app.whenReady().then(() => {
     sendToShell,
     webPermission: siteNotificationPermission,
     remembersPermission: remembersDecisions,
+    siteIdentity: (origin) => siteIdentity(origin),
   });
+  configureSiteIdentities({ session: browserSession, onChange: () => sendToShell('site-permissions:changed') });
   registerNappHandlers({
     session: browserSession,
     sendToShell,

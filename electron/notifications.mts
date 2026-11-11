@@ -13,7 +13,8 @@
 // notify (asked in the shell, see hardenGuestSession in main.mts) gets one
 // shown; its icon is fetched here, in the page's own session. Clicks and
 // closes go back to the page as its Notification's events, and its
-// notifications go when the page does.
+// notifications go when the page does. A website's go under the name and
+// icon its web app manifest gives (site-identities.mts), not its host.
 //
 // Installed nsites' come from napp.mts (their pages' and service workers'
 // registration.showNotification). They outlive the page; clicks and
@@ -282,6 +283,12 @@ const MAX_WEB_PER_PAGE = 32;
 const MAX_FETCHED_ICON_BYTES = 2 * 1024 * 1024;
 const ICON_FETCH_TIMEOUT_MS = 5_000;
 
+/**
+ * What a website allowed to notify calls itself and its icon
+ * (site-identities.mts), for the notification's source in place of its host.
+ */
+let identityOf: (origin: string) => Promise<{ name: string | null; icon: string | null } | null> = async () => null;
+
 /** A web page's notification, by the number the page knows it by. */
 const webNotifications = new Map<number, Electron.WebContents>();
 let lastWebId = 0;
@@ -298,7 +305,7 @@ function webText(value: unknown, max: number): string {
  * <img> never runs scripts in. A data: URL is taken whole or not at all:
  * cut short, it decodes as just the picture's top rows.
  */
-async function fetchIcon(s: Electron.Session, url: string, credentials: RequestCredentials = 'include'): Promise<string | null> {
+export async function fetchIcon(s: Electron.Session, url: string, credentials: RequestCredentials = 'include'): Promise<string | null> {
   if (!/^(https?|nsite|din|din\+file):/i.test(url)) {
     return /^data:image\/[a-z0-9.+-]+[;,]/i.test(url) && url.length <= MAX_IMAGE_BYTES ? url : null;
   }
@@ -363,7 +370,12 @@ function registerWebHandlers(
     if (!origin || permission(contents.session, origin) !== 'granted') return null;
     if ([...webNotifications.values()].filter((owner) => owner === contents).length >= MAX_WEB_PER_PAGE) return null;
     const opts = typeof options === 'object' && options !== null ? (options as Record<string, unknown>) : {};
-    const icon = await fetchIcon(contents.session, typeof opts.icon === 'string' ? opts.icon : '');
+    const isRemembered = remembered(contents.session);
+    const [icon, identity] = await Promise.all([
+      fetchIcon(contents.session, typeof opts.icon === 'string' ? opts.icon : ''),
+      // A private window's or Tor's site is never looked up.
+      isRemembered ? identityOf(origin) : null,
+    ]);
     if (contents.isDestroyed()) return null;
 
     const id = ++lastWebId;
@@ -375,9 +387,9 @@ function registerWebHandlers(
     }
     const notification: SystemNotification = {
       id: `web:${id}`,
-      appName: new URL(origin).host,
+      appName: identity?.name ?? new URL(origin).host,
       appId: null,
-      icon: null,
+      icon: identity?.icon ?? null,
       image: icon,
       title: webText(opts.title, MAX_WEB_TITLE),
       body: webText(opts.body, MAX_WEB_BODY),
@@ -386,7 +398,7 @@ function registerWebHandlers(
       timeout: opts.requireInteraction === true ? 0 : -1,
       resident: false,
       transient: false,
-      guest: { webContentsId: contents.id, origin, remembered: remembered(contents.session) },
+      guest: { webContentsId: contents.id, origin, remembered: isRemembered },
       tag: webText(opts.tag, 256),
       site: null,
       worker: null,
@@ -493,12 +505,15 @@ export async function showWorkerNotification(
     silent: boolean;
   },
 ): Promise<void> {
-  const image = notification.icon ? await fetchIcon(s, notification.icon) : null;
+  const [image, identity] = await Promise.all([
+    notification.icon ? fetchIcon(s, notification.icon) : null,
+    identityOf(notification.origin),
+  ]);
   const shown: SystemNotification = {
     id: `sw:${notification.id}`,
-    appName: new URL(notification.origin).host,
+    appName: identity?.name ?? new URL(notification.origin).host,
     appId: null,
-    icon: null,
+    icon: identity?.icon ?? null,
     image,
     title: notification.title.slice(0, MAX_WEB_TITLE),
     body: notification.body.slice(0, MAX_WEB_BODY),
@@ -592,9 +607,12 @@ export function registerNotificationHandlers(options: {
   webPermission: (s: Electron.Session, origin: string) => NotificationPermission;
   /** Whether a session's answers are the remembered ones. */
   remembersPermission: (s: Electron.Session) => boolean;
+  /** What a website allowed to notify calls itself, and its icon. */
+  siteIdentity: (origin: string) => Promise<{ name: string | null; icon: string | null } | null>;
 }): void {
   const { isShellSender } = options;
   sendToShell = options.sendToShell;
+  identityOf = options.siteIdentity;
 
   ipcMain.on('notifications:activate', (event, id, action) => {
     const target = parseId(id);
