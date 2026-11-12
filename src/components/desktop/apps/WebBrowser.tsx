@@ -59,7 +59,7 @@ import {
   PREFERENCES_URL,
   BOOKMARKS_URL,
 } from '@/lib/internalPages';
-import { addBookmark, bookmarksOfUrl, getBookmarks, isBookmarkableUrl } from '@/lib/browserBookmarks';
+import { addBookmark, bookmarksOfUrl, getBookmarks, isBookmarkableUrl, recordBookmarkIcon } from '@/lib/browserBookmarks';
 import { useBookmarkFiles, useBookmarksBarShown } from '@/hooks/useBrowserBookmarks';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { BookmarkStarButton, BookmarksBar } from '@/components/desktop/apps/BrowserBookmarks';
@@ -1199,7 +1199,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           // keeps its glyph.
           if (tab?.tor) break;
           updateTab(id, { favicon: event.value });
-          if (!isPrivate && tab?.url) recordFavicon(tab.url, event.value);
+          if (!isPrivate && tab?.url) {
+            recordFavicon(tab.url, event.value);
+            recordBookmarkIcon(bookmarksOwner, tab.url, event.value);
+          }
           break;
         }
         case 'themeColor':
@@ -1262,7 +1265,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         }
       }
     },
-    [updateTab, crx, recordVisit, recordTitle, recordFavicon, clearCertError, clearLoadError, resetFind, isPrivate],
+    [updateTab, crx, recordVisit, recordTitle, recordFavicon, bookmarksOwner, clearCertError, clearLoadError, resetFind, isPrivate],
   );
 
   // Retry a failed load: re-request the failed URL through the tab's surface.

@@ -20,7 +20,7 @@ export interface Bookmark {
   url: string;
   /** Unix seconds it was added. */
   addedAt: number;
-  /** The page's favicon (http(s) only), when it reported one. */
+  /** The page's favicon (http(s), or a small data:image), when it reported one. */
   icon?: string;
 }
 
@@ -61,9 +61,19 @@ export function isBookmarkableUrl(url: string): boolean {
   return url.length <= MAX_URL_LENGTH && /^(https?:\/\/|nsite:\/\/|nostr:|blossom:)/i.test(url);
 }
 
-/** A favicon worth keeping: a plain http(s) URL, not a data: URI. */
+/**
+ * The most a data: favicon may take up. Pages Din serves itself (nsites)
+ * report theirs inline, a few KB each; anything much bigger isn't worth
+ * keeping in localStorage for a 16px icon.
+ */
+const MAX_DATA_ICON_LENGTH = 32 * 1024;
+
+/** A favicon worth keeping: an http(s) URL, or a small inline image (data:image/…). */
 export function cleanIcon(icon: string | null | undefined): string | undefined {
-  return icon && /^https?:\/\//i.test(icon) && icon.length <= MAX_URL_LENGTH ? icon : undefined;
+  if (!icon) return undefined;
+  if (/^https?:\/\//i.test(icon)) return icon.length <= MAX_URL_LENGTH ? icon : undefined;
+  if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(icon)) return icon.length <= MAX_DATA_ICON_LENGTH ? icon : undefined;
+  return undefined;
 }
 
 export function cleanTitle(title: string): string {
@@ -346,6 +356,27 @@ export function updateBookmark(owner: string, id: string, changes: { title?: str
     })),
   );
   return true;
+}
+
+/**
+ * Give a page's bookmarks the favicon it just reported, as Chrome does on a
+ * visit, so one saved before its icon loaded (or before Din kept icons like
+ * it) gets one. Does nothing when the page has none or none are bookmarked.
+ */
+export function recordBookmarkIcon(owner: string, url: string, icon: string | null): void {
+  const clean = cleanIcon(icon);
+  if (!clean) return;
+  let tree = getBookmarks(owner);
+  const stale = new Set(bookmarksOfUrl(tree, url).filter((b) => b.icon !== clean).map((b) => b.id));
+  if (!stale.size) return;
+  for (const { node, parent } of [...walkTree(tree)]) {
+    if (!stale.has(node.id)) continue;
+    tree = updateFolder(tree, parent.id, (folder) => ({
+      ...folder,
+      children: folder.children.map((c) => (c.type === 'bookmark' && c.id === node.id ? { ...c, icon: clean } : c)),
+    }));
+  }
+  save(owner, tree);
 }
 
 /** A node taken out of the tree, and where it was, so it can be put back. */
