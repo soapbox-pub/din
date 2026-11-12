@@ -26,7 +26,7 @@
 // `din update local` command, for the assistant's `dinos` skill): it names
 // the exact commit to `local`, which sudo asks the user to approve, in the
 // Assistant's conversation when it ran the command. It answers what's left
-// to restart, and the command restarts Din.
+// to restart, which the command leaves to the user (or to its `--restart`).
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.

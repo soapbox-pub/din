@@ -366,7 +366,9 @@ with `din update local` (the assistant's `dinos` skill,
 `os/opencode/skills/dinos`): Din resolves `main` of `~/DinOS` to its commit
 and runs `din-update local <commit>` through sudo, which asks the user
 ("Allow the assistant to update Din?"). The service builds that commit like
-any update, then the command switches to it and Din restarts if it changed.
+any update, then the command switches to it. If Din changed, it starts when the user
+restarts Din (Restart Din, or `din update restart`), or right away with
+`din update local --restart`.
 The newest `local` wins: asked for while another commit (or any update)
 builds, it stops that build and starts its own, and the one set aside says
 so; an install or switch under way finishes first.

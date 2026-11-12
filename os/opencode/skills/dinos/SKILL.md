@@ -42,11 +42,14 @@ developer's own checkout of Din; work in it all the same.
    it. Give it a long timeout (an hour): the build, and the user, take a
    while. It prints what happened:
    - "It's live": done.
-   - "Din is restarting": Din's own code changed, so Din restarts by
-     itself a moment later, closing every app, this conversation included.
-     The user approved that; the conversation is saved, and they pick it
-     up after. Tell the user before you run it if there's anything left
-     to say.
+   - "It starts when Din restarts": Din's own code changed. Restarting
+     Din closes every app, this conversation included, so leave it to the
+     user: tell them to press **Restart Din** (in the notification, or
+     Settings → About) or run `din update restart` when they're ready.
+     Only if they ask you to restart it, run `din update local --restart`
+     (or `din update restart` after the build, which asks them on screen);
+     the conversation is saved and they pick it up after, so say whatever
+     is left to say first.
    - "It starts when the computer restarts": the kernel, initrd, kernel
      parameters, modules or firmware changed, which load only at startup.
      Ask the user to restart the computer; never reboot it yourself.

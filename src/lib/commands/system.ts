@@ -48,9 +48,9 @@ export const updateArea: Area = {
     command('update', 'apply', 'Switch to the staged update now, where that needs no restart', [], async () => {
       await call(updater().apply());
     }),
-    command('update', 'local', 'Build your own commits in ~/DinOS and switch to them, restarting Din if it changed (sudo asks you first)', [
+    command('update', 'local', 'Build your own commits in ~/DinOS and switch to them (sudo asks you first); Din restarts later, when you choose', [
       { name: 'ref', type: 'string', positional: true, optional: true, help: 'The branch or commit (default: main)' },
-      { name: 'restart', type: 'boolean', optional: true, help: 'Restart Din if it changed (default: on; --no-restart leaves that to din update restart)' },
+      { name: 'restart', type: 'boolean', optional: true, help: 'Restart Din right after if it changed, closing every app (default: off; din update restart does it later)' },
     ], async (args, ctx) => {
       const bridge = updater();
       const ref = args.optString('ref') ?? 'main';
@@ -71,7 +71,7 @@ export const updateArea: Area = {
       const data = { commit, restart };
       if (restart === 'reboot') return { data, text: `${done}. It starts when the computer restarts.` };
       if (restart !== 'din') return { data, text: `${done}. It's live.` };
-      if (args.optBool('restart') === false) return { data, text: `${done}. It starts when Din restarts (din update restart).` };
+      if (args.optBool('restart') !== true) return { data, text: `${done}. It starts when Din restarts (din update restart).` };
       restartDinSoon(bridge);
       return { data, text: `${done}. Din is restarting.` };
     }),
