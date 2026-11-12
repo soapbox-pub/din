@@ -72,7 +72,7 @@ const defaultConfig: AppConfig = {
   cursorFirePaint: false,
   cursorWater: false,
   cursorThemeColor: false,
-  powerMode: false,
+  powerMode: true,
   powerModeShake: true,
   mouseScrollDirection: 'auto',
   mouseTrackingSpeed: 0,
