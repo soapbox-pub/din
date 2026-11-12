@@ -31,7 +31,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { toolButtonClass, toolIcon } from '@/shared/appChromeStyles';
+import { toolIcon } from '@/shared/appChromeStyles';
 import { PillButton, StatusPill, ToolButton } from '@/shared/appChrome';
 import { getTorBridge, isOnionUrl, torState, type TorStatus } from '@/lib/tor';
 import { useTorStatus } from '@/hooks/useTor';
@@ -178,7 +178,6 @@ import {
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
 import { SiteLimitTimer } from '@/components/desktop/apps/SiteLimitTimer';
-import { PasswordsSiteButton } from '@/components/desktop/apps/PasswordsSiteButton';
 import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { Host, Interstitial } from '@/components/desktop/apps/BrowserInterstitial';
 import { SiteLimitPage } from '@/components/desktop/apps/SiteLimitPage';
@@ -2126,15 +2125,32 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onionLocation={onionLocation}
           nsiteLocation={siteLocations.nsite}
           end={
-            isBookmarkableUrl(activeTab.url) ? (
-              <BookmarkStarButton
-                url={activeTab.url}
-                open={starTab === activeId}
-                onOpenChange={(open) => setStarTab(open ? activeId : null)}
-                onBookmark={bookmarkPage}
-                onOpenManager={openBookmarks}
-              />
-            ) : null
+            <>
+              {/* Chrome's place for it: in the bar, before the star. */}
+              {!activeTab.tor && (
+                <InstallSiteButton
+                  url={activeTab.url}
+                  pageTitle={activeTab.title}
+                  favicon={activeTab.favicon}
+                  themeColor={activeTab.themeColor}
+                  collectIcons={() =>
+                    views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
+                  }
+                  collectManifest={() =>
+                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [] })
+                  }
+                />
+              )}
+              {isBookmarkableUrl(activeTab.url) && (
+                <BookmarkStarButton
+                  url={activeTab.url}
+                  open={starTab === activeId}
+                  onOpenChange={(open) => setStarTab(open ? activeId : null)}
+                  onBookmark={bookmarkPage}
+                  onOpenManager={openBookmarks}
+                />
+              )}
+            </>
           }
           site={
             /^(https?|nsite):\/\//i.test(activeTab.url) ? (
@@ -2162,8 +2178,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           }}
         />
 
-        <PasswordsSiteButton url={activeTab.url} wcId={activeTab.wcId} />
-
         {activeTab.zoom !== 1 && (
           <PillButton
             size="sm"
@@ -2183,19 +2197,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             Private
           </StatusPill>
         )}
-
-        {!activeTab.tor && <InstallSiteButton
-          url={activeTab.url}
-          pageTitle={activeTab.title}
-          favicon={activeTab.favicon}
-          themeColor={activeTab.themeColor}
-          collectIcons={() =>
-            views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
-          }
-          collectManifest={() =>
-            views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [] })
-          }
-        />}
 
         {/* One overflow menu gathers the browser's less-frequent *actions*:
             new/private windows, find-in-page, page source, developer tools,
@@ -2456,6 +2457,19 @@ function AddressBar({
   /** Keyboard highlight: -1 is the raw typed text, 0.. a suggestion. */
   const [highlighted, setHighlighted] = useState(-1);
   const [typed, setTyped] = useState('');
+  // What sits at the bar's end (badges, install, the star) varies by page;
+  // the text stops short of however wide it is.
+  const [endEl, setEndEl] = useState<HTMLDivElement | null>(null);
+  const [measuredEnd, setMeasuredEnd] = useState(0);
+  useLayoutEffect(() => {
+    if (!endEl) return;
+    const measure = () => setMeasuredEnd(endEl.offsetWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(endEl);
+    return () => observer.disconnect();
+  }, [endEl]);
+  const endWidth = endEl ? measuredEnd : 0;
 
   const suggestions = useMemo(
     () => (open ? matchHistory(history, typed) : []),
@@ -2618,10 +2632,7 @@ function AddressBar({
   );
 
   return (
-    // As wide as a page's address needs and no wider, centered between the
-    // buttons on either side (Safari's, Arc's), rather than running from the
-    // reload button to the menu across a wide window.
-    <div className="relative mx-auto min-w-0 max-w-3xl flex-1">
+    <div className="relative flex-1">
       {/* While the user types, the box is a search box; otherwise its icon
           speaks for the page that's open. */}
       {open || !site ? (
@@ -2676,14 +2687,9 @@ function AddressBar({
             spellCheck={false}
             autoComplete="off"
             className={cn(
-              'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
-              // Room for what sits at the end: each badge, and the star.
-              [
-                ['pr-3', 'pr-9'],
-                ['pr-20', 'pr-28'],
-                ['pr-36', 'pr-44'],
-              ][Number(showOnion) + Number(showNsite)][end ? 1 : 0],
+              'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
             )}
+            style={endWidth ? { paddingRight: endWidth + 8 } : undefined}
           />
         </ContextMenuTrigger>
         <ContextMenuContent
@@ -2729,6 +2735,7 @@ function AddressBar({
       {(showOnion || showNsite || end) && (
         // Keep a click from selecting the address first.
         <div
+          ref={setEndEl}
           className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1"
           onMouseDown={(e) => e.preventDefault()}
         >
@@ -4773,7 +4780,8 @@ function BrowserMenu({
           <BarsStaggeredIcon className="size-4.5" />
         </ToolButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={8} className="w-72">
+      {/* As wide as its longest row: every row on one line. */}
+      <DropdownMenuContent align="end" sideOffset={8} className="w-max min-w-56 [&_[role^=menuitem]]:whitespace-nowrap [&_[data-slot$=shortcut]]:pl-6">
         {item(SquarePlus, 'New Window', onNewWindow, 'Ctrl+N')}
         {item(VenetianMask, 'New Private Window', onNewPrivateWindow, 'Ctrl+Shift+N')}
         <DropdownMenuSeparator />
@@ -5088,6 +5096,8 @@ function InstallSiteButton({
     });
   };
 
+  if (!site) return null;
+
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -5095,12 +5105,13 @@ function InstallSiteButton({
           type="button"
           aria-label="Install site as app"
           title="Install site as app"
-          disabled={!site}
           className={cn(
-            toolButtonClass,
-                      )}
+            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+            'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
+            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+          )}
         >
-          <MonitorDown {...toolIcon} />
+          <MonitorDown className="size-4.5" strokeWidth={1.75} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-80">
