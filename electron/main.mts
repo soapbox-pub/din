@@ -3120,10 +3120,19 @@ const SYSTEM_EVENT_DEBOUNCE_MS = 250;
  */
 const AUDIO_EVENT = /on (sink|source|server|card|sink-input) /;
 
+/**
+ * A sound device going away. WirePlumber moves what played to it onto the
+ * speakers at once, so this isn't left to wait out the coalescing window:
+ * every moment until Din pauses is heard out loud.
+ */
+const AUDIO_CARD_REMOVED = /'remove' on card /;
+
 function registerSystemEvents(): void {
   const timers = new Map<string, NodeJS.Timeout>();
-  const changed = (topic: 'network' | 'audio') => {
-    if (timers.has(topic)) return;
+  const changed = (topic: 'network' | 'audio', now = false) => {
+    const pending = timers.get(topic);
+    if (pending && !now) return;
+    if (pending) clearTimeout(pending);
     timers.set(
       topic,
       setTimeout(() => {
@@ -3142,14 +3151,14 @@ function registerSystemEvents(): void {
         if (topic === 'network') airplayNetworkChanged();
         // And its printers are listed again, before CUPS has browsed for them.
         if (topic === 'network') printingNetworkChanged();
-      }, SYSTEM_EVENT_DEBOUNCE_MS),
+      }, now ? 0 : SYSTEM_EVENT_DEBOUNCE_MS),
     );
   };
   void syncMicMuteLed();
   followAudioDevices();
   watchCommand('network', 'nmcli', ['monitor'], () => changed('network'));
   watchCommand('audio', 'pactl', ['subscribe'], (line) => {
-    if (AUDIO_EVENT.test(line)) changed('audio');
+    if (AUDIO_EVENT.test(line)) changed('audio', AUDIO_CARD_REMOVED.test(line));
   });
 }
 
@@ -3167,8 +3176,6 @@ function registerSystemEvents(): void {
 
 /** How long after a device appears its outputs and inputs may still follow. */
 const AUDIO_ARRIVAL_MS = 5_000;
-/** How long a device must stay gone before it counts as taken away. */
-const AUDIO_DEPARTURE_MS = 1_000;
 
 /** One sound device: its card, and the sinks and sources it has now. */
 interface AudioCard {
@@ -3248,6 +3255,13 @@ async function lookAtAudioDevices(): Promise<void> {
   // The first look is how things stand, not something that just happened.
   if (!before) return;
 
+  // Its card gone is the device gone (a profile switch keeps the card), so
+  // there's nothing to wait for: what played to it is on the speakers now.
+  const playedThrough = before.defaultSinkCard;
+  if (playedThrough && before.cards.get(playedThrough)?.external && !now.cards.has(playedThrough)) {
+    pauseAllMedia();
+  }
+
   for (const [card, info] of now.cards) {
     if (info.external && !before.cards.has(card)) audioArrivals.set(card, { at: Date.now(), sink: false, source: false });
   }
@@ -3270,18 +3284,6 @@ async function lookAtAudioDevices(): Promise<void> {
       arrival.source = true;
       await pactl(['set-default-source', info.source]).catch(() => {});
     }
-  }
-
-  const playedThrough = before.defaultSinkCard;
-  if (playedThrough && before.cards.get(playedThrough)?.external && !now.cards.has(playedThrough)) {
-    setTimeout(() => {
-      audioFollowing = audioFollowing
-        .then(async () => {
-          const again = await audioSnapshot().catch(() => null);
-          if (again && !again.cards.has(playedThrough)) pauseAllMedia();
-        })
-        .catch(() => {});
-    }, AUDIO_DEPARTURE_MS);
   }
 }
 
