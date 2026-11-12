@@ -2457,6 +2457,10 @@ function AddressBar({
   end?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // Out of focus, a web address is shown Chrome's way (prettyAddress); in
+  // focus, in full, to edit.
+  const [focused, setFocused] = useState(false);
+  const pretty = focused ? null : prettyAddress(value);
   /** Keyboard highlight: -1 is the raw typed text, 0.. a suggestion. */
   const [highlighted, setHighlighted] = useState(-1);
   const [typed, setTyped] = useState('');
@@ -2577,8 +2581,18 @@ function AddressBar({
 
   const closedOutside = useRef(false);
 
-  const onMenuOpenChange = (menuOpen: boolean) => {
-    if (!menuOpen) return;
+  const menuOpen = useRef(false);
+
+  const onMenuOpenChange = (opening: boolean) => {
+    menuOpen.current = opening;
+    if (!opening) {
+      // Closed onto something else (once the menu has handed focus back, or
+      // not): the address goes back to its short form.
+      requestAnimationFrame(() => {
+        if (document.activeElement !== inputRef.current) setFocused(false);
+      });
+      return;
+    }
     closedOutside.current = false;
     const input = inputRef.current;
     const start = input?.selectionStart ?? 0;
@@ -2685,14 +2699,23 @@ function AddressBar({
             }}
             onKeyDown={onKeyDown}
             onFocus={(e) => {
+              setFocused(true);
               if (!restoringFocus.current) e.currentTarget.select();
             }}
-            onBlur={dismiss}
+            onBlur={() => {
+              // The right-click menu takes focus and gives it back; the
+              // address stays in full meanwhile.
+              if (!menuOpen.current) setFocused(false);
+              dismiss();
+            }}
             placeholder="Search or type a URL"
             spellCheck={false}
             autoComplete="off"
             className={cn(
               'h-9 w-full rounded-full bg-foreground/[0.06] pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground glass-control focus-visible:bg-background focus-visible:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/60',
+              // The pretty address is drawn over it; the field keeps the
+              // whole URL underneath, for screen readers and copying.
+              pretty && 'text-transparent',
             )}
             style={endWidth ? { paddingRight: endWidth + 8 } : undefined}
           />
@@ -2737,6 +2760,18 @@ function AddressBar({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      {pretty && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 flex items-center overflow-hidden pl-9 text-sm"
+          style={{ right: endWidth ? endWidth + 8 : 12 }}
+        >
+          <span className="truncate">
+            <span className="text-foreground">{pretty.host}</span>
+            <span className="text-muted-foreground">{pretty.rest}</span>
+          </span>
+        </div>
+      )}
       {(showOnion || showNsite || end) && (
         // Keep a click from selecting the address first.
         <div
@@ -2820,6 +2855,39 @@ function AddressBar({
       )}
     </div>
   );
+}
+
+/**
+ * A web address as the address bar shows it out of focus, Chrome's way: no
+ * `https://` or `http://` (the site info button says whether it's secure), no
+ * `www.`, and no lone trailing `/`; the host in the text's color and the rest
+ * (path, query, fragment) muted. Null for anything else (nsite:, din:, file:,
+ * typed text), which is shown as it is.
+ */
+function prettyAddress(value: string): { host: string; rest: string } | null {
+  const match = /^https?:\/\/([^/?#]+)(.*)$/i.exec(value);
+  if (!match) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  // Credentials in the address are shown in full, never hidden behind a host.
+  if (url.username || url.password) return null;
+  let host = match[1].toLowerCase();
+  if (/^www\.[^.]+\.[^.]/.test(host)) host = host.slice(4);
+  let rest = match[2];
+  if (rest === '/') rest = '';
+  // Readable (a Wikipedia title in its own script), except where decoding
+  // would show spaces, controls or direction marks, which can disguise it.
+  try {
+    const decoded = decodeURI(rest);
+    if (!/[\p{C}\p{Z}]/u.test(decoded)) rest = decoded;
+  } catch {
+    // Not valid percent-encoding: shown as it is.
+  }
+  return { host, rest };
 }
 
 /**
