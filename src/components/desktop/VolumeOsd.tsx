@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Headphones, Mic, MicOff } from 'lucide-react';
+import { HeadphoneOff, Headphones, Mic, MicOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { glassPanel } from '@/shared/appChromeStyles';
 import { MAX_VOLUME, getAudioBridge } from '@/lib/audio';
 import type { AudioStatus } from '@/lib/audio';
 import { VolumeGlyph } from '@/components/desktop/VolumeIndicator';
 import { AUDIO_INPUT_KEY } from '@/hooks/useAudio';
+import { useAppContext } from '@/hooks/useAppContext';
 import { OverdriveMeter } from '@/components/ui/overdrive-slider';
 import { knockAnimation } from '@/lib/overdrive';
 import { announce } from '@/lib/announce';
+import { playVolumeFeedback } from '@/lib/volumeFeedback';
+import { OsdLayer } from './OsdLayer';
 
 /** How long the OSD stays on screen after the last volume change. */
 const OSD_VISIBLE_MS = 1500;
@@ -19,16 +22,25 @@ const DEVICE_OSD_VISIBLE_MS = 3000;
 /**
  * On-screen volume display. Listens for media-key volume changes pushed from
  * the main process (window.dinos.audio.onOsd) and shows a transient overlay with the
- * new level, GNOME/macOS style; the mic-mute key shows the microphone's state
- * the same way. Also primes the audio status cache so the menu-bar control
- * and Settings reflect the change immediately.
+ * new level, GNOME/macOS style, over anything in full screen too (OsdLayer),
+ * with headphones for its icon while sound goes to a pair. A step up or down
+ * plays a tick at the new level (src/lib/volumeFeedback.ts) unless Settings
+ * turned that off. The mic-mute key shows the microphone's state the same
+ * way. Also primes the audio status cache so the menu-bar control and
+ * Settings reflect the change immediately.
  *
  * Renders nothing (and registers no listener) outside the Electron shell.
  */
 export function VolumeOsd() {
   const queryClient = useQueryClient();
+  const { config } = useAppContext();
+  const feedback = useRef(config.volumeFeedback !== false);
+  useEffect(() => {
+    feedback.current = config.volumeFeedback !== false;
+  }, [config.volumeFeedback]);
   const [status, setStatus] = useState<AudioStatus | null>(null);
   const [input, setInput] = useState(false);
+  const [headphones, setHeadphones] = useState(false);
   /** The output sound just moved to, shown above the level. */
   const [device, setDevice] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
@@ -55,9 +67,11 @@ export function VolumeOsd() {
       if (next.volume === 100 && last.current?.volume === 100 && last.current.muted === next.muted) {
         knockAnimation(meterRef.current, 1);
       }
-      const { device: switchedTo, ...state } = next;
+      const { device: switchedTo, headphones: toHeadphones, step, ...state } = next;
       last.current = state;
+      setHeadphones(toHeadphones === true);
       show(state, false, switchedTo ?? null);
+      if (step && feedback.current && !state.muted && state.volume !== 0) playVolumeFeedback();
       queryClient.setQueryData(['audio', 'status'], state);
       // A new output means a new device list, in the menu and Settings.
       if (switchedTo) void queryClient.invalidateQueries({ queryKey: ['audio', 'devices'] });
@@ -80,7 +94,7 @@ export function VolumeOsd() {
   if (input) {
     const MicIcon = status.muted ? MicOff : Mic;
     return (
-      <div aria-hidden className={osdClass(visible)}>
+      <OsdLayer aria-hidden visible={visible}>
         <div className={cn('flex items-center gap-3 px-4 py-3', glassPanel)}>
           <MicIcon
             className={cn('size-6 shrink-0', status.muted ? 'text-muted-foreground' : 'text-foreground')}
@@ -89,15 +103,17 @@ export function VolumeOsd() {
             {status.muted ? 'Microphone off' : 'Microphone on'}
           </span>
         </div>
-      </div>
+      </OsdLayer>
     );
   }
 
   const muted = status.muted || status.volume === 0;
   const level = muted ? 0 : status.volume ?? 0;
+  const glyphClass = cn('size-6 shrink-0', muted ? 'text-muted-foreground' : 'text-foreground');
+  const HeadphonesIcon = muted ? HeadphoneOff : Headphones;
 
   return (
-    <div aria-hidden className={osdClass(visible)}>
+    <OsdLayer aria-hidden visible={visible}>
       <div className={cn('flex flex-col gap-2 px-4 py-3', glassPanel)}>
         {device && (
           <p className="flex items-center justify-center gap-2 text-sm font-medium text-foreground">
@@ -106,11 +122,11 @@ export function VolumeOsd() {
           </p>
         )}
         <div className="flex items-center gap-3">
-          <VolumeGlyph
-            volume={status.volume}
-            muted={status.muted}
-            className={cn('size-6 shrink-0', muted ? 'text-muted-foreground' : 'text-foreground')}
-          />
+          {headphones ? (
+            <HeadphonesIcon className={glyphClass} aria-hidden />
+          ) : (
+            <VolumeGlyph volume={status.volume} muted={status.muted} className={glyphClass} />
+          )}
           <OverdriveMeter
             ref={meterRef}
             value={level}
@@ -126,7 +142,7 @@ export function VolumeOsd() {
           </span>
         </div>
       </div>
-    </div>
+    </OsdLayer>
   );
 }
 
@@ -135,12 +151,4 @@ function volumeAnnouncement(status: AudioStatus, input: boolean, device: string 
   if (input) return status.muted ? 'Microphone off' : 'Microphone on';
   const level = status.muted || status.volume === 0 ? 'Muted' : `Volume ${status.volume ?? 0}%`;
   return device ? `Now playing through ${device}. ${level}` : level;
-}
-
-function osdClass(visible: boolean): string {
-  return cn(
-    'pointer-events-none fixed inset-x-0 bottom-24 z-[9998] flex justify-center',
-    'transition-opacity duration-200 motion-reduce:transition-none',
-    visible ? 'opacity-100' : 'opacity-0',
-  );
 }

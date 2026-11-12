@@ -182,6 +182,11 @@ export interface AppConfig {
    */
   pauseMediaWhileRecording: boolean;
   /**
+   * Whether the volume keys play a short tick at the new level as they turn
+   * it up or down, as on a Mac (src/lib/volumeFeedback.ts).
+   */
+  volumeFeedback: boolean;
+  /**
    * The menu bar and Dock (default), or a taskbar along an edge of the
    * screen in their place, with the Start menu, open windows and status icons.
    */

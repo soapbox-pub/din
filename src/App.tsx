@@ -84,6 +84,7 @@ const defaultConfig: AppConfig = {
   tilingGap: 8,
   restoreWindows: true,
   pauseMediaWhileRecording: true,
+  volumeFeedback: true,
   desktopLayout: 'dock',
   dockMagnification: true,
   dockMagnificationScale: 1.5,

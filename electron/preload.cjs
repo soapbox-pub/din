@@ -2868,14 +2868,15 @@ expose('audio', {
   /**
    * Subscribe to media-key volume changes (VolumeUp/Down/Mute), for the OSD.
    * The callback receives the new { available, volume, muted } state, with
-   * `device` naming the output when sound has just moved to headphones.
-   * Returns an unsubscribe fn.
-   * @param {(status: { available: boolean, volume: number | null, muted: boolean, device?: string }) => void} callback
+   * `device` naming the output when sound has just moved to headphones,
+   * `headphones` when the output is a pair, and `step` for a key that turned
+   * it up or down. Returns an unsubscribe fn.
+   * @param {(status: { available: boolean, volume: number | null, muted: boolean, device?: string, headphones?: boolean, step?: boolean }) => void} callback
    */
   onOsd: (callback) => {
     /**
      * @param {Electron.IpcRendererEvent} _event
-     * @param {{ available: boolean, volume: number | null, muted: boolean, device?: string }} status
+     * @param {{ available: boolean, volume: number | null, muted: boolean, device?: string, headphones?: boolean, step?: boolean }} status
      */
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('audio:osd', listener);

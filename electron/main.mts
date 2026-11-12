@@ -3261,8 +3261,8 @@ async function lookAtAudioDevices(): Promise<void> {
       arrival.sink = true;
       await pactl(['set-default-sink', info.sink]).catch(() => {});
       now.defaultSinkCard = card;
-      void audioStatus()
-        .then((status) => sendToShell('audio:osd', { ...status, device: info.description }))
+      void Promise.all([audioStatus(), outputIsHeadphones().catch(() => false)])
+        .then(([status, headphones]) => sendToShell('audio:osd', { ...status, headphones, device: info.description }))
         .catch(() => {});
     }
     // A headset's mic, not a webcam's or a USB microphone's on its own.
@@ -3285,9 +3285,34 @@ async function lookAtAudioDevices(): Promise<void> {
   }
 }
 
-/** Adjust the default sink and push the new state to the shell for the OSD. */
-function pushAudioOsd(statusPromise: Promise<AudioState>): void {
-  statusPromise.then((s) => sendToShell('audio:osd', s)).catch(() => {});
+/**
+ * Whether sound goes to headphones: a Bluetooth or USB headset or pair of
+ * headphones, or a sound card's headphone jack. For the OSD's icon.
+ */
+async function outputIsHeadphones(): Promise<boolean> {
+  const [name, sinks] = await Promise.all([
+    pactl(['get-default-sink']).then((out) => out.trim()).catch(() => ''),
+    pactlList<PactlNode>('sinks'),
+  ]);
+  const sink = sinks.find((node) => node.name === name);
+  if (!sink) return false;
+  const props = sink.properties ?? {};
+  return (
+    /^(headset|headphone|hands-free|handset)$/.test(props['device.form_factor'] ?? '') ||
+    /head(set|phone)/.test(props['device.icon_name'] ?? '') ||
+    /head(set|phone)/i.test(sink.active_port ?? '')
+  );
+}
+
+/**
+ * Adjust the default sink and push the new state to the shell for the OSD,
+ * with whether it plays through headphones (for its icon) and, for a step up
+ * or down (not mute), `step`, which plays the feedback tick.
+ */
+function pushAudioOsd(statusPromise: Promise<AudioState>, step = false): void {
+  Promise.all([statusPromise, outputIsHeadphones().catch(() => false)])
+    .then(([s, headphones]) => sendToShell('audio:osd', { ...s, headphones, ...(step ? { step } : {}) }))
+    .catch(() => {});
 }
 
 /** Push the default source's new state to the shell for the microphone OSD. */
@@ -3304,8 +3329,8 @@ function pushInputOsd(statusPromise: Promise<AudioState>): void {
  */
 function registerMediaKeys(): void {
   if (process.env.WAYLAND_DISPLAY) return;
-  globalShortcut.register('VolumeUp', () => pushAudioOsd(audioAdjust(5)));
-  globalShortcut.register('VolumeDown', () => pushAudioOsd(audioAdjust(-5)));
+  globalShortcut.register('VolumeUp', () => pushAudioOsd(audioAdjust(5), true));
+  globalShortcut.register('VolumeDown', () => pushAudioOsd(audioAdjust(-5), true));
   globalShortcut.register('VolumeMute', () => pushAudioOsd(audioToggleMute()));
   for (const [accelerator, key] of [
     ['MediaPlayPause', 'playpause'],
@@ -3605,8 +3630,8 @@ function attachMediaKeys(contents: Electron.WebContents): void {
     const key = input.key === 'Unidentified' ? input.code : input.key;
     if (key === 'AudioVolumeUp' || key === 'AudioVolumeDown' || key === 'AudioVolumeMute') {
       event.preventDefault();
-      if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5));
-      else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5));
+      if (key === 'AudioVolumeUp') pushAudioOsd(audioAdjust(5), true);
+      else if (key === 'AudioVolumeDown') pushAudioOsd(audioAdjust(-5), true);
       else pushAudioOsd(audioToggleMute());
       return;
     }

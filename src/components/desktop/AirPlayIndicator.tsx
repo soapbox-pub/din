@@ -21,6 +21,7 @@ import { cleanAirPlayError, getAirPlayBridge, type AirPlayMode, type AirPlaySess
 import { cn } from '@/lib/utils';
 import { trayFooter, trayFooterButton, trayHeader, trayTitle } from './trayPanel';
 import { glassPanel } from '@/shared/appChromeStyles';
+import { OsdLayer } from './OsdLayer';
 
 /** What a session is doing, in a few words. */
 function describeSession(session: AirPlaySession): string {
@@ -271,15 +272,7 @@ export function AirPlayOsd() {
   ] as const;
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cn(
-        'pointer-events-none fixed inset-x-0 bottom-24 z-[9998] flex justify-center',
-        'transition-opacity duration-200 motion-reduce:transition-none',
-        visible ? 'opacity-100' : 'opacity-0',
-      )}
-    >
+    <OsdLayer role="status" aria-live="polite" visible={visible}>
       <div className={cn('flex flex-col items-center gap-2 px-4 py-3', glassPanel)}>
         <p className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Airplay className="size-4 text-muted-foreground" aria-hidden />
@@ -303,7 +296,7 @@ export function AirPlayOsd() {
           {change.mode === 'extend' ? `Extending the desktop to ${change.name}` : `Mirroring the screen to ${change.name}`}
         </span>
       </div>
-    </div>
+    </OsdLayer>
   );
 }
 

@@ -8,6 +8,7 @@ import { BrightnessGlyph } from '@/components/desktop/BrightnessIndicator';
 import { OverdriveMeter } from '@/components/ui/overdrive-slider';
 import { knockAnimation } from '@/lib/overdrive';
 import { announce } from '@/lib/announce';
+import { OsdLayer } from './OsdLayer';
 
 /** How long the OSD stays on screen after the last brightness change. */
 const OSD_VISIBLE_MS = 1500;
@@ -55,14 +56,7 @@ export function BrightnessOsd() {
   const level = status.brightness ?? 0;
 
   return (
-    <div
-      aria-hidden
-      className={cn(
-        'pointer-events-none fixed inset-x-0 bottom-24 z-[9998] flex justify-center',
-        'transition-opacity duration-200 motion-reduce:transition-none',
-        visible ? 'opacity-100' : 'opacity-0',
-      )}
-    >
+    <OsdLayer aria-hidden visible={visible}>
       <div className={cn('flex items-center gap-3 px-4 py-3', glassPanel)}>
         <BrightnessGlyph
           brightness={status.brightness}
@@ -81,6 +75,6 @@ export function BrightnessOsd() {
           {brightnessText(level)}
         </span>
       </div>
-    </div>
+    </OsdLayer>
   );
 }

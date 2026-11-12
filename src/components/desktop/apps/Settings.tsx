@@ -51,6 +51,7 @@ import {
   TriangleAlert,
   Trash2,
   Upload,
+  Volume1,
   Volume2,
   VolumeX,
   ZoomIn,
@@ -2550,6 +2551,14 @@ function SoundSection() {
               onCheckedChange={(checked) => setMuted.mutate(checked)}
             />
           </div>
+          <SettingSwitchRow
+            id="volume-feedback"
+            icon={Volume1}
+            label="Play feedback when volume is changed"
+            description="The volume keys play a short tick at the new level as they turn it up or down."
+            checked={config.volumeFeedback !== false}
+            onCheckedChange={(checked) => updateConfig((current) => ({ ...current, volumeFeedback: checked }))}
+          />
 
           {/* Output devices */}
           <SoundGroupHeading icon={Volume2}>Output device</SoundGroupHeading>

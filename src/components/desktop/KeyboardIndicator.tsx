@@ -16,7 +16,7 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useKeyboardStatus, useSelectKeyboardLayout } from '@/hooks/useKeyboardLayout';
 import { LAYOUT_SWITCH_KEYS, getKeyboardBridge, layoutKey, layoutTag } from '@/lib/keyboard';
 import { announce } from '@/lib/announce';
-import { cn } from '@/lib/utils';
+import { OsdLayer } from './OsdLayer';
 
 /**
  * The keyboard's layouts, in the menu bar, as a Mac's input menu: the tag
@@ -113,18 +113,11 @@ export function KeyboardLayoutOsd() {
 
   if (!shown) return null;
   return (
-    <div
-      aria-hidden
-      className={cn(
-        'pointer-events-none fixed inset-x-0 bottom-24 z-[9998] flex justify-center',
-        'transition-opacity duration-200 motion-reduce:transition-none',
-        visible ? 'opacity-100' : 'opacity-0',
-      )}
-    >
+    <OsdLayer aria-hidden visible={visible}>
       <div className="flex items-center gap-3 glass-surface rounded-2xl px-4 py-3">
         <Keyboard className="size-6 shrink-0 text-foreground" />
         <span className="text-sm font-medium text-foreground">{shown}</span>
       </div>
-    </div>
+    </OsdLayer>
   );
 }

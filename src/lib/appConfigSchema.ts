@@ -54,6 +54,7 @@ export const AppConfigSchema = z.object({
   tilingGap: z.number().min(0).max(64),
   restoreWindows: z.boolean(),
   pauseMediaWhileRecording: z.boolean(),
+  volumeFeedback: z.boolean(),
   desktopLayout: z.enum(['dock', 'taskbar']),
   dockMagnification: z.boolean(),
   dockMagnificationScale: z.number().min(1).max(3),

@@ -27,6 +27,16 @@ export interface AudioStatus {
   muted: boolean;
 }
 
+/** What the volume OSD hears from the main process. */
+export interface AudioOsdStatus extends AudioStatus {
+  /** The output's name, when sound has just moved to a device plugged in or connected. */
+  device?: string;
+  /** The output is headphones (a headset, or a sound card's headphone jack). */
+  headphones?: boolean;
+  /** A volume key turned it up or down (not mute): the feedback tick plays. */
+  step?: boolean;
+}
+
 /** A sink (output) or source (input) device. */
 export interface AudioDevice {
   /** wpctl node id, used to select/control this device. */
@@ -119,7 +129,7 @@ export interface AudioBridge {
    * the new state, and the output's name when sound has just moved to a device
    * plugged in or connected. Returns an unsubscribe fn.
    */
-  onOsd(callback: (status: AudioStatus & { device?: string }) => void): () => void;
+  onOsd(callback: (status: AudioOsdStatus) => void): () => void;
   /**
    * Subscribe to mic-mute key presses (for the OSD). The callback receives the
    * default source's new state. Returns an unsubscribe fn.
