@@ -187,6 +187,11 @@ export interface AppConfig {
    */
   volumeFeedback: boolean;
   /**
+   * Whether Din plays its chime as the desktop fades in at startup
+   * (src/lib/startupSound.ts).
+   */
+  startupSound: boolean;
+  /**
    * The menu bar and Dock (default), or a taskbar along an edge of the
    * screen in their place, with the Start menu, open windows and status icons.
    */

@@ -69,6 +69,7 @@ const SETTINGS: Setting[] = [
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'sound.volume-feedback', field: 'volumeFeedback', help: 'The volume keys play a short tick at the new level as they turn it up or down', param: bool },
+  { key: 'sound.startup-sound', field: 'startupSound', help: 'Din plays a chime as the desktop fades in when it starts', param: bool },
   { key: 'sound.pause-media', field: 'pauseMediaWhileRecording', help: 'What’s playing pauses while dictation or Record Audio listens, and plays again after', param: bool },
   { key: 'windows.reopen', field: 'restoreWindows', help: 'Din reopens your windows when it starts again', param: bool },
   { key: 'desktop.layout', field: 'desktopLayout', help: 'The menu bar and Dock, or a taskbar', param: { type: 'string', choices: ['dock', 'taskbar'] } },

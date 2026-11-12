@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useAppContext } from '@/hooks/useAppContext';
 import { getBootBridge } from '@/lib/boot';
+import { playStartupSound } from '@/lib/startupSound';
 import { cn } from '@/lib/utils';
 import { ScreenLayer } from './MonitorsProvider';
 
@@ -19,12 +21,22 @@ import { ScreenLayer } from './MonitorsProvider';
  * the window shown, never while the hidden window is still warming up (its
  * document already calls itself visible then). Without a host, it starts
  * once the page is visible.
+ *
+ * The startup chime (src/lib/startupSound.ts) plays as the fade starts,
+ * unless Settings → Sound turned it off.
  */
 export function BootVeil() {
   const [bridge] = useState(getBootBridge);
   const [visible, setVisible] = useState(
     () => !bridge && document.visibilityState === 'visible',
   );
+  // Read once: the chime belongs to this start, whatever changes after.
+  const { config } = useAppContext();
+  const chime = useRef(config.startupSound !== false);
+
+  useEffect(() => {
+    if (visible && chime.current) playStartupSound();
+  }, [visible]);
 
   useEffect(() => {
     if (bridge) {

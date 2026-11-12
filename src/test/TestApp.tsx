@@ -67,6 +67,7 @@ export function TestApp({ children }: TestAppProps) {
     restoreWindows: true,
     pauseMediaWhileRecording: true,
     volumeFeedback: true,
+    startupSound: true,
     desktopLayout: 'dock',
     dockMagnification: true,
     dockMagnificationScale: 1.5,

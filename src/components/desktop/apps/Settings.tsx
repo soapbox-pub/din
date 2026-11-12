@@ -38,6 +38,7 @@ import {
   Moon,
   Mouse,
   MoreHorizontal,
+  Music,
   Play,
   Power,
   Plug,
@@ -2558,6 +2559,14 @@ function SoundSection() {
             description="The volume keys play a short tick at the new level as they turn it up or down."
             checked={config.volumeFeedback !== false}
             onCheckedChange={(checked) => updateConfig((current) => ({ ...current, volumeFeedback: checked }))}
+          />
+          <SettingSwitchRow
+            id="startup-sound"
+            icon={Music}
+            label="Play a sound when Din starts"
+            description="A chime plays as the desktop fades in."
+            checked={config.startupSound !== false}
+            onCheckedChange={(checked) => updateConfig((current) => ({ ...current, startupSound: checked }))}
           />
 
           {/* Output devices */}

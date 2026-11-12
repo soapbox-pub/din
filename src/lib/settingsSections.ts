@@ -187,7 +187,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Sound',
     icon: Volume2,
-    search: ['Output volume', 'Mute', 'Silence all output without losing your volume level.', 'Play feedback when volume is changed', 'beep', 'volume keys', 'Output device', 'Input device', 'Input volume', 'Play a test tone', 'volume', 'audio', 'speaker', 'headphones', 'microphone', 'mic'],
+    search: ['Output volume', 'Mute', 'Silence all output without losing your volume level.', 'Play feedback when volume is changed', 'beep', 'volume keys', 'Play a sound when Din starts', 'startup sound', 'chime', 'Output device', 'Input device', 'Input volume', 'Play a test tone', 'volume', 'audio', 'speaker', 'headphones', 'microphone', 'mic'],
   },
   {
     id: 'keyboard',
