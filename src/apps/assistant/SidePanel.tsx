@@ -66,7 +66,14 @@ export function SidePanel({
           <PanelRightClose {...toolIcon} aria-hidden />
         </ToolButton>
         <div role="tablist" aria-label="Side pane" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
-          <SideTabButton selected={!shown} onSelect={() => onTab('git')} icon={<GitBranch {...toolIcon} aria-hidden />} label="Git" />
+          <SideTabButton
+            selected={!shown}
+            onSelect={() => onTab('git')}
+            icon={<GitBranch {...toolIcon} aria-hidden />}
+            label="Git"
+            // Alone, Git's tab closes the pane, as a last preview's would.
+            onClose={previews.length === 0 ? onHide : undefined}
+          />
           {previews.map((preview) => (
             <PreviewMenu key={preview.uri} preview={preview} onReload={() => onReload(preview.uri)} onClose={() => onClosePreview(preview.uri)}>
               <SideTabButton
