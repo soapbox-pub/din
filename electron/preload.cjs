@@ -809,6 +809,14 @@ expose('pageFullscreen', {
   fit: (webContentsId, width, height) =>
     ipcRenderer.invoke('pageFullscreen:fit', webContentsId, width, height),
   /**
+   * Hand a fullscreen page a mouse event Chromium gave the desktop instead.
+   * @param {number} webContentsId the <webview>'s guest, in fullscreen
+   * @param {{ type: 'mouseDown' | 'mouseUp' | 'mouseMove' | 'mouseWheel', x: number, y: number,
+   *   button?: 'left' | 'middle' | 'right', clickCount?: number, modifiers?: string[],
+   *   deltaX?: number, deltaY?: number }} input x and y in the page's device-independent pixels
+   */
+  forward: (webContentsId, input) => ipcRenderer.send('pageFullscreen:forward', webContentsId, input),
+  /**
    * @param {number} xid the native window (NativeWindowView.tsx)
    * @returns {Promise<boolean>} whether it went into full screen
    */

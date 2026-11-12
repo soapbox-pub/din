@@ -1569,6 +1569,8 @@ function shellGuestFromId(wcId: unknown): Electron.WebContents | null {
 
 /** Guests laid out at a monitor's size, waiting to leave fullscreen. */
 const fittedGuests = new Set<number>();
+/** Fullscreen guests the desktop has handed clicks to, logged once each time. */
+const forwardedGuests = new Set<number>();
 
 // Pages on different monitors can be fullscreen at once, but Chromium has one
 // fullscreen state for the whole window: one page leaving fullscreen (Escape,
@@ -1679,6 +1681,43 @@ function registerPageFullscreenHandlers(): void {
         return lock({ unadjustedMovement: true }).then((locked) => locked || lock());`,
     ),
   );
+
+  // A click on a fullscreen page that Chromium routed to the shell instead
+  // (PageFullscreenHost.tsx): the shell's layer over the other monitors sits
+  // above the page's frame, and while the shell has the focus, Chromium
+  // sometimes asks the shell, not the page, what's under the pointer there.
+  ipcMain.on('pageFullscreen:forward', (event, wcId, raw) => {
+    if (!isShellSender(event)) return;
+    const guest = shellGuestFromId(wcId);
+    if (!guest || !fullscreenGuests.has(guest.id) || typeof raw !== 'object' || raw === null) return;
+    const input = raw as Record<string, unknown>;
+    const x = Math.round(Number(input.x));
+    const y = Math.round(Number(input.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const modifiers = (Array.isArray(input.modifiers) ? input.modifiers : []).filter(
+      (m): m is 'shift' | 'control' | 'alt' | 'meta' | 'leftbuttondown' | 'middlebuttondown' | 'rightbuttondown' =>
+        ['shift', 'control', 'alt', 'meta', 'leftbuttondown', 'middlebuttondown', 'rightbuttondown'].includes(String(m)),
+    );
+    const type = input.type;
+    if (type === 'mouseWheel') {
+      const deltaX = Number(input.deltaX) || 0;
+      const deltaY = Number(input.deltaY) || 0;
+      guest.sendInputEvent({ type, x, y, deltaX, deltaY, canScroll: true, modifiers });
+      return;
+    }
+    if (type !== 'mouseDown' && type !== 'mouseUp' && type !== 'mouseMove') return;
+    if (type === 'mouseDown' && !forwardedGuests.has(guest.id)) {
+      forwardedGuests.add(guest.id);
+      const id = guest.id;
+      const done = () => forwardedGuests.delete(id);
+      guest.once('leave-html-full-screen', done);
+      guest.once('destroyed', done);
+      console.log(`page fullscreen: handing page ${guest.id} the clicks the desktop got for it`);
+    }
+    const button = input.button === 'middle' || input.button === 'right' ? input.button : 'left';
+    const clickCount = Math.min(3, Math.max(1, Math.round(Number(input.clickCount)) || 1));
+    guest.sendInputEvent({ type, x, y, button, clickCount, modifiers });
+  });
 
   ipcMain.handle('pageFullscreen:fit', (event, wcId, rawWidth, rawHeight) => {
     assertShellSender(event);
