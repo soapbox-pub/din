@@ -647,15 +647,18 @@ async function discover(on: boolean): Promise<void> {
   discoveryTimer = null;
   const adapter = adapterPath();
   if (!adapter) return;
-  const discovering = objects.get(adapter)?.get(ADAPTER)?.get('Discovering') === true;
   if (on) {
     discoveryTimer = setTimeout(() => void discover(false), DISCOVERY_MS);
     setPairable(true);
-    if (!discovering) {
-      await call('StartDiscovery', adapter, ADAPTER).catch((error) => {
-        if (!(error instanceof DBusError && error.type === 'org.bluez.Error.InProgress')) throw explain(error);
-      });
-    }
+    // Start this connection's own search even when the adapter is already
+    // searching: BlueZ searches for the union of its clients' filters, and
+    // another's may be narrower than Settings' (Quick Share looks for LE
+    // advertisements alone). Joining it would miss classic devices, such as
+    // headphones, whose names come only in their replies to an inquiry.
+    // InProgress means this connection's search is already on.
+    await call('StartDiscovery', adapter, ADAPTER).catch((error) => {
+      if (!(error instanceof DBusError && error.type === 'org.bluez.Error.InProgress')) throw explain(error);
+    });
   } else {
     if (![...busy.values()].includes('pairing')) setPairable(false);
     // Only stops a search this connection started.
