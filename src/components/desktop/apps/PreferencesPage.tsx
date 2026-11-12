@@ -151,7 +151,7 @@ export function PreferencesPage(props: PreferencesProps) {
 
 /**
  * The built-in ad blocker: on/off for every site, and the sites the user
- * turned it off for from the toolbar's shield. Absent outside the Electron
+ * turned it off for from their site info in the address bar. Absent outside the Electron
  * shell, where nothing blocks.
  */
 function AdblockSection() {

@@ -176,9 +176,8 @@ import {
   type LoadErrorInfo,
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
-import { AdblockButton } from '@/components/desktop/apps/AdblockButton';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
-import { SignerSiteButton } from '@/components/desktop/apps/SignerSiteButton';
+import { SiteLimitTimer } from '@/components/desktop/apps/SiteLimitTimer';
 import { PasswordsSiteButton } from '@/components/desktop/apps/PasswordsSiteButton';
 import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { Host, Interstitial } from '@/components/desktop/apps/BrowserInterstitial';
@@ -2141,6 +2140,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             /^(https?|nsite):\/\//i.test(activeTab.url) ? (
               <SiteInfoButton
                 url={activeTab.url}
+                wcId={activeTab.wcId}
                 isPrivate={isPrivate}
                 onReload={() => views.current.get(activeId)?.reload()}
               />
@@ -2148,15 +2148,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           }
         />
 
+        <SiteLimitTimer url={activeTab.url} />
+
         {/* Extension action icons are hidden in private windows (extensions
             don't run in the ephemeral private session). */}
         {crx && !isPrivate && <BrowserActionList tabWcId={activeTab.wcId} />}
-
-        <AdblockButton
-          wcId={activeTab.wcId}
-          url={activeTab.url}
-          onReload={() => views.current.get(activeId)?.reload()}
-        />
 
         <PopupBlockedButton
           wcId={activeTab.wcId}
@@ -2166,8 +2162,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           }}
         />
 
-        {/* Private tabs have no window.nostr. */}
-        {!isPrivate && <SignerSiteButton url={activeTab.url} />}
         <PasswordsSiteButton url={activeTab.url} wcId={activeTab.wcId} />
 
         {activeTab.zoom !== 1 && (

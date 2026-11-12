@@ -162,7 +162,13 @@ function saveSettings(): void {
 
 /** The limits and today's time, as the shell shows them. */
 function snapshot() {
-  return { limits, usage: Object.fromEntries(usage) };
+  const now = Date.now();
+  return {
+    limits,
+    usage: Object.fromEntries(usage),
+    // When each site's pass ends, for the address bar's time left.
+    passes: Object.fromEntries([...passes].filter(([, until]) => until > now)),
+  };
 }
 
 function changed(): void {
@@ -308,6 +314,13 @@ function shutOpenPages(): void {
 /** Count a tick on screen for each limited site showing, and shut what ran out. */
 function tick(): void {
   rollDay();
+  let lapsed = false;
+  for (const [site, until] of passes) {
+    if (until > Date.now()) continue;
+    passes.delete(site);
+    lapsed = true;
+  }
+  if (lapsed) sendToShell('site-limits:settings', snapshot());
   const state = powerMonitor.getSystemIdleState(IDLE_SECONDS);
   // 'unknown' where the compositor can't say: count then.
   if (state !== 'idle' && state !== 'locked') {
@@ -475,6 +488,7 @@ export function setupSiteLimits(options: {
     if (typeof minutes !== 'number' || !info.passes.includes(minutes)) throw new Error('Invalid time');
     if (Date.now() < info.since + info.wait * 1000) throw new Error('Not yet');
     passes.set(info.site, Date.now() + minutes * 60_000);
+    sendToShell('site-limits:settings', snapshot());
     // Every page waiting on the site opens: the user chose to go there.
     for (const guest of guests) {
       const waiting = blocks.get(guest.id);

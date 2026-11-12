@@ -29,6 +29,8 @@ export interface SiteUsage {
 export interface SiteLimitSettings {
   limits: SiteLimit[];
   usage: Record<string, SiteUsage>;
+  /** When each site's current pass ends (ms). */
+  passes: Record<string, number>;
 }
 
 export interface SiteLimitStatus {
@@ -81,6 +83,12 @@ declare global {
 export function getSiteLimitsBridge(): SiteLimitsBridge | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.dinos?.siteLimits;
+}
+
+/** The limit covering a host (its site or a subdomain of it), if any. */
+export function limitOfHost(limits: SiteLimit[], hostname: string): SiteLimit | null {
+  const host = hostname.toLowerCase();
+  return limits.find((l) => host === l.site || host.endsWith(`.${l.site}`)) ?? null;
 }
 
 /** The daily allowances offered, in minutes (the main process takes these). */
