@@ -110,6 +110,38 @@ export function sortDevices(devices: BluetoothDevice[]): BluetoothDevice[] {
   );
 }
 
+/** A device in a list of ones nearby, which stays put once it's there. */
+export interface NearbyDevice extends BluetoothDevice {
+  /** BlueZ has stopped hearing from it (it forgets one in about 30 s). */
+  gone: boolean;
+}
+
+/**
+ * The devices nearby to pair with, in a list that holds still while it's
+ * looked at, as Android's Pair new device does: the ones already listed keep
+ * their places, updated where they are (a name arriving doesn't re-sort
+ * them); new ones join at the bottom (a batch of them by name); and one
+ * BlueZ forgets stays, as `gone`, until it's back or the list closes. Only
+ * pairing one takes it off (it moves up to the paired ones). Otherwise a
+ * device found, or one going quiet, moves the rows under the pointer as
+ * it's about to click one. `devices` is all of them, paired too.
+ */
+export function holdNearby(previous: readonly NearbyDevice[], devices: readonly BluetoothDevice[]): NearbyDevice[] {
+  const byPath = new Map(devices.map((d) => [d.path, d]));
+  const held: NearbyDevice[] = [];
+  for (const old of previous) {
+    const now = byPath.get(old.path);
+    if (!now) held.push(old.gone ? old : { ...old, gone: true, busy: null });
+    else if (!now.paired) held.push({ ...now, gone: false });
+  }
+  const listed = new Set(previous.map((d) => d.path));
+  const found = devices
+    .filter((d) => !d.paired && !listed.has(d.path))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => ({ ...d, gone: false }));
+  return [...held, ...found];
+}
+
 /** What a device is doing, or what it is, in a few words. */
 export function describeDevice(device: BluetoothDevice): string {
   if (device.busy === 'pairing') return 'Pairing…';

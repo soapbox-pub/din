@@ -1,6 +1,12 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getBluetoothBridge, type BluetoothState } from '@/lib/bluetooth';
+import {
+  getBluetoothBridge,
+  holdNearby,
+  type BluetoothDevice,
+  type BluetoothState,
+  type NearbyDevice,
+} from '@/lib/bluetooth';
 
 const BLUETOOTH_KEY = ['bluetooth', 'state'] as const;
 
@@ -50,6 +56,20 @@ export function useBluetoothDiscovery(enabled: boolean) {
       void bluetooth.discover(false).catch(() => {});
     };
   }, [enabled]);
+}
+
+/**
+ * The devices nearby to pair with, among `devices`, in an order that holds
+ * still while the component showing them is mounted (holdNearby).
+ */
+export function useNearbyDevices(devices: readonly BluetoothDevice[] | undefined): NearbyDevice[] {
+  const [seen, setSeen] = useState<readonly BluetoothDevice[] | undefined>(undefined);
+  const [nearby, setNearby] = useState<NearbyDevice[]>([]);
+  if (devices !== seen) {
+    setSeen(devices);
+    setNearby(holdNearby(nearby, devices ?? []));
+  }
+  return nearby;
 }
 
 export function useBluetoothActions() {

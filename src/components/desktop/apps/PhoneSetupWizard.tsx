@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bluetooth, Check, ChevronLeft, Loader2, MessageCircle, Share2, TriangleAlert } from 'lucide-react';
 import { BluetoothDeviceIcon } from '@/components/desktop/BluetoothIndicator';
 import { Button } from '@/components/ui/button';
-import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
+import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState, useNearbyDevices } from '@/hooks/useBluetooth';
 import { usePhoneActions, usePhoneState } from '@/hooks/usePhone';
 import { cleanBluetoothBridgeError, getBluetoothBridge, type BluetoothDevice } from '@/lib/bluetooth';
 import { getPhoneDesktopBridge, type PhoneDevice, type PhonePlatform, type PhoneState } from '@/lib/phone';
@@ -115,8 +115,10 @@ function PairStep({ onPaired }: { onPaired: (address: string, name: string, plat
   const powered = adapter?.powered ?? false;
   useBluetoothDiscovery(powered);
 
-  const phones = (bluetooth.data?.devices ?? []).filter((d) => d.icon === 'phone');
-  const nearby = phones.filter((d) => !d.paired);
+  const devices = bluetooth.data?.devices;
+  // Memoized: useNearbyDevices takes a new list as news of the devices.
+  const phones = useMemo(() => devices?.filter((d) => d.icon === 'phone'), [devices]);
+  const nearby = useNearbyDevices(phones);
 
   const pair = async (device: BluetoothDevice) => {
     const bridge = getBluetoothBridge();
@@ -167,8 +169,8 @@ function PairStep({ onPaired }: { onPaired: (address: string, name: string, plat
               </p>
             ) : (
               nearby.map((d) => (
-                <DeviceRow key={d.path} device={d}>
-                  <Button size="sm" variant="outline" disabled={pairing !== null} onClick={() => void pair(d)}>
+                <DeviceRow key={d.path} device={d} gone={d.gone}>
+                  <Button size="sm" variant="outline" disabled={pairing !== null || d.gone} onClick={() => void pair(d)}>
                     {pairing === d.path && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
                     Pair
                   </Button>
@@ -360,11 +362,12 @@ function DeviceList({ label, busy, children }: { label: string; busy?: boolean; 
   );
 }
 
-function DeviceRow({ device, children }: { device: BluetoothDevice; children: React.ReactNode }) {
+function DeviceRow({ device, gone = false, children }: { device: BluetoothDevice; gone?: boolean; children: React.ReactNode }) {
   return (
-    <li className="flex items-center gap-3 py-2 pr-2 pl-4">
+    <li className={cn('flex items-center gap-3 py-2 pr-2 pl-4', gone && 'opacity-60')}>
       <BluetoothDeviceIcon device={device} className="size-5 shrink-0 text-ink-accent" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{device.name}</span>
+      {gone && <span className="shrink-0 text-xs text-muted-foreground">Out of range</span>}
       {children}
     </li>
   );

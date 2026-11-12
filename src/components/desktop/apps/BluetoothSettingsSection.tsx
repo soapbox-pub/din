@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
-import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState } from '@/hooks/useBluetooth';
+import { useBluetoothActions, useBluetoothDiscovery, useBluetoothState, useNearbyDevices } from '@/hooks/useBluetooth';
 import { cleanBluetoothBridgeError, describeDevice, deviceKind, getBluetoothBridge, sortDevices } from '@/lib/bluetooth';
 import type { BluetoothDevice } from '@/lib/bluetooth';
 import { SettingsFallback as Fallback, SettingsSection as Shell, SettingsSubHeading as SubHeading } from '@/shared/settingsSection';
@@ -50,6 +50,7 @@ export function BluetoothSettingsSection() {
   const adapter = data?.adapter ?? null;
   const powered = adapter?.powered ?? false;
   useBluetoothDiscovery(powered && viewing === null);
+  const nearby = useNearbyDevices(data?.devices);
 
   if (!bridge) {
     return (
@@ -75,7 +76,6 @@ export function BluetoothSettingsSection() {
   const devices = sortDevices(data?.devices ?? []);
   const connected = devices.filter((d) => d.paired && d.connected);
   const saved = devices.filter((d) => d.paired && !d.connected);
-  const nearby = devices.filter((d) => !d.paired);
 
   const run = (path: string, action: typeof pair) => {
     setOpError(null);
@@ -181,7 +181,7 @@ export function BluetoothSettingsSection() {
             ) : (
               <ul className={settingsGroup} aria-label="Devices nearby">
                 {nearby.map((device) => (
-                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} />
+                  <BluetoothDeviceRow key={device.path} {...rowProps(device)} gone={device.gone} />
                 ))}
               </ul>
             )}
@@ -193,7 +193,8 @@ export function BluetoothSettingsSection() {
 }
 
 /** What a row says under the name: what it's doing, else its battery, else what it is. */
-function rowDetail(device: BluetoothDevice): string {
+function rowDetail(device: BluetoothDevice, gone: boolean): string {
+  if (gone) return 'Out of range';
   if (device.busy) return describeDevice(device);
   if (device.battery !== null) return `${device.battery}% battery`;
   return device.connected ? '' : deviceKind(device);
@@ -207,8 +208,11 @@ function BluetoothDeviceRow({
   onDisconnect,
   onForget,
   onDetails,
+  gone = false,
 }: {
   device: BluetoothDevice;
+  /** A device nearby that BlueZ stopped hearing from, kept in its place until it's back. */
+  gone?: boolean;
   error: string | null;
   onPair: () => void;
   onConnect: () => void;
@@ -223,12 +227,13 @@ function BluetoothDeviceRow({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <DeviceRowButton
+            className={gone ? 'opacity-60' : undefined}
             icon={<BluetoothDeviceIcon device={device} />}
             name={device.name}
-            detail={rowDetail(device)}
+            detail={rowDetail(device, gone)}
             connected={device.connected}
             pending={busy}
-            disabled={busy && !device.connected}
+            disabled={gone || (busy && !device.connected)}
             chevron={device.connected}
             onClick={!device.paired ? onPair : device.connected ? onDetails : onConnect}
             trailing={
@@ -249,7 +254,7 @@ function BluetoothDeviceRow({
         </ContextMenuTrigger>
         <ContextMenuContent>
           {!device.paired ? (
-            <ContextMenuItem disabled={busy} onSelect={onPair}>
+            <ContextMenuItem disabled={busy || gone} onSelect={onPair}>
               <Link2 aria-hidden />
               Pair
             </ContextMenuItem>
