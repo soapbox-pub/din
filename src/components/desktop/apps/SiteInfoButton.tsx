@@ -12,7 +12,7 @@ import {
   Lock,
   RotateCw,
   Shield,
-  SlidersHorizontal,
+  Settings2,
   Trash2,
   TriangleAlert,
   type LucideIcon,
@@ -155,7 +155,7 @@ function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
  * to ask, answered or not), and its cookies and storage. The popover opens on
  * a summary, a row for each, and each opens a page of its own in place.
  *
- * Sliders for a secure page, the nsite's N or an onion for those, and a
+ * Two sliders (Chrome's tune) for a secure page, the nsite's N or an onion for those, and a
  * warning for a page that isn't secure. Renders nothing for pages that aren't
  * websites (the new tab page, settings).
  */
@@ -613,7 +613,7 @@ export function SiteInfoButton({
           ) : security === 'onion' ? (
             <OnionIcon className="size-3.5" />
           ) : (
-            <SlidersHorizontal className="size-3.5" aria-hidden />
+            <Settings2 className="size-4" strokeWidth={1.75} aria-hidden />
           )}
         </button>
       </PopoverTrigger>

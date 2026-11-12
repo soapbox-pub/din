@@ -2618,7 +2618,10 @@ function AddressBar({
   );
 
   return (
-    <div className="relative flex-1">
+    // As wide as a page's address needs and no wider, centered between the
+    // buttons on either side (Safari's, Arc's), rather than running from the
+    // reload button to the menu across a wide window.
+    <div className="relative mx-auto min-w-0 max-w-3xl flex-1">
       {/* While the user types, the box is a search box; otherwise its icon
           speaks for the page that's open. */}
       {open || !site ? (
