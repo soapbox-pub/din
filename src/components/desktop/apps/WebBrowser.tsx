@@ -4306,21 +4306,27 @@ const TabSurface = memo(function TabSurface({
       {extensionsPage && (
         <ExtensionsPage key={extensionsPage} initial={extensionAddressOf(extensionsPage)} installed={installedExtensions} />
       )}
-      {/* Untrusted-TLS warning, over the failed page until the user decides. */}
-      {certError && (
-        <CertificateWarning
-          info={certError}
-          onProceed={() => onTrustCertificate(certError)}
-          onBack={() => onDismissCertError(id)}
-        />
-      )}
-      {/* Network-level load error page (a cert warning takes precedence). */}
-      {loadError && !certError && (
-        <LoadErrorPage info={loadError} onRetry={() => onRetryLoad(id)} />
-      )}
-      {/* A site the user limited, over whatever the tab was on before it
-          tried to go there (electron/site-limits.mts). */}
-      <SiteLimitPage wcId={devtoolsWcId} closeLabel="Close tab" onClose={() => onCloseTab(id)} />
+      {/* The interstitials are taken out of a background tab's layout, not
+          just hidden with it: their entrance animation keeps them on a
+          compositor layer of their own, which went on showing over the
+          newly chosen tab for a moment after switching. */}
+      <div className="contents" hidden={!active}>
+        {/* Untrusted-TLS warning, over the failed page until the user decides. */}
+        {certError && (
+          <CertificateWarning
+            info={certError}
+            onProceed={() => onTrustCertificate(certError)}
+            onBack={() => onDismissCertError(id)}
+          />
+        )}
+        {/* Network-level load error page (a cert warning takes precedence). */}
+        {loadError && !certError && (
+          <LoadErrorPage info={loadError} onRetry={() => onRetryLoad(id)} />
+        )}
+        {/* A site the user limited, over whatever the tab was on before it
+            tried to go there (electron/site-limits.mts). */}
+        <SiteLimitPage wcId={devtoolsWcId} closeLabel="Close tab" onClose={() => onCloseTab(id)} />
+      </div>
     </div>
   );
 
