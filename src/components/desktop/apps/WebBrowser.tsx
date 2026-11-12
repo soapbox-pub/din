@@ -2632,7 +2632,9 @@ function AddressBar({
   );
 
   return (
-    <div className="relative flex-1">
+    // Set apart from the buttons on either side, so the bar reads as its own
+    // thing rather than one more button in a row.
+    <div className="relative mx-2 flex-1">
       {/* While the user types, the box is a search box; otherwise its icon
           speaks for the page that's open. */}
       {open || !site ? (
