@@ -164,6 +164,9 @@ class SkinBoundary extends Component<{ children: ReactNode; onError: (message: s
   }
 }
 
+/** Focused controls that use ← and → themselves. */
+const ARROW_KEEPERS = '[role=slider], [role=tab], [role=tablist], [role=radio], [role=radiogroup], [role=menu], [role=menuitem], [role=spinbutton]';
+
 /** Keyboard shortcuts: Windows Media Player's everywhere, Winamp's too in a Winamp skin. */
 function useShortcuts(commands: Commands, winamp: boolean) {
   return (e: React.KeyboardEvent) => {
@@ -202,8 +205,11 @@ function useShortcuts(commands: Commands, winamp: boolean) {
     else if (winamp && key === 'l') void (e.shiftKey ? commands.openFolder('play') : commands.openFiles('play'));
     else if (winamp && key === 's') player.setShuffle(!s.shuffle);
     else if (winamp && key === 'r') player.setRepeat(s.repeat === 'off' ? 'all' : 'off');
-    else if (winamp && key === 'arrowleft') player.seekBy(-5);
-    else if (winamp && key === 'arrowright') player.seekBy(5);
+    // ← and → skip back and forward in every skin, unless what has focus
+    // moves with them itself (a slider, tabs, a radio group).
+    else if ((key === 'arrowleft' || key === 'arrowright') && !e.defaultPrevented && !target.closest(ARROW_KEEPERS)) {
+      player.seekBy(key === 'arrowleft' ? -5 : 5);
+    }
     else if (winamp && key === 'arrowup') player.setVolume(s.volume + 0.02);
     else if (winamp && key === 'arrowdown') player.setVolume(s.volume - 0.02);
     else handled = false;
