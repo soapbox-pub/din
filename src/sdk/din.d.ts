@@ -71,6 +71,8 @@ export interface Din {
   theme: DinTheme;
   desktop: DinDesktop;
   assistant: DinAssistant;
+  /** Being a keyboard: the field being typed in, and editing it (permission `input-method`). */
+  inputMethod: DinInputMethod;
   /** Privileged system bridges, present only when the manifest asks for them. */
   system: DinSystem;
   /**
@@ -721,7 +723,10 @@ export interface DinDesktop {
 // the user is in: `start()` listens until a pause (until `stop()` with
 // `continuous`), then one final `result` brings what was said and `end`
 // follows. `SpeechRecognition.available()` says whether this computer can
-// take dictation. No interim results; `lang` is whisper's to guess.
+// take dictation. With `interimResults`, a host that hears as it goes (Din
+// Phone) sends what it's heard so far as results that aren't final, each
+// replacing the last; Din's desktop sends only the final one. `lang` is
+// passed on as a hint where the host takes one; whisper guesses otherwise.
 
 declare global {
   // The Web Speech API's recognizer, which TypeScript's DOM types don't have.
@@ -738,12 +743,173 @@ declare global {
     onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => unknown) | null;
     onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => unknown) | null;
     onend: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+    onspeechstart: ((this: SpeechRecognition, ev: Event) => unknown) | null;
+    onspeechend: ((this: SpeechRecognition, ev: Event) => unknown) | null;
   }
   var SpeechRecognition: {
     prototype: SpeechRecognition;
     new (): SpeechRecognition;
     available(options?: { langs?: string[]; processLocally?: boolean }): Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>;
   };
+}
+
+// ---------------------------------------------------------------------------
+// din.inputMethod (permission `input-method`): being the keyboard
+// ---------------------------------------------------------------------------
+
+/**
+ * The field being typed in, as a keyboard needs it, in the words a page
+ * uses for its own fields (HTML's `type`, `inputmode`, `enterkeyhint`,
+ * `autocapitalize`, `spellcheck`, `autocorrect`, `lang`), whatever the
+ * app is written in: the host says what its toolkit said (Android's
+ * EditorInfo on Din Phone) in these.
+ */
+export interface InputField {
+  /** What the field holds: an `<input>`'s `type` (`text` for anything else, a `<textarea>`'s too). */
+  type: 'text' | 'search' | 'email' | 'url' | 'tel' | 'password' | 'number' | 'date' | 'time' | 'datetime-local';
+  /** The keys it wants: `inputmode` (`numeric` digits only, `decimal` a number pad with a point). */
+  inputMode: 'text' | 'decimal' | 'numeric' | 'tel' | 'search' | 'email' | 'url' | 'none';
+  /**
+   * What Enter does: `enterkeyhint`. `enter` is a new line in a multi-line
+   * field and a plain Enter key in another; the rest are the field's
+   * action, which `performAction()` performs.
+   */
+  enterKeyHint: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send';
+  /** The app's own word for its action, when it gave one ("Post"), to show on Enter. */
+  enterKeyLabel: string | null;
+  autocapitalize: 'none' | 'sentences' | 'words' | 'characters';
+  /** Whether to offer words as they're typed (`spellcheck`). */
+  spellcheck: boolean;
+  /** Whether to correct words as they're finished (`autocorrect`). */
+  autocorrect: boolean;
+  multiline: boolean;
+  /**
+   * Learn nothing from what's typed here, and keep none of it: a password,
+   * a private window, or the app asked (Android's
+   * IME_FLAG_NO_PERSONALIZED_LEARNING).
+   */
+  private: boolean;
+  /**
+   * The field has no text the keyboard can see or edit (a terminal): what's
+   * typed goes in as keys, `sendKey()`, and text as `insertText()`.
+   */
+  keysOnly: boolean;
+  /** The languages the app expects here, most likely first (BCP 47); often none. */
+  lang: string[];
+  /** The field's placeholder, if it has one. */
+  placeholder: string | null;
+  /** The app it's in, as the host names apps (a package name on Din Phone, an app's id on Din). */
+  app: string | null;
+}
+
+/** The text around the selection, as far as the host could read it. Positions are UTF-16 units, as a string's are. */
+export interface InputText {
+  before: string;
+  selected: string;
+  after: string;
+  /** Where the selection is in the field; null when the app doesn't say. */
+  start: number | null;
+  end: number | null;
+}
+
+/** The selection in the field, and the text being composed (underlined, to be replaced whole), as the app reports them. */
+export interface InputSelection {
+  start: number;
+  end: number;
+  composition: { start: number; end: number } | null;
+}
+
+/** A field coming into the keyboard's hands, or going: what `onFieldChange` hears. */
+export interface InputFieldChange {
+  /** The field, or null when there's none (the keyboard was put away). */
+  field: InputField | null;
+  /** Its text around the selection, when the host could read it at once; ask with `getText()` otherwise. */
+  text: InputText | null;
+  /** Where the selection starts and ends, from the field's start. */
+  selection: InputSelection | null;
+  /** The same field again (the app started over in it): what the keyboard was showing can stay. */
+  restarted: boolean;
+}
+
+/**
+ * For an app that is a keyboard (an input method), with the
+ * `input-method` permission: Din Keyboard. The host shows it where a
+ * keyboard goes, and it types into whatever field has focus in any app.
+ *
+ * Everything else a keyboard does is the web's own:
+ * - shown and hidden: `document.visibilityState` and `visibilitychange`;
+ * - its size: the window's (`innerWidth`, `innerHeight`), and how tall it
+ *   wants to be, `resizeTo()`; `screen.width`/`height` are the screen's, and
+ *   `screen.avail*` the part of it clear of system bars, so the keyboard
+ *   can keep its keys clear of a navigation bar;
+ * - its color while it starts: `<meta name="theme-color">`; drawn:
+ *   `din.app.ready()`;
+ * - the look: `prefers-color-scheme`, `prefers-reduced-motion`, and
+ *   `din.theme`'s `background`, `foreground` and `primary` (Material You's
+ *   on Din Phone);
+ * - the clipboard: `navigator.clipboard`, and its `clipboardchange` event,
+ *   which fires for text the user copies anywhere (except what the
+ *   system marks sensitive);
+ * - voice typing: `SpeechRecognition`, with `interimResults`;
+ * - a key's feel and sound: `navigator.vibrate()` (on Din Phone, a short
+ *   duration is a crisp tick, up to 30 ms its strength) and Web Audio;
+ * - the system's settings for keyboards and for voice typing:
+ *   `window.open('din://settings/?section=keyboard')` (`dictation`).
+ *
+ * Edits apply in order; those made in the same task go to the field as one
+ * (one change to undo, one selection reported after). Positions are UTF-16
+ * units from the field's start, as `InputSelection`'s.
+ */
+export interface DinInputMethod {
+  /** The field being typed in, or null. */
+  readonly field: InputField | null;
+  onFieldChange(cb: (change: InputFieldChange) => void): Unsubscribe;
+  /** The selection as the app last reported it. */
+  readonly selection: InputSelection | null;
+  /** The app reports the selection: after the keyboard's edits, and when the user or the app moves it or changes the text. */
+  onSelectionChange(cb: (selection: InputSelection) => void): Unsubscribe;
+  /** Read the text around the selection: up to `before` and `after` units either side (1000 by default). */
+  getText(options?: { before?: number; after?: number }): Promise<InputText | null>;
+  /**
+   * Where the app's caret is, in the keyboard's CSS pixels (negative `y`
+   * is above the keyboard's window), while anything listens; null when it
+   * isn't known. For effects that follow typing.
+   */
+  onCaretChange(cb: (caret: Rect | null) => void): Unsubscribe;
+
+  /** Put text in place of what's being composed, or else of what's selected, with the caret after it. */
+  insertText(text: string): void;
+  /** Put text in place of what's being composed, or else of what's selected, as what's being composed now, with the caret after it. */
+  setComposition(text: string): void;
+  /** Compose the text from `start` to `end` that's already in the field (a word to suggest for); equal ends compose nothing. */
+  setCompositionRange(start: number, end: number): void;
+  /** Leave what's being composed as it is, no longer composing. */
+  finishComposition(): void;
+  /** Delete `before` units before the selection and `after` units after it. */
+  deleteSurroundingText(before: number, after: number): void;
+  setSelectionRange(start: number, end: number): void;
+  /**
+   * Press and release a key, by `KeyboardEvent.key`'s name: `Backspace`,
+   * `Delete`, `Enter`, `Tab`, `Escape`, `ArrowLeft`, `ArrowRight`,
+   * `ArrowUp`, `ArrowDown`, `Home`, `End`, `PageUp`, `PageDown`, or a
+   * character, with modifiers held. For what has no text (a terminal),
+   * and for leaving what a key does to the app.
+   */
+  sendKey(key: string, modifiers?: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean; metaKey?: boolean }): void;
+  /** What the field's `enterKeyHint` says (go, search, send, next…). */
+  performAction(): void;
+
+  /**
+   * How much of the bottom of the screen the keyboard covers, in CSS
+   * pixels: apps are laid out above it, and touches in it are the
+   * keyboard's. The window can be taller (`resizeTo()`), for popups over
+   * the app, which take no touches but those already on the keyboard.
+   */
+  setInset(height: number): void;
+  /** Put the keyboard away. */
+  hide(): void;
+  /** Let the user choose another keyboard (the system's picker). */
+  showPicker(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -876,7 +1042,13 @@ export type Permission =
    * pictures). Apps that need fixed folders instead list them in their
    * manifest's `din.folders`.
    */
-  | 'file-folders';
+  | 'file-folders'
+  /**
+   * Being a keyboard (`din.inputMethod`): what's typed in any app's fields,
+   * read and written as the user types, and the clipboard as it changes.
+   * Din Keyboard.
+   */
+  | 'input-method';
 
 declare global {
   interface Permissions {

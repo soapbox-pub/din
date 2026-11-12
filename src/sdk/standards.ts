@@ -1110,7 +1110,9 @@ export function installClipboardFiles(host: ClipboardFilesHost): void {
 // ---------------------------------------------------------------------------
 
 export type SpeechEvent = { id: number } & (
-  | { event: 'result'; text: string }
+  /** What was said: `final` false for what's heard so far, which the next result replaces. */
+  | { event: 'result'; text: string; final?: boolean }
+  | { event: 'speechstart' | 'speechend' }
   | { event: 'error'; error: string; message: string }
   | { event: 'end' }
 );
@@ -1118,8 +1120,8 @@ export type SpeechEvent = { id: number } & (
 export interface SpeechHost {
   /** Whether this computer can take dictation. */
   available(): Promise<boolean>;
-  /** Start session `id`, whose events name it. */
-  start(id: number, continuous: boolean): Promise<void>;
+  /** Start session `id`, whose events name it: with `interim`, results that aren't final as it goes; `lang`, '' for none. */
+  start(id: number, options: { continuous: boolean; interim: boolean; lang: string }): Promise<void>;
   stop(): void;
   abort(): void;
   onEvent(cb: (event: SpeechEvent) => void): Unsubscribe;
@@ -1130,9 +1132,12 @@ type SpeechHandler = ((this: unknown, event: Event) => unknown) | null;
 /**
  * The Web Speech API's `SpeechRecognition` (and `webkitSpeechRecognition`)
  * over Din's dictation, which listens through the desktop and transcribes on
- * this computer. One final result per session, then `end`; `start()` while
- * one is going throws `InvalidStateError`, as the web's does. The draft's
- * `SpeechRecognition.available()` answers `available` or `unavailable`.
+ * this computer. One final result per session, then `end`; with
+ * `interimResults`, results that aren't final before it, where the host
+ * hears as it goes, each the same result (index 0) heard further. `start()`
+ * while one is going throws `InvalidStateError`, as the web's does. The
+ * draft's `SpeechRecognition.available()` answers `available` or
+ * `unavailable`.
  */
 export function installSpeechRecognition(host: SpeechHost): void {
   let active: DinSpeechRecognition | null = null;
@@ -1180,7 +1185,7 @@ export function installSpeechRecognition(host: SpeechHost): void {
       // eslint-disable-next-line @typescript-eslint/no-this-alias
       active = this;
       const id = (this.session = nextId++);
-      host.start(id, this.continuous).then(
+      host.start(id, { continuous: this.continuous, interim: this.interimResults, lang: String(this.lang ?? '') }).then(
         () => {
           if (active !== this || this.session !== id) return;
           this.fire(new Event('start'));
@@ -1208,9 +1213,16 @@ export function installSpeechRecognition(host: SpeechHost): void {
     /** @internal */
     hear(e: SpeechEvent): void {
       if (!this.running) return;
-      if (e.event === 'result') {
-        const alternative = { transcript: e.text, confidence: 1 };
-        const result = list([alternative], { isFinal: true });
+      if (e.event === 'speechstart' || e.event === 'speechend') {
+        // Din hears sound only as speech: the two come together.
+        if (e.event === 'speechstart') this.fire(new Event('soundstart'));
+        this.fire(new Event(e.event));
+        if (e.event === 'speechend') this.fire(new Event('soundend'));
+      } else if (e.event === 'result') {
+        const final = e.final !== false;
+        if (!final && !this.interimResults) return;
+        const alternative = { transcript: e.text, confidence: final ? 1 : 0 };
+        const result = list([alternative], { isFinal: final });
         const event = new Event('result');
         Object.defineProperties(event, {
           resultIndex: { value: 0, enumerable: true },
@@ -1377,6 +1389,7 @@ const DIN_PERMISSIONS: Record<Permission, true> = {
   nostr: true, fs: true, pty: true, notifications: true, background: true, wallpaper: true, cursor: true,
   assistant: true, 'assistant-sudo': true, indd: true, volumes: true, drive: true, mail: true, phone: true, passwords: true, vms: true, games: true,
   capture: true, camera: true, microphone: true, preview: true, 'file-folders': true, features: true,
+  'input-method': true,
 };
 
 /** The web's permission names whose powers Din permissions grant (any one of them). */

@@ -98,6 +98,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   preview: 'Show web servers running on this computer, and web pages from your files',
   'file-folders': 'Reach the folders of files you give it',
   features: 'Install optional features it needs',
+  'input-method': 'Be a keyboard: see and change what you type in every app, and what you copy',
 };
 
 /** Permissions only a built-in app's reviewed manifest gets, never one the user is asked about. */

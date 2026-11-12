@@ -119,7 +119,13 @@ as one final `result`, then `end`; nothing is typed for the app, which
 puts the text where it wants it. Only the window the user is in can
 start listening (an `error` of `not-allowed` otherwise), and one session
 runs at a time on the desktop: a new one, or the dictation key, ends the
-last. No interim results; `lang` is whisper's to guess. The Assistant's
+last. `speechstart` and `speechend` (with `soundstart` and `soundend`)
+come where the host hears them. With `interimResults`, a host that hears
+as it goes (Din Phone, whose recognizer is Android's `RecognitionService`
+over whisper.cpp) sends what it has so far as results that aren't final,
+each the session's one result (`results[0]`) heard further, before the
+final one; Din's desktop sends only the final one. `lang` goes to the
+host as a hint; whisper guesses where there's none. The Assistant's
 composer (`src/shared/assistant/appHost.tsx`) types the text at its
 cursor as the keyboard would.
 

@@ -19,6 +19,9 @@ import type {
   Edge,
   RelatedApplication,
   OpenWithApp,
+  InputFieldChange,
+  InputSelection,
+  InputText,
 } from '@/sdk/din';
 import type { StoredHandle } from '@/sdk/standards';
 
@@ -175,7 +178,20 @@ export interface Hello {
    * true, which is how apps ask.
    */
   formFactor?: 'desktop' | 'phone';
+  /** For a keyboard (`input-method`): the field it's typing in, if there's one already. */
+  inputField?: InputFieldChange;
 }
+
+/** One edit of the field a keyboard types in: `din.inputMethod`'s, as they cross. */
+export type InputEdit =
+  | { type: 'insertText'; text: string }
+  | { type: 'setComposition'; text: string }
+  | { type: 'setCompositionRange'; start: number; end: number }
+  | { type: 'finishComposition' }
+  | { type: 'deleteSurroundingText'; before: number; after: number }
+  | { type: 'setSelectionRange'; start: number; end: number }
+  | { type: 'sendKey'; key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
+  | { type: 'performAction' };
 
 /** What an app can ask, by method: the params, and what the reply carries. */
 export interface Requests {
@@ -257,8 +273,12 @@ export interface Requests {
   'media.hold': [{ on: boolean }, void];
   'desktop.setWallpaper': [{ handle: string }, void];
   'desktop.setCursor': [{ handle: string }, void];
-  /** SpeechRecognition's start(): listen until a pause, or with `continuous` until stop(). */
-  'speech.start': [{ id: number; continuous: boolean }, void];
+  /**
+   * SpeechRecognition's start(): listen until a pause, or with `continuous`
+   * until stop(); with `interim`, say what's heard so far as it goes, if
+   * the host can. `lang` is the page's hint, '' for none.
+   */
+  'speech.start': [{ id: number; continuous: boolean; interim?: boolean; lang?: string }, void];
   'speech.stop': [void, void];
   'speech.abort': [void, void];
 
@@ -280,6 +300,19 @@ export interface Requests {
   /** navigator.setAppBadge(): a count, a plain mark, or none. */
   'notifications.setBadge': [{ badge: number | 'flag' | null }, void];
 
+
+  /**
+   * A keyboard's edits, in order, as one change to the field. `typed`: made
+   * while handling a touch or a key, for the host's timing of how long a
+   * tap takes to reach the app.
+   */
+  'inputMethod.edit': [{ edits: InputEdit[]; typed: boolean }, void];
+  'inputMethod.getText': [{ before: number; after: number }, InputText | null];
+  /** Say where the caret is (`inputCaret` pushes) while `on`. */
+  'inputMethod.followCaret': [{ on: boolean }, void];
+  'inputMethod.setInset': [{ height: number }, void];
+  'inputMethod.hide': [void, void];
+  'inputMethod.showPicker': [void, void];
 
   'nostr.getPublicKey': [void, string];
   'nostr.signEvent': [{ event: unknown }, unknown];
@@ -319,17 +352,28 @@ export type Push =
   | { type: 'clipboardFiles'; has: { count: number; cut: boolean } | null }
   | { type: 'notification'; id: number; event: 'click' | 'close'; action: string | null }
   | { type: 'mediaAction'; action: MediaAction }
-  /** This window's SpeechRecognition: what was said, how it ended. */
-  | { type: 'speech'; id: number; event: 'result'; text: string }
+  /**
+   * This window's SpeechRecognition: speech heard beginning and ending,
+   * what was said (`final` false for what's heard so far, absent or true
+   * for the last word on it), how it ended.
+   */
+  | { type: 'speech'; id: number; event: 'result'; text: string; final?: boolean }
+  | { type: 'speech'; id: number; event: 'speechstart' | 'speechend' }
   | { type: 'speech'; id: number; event: 'error'; error: SpeechErrorCode; message: string }
   | { type: 'speech'; id: number; event: 'end' }
+  /** A keyboard's field: another one, or none. */
+  | { type: 'inputField'; change: InputFieldChange }
+  /** The keyboard's field's selection, as the app reports it. */
+  | { type: 'inputSelection'; selection: InputSelection }
+  /** Where the field's caret is, in the keyboard's CSS pixels, while followed. */
+  | { type: 'inputCaret'; caret: Rect | null }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
   | { type: 'assistantUnread'; sessionIDs: string[] }
   | { type: 'powerMode'; on: boolean };
 
 /** SpeechRecognitionErrorEvent's `error`, as Din's dictation can fail. */
-export type SpeechErrorCode = 'no-speech' | 'audio-capture' | 'service-not-allowed' | 'network';
+export type SpeechErrorCode = 'no-speech' | 'audio-capture' | 'service-not-allowed' | 'network' | 'not-allowed' | 'language-not-supported' | 'aborted';
 
 /** What a page's Notification tells the desktop to show. */
 export interface NotificationData {

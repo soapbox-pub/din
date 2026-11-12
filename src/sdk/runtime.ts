@@ -28,7 +28,11 @@ import type {
   DinSystem,
   DinTheme,
   DinWindow,
+  DinInputMethod,
   DragInfo,
+  InputField,
+  InputFieldChange,
+  InputSelection,
   FrameStyle,
   MenuItem,
   Nip07,
@@ -52,7 +56,7 @@ import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
-import type { FromDesktop, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
+import type { FromDesktop, InputEdit, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import { seedHandles } from '@/shared/handleStore';
@@ -1020,7 +1024,7 @@ export function installDin(transport: Transport): void {
       await ready;
       return h?.dictation.available ?? false;
     },
-    start: (id, continuous) => request('speech.start', { id, continuous }),
+    start: (id, { continuous, interim, lang }) => request('speech.start', { id, continuous, interim, lang }),
     stop: () => tell('speech.stop'),
     abort: () => tell('speech.abort'),
     onEvent: (cb) => pushes.on((p) => {
@@ -1062,6 +1066,108 @@ export function installDin(transport: Transport): void {
     setViewing: (sessionID) => {
       if (permissions.has('assistant')) tell('assistant.viewing', { sessionID });
     },
+  };
+
+  // ---- being a keyboard ----
+  let inputField: InputField | null = null;
+  let inputSelection: InputSelection | null = null;
+  const fieldChanges = new Emitter<InputFieldChange>();
+  const selectionChanges = new Emitter<InputSelection>();
+  const caretChanges = new Emitter<Rect | null>();
+  const takeField = (change: InputFieldChange) => {
+    inputField = change.field;
+    inputSelection = change.selection;
+  };
+  pushes.on((p) => {
+    if (p.type === 'inputField') {
+      takeField(p.change);
+      fieldChanges.emit(p.change);
+    } else if (p.type === 'inputSelection') {
+      inputSelection = p.selection;
+      selectionChanges.emit(p.selection);
+    } else if (p.type === 'inputCaret') {
+      caretChanges.emit(p.caret);
+    }
+  });
+  // Edits in the same task go as one, in order, when the task is done.
+  let edits: InputEdit[] | null = null;
+  let typed = false;
+  const edit = (e: InputEdit) => {
+    need('input-method');
+    if (!edits) {
+      edits = [];
+      typed = false;
+      queueMicrotask(() => {
+        const batch = edits!;
+        edits = null;
+        tell('inputMethod.edit', { edits: batch, typed });
+      });
+    }
+    // Made while a touch or a key is being handled: typed, for the host's timing.
+    const event = (window as { event?: Event }).event;
+    if (event instanceof PointerEvent || event instanceof KeyboardEvent || (typeof TouchEvent !== 'undefined' && event instanceof TouchEvent)) typed = true;
+    edits.push(e);
+  };
+  /** A setter: at once with the permission, or once the hello says the app has it (warned about if it hasn't). */
+  const granted = (fn: () => void) => {
+    if (h) {
+      need('input-method');
+      fn();
+      return;
+    }
+    void ready.then(() => {
+      if (permissions.has('input-method')) fn();
+      else console.warn('din: din.inputMethod:', new DinPermissionError('input-method').message);
+    });
+  };
+  let caretFollowers = 0;
+  const followCaret = (on: boolean) => void ready.then(() => {
+    if (permissions.has('input-method')) tell('inputMethod.followCaret', { on });
+  });
+  const inputMethod: DinInputMethod = {
+    get field() {
+      return inputField;
+    },
+    onFieldChange: (cb) => fieldChanges.on(cb),
+    get selection() {
+      return inputSelection;
+    },
+    onSelectionChange: (cb) => selectionChanges.on(cb),
+    getText: async (options) => {
+      await ready;
+      need('input-method');
+      return request('inputMethod.getText', { before: options?.before ?? 1000, after: options?.after ?? 1000 });
+    },
+    onCaretChange: (cb) => {
+      const off = caretChanges.on(cb);
+      if (caretFollowers++ === 0) followCaret(true);
+      let followed = true;
+      return () => {
+        if (!followed) return;
+        followed = false;
+        off();
+        if (--caretFollowers === 0) followCaret(false);
+      };
+    },
+    insertText: (text) => edit({ type: 'insertText', text: String(text) }),
+    setComposition: (text) => edit({ type: 'setComposition', text: String(text) }),
+    setCompositionRange: (start, end) => edit({ type: 'setCompositionRange', start: Number(start), end: Number(end) }),
+    finishComposition: () => edit({ type: 'finishComposition' }),
+    deleteSurroundingText: (before, after) => edit({ type: 'deleteSurroundingText', before: Number(before), after: Number(after) }),
+    setSelectionRange: (start, end) => edit({ type: 'setSelectionRange', start: Number(start), end: Number(end) }),
+    sendKey: (key, modifiers) =>
+      edit({
+        type: 'sendKey',
+        key: String(key),
+        ctrlKey: !!modifiers?.ctrlKey,
+        shiftKey: !!modifiers?.shiftKey,
+        altKey: !!modifiers?.altKey,
+        metaKey: !!modifiers?.metaKey,
+      }),
+    performAction: () => edit({ type: 'performAction' }),
+    setInset: (height) => granted(() => tell('inputMethod.setInset', { height: Math.max(0, Number(height) || 0) })),
+    hide: () => granted(() => tell('inputMethod.hide')),
+    showPicker: () => granted(() => tell('inputMethod.showPicker')),
   };
 
   // Filled in once the desktop has granted them.
@@ -1129,6 +1235,7 @@ export function installDin(transport: Transport): void {
     theme,
     desktop,
     assistant,
+    inputMethod,
     system,
     fetch: dinFetch,
   };
@@ -1179,6 +1286,7 @@ export function installDin(transport: Transport): void {
     assistantSettings = hello.assistant ?? NO_ASSISTANT;
     assistantUnread = hello.assistantUnread;
     powerMode = hello.powerMode;
+    if (hello.inputField) takeField(hello.inputField);
     if (permissions.has('nostr') && !('nostr' in window)) {
       Object.defineProperty(window, 'nostr', { value: nostr, configurable: false });
     }
