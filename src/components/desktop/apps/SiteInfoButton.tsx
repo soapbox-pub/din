@@ -15,10 +15,10 @@ import { usePopupSettings } from '@/hooks/usePopups';
 import {
   choiceOf,
   describeChoice,
-  formatSpent,
   getSiteLimitsBridge,
   LIMIT_CHOICES,
   limitOfChoice,
+  spentToday,
   type SiteLimitStatus,
 } from '@/lib/siteLimits';
 import { Button } from '@/components/ui/button';
@@ -365,32 +365,35 @@ export function SiteInfoButton({
 
         {siteLimits && limitHost && (
           <div className="space-y-2 border-t border-border/60 pt-4">
-            <p className="text-xs font-medium text-muted-foreground">Your time</p>
-            <div className="flex items-center gap-3 py-1">
-              <Hourglass className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <label htmlFor="site-limit" className="min-w-0 flex-1 space-y-0.5">
-                <span className="block text-sm">Limit this site</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {limit ? `${formatSpent(limit.seconds)} on ${limit.site} today` : '\u00a0'}
-                </span>
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="site-limit" className="text-xs font-medium text-muted-foreground">
+                Limit this site
               </label>
-              <Select value={choiceOf(limit?.limit ?? null)} onValueChange={setSiteLimit} disabled={!limit}>
-                <SelectTrigger id="site-limit" size="sm" className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LIMIT_CHOICES.map((choice) => (
-                    <SelectItem key={choice} value={choice}>
-                      {describeChoice(choice)}
-                    </SelectItem>
-                  ))}
-                  {/* A daily allowance set elsewhere (the din command) keeps its own row. */}
-                  {limit?.limit && !LIMIT_CHOICES.includes(choiceOf(limit.limit)) && (
-                    <SelectItem value={choiceOf(limit.limit)}>{describeChoice(choiceOf(limit.limit))}</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+              {limit && (
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  {spentToday(limit.seconds)}
+                </span>
+              )}
             </div>
+            <Select value={choiceOf(limit?.limit ?? null)} onValueChange={setSiteLimit} disabled={!limit}>
+              <SelectTrigger id="site-limit" size="sm" className="w-full">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Hourglass className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <SelectValue />
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_CHOICES.map((choice) => (
+                  <SelectItem key={choice} value={choice}>
+                    {describeChoice(choice)}
+                  </SelectItem>
+                ))}
+                {/* A daily allowance set elsewhere (the din command) keeps its own row. */}
+                {limit?.limit && !LIMIT_CHOICES.includes(choiceOf(limit.limit)) && (
+                  <SelectItem value={choiceOf(limit.limit)}>{describeChoice(choiceOf(limit.limit))}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

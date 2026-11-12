@@ -104,6 +104,12 @@ export function formatSpent(seconds: number): string {
   return h ? `${h} hr${m ? ` ${m} min` : ''}` : `${m} min`;
 }
 
+/** "Under a minute today", "12 min today". */
+export function spentToday(seconds: number): string {
+  const spent = formatSpent(seconds);
+  return `${spent.charAt(0).toUpperCase()}${spent.slice(1)} today`;
+}
+
 /** What a limit does, in a few words: "Pause before opening", "30 minutes a day", "Blocked". */
 export function describeLimit(limit: Pick<SiteLimit, 'mode' | 'minutes'>): string {
   if (limit.mode === 'pause') return 'Pause before opening';

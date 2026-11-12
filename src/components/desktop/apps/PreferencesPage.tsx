@@ -7,7 +7,7 @@ import { usePopupSettings } from '@/hooks/usePopups';
 import {
   choiceOf,
   describeChoice,
-  formatSpent,
+  spentToday,
   getSiteLimitsBridge,
   LIMIT_CHOICES,
   limitOfChoice,
@@ -330,7 +330,7 @@ function SiteLimitRow({
         <li className="flex items-center gap-4 py-1.5 pr-2 pl-4">
           <div className="min-w-0 flex-1">
             <label htmlFor={id} className="block truncate text-sm">{limit.site}</label>
-            <p className="truncate text-xs text-muted-foreground">{formatSpent(seconds)} today</p>
+            <p className="truncate text-xs text-muted-foreground">{spentToday(seconds)}</p>
           </div>
           <Select value={current} onValueChange={onChange}>
             <SelectTrigger id={id} size="sm" className="w-44">
