@@ -377,6 +377,9 @@ const AppsMenu = memo(function AppsMenu() {
   );
 });
 
+/** Apps' names from A to Z, ignoring case, with "Paint 2" before "Paint 10". */
+const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 /**
  * The apps launcher: a search over the apps and Settings' sections, and
  * their tiles. It lives in a popover (the apps menu, the Start menu), whose
@@ -411,21 +414,22 @@ export function AppLauncher({
   // so "browser" finds Firefox and "photo" finds an image editor.
   const needle = query.trim().toLowerCase();
   // Apps whose name matches come before those found by a keyword (Camera
-  // before Studio for "camera"), names that start with it first; otherwise
-  // in launcher order.
+  // before Studio for "camera"), names that start with it first. Within
+  // that, and with no search, every app (Din's own, installed websites and
+  // nsites, the system's) is in one list from A to Z, as every desktop's
+  // full list of apps is.
   const rank = (app: (typeof apps)[number]) => {
+    if (!needle) return 0;
     const name = app.name.toLowerCase();
     if (name.startsWith(needle)) return 0;
     if (name.includes(needle)) return 1;
     return (app.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(needle)) ? 2 : -1;
   };
   const launcherApps = apps
-    .filter((app) => !app.hidden && (!needle || rank(app) >= 0))
-    .sort((a, b) => (needle ? rank(a) - rank(b) : 0));
-  // Din's own apps lead; the host system's installed apps follow in their own
-  // section, since there are typically hundreds of them.
-  const dinApps = launcherApps.filter((app) => !app.native);
-  const nativeApps = launcherApps.filter((app) => app.native);
+    .filter((app) => !app.hidden && rank(app) >= 0)
+    .sort((a, b) => rank(a) - rank(b) || byName.compare(a.name, b.name));
+  // Found only by a keyword: listed, but Enter prefers a setting to them.
+  const nameMatches = launcherApps.filter((app) => rank(app) < 2);
   // Settings' sections match the way Settings' own search does, once the
   // query has two letters or digits, so "display" or "wifi" finds them.
   const terms = parseQuery(query);
@@ -434,16 +438,16 @@ export function AppLauncher({
 
   /** Enter in the search launches the first match, as shown. */
   const launchFirst = () => {
-    const first = dinApps[0];
+    const first = nameMatches[0];
     if (first) {
       onClose();
       open(first.id);
     } else if (settings[0]) {
       onClose();
       openSetting(settings[0]);
-    } else if (nativeApps[0]) {
+    } else if (launcherApps[0]) {
       onClose();
-      open(nativeApps[0].id);
+      open(launcherApps[0].id);
     }
   };
 
@@ -483,26 +487,15 @@ export function AppLauncher({
         ) : (
           <>
             <AppGrid
-              apps={dinApps}
+              apps={launcherApps}
               onOpen={open}
               onUninstall={uninstall}
               canUninstall={canUninstall}
             />
             {settings.length > 0 && (
               <>
-                {dinApps.length > 0 && <LauncherHeading>Settings</LauncherHeading>}
+                {launcherApps.length > 0 && <LauncherHeading>Settings</LauncherHeading>}
                 <SettingsList sections={settings} onOpen={openSetting} />
-              </>
-            )}
-            {nativeApps.length > 0 && (
-              <>
-                {(dinApps.length > 0 || settings.length > 0) && <LauncherHeading>System</LauncherHeading>}
-                <AppGrid
-                  apps={nativeApps}
-                  onOpen={open}
-                  onUninstall={uninstall}
-                  canUninstall={canUninstall}
-                />
               </>
             )}
           </>

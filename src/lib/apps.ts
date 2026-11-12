@@ -188,7 +188,10 @@ function dinApp(id: string): AppDefinition {
   };
 }
 
-/** All apps installed on the desktop, in launcher order. */
+/**
+ * All apps built into the desktop. The order is only where they're
+ * registered: the apps menu lists every app by name.
+ */
 export const APPS: readonly AppDefinition[] = [
   {
     id: 'web-browser',

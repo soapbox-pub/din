@@ -21,7 +21,7 @@ export interface LinkedWebsite {
  * and the host's Linux apps.
  */
 export interface InstalledAppsManager {
-  /** Every launchable app, in launcher order (built-ins first). */
+  /** Every launchable app: built-ins, then installed ones (the apps menu sorts them by name). */
   apps: readonly AppDefinition[];
   /** Look up any app (built-in or installed) by id. */
   getApp: (id: string) => AppDefinition | undefined;
