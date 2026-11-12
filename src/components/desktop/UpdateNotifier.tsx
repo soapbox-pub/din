@@ -10,6 +10,7 @@ import {
   dismissUpdateNotice,
   dismissUpdateProblems,
   failureKey,
+  isDinRestartPlanned,
   isUpdateProblemDismissed,
   securityKey,
   UPDATE_NOTICE_KEY,
@@ -96,6 +97,8 @@ export function UpdateNotifier() {
     if (!restart || sessionStorage.getItem(RESTART_NOTIFIED_KEY) === restart) return;
     sessionStorage.setItem(RESTART_NOTIFIED_KEY, restart);
     const din = restart.endsWith(':din');
+    // `din update local --restart` is about to restart Din itself.
+    if (din && isDinRestartPlanned()) return;
     toast({
       title: din ? 'Restart Din to finish updating' : 'Restart to finish updating',
       replaceKey: UPDATE_NOTICE_KEY,

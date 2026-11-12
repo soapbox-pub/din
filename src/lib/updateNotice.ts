@@ -13,6 +13,20 @@ export const UPDATE_NOTICE_KEY = 'din-update';
  */
 export const UPDATE_PROBLEM_KEY = 'din-update-problem';
 
+/**
+ * Set while `din update local --restart` builds: it restarts Din itself
+ * once the switch is done, so UpdateNotifier doesn't ask the user to.
+ */
+let dinRestartPlanned = false;
+
+export function planDinRestart(on: boolean): void {
+  dinRestartPlanned = on;
+}
+
+export function isDinRestartPlanned(): boolean {
+  return dinRestartPlanned;
+}
+
 /** Whether the update's notification is still waiting to be seen. */
 export function useUpdateNoticePending(): boolean {
   const { notifications } = useNotificationCenter();

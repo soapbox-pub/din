@@ -5,6 +5,7 @@ import { getFirmwareBridge } from '@/lib/firmware';
 import { getLockBridge } from '@/lib/lock';
 import { blossomListTags, normalizeBlossomUrl, normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
 import { getUpdaterBridge, shortRevision, UPDATE_STEP_LABELS } from '@/lib/updater';
+import { planDinRestart } from '@/lib/updateNotice';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need } from './util';
 
@@ -18,7 +19,7 @@ const RESTART_DELAY_MS = 1_000;
 
 /** Restart Din once the answer's on its way: the restart ends whatever ran the command. */
 function restartDinSoon(bridge = updater()) {
-  setTimeout(() => void bridge.restartDin().catch(() => {}), RESTART_DELAY_MS);
+  setTimeout(() => void bridge.restartDin().catch(() => planDinRestart(false)), RESTART_DELAY_MS);
 }
 
 export const updateArea: Area = {
@@ -66,12 +67,22 @@ export const updateArea: Area = {
           ctx.progress?.({ text: 'Switching to it' });
         }
       });
-      const { commit, restart } = await call(bridge.buildLocal(ref, ctx.session)).finally(stop);
+      const restartAfter = args.optBool('restart') === true;
+      // Set before the build: the switch can report Din's waiting on a
+      // restart before buildLocal answers, and this restarts it anyway.
+      planDinRestart(restartAfter);
+      const { commit, restart } = await call(bridge.buildLocal(ref, ctx.session))
+        .catch((e: unknown) => {
+          planDinRestart(false);
+          throw e;
+        })
+        .finally(stop);
       const done = `Built commit ${shortRevision(commit)}`;
       const data = { commit, restart };
+      if (restart !== 'din') planDinRestart(false);
       if (restart === 'reboot') return { data, text: `${done}. It starts when the computer restarts.` };
       if (restart !== 'din') return { data, text: `${done}. It's live.` };
-      if (args.optBool('restart') !== true) return { data, text: `${done}. It starts when Din restarts (din update restart).` };
+      if (!restartAfter) return { data, text: `${done}. It starts when Din restarts (din update restart).` };
       restartDinSoon(bridge);
       return { data, text: `${done}. Din is restarting.` };
     }),
