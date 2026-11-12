@@ -155,7 +155,7 @@ directly by components.
 | System | `datetime`, `theme`, `systemEvents`, `systemMonitor`, `systemNotifications`, `tray`, `printing` |
 | Native apps | `nativeApps`, `nativeDisplay` |
 | Nostr | `nostrd`, `nostrHost`, `bunkerHost` |
-| The browser | `browser`, `crx`, `userscripts`, `adblock`, `popups`, `devtools`, `screenShare`, `eyeDropper` |
+| The browser | `browser`, `crx`, `userscripts`, `adblock`, `popups`, `siteLimits`, `devtools`, `screenShare`, `eyeDropper` |
 | nsites and napps | `nsiteHost`, `nsiteStore`, `nappHost`, `webPushHost` |
 | Guest plumbing | `pageFullscreen`, `guestVisibility`, `guestFileDrop`, `guestInput`, `highlightHost`, `filePickerHost`, `promptHost` |
 | The Assistant | `assistant` |

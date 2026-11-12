@@ -76,6 +76,8 @@
 //     requests for the Web Browser app
 //   - window.dinos.adblock: the Web Browser's built-in ad blocker
 //   - window.dinos.popups: the pop-up blocker's blocked windows and allowed sites
+//   - window.dinos.siteLimits: sites the user limited (a pause, a daily
+//     allowance, a block), and the pages covered for them
 //   - window.dinos.devtools: docked devtools control for the Web Browser app
 //   - window.dinos.nostrHost: relays NIP-07 requests from browser tabs and installed
 //     web apps to the signed-in account's signer (see NostrBridgeHost /
@@ -3418,6 +3420,65 @@ expose('adblock', {
     const listener = (_event, update) => callback(update);
     ipcRenderer.on('adblock:blocked', listener);
     return () => ipcRenderer.removeListener('adblock:blocked', listener);
+  },
+});
+
+// Site limits bridge (window.dinos.siteLimits), backed by the site-limits:*
+// handlers in electron/site-limits.mts: the sites the user limited and their
+// time today, and the limit's page over a guest stopped at one.
+expose('siteLimits', {
+  /** @returns {Promise<{ limits: unknown[], usage: Record<string, { seconds: number, attempts: number }> }>} */
+  get: () => ipcRenderer.invoke('site-limits:get'),
+
+  /** @param {string} hostname */
+  status: (hostname) => ipcRenderer.invoke('site-limits:status', hostname),
+
+  /**
+   * @param {string} hostname
+   * @param {{ mode: string, minutes?: number } | null} limit null lifts it
+   * @returns {Promise<string>} the site the limit covers
+   */
+  set: (hostname, limit) => ipcRenderer.invoke('site-limits:set', hostname, limit),
+
+  /** @param {number} wcId */
+  blockOf: (wcId) => ipcRenderer.invoke('site-limits:blockOf', wcId),
+
+  /**
+   * @param {number} wcId
+   * @param {number} minutes
+   */
+  allow: (wcId, minutes) => ipcRenderer.invoke('site-limits:allow', wcId, minutes),
+
+  /** @param {number} wcId */
+  dismiss: (wcId) => ipcRenderer.invoke('site-limits:dismiss', wcId),
+
+  /**
+   * Subscribe to the limits and today's time. Returns an unsubscribe fn.
+   * @param {(settings: unknown) => void} callback
+   */
+  onSettings: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} settings
+     */
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on('site-limits:settings', listener);
+    return () => ipcRenderer.removeListener('site-limits:settings', listener);
+  },
+
+  /**
+   * Subscribe to guests being covered by a limit's page, or uncovered (null).
+   * Returns an unsubscribe fn.
+   * @param {(update: { wcId: number, block: unknown }) => void} callback
+   */
+  onBlock: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ wcId: number, block: unknown }} update
+     */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('site-limits:block', listener);
+    return () => ipcRenderer.removeListener('site-limits:block', listener);
   },
 });
 

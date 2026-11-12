@@ -63,6 +63,7 @@ import {
 } from './userscripts.mts';
 import { attachAdblock, ensureAdblockEngine, isAdblockExtension, prepareAdblock, setupAdblock } from './adblock.mts';
 import { sendNavigationClientHints } from './client-hints.mts';
+import { attachSiteLimits, setupSiteLimits } from './site-limits.mts';
 import {
   attachPopups,
   justPressed,
@@ -6663,6 +6664,13 @@ app.whenReady().then(() => {
     },
   });
 
+  // Sites the user limited for their own sake (electron/site-limits.mts).
+  setupSiteLimits({
+    isGuestHidden: (wcId) => hiddenGuests.has(wcId),
+    assertShellSender,
+    sendToShell,
+  });
+
   // Route chrome.action popups into the shell instead of native windows.
   overrideActionPopup();
 
@@ -7219,6 +7227,8 @@ app.on('web-contents-created', (_event, contents) => {
   // blocker sees every request in the browser's session anyway.
   if (isBrowserTabSession(contents.session) && !isExtensionPageGuest) {
     attachAdblock(contents);
+    // Limited sites, in installed apps' windows as in tabs.
+    attachSiteLimits(contents);
   }
   if (isBrowserTabSession(contents.session) && !isAppWindow && !isExtensionPageGuest) {
     // The onion service and nsite the page names, for the address bar

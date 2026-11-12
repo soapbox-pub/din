@@ -1,6 +1,7 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import { getBrowserBridge, siteOriginOf, type SiteCapability } from '@/lib/browser';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
+import { DAILY_MINUTES, describeLimit, formatSpent, getSiteLimitsBridge, type SiteLimitMode } from '@/lib/siteLimits';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
 import { getFsBridge } from '@/lib/fs';
 import { openPath } from '@/lib/openPath';
@@ -495,7 +496,7 @@ function siteOrigin(site: string): string {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), site data, and what each site may do',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), site data, what each site may do, and the sites the user limited for their own sake',
   commands: [
     ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
@@ -551,6 +552,61 @@ export const browserArea: Area = {
       }
       await call(browser.setSitePermission(origin, capability, answer === 'ask' ? null : answer === 'allow', false));
       return { text: `${what} for ${name}: ${answer}` };
+    }),
+    command('browser', 'site-limits', 'The sites the user limited (a pause before opening, a daily allowance, or a block), and their time on each today', [], async () => {
+      const limits = need(getSiteLimitsBridge(), 'Site limits');
+      const settings = await call(limits.get());
+      const rows = settings.limits.map((limit) => ({
+        site: limit.site,
+        mode: limit.mode,
+        ...(limit.mode === 'daily' ? { minutes: limit.minutes } : {}),
+        secondsToday: Math.round(settings.usage[limit.site]?.seconds ?? 0),
+        triesToday: settings.usage[limit.site]?.attempts ?? 0,
+      }));
+      return {
+        data: rows,
+        text: settings.limits.length
+          ? settings.limits
+            .map((l) => `${l.site}\t${describeLimit(l)}\t${formatSpent(settings.usage[l.site]?.seconds ?? 0)} today`)
+            .join('\n')
+          : 'No sites are limited',
+      };
+    }),
+    command('browser', 'site-limit', 'Limit a site, as its site info’s Limit this site does: pause before opening it, give it some minutes a day, or block it; or lift its limit (changing or lifting one asks on screen first)', [
+      { name: 'site', type: 'string', positional: true, help: 'The site, e.g. reddit.com (its subdomains are covered too)' },
+      { name: 'limit', type: 'string', positional: true, help: 'Pause before opening it, a daily allowance, block it, or none to lift its limit', choices: ['pause', 'daily', 'block', 'none'] },
+      { name: 'minutes', type: 'integer', optional: true, help: `The daily allowance in minutes: ${DAILY_MINUTES.join(', ')} (default 30)` },
+    ], async (args, ctx) => {
+      const limits = need(getSiteLimitsBridge(), 'Site limits');
+      const choice = args.string('limit');
+      const minutes = args.optNumber('minutes') ?? 30;
+      if (choice === 'daily' && !DAILY_MINUTES.includes(minutes)) {
+        throw new CommandError(`The minutes a day are one of ${DAILY_MINUTES.join(', ')}`, 'usage');
+      }
+      let host: string;
+      try {
+        host = new URL(/^[a-z]+:\/\//i.test(args.string('site')) ? args.string('site') : `https://${args.string('site')}`).hostname;
+      } catch {
+        throw new CommandError(`Not a website: ${args.string('site')}`, 'usage');
+      }
+      const current = await call(limits.status(host));
+      const next = choice === 'none' ? null : { mode: choice as SiteLimitMode, minutes };
+      // The user set their limits for themselves: a command doesn't get to
+      // loosen one without them.
+      if (current.limit) {
+        const ok = await ctx.confirm({
+          title: next ? `Change the limit on ${current.site}?` : `Remove the limit on ${current.site}?`,
+          description: next
+            ? `A command asked to change ${current.site} from “${describeLimit(current.limit)}” to “${describeLimit({ mode: next.mode, minutes })}”.`
+            : `A command asked to lift your limit on ${current.site} (“${describeLimit(current.limit)}”).`,
+          action: next ? 'Change' : 'Remove',
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+      } else if (!next) {
+        return { text: `${current.site} isn’t limited` };
+      }
+      const site = await call(limits.set(host, next));
+      return { text: next ? `${site}: ${describeLimit({ mode: next.mode, minutes })}` : `${site} is no longer limited` };
     }),
   ],
 };

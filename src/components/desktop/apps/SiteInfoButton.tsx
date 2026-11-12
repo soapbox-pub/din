@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AppWindow, Loader2, Lock, RotateCw, Trash2, TriangleAlert } from 'lucide-react';
+import { AppWindow, Hourglass, Loader2, Lock, RotateCw, Trash2, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 import { getBrowserBridge, siteOriginOf, type SiteInfo } from '@/lib/browser';
@@ -12,6 +12,15 @@ import { OnionIcon } from '@/components/icons/OnionIcon';
 import type { SiteCapability } from '@/lib/promptBridge';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { usePopupSettings } from '@/hooks/usePopups';
+import {
+  choiceOf,
+  describeChoice,
+  formatSpent,
+  getSiteLimitsBridge,
+  LIMIT_CHOICES,
+  limitOfChoice,
+  type SiteLimitStatus,
+} from '@/lib/siteLimits';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -82,6 +91,8 @@ export function SiteInfoButton({
   const [info, setInfo] = useState<SiteInfo | null>(null);
   const [changed, setChanged] = useState(false);
   const [deleting, setDeleting] = useState<'idle' | 'confirm' | 'busy'>('idle');
+  const [limit, setLimit] = useState<SiteLimitStatus | null>(null);
+  const siteLimits = getSiteLimitsBridge();
   const { toast } = useToast();
 
   const origin = siteOriginOf(url);
@@ -103,12 +114,40 @@ export function SiteInfoButton({
     // Re-read each time it opens: a prompt may have been answered since.
   }, [bridge, origin, isPrivate, open]);
 
+  // Its limit, if the user limited it, and its time today: websites only.
+  const limitHost = scheme === 'http' || scheme === 'https' ? new URL(origin ?? '').hostname : null;
+  useEffect(() => {
+    if (!siteLimits || !limitHost || !open) return;
+    let cancelled = false;
+    siteLimits.status(limitHost).then(
+      (next) => {
+        if (!cancelled) setLimit(next);
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [siteLimits, limitHost, open]);
+
+  const setSiteLimit = (choice: string) => {
+    if (!siteLimits || !limitHost) return;
+    const next = limitOfChoice(choice);
+    setLimit((prev) => (prev ? { ...prev, limit: next ? { site: prev.site, minutes: 30, ...next } : null } : prev));
+    siteLimits
+      .set(limitHost, next)
+      .then(() => siteLimits.status(limitHost))
+      .then(setLimit)
+      .catch(() => toast({ title: "Couldn't change this site's limit", variant: 'destructive' }));
+  };
+
   // A different site is a different set of answers.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpen(false);
     setChanged(false);
     setInfo(null);
+    setLimit(null);
   }, [origin]);
 
   if (!origin) return null;
@@ -321,6 +360,37 @@ export function SiteInfoButton({
                 In a private window, answers are forgotten when it closes.
               </p>
             )}
+          </div>
+        )}
+
+        {siteLimits && limitHost && (
+          <div className="space-y-2 border-t border-border/60 pt-4">
+            <p className="text-xs font-medium text-muted-foreground">Your time</p>
+            <div className="flex items-center gap-3 py-1">
+              <Hourglass className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <label htmlFor="site-limit" className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-sm">Limit this site</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {limit ? `${formatSpent(limit.seconds)} on ${limit.site} today` : '\u00a0'}
+                </span>
+              </label>
+              <Select value={choiceOf(limit?.limit ?? null)} onValueChange={setSiteLimit} disabled={!limit}>
+                <SelectTrigger id="site-limit" size="sm" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LIMIT_CHOICES.map((choice) => (
+                    <SelectItem key={choice} value={choice}>
+                      {describeChoice(choice)}
+                    </SelectItem>
+                  ))}
+                  {/* A daily allowance set elsewhere (the din command) keeps its own row. */}
+                  {limit?.limit && !LIMIT_CHOICES.includes(choiceOf(limit.limit)) && (
+                    <SelectItem value={choiceOf(limit.limit)}>{describeChoice(choiceOf(limit.limit))}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         )}
 

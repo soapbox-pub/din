@@ -87,6 +87,7 @@ function webAppComponent(webApp: WebApp, favicon?: string, nsiteHost?: string): 
         typeof props.params?.url === 'string' ? props.params.url : undefined;
       return (
         <WebAppFrame
+          windowId={props.windowId}
           url={url}
           initialUrl={initialUrl}
           navigateAt={props.params?.actionAt}

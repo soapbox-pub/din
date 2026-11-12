@@ -10,6 +10,8 @@ import { NappInfoButton } from '@/components/desktop/apps/NappInfoButton';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useSlowLaunch } from '@/hooks/useSlowLaunch';
+import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { SiteLimitPage } from '@/components/desktop/apps/SiteLimitPage';
 
 /**
  * Standalone, chrome-less window content for an installed web app: the site
@@ -33,6 +35,7 @@ import { useSlowLaunch } from '@/hooks/useSlowLaunch';
  * that opens its permissions, window.ENV and data (see NappInfoButton).
  */
 export function WebAppFrame({
+  windowId,
   url,
   initialUrl,
   navigateAt,
@@ -42,6 +45,8 @@ export function WebAppFrame({
   themeColor,
   nsiteHost,
 }: {
+  /** The app's window, which a limited site's page closes. */
+  windowId?: string;
   url: string;
   initialUrl?: string;
   /** Changes when the app is asked to go to `initialUrl` again (a shortcut chosen twice). */
@@ -70,6 +75,8 @@ export function WebAppFrame({
   // Back/forward availability, reported by the webview on each navigation.
   const [nav, setNav] = useState({ canBack: false, canForward: false });
   const viewRef = useRef<BrowserViewHandle>(null);
+  const [wcId, setWcId] = useState<number | null>(null);
+  const { close: closeWindow } = useWindowActions();
   const setAccent = useWindowAccent();
   const setTitlebar = useWindowTitlebar();
   const home = sanitizeAppUrl(url);
@@ -204,6 +211,7 @@ export function WebAppFrame({
         }}
         onThemeColorChange={onThemeColorChange}
         onNavigate={onNavigate}
+        onWebContentsId={setWcId}
       />
       {/* Until the first paint lands, cover the guest's blank white surface
           with a splash tinted by the app's theme color, so opening an app
@@ -237,6 +245,11 @@ export function WebAppFrame({
           aria-hidden
           className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-ink-accent"
         />
+      )}
+      {/* A site the user limited (electron/site-limits.mts): the app itself,
+          when they limited the site it's on. */}
+      {windowId && (
+        <SiteLimitPage wcId={wcId} closeLabel="Close window" onClose={() => closeWindow(windowId)} />
       )}
     </div>
   );
