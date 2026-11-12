@@ -2768,7 +2768,11 @@ function AddressBar({
         >
           <span className="truncate">
             <span className="text-foreground">{pretty.host}</span>
-            <span className="text-muted-foreground">{pretty.rest}</span>
+            {/* The text's own color faded, as Chrome's is, not the theme's
+                muted-foreground, which many themes keep close to the text. */}
+            <span className="text-foreground/55 [:root[data-increase-contrast]_&]:text-muted-foreground">
+              {pretty.rest}
+            </span>
           </span>
         </div>
       )}
