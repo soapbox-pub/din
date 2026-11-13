@@ -62,7 +62,8 @@ import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
 import { mimeOf } from '@/lib/mime';
-import { anchorOf, requestShare, stageSharedFiles, type ShareAnchor, type ShareData } from '@/lib/share';
+import { anchorOf, clampInto, requestShare, stageSharedFiles, type ShareAnchor, type ShareData } from '@/lib/share';
+import { MAX_SHARE_FILES, shareableUrl } from '@/shared/shareLimits';
 import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import {
@@ -465,8 +466,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         const p = decodeLaunchParams(String(url));
         // Paths in params grant nothing; files travel as handles, which the
         // window manager hands on as paths (and the new window's frame
-        // turns back into handles).
-        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, ...clean } = p;
+        // turns back into handles). Nor can an app pass a launch off as a
+        // share (`shareNonce`): only the share sheet gives one.
+        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, shareNonce: _shareNonce, ...clean } = p;
         const grants = await Promise.all((handles ?? []).map(usableGrant));
         const paths = grants.map((g) => g.path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };
@@ -537,27 +539,41 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
             throw error;
           }
         }
-        const held = await Promise.all((Array.isArray(handles) ? handles : []).map(usableGrant));
-        if (held.some((g) => g.kind !== 'file')) throw new TypeError('Only files can be shared, not folders');
-        const staged = await stageSharedFiles(Array.isArray(files) ? files : []);
+        // What the app's runtime checked, checked again: an app can skip it.
         const clip = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.slice(0, max) : undefined);
+        const raw = clip(url, 8000);
+        const link = raw === undefined ? undefined : shareableUrl(raw);
+        const handleIds = Array.isArray(handles) ? handles : [];
+        const sent: unknown[] = Array.isArray(files) ? files : [];
+        if (sent.length + handleIds.length > MAX_SHARE_FILES) {
+          const error = new Error('Those are too many files to share');
+          error.name = 'NotAllowedError';
+          throw error;
+        }
+        const held = await Promise.all(handleIds.map(usableGrant));
+        if (held.some((g) => g.kind !== 'file')) throw new TypeError('Only files can be shared, not folders');
+        const staged = await stageSharedFiles(sent, held.length);
         const data: ShareData = {
           title: clip(title, 1000),
           text: clip(text, 100_000),
-          url: clip(url, 8000),
-          files: [...held.map((g) => ({ path: g.path, name: basename(g.path), type: mimeOf(basename(g.path)) })), ...staged],
+          url: link,
+          files: [...held.map((g) => ({ path: g.path, name: basename(g.path), type: mimeOf(basename(g.path)) })), ...staged.files],
         };
+        // The sheet points into the sharer's own window, never at another's.
+        const win = anchorOf(container.current);
         let at: ShareAnchor | null;
         if (anchor && [anchor.x, anchor.y, anchor.width, anchor.height].every(Number.isFinite)) {
           const p = toDesktop(anchor);
-          at = { x: p.clientX, y: p.clientY, width: anchor.width, height: anchor.height };
+          at = { x: p.clientX, y: p.clientY, width: Math.max(0, anchor.width), height: Math.max(0, anchor.height) };
+          if (win) at = clampInto(at, win);
         } else {
           // Nothing to point at: the middle of the window.
-          const r = anchorOf(container.current);
-          at = r && { x: r.x + r.width / 2, y: r.y + r.height / 3, width: 1, height: 1 };
+          at = win && { x: win.x + win.width / 2, y: win.y + win.height / 3, width: 1, height: 1 };
         }
         const result = await requestShare(data, { anchor: at, opener: appId });
         if (result === null) {
+          // Nothing took the bytes it shared; they're not kept for a day.
+          void staged.discard();
           const error = new Error('The share was canceled');
           error.name = 'AbortError';
           throw error;

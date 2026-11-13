@@ -60,6 +60,7 @@ import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
 import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
+import { MAX_SHARE_BYTES, MAX_SHARE_FILES, shareableUrl } from '@/shared/shareLimits';
 import { seedHandles } from '@/shared/handleStore';
 import { TITLE_BAR_CONTROLS } from '@/shared/titleBarControls';
 import {
@@ -227,26 +228,10 @@ function installNotifications(host: NotificationHost): void {
   Object.defineProperty(navigator, 'clearAppBadge', { value: () => host.setBadge(null), configurable: true });
 }
 
-/** The most a share's files may come to, read into memory to cross the port. */
-const MAX_SHARE_BYTES = 256 * 1024 * 1024;
-
-/** Schemes a shared URL can't have: what's only this page's, or runs. */
-const UNSHAREABLE = new Set(['javascript:', 'data:', 'blob:', 'file:', 'about:', 'filesystem:']);
-
 /** A ShareData's parts as the Web Share API checks them: a TypeError for a URL that can't be shared. */
 function shareParts(data: ShareData | undefined): { title?: string; text?: string; url?: string; files: File[] } {
   const d = data ?? {};
-  let url: string | undefined;
-  if (d.url !== undefined) {
-    let u: URL;
-    try {
-      u = new URL(String(d.url), location.href);
-    } catch {
-      throw new TypeError(`Not a URL: ${String(d.url)}`);
-    }
-    if (UNSHAREABLE.has(u.protocol)) throw new TypeError(`Can’t share a ${u.protocol} URL`);
-    url = u.href;
-  }
+  const url = d.url !== undefined ? shareableUrl(String(d.url), location.href) : undefined;
   const files = d.files === undefined ? [] : Array.from(d.files);
   if (files.some((f) => !(f instanceof File))) throw new TypeError('Only files can be shared as files');
   return {
@@ -596,6 +581,7 @@ export function installDin(transport: Transport): void {
     sharing = true;
     try {
       const anchor = shareAnchor();
+      if (parts.files.length + handles.length > MAX_SHARE_FILES) throw new DOMException('Those are too many files to share', 'NotAllowedError');
       let total = 0;
       const files: FileData[] = [];
       for (const f of parts.files) {

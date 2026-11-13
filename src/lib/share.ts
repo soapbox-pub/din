@@ -14,6 +14,7 @@ import { getFsBridge } from '@/lib/fs';
 import type { FileData } from '@/sdk/protocol';
 import type { GuestLoadOptions, GuestUploadPart } from '@/platform/guest';
 import type { WebShareTarget } from '@/lib/webShareTarget';
+import { MAX_SHARE_BYTES, MAX_SHARE_FILES } from '@/shared/shareLimits';
 
 /** A shared file, on disk: one Files shared, or bytes an app shared kept under the share cache. */
 export interface ShareFile {
@@ -117,6 +118,16 @@ export function requestShare(data: ShareData, options: { anchor?: ShareAnchor | 
 export function anchorOf(element: Element | null | undefined): ShareAnchor | null {
   const r = element?.getBoundingClientRect();
   return r && r.width > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+}
+
+/** A rectangle cut to fit inside another (a point on its edge when it's wholly outside). */
+export function clampInto(r: ShareAnchor, bounds: ShareAnchor): ShareAnchor {
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  const left = clamp(r.x, bounds.x, bounds.x + bounds.width);
+  const top = clamp(r.y, bounds.y, bounds.y + bounds.height);
+  const right = clamp(r.x + r.width, bounds.x, bounds.x + bounds.width);
+  const bottom = clamp(r.y + r.height, bounds.y, bounds.y + bounds.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 // ---- which apps take what ----
@@ -349,13 +360,41 @@ function safeName(name: string): string {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Files kept on disk for a share, and how to throw them away when it isn't made. */
+export interface StagedShare {
+  files: ShareFile[];
+  discard: () => Promise<void>;
+}
+
+const NOTHING_STAGED: StagedShare = { files: [], discard: async () => {} };
+
+/**
+ * Check what an app sent as a share's files, which its runtime checked
+ * already but the desktop can't take on trust: real bytes, names and types,
+ * no more of them than a share may hold.
+ */
+function checkSharedFiles(files: unknown[], held: number): FileData[] {
+  if (files.length + held > MAX_SHARE_FILES) throw new DOMException('Those are too many files to share', 'NotAllowedError');
+  let total = 0;
+  return files.map((raw) => {
+    const f = raw as Partial<FileData> | null;
+    if (!f || typeof f.name !== 'string' || typeof f.type !== 'string' || !(f.bytes instanceof ArrayBuffer)) throw new TypeError('Only files can be shared as files');
+    total += f.bytes.byteLength;
+    if (total > MAX_SHARE_BYTES) throw new DOMException('Those files are too big to share', 'NotAllowedError');
+    return { name: f.name, type: f.type.slice(0, 255), lastModified: typeof f.lastModified === 'number' ? f.lastModified : 0, bytes: f.bytes };
+  });
+}
+
 /**
  * Keep files an app shared as bytes on disk, each share in a folder of its
- * own, so the app it goes to can be handed them as files. Shares older than
- * a day are cleared out as new ones come.
+ * own, so the app it goes to can be handed them as files; `held` is how many
+ * files the share holds besides, by handle. The share's folder goes once
+ * `discard` is called (the sheet closed), else once it's a day old, cleared
+ * out as new shares come.
  */
-export async function stageSharedFiles(files: FileData[]): Promise<ShareFile[]> {
-  if (files.length === 0) return [];
+export async function stageSharedFiles(sent: unknown[], held = 0): Promise<StagedShare> {
+  const files = checkSharedFiles(sent, held);
+  if (files.length === 0) return NOTHING_STAGED;
   const fs = getFsBridge();
   const cache = await shareCache();
   if (!fs || !cache) throw new DOMException('Files can only be shared in the Din desktop app', 'NotAllowedError');
@@ -370,16 +409,22 @@ export async function stageSharedFiles(files: FileData[]): Promise<ShareFile[]> 
   );
   const dir = `${cache}/${crypto.randomUUID()}`;
   await fs.mkdir(dir);
+  const discard = () => fs.rm(dir, { recursive: true }).then(() => {}, () => {});
   const taken = new Set<string>();
   const out: ShareFile[] = [];
-  for (const f of files) {
-    let name = safeName(f.name);
-    for (let n = 2; taken.has(name); n++) name = safeName(f.name).replace(/(\.[^.]*)?$/, ` (${n})$1`);
-    taken.add(name);
-    await fs.writeFile(`${dir}/${name}`, new Uint8Array(f.bytes));
-    out.push({ path: `${dir}/${name}`, name, type: f.type });
+  try {
+    for (const f of files) {
+      let name = safeName(f.name);
+      for (let n = 2; taken.has(name); n++) name = safeName(f.name).replace(/(\.[^.]*)?$/, ` (${n})$1`);
+      taken.add(name);
+      await fs.writeFile(`${dir}/${name}`, new Uint8Array(f.bytes));
+      out.push({ path: `${dir}/${name}`, name, type: f.type });
+    }
+  } catch (error) {
+    await discard();
+    throw error;
   }
-  return out;
+  return { files: out, discard };
 }
 
 /** Copy shared files into ~/Downloads (renamed where a name's taken); resolves with where they went. */

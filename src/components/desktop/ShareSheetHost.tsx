@@ -79,7 +79,7 @@ function ShareSheet({ request }: { request: ShareRequest }) {
         aria-label="Share"
         className="w-88 rounded-xl p-0"
       >
-        <Preview data={data} />
+        <Preview data={data} from={opener ? (getApp(opener)?.name ?? opener) : null} />
         <div className={cn(trayRuleTop, 'p-2')}>
           {targets.length > 0 ? (
             <ul aria-label="Share to" className="grid grid-cols-4 gap-1">
@@ -124,8 +124,12 @@ function ShareSheet({ request }: { request: ShareRequest }) {
   );
 }
 
-/** What's being shared: a picture's thumbnail or a kind of thing's icon, its name, and where it's from. */
-function Preview({ data }: { data: ShareData }) {
+/**
+ * What's being shared: a picture's thumbnail or a kind of thing's icon, its
+ * name, where it's from, and the app sharing it (`from`), which is shown so
+ * an app can't pass its share off as another's.
+ */
+function Preview({ data, from }: { data: ShareData; from: string | null }) {
   const [broken, setBroken] = useState(false);
   const first = data.files[0];
   const picture = data.files.length === 1 && first.type.startsWith('image/') && getFsBridge() && !broken ? localFileUrl(first.path) : null;
@@ -155,6 +159,7 @@ function Preview({ data }: { data: ShareData }) {
       <div className="min-w-0 flex-1">
         <p className="truncate font-[family-name:var(--font-title)] text-[15px] font-semibold text-foreground">{title}</p>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+        {from && <p className="truncate text-xs text-muted-foreground">From {from}</p>}
       </div>
     </div>
   );

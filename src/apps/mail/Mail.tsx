@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react';
 import { parseMailto } from '@/lib/mailto';
-import { restoredState, windowLaunch, type Launch } from '@/shared/launch';
+import { restoredState, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { blankSeed, escapeHtml, parseAddresses, type ComposeSeed } from './mail/format';
 import { Viewer } from './mail/Viewer';
 import { savedCompose } from './mail/restore';
@@ -53,13 +53,22 @@ function sharedSeed(params: Record<string, unknown>): ComposeSeed {
   };
 }
 
+/**
+ * Files to attach as the message starts: only what was shared to Mail, and
+ * only the first time. Any app can open Mail with files it holds, which
+ * must not come ready to send; a window Din reopened had them already.
+ */
+function sharedFiles(launch: Launch): readonly FileSystemHandle[] | undefined {
+  return typeof launch.params.shareNonce === 'string' && !wasReopened() ? launch.files : undefined;
+}
+
 export function Mail() {
   // A message being written comes back as it was left, not as it was started.
   const saved = useMemo(() => savedCompose(restoredState()), []);
   const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(windowLaunch())), [saved]);
   return seed ? (
     <Suspense>
-      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : windowLaunch().files} />
+      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : sharedFiles(windowLaunch())} />
     </Suspense>
   ) : (
     <Viewer />

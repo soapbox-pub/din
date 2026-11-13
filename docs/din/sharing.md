@@ -24,17 +24,21 @@ await navigator.share({ title: 'Trip photos', text: 'From Saturday', url: 'https
   `navigator.userActivation`, and the desktop checks the window had input in
   the last three seconds (or a pick from its Din menus).
 - The sheet points at what was pressed (or else what has focus), so a
-  Share button needs nothing more.
+  Share button needs nothing more. It points only inside the sharer's own
+  window, and says which app is sharing, so an app can't pass its share off
+  as another's.
 - It resolves once the user picks an app or one of the sheet's actions, and
   rejects with an `AbortError` when they close the sheet. The app learns
   nothing about where it went.
 - `navigator.canShare(data)` says whether the data could be shared (a URL
   that isn't `javascript:`, `data:`, `blob:`, `file:` or `about:`; files
   that are `File`s). Whether an app takes it is the sheet's business.
-- Files cross as their bytes, up to 256 MB in all, and are kept in
-  `~/.cache/din/shared/<random>/` for the app they go to (cleared after a
-  day). An app that holds the files as handles (Files) shares them as
-  themselves instead, without reading them:
+- Files cross as their bytes, up to 256 MB and 100 files in all, and are
+  kept in `~/.cache/din/shared/<random>/` for the app they go to (cleared
+  after a day, or as soon as the sheet is closed without a pick). The
+  desktop checks the link, the sizes and the files again itself: an app
+  can skip its runtime. An app that holds the files as handles (Files)
+  shares them as themselves instead, without reading them:
 
 ```ts
 await din.app.share({ title: 'report.pdf' }, [handle]);
@@ -97,6 +101,10 @@ An app says what it takes in its manifest, as the web does:
 - Param names the desktop's launches use (`path`, `paths`, `readOnlyPaths`,
   `opener`, `shortcut`, `shareNonce`, `window`) can't be targets'; a
   manifest naming one isn't offered.
+- Only the sheet (and `din share`) makes a share: an app's `window.open` of
+  another app loses any `shareNonce` it names, so an app can trust that a
+  launch with one came from the user's pick. Mail attaches a launch's files
+  only for a share, and not again when Din reopens the window.
 
 ### Installed websites and nsites
 
