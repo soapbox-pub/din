@@ -38,7 +38,7 @@ import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import { FolderAppDetail } from '@/components/desktop/apps/appstore/FolderApps';
 import { FlatpakAppDetail, FlatpakCard } from '@/components/desktop/apps/appstore/FlatpakApps';
 import { useFlatpakCatalog, useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
-import type { FlatpakApp } from '@/lib/nostrFlatpaks';
+import type { LinuxApp } from '@/lib/nostrFlatpaks';
 import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
 import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
 import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
@@ -56,12 +56,12 @@ import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyl
 import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
-const NO_LINUX_APPS: FlatpakApp[] = [];
+const NO_LINUX_APPS: LinuxApp[] = [];
 
 /** Opens a site's detail page; provided by AppStore to every card. */
 const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
 /** Opens a Linux app's detail page; provided by AppStore to every grid. */
-const SelectFlatpakContext = createContext<(app: FlatpakApp) => void>(() => {});
+const SelectFlatpakContext = createContext<(app: LinuxApp) => void>(() => {});
 
 type StoreTab = 'apps' | 'themes' | 'cursors' | 'icons' | 'skins';
 
@@ -135,10 +135,11 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * nsite store downloads every file, and the entry roams via encrypted app
  * data.
  *
- * Linux apps are there too, where Flatpak is: NIP-82 apps whose newest
- * release carries a .flatpak for this computer, installed through a Flatpak
- * remote of Din's own so they update like any other (FlatpakApps,
- * src/lib/nostrFlatpaks.ts, electron/nostr-flatpaks.mts).
+ * Linux apps are there too: NIP-82 apps whose newest release carries a
+ * .flatpak or an AppImage for this computer, a Flatpak installed through a
+ * remote of Din's own so it updates like any other, an AppImage with a
+ * launcher entry of its own (FlatpakApps, src/lib/nostrFlatpaks.ts,
+ * electron/nostr-flatpaks.mts).
  *
  * Apps can also come from a folder on this computer (src/lib/fileApps.ts),
  * for developing one: the title bar's folder button picks it and opens its
@@ -167,8 +168,8 @@ export function AppStore({ params }: AppComponentProps) {
   );
   // A folder chosen to add as an app, whose page is showing.
   const [folderApp, setFolderApp] = useState<OpenedFolder | null>(null);
-  // A Linux app (a NIP-82 app with a Flatpak) whose page is showing.
-  const [selectedFlatpak, setSelectedFlatpak] = useState<FlatpakApp | null>(null);
+  // A Linux app (a NIP-82 app with a Flatpak or an AppImage) whose page is showing.
+  const [selectedFlatpak, setSelectedFlatpak] = useState<LinuxApp | null>(null);
   const { choose: chooseAppFolder, busy: choosingFolder } = useChooseAppFolder();
   const onThemes = tab === 'themes';
   const onPackages = packages !== null;
@@ -605,14 +606,14 @@ const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
 function CatalogGrid({ apps, linux = [], complete = true }: {
   apps: StoreApp[];
   /** Linux apps (FlatpakApps), each placed before the first site published before its release. */
-  linux?: FlatpakApp[];
+  linux?: LinuxApp[];
   /** Whether `apps` is the whole list; until it is, Linux apps older than all of it wait for the next page. */
   complete?: boolean;
 }) {
   const selectLinux = useContext(SelectFlatpakContext);
   const cards: ReactNode[] = [];
   let next = 0;
-  const flatpakCard = (app: FlatpakApp) => (
+  const flatpakCard = (app: LinuxApp) => (
     <FlatpakCard key={`linux:${app.pubkey}:${app.identifier}`} app={app} onSelect={selectLinux} />
   );
   for (const app of apps) {

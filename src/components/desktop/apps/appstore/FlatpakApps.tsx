@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
-import { ArrowDownToLine, Copy, Globe, Info, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, ChevronDown, Copy, Globe, Info, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
@@ -12,6 +12,12 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAuthor } from '@/hooks/useAuthor';
@@ -26,7 +32,16 @@ import { useToast } from '@/hooks/useToast';
 import { formatBytes } from '@/lib/fs';
 import { NATIVE_APP_PREFIX } from '@/lib/nativeApps';
 import { ngitRepositoryUri } from '@/lib/nostrUri';
-import { flatpakNaddr, isOutdated, progressLabel, type FlatpakApp } from '@/lib/nostrFlatpaks';
+import {
+  chosenFormat,
+  flatpakNaddr,
+  formatName,
+  installFormats,
+  isOutdated,
+  progressLabel,
+  type LinuxApp,
+  type LinuxFormat,
+} from '@/lib/nostrFlatpaks';
 import { sanitizeImageUrl, sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
@@ -35,16 +50,20 @@ import { settingsGroup } from '@/shared/settingsChromeStyles';
 const ReleaseNotes = lazy(() => import('@/components/desktop/apps/appstore/ReleaseNotes'));
 
 /**
- * The App Store's Linux apps: NIP-82 apps whose releases carry a Flatpak
- * for this computer (src/lib/nostrFlatpaks.ts), in the Apps section beside
- * the nsites. Get downloads the release's bundle, checks it against its
- * hash, and installs it from Din's own Flatpak remote
- * (electron/nostr-flatpaks.mts); it's then an installed Linux app like any
- * other, in the launcher, and Update brings it to the newest release.
+ * The App Store's Linux apps: NIP-82 apps whose releases carry a Flatpak or
+ * an AppImage for this computer (src/lib/nostrFlatpaks.ts), in the Apps
+ * section beside the nsites. Get downloads the release's bundle, checks it
+ * against its hash, and installs it (electron/nostr-flatpaks.mts): a
+ * Flatpak from Din's own Flatpak remote where it has one and Flatpak is
+ * here, else its AppImage. It's then an installed Linux app like any other,
+ * in the launcher, and Update brings it to the newest release the same way.
+ *
+ * An app is one app however many ways it comes. Get never says which way;
+ * the others are named only in the menu under its caret, as Get as AppImage.
  */
 
 /** Everything a card or page shows of an app's state here, and its actions. */
-function useFlatpakState(app: FlatpakApp) {
+function useFlatpakState(app: LinuxApp) {
   const installed = useInstalledFlatpaks().data?.get(app.identifier);
   const progress = useFlatpakBusy(app.identifier);
   const { install, remove } = useFlatpakActions();
@@ -54,14 +73,21 @@ function useFlatpakState(app: FlatpakApp) {
   const status = useFlatpakStatus();
   const nativeId = NATIVE_APP_PREFIX + app.identifier;
   const outdated = !!installed && isOutdated(installed, app);
-  const canInstall = !!status.data?.available;
+  const formats = status.data?.formats ?? [];
+  const ways = installFormats(app, formats);
+  const format = chosenFormat(app, formats, installed);
+  const canInstall = installed ? ways.includes(installed.format) : ways.length > 0;
 
   return {
     installed,
     outdated,
     progress,
     canInstall,
-    get: () => void install(app, installed),
+    /** How it's installed, or would be by Get. */
+    format,
+    /** The other ways to get it, by name in Get's menu; none once it's installed. */
+    others: installed ? [] : ways.slice(1),
+    get: (way: LinuxFormat = format) => void install(app, way, installed),
     open: () => {
       if (getApp(nativeId)) open(nativeId);
       else toast({ title: `${app.name} isn’t in the launcher yet`, description: 'It shows up there in a moment.' });
@@ -87,7 +113,7 @@ function usePublisher(pubkey: string, enabled = true) {
  * it isn't. What it's doing is its tooltip and accessible name, or beside
  * it with `withLabel`.
  */
-function ProgressRing({ app, label, percent, withLabel }: { app: FlatpakApp; label: string; percent?: number; withLabel?: boolean }) {
+function ProgressRing({ app, label, percent, withLabel }: { app: LinuxApp; label: string; percent?: number; withLabel?: boolean }) {
   const r = 13;
   const circumference = 2 * Math.PI * r;
   const known = percent !== undefined;
@@ -122,8 +148,13 @@ function ProgressRing({ app, label, percent, withLabel }: { app: FlatpakApp; lab
   );
 }
 
-/** Get, Update, Open, or how far it's got. */
-export function FlatpakPill({ app, className, withLabel }: { app: FlatpakApp; className?: string; withLabel?: boolean }) {
+const pillClass = 'h-8 shrink-0 rounded-full bg-secondary font-semibold text-ink-accent hover:bg-secondary/80';
+
+/**
+ * Get, Update, Open, or how far it's got. Where an app comes more than one
+ * way, Get has a caret whose menu names the others; Get itself never says.
+ */
+export function FlatpakPill({ app, className, withLabel }: { app: LinuxApp; className?: string; withLabel?: boolean }) {
   const state = useFlatpakState(app);
   if (state.progress) {
     return (
@@ -136,28 +167,52 @@ export function FlatpakPill({ app, className, withLabel }: { app: FlatpakApp; cl
     );
   }
   const label = state.outdated ? 'Update' : state.installed ? 'Open' : 'Get';
-  return (
+  const size = app.assets[state.format]?.size;
+  const split = state.others.length > 0;
+  const main = (
     <Button
       size="sm"
       variant="secondary"
-      onClick={state.installed && !state.outdated ? state.open : state.get}
+      onClick={state.installed && !state.outdated ? state.open : () => state.get()}
       disabled={!state.installed && !state.canInstall}
-      title={state.canInstall ? (state.installed ? undefined : app.asset.size ? `Downloads ${formatBytes(app.asset.size)}` : undefined) : 'Linux apps install in the Din desktop app, with Flatpak'}
+      title={state.canInstall ? (state.installed ? undefined : size ? `Downloads ${formatBytes(size)}` : undefined) : 'Linux apps install in the Din desktop app'}
       aria-label={`${label} ${app.name}`}
-      className={cn(
-        'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
-        'bg-secondary text-ink-accent hover:bg-secondary/80',
-        className,
-      )}
+      className={cn(pillClass, 'relative z-10 px-5', split && 'rounded-r-none pr-3', className)}
     >
       {state.outdated ? <RefreshCw aria-hidden /> : null}
       {label}
     </Button>
   );
+  if (!split) return main;
+  return (
+    <div role="group" aria-label={`Get ${app.name}`} className="relative z-10 flex shrink-0 items-center">
+      {main}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label={`Other ways to get ${app.name}`}
+            className={cn(pillClass, 'w-8 rounded-l-none border-l border-foreground/10 pl-1 pr-2')}
+          >
+            <ChevronDown aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          {state.others.map((way) => (
+            <DropdownMenuItem key={way} onSelect={() => state.get(way)}>
+              <ArrowDownToLine aria-hidden />
+              Get as {formatName(way)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
 }
 
 /** An app's right-click menu, mirroring its card's and page's buttons. */
-function FlatpakContextMenu({ app, onSelect, children }: { app: FlatpakApp; onSelect?: (app: FlatpakApp) => void; children: ReactNode }) {
+function FlatpakContextMenu({ app, onSelect, children }: { app: LinuxApp; onSelect?: (app: LinuxApp) => void; children: ReactNode }) {
   const state = useFlatpakState(app);
   const busy = !!state.progress;
   return (
@@ -170,11 +225,17 @@ function FlatpakContextMenu({ app, onSelect, children }: { app: FlatpakApp; onSe
             Open
           </ContextMenuItem>
         ) : (
-          <ContextMenuItem onSelect={state.get} disabled={busy || !state.canInstall}>
+          <ContextMenuItem onSelect={() => state.get()} disabled={busy || !state.canInstall}>
             {state.outdated ? <RefreshCw aria-hidden /> : <ArrowDownToLine aria-hidden />}
             {state.outdated ? 'Update' : 'Get'}
           </ContextMenuItem>
         )}
+        {state.others.map((way) => (
+          <ContextMenuItem key={way} onSelect={() => state.get(way)} disabled={busy}>
+            <ArrowDownToLine aria-hidden />
+            Get as {formatName(way)}
+          </ContextMenuItem>
+        ))}
         {onSelect && (
           <ContextMenuItem onSelect={() => onSelect(app)}>
             <Info aria-hidden />
@@ -197,7 +258,7 @@ function FlatpakContextMenu({ app, onSelect, children }: { app: FlatpakApp; onSe
   );
 }
 
-function FlatpakIcon({ app, className }: { app: FlatpakApp; className?: string }) {
+function FlatpakIcon({ app, className }: { app: LinuxApp; className?: string }) {
   if (app.icon) return <AppIcon icon={app.icon} className={cn('object-contain', className)} />;
   const initial = app.name.match(/\p{L}|\p{N}/u)?.[0]?.toUpperCase() ?? '?';
   return (
@@ -211,7 +272,7 @@ function FlatpakIcon({ app, className }: { app: FlatpakApp; className?: string }
 }
 
 /** One app's card: icon, name, publisher, summary, and its pill. */
-export function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app: FlatpakApp) => void }) {
+export function FlatpakCard({ app, onSelect }: { app: LinuxApp; onSelect: (app: LinuxApp) => void }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const publisher = usePublisher(app.pubkey, seen);
   return (
@@ -240,7 +301,7 @@ export function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app
 }
 
 /** A Linux app's page: what it is, its newest release, and getting, updating, opening or removing it. */
-export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
+export function FlatpakAppDetail({ app }: { app: LinuxApp }) {
   const publisher = usePublisher(app.pubkey);
   const state = useFlatpakState(app);
   const openUrl = useOpenUrl();
@@ -252,6 +313,7 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
     : /^https?:\/\//i.test(app.repository)
       ? sanitizeNavigationUrl(app.repository)
       : ngitRepositoryUri(app.repository);
+  const downloadSize = app.assets[state.format]?.size;
   const released = new Date(app.release.createdAt * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 
   // Take focus so Escape goes back without a click first.
@@ -347,9 +409,9 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
           <dl className={cn(settingsGroup, 'text-sm')}>
             <InfoRow label="Version">{app.release.version}</InfoRow>
             {state.installed && <InfoRow label="Installed">{state.installed.version || 'Yes'}</InfoRow>}
-            <InfoRow label="Download size">{app.asset.size ? formatBytes(app.asset.size) : 'Unknown'}</InfoRow>
-            <InfoRow label="Kind">Linux app (Flatpak)</InfoRow>
-            <InfoRow label="Flatpak id"><span className="font-mono text-xs">{app.identifier}</span></InfoRow>
+            <InfoRow label="Download size">{downloadSize ? formatBytes(downloadSize) : 'Unknown'}</InfoRow>
+            <InfoRow label="Kind">Linux app ({formatName(state.format)})</InfoRow>
+            <InfoRow label="Identifier"><span className="font-mono text-xs">{app.identifier}</span></InfoRow>
             {app.license && <InfoRow label="License">{app.license}</InfoRow>}
             {app.repository && (
               <InfoRow label="Source code">

@@ -7,10 +7,16 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  * Linux apps on Nostr, as NIP-82 software: an application (kind 32267)
  * naming this computer's platform (`f linux-x86_64`), whose newest release
  * (kind 30063, channel `main`) names a Flatpak bundle asset (kind 3063,
- * `m application/vnd.flatpak`) for that platform. Armada publishes its
- * desktop builds this way, and npkg republishes the same bundles as a
- * Flatpak remote; the App Store installs them through a remote of Din's own
- * (electron/nostr-flatpaks.mts), so they update like any other Flatpak.
+ * `m application/vnd.flatpak`) or an AppImage (`m application/vnd.appimage`)
+ * for that platform, or both. Armada publishes its desktop builds this way,
+ * and npkg republishes the same bundles as a Flatpak remote; the App Store
+ * installs a Flatpak through a remote of Din's own
+ * (electron/nostr-flatpaks.mts), so it updates like any other Flatpak, and
+ * an AppImage as a file with a launcher entry of its own.
+ *
+ * Each app is one app however many ways it comes: Flatpak where it has one
+ * and Flatpak is here (sandboxed, its runtimes shared), else AppImage. The
+ * other ways are offered by name, never the one the user gets by default.
  *
  * The author is the only trust boundary: a release counts only by the app's
  * own author, and an asset only when that release names it and the same key
@@ -19,6 +25,27 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
  */
 
 export const FLATPAK_MIME = 'application/vnd.flatpak';
+/** AppImages' types: shared-mime-info's, and the older names some still publish. */
+const APPIMAGE_MIMES = new Set(['application/vnd.appimage', 'application/x-appimage', 'application/x-iso9660-appimage']);
+
+/** How a Linux app is installed. */
+export type LinuxFormat = 'flatpak' | 'appimage';
+/** Every way, the default first where an app has both. */
+export const LINUX_FORMATS: readonly LinuxFormat[] = ['flatpak', 'appimage'];
+
+/** A way's name, for the user. */
+export function formatName(format: LinuxFormat): string {
+  return format === 'appimage' ? 'AppImage' : 'Flatpak';
+}
+
+/** A release asset an app installs from. */
+export interface LinuxAsset {
+  id: string;
+  sha256: string;
+  size: number;
+  urls: string[];
+  filename: string;
+}
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const DELETION_KIND = 5;
@@ -27,8 +54,8 @@ const FILTER_BATCH = 10;
 /** Ids per asset filter: relays cap an `ids` list too (relay.dreamith.to at about 50). */
 const ID_BATCH = 40;
 
-/** A Linux app published on Nostr with a Flatpak for this computer. */
-export interface FlatpakApp {
+/** A Linux app published on Nostr with a Flatpak or an AppImage for this computer. */
+export interface LinuxApp {
   event: NostrEvent;
   pubkey: string;
   /** The app's `d`: its Flatpak application id. */
@@ -43,7 +70,8 @@ export interface FlatpakApp {
   website: string | null;
   repository: string | null;
   release: { id: string; version: string; createdAt: number; notes: string };
-  asset: { id: string; sha256: string; size: number; urls: string[]; filename: string };
+  /** What its newest release has for this computer, each way: one at least. */
+  assets: Partial<Record<LinuxFormat, LinuxAsset>>;
 }
 
 export type FlatpakQuery = (filters: NostrFilter[], signal?: AbortSignal) => Promise<NostrEvent[]>;
@@ -60,6 +88,7 @@ export interface InstalledFlatpak {
   publishedAt: number;
   version: string;
   sha256: string;
+  format: LinuxFormat;
 }
 
 export interface FlatpakProgress {
@@ -74,11 +103,20 @@ export interface FlatpakInstallRequest {
   coordinate: string;
   publishedAt: number;
   version: string;
+  format: LinuxFormat;
   asset: { sha256: string; size: number; urls: string[] };
 }
 
+export interface LinuxAppsStatus {
+  /** Whether Linux apps install here at all. */
+  available: boolean;
+  platform: string | null;
+  /** The ways they install here. */
+  formats: LinuxFormat[];
+}
+
 export interface FlatpaksBridge {
-  status(): Promise<{ available: boolean; platform: string | null }>;
+  status(): Promise<LinuxAppsStatus>;
   installed(): Promise<InstalledFlatpak[]>;
   install(request: FlatpakInstallRequest): Promise<InstalledFlatpak>;
   uninstall(appId: string): Promise<void>;
@@ -172,11 +210,11 @@ function newestApps(events: NostrEvent[]): NostrEvent[] {
 }
 
 /**
- * The apps among `appEvents` whose newest `main` release has a Flatpak for
- * `platform`, with that release and asset: their releases in one round of
+ * The apps among `appEvents` whose newest `main` release has a Flatpak or
+ * an AppImage for `platform`, with that release and those assets: their releases in one round of
  * requests, then the assets those name in another.
  */
-async function withFlatpaks(appEvents: NostrEvent[], platform: string, query: FlatpakQuery, signal?: AbortSignal): Promise<FlatpakApp[]> {
+async function withLinuxAssets(appEvents: NostrEvent[], platform: string, query: FlatpakQuery, signal?: AbortSignal): Promise<LinuxApp[]> {
   const apps = appEvents.filter((app) => tagValues(app, 'f').includes(platform));
   if (!apps.length) return [];
 
@@ -209,18 +247,28 @@ async function withFlatpaks(appEvents: NostrEvent[], platform: string, query: Fl
     const identifier = tagValue(app, 'd');
     const release = identifier ? latest.get(`${app.pubkey}:${identifier}`) : undefined;
     if (!identifier || !release) return [];
-    const asset = tagValues(release, 'e')
+    const named = tagValues(release, 'e')
       .map((id) => assets.get(id))
-      .find((a): a is NostrEvent => !!a
+      .filter((a): a is NostrEvent => !!a
         && a.pubkey === app.pubkey
-        && tagValue(a, 'm') === FLATPAK_MIME
         && tagValues(a, 'f').includes(platform)
-        && SHA256.test(tagValue(a, 'x') ?? ''));
-    if (!asset) return [];
-    const sha256 = tagValue(asset, 'x') as string;
-    const urls = httpsUrls(tagValues(asset, 'url'));
-    if (!urls.length) return [];
-    const size = Number(tagValue(asset, 'size'));
+        && SHA256.test(tagValue(a, 'x') ?? '')
+        && httpsUrls(tagValues(a, 'url')).length > 0);
+    const found: LinuxApp['assets'] = {};
+    for (const asset of named) {
+      const mime = tagValue(asset, 'm')?.toLowerCase() ?? '';
+      const format: LinuxFormat | null = mime === FLATPAK_MIME ? 'flatpak' : APPIMAGE_MIMES.has(mime) ? 'appimage' : null;
+      if (!format || found[format]) continue;
+      const size = Number(tagValue(asset, 'size'));
+      found[format] = {
+        id: asset.id,
+        sha256: tagValue(asset, 'x') as string,
+        size: Number.isSafeInteger(size) && size > 0 ? size : 0,
+        urls: httpsUrls(tagValues(asset, 'url')),
+        filename: tagValue(asset, 'filename') ?? `${identifier}.${format === 'appimage' ? 'AppImage' : 'flatpak'}`,
+      };
+    }
+    if (!found.flatpak && !found.appimage) return [];
     const icon = tagValue(app, 'icon');
     const content = app.content.trim();
     return [{
@@ -242,59 +290,75 @@ async function withFlatpaks(appEvents: NostrEvent[], platform: string, query: Fl
         createdAt: release.created_at,
         notes: release.content.trim(),
       },
-      asset: {
-        id: asset.id,
-        sha256,
-        size: Number.isSafeInteger(size) && size > 0 ? size : 0,
-        urls,
-        filename: tagValue(asset, 'filename') ?? `${identifier}.flatpak`,
-      },
+      assets: found,
     }];
   });
 }
 
-/** The Linux apps `authors` publish with a Flatpak for `platform`, the most recently released first. */
-export async function fetchFlatpakCatalog(authors: string[], platform: string, query: FlatpakQuery, signal?: AbortSignal): Promise<FlatpakApp[]> {
+/** The Linux apps `authors` publish with a Flatpak or an AppImage for `platform`, the most recently released first. */
+export async function fetchFlatpakCatalog(authors: string[], platform: string, query: FlatpakQuery, signal?: AbortSignal): Promise<LinuxApp[]> {
   if (!authors.length) return [];
   const allowed = new Set(authors);
   const events = (await query([
     { kinds: [APP_KIND], authors, '#f': [platform] },
     { kinds: [DELETION_KIND], authors, '#k': [String(APP_KIND)] },
   ], signal)).filter((event) => allowed.has(event.pubkey));
-  const apps = await withFlatpaks(newestApps(events), platform, query, signal);
+  const apps = await withLinuxAssets(newestApps(events), platform, query, signal);
   return apps.sort((a, b) => b.release.createdAt - a.release.createdAt);
 }
 
-/** One app by its address, if it has a Flatpak for `platform`. */
+/** One app by its address, if it has a Flatpak or an AppImage for `platform`. */
 export async function fetchFlatpakApp(
   address: { pubkey: string; identifier: string },
   platform: string,
   query: FlatpakQuery,
   signal?: AbortSignal,
-): Promise<FlatpakApp | null> {
+): Promise<LinuxApp | null> {
   const events = (await query([
     { kinds: [APP_KIND], authors: [address.pubkey], '#d': [address.identifier] },
     { kinds: [DELETION_KIND], authors: [address.pubkey], '#a': [`${APP_KIND}:${address.pubkey}:${address.identifier}`] },
   ], signal)).filter((event) => event.pubkey === address.pubkey);
-  const [app] = await withFlatpaks(newestApps(events), platform, query, signal);
+  const [app] = await withLinuxAssets(newestApps(events), platform, query, signal);
   return app ?? null;
 }
 
-/** What the main process needs to install an app's release. */
-export function installRequest(app: FlatpakApp): FlatpakInstallRequest {
+/**
+ * The ways an app installs here, the default first: those its release has
+ * an asset for, of those this computer can install (`formats`).
+ */
+export function installFormats(app: LinuxApp, formats: readonly LinuxFormat[]): LinuxFormat[] {
+  return LINUX_FORMATS.filter((format) => !!app.assets[format] && formats.includes(format));
+}
+
+/**
+ * The way an app is (or would be) installed: as it is, else the default
+ * here, else the first it has at all (to say what it is where nothing
+ * installs it).
+ */
+export function chosenFormat(app: LinuxApp, formats: readonly LinuxFormat[], installed?: InstalledFlatpak): LinuxFormat {
+  if (installed) return installed.format;
+  return installFormats(app, formats)[0] ?? LINUX_FORMATS.find((format) => !!app.assets[format]) ?? 'flatpak';
+}
+
+/** What the main process needs to install an app's release, one way. */
+export function installRequest(app: LinuxApp, format: LinuxFormat): FlatpakInstallRequest {
+  const asset = app.assets[format];
+  if (!asset) throw new Error(`${app.name} has no ${formatName(format)} for this computer`);
   return {
     appId: app.identifier,
     name: app.name,
     coordinate: flatpakCoordinate(app),
     publishedAt: app.release.createdAt,
     version: app.release.version,
-    asset: { sha256: app.asset.sha256, size: app.asset.size, urls: app.asset.urls },
+    format,
+    asset: { sha256: asset.sha256, size: asset.size, urls: asset.urls },
   };
 }
 
-/** Whether an installed app is behind the release `app` is at. */
-export function isOutdated(installed: InstalledFlatpak, app: FlatpakApp): boolean {
-  return installed.sha256 !== app.asset.sha256 && installed.publishedAt < app.release.createdAt;
+/** Whether an installed app is behind the release `app` is at, the way it's installed. */
+export function isOutdated(installed: InstalledFlatpak, app: LinuxApp): boolean {
+  const asset = app.assets[installed.format];
+  return !!asset && installed.sha256 !== asset.sha256 && installed.publishedAt < app.release.createdAt;
 }
 
 /** What a progress report says, for a button or the command line. */

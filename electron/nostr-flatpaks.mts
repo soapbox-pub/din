@@ -35,16 +35,27 @@
 //
 // One writer at a time, as npkg's queue is: OSTree assumes it.
 //
+// A release may carry an AppImage instead, or as well (kind 3063,
+// `m application/vnd.appimage`), which installs without Flatpak: the same
+// download and hash check, then the file is kept in
+// $XDG_DATA_HOME/din/appimages/<id>.AppImage, beside the icon it carries,
+// with a desktop entry of Din's own in the user's applications folder
+// (<id>.desktop, so the launcher has it under the same id a Flatpak's
+// would be) that runs it the way Din runs any AppImage (appimage-run where
+// there is one). An app is installed one way at a time: the other is
+// refused until it's removed.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import fsSync, { constants as fsConstants, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain, net } from 'electron';
+import { appImageEntryAndIcon } from './files.mts';
 
 /** The user remote Din's own repository is added as. */
 export const FLATPAK_REMOTE = 'din-nostr';
@@ -64,6 +75,9 @@ const ENV = { ...process.env, LC_ALL: 'C' };
 
 export class FlatpakError extends Error {}
 
+/** How an app is installed: from Din's Flatpak remote, or as an AppImage. */
+type Format = 'flatpak' | 'appimage';
+
 /** What the renderer sends to install a release (src/lib/nostrFlatpaks.ts). */
 interface InstallRequest {
   /** The app's `d`, which is its Flatpak id. */
@@ -74,15 +88,17 @@ interface InstallRequest {
   /** The release's `created_at`. */
   publishedAt: number;
   version: string;
+  format: Format;
   asset: { sha256: string; size: number; urls: string[] };
 }
 
-/** One app installed from Din's remote, as kept in installed.json. */
+/** One app installed from Nostr, as kept in installed.json. */
 interface InstalledRecord {
   coordinate: string;
   publishedAt: number;
   version: string;
   sha256: string;
+  format: Format;
 }
 
 export interface InstalledFlatpak extends InstalledRecord {
@@ -103,6 +119,11 @@ function dataHome(): string {
 const base = (): string => path.join(dataHome(), 'din/flatpak');
 const repoDir = (): string => path.join(base(), 'repo');
 const stateFile = (): string => path.join(base(), 'installed.json');
+const appImageDir = (): string => path.join(dataHome(), 'din/appimages');
+const appImageFile = (appId: string): string => path.join(appImageDir(), `${appId}.AppImage`);
+const entryFile = (appId: string): string => path.join(dataHome(), 'applications', `${appId}.desktop`);
+/** The key in a desktop entry Din wrote for an AppImage it installed, naming the app. */
+const ENTRY_MARK = 'X-Din-Nostr-App';
 
 /** This computer's Flatpak arch, and the NIP-82 platform it runs. */
 function arch(): { flatpak: string; platform: string } | null {
@@ -224,6 +245,8 @@ async function readState(): Promise<Record<string, InstalledRecord>> {
         publishedAt: typeof r.publishedAt === 'number' ? r.publishedAt : 0,
         version: typeof r.version === 'string' ? r.version : '',
         sha256: typeof r.sha256 === 'string' && SHA256.test(r.sha256) ? r.sha256 : '',
+        // Records from before AppImages are all Flatpaks.
+        format: r.format === 'appimage' ? 'appimage' : 'flatpak',
       };
     }
     return out;
@@ -250,13 +273,29 @@ async function installedApps(): Promise<Map<string, string>> {
   return out;
 }
 
-/** The apps installed from Din's remote, forgetting any removed some other way. */
+/** Every app installed, by id, with its remote; none where Flatpak isn't. */
+async function installedFlatpaks(): Promise<Map<string, string>> {
+  return (await flatpakAvailable()) ? installedApps() : new Map();
+}
+
+async function exists(file: string): Promise<boolean> {
+  return fs.access(file).then(() => true, () => false);
+}
+
+/** The apps installed from Nostr, forgetting any removed some other way. */
 async function listInstalled(): Promise<InstalledFlatpak[]> {
-  if (!(await flatpakAvailable())) return [];
-  const [state, apps] = await Promise.all([readState(), installedApps()]);
-  return Object.entries(state)
-    .filter(([appId]) => apps.get(appId) === FLATPAK_REMOTE)
-    .map(([appId, record]) => ({ appId, ...record }));
+  const [state, apps] = await Promise.all([readState(), installedFlatpaks()]);
+  const out: InstalledFlatpak[] = [];
+  for (const [appId, record] of Object.entries(state)) {
+    const here = record.format === 'appimage' ? await exists(appImageFile(appId)) : apps.get(appId) === FLATPAK_REMOTE;
+    if (here) out.push({ appId, ...record });
+  }
+  return out;
+}
+
+/** Whether this computer can run AppImages: Linux, on an architecture NIP-82 names. */
+function appImagesAvailable(): boolean {
+  return process.platform === 'linux' && !!arch();
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +313,8 @@ function checkRequest(value: unknown): InstallRequest {
     throw new FlatpakError('Not a NIP-82 app');
   }
   if (typeof publishedAt !== 'number' || !Number.isInteger(publishedAt) || publishedAt < 0) throw new FlatpakError('Not a release');
-  if (typeof asset.sha256 !== 'string' || !SHA256.test(asset.sha256)) throw new FlatpakError('Not a Flatpak asset');
+  const format: Format = v.format === 'appimage' ? 'appimage' : 'flatpak';
+  if (typeof asset.sha256 !== 'string' || !SHA256.test(asset.sha256)) throw new FlatpakError('Not an asset');
   const urls = (Array.isArray(asset.urls) ? asset.urls : []).filter((url): url is string => {
     if (typeof url !== 'string') return false;
     try {
@@ -283,16 +323,23 @@ function checkRequest(value: unknown): InstallRequest {
       return false;
     }
   });
-  if (!urls.length) throw new FlatpakError('The release names nowhere to download its Flatpak from.');
+  if (!urls.length) throw new FlatpakError(`The release names nowhere to download its ${formatName(format)} from.`);
   const size = typeof asset.size === 'number' && Number.isSafeInteger(asset.size) && asset.size > 0 ? asset.size : 0;
+  // The name goes into a desktop entry: one line, no control characters.
+  const name = typeof v.name === 'string' ? v.name.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 200) : '';
   return {
     appId,
-    name: typeof v.name === 'string' && v.name.trim() ? v.name.trim().slice(0, 200) : appId,
+    name: name || appId,
     coordinate,
     publishedAt,
     version: typeof v.version === 'string' ? v.version.slice(0, 100) : '',
+    format,
     asset: { sha256: asset.sha256, size, urls: [...new Set(urls)].slice(0, 16) },
   };
+}
+
+function formatName(format: Format): string {
+  return format === 'appimage' ? 'AppImage' : 'Flatpak';
 }
 
 /** Download a bundle to `file` from the first URL whose copy has its hash. */
@@ -328,7 +375,7 @@ async function download(req: InstallRequest, file: string, progress: (percent?: 
       // Unreachable, too slow, too big: the next URL.
     }
   }
-  throw new FlatpakError(`${req.name}’s Flatpak couldn’t be downloaded, or no copy of it matched its release.`);
+  throw new FlatpakError(`${req.name}’s ${formatName(req.format)} couldn’t be downloaded, or no copy of it matched its release.`);
 }
 
 /**
@@ -370,20 +417,31 @@ function serially<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** Refuse an app another publisher's app is installed as, or one installed the other way. */
+function checkOwner(req: InstallRequest, owner: InstalledRecord | undefined, installed: boolean): void {
+  if (!owner || !installed) return;
+  if (owner.coordinate.split(':')[1] !== req.coordinate.split(':')[1]) {
+    throw new FlatpakError(`Another publisher’s app is installed as ${req.appId}. Remove it first.`);
+  }
+  if (owner.format !== req.format) {
+    throw new FlatpakError(`${req.name} is installed as ${owner.format === 'appimage' ? 'an AppImage' : 'a Flatpak'}. Remove it first.`);
+  }
+}
+
 async function install(value: unknown, progress: (p: FlatpakProgress) => void, changed: () => void): Promise<InstalledFlatpak> {
   const req = checkRequest(value);
+  if (req.format === 'appimage') return installAppImage(req, progress, changed);
   if (!(await flatpakAvailable())) throw new FlatpakError('Flatpak isn’t installed on this computer.');
   return serially(async () => {
     const state = await readState();
     const owner = state[req.appId];
+    if (owner?.format === 'appimage') checkOwner(req, owner, await exists(appImageFile(req.appId)));
     const apps = await installedApps();
     const origin = apps.get(req.appId);
     if (origin && origin !== FLATPAK_REMOTE) {
       throw new FlatpakError(`${req.appId} is already installed from ${origin === 'flathub' ? 'Flathub' : origin}. Remove that one first.`);
     }
-    if (owner && origin === FLATPAK_REMOTE && owner.coordinate.split(':')[1] !== req.coordinate.split(':')[1]) {
-      throw new FlatpakError(`Another publisher’s app is installed as ${req.appId}. Remove it first.`);
-    }
+    if (owner?.format === 'flatpak') checkOwner(req, owner, origin === FLATPAK_REMOTE);
 
     await fs.mkdir(base(), { recursive: true });
     const staging = await fs.mkdtemp(path.join(base(), '.staging-'));
@@ -415,6 +473,7 @@ async function install(value: unknown, progress: (p: FlatpakProgress) => void, c
       publishedAt: req.publishedAt,
       version: req.version,
       sha256: req.asset.sha256,
+      format: 'flatpak',
     };
     await writeState({ ...(await readState()), [req.appId]: record });
     changed();
@@ -424,6 +483,7 @@ async function install(value: unknown, progress: (p: FlatpakProgress) => void, c
 
 async function uninstall(appId: unknown, progress: (p: FlatpakProgress) => void, changed: () => void): Promise<void> {
   if (typeof appId !== 'string' || !APP_ID.test(appId)) throw new FlatpakError('Not a Flatpak application id');
+  if ((await readState())[appId]?.format === 'appimage') return uninstallAppImage(appId, progress, changed);
   if (!(await flatpakAvailable())) throw new FlatpakError('Flatpak isn’t installed on this computer.');
   return serially(async () => {
     const state = await readState();
@@ -445,10 +505,195 @@ async function uninstall(appId: unknown, progress: (p: FlatpakProgress) => void,
   });
 }
 
+// ---------------------------------------------------------------------------
+// AppImages
+// ---------------------------------------------------------------------------
+
+/** ELF machines (e_machine) by Flatpak arch name. */
+const ELF_MACHINES: Record<number, string> = { 0x3e: 'x86_64', 0xb7: 'aarch64' };
+
 /**
- * The flatpak:* handlers behind window.dinos.flatpaks: whether Flatpak is
- * here, what's installed from Nostr, installing a release and removing one.
- * `changed` is told after either, for the installed apps to be listed again.
+ * The arch an AppImage is built for, or null when the file isn't one: an
+ * ELF executable (its runtime) with the AppImage magic, "AI" and its type,
+ * at byte 8.
+ */
+async function appImageArch(file: string): Promise<string | null> {
+  const handle = await fs.open(file, 'r');
+  try {
+    const head = Buffer.alloc(20);
+    const { bytesRead } = await handle.read(head, 0, head.length, 0);
+    if (bytesRead < head.length || !head.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return null;
+    if (head[8] !== 0x41 || head[9] !== 0x49 || (head[10] !== 1 && head[10] !== 2)) return null;
+    // e_machine, in the file's byte order (EI_DATA: 1 little-endian).
+    const machine = head[5] === 1 ? head.readUInt16LE(18) : head.readUInt16BE(18);
+    return ELF_MACHINES[machine] ?? `machine ${machine}`;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Whether a program is on PATH, as a desktop entry's Exec finds it. */
+function onPath(command: string): boolean {
+  return (process.env.PATH ?? '').split(':').some((dir) => {
+    if (!dir) return false;
+    try {
+      fsSync.accessSync(path.join(dir, command), fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The [Desktop Entry] group's keys, as written. */
+function entryValues(text: string): Map<string, string> {
+  const values = new Map<string, string>();
+  let inEntry = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.startsWith('[')) {
+      if (inEntry) break;
+      inEntry = line === '[Desktop Entry]';
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (inEntry && eq > 0) values.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim().replace(/\p{Cc}/gu, ''));
+  }
+  return values;
+}
+
+/** A string as a desktop entry's value. */
+const entryValue = (text: string): string => text.replace(/\\/g, '\\\\');
+
+/** A program's path as an argument in Exec, quoted. */
+const execArg = (arg: string): string => `"${arg.replace(/[\\"`$]/g, '\\$&')}"`;
+
+/**
+ * The desktop entry for an installed AppImage: its name as the store has it,
+ * its icon, and what its own entry says of it (the arguments its Exec gives
+ * the program, the types it opens, the window class that ties its windows
+ * to it), running the AppImage itself the way Din runs any (appimage-run
+ * where there is one, as on DinOS).
+ */
+function appImageEntry(req: InstallRequest, file: string, icon: string | null, embedded: string | null): string {
+  const own = entryValues(embedded ?? '');
+  const program = [...(onPath('appimage-run') ? ['appimage-run'] : []), execArg(file)].join(' ');
+  // Its Exec's own program is inside the AppImage; its arguments (Electron's
+  // --no-sandbox, a %U) follow ours, as written.
+  let args = '';
+  const exec = own.get('Exec');
+  if (exec) {
+    const first = /^("(?:[^"\\]|\\.)*"|\S+)\s*/.exec(exec);
+    args = first && first[1] !== 'env' ? exec.slice(first[0].length) : (/%[UuFf]/.exec(exec)?.[0] ?? '');
+  }
+  const lines = [
+    '[Desktop Entry]',
+    'Type=Application',
+    `Name=${entryValue(req.name)}`,
+    `Exec=${entryValue(program)}${args ? ` ${args}` : ''}`,
+    `TryExec=${entryValue(file)}`,
+    ...(icon ? [`Icon=${entryValue(icon)}`] : []),
+    ...['Comment', 'Categories', 'Keywords', 'MimeType', 'StartupWMClass'].flatMap((key) => {
+      const value = own.get(key);
+      return value ? [`${key}=${value}`] : [];
+    }),
+    'Terminal=false',
+    `${ENTRY_MARK}=${req.appId}`,
+    '',
+  ];
+  return lines.join('\n');
+}
+
+/** Whether the entry at `file` is the one Din wrote for this app (or there's none). */
+async function entryIsOurs(appId: string): Promise<boolean> {
+  const text = await fs.readFile(entryFile(appId), 'utf8').catch(() => null);
+  return text === null || text.split('\n').some((line) => line.trim() === `${ENTRY_MARK}=${appId}`);
+}
+
+async function removeAppImageIcons(appId: string): Promise<void> {
+  for (const ext of ['png', 'svg']) await fs.rm(path.join(appImageDir(), `${appId}.${ext}`), { force: true });
+}
+
+async function writeAtomically(file: string, data: string | Buffer): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.din-tmp`;
+  await fs.writeFile(tmp, data);
+  await fs.rename(tmp, file);
+}
+
+async function installAppImage(req: InstallRequest, progress: (p: FlatpakProgress) => void, changed: () => void): Promise<InstalledFlatpak> {
+  const machine = arch();
+  if (!appImagesAvailable() || !machine) throw new FlatpakError('AppImages from Nostr aren’t available on this kind of computer.');
+  return serially(async () => {
+    const state = await readState();
+    const owner = state[req.appId];
+    const file = appImageFile(req.appId);
+    const origin = (await installedFlatpaks()).get(req.appId);
+    if (origin && origin !== FLATPAK_REMOTE) {
+      throw new FlatpakError(`${req.appId} is already installed from ${origin === 'flathub' ? 'Flathub' : origin}. Remove that one first.`);
+    }
+    checkOwner(req, owner, owner?.format === 'appimage' ? await exists(file) : origin === FLATPAK_REMOTE);
+    if (origin === FLATPAK_REMOTE) throw new FlatpakError(`${req.name} is installed as a Flatpak. Remove it first.`);
+    if (!(await entryIsOurs(req.appId))) {
+      throw new FlatpakError(`Another app is in your applications folder as ${req.appId}, so ${req.name} wasn’t installed.`);
+    }
+
+    await fs.mkdir(appImageDir(), { recursive: true });
+    const staging = await fs.mkdtemp(path.join(appImageDir(), '.staging-'));
+    try {
+      const staged = path.join(staging, 'app.AppImage');
+      progress({ appId: req.appId, phase: 'download', percent: 0 });
+      await download(req, staged, (percent) => progress({ appId: req.appId, phase: 'download', percent }));
+      progress({ appId: req.appId, phase: 'import' });
+      const built = await appImageArch(staged);
+      if (!built) throw new FlatpakError(`${req.name}’s AppImage isn’t one, so it wasn’t installed.`);
+      if (built !== machine.flatpak) throw new FlatpakError(`${req.name}’s AppImage is built for ${built}, and this computer is ${machine.flatpak}.`);
+      await fs.chmod(staged, 0o755);
+      progress({ appId: req.appId, phase: 'install' });
+      const { entry: embedded, icon } = await appImageEntryAndIcon(staged);
+      await removeAppImageIcons(req.appId);
+      const iconFile = icon ? path.join(appImageDir(), `${req.appId}.${icon.type === 'image/svg+xml' ? 'svg' : 'png'}`) : null;
+      if (icon && iconFile) await writeAtomically(iconFile, icon.data);
+      // A running copy keeps the file it started from.
+      await fs.rename(staged, file);
+      await writeAtomically(entryFile(req.appId), appImageEntry(req, file, iconFile, embedded));
+    } finally {
+      await fs.rm(staging, { recursive: true, force: true });
+    }
+
+    const record: InstalledRecord = {
+      coordinate: req.coordinate,
+      publishedAt: req.publishedAt,
+      version: req.version,
+      sha256: req.asset.sha256,
+      format: 'appimage',
+    };
+    await writeState({ ...(await readState()), [req.appId]: record });
+    changed();
+    return { appId: req.appId, ...record };
+  });
+}
+
+async function uninstallAppImage(appId: string, progress: (p: FlatpakProgress) => void, changed: () => void): Promise<void> {
+  return serially(async () => {
+    const state = await readState();
+    if (state[appId]?.format !== 'appimage') throw new FlatpakError(`${appId} wasn’t installed from Nostr.`);
+    progress({ appId, phase: 'remove' });
+    if (await entryIsOurs(appId)) await fs.rm(entryFile(appId), { force: true });
+    await fs.rm(appImageFile(appId), { force: true });
+    await removeAppImageIcons(appId);
+    const { [appId]: _gone, ...rest } = state;
+    await writeState(rest);
+    changed();
+  });
+}
+
+/**
+ * The flatpak:* handlers behind window.dinos.flatpaks: which ways this
+ * computer installs Linux apps (Flatpak, AppImage), what's installed from
+ * Nostr, installing a release either way and removing one. `changed` is
+ * told after either, for the installed apps to be listed again.
  */
 export function registerNostrFlatpakHandlers(options: {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
@@ -461,7 +706,10 @@ export function registerNostrFlatpakHandlers(options: {
   ipcMain.handle('flatpaks:status', async (event) => {
     assertShellSender(event);
     const machine = arch();
-    return { available: !!machine && (await flatpakAvailable()), platform: machine?.platform ?? null };
+    const formats: Format[] = [];
+    if (machine && (await flatpakAvailable())) formats.push('flatpak');
+    if (appImagesAvailable()) formats.push('appimage');
+    return { available: formats.length > 0, platform: machine?.platform ?? null, formats };
   });
 
   ipcMain.handle('flatpaks:installed', async (event) => {

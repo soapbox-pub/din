@@ -10,22 +10,23 @@ import {
   getFlatpaksBridge,
   installRequest,
   parseAppNaddr,
-  type FlatpakApp,
   type FlatpakProgress,
+  type LinuxApp,
+  type LinuxFormat,
   type FlatpakQuery,
   type InstalledFlatpak,
 } from '@/lib/nostrFlatpaks';
 
 /**
- * The App Store's Linux apps: NIP-82 apps with a Flatpak for this computer
- * (src/lib/nostrFlatpaks.ts), what of them is installed, and installing and
- * removing them through window.dinos.flatpaks.
+ * The App Store's Linux apps: NIP-82 apps with a Flatpak or an AppImage for
+ * this computer (src/lib/nostrFlatpaks.ts), what of them is installed, and
+ * installing and removing them through window.dinos.flatpaks.
  */
 
 export const FLATPAKS_KEY = ['nostr-flatpaks'] as const;
 const INSTALLED_KEY = [...FLATPAKS_KEY, 'installed'] as const;
 
-/** Whether Flatpak is here, and this computer's NIP-82 platform; null outside the Din desktop app. */
+/** Which ways Linux apps install here, and this computer's NIP-82 platform; null outside the Din desktop app. */
 export function useFlatpakStatus() {
   const bridge = getFlatpaksBridge();
   return useQuery({
@@ -44,7 +45,7 @@ function useQueryFn(): FlatpakQuery {
   );
 }
 
-/** The Linux apps Din's publishers, the user and the people they follow publish with a Flatpak. */
+/** The Linux apps Din's publishers, the user and the people they follow publish for this computer. */
 export function useFlatpakCatalog(enabled = true) {
   const authors = useCatalogAuthors();
   const status = useFlatpakStatus();
@@ -58,7 +59,7 @@ export function useFlatpakCatalog(enabled = true) {
   });
 }
 
-/** One app by its address, when it has a Flatpak for this computer. */
+/** One app by its address, when it has a Flatpak or an AppImage for this computer. */
 export function useFlatpakApp(address: { pubkey: string; identifier: string } | null) {
   const status = useFlatpakStatus();
   const platform = status.data?.available ? status.data.platform : null;
@@ -126,9 +127,9 @@ export function useFlatpakActions() {
     void queryClient.invalidateQueries({ queryKey: INSTALLED_KEY });
   }, [queryClient]);
 
-  const install = useCallback(async (app: FlatpakApp, installed?: InstalledFlatpak) => {
+  const install = useCallback(async (app: LinuxApp, format: LinuxFormat, installed?: InstalledFlatpak) => {
     try {
-      await installFlatpak(app);
+      await installFlatpak(app, format);
       toast({
         title: installed ? `${app.name} is up to date` : `${app.name} installed`,
         description: installed ? `Version ${app.release.version}.` : 'Find it in the app launcher.',
@@ -156,15 +157,20 @@ export function useFlatpakActions() {
   return useMemo(() => ({ install, remove }), [install, remove]);
 }
 
-/** Install or update an app from its release, showing it busy meanwhile. */
-export async function installFlatpak(app: FlatpakApp, onProgress?: (progress: FlatpakProgress) => void): Promise<InstalledFlatpak> {
+/** Install or update an app from its release, one way, showing it busy meanwhile. */
+export async function installFlatpak(
+  app: LinuxApp,
+  format: LinuxFormat,
+  onProgress?: (progress: FlatpakProgress) => void,
+): Promise<InstalledFlatpak> {
   const bridge = getFlatpaksBridge();
   if (!bridge) throw new Error('Linux apps install in the Din desktop app');
   if (busy.has(app.identifier)) throw new Error(`${app.name} is already being installed`);
+  const request = installRequest(app, format);
   setBusy(app.identifier, { appId: app.identifier, phase: 'download', percent: 0 });
   const off = onProgress ? bridge.onProgress((p) => p.appId === app.identifier && onProgress(p)) : null;
   try {
-    return await bridge.install(installRequest(app));
+    return await bridge.install(request);
   } finally {
     off?.();
     setBusy(app.identifier, null);
@@ -184,7 +190,7 @@ export async function removeFlatpak(appId: string): Promise<void> {
 }
 
 /** The Linux apps a search finds: by name and summary, or the one at a pasted address. */
-export function useFlatpakMatches(query: string): { apps: FlatpakApp[]; pending: boolean; isAddress: boolean } {
+export function useFlatpakMatches(query: string): { apps: LinuxApp[]; pending: boolean; isAddress: boolean } {
   const q = query.trim();
   const address = useMemo(() => parseAppNaddr(q), [q]);
   const catalog = useFlatpakCatalog(!!q && !address);

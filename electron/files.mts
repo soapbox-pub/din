@@ -1458,24 +1458,57 @@ async function desktopEntryIcon(dest: string): Promise<string | null> {
   return null;
 }
 
-async function findAppImageIcon(file: string): Promise<AppImageIcon | null> {
+/** The icon in an AppImage whose top has been extracted into `dest`. */
+async function iconInExtracted(file: string, dest: string): Promise<AppImageIcon | null> {
+  const dirIcon = await appImageIconAt(file, dest, '.DirIcon', true);
+  if (dirIcon) return dirIcon;
+  const icon = await desktopEntryIcon(dest);
+  if (!icon) return null;
+  for (const ext of ['.svg', '.png']) {
+    const found = await appImageIconAt(file, dest, icon + ext, true);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Extract the top of an AppImage's folder for `read`, then throw it away. */
+async function withAppImageTop<T>(file: string, read: (dest: string) => Promise<T>): Promise<T> {
   const dest = await fsp.mkdtemp(path.join(os.tmpdir(), 'din-appimage-icon-'));
   try {
     // The top of the folder in one go: .DirIcon, the desktop entry, and the
     // icons that are usually beside it.
     await extractFromAppImage(file, dest, ['.DirIcon', '*.desktop', '*.png', '*.svg']);
-    const dirIcon = await appImageIconAt(file, dest, '.DirIcon', true);
-    if (dirIcon) return dirIcon;
-    const icon = await desktopEntryIcon(dest);
-    if (!icon) return null;
-    for (const ext of ['.svg', '.png']) {
-      const found = await appImageIconAt(file, dest, icon + ext, true);
-      if (found) return found;
-    }
-    return null;
+    return await read(dest);
   } finally {
     await fsp.rm(dest, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function findAppImageIcon(file: string): Promise<AppImageIcon | null> {
+  return withAppImageTop(file, (dest) => iconInExtracted(file, dest));
+}
+
+/**
+ * An AppImage's own desktop entry (the first at the top of its folder, as
+ * text) and its icon, for the entry Din writes for one it installs
+ * (electron/nostr-appimages.mts). Either may be null.
+ */
+export function appImageEntryAndIcon(file: string): Promise<{ entry: string | null; icon: AppImageIcon | null }> {
+  return withAppImageTop(file, async (dest) => {
+    let entry: string | null = null;
+    const names = (await fsp.readdir(dest).catch(() => [] as string[])).filter((n) => n.endsWith('.desktop')).sort();
+    for (const name of names) {
+      try {
+        const stats = await fsp.lstat(path.join(dest, name));
+        if (!stats.isFile() || stats.size > 64 * 1024) continue;
+        entry = await fsp.readFile(path.join(dest, name), 'utf8');
+        break;
+      } catch {
+        // Next one.
+      }
+    }
+    return { entry, icon: await iconInExtracted(file, dest) };
+  });
 }
 
 /** An AppImage's icon, made once per version of the file. */

@@ -893,20 +893,21 @@ expose('monitors', {
   zoomFactor: () => webFrame.getZoomFactor(),
 });
 
-// Flatpaks from Nostr (window.dinos.flatpaks), backed by the flatpaks:*
+// Linux apps from Nostr (window.dinos.flatpaks), backed by the flatpaks:*
 // handlers in electron/nostr-flatpaks.mts: NIP-82 apps whose releases carry
 // a .flatpak bundle, imported into a Flatpak remote of Din's own and
-// installed from it, for the App Store.
+// installed from it, or an AppImage, kept with a launcher entry of its own,
+// for the App Store.
 expose('flatpaks', {
-  /** Whether Flatpak is here, and the NIP-82 platform this computer runs. */
+  /** Which ways Linux apps install here, and the NIP-82 platform this computer runs. */
   status: () => ipcRenderer.invoke('flatpaks:status'),
 
-  /** The apps installed from Nostr, with the release each is at. */
+  /** The apps installed from Nostr, with the release each is at and how it's installed. */
   installed: () => ipcRenderer.invoke('flatpaks:installed'),
 
   /**
-   * Download a release's bundle, check it against its hash, and install or
-   * update the app from it.
+   * Download a release's Flatpak or AppImage, check it against its hash, and
+   * install or update the app from it.
    * @param {unknown} request
    */
   install: (request) => ipcRenderer.invoke('flatpaks:install', request),

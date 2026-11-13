@@ -38,7 +38,7 @@ a missing or bad argument).
 | --- | --- |
 | `settings` | Din's own preferences by key (`appearance.theme`, `dock.size`, `windows.tiling`, `datetime.clock-format`, `notifications.do-not-disturb`…), like `gsettings` |
 | `cursors`, `icons`, `skins` | Cursor themes, icon themes and Media Player skins: list, use (a skin opens the Media Player wearing it), publish to Nostr (asks on screen first), find in the App Store (`store`), install one by its address, remove one Din installed |
-| `apps` | List, open, install (websites, nsites), remove; the App Store's Linux apps, NIP-82 apps on Nostr with a Flatpak for this computer: list (`linux`), install or update one (`install-linux`, asks on screen first), remove one (`remove-linux`); `apps run` runs your own (below) |
+| `apps` | List, open, install (websites, nsites), remove; the App Store's Linux apps, NIP-82 apps on Nostr with a Flatpak or an AppImage for this computer: list (`linux`), install or update one (`install-linux`, asks on screen first; `--as appimage` or `--as flatpak` picks the way, as the App Store's Get as … does), remove one (`remove-linux`); `apps run` runs your own (below) |
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
