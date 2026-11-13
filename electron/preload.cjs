@@ -72,7 +72,7 @@
 //   - window.dinos.browser: TLS certificate exceptions, browsing-data clearing,
 //     find-in-page, and download progress for the Web Browser app
 //   - window.dinos.crx: Chrome extension coordination for the Web Browser app
-//   - window.dinos.userscripts: userscript library sync and install
+//   - window.dinos.userscripts: the userscript library and install
 //     requests for the Web Browser app
 //   - window.dinos.adblock: the Web Browser's built-in ad blocker
 //   - window.dinos.popups: the pop-up blocker's blocked windows and allowed sites
@@ -3345,17 +3345,52 @@ expose('crx', {
 });
 
 // Userscript bridge (window.dinos.userscripts), backed by the userscripts:*
-// handlers in main.mts (electron/userscripts.mts). The shell renderer owns
-// the script library (localStorage, see src/hooks/useUserscripts.ts) and
-// syncs the full list here so the main process can inject matching scripts
-// into browser-tab guests as pages load. Navigations to *.user.js files are
-// intercepted in main and surfaced back as install requests.
+// handlers in main.mts (electron/userscripts.mts). The main process keeps the
+// script library and injects matching scripts into browser-tab guests as pages
+// load; the shell is told what's installed (never a script's code, see
+// src/hooks/useUserscripts.ts) and has scripts installed, removed and
+// switched here. Navigations to *.user.js files are intercepted in main and
+// surfaced back as install requests.
 expose('userscripts', {
+  /** @returns {Promise<object[]>} What's installed, without the scripts' code. */
+  list: () => ipcRenderer.invoke('userscripts:list'),
+
   /**
-   * Replace the main process's script list (the renderer is authoritative).
-   * @param {object[]} scripts
+   * Install a script, or replace the one it's a new copy of.
+   * @param {object} script Its parsed metadata, code and downloadUrl.
+   * @returns {Promise<object>}
    */
-  sync: (scripts) => ipcRenderer.send('userscripts:sync', scripts),
+  install: (script) => ipcRenderer.invoke('userscripts:install', script),
+
+  /** @param {string} id */
+  remove: (id) => ipcRenderer.invoke('userscripts:remove', id),
+
+  /**
+   * @param {string} id
+   * @param {boolean} enabled
+   */
+  setEnabled: (id, enabled) => ipcRenderer.invoke('userscripts:setEnabled', id, enabled),
+
+  /**
+   * Hand over the library the shell used to keep in localStorage.
+   * @param {unknown[]} scripts
+   * @returns {Promise<boolean>} Whether the shell's copy can go.
+   */
+  adopt: (scripts) => ipcRenderer.invoke('userscripts:adopt', scripts),
+
+  /**
+   * Subscribe to what's installed, as it changes. Returns an unsubscribe fn.
+   * @param {(scripts: object[]) => void} callback
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {object[]} scripts
+     */
+    const listener = (_event, scripts) => callback(scripts);
+    ipcRenderer.on('userscripts:changed', listener);
+    return () => ipcRenderer.removeListener('userscripts:changed', listener);
+  },
 
   /**
    * Fetch a userscript's source text over https (size-capped, in main).

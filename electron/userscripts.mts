@@ -1,10 +1,11 @@
 // Userscript engine for the Web Browser app: native support for
 // Greasemonkey-format scripts, managed like extensions.
 //
-// The shell renderer owns the script library (src/hooks/useUserscripts.ts)
-// and syncs the full list here over `userscripts:sync`; a copy is persisted
-// to userData/userscripts.json so injection works from the first page load
-// after a restart, before any renderer sync arrives.
+// The library is kept here, in userData/userscripts.json, and nowhere else:
+// the shell asks for what's installed (everything but the code) and has
+// scripts installed, removed and switched over `userscripts:*`
+// (src/hooks/useUserscripts.ts). A script's code can be megabytes, and the
+// shell needs it only once, to hand it over.
 //
 // Injection targets browser-tab guests only (main.mts calls attachUserscripts
 // on webviews in the persist:webbrowser session). Scripts run in the page's
@@ -24,11 +25,13 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { app, ipcMain, net } from 'electron';
 
-/** Upper bounds keeping a hostile sync/fetch from bloating disk or memory. */
+/** Upper bounds keeping a hostile install/fetch from bloating disk or memory. */
 const MAX_SCRIPTS = 200;
 const MAX_CODE_BYTES = 2 * 1024 * 1024;
+const MAX_URL_LENGTH = 2048;
 
 type RunAt = 'document-start' | 'document-end' | 'document-idle';
 
@@ -41,23 +44,44 @@ interface Userscript {
   description: string;
   enabled: boolean;
   runAt: RunAt;
+  noframes: boolean;
   matches: string[];
   includes: string[];
   excludes: string[];
   code: string;
+  /** The *.user.js link it was installed from, if any. */
+  downloadUrl?: string;
+  installedAt: number;
+  updatedAt: number;
 }
 
-/** The current script list (sanitized renderer data). */
+/** A script as the shell is told of it: everything but its code. */
+type UserscriptInfo = Omit<Userscript, 'code'>;
+
+/** The library. */
 let scripts: Userscript[] = [];
+/**
+ * Whether the file on disk is the library itself. Until Din kept it here it
+ * was the shell's, in localStorage, and the file a copy for injecting from;
+ * that copy is replaced by the shell's own (`userscripts:adopt`) once.
+ */
+let owned = false;
+
+let sendToShell: (channel: string, payload?: unknown) => void = () => {};
 
 function storeFile(): string {
   return path.join(app.getPath('userData'), 'userscripts.json');
 }
 
+function info(script: Userscript): UserscriptInfo {
+  const { code: _code, ...rest } = script;
+  return rest;
+}
+
 /**
- * Validate one renderer-supplied script record. The renderer is the trusted
- * shell (assertShellSender gates the IPC), but records also round-trip
- * through a JSON file on disk, so shape-check everything defensively.
+ * Validate one script record. The renderer is the trusted shell
+ * (assertShellSender gates the IPC), but records also round-trip through a
+ * JSON file on disk, so shape-check everything defensively.
  */
 function sanitizeScript(value: unknown): Userscript | null {
   if (!value || typeof value !== 'object') return null;
@@ -71,6 +95,7 @@ function sanitizeScript(value: unknown): Userscript | null {
     raw.runAt === 'document-start' || raw.runAt === 'document-idle' || raw.runAt === 'document-end'
       ? raw.runAt
       : 'document-end';
+  const time = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
   return {
     id: raw.id,
     name: raw.name,
@@ -79,10 +104,14 @@ function sanitizeScript(value: unknown): Userscript | null {
     description: typeof raw.description === 'string' ? raw.description : '',
     enabled: raw.enabled === true,
     runAt,
+    noframes: raw.noframes === true,
     matches: strings(raw.matches),
     includes: strings(raw.includes),
     excludes: strings(raw.excludes),
     code: raw.code,
+    ...(typeof raw.downloadUrl === 'string' && raw.downloadUrl.length <= MAX_URL_LENGTH ? { downloadUrl: raw.downloadUrl } : {}),
+    installedAt: time(raw.installedAt),
+    updatedAt: time(raw.updatedAt),
   };
 }
 
@@ -102,19 +131,39 @@ function sanitizeScripts(list: unknown): Userscript[] {
 
 function loadFromDisk(): void {
   try {
-    scripts = sanitizeScripts(JSON.parse(fs.readFileSync(storeFile(), 'utf8')));
+    const stored: unknown = JSON.parse(fs.readFileSync(storeFile(), 'utf8'));
+    // A bare list is the copy the shell used to sync here.
+    owned = !Array.isArray(stored);
+    scripts = sanitizeScripts(owned ? (stored as { scripts?: unknown } | null)?.scripts : stored);
   } catch {
-    // Missing or corrupt store: start empty; the renderer re-syncs anyway.
+    // Missing or corrupt store: start empty.
     scripts = [];
   }
 }
 
-function saveToDisk(): void {
+/** Write the library, whole or not at all: it's the only copy. */
+function saveToDisk(): boolean {
+  const file = storeFile();
   try {
-    fs.writeFileSync(storeFile(), JSON.stringify(scripts));
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ version: 2, scripts }));
+    fs.renameSync(`${file}.tmp`, file);
+    owned = true;
+    return true;
   } catch (error) {
     console.error('userscripts: failed to persist store:', error);
+    return false;
   }
+}
+
+/** Make a change, kept or not made at all, and tell the shell what's installed now. */
+function commit(next: Userscript[]): void {
+  const before = scripts;
+  scripts = next;
+  if (!saveToDisk()) {
+    scripts = before;
+    throw new Error('The userscript library could not be saved');
+  }
+  sendToShell('userscripts:changed', scripts.map(info));
 }
 
 // --- URL matching (Greasemonkey semantics) ---------------------------------
@@ -297,17 +346,69 @@ export function isUserscriptInstallUrl(url: string): boolean {
   }
 }
 
-/** Register the userscripts:* IPC surface and load the persisted store. */
-export function registerUserscriptHandlers({ assertShellSender }: {
+/** Register the userscripts:* IPC surface and load the library. */
+export function registerUserscriptHandlers(deps: {
   assertShellSender: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => void;
+  sendToShell: (channel: string, payload?: unknown) => void;
 }): void {
+  const { assertShellSender } = deps;
+  sendToShell = deps.sendToShell;
   loadFromDisk();
 
-  // Full-list replacement from the shell (the renderer is authoritative).
-  ipcMain.on('userscripts:sync', (event, list) => {
+  ipcMain.handle('userscripts:list', (event) => {
     assertShellSender(event);
-    scripts = sanitizeScripts(list);
-    saveToDisk();
+    return scripts.map(info);
+  });
+
+  // Install a script, or replace the one from the same link or of the same
+  // name and namespace, which keeps its id and whether it's on.
+  ipcMain.handle('userscripts:install', (event, raw: unknown) => {
+    assertShellSender(event);
+    const now = Date.now();
+    const draft = sanitizeScript({ ...(raw && typeof raw === 'object' ? raw : {}), id: 'new' });
+    if (!draft) throw new Error('Not a userscript');
+    const existing = scripts.find(
+      (s) =>
+        (draft.downloadUrl !== undefined && s.downloadUrl === draft.downloadUrl) ||
+        (s.name === draft.name && s.namespace === draft.namespace),
+    );
+    if (!existing && scripts.length >= MAX_SCRIPTS) throw new Error(`No more than ${MAX_SCRIPTS} userscripts can be installed`);
+    const script: Userscript = {
+      ...draft,
+      id: existing?.id ?? `us-${randomBytes(8).toString('hex')}`,
+      enabled: existing?.enabled ?? true,
+      ...(draft.downloadUrl === undefined && existing?.downloadUrl !== undefined ? { downloadUrl: existing.downloadUrl } : {}),
+      installedAt: existing?.installedAt ?? now,
+      updatedAt: now,
+    };
+    commit(existing ? scripts.map((s) => (s.id === script.id ? script : s)) : [...scripts, script]);
+    return info(script);
+  });
+
+  ipcMain.handle('userscripts:remove', (event, id: unknown) => {
+    assertShellSender(event);
+    if (!scripts.some((s) => s.id === id)) return;
+    commit(scripts.filter((s) => s.id !== id));
+  });
+
+  ipcMain.handle('userscripts:setEnabled', (event, id: unknown, enabled: unknown) => {
+    assertShellSender(event);
+    if (!scripts.some((s) => s.id === id && s.enabled !== (enabled === true))) return;
+    commit(scripts.map((s) => (s.id === id ? { ...s, enabled: enabled === true } : s)));
+  });
+
+  // The library the shell kept in localStorage before it was kept here: taken
+  // once, in place of the copy synced from it. True once it's safely here (or
+  // was already), so the shell can drop its own.
+  ipcMain.handle('userscripts:adopt', (event, list: unknown) => {
+    assertShellSender(event);
+    if (owned) return true;
+    try {
+      commit(sanitizeScripts(list));
+      return true;
+    } catch {
+      return false;
+    }
   });
 
   // Fetch a script's source for the install dialog. Done here (not in the

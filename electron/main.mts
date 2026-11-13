@@ -6489,7 +6489,7 @@ app.whenReady().then(() => {
   registerBrowserPreconnectHandler();
   registerFindHandlers();
   registerThemeHandler();
-  registerUserscriptHandlers({ assertShellSender });
+  registerUserscriptHandlers({ assertShellSender, sendToShell });
   registerDevtoolsHandlers();
   registerNostrBridge();
   registerHighlightBridge();
