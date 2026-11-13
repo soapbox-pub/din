@@ -539,10 +539,12 @@ expose('wifi', {
   status: () => ipcRenderer.invoke('wifi:status'),
 
   /**
-   * Visible networks, one entry per SSID. `rescan` forces a fresh scan.
-   * @param {boolean} [rescan]
+   * Visible networks, one entry per SSID: after a scan if the last is over 30
+   * seconds old ('auto', the default), after a fresh one ('fresh'), or as
+   * NetworkManager has them, leaving the radio alone ('none').
+   * @param {'auto' | 'fresh' | 'none'} [scan]
    */
-  networks: (rescan) => ipcRenderer.invoke('wifi:networks', rescan),
+  networks: (scan) => ipcRenderer.invoke('wifi:networks', scan),
 
   /** Saved (remembered) WiFi networks. */
   saved: () => ipcRenderer.invoke('wifi:saved'),

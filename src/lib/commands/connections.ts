@@ -36,7 +36,7 @@ export const wifiArea: Area = {
     command('wifi', 'list', 'Networks in range', [
       { name: 'rescan', type: 'boolean', optional: true, help: 'Scan afresh first' },
     ], async (args) => {
-      const networks = await call(wifi().networks(args.optBool('rescan') ?? false));
+      const networks = await call(wifi().networks(args.optBool('rescan') ? 'fresh' : 'auto'));
       return {
         data: networks,
         text: networks.length === 0 ? '(none)' : networks

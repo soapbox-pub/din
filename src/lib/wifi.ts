@@ -182,14 +182,20 @@ export interface WifiAddResult {
   error: string | null;
 }
 
+/** Whether listing the networks scans for them first. */
+export type WifiScan = 'auto' | 'fresh' | 'none';
+
 export interface WifiBridge {
   /** Adapter/radio state. `available: false` when NetworkManager is absent. */
   status(): Promise<WifiStatus>;
   /**
-   * Visible networks, one entry per SSID. `rescan` waits for a fresh scan,
-   * resetting the adapter if it never finishes, and fails if none does.
+   * Visible networks, one entry per SSID. 'auto' (the default) scans first if
+   * the last scan is over 30 seconds old; 'fresh' waits for a new scan,
+   * resetting the adapter if it never finishes, and fails if none does;
+   * 'none' lists what NetworkManager has and leaves the radio alone (a scan
+   * takes it off its channel for seconds).
    */
-  networks(rescan?: boolean): Promise<WifiNetwork[]>;
+  networks(scan?: WifiScan): Promise<WifiNetwork[]>;
   /** Saved (remembered) networks. */
   saved(): Promise<SavedWifiNetwork[]>;
   /** A saved network's settings, and its live link details while it's up. */

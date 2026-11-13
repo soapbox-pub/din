@@ -52,7 +52,7 @@ export function WifiSettingsSection({ join }: { join?: { ssid: string; nonce: un
   const status = useWifiStatus();
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
-  const networks = useWifiNetworks(radioEnabled && hasAdapter);
+  const networks = useWifiNetworks(radioEnabled && hasAdapter, { scan: true });
   const saved = useSavedNetworks();
 
   const lastJoin = useRef<unknown>(undefined);
@@ -132,7 +132,7 @@ function NetworkListView({
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
   const ethernet = isEthernetConnected(status.data);
-  const networks = useWifiNetworks(radioEnabled && hasAdapter);
+  const networks = useWifiNetworks(radioEnabled && hasAdapter, { scan: true });
   const { connect, disconnect, forget, setRadio, rescan } = useWifiMutations();
   const canReset = status.data?.canReset ?? false;
   const resetting = canReset && setRadio.isPending && setRadio.variables === true;

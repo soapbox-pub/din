@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getWifiBridge } from '@/lib/wifi';
 import type {
@@ -12,7 +13,7 @@ import type {
 /**
  * TanStack Query hooks over the OS WiFi bridge (window.dinos.wifi).
  *
- * Status and scan results poll on a short interval so the Settings panel
+ * Status and the networks poll on a short interval so the Settings panel
  * tracks connection changes made elsewhere (e.g. nmcli in the Terminal app).
  * Mutations invalidate everything WiFi so the UI converges after connects,
  * disconnects, edits and forgets.
@@ -39,12 +40,35 @@ export function useWifiStatus() {
   });
 }
 
-/** Visible networks. `enabled` should be false while the radio is off. */
-export function useWifiNetworks(enabled: boolean) {
+/** How many lists of networks are on screen, and so want scanning for. */
+let listsShown = 0;
+
+/**
+ * Visible networks. `enabled` should be false while the radio is off.
+ *
+ * `scan` is for a list of them someone is looking at (the menu bar's panel,
+ * Settings): while one is up, each poll has NetworkManager scan again if its
+ * last scan is over 30 seconds old. Without one (the menu bar's glyph, which
+ * is always there) a poll reads what NetworkManager has, the network it's on
+ * and its signal among it, and leaves the radio alone: a scan takes it off
+ * its channel for seconds at a time, which a call or a game can feel.
+ */
+export function useWifiNetworks(enabled: boolean, { scan = false }: { scan?: boolean } = {}) {
   const wifi = getWifiBridge();
+  const queryClient = useQueryClient();
+  const scans = scan && enabled && wifi !== undefined;
+  useEffect(() => {
+    if (!scans) return;
+    listsShown += 1;
+    // What's there is as old as NetworkManager's own last scan.
+    if (listsShown === 1) void queryClient.invalidateQueries({ queryKey: ['wifi', 'networks'] });
+    return () => {
+      listsShown -= 1;
+    };
+  }, [scans, queryClient]);
   return useQuery<WifiNetwork[]>({
     queryKey: ['wifi', 'networks'],
-    queryFn: () => requireBridge().networks(),
+    queryFn: () => requireBridge().networks(listsShown > 0 ? 'auto' : 'none'),
     enabled: wifi !== undefined && enabled,
     refetchInterval: 15_000,
     retry: false,
@@ -119,7 +143,7 @@ export function useWifiMutations() {
 
   /** A fresh scan (the refresh button), which replaces the visible networks. */
   const rescan = useMutation({
-    mutationFn: () => requireBridge().networks(true),
+    mutationFn: () => requireBridge().networks('fresh'),
     onSuccess: (networks) => queryClient.setQueryData(['wifi', 'networks'], networks),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['wifi', 'status'] }),
   });
