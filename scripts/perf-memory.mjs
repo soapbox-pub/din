@@ -19,6 +19,10 @@
  *   node scripts/perf-memory.mjs --apps empty --empty-dir <built page>   # what only that page costs in a window
  *   node scripts/perf-memory.mjs --breakdown        # + Chromium's own account of each process, by allocator
  *                                                   # (v8, malloc, cc's images and tiles, discardable, gpu…)
+ *   node scripts/perf-memory.mjs --breakdown --breakdown-depth 6   # further down each allocator's tree (2), into
+ *                                                   # the report: malloc's buckets, each decoded image
+ *   node scripts/perf-memory.mjs --breakdown --breakdown-trace     # + perf-reports/breakdown[-<label>].trace.json,
+ *                                                   # the idle desktop's dump whole, every attribute
  *   node scripts/perf-memory.mjs --home /tmp/h --apps none   # boot only, in a home kept between runs:
  *                                                   # the second boot and after start with caches, as a computer's do
  *   node scripts/perf-memory.mjs --chromium disable-features=AudioServiceOutOfProcess   # under Chromium switches (a=1,b)
@@ -96,6 +100,7 @@ const SETTLE_MS = Number(opt("settle", "8")) * 1000;
 // credited with giving back.
 const BOOT_SETTLE_MS = Number(opt("boot-settle", "35")) * 1000;
 const REST_MS = Number(opt("rest", "5")) * 1000;
+const BREAKDOWN_DEPTH = Number(opt("breakdown-depth", "2"));
 const LABEL = opt("label", "");
 const COMPARE = opt("compare", "");
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -654,6 +659,7 @@ function dirBytes(dir) {
  * (v8, blink_gc, partition_alloc, cc, skia, discardable, gpu, …) and the
  * level below for the big ones; a renderer is named by its page's title.
  */
+let traceWritten = false;
 async function breakdown() {
   const events = [];
   const offData = browser.on("Tracing.dataCollected", ({ value }) => events.push(...value));
@@ -670,6 +676,11 @@ async function breakdown() {
   await browser.send("Tracing.end");
   await complete;
   offData();
+  // --breakdown-trace: the first dump (the idle desktop's) whole, every allocator and its attributes.
+  if (flag("breakdown-trace") && !traceWritten) {
+    traceWritten = true;
+    writeFileSync(resolve(OUT, `breakdown${LABEL ? `-${LABEL}` : ""}.trace.json`), JSON.stringify({ traceEvents: events }));
+  }
 
   const names = new Map();
   const labels = new Map();
@@ -691,7 +702,9 @@ async function breakdown() {
       const depth = name.split("/").length;
       const size = hexMB(dump.attrs?.size?.value);
       // The level below only where it's big enough to be worth naming; leaves of shared or global dumps are ids.
-      if (depth === 1 ? size >= 0.5 : depth === 2 && size >= 2 && !/^(global|shared_memory|discardable)\//.test(name)) p.allocators[name] = size;
+      // --breakdown-depth goes further down (into the report, the summary keeps to the biggest ten).
+      const worthNaming = depth === 2 ? size >= 2 : depth <= BREAKDOWN_DEPTH && size >= 0.5;
+      if (depth === 1 ? size >= 0.5 : worthNaming && !/^(global|shared_memory|discardable)\//.test(name)) p.allocators[name] = size;
     }
   }
   const processes = [...byPid.values()].filter((p) => p.footprintMB > 0);
