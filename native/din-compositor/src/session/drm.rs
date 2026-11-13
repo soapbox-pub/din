@@ -544,7 +544,29 @@ impl State {
             }
         }
         if changed {
+            self.light_a_display();
             self.layout_changed();
+        }
+    }
+
+    /// Lights a display when none is on: the only one that was has been
+    /// unplugged (a docked laptop's monitor, its own panel switched off while
+    /// the lid was shut), and nothing else would turn one on again. The
+    /// laptop's own panel first; Din puts back an arrangement it remembers.
+    fn light_a_display(&mut self) {
+        let physical = |h: &&Head| matches!(h.kind, Kind::Drm { .. });
+        if self.backend.heads.iter().filter(physical).any(|h| h.enabled()) {
+            return;
+        }
+        let internal = |h: &&Head| ["eDP", "LVDS", "DSI"].iter().any(|p| h.name.starts_with(p));
+        let heads = || self.backend.heads.iter().filter(physical);
+        let Some(id) = heads().find(internal).or_else(|| heads().next()).map(|h| h.id) else { return };
+        let x = self.layout_right();
+        if let Some(head) = self.backend.heads.iter_mut().find(|h| h.id == id) {
+            head.position = (x, 0).into();
+        }
+        if let Err(err) = self.enable_head(id) {
+            warn!("{err}");
         }
     }
 
