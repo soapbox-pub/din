@@ -2862,14 +2862,15 @@ function AddressBar({
 }
 
 /**
- * A web address as the address bar shows it out of focus, Chrome's way: no
- * `https://` or `http://` (the site info button says whether it's secure), no
- * `www.`, and no lone trailing `/`; the host in the text's color and the rest
- * (path, query, fragment) muted. Null for anything else (nsite:, din:, file:,
- * typed text), which is shown as it is.
+ * A web address or nsite as the address bar shows it out of focus, Chrome's
+ * way: no `https://`, `http://` or `nsite://` (the site info button says
+ * whether it's secure, or shows the nsite mark), no `www.`, and no lone
+ * trailing `/`; the host in the text's color and the rest (path, query,
+ * fragment) muted. Null for anything else (din:, file:, typed text), which is
+ * shown as it is.
  */
 function prettyAddress(value: string): { host: string; rest: string } | null {
-  const match = /^https?:\/\/([^/?#]+)(.*)$/i.exec(value);
+  const match = /^(?:https?|nsite):\/\/([^/?#]+)(.*)$/i.exec(value);
   if (!match) return null;
   let url: URL;
   try {
