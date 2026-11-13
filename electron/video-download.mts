@@ -35,9 +35,30 @@ interface Options {
   nextId: () => number;
 }
 
+/** What to save: the best video, video no taller than a height, or just the sound. */
+export type VideoDownloadFormat = 'best' | '1080p' | '720p' | '480p' | 'audio';
+export const VIDEO_DOWNLOAD_FORMATS: readonly VideoDownloadFormat[] = ['best', '1080p', '720p', '480p', 'audio'];
+
+/** yt-dlp's options for a format. */
+function formatArgs(format: VideoDownloadFormat): string[] {
+  if (format === 'audio') {
+    // An M4A, which plays anywhere: YouTube's own AAC as is, anything else converted.
+    return ['-f', 'ba[ext=m4a]/ba/b', '-x', '--audio-format', 'm4a'];
+  }
+  // Video and audio, kept in an MP4 where their codecs allow, which plays anywhere.
+  const height = format === 'best' ? null : Number.parseInt(format, 10);
+  return [
+    '-f', height ? `bv*[height<=${height}]+ba/b[height<=${height}]/bv*+ba/b` : 'bv*+ba/b',
+    '-S', 'res,ext:mp4:m4a',
+    '--merge-output-format', 'mp4/mkv',
+  ];
+}
+
 export interface VideoDownloadRequest {
   /** The page whose video to save: http(s) only. */
   url: string;
+  /** What to save of it (default: the best video). */
+  format?: VideoDownloadFormat;
   /** The tab that asked (its WebContents id), or -1. */
   wcId: number;
   /** Its title, to name the download until yt-dlp names it. */
@@ -161,13 +182,12 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
     '--no-playlist',
     '--no-colors',
     '--no-mtime',
-    // The best there is, kept in an MP4 where its codecs allow, which plays anywhere.
-    '-f', 'bv*+ba/b',
-    '-S', 'res,ext:mp4:m4a',
-    '--merge-output-format', 'mp4/mkv',
+    ...formatArgs(request.format ?? 'best'),
     '-P', downloads,
     '-P', `temp:${workDir}`,
-    '-o', '%(title).150B [%(id)s].%(ext)s',
+    // A capped quality says so in its name, so a copy at another doesn't
+    // pass for "already downloaded".
+    '-o', `%(title).150B [%(id)s]${/^\d+p$/.test(request.format ?? '') ? ` ${request.format}` : ''}.%(ext)s`,
     '--progress-template', 'download:DINPROGRESS %(progress.status)s %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s',
     '-O', 'video:DINTITLE %(title)s',
     '-O', 'after_move:DINFILE %(filepath)s',

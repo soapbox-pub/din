@@ -88,6 +88,22 @@ export interface DownloadInfo {
   error?: string;
 }
 
+/**
+ * What Download Video saves: the best video, video no taller than a height
+ * (smaller files), or just the sound, as an M4A. Main checks it against
+ * its own list (electron/video-download.mts).
+ */
+export type VideoDownloadFormat = 'best' | '1080p' | '720p' | '480p' | 'audio';
+
+/** The formats as the browser's menus list them, in order. */
+export const VIDEO_DOWNLOAD_FORMATS: readonly { format: VideoDownloadFormat; label: string }[] = [
+  { format: 'best', label: 'Best Quality' },
+  { format: '1080p', label: 'Up to 1080p' },
+  { format: '720p', label: 'Up to 720p' },
+  { format: '480p', label: 'Up to 480p' },
+  { format: 'audio', label: 'Audio Only' },
+];
+
 /** Options for a find-in-page query. */
 export interface FindOptions {
   /** Search direction (default true = forward). */
@@ -163,7 +179,7 @@ export interface BrowserBridge {
    * a tab's that can't start resolves null and shows on its chip why, and a
    * `url`'s rejects instead.
    */
-  downloadVideo(request: { wcId: number } | { url: string }): Promise<number | null>;
+  downloadVideo(request: ({ wcId: number } | { url: string }) & { format?: VideoDownloadFormat }): Promise<number | null>;
   /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.

@@ -180,7 +180,9 @@ import { setNativeColorScheme, setNativePalette } from './gtk-theme.mts';
 import { setWindowsPalette } from './windows-apps.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
-import { cancelVideoDownload, registerVideoDownloads, startVideoDownload } from './video-download.mts';
+import {
+  cancelVideoDownload, registerVideoDownloads, startVideoDownload, VIDEO_DOWNLOAD_FORMATS, type VideoDownloadFormat,
+} from './video-download.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { becomeWindowsDesktop, isWindows, isWindowsShell, windowsPower } from './windows-shell.mts';
@@ -5744,20 +5746,21 @@ function registerBrowserDownloadHandlers(): void {
   registerVideoDownloads({ sendToShell, nextId: () => nextDownloadId++ });
   ipcMain.handle('browser:downloadVideo', async (event, request: unknown) => {
     assertShellSender(event);
-    const r = request && typeof request === 'object' ? (request as { wcId?: unknown; url?: unknown }) : {};
+    const r = request && typeof request === 'object' ? (request as { wcId?: unknown; url?: unknown; format?: unknown }) : {};
+    const format = VIDEO_DOWNLOAD_FORMATS.find((f) => f === r.format) ?? 'best';
     if (typeof r.wcId === 'number') {
       const contents = webContents.fromId(r.wcId);
       if (!contents || contents.isDestroyed() || !isBrowserTabSession(contents.session)) {
         throw new Error('That tab is gone');
       }
       // One that can't start says why on its chip, as one that fails does.
-      return downloadTabVideo(contents).catch((err: unknown) => {
+      return downloadTabVideo(contents, format).catch((err: unknown) => {
         sendToShell('browser:download', videoDownloadFailure(contents, err));
         return null;
       });
     }
     if (typeof r.url !== 'string') throw new Error('No address to download from');
-    return startVideoDownload({ url: r.url, wcId: -1, cookies: browserSession(), proxy: browserSession() });
+    return startVideoDownload({ url: r.url, format, wcId: -1, cookies: browserSession(), proxy: browserSession() });
   });
 
   // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else
@@ -5777,13 +5780,14 @@ function registerBrowserDownloadHandlers(): void {
  * cookies unless it's private, and never from a Tor tab, whose video
  * yt-dlp would fetch without Tor.
  */
-function downloadTabVideo(contents: Electron.WebContents): Promise<number> {
+function downloadTabVideo(contents: Electron.WebContents, format: VideoDownloadFormat = 'best'): Promise<number> {
   if (contents.session === torBrowserSession()) {
     return Promise.reject(new Error('Videos can’t be downloaded from a Tor tab'));
   }
   const persistent = contents.session === browserSession();
   return startVideoDownload({
     url: contents.getURL(),
+    format,
     wcId: contents.id,
     title: contents.getTitle(),
     cookies: persistent ? contents.session : null,
@@ -7545,18 +7549,25 @@ app.on('web-contents-created', (_event, contents) => {
       (params.mediaType === 'video' || params.mediaType === 'audio') &&
       /^https?:\/\//i.test(contents.getURL())
     ) {
-      menu.insert(
-        0,
-        new MenuItem({
-          label: params.mediaType === 'video' ? 'Download Video' : 'Download Audio',
-          click: () => {
-            downloadTabVideo(contents).catch((err: unknown) =>
-              sendToShell('browser:download', videoDownloadFailure(contents, err)),
-            );
-          },
-        }),
-      );
-      menu.insert(1, new MenuItem({ type: 'separator' }));
+      const download = (format: VideoDownloadFormat) => () => {
+        downloadTabVideo(contents, format).catch((err: unknown) =>
+          sendToShell('browser:download', videoDownloadFailure(contents, err)),
+        );
+      };
+      // As the address bar's button's right-click menu offers them.
+      const items =
+        params.mediaType === 'video'
+          ? [
+            new MenuItem({ label: 'Download Video', click: download('best') }),
+            new MenuItem({
+              label: 'Download Video at',
+              submenu: (['1080p', '720p', '480p'] as const).map((f) => ({ label: `Up to ${f}`, click: download(f) })),
+            }),
+            new MenuItem({ label: 'Download Audio Only', click: download('audio') }),
+          ]
+          : [new MenuItem({ label: 'Download Audio', click: download('audio') })];
+      items.forEach((item, index) => menu.insert(index, item));
+      menu.insert(items.length, new MenuItem({ type: 'separator' }));
     }
     // Chrome's "Search Google for “…”" on selected text, after "Copy". The
     // search opens in a new foreground tab with the same engine the address

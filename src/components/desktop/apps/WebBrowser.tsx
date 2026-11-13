@@ -72,10 +72,12 @@ import { getMonitorsBridge } from '@/lib/monitors';
 import { findGuest } from '@/platform/guest';
 import {
   getBrowserBridge,
+  VIDEO_DOWNLOAD_FORMATS,
   type BrowserBridge,
   type CertificateErrorInfo,
   type DownloadInfo,
   type FindResult,
+  type VideoDownloadFormat,
 } from '@/lib/browser';
 import { getShellShortcuts } from '@/lib/shellShortcuts';
 import { consumeTabCommands, consumeBrowserHotkeys } from '@/lib/browserTabBus';
@@ -107,6 +109,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { AppIcon } from '@/components/desktop/AppIcon';
@@ -1057,8 +1062,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   // Download Video: yt-dlp saves the page's video (video-download.mts), on
   // any site it knows; its chip arrives through onDownload like a file's.
   const downloadVideo = useCallback(
-    (wcId: number | null) => {
-      if (wcId !== null) void browserBridge?.downloadVideo({ wcId }).catch(() => {});
+    (wcId: number | null, format: VideoDownloadFormat = 'best') => {
+      if (wcId !== null) void browserBridge?.downloadVideo({ wcId, format }).catch(() => {});
     },
     [browserBridge],
   );
@@ -2146,19 +2151,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           end={
             <>
               {pageHasMedia && (
-                <button
-                  type="button"
-                  aria-label="Download video"
-                  title="Download video"
-                  onClick={() => downloadVideo(activeTab.wcId)}
-                  className={cn(
-                    'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
-                    'hover:bg-foreground/[0.07] hover:text-foreground',
-                    'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                  )}
-                >
-                  <Download className="size-4.5" strokeWidth={1.75} />
-                </button>
+                <DownloadVideoButton onDownload={(format) => downloadVideo(activeTab.wcId, format)} />
               )}
               {/* Chrome's place for it: in the bar, before the star. */}
               {!activeTab.tor && (
@@ -2247,7 +2240,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           printDisabled={activeTab.wcId === null}
           onPrint={() => printTab(activeId)}
           downloadVideoDisabled={!canDownloadVideo}
-          onDownloadVideo={() => downloadVideo(activeTab.wcId)}
+          onDownloadVideo={(format) => downloadVideo(activeTab.wcId, format)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -4866,7 +4859,7 @@ function BrowserMenu({
   onPrint: () => void;
   /** Not a website's page (or a Tor tab's), whose video yt-dlp could save. */
   downloadVideoDisabled: boolean;
-  onDownloadVideo: () => void;
+  onDownloadVideo: (format: VideoDownloadFormat) => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -4919,7 +4912,20 @@ function BrowserMenu({
             <DropdownMenuSeparator />
             {item(Search, 'Find in Page…', onFind, 'Ctrl+F', findDisabled)}
             {item(Printer, 'Print…', onPrint, 'Ctrl+P', printDisabled)}
-            {item(Download, 'Download Video', onDownloadVideo, undefined, downloadVideoDisabled)}
+            {/* The formats the address bar's button offers on a right-click. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={downloadVideoDisabled}>
+                <Download aria-hidden />
+                Download Video
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {VIDEO_DOWNLOAD_FORMATS.map(({ format, label }) => (
+                  <DropdownMenuItem key={format} onSelect={() => onDownloadVideo(format)}>
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             {item(FileCode, 'View Page Source', onViewSource, 'Ctrl+U', viewSourceDisabled)}
           </>
         )}
@@ -5075,6 +5081,40 @@ function ClearDataOption({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
     </div>
+  );
+}
+
+/**
+ * The address bar's Download Video: a click saves the best there is; a
+ * right-click picks a smaller one, or just
+ * the sound, as the browser menu's Download Video does.
+ */
+function DownloadVideoButton({ onDownload }: { onDownload: (format: VideoDownloadFormat) => void }) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Download video (right-click for other formats)"
+          title="Download video (right-click for other formats)"
+          onClick={() => onDownload('best')}
+          className={cn(
+            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+            'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
+            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+          )}
+        >
+          <Download className="size-4.5" strokeWidth={1.75} />
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        {VIDEO_DOWNLOAD_FORMATS.map(({ format, label }) => (
+          <ContextMenuItem key={format} onSelect={() => onDownload(format)}>
+            {label}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

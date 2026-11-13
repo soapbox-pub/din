@@ -1,5 +1,7 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
-import { getBrowserBridge, siteOriginOf, type DownloadInfo, type SiteCapability } from '@/lib/browser';
+import {
+  getBrowserBridge, siteOriginOf, VIDEO_DOWNLOAD_FORMATS, type DownloadInfo, type SiteCapability, type VideoDownloadFormat,
+} from '@/lib/browser';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { DAILY_MINUTES, describeLimit, formatSpent, getSiteLimitsBridge, type SiteLimitMode } from '@/lib/siteLimits';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
@@ -521,11 +523,13 @@ export const browserArea: Area = {
     }),
     command('browser', 'download-video', 'Save a page’s video (or audio) to Downloads, as the Web Browser’s Download Video does, from any site yt-dlp knows (YouTube’s included), with the browser’s cookies for it; waits until it’s saved', [
       { name: 'url', type: 'string', positional: true, help: 'The page’s address, e.g. https://www.youtube.com/watch?v=…' },
+      { name: 'format', type: 'string', optional: true, help: 'The best quality (default), video up to a height, or the sound alone as an M4A', choices: VIDEO_DOWNLOAD_FORMATS.map((f) => f.format) },
       { name: 'no-wait', type: 'boolean', optional: true, help: 'Start it and return, without waiting for it to finish' },
     ], async (args) => {
       const browser = need(getBrowserBridge(), 'The Web Browser');
       const url = args.string('url');
       if (!/^https?:\/\//i.test(url)) throw new CommandError(`Not a website’s address: ${url}`, 'usage');
+      const format = (args.optString('format') ?? 'best') as VideoDownloadFormat;
       const wait = !args.optBool('no-wait');
       // Reports can come before the id does: keep them until it's known.
       const seen = new Map<number, DownloadInfo>();
@@ -539,7 +543,7 @@ export const browserArea: Area = {
         })
         : () => {};
       try {
-        id = await call(browser.downloadVideo({ url }));
+        id = await call(browser.downloadVideo({ url, format }));
         if (id === null) throw new CommandError('The video couldn’t be downloaded');
         if (!wait) return { data: { id }, text: 'Downloading to Downloads' };
         const started = id;
