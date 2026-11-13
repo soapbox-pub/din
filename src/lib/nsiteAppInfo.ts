@@ -13,6 +13,7 @@ import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { parseNostrProtocolHandler } from '@/lib/nostrUri';
 import { parseManifestShortcuts } from '@/lib/webAppShortcuts';
+import { parseWebShareTarget, shareTargetPath } from '@/lib/webShareTarget';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
 
 /**
@@ -211,9 +212,9 @@ const FAVICON_SIZE = 64;
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
  * 4: favicons are kept too; 5: and how it opens nostr: links; 6: and its
  * manifest id and scope_extensions, so installed sites can open websites' links;
- * 7: and its shortcuts; 8: and its share target).
+ * 7: and its shortcuts; 8: and its share target; 9: a POST one too).
  */
-export const NSITE_APP_INFO_VERSION = 8;
+export const NSITE_APP_INFO_VERSION = 9;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -427,32 +428,14 @@ function pickShortcuts(webManifest: unknown, manifestPath: string): NonNullable<
 }
 
 /**
- * The manifest's `share_target`, as a path on the site, when it takes shares
- * by GET: a POST one needs a request body, which an nsite's window can't be
- * opened with yet.
+ * The manifest's `share_target`, its action as a path on the site: a GET's
+ * query or a POST's form body (src/lib/webShareTarget.ts).
  */
 function pickShareTarget(webManifest: unknown, manifestPath: string): NsiteAppInfo['share'] {
-  if (typeof webManifest !== 'object' || webManifest === null) return null;
-  const target = (webManifest as { share_target?: unknown }).share_target;
-  if (typeof target !== 'object' || target === null) return null;
-  const { action, method, params } = target as Record<string, unknown>;
-  if (typeof action !== 'string' || (method !== undefined && String(method).toUpperCase() !== 'GET')) return null;
-  if (typeof params !== 'object' || params === null) return null;
   const origin = 'https://nsite.invalid';
-  let url: URL;
-  try {
-    url = new URL(action, `${origin}${manifestPath}`);
-  } catch {
-    return null;
-  }
-  if (url.origin !== origin) return null;
-  const names: NonNullable<NsiteAppInfo['share']>['params'] = {};
-  for (const key of ['title', 'text', 'url'] as const) {
-    const name = (params as Record<string, unknown>)[key];
-    if (typeof name === 'string' && /^[\w.~-]{1,64}$/.test(name)) names[key] = name;
-  }
-  if (!names.title && !names.text && !names.url) return null;
-  return { path: `${url.pathname}${url.search}`, params: names };
+  const target = parseWebShareTarget(webManifest, `${origin}${manifestPath}`, origin);
+  if (!target) return null;
+  return { path: shareTargetPath(target), method: target.method, enctype: target.enctype, params: target.params };
 }
 
 /**

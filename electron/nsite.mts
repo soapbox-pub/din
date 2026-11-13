@@ -40,6 +40,7 @@ import {
   ensureBlobs,
   fetchBlobVerified,
   initNsiteStore,
+  installedShareTarget,
   installedSites,
   markInstalled,
   markUninstalled,
@@ -53,6 +54,7 @@ import {
   storeBlob,
   touchSite,
   type NsiteEvents,
+  type NsiteShareTarget,
   type NsiteSite,
 } from './nsite-store.mts';
 
@@ -349,6 +351,22 @@ function resolutionErrorPage(code: string, message: string, url: string): Respon
 }
 
 /** A no-store redirect, so a redirect is never served from a cache. */
+/** A POSTed share's title, text and link, sent on to the share target as a GET (303 See Other). */
+async function shareAsGet(request: Request, host: string, share: NsiteShareTarget): Promise<Response> {
+  const target = new URL(`${NSITE_SCHEME}://${host}${share.path}`);
+  try {
+    const form = await request.formData();
+    for (const key of ['title', 'text', 'url'] as const) {
+      const name = share.params[key];
+      const value = name ? form.get(name) : null;
+      if (name && typeof value === 'string' && value) target.searchParams.set(name, value.slice(0, 100_000));
+    }
+  } catch {
+    // An unreadable body: the share page, empty.
+  }
+  return new Response(null, { status: 303, headers: { location: target.href, 'cache-control': 'no-store' } });
+}
+
 function redirectTo(url: string): Response {
   return new Response(null, {
     status: 302,
@@ -474,6 +492,16 @@ async function handleRequest(request: Request, persist: boolean): Promise<Respon
   const url = new URL(request.url);
   const host = url.hostname;
 
+  // A share POSTed to the site's share target that its service worker let
+  // through (Din checks there is one first): nothing here can take its
+  // files, but the site can still have its title, text and link, as a GET.
+  if (request.method === 'POST') {
+    await nsiteStoreReady();
+    const share = isCanonical(host) ? installedShareTarget(host) : null;
+    if (share?.method === 'POST' && `${url.pathname}${url.search}` === share.path) {
+      return shareAsGet(request, host, share);
+    }
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return errorPage(405, 'Unsupported request', 'nsites are read-only.', request.url);
   }

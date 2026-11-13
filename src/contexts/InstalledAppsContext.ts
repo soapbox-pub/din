@@ -1,3 +1,4 @@
+import type { WebShareTarget } from '@/lib/webShareTarget';
 import { createContext, useContext } from 'react';
 import type { AppDefinition } from '@/lib/apps';
 import type { WebApp } from '@/lib/webApps';
@@ -33,7 +34,7 @@ export interface InstalledAppsManager {
    * entry, or `null` if the URL was invalid.
    */
   installWebApp: (
-    input: { name: string; url: string; icon?: string; themeColor?: string; nostr?: NostrHandler; shortcuts?: WebAppShortcut[] },
+    input: { name: string; url: string; icon?: string; themeColor?: string; nostr?: NostrHandler; shortcuts?: WebAppShortcut[]; share?: WebShareTarget },
   ) => WebApp | null;
   /** Find an installed web app by its exact start URL. */
   findWebAppByUrl: (url: string) => WebApp | undefined;

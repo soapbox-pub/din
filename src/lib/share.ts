@@ -12,6 +12,8 @@ import type { AppDefinition } from '@/lib/apps';
 import { dinManifests } from '@/lib/dinApps';
 import { getFsBridge } from '@/lib/fs';
 import type { FileData } from '@/sdk/protocol';
+import type { GuestLoadOptions, GuestUploadPart } from '@/platform/guest';
+import type { WebShareTarget } from '@/lib/webShareTarget';
 
 /** A shared file, on disk: one Files shared, or bytes an app shared kept under the share cache. */
 export interface ShareFile {
@@ -44,11 +46,11 @@ export interface ShareTargetApp {
   icon: AppDefinition['icon'];
   target: ShareTarget;
   /**
-   * An installed nsite's share page, which its window opens with the share
-   * in the query (its manifest's GET share target); absent for a built-in
-   * app, which hears the share in its launchQueue.
+   * An installed website's or nsite's share target: its window opens at the
+   * action with the share in the query (GET) or the form body (POST).
+   * Absent for a built-in app, which hears the share in its launchQueue.
    */
-  page?: string;
+  web?: WebShareTarget;
 }
 
 /** The apps the sheet looks through: built-in ones by their manifests, installed ones by what they took from theirs. */
@@ -192,11 +194,12 @@ export function shareTargets(data: ShareData, { apps, getApp }: ShareApps, opene
     if (!target || !app || !takesShare(target, data)) continue;
     out.push({ id, name: app.name, icon: app.icon, target });
   }
-  // Installed nsites, which take text and links (a GET share target has no room for files).
+  // Installed websites and nsites, as their manifests' share targets say.
   for (const app of apps) {
-    if (!app.share || builtIn.has(app.id) || app.id === opener) continue;
-    const target: ShareTarget = { action: app.share.url, method: 'GET', params: app.share.params };
-    if (takesShare(target, data)) out.push({ id: app.id, name: app.name, icon: app.icon, target, page: app.share.url });
+    const web = app.share;
+    if (!web || builtIn.has(app.id) || app.id === opener) continue;
+    const target: ShareTarget = { action: web.action, method: web.method, enctype: web.enctype, params: web.params };
+    if (takesShare(target, data)) out.push({ id: app.id, name: app.name, icon: app.icon, target, web });
   }
   const recent = recentTargets();
   const rank = (id: string) => {
@@ -218,11 +221,72 @@ function shareFields(target: ShareTarget, data: ShareData): Record<string, strin
   return p;
 }
 
-/** An nsite's share page with the share in its query, as a browser makes a GET share target's. */
-export function sharePageUrl(page: string, target: ShareTarget, data: ShareData): string {
-  const url = new URL(page);
+/**
+ * A share target's action with the share's title, text and link in its
+ * query, as a browser makes a GET share target's: also where a POST share
+ * goes without its files when nothing on the site can take the POST.
+ */
+export function sharePageUrl(target: ShareTarget, data: ShareData): string {
+  const url = new URL(target.action);
   for (const [key, value] of Object.entries(shareFields(target, data))) url.searchParams.set(key, value);
   return url.href;
+}
+
+/** A field name or file name in a multipart header, as the HTML standard escapes them. */
+function headerValue(value: string): string {
+  return value.replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/"/g, '%22');
+}
+
+/**
+ * A POST share target's request body, as a form submitting the share would
+ * send it: url-encoded fields, or multipart with each file under the first
+ * of the target's `files` entries that takes it. Files go by path, read by
+ * the engine as the request goes.
+ */
+export function shareRequestBody(target: WebShareTarget, data: ShareData): GuestLoadOptions {
+  const fields = shareFields(target, data);
+  const encoder = new TextEncoder();
+  if (target.enctype !== 'multipart/form-data') {
+    return {
+      postData: [{ type: 'rawData', bytes: encoder.encode(new URLSearchParams(fields).toString()) }],
+      extraHeaders: 'Content-Type: application/x-www-form-urlencoded',
+    };
+  }
+  const boundary = `----DinShare${crypto.randomUUID().replace(/-/g, '')}`;
+  const parts: GuestUploadPart[] = [];
+  const raw = (text: string) => parts.push({ type: 'rawData', bytes: encoder.encode(text) });
+  for (const [name, value] of Object.entries(fields)) {
+    raw(`--${boundary}\r\nContent-Disposition: form-data; name="${headerValue(name)}"\r\n\r\n${value}\r\n`);
+  }
+  for (const file of data.files) {
+    const entry = target.params.files?.find((f) => acceptsFile(f.accept, file));
+    if (!entry) continue;
+    const type = /^[\w.+-]+\/[\w.+-]+$/.test(file.type) ? file.type : 'application/octet-stream';
+    raw(`--${boundary}\r\nContent-Disposition: form-data; name="${headerValue(entry.name)}"; filename="${headerValue(file.name)}"\r\nContent-Type: ${type}\r\n\r\n`);
+    parts.push({ type: 'file', filePath: file.path });
+    raw('\r\n');
+  }
+  raw(`--${boundary}--\r\n`);
+  return { postData: parts, extraHeaders: `Content-Type: multipart/form-data; boundary=${boundary}` };
+}
+
+/** POST shares on their way to an installed app's window, by the token its launch carries. */
+const pendingPosts = new Map<string, { appId: string; target: WebShareTarget; data: ShareData; at: number }>();
+
+/** How long a POST share waits for its window to take it. */
+const PENDING_MS = 5 * 60 * 1000;
+
+/**
+ * The POST share a window was opened with (its `share` launch param), once:
+ * a window Din reopens after a restart finds none, so a share never goes
+ * twice. Only the app it went to can take it.
+ */
+export function takePostShare(token: unknown, appId: string): { target: WebShareTarget; data: ShareData } | null {
+  if (typeof token !== 'string') return null;
+  const pending = pendingPosts.get(token);
+  if (!pending || pending.appId !== appId) return null;
+  pendingPosts.delete(token);
+  return Date.now() - pending.at < PENDING_MS ? { target: pending.target, data: pending.data } : null;
 }
 
 /** The launch params that give a share to a built-in app, as its `share_target` names them. */
@@ -239,7 +303,9 @@ export function shareLaunchParams(target: ShareTarget, data: ShareData, opener: 
 
 /**
  * Give a share to an app: a built-in one opens (or its open window hears it)
- * at its share target; an nsite's window opens at its share page.
+ * at its share target; an installed website's or nsite's window goes to its
+ * share target's action, with the share in the query (GET), or POSTs it there
+ * (WebAppFrame takes it by the token in its `share` param).
  */
 export function deliverShare(
   app: ShareTargetApp,
@@ -248,8 +314,16 @@ export function deliverShare(
   open: (id: string, params: Record<string, unknown>, options: { replaceParams: boolean }) => unknown,
 ): void {
   noteRecent(app.id);
-  if (app.page) open(app.id, { url: sharePageUrl(app.page, app.target, data) }, { replaceParams: true });
-  else open(app.id, shareLaunchParams(app.target, data, opener), { replaceParams: true });
+  if (app.web?.method === 'POST') {
+    const token = crypto.randomUUID();
+    for (const [key, pending] of pendingPosts) if (Date.now() - pending.at >= PENDING_MS) pendingPosts.delete(key);
+    pendingPosts.set(token, { appId: app.id, target: app.web, data, at: Date.now() });
+    open(app.id, { share: token }, { replaceParams: true });
+  } else if (app.web) {
+    open(app.id, { url: sharePageUrl(app.target, data) }, { replaceParams: true });
+  } else {
+    open(app.id, shareLaunchParams(app.target, data, opener), { replaceParams: true });
+  }
 }
 
 // ---- what the sheet does itself ----

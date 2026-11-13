@@ -9,6 +9,7 @@
  * In a plain browser the store is absent, so callers must feature-detect via
  * `getNsiteStore()`.
  */
+import type { WebShareTarget } from '@/lib/webShareTarget';
 
 /** How a site presents itself as an app (see src/lib/nsiteAppInfo.ts). */
 export interface NsiteAppInfo {
@@ -44,11 +45,17 @@ export interface NsiteAppInfo {
    */
   shortcuts?: { name: string; path: string }[];
   /**
-   * The manifest's `share_target`, when it takes shares by GET (Din's share
-   * sheet, src/lib/share.ts): the path a share opens, and the query
-   * parameter each part goes in. Null when it takes none.
+   * The manifest's `share_target` (Din's share sheet, src/lib/share.ts):
+   * the path a share opens, how it's sent (absent from info stored before
+   * POST ones were read: GET), and the field each part goes in. Null when
+   * it takes none.
    */
-  share?: { path: string; params: { title?: string; text?: string; url?: string } } | null;
+  share?: {
+    path: string;
+    method?: WebShareTarget['method'];
+    enctype?: WebShareTarget['enctype'];
+    params: WebShareTarget['params'];
+  } | null;
 }
 
 /**

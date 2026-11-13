@@ -1,3 +1,4 @@
+import type { WebShareTarget } from '@/lib/webShareTarget';
 import { createElement, lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -155,11 +156,10 @@ export interface AppDefinition {
    */
   nostr?: { url?: string; kinds: number[] | null };
   /**
-   * How an installed nsite takes shares (src/lib/share.ts): its manifest's
-   * GET `share_target`, the page a share opens (on the app's own origin)
-   * and the query parameter each part of the share goes in.
+   * How an installed website or nsite takes shares (src/lib/share.ts): its
+   * manifest's `share_target`, its action on the app's own origin.
    */
-  share?: { url: string; params: { title?: string; text?: string; url?: string } };
+  share?: WebShareTarget;
 }
 
 /** Window bodies of din:// apps, one per app so windows keep their component. */

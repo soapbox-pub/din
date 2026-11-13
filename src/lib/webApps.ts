@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { normalizeNostrHandler, type NostrHandler } from '@/lib/nostrUri';
 import { normalizeShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
+import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 
 /**
  * User-installed web apps ("install this website as an app", like a PWA
@@ -35,6 +36,11 @@ export interface WebApp {
    * Dock and launcher tiles. Each is on the app's own origin.
    */
   shortcuts?: WebAppShortcut[];
+  /**
+   * Its manifest's `share_target` at install time: Din's share sheet offers
+   * it for what it takes (src/lib/share.ts). On the app's own origin.
+   */
+  share?: WebShareTarget;
 }
 
 function originOf(url: string): string | null {
@@ -58,9 +64,11 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
       .transform((value) => normalizeNostrHandler(value) ?? undefined)
       .optional(),
     shortcuts: z.unknown().optional(),
-  }).transform(({ shortcuts, ...app }) => {
+    share: z.unknown().optional(),
+  }).transform(({ shortcuts, share, ...app }) => {
     const kept = normalizeShortcuts(shortcuts, originOf(app.url));
-    return kept.length > 0 ? { ...app, shortcuts: kept } : app;
+    const target = normalizeWebShareTarget(share, originOf(app.url));
+    return { ...app, ...(kept.length > 0 ? { shortcuts: kept } : {}), ...(target ? { share: target } : {}) };
   }),
 );
 

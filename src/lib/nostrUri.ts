@@ -196,8 +196,8 @@ export function handlesKind(kinds: number[] | null, kind: number | null): boolea
 
 /**
  * Guest-side script (run via `<webview>.executeJavaScript`) that reads the
- * page's web app manifest and returns its `protocol_handlers` and
- * `shortcuts` with the URL it was served from, for resolving them. Runs on the page's own origin, so
+ * page's web app manifest and returns its `protocol_handlers`,
+ * `shortcuts` and `share_target` with the URL it was served from, for resolving them. Runs on the page's own origin, so
  * there are no CORS concerns; everything it returns is re-checked host-side.
  */
 export const COLLECT_PROTOCOL_HANDLERS_JS = `(async () => {
@@ -208,7 +208,7 @@ export const COLLECT_PROTOCOL_HANDLERS_JS = `(async () => {
   try {
     const res = await fetch(href);
     const json = await res.json();
-    return { base: res.url || href, manifest: { protocol_handlers: json && json.protocol_handlers, shortcuts: json && json.shortcuts } };
+    return { base: res.url || href, manifest: { protocol_handlers: json && json.protocol_handlers, shortcuts: json && json.shortcuts, share_target: json && json.share_target } };
   } catch (e) { return null; }
 })()`;
 

@@ -101,15 +101,18 @@ export interface NsiteAppInfo {
   /** Its manifest's `shortcuts`: a name and a path on the site each. */
   shortcuts?: { name: string; path: string }[];
   /**
-   * Its manifest's `share_target`, when it takes shares by GET: the path a
-   * share opens, and the query parameter each part of the share goes in.
+   * Its manifest's `share_target`: the path a share opens, how it's sent (a
+   * GET's query, or a POST's form body, the way files go), and the field
+   * each part of the share goes in.
    */
   share?: NsiteShareTarget | null;
 }
 
 export interface NsiteShareTarget {
   path: string;
-  params: { title?: string; text?: string; url?: string };
+  method: 'GET' | 'POST';
+  enctype: 'application/x-www-form-urlencoded' | 'multipart/form-data';
+  params: { title?: string; text?: string; url?: string; files?: { name: string; accept: string[] }[] };
 }
 
 /**
@@ -514,17 +517,37 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
   };
 }
 
+/** A form field's name, as it goes in a multipart header: printable ASCII, no space, quote or backslash. */
+const SHARE_FIELD = /^[!#-[\]-~]{1,64}$/;
+/** A share target's `accept` entry: a MIME type, a family (`image/*`), or an extension. */
+const SHARE_ACCEPT = /^(\.[a-z0-9][a-z0-9.+-]{0,31}|\*\/\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/(\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,127}))$/;
+
 function parseShareTarget(raw: unknown): NsiteShareTarget | null {
   if (!raw || typeof raw !== 'object') return null;
-  const { path, params } = raw as Record<string, unknown>;
-  if (!isScopePath(path) || path.length > 2048 || /[\s\\#]/.test(path)) return null;
+  const { path, method, enctype, params } = raw as Record<string, unknown>;
+  if (!isScopePath(path) || /[\s\\#]/.test(path)) return null;
   if (!params || typeof params !== 'object') return null;
+  // Info stored before POST targets were read has neither: a GET.
+  const verb = method === 'POST' ? 'POST' : method === undefined || method === 'GET' ? 'GET' : null;
+  if (!verb) return null;
+  const encoding = verb === 'POST' && enctype === 'multipart/form-data' ? 'multipart/form-data' : 'application/x-www-form-urlencoded';
+  const p = params as Record<string, unknown>;
   const out: NsiteShareTarget['params'] = {};
   for (const key of ['title', 'text', 'url'] as const) {
-    const name = (params as Record<string, unknown>)[key];
-    if (typeof name === 'string' && /^[\w.~-]{1,64}$/.test(name)) out[key] = name;
+    if (typeof p[key] === 'string' && SHARE_FIELD.test(p[key])) out[key] = p[key];
   }
-  return out.title || out.text || out.url ? { path, params: out } : null;
+  if (encoding === 'multipart/form-data' && Array.isArray(p.files)) {
+    const files = p.files.slice(0, 8).flatMap((entry: unknown) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const { name, accept } = entry as Record<string, unknown>;
+      const list = Array.isArray(accept)
+        ? accept.filter((a): a is string => typeof a === 'string' && SHARE_ACCEPT.test(a)).slice(0, 32)
+        : [];
+      return typeof name === 'string' && SHARE_FIELD.test(name) && list.length > 0 ? [{ name, accept: list }] : [];
+    });
+    if (files.length > 0) out.files = files;
+  }
+  return out.title || out.text || out.url || out.files ? { path, method: verb, enctype: encoding, params: out } : null;
 }
 
 function parseShortcuts(raw: unknown): NonNullable<NsiteAppInfo['shortcuts']> {
@@ -622,6 +645,12 @@ export function storedSite(host: string, persist: boolean): NsiteSite | null {
     return null;
   }
   return entry.site;
+}
+
+/** An installed site's share target, as its manifest gave it (Din's share sheet). */
+export function installedShareTarget(host: string): NsiteShareTarget | null {
+  const record = records.get(host);
+  return record?.installed ? (record.app?.share ?? null) : null;
 }
 
 /** Whether a host is due another look on relays. */

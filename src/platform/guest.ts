@@ -57,6 +57,20 @@ export function prepareGuestSession(partition: string): Promise<void> {
   return ready;
 }
 
+/**
+ * A part of a request body a guest is loaded with: bytes, or a file the
+ * engine reads from disk itself as the request goes (so it's never held in
+ * the desktop's memory). Electron's UploadRawData and UploadFile.
+ */
+export type GuestUploadPart = { type: 'rawData'; bytes: Uint8Array } | { type: 'file'; filePath: string };
+
+/** A load with a request body: a POST, as a form submits one. */
+export interface GuestLoadOptions {
+  postData: GuestUploadPart[];
+  /** Headers, one per line: the body's `Content-Type`. */
+  extraHeaders: string;
+}
+
 /** A guest's host element in the desktop's document. Opaque outside src/platform. */
 export type GuestElement = HTMLElement & { readonly __guest: true };
 
@@ -64,7 +78,7 @@ export type GuestElement = HTMLElement & { readonly __guest: true };
 interface WebviewElement extends HTMLElement {
   reload(): void;
   reloadIgnoringCache(): void;
-  loadURL(url: string): Promise<void>;
+  loadURL(url: string, options?: GuestLoadOptions): Promise<void>;
   goBack(): void;
   goForward(): void;
   setZoomFactor(factor: number): void;
@@ -177,7 +191,8 @@ export function isGuestFullscreen(el: GuestElement): boolean {
 export const guest = {
   reload: (el: GuestElement) => engine(el).reload(),
   reloadIgnoringCache: (el: GuestElement) => engine(el).reloadIgnoringCache(),
-  loadURL: (el: GuestElement, url: string) => engine(el).loadURL(url),
+  loadURL: (el: GuestElement, url: string, options?: GuestLoadOptions) =>
+    options ? engine(el).loadURL(url, options) : engine(el).loadURL(url),
   goBack: (el: GuestElement) => engine(el).goBack(),
   goForward: (el: GuestElement) => engine(el).goForward(),
   canGoBack: (el: GuestElement) => engine(el).canGoBack(),

@@ -2171,7 +2171,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                     views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
                   }
                   collectManifest={() =>
-                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [] })
+                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [], share: null })
                   }
                 />
               )}
@@ -5312,6 +5312,7 @@ function InstallSiteButton({
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
       nostr: manifest?.nostr ?? undefined,
       shortcuts: manifest?.shortcuts,
+      share: manifest?.share ?? undefined,
     });
     if (!webApp) return;
     setOpen(false);

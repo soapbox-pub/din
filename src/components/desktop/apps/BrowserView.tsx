@@ -3,6 +3,7 @@ import { RotateCw, Unplug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { isWebviewAvailable } from '@/lib/isElectron';
 import { COLLECT_ICONS_JS, type IconCandidate } from '@/lib/appIcon';
+import { parseWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 import {
   COLLECT_PROTOCOL_HANDLERS_JS,
   parseNostrProtocolHandler,
@@ -12,14 +13,38 @@ import { parseManifestShortcuts, type WebAppShortcut } from '@/lib/webAppShortcu
 import { shownUrl } from '@/lib/tor';
 import { getBrowserBridge } from '@/lib/browser';
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
+import type { GuestLoadOptions } from '@/platform/guest';
 
 /** What a page's web app manifest says for installing its site as an app. */
 export interface InstallManifest {
   nostr: NostrHandler | null;
   shortcuts: WebAppShortcut[];
+  /** Its `share_target`, on the manifest's own origin (installWebApp checks it's the app's). */
+  share: WebShareTarget | null;
 }
 
-const NO_INSTALL_MANIFEST: InstallManifest = { nostr: null, shortcuts: [] };
+/**
+ * Guest-side script: whether a service worker is active for `url` (one the
+ * page's origin registered, whatever its scope), checking every 250ms for up
+ * to `waitMs` while one installs.
+ */
+function serviceWorkerProbe(url: string, waitMs: number): string {
+  return `(async () => {
+  const sw = navigator.serviceWorker;
+  if (!sw) return false;
+  const deadline = Date.now() + ${Math.max(0, Math.floor(waitMs))};
+  for (;;) {
+    try {
+      const reg = await sw.getRegistration(${JSON.stringify(url)});
+      if (reg && reg.active) return true;
+    } catch (e) { return false; }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+})()`;
+}
+
+const NO_INSTALL_MANIFEST: InstallManifest = { nostr: null, shortcuts: [], share: null };
 
 /**
  * The Electron session partition for the Web Browser app's tabs and for
@@ -72,8 +97,17 @@ export interface BrowserViewHandle {
   reload: () => void;
   /** Reload bypassing the cache (Ctrl+Shift+R / Shift+F5). */
   reloadIgnoringCache: () => void;
-  /** Navigate the surface to a new URL. */
-  loadURL: (url: string) => void;
+  /**
+   * Navigate the surface to a new URL; with `options`, POST to it (a share's
+   * form body, webview only: the iframe fallback goes to the URL).
+   */
+  loadURL: (url: string, options?: GuestLoadOptions) => void;
+  /**
+   * Whether a service worker is active for a URL on the page's origin, as
+   * the page sees it (it can only lie about its own); false in the iframe
+   * fallback. Waits up to `waitMs` for one to activate.
+   */
+  hasServiceWorker: (url: string, waitMs: number) => Promise<boolean>;
   /** Go back in the surface's own history (webview only; no-op in iframe). */
   goBack: () => void;
   /** Go forward in the surface's own history (webview only). */
@@ -90,7 +124,7 @@ export interface BrowserViewHandle {
   collectIcons: () => Promise<IconCandidate[]>;
   /**
    * What the page's web app manifest says for installing the site as an app:
-   * how it opens `nostr:` links (or null) and its shortcuts. Not yet checked
+   * how it opens `nostr:` links (or null), its shortcuts and its share target. Not yet checked
    * against the site's origin. Webview only.
    */
   collectManifest: () => Promise<InstallManifest>;
@@ -237,6 +271,7 @@ const IframeSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
       },
       goBack: () => {},
       goForward: () => {},
+      hasServiceWorker: () => Promise.resolve(false),
       focus: () => iframeRef.current?.focus(),
       toggleFullscreen: () => {},
       // The iframe fallback can't reach into cross-origin guest DOM.
@@ -306,9 +341,17 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
     useImperativeHandle(ref, () => ({
       reload: () => surface.current?.reload(),
       reloadIgnoringCache: () => surface.current?.reloadIgnoringCache(),
-      loadURL: (url: string) => {
+      loadURL: (url: string, options?: GuestLoadOptions) => {
         allowLocal(url);
-        surface.current?.loadURL(url);
+        surface.current?.loadURL(url, options);
+      },
+      hasServiceWorker: async (url: string, waitMs: number) => {
+        try {
+          const found = await surface.current?.executeJavaScript(serviceWorkerProbe(url, waitMs));
+          return found === true;
+        } catch {
+          return false;
+        }
       },
       goBack: () => surface.current?.goBack(),
       goForward: () => surface.current?.goForward(),
@@ -332,6 +375,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           return {
             nostr: parseNostrProtocolHandler(manifest, base),
             shortcuts: parseManifestShortcuts(manifest, base, null),
+            share: parseWebShareTarget(manifest, base, new URL(base).origin),
           };
         } catch {
           return NO_INSTALL_MANIFEST;

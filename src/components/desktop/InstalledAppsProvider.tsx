@@ -18,6 +18,7 @@ import {
 import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { normalizeNostrHandler } from '@/lib/nostrUri';
+import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 import { normalizeShortcuts, shortcutActions } from '@/lib/webAppShortcuts';
 import { useAppData } from '@/hooks/useAppData';
 import {
@@ -96,6 +97,8 @@ function webAppComponent(webApp: WebApp, favicon?: string, nsiteHost?: string): 
           favicon={favicon}
           themeColor={themeColor}
           nsiteHost={nsiteHost}
+          appId={webApp.id}
+          shareToken={props.params?.share}
         />
       );
     };
@@ -125,7 +128,12 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
     // Only a handler on the app's own origin: the window is pinned to it.
     ...(webApp.nostr && sameOrigin(webApp.nostr.url, webApp.url) ? { nostr: webApp.nostr } : {}),
     actions: shortcutActions(normalizeShortcuts(webApp.shortcuts, originOfUrl(webApp.url))),
+    ...withShare(normalizeWebShareTarget(webApp.share, originOfUrl(webApp.url))),
   };
+}
+
+function withShare(share: WebShareTarget | null | undefined): Pick<AppDefinition, 'share'> {
+  return share ? { share } : {};
 }
 
 /**
@@ -163,7 +171,16 @@ function nsiteAppToDefinition(
     ...(handler
       ? { nostr: { url: `${base}${handler.path}`, kinds: handler.kinds } }
       : {}),
-    ...(share ? { share: { url: `${base}${share.path}`, params: share.params } } : {}),
+    ...withShare(
+      share
+        ? {
+            action: `${base}${share.path}`,
+            method: share.method ?? 'GET',
+            enctype: share.enctype ?? 'application/x-www-form-urlencoded',
+            params: share.params,
+          }
+        : null,
+    ),
   };
 }
 
@@ -410,7 +427,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         requestInstall(host);
         return entry;
       },
-      installWebApp: ({ name, url, icon, themeColor, nostr, shortcuts }) => {
+      installWebApp: ({ name, url, icon, themeColor, nostr, shortcuts, share }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
@@ -418,6 +435,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
         const handler = normalizeNostrHandler(nostr);
         const kept = normalizeShortcuts(shortcuts, originOfUrl(safeUrl));
+        const shareTarget = normalizeWebShareTarget(share, originOfUrl(safeUrl));
         const webApp = createWebApp({
           name: trimmedName,
           url: safeUrl,
@@ -425,6 +443,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
           themeColor: safeThemeColor,
           ...(handler && sameOrigin(handler.url, safeUrl) ? { nostr: handler } : {}),
           ...(kept.length > 0 ? { shortcuts: kept } : {}),
+          ...(shareTarget ? { share: shareTarget } : {}),
         });
         setWebApps((prev) => [...prev, webApp]);
         return webApp;

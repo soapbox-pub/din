@@ -12,6 +12,12 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { SiteLimitPage } from '@/components/desktop/apps/SiteLimitPage';
+import { useToast } from '@/hooks/useToast';
+import { sharePageUrl, shareRequestBody, takePostShare } from '@/lib/share';
+import { guestsAvailable } from '@/platform/guest';
+
+/** How long a share waits for an nsite's service worker to be up before it goes without its files. */
+const SERVICE_WORKER_WAIT_MS = 5000;
 
 /**
  * Standalone, chrome-less window content for an installed web app: the site
@@ -33,6 +39,13 @@ import { SiteLimitPage } from '@/components/desktop/apps/SiteLimitPage';
  *
  * In an installed nsite (`nsiteHost`) the title bar's favicon and name are a button
  * that opens its permissions, window.ENV and data (see NappInfoButton).
+ *
+ * `shareToken` is a POST share sent here from the share sheet
+ * (src/lib/share.ts): once the page is up, the window POSTs it to the site's
+ * share target, where its service worker (or, for a website, its server)
+ * takes it, as a browser delivers one. An nsite with no service worker
+ * active for the action after a few seconds gets the share's title, text
+ * and link in the query instead, and the user hears its files didn't go.
  */
 export function WebAppFrame({
   windowId,
@@ -44,9 +57,15 @@ export function WebAppFrame({
   favicon,
   themeColor,
   nsiteHost,
+  appId,
+  shareToken,
 }: {
   /** The app's window, which a limited site's page closes. */
   windowId?: string;
+  /** The app's id, which a POST share is held for. */
+  appId?: string;
+  /** The `share` launch param: a POST share waiting for this window. */
+  shareToken?: unknown;
   url: string;
   initialUrl?: string;
   /** Changes when the app is asked to go to `initialUrl` again (a shortcut chosen twice). */
@@ -95,14 +114,46 @@ export function WebAppFrame({
   // without remounting. The webview's src is fixed at mount, so drive the
   // navigation imperatively. `src` already covers the initial deep link, so
   // only react to *changes* after mount.
-  const lastNavigated = useRef({ src, at: navigateAt });
+  // A share arriving replaces the launch params, which takes the deep link
+  // away: the share's own load goes instead of going home.
+  const lastNavigated = useRef({ src, at: navigateAt, share: shareToken });
   useEffect(() => {
     const last = lastNavigated.current;
-    if (src && (src !== last.src || (deepLink && navigateAt !== last.at))) {
+    const shared = shareToken !== undefined && shareToken !== last.share;
+    if (src && !shared && (src !== last.src || (deepLink && navigateAt !== last.at))) {
       viewRef.current?.loadURL(src);
     }
-    lastNavigated.current = { src, at: navigateAt };
-  }, [src, deepLink, navigateAt]);
+    lastNavigated.current = { src, at: navigateAt, share: shareToken };
+  }, [src, deepLink, navigateAt, shareToken]);
+
+  // A POST share, once the first page is up (so an nsite's service worker
+  // has had its chance to start).
+  const { toast } = useToast();
+  const sentShare = useRef<unknown>(undefined);
+  useEffect(() => {
+    if (!ready || shareToken === undefined || sentShare.current === shareToken || !appId) return;
+    sentShare.current = shareToken;
+    const share = takePostShare(shareToken, appId);
+    const view = viewRef.current;
+    if (!share || !view || !home || !sameOrigin(home, share.target.action)) return;
+    const { target, data } = share;
+    const withoutFiles = () => {
+      view.loadURL(sharePageUrl(target, data));
+      if (data.files.length > 0) {
+        toast({
+          title: `${name} couldn’t take the ${data.files.length === 1 ? 'file' : 'files'}`,
+          description: 'Nothing on the site is set up to receive shared files yet, so it got the text and link only.',
+          variant: 'destructive',
+        });
+      }
+    };
+    if (!guestsAvailable()) return withoutFiles();
+    void (async () => {
+      // An nsite has no server: only its service worker can take a POST.
+      if (nsiteHost && !(await view.hasServiceWorker(target.action, SERVICE_WORKER_WAIT_MS))) return withoutFiles();
+      view.loadURL(target.action, shareRequestBody(target, data));
+    })();
+  }, [ready, shareToken, appId, home, name, nsiteHost, toast]);
 
   const onThemeColorChange = useCallback(
     (color: string | null) => setPageColor(color ?? themeColor ?? null),

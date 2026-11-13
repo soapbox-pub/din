@@ -12,6 +12,7 @@ import {
   isGuestFullscreen,
   prepareGuestSession,
   type GuestElement,
+  type GuestLoadOptions,
 } from '@/platform/guest';
 
 /** Imperative controls of a guest surface. */
@@ -22,7 +23,11 @@ export interface GuestSurfaceHandle {
   id(): number | null;
   reload(): void;
   reloadIgnoringCache(): void;
-  loadURL(url: string): void;
+  /**
+   * Go to a URL, or with `options` POST to it (a share's form body). A load
+   * with a body asked for before the guest attaches is dropped.
+   */
+  loadURL(url: string, options?: GuestLoadOptions): void;
   goBack(): void;
   goForward(): void;
   focus(): void;
@@ -105,9 +110,9 @@ export function GuestSurface({ ref, ...props }: GuestSurfaceProps) {
     id: () => inner.current?.id() ?? null,
     reload: () => inner.current?.reload(),
     reloadIgnoringCache: () => inner.current?.reloadIgnoringCache(),
-    loadURL: (url) => {
-      if (inner.current) inner.current.loadURL(url);
-      else setEarly(url);
+    loadURL: (url, options) => {
+      if (inner.current) inner.current.loadURL(url, options);
+      else if (!options) setEarly(url);
     },
     goBack: () => inner.current?.goBack(),
     goForward: () => inner.current?.goForward(),
@@ -190,9 +195,9 @@ function PreparedGuestSurface({
     id: () => (elRef.current ? guestId(elRef.current) : null),
     reload: () => elRef.current && guest.reload(elRef.current),
     reloadIgnoringCache: () => elRef.current && guest.reloadIgnoringCache(elRef.current),
-    loadURL: (url) => {
+    loadURL: (url, options) => {
       // Aborted and failed loads reject; the load-error event reports them.
-      if (elRef.current) guest.loadURL(elRef.current, url).catch(() => {});
+      if (elRef.current) guest.loadURL(elRef.current, url, options).catch(() => {});
     },
     goBack: () => elRef.current && guest.goBack(elRef.current),
     goForward: () => elRef.current && guest.goForward(elRef.current),
