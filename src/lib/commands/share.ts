@@ -59,7 +59,7 @@ export const shareArea: Area = {
       const data = await shareOf(args, ctx);
       const to = args.optString('to');
       if (to !== undefined) {
-        const targets = shareTargets(data, ctx.apps.getApp);
+        const targets = shareTargets(data, ctx.apps);
         if (targets.length === 0) throw new CommandError('No app here takes that');
         const target = pick(targets, to, (t) => [t.id, t.name], 'app that takes it');
         deliverShare(target, data, null, ctx.actions.open);
@@ -71,7 +71,7 @@ export const shareArea: Area = {
       return { data: { to: result }, text: app ? `Shared to ${app.name}` : result === 'copy' ? 'Copied' : 'Saved to Downloads' };
     })),
     command('share', 'targets', 'The apps that take files, text or a link', WHAT, async (args, ctx) => {
-      const targets = shareTargets(await shareOf(args, ctx), ctx.apps.getApp);
+      const targets = shareTargets(await shareOf(args, ctx), ctx.apps);
       return {
         data: targets.map((t) => ({ id: t.id, name: t.name })),
         text: targets.length === 0 ? 'No app here takes that' : targets.map((t) => `${t.id}\t${t.name}`).join('\n'),

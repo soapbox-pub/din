@@ -43,6 +43,18 @@ export interface ShareTargetApp {
   name: string;
   icon: AppDefinition['icon'];
   target: ShareTarget;
+  /**
+   * An installed nsite's share page, which its window opens with the share
+   * in the query (its manifest's GET share target); absent for a built-in
+   * app, which hears the share in its launchQueue.
+   */
+  page?: string;
+}
+
+/** The apps the sheet looks through: built-in ones by their manifests, installed ones by what they took from theirs. */
+export interface ShareApps {
+  apps: readonly AppDefinition[];
+  getApp: (id: string) => AppDefinition | undefined;
 }
 
 /** A share waiting on the user, for the sheet to show. */
@@ -170,14 +182,21 @@ function noteRecent(id: string): void {
  * The installed apps that take a share, those chosen lately first, then by
  * name. The sharer itself isn't among them.
  */
-export function shareTargets(data: ShareData, getApp: (id: string) => AppDefinition | undefined, opener: string | null = null): ShareTargetApp[] {
+export function shareTargets(data: ShareData, { apps, getApp }: ShareApps, opener: string | null = null): ShareTargetApp[] {
   const out: ShareTargetApp[] = [];
-  for (const [id, manifest] of dinManifests()) {
+  const builtIn = dinManifests();
+  for (const [id, manifest] of builtIn) {
     if (id === opener) continue;
     const target = shareTargetOf(manifest);
     const app = getApp(id);
     if (!target || !app || !takesShare(target, data)) continue;
     out.push({ id, name: app.name, icon: app.icon, target });
+  }
+  // Installed nsites, which take text and links (a GET share target has no room for files).
+  for (const app of apps) {
+    if (!app.share || builtIn.has(app.id) || app.id === opener) continue;
+    const target: ShareTarget = { action: app.share.url, method: 'GET', params: app.share.params };
+    if (takesShare(target, data)) out.push({ id: app.id, name: app.name, icon: app.icon, target, page: app.share.url });
   }
   const recent = recentTargets();
   const rank = (id: string) => {
@@ -187,15 +206,28 @@ export function shareTargets(data: ShareData, getApp: (id: string) => AppDefinit
   return out.sort((a, b) => rank(a.id) - rank(b.id) || a.name.localeCompare(b.name));
 }
 
-/** The launch params that give a share to a target, as its `share_target` names them. */
-export function shareLaunchParams(target: ShareTarget, data: ShareData, opener: string | null): Record<string, unknown> {
-  const p: Record<string, unknown> = { shareNonce: crypto.randomUUID() };
+/** A share's title, text and link under the names a target gives them; the link goes in the text where it has no name of its own. */
+function shareFields(target: ShareTarget, data: ShareData): Record<string, string> {
+  const p: Record<string, string> = {};
   const { title, text, url } = target.params;
   if (title && data.title) p[title] = data.title;
   let body = data.text;
   if (url && data.url) p[url] = data.url;
   else if (data.url) body = body ? `${body}\n${data.url}` : data.url;
   if (text && body) p[text] = body;
+  return p;
+}
+
+/** An nsite's share page with the share in its query, as a browser makes a GET share target's. */
+export function sharePageUrl(page: string, target: ShareTarget, data: ShareData): string {
+  const url = new URL(page);
+  for (const [key, value] of Object.entries(shareFields(target, data))) url.searchParams.set(key, value);
+  return url.href;
+}
+
+/** The launch params that give a share to a built-in app, as its `share_target` names them. */
+export function shareLaunchParams(target: ShareTarget, data: ShareData, opener: string | null): Record<string, unknown> {
+  const p: Record<string, unknown> = { shareNonce: crypto.randomUUID(), ...shareFields(target, data) };
   const paths = data.files.map((f) => f.path);
   if (paths.length === 1) p.path = paths[0];
   else if (paths.length > 1) p.paths = paths;
@@ -205,7 +237,10 @@ export function shareLaunchParams(target: ShareTarget, data: ShareData, opener: 
   return p;
 }
 
-/** Give a share to an app: it opens (or its open window hears it) at its share target. */
+/**
+ * Give a share to an app: a built-in one opens (or its open window hears it)
+ * at its share target; an nsite's window opens at its share page.
+ */
 export function deliverShare(
   app: ShareTargetApp,
   data: ShareData,
@@ -213,7 +248,8 @@ export function deliverShare(
   open: (id: string, params: Record<string, unknown>, options: { replaceParams: boolean }) => unknown,
 ): void {
   noteRecent(app.id);
-  open(app.id, shareLaunchParams(app.target, data, opener), { replaceParams: true });
+  if (app.page) open(app.id, { url: sharePageUrl(app.page, app.target, data) }, { replaceParams: true });
+  else open(app.id, shareLaunchParams(app.target, data, opener), { replaceParams: true });
 }
 
 // ---- what the sheet does itself ----

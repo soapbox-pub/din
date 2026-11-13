@@ -211,9 +211,9 @@ const FAVICON_SIZE = 64;
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
  * 4: favicons are kept too; 5: and how it opens nostr: links; 6: and its
  * manifest id and scope_extensions, so installed sites can open websites' links;
- * 7: and its shortcuts).
+ * 7: and its shortcuts; 8: and its share target).
  */
-export const NSITE_APP_INFO_VERSION = 7;
+export const NSITE_APP_INFO_VERSION = 8;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -427,6 +427,35 @@ function pickShortcuts(webManifest: unknown, manifestPath: string): NonNullable<
 }
 
 /**
+ * The manifest's `share_target`, as a path on the site, when it takes shares
+ * by GET: a POST one needs a request body, which an nsite's window can't be
+ * opened with yet.
+ */
+function pickShareTarget(webManifest: unknown, manifestPath: string): NsiteAppInfo['share'] {
+  if (typeof webManifest !== 'object' || webManifest === null) return null;
+  const target = (webManifest as { share_target?: unknown }).share_target;
+  if (typeof target !== 'object' || target === null) return null;
+  const { action, method, params } = target as Record<string, unknown>;
+  if (typeof action !== 'string' || (method !== undefined && String(method).toUpperCase() !== 'GET')) return null;
+  if (typeof params !== 'object' || params === null) return null;
+  const origin = 'https://nsite.invalid';
+  let url: URL;
+  try {
+    url = new URL(action, `${origin}${manifestPath}`);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  const names: NonNullable<NsiteAppInfo['share']>['params'] = {};
+  for (const key of ['title', 'text', 'url'] as const) {
+    const name = (params as Record<string, unknown>)[key];
+    if (typeof name === 'string' && /^[\w.~-]{1,64}$/.test(name)) names[key] = name;
+  }
+  if (!names.title && !names.text && !names.url) return null;
+  return { path: `${url.pathname}${url.search}`, params: names };
+}
+
+/**
  * The manifest's id and the websites it extends its scope to. The id is a
  * path on the site: `id` resolved against the start URL's origin, or the
  * start URL itself, without its fragment, as the Manifest spec has it. The
@@ -627,6 +656,7 @@ export async function deriveNsiteAppDetails(
     id: null,
     scopeExtensions: [],
     shortcuts: [],
+    share: null,
     description: null,
     installable: false,
   };
@@ -649,6 +679,7 @@ export async function deriveNsiteAppDetails(
     info.installable = isInstallable(webManifest, manifestBase, paths);
     info.nostr = pickNostrHandler(webManifest, manifestPath);
     info.shortcuts = pickShortcuts(webManifest, manifestPath);
+    info.share = pickShareTarget(webManifest, manifestPath);
     Object.assign(info, pickScope(webManifest, manifestPath));
     // Only if the document named no color of its own.
     if (!info.themeColor && typeof webManifest === 'object' && webManifest !== null) {

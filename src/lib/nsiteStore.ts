@@ -43,6 +43,12 @@ export interface NsiteAppInfo {
    * launcher tiles: a name and a path on the site each.
    */
   shortcuts?: { name: string; path: string }[];
+  /**
+   * The manifest's `share_target`, when it takes shares by GET (Din's share
+   * sheet, src/lib/share.ts): the path a share opens, and the query
+   * parameter each part goes in. Null when it takes none.
+   */
+  share?: { path: string; params: { title?: string; text?: string; url?: string } } | null;
 }
 
 /**

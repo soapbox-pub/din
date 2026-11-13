@@ -33,10 +33,11 @@ export function ShareSheetHost() {
 }
 
 function ShareSheet({ request }: { request: ShareRequest }) {
-  const { getApp } = useInstalledApps();
+  const installed = useInstalledApps();
   const actions = useWindowActions();
   const { data, anchor, opener } = request;
-  const targets = useMemo(() => shareTargets(data, getApp, opener), [data, getApp, opener]);
+  const { apps, getApp } = installed;
+  const targets = useMemo(() => shareTargets(data, { apps, getApp }, opener), [data, apps, getApp, opener]);
   const close = (answer: string | null) => request.finish(answer);
 
   const copy = () => {

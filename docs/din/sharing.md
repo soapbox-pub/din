@@ -1,13 +1,13 @@
 # Sharing
 
-> **Status: in place for built-in apps.** `navigator.share` and
-> `din.app.share` in `din://` apps, the desktop's share sheet
-> (`src/components/desktop/ShareSheetHost.tsx`, `src/lib/share.ts`),
-> built-in apps as share targets, and `din share`. Not yet: installed
-> websites and nsites as targets (their manifests' `share_target`, read when
-> they're installed), `navigator.share` on web pages in the Web Browser, and
-> people and conversations as targets of their own (Android's sharing
-> shortcuts).
+> **Status: in place for built-in apps and installed nsites.**
+> `navigator.share` and `din.app.share` in `din://` apps, the desktop's
+> share sheet (`src/components/desktop/ShareSheetHost.tsx`,
+> `src/lib/share.ts`), built-in apps and installed nsites (a GET
+> `share_target`) as share targets, and `din share`. Not yet: nsites'
+> POST share targets (files), installed websites as targets,
+> `navigator.share` on web pages in the Web Browser, and people and
+> conversations as targets of their own (Android's sharing shortcuts).
 
 Sharing is Android's: anything can have a Share button, the desktop shows a
 share sheet of the apps that take what's shared, and the user picks one.
@@ -99,6 +99,22 @@ An app says what it takes in its manifest, as the web does:
 - Param names the desktop's launches use (`path`, `paths`, `readOnlyPaths`,
   `opener`, `shortcut`, `shareNonce`, `window`) can't be targets'; a
   manifest naming one isn't offered.
+
+### Installed nsites
+
+An installed nsite whose web app manifest has a `share_target` with
+`method` `GET` (or none) is offered for text and links, as a browser offers
+a PWA: its window opens at `action`, resolved against the manifest on the
+site's own host, with the shared title, text and link in the query under
+the names `params` gives them (Ditto and Armada take them at `/share`).
+Main reads it with the site's other app details when it's installed or
+updated (`share` in the nsite store's app info, `pickShareTarget` in
+`src/lib/nsiteAppInfo.ts`, checked again by `parseShareTarget` in
+`electron/nsite-store.mts`). A POST share target, the only kind that takes
+files, isn't offered yet: an nsite's window can't be opened with a request
+body.
+
+### Built-in apps that take shares
 
 | App | Takes | Opens |
 |---|---|---|

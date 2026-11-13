@@ -153,6 +153,7 @@ function nsiteAppToDefinition(
   const handler = summary?.app?.nostr;
   const base = nsiteAppUrl(entry.host).slice(0, -1);
   const shortcuts = summary?.app?.shortcuts ?? [];
+  const share = summary?.app?.share;
   return {
     ...definition,
     web: false,
@@ -162,6 +163,7 @@ function nsiteAppToDefinition(
     ...(handler
       ? { nostr: { url: `${base}${handler.path}`, kinds: handler.kinds } }
       : {}),
+    ...(share ? { share: { url: `${base}${share.path}`, params: share.params } } : {}),
   };
 }
 

@@ -100,6 +100,16 @@ export interface NsiteAppInfo {
   scopeExtensions?: string[];
   /** Its manifest's `shortcuts`: a name and a path on the site each. */
   shortcuts?: { name: string; path: string }[];
+  /**
+   * Its manifest's `share_target`, when it takes shares by GET: the path a
+   * share opens, and the query parameter each part of the share goes in.
+   */
+  share?: NsiteShareTarget | null;
+}
+
+export interface NsiteShareTarget {
+  path: string;
+  params: { title?: string; text?: string; url?: string };
 }
 
 /**
@@ -500,7 +510,21 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     id,
     scopeExtensions,
     shortcuts: parseShortcuts(value.shortcuts),
+    share: parseShareTarget(value.share),
   };
+}
+
+function parseShareTarget(raw: unknown): NsiteShareTarget | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { path, params } = raw as Record<string, unknown>;
+  if (!isScopePath(path) || path.length > 2048 || /[\s\\#]/.test(path)) return null;
+  if (!params || typeof params !== 'object') return null;
+  const out: NsiteShareTarget['params'] = {};
+  for (const key of ['title', 'text', 'url'] as const) {
+    const name = (params as Record<string, unknown>)[key];
+    if (typeof name === 'string' && /^[\w.~-]{1,64}$/.test(name)) out[key] = name;
+  }
+  return out.title || out.text || out.url ? { path, params: out } : null;
 }
 
 function parseShortcuts(raw: unknown): NonNullable<NsiteAppInfo['shortcuts']> {
