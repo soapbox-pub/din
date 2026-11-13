@@ -910,6 +910,15 @@ function rescan(): void {
 }
 
 /**
+ * List the installed apps again, after something installed or removed one
+ * where no watched folder shows it (a Flatpak, whose entries are in its
+ * exports: electron/nostr-flatpaks.mts).
+ */
+export function rescanNativeApps(): void {
+  rescan();
+}
+
+/**
  * Uninstall a Windows program, as Windows' Apps & Features does: by its
  * own uninstaller, which asks what it asks and takes away its shortcuts,
  * then its entries go from the list. One with none (a program that only

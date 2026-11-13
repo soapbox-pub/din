@@ -83,7 +83,8 @@ import {
 } from './nsite.mts';
 import { parseCanonicalHost } from './nsite-store.mts';
 import { BLOSSOM_SCHEME, registerBlossomProtocol } from './blossom.mts';
-import { isProgram, registerNativeAppHandlers, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
+import { isProgram, registerNativeAppHandlers, rescanNativeApps, runProgram, terminalAppCommand, terminalEnvironment } from './native-apps.mts';
+import { registerNostrFlatpakHandlers } from './nostr-flatpaks.mts';
 import { registerNativeDisplayHandlers, sessionBusAddress } from './native-display.mts';
 import { attachLayoutKeys, registerKeyboardHandlers } from './keyboard.mts';
 import { registerDateTimeHandlers } from './datetime.mts';
@@ -6489,6 +6490,11 @@ app.whenReady().then(() => {
   registerNativeAppHandlers({
     assertShellSender,
     shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+  });
+  registerNostrFlatpakHandlers({
+    assertShellSender,
+    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
+    changed: rescanNativeApps,
   });
   registerKeyboardHandlers({ assertShellSender, send: sendToShell });
   registerDateTimeHandlers({ assertShellSender });

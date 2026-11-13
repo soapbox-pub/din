@@ -36,6 +36,13 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import { FolderAppDetail, FolderAppsSection } from '@/components/desktop/apps/appstore/FolderApps';
+import {
+  FlatpakAppDetail,
+  FlatpakAppsSection,
+  FlatpakGrid,
+} from '@/components/desktop/apps/appstore/FlatpakApps';
+import { useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
+import type { FlatpakApp } from '@/lib/nostrFlatpaks';
 import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
 import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
 import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
@@ -129,6 +136,11 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * nsite store downloads every file, and the entry roams via encrypted app
  * data.
  *
+ * Linux apps are there too, where Flatpak is: NIP-82 apps whose newest
+ * release carries a .flatpak for this computer, installed through a Flatpak
+ * remote of Din's own so they update like any other (FlatpakApps,
+ * src/lib/nostrFlatpaks.ts, electron/nostr-flatpaks.mts).
+ *
  * Apps can also come from a folder on this computer (src/lib/fileApps.ts),
  * for developing one: the title bar's folder button, or the From Your
  * Folders section, picks it and opens its page (FolderApps).
@@ -156,13 +168,16 @@ export function AppStore({ params }: AppComponentProps) {
   );
   // A folder chosen to add as an app, whose page is showing.
   const [folderApp, setFolderApp] = useState<OpenedFolder | null>(null);
+  // A Linux app (a NIP-82 app with a Flatpak) whose page is showing.
+  const [selectedFlatpak, setSelectedFlatpak] = useState<FlatpakApp | null>(null);
   const { choose: chooseAppFolder, busy: choosingFolder } = useChooseAppFolder();
   const onThemes = tab === 'themes';
   const onPackages = packages !== null;
-  const detailOpen = onThemes ? !!selectedTheme : onPackages ? !!selectedPackage : !!selected || !!folderApp;
+  const detailOpen = onThemes ? !!selectedTheme : onPackages ? !!selectedPackage : !!selected || !!folderApp || !!selectedFlatpak;
   const closeDetail = () => {
     setSelected(null);
     setFolderApp(null);
+    setSelectedFlatpak(null);
     setSelectedTheme(null);
     setSelectedPackage(null);
   };
@@ -190,6 +205,7 @@ export function AppStore({ params }: AppComponentProps) {
   }, [searching, rawQuery, lookup.isAddress, lookup.data, featured.data, catalog.allApps]);
 
   const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
+  const linuxMatches = useFlatpakMatches(tab === 'apps' ? rawQuery : '');
 
   const refreshing = onThemes
     ? themes.refreshing
@@ -338,7 +354,7 @@ export function AppStore({ params }: AppComponentProps) {
       <div
         className="flex min-h-0 flex-1 flex-col"
         onKeyDown={(e) => {
-          if ((selected || folderApp) && e.key === 'Escape') {
+          if ((selected || folderApp || selectedFlatpak) && e.key === 'Escape') {
             closeDetail();
           }
         }}
@@ -347,33 +363,48 @@ export function AppStore({ params }: AppComponentProps) {
           <AppDetail key={selected.host} app={selected} moreFromPublisher={moreFromPublisher} />
         )}
         {folderApp && !selected && <FolderAppDetail key={folderApp.appId} opened={folderApp} />}
+        {selectedFlatpak && !selected && !folderApp && (
+          <FlatpakAppDetail key={`${selectedFlatpak.pubkey}:${selectedFlatpak.identifier}`} app={selectedFlatpak} />
+        )}
         {/* Content */}
-        <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp) && 'hidden')}>
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp || selectedFlatpak) && 'hidden')}>
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {searching ? (
-              <section className="flex flex-col gap-4" aria-label="Search results">
-                <SectionHeader
-                  title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
-                />
-                {searchMatches.length > 0 ? (
-                  // A pasted address asks for that one site, so it shows
-                  // whether or not the store would list it.
-                  <CatalogGrid apps={searchMatches} />
-                ) : searchPending ? (
-                  <CatalogSkeleton />
-                ) : (
-                  <EmptyState
-                    message={
-                      lookup.isAddress
-                        ? 'No site is published at that address on your relays.'
-                        : `No apps match “${rawQuery}”. You can also paste a site’s address to find it.`
-                    }
-                  />
+              <>
+                {linuxMatches.apps.length > 0 && (
+                  <section className="flex flex-col gap-4" aria-label="Linux apps found">
+                    <SectionHeader title={linuxMatches.isAddress ? 'Linux app at this address' : 'Linux Apps'} />
+                    <FlatpakGrid apps={linuxMatches.apps} onSelect={setSelectedFlatpak} />
+                  </section>
                 )}
-              </section>
+                {/* A Linux app's address names no site, so only the app shows for it. */}
+                {!(linuxMatches.isAddress && (linuxMatches.apps.length > 0 || linuxMatches.pending)) && (searchMatches.length > 0 || linuxMatches.apps.length === 0) && (
+                  <section className="flex flex-col gap-4" aria-label="Search results">
+                    <SectionHeader
+                      title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
+                    />
+                    {searchMatches.length > 0 ? (
+                      // A pasted address asks for that one site, so it shows
+                      // whether or not the store would list it.
+                      <CatalogGrid apps={searchMatches} />
+                    ) : searchPending || linuxMatches.pending ? (
+                      <CatalogSkeleton />
+                    ) : (
+                      <EmptyState
+                        message={
+                          lookup.isAddress
+                            ? 'No app is published at that address on your relays.'
+                            : `No apps match “${rawQuery}”. You can also paste an app’s address to find it.`
+                        }
+                      />
+                    )}
+                  </section>
+                )}
+              </>
             ) : (
               <>
                 <FeaturedSection />
+                <FlatpakAppsSection onSelect={setSelectedFlatpak} />
                 <FolderAppsSection onChose={setFolderApp} />
                 <section className="flex flex-col gap-4" aria-label="All apps">
                   <SectionHeader

@@ -893,6 +893,45 @@ expose('monitors', {
   zoomFactor: () => webFrame.getZoomFactor(),
 });
 
+// Flatpaks from Nostr (window.dinos.flatpaks), backed by the flatpaks:*
+// handlers in electron/nostr-flatpaks.mts: NIP-82 apps whose releases carry
+// a .flatpak bundle, imported into a Flatpak remote of Din's own and
+// installed from it, for the App Store.
+expose('flatpaks', {
+  /** Whether Flatpak is here, and the NIP-82 platform this computer runs. */
+  status: () => ipcRenderer.invoke('flatpaks:status'),
+
+  /** The apps installed from Nostr, with the release each is at. */
+  installed: () => ipcRenderer.invoke('flatpaks:installed'),
+
+  /**
+   * Download a release's bundle, check it against its hash, and install or
+   * update the app from it.
+   * @param {unknown} request
+   */
+  install: (request) => ipcRenderer.invoke('flatpaks:install', request),
+
+  /**
+   * Uninstall an app installed from Nostr.
+   * @param {string} appId
+   */
+  uninstall: (appId) => ipcRenderer.invoke('flatpaks:uninstall', appId),
+
+  /**
+   * How an install or removal is going.
+   * @param {(progress: unknown) => void} callback
+   */
+  onProgress: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} progress
+     */
+    const handler = (_event, progress) => callback(progress);
+    ipcRenderer.on('flatpaks:progress', handler);
+    return () => ipcRenderer.removeListener('flatpaks:progress', handler);
+  },
+});
+
 // Native-app bridge (window.dinos.nativeApps), backed by the native-apps:* handlers
 // in electron/native-apps.mts: lists installed XDG desktop entries and
 // launches them onto Din's embedded display, whose windows Din composites

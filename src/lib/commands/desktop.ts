@@ -22,6 +22,7 @@ import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
 import { bookmarkCommands } from './bookmarks';
+import { flatpakCommands } from './flatpaks';
 
 /**
  * `din apps`, `din windows`, `din workspace`, `din widgets`, `din desktop-icons`,
@@ -59,7 +60,7 @@ const WINDOW: Param = { name: 'window', type: 'string', positional: true, help: 
 
 export const appsArea: Area = {
   name: 'apps',
-  summary: 'Apps: list, open, install, remove, and run your own (din apps run)',
+  summary: 'Apps: list, open, install (Linux apps from Nostr too), remove, and run your own (din apps run)',
   commands: [
     command('apps', 'list', 'Every app on the desktop', [
       { name: 'installed', type: 'boolean', optional: true, help: 'Only those you installed (web apps, nsites, folders)' },
@@ -122,6 +123,7 @@ export const appsArea: Area = {
       ctx.apps.uninstallApp(app.id);
       return { text: `Removed ${app.name}` };
     }),
+    ...flatpakCommands,
     command('apps', 'reset-windows', 'Start Windows apps over: delete every Windows program installed, and its settings', [], async (_args, ctx) => {
       const ok = await ctx.confirm({
         title: 'Reset Windows apps?',
