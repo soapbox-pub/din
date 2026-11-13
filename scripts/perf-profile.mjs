@@ -32,6 +32,19 @@
  *                "App Store" leaves other apps open under it; --drag-size
  *                1400x950 grows the dragged window first, as big app
  *                windows are. Each is paced still first, for a baseline
+ *   glass        what Liquid glass costs: Files and Settings open over the
+ *                wallpaper and the Dock, then --glass-sec (5) each of nothing
+ *                moving, something moving behind every pane, the pointer
+ *                circling over a window, over the wallpaper and in the
+ *                desktop's right-click menu, and a window dragged over the
+ *                other. Run as it is and with one part of the glass taken
+ *                away at a time (no-light: the light held at rest; no-lens:
+ *                the blur without the rim's lens; no-filter: no backdrop
+ *                filter at all), so a part's cost is the difference from
+ *                "liquid". Counts every process, not the main thread alone:
+ *                the renderers' CPU (raster and the compositor too), the GPU
+ *                process's, and with --gpu its time on the GPU.
+ *                --glass-variants and --glass-phases name the ones to run
  *   switch       four light windows open, click each title bar in turn for
  *                --rounds (6) rounds: pointer-down to next frame per raise
  *   switch-store the same with the App Store's card grid open as well
@@ -69,8 +82,17 @@
  * compositing the frosted glass rather than the app's own work; `--css
  * "rules"` adds any other rules to every page, to A/B one effect at a time.
  *
- * To measure on a GPU, point DIN_PERF_CHROME at a script that runs a real
- * browser on the screen (Electron with a main that opens a 1920x1080
+ * `--gpu` runs the whole Chromium (not the headless shell, which has no GPU
+ * process to give one to) headless on this machine's GPU, through ANGLE's
+ * OpenGL: nothing on screen, and raster and the display compositor where they
+ * are on DinOS. The glass scenario then also reports the GPU process's time on
+ * the GPU, where the driver counts it per process (amdgpu's fdinfo). `--trace`
+ * adds, per glass phase, where each kind of thread (the page's main, raster
+ * workers, the compositor, the GPU process's) spent its own time, from a
+ * trace of every process (`glass.json`'s `threads`).
+ *
+ * To measure on the screen instead, point DIN_PERF_CHROME at a script that
+ * runs a real browser there (Electron with a main that opens a 1920x1080
  * BrowserWindow, --ozone-platform=wayland --use-angle=vulkan, passing on the
  * harness's arguments). Frame pacing then also reports amdgpu's busy
  * percentage (gpuBusyPct), which counts the rest of the screen too: compare
@@ -107,6 +129,16 @@ const DRAG_BEHIND = opt("drag-behind", "")
   .map((s) => s.trim())
   .filter(Boolean);
 const ROUNDS = Number(opt("rounds", "6"));
+const GLASS_SEC = Number(opt("glass-sec", "5"));
+const list = (name) =>
+  opt(name, "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+/** The glass scenario's variants and phases to run (comma-separated; all of them by default). */
+const GLASS_VARIANTS = list("glass-variants");
+const GLASS_PHASES = list("glass-phases");
+let GLASS_SHOTS = "";
 const LEAK_ROUNDS = Number(opt("leak-rounds", "8"));
 const OFFLINE = flag("offline");
 const ONLY = opt("only", "")
@@ -119,7 +151,7 @@ const DRAG_SIZE = (() => {
   return m ? { width: Number(m[1]), height: Number(m[2]) } : null;
 })();
 /** amdgpu's busy percentage, read while frames are paced when the browser is one of your own (DIN_PERF_CHROME), which may use the GPU. */
-const GPU_BUSY_FILE = process.env.DIN_PERF_CHROME
+const GPU_BUSY_FILE = process.env.DIN_PERF_CHROME || flag("gpu")
   ? (existsSync("/sys/class/drm") ? readdirSync("/sys/class/drm") : [])
       .map((d) => `/sys/class/drm/${d}/device/gpu_busy_percent`)
       .find((p) => existsSync(p)) ?? null
@@ -204,7 +236,8 @@ function findChrome() {
       .map((d) => join(cache, d, rel))
       .find((p) => existsSync(p));
   const shell = newest("chromium_headless_shell-", "chrome-headless-shell-linux64/chrome-headless-shell");
-  if (shell) return { path: shell, shell: true };
+  // The headless shell has no GPU process to give one to.
+  if (shell && !flag("gpu")) return { path: shell, shell: true };
   const full = newest("chromium-", "chrome-linux64/chrome") ?? newest("chromium-", "chrome-linux/chrome");
   if (full) return { path: full, shell: false };
   throw new Error("no Chromium found: set DIN_PERF_CHROME, or `npx playwright install chromium-headless-shell`");
@@ -262,6 +295,8 @@ const browserProc = spawn(
   chrome.path,
   [
     ...(chrome.shell ? [] : ["--headless=new"]),
+    // On this machine's GPU through EGL, with nothing on the screen (--gpu).
+    ...(flag("gpu") ? ["--enable-gpu", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=gl-egl"] : []),
     "--remote-debugging-port=0",
     `--user-data-dir=${profileDir}`,
     // Without it `performance.memory` is bucketed and cached, and the
@@ -722,6 +757,138 @@ function sampleGpuBusy() {
   };
 }
 
+/** Nanoseconds process `pid` has had on the GPU's engines (the kernel's DRM fdinfo, one count per client), or null where it has no GPU. */
+function gpuEngineNs(pid) {
+  const clients = new Map();
+  let fds = [];
+  try {
+    fds = readdirSync(`/proc/${pid}/fdinfo`);
+  } catch {
+    return null;
+  }
+  for (const fd of fds) {
+    let text = "";
+    try {
+      text = readFileSync(`/proc/${pid}/fdinfo/${fd}`, "utf8");
+    } catch {
+      continue;
+    }
+    const client = /^drm-client-id:\s*(\d+)/m.exec(text)?.[1];
+    if (!client) continue;
+    let ns = 0;
+    for (const m of text.matchAll(/^drm-engine-\w+:\s*(\d+) ns/gm)) ns += Number(m[1]);
+    clients.set(client, ns);
+  }
+  return clients.size ? [...clients.values()].reduce((a, b) => a + b, 0) : null;
+}
+
+/** CPU seconds so far of each kind of the browser's processes, every thread of them, and the GPU process's time on the GPU. */
+async function processTimes() {
+  const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
+  const cpu = { renderer: 0, gpu: 0, browser: 0 };
+  let gpuNs = null;
+  for (const p of processInfo) {
+    const kind = p.type === "GPU" ? "gpu" : p.type;
+    if (kind in cpu) cpu[kind] += p.cpuTime;
+    if (p.type === "GPU") gpuNs = gpuEngineNs(p.id);
+  }
+  return { cpu, gpuNs };
+}
+
+/**
+ * What `fn` cost the whole browser, not the page's main thread alone: every
+ * renderer's threads (raster and the compositor among them), the GPU
+ * process's CPU, and its time on the GPU itself (`gpuPct`, with --gpu on a
+ * driver that counts it), each as a share of wall time.
+ */
+async function processCost(fn) {
+  const a = await processTimes();
+  const t = Date.now();
+  const result = await fn();
+  const b = await processTimes();
+  const wall = (Date.now() - t) / 1000;
+  const pct = (v) => Math.round((v / wall) * 1000) / 10;
+  return {
+    result,
+    processes: {
+      rendererCpuPct: pct(b.cpu.renderer - a.cpu.renderer),
+      gpuProcessCpuPct: pct(b.cpu.gpu - a.cpu.gpu),
+      browserCpuPct: pct(b.cpu.browser - a.cpu.browser),
+      ...(a.gpuNs === null || b.gpuNs === null ? {} : { gpuPct: pct((b.gpuNs - a.gpuNs) / 1e9) }),
+    },
+  };
+}
+
+/**
+ * A trace of `fn` across every process (`--trace` only), reduced to where
+ * each kind of thread spent its own time: painting, raster, the compositor,
+ * the display compositor's draws.
+ */
+async function trace(fn) {
+  if (!flag("trace")) return { result: await fn(), threads: undefined };
+  const events = [];
+  const collect = ({ value }) => events.push(...value);
+  browser.on("Tracing.dataCollected", collect);
+  await browser.send("Tracing.start", {
+    transferMode: "ReportEvents",
+    traceConfig: { includedCategories: ["cc", "viz", "gpu", "blink", "toplevel", "devtools.timeline", "disabled-by-default-devtools.timeline"] },
+  });
+  const t = Date.now();
+  const result = await fn();
+  const wallMs = Date.now() - t;
+  const done = new Promise((res) => {
+    const fin = () => {
+      browser.off("Tracing.tracingComplete", fin);
+      res();
+    };
+    browser.on("Tracing.tracingComplete", fin);
+  });
+  await browser.send("Tracing.end");
+  await done;
+  browser.off("Tracing.dataCollected", collect);
+
+  const names = new Map();
+  for (const e of events) if (e.ph === "M" && e.name === "thread_name") names.set(`${e.pid}:${e.tid}`, e.args.name);
+  const byThread = new Map();
+  for (const e of events) {
+    if (e.ph !== "X" || !e.dur) continue;
+    const key = `${e.pid}:${e.tid}`;
+    if (!byThread.has(key)) byThread.set(key, []);
+    byThread.get(key).push(e);
+  }
+  // Self time: an event's own, less what ran inside it.
+  const self = new Map();
+  for (const [key, list] of byThread) {
+    const kind = (names.get(key) ?? "?").replace(/[\d/]+$/, "");
+    list.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+    const stack = [];
+    for (const e of list) {
+      while (stack.length && stack.at(-1).ts + stack.at(-1).dur <= e.ts) stack.pop();
+      e.self = e.dur;
+      if (stack.length) stack.at(-1).self -= e.dur;
+      stack.push(e);
+    }
+    if (!self.has(kind)) self.set(kind, new Map());
+    const into = self.get(kind);
+    for (const e of list) {
+      const at = into.get(e.name) ?? { us: 0, count: 0 };
+      at.us += Math.max(0, e.self);
+      at.count++;
+      into.set(e.name, at);
+    }
+  }
+  const threads = {};
+  for (const [kind, into] of self) {
+    const total = [...into.values()].reduce((a, b) => a + b.us, 0);
+    if (total < wallMs * 10) continue; // under 1% of the wall
+    threads[`${kind} ${Math.round(total / wallMs / 10)}%`] = [...into.entries()]
+      .sort((a, b) => b[1].us - a[1].us)
+      .slice(0, 12)
+      .map(([name, v]) => `${Math.round(v.us / 1000)}ms ×${v.count} ${name}`);
+  }
+  return { result, threads };
+}
+
 /**
  * Sampling CPU profile of `fn`, reduced to the top self-time functions,
  * resolved through the build's sourcemaps. `--cpu-profile` only: the
@@ -931,6 +1098,15 @@ async function growWindow(id, size, at = { x: 120, y: 80 }) {
   await dragBy({ x: r.right - 2, y: r.bottom - 2 }, size.width - (r.right - r.left), size.height - (r.bottom - r.top));
 }
 
+/**
+ * Whether apps' frames take the pointer. Here an app is an iframe, and a
+ * button held down over one stops reaching the desktop, as it doesn't over a
+ * <webview>: a window carried past its own content, or another app's, would
+ * never be let go. Off for the length of such a drag.
+ */
+const guestsTakePointer = (on) =>
+  evaluate((value) => document.querySelectorAll("iframe").forEach((frame) => (frame.style.pointerEvents = value)), on ? "" : "none");
+
 /** Drag from `from` by (dx, dy) in small steps, and let go. */
 async function dragBy(from, dx, dy, steps = 12) {
   await moveTo(from.x, from.y);
@@ -1126,6 +1302,120 @@ try {
       console.log(`  ${label}: ${runs[label].drag.fps} fps, p95 ${runs[label].drag.p95}ms, cpu ${runs[label].drag.cpuPct}%${runs[label].drag.gpuBusyPct === undefined ? "" : `, gpu ${runs[label].drag.gpuBusyPct}% busy (${runs[label].still.gpuBusyPct}% still)`}`);
     }
     save("drag", runs);
+  }
+
+  // What the glass costs, a phase and a variant at a time, in one scene: two
+  // windows over the wallpaper and the Dock. Each variant is the glass with
+  // one part of it taken away (rules added to the desktop's document), so
+  // the difference from "liquid" is that part's cost.
+  if (wants("glass")) {
+    console.log(`\n▶ glass (${GLASS_SEC}s a phase)`);
+    const mark = errors.length;
+    await resetStorage();
+    await bootDesktop();
+    for (const [i, name] of ["Files", "Settings"].entries()) {
+      await launch(name);
+      await waitFor(windowSettled, undefined, 15_000);
+      await sleep(300);
+      const grab = await grabPoint(await topWindowId());
+      if (grab) await dragBy(grab, i * 260 - 200, i * 90);
+    }
+    await sleep(1000);
+    const top = await topWindowId();
+    const rectOf = (selector) => evaluate((sel) => document.querySelector(sel)?.getBoundingClientRect().toJSON() ?? null, selector);
+    /** The pointer round an ellipse, a lap a second, ~120 moves/s. */
+    const circle = async (cx, cy, rx, ry, extra = { button: "none" }, lap = 120) => {
+      const end = Date.now() + GLASS_SEC * 1000;
+      let i = 0;
+      while (Date.now() < end) {
+        const t = (i++ / lap) * Math.PI * 2;
+        await mouse("mouseMoved", cx + Math.cos(t) * rx, cy + Math.sin(t) * ry, extra);
+        await sleep(8);
+      }
+    };
+    const phases = {
+      // Nothing moving: what the scene costs by being there.
+      still: () => sleep(GLASS_SEC * 1000),
+      // Something moving behind every pane (a video, an animated wallpaper),
+      // on the compositor alone: the backdrop filters, every frame.
+      behind: async () => {
+        await evaluate(() => {
+          const el = document.createElement("div");
+          el.id = "din-perf-behind";
+          el.style.cssText = "position:absolute;inset:0;pointer-events:none;background:#fff;will-change:opacity";
+          document.querySelector('main[aria-label="Desktop"]').prepend(el);
+          el.animate([{ opacity: 0 }, { opacity: 0.06 }], { duration: 700, iterations: Infinity, direction: "alternate" });
+        });
+        await sleep(GLASS_SEC * 1000);
+        await evaluate(() => document.getElementById("din-perf-behind")?.remove());
+      },
+      // The pointer over a window: the light following it.
+      "hover-window": async () => {
+        const r = await rectOf(`section[data-window-id="${top}"]`);
+        await circle(r.left + r.width / 2, r.top + r.height / 2, r.width / 3, r.height / 3);
+      },
+      // The pointer over the wallpaper, beside the windows and above the Dock.
+      "hover-desktop": () => circle(VIEWPORT.width / 2, VIEWPORT.height - 160, VIEWPORT.width / 2 - 80, 40),
+      // The desktop's right-click menu open (the lens), the pointer in it.
+      menu: async () => {
+        const at = { x: VIEWPORT.width - 200, y: 300 };
+        await moveTo(at.x, at.y);
+        await mouse("mousePressed", at.x, at.y, { button: "right", buttons: 2, clickCount: 1 });
+        await mouse("mouseReleased", at.x, at.y, { button: "right", buttons: 0, clickCount: 1 });
+        const menu = await waitFor(() => document.querySelector('[role="menu"]')?.getBoundingClientRect().toJSON(), undefined, 3000);
+        if (!menu) throw new Error("the desktop's menu never opened");
+        await sleep(300);
+        await circle(menu.left + menu.width / 2, menu.top + menu.height / 2, menu.width / 3, menu.height / 3);
+        if (GLASS_SHOTS) await screenshot(`glass-menu-${GLASS_SHOTS}`);
+        await pressKey("Escape", "Escape", 27);
+        await sleep(300);
+      },
+      // The top window carried in circles over the other.
+      drag: async () => {
+        const grab = await grabPoint(top);
+        await guestsTakePointer(false);
+        await moveTo(grab.x, grab.y);
+        await mouse("mousePressed", grab.x, grab.y, { clickCount: 1, buttons: 1 });
+        await circle(grab.x - 150, grab.y + 100, 150, 100, { buttons: 1 }, 60);
+        await mouse("mouseMoved", grab.x, grab.y, { buttons: 1 });
+        await mouse("mouseReleased", grab.x, grab.y, { clickCount: 1, buttons: 0 });
+        await guestsTakePointer(true);
+        // The wobble settling is part of the gesture, and holds the light still.
+        if (!(await waitFor(() => !document.documentElement.hasAttribute("data-window-gesture"), undefined, 5000))) throw new Error("the drag never ended");
+      },
+    };
+    const variants = {
+      liquid: "",
+      "no-light": "* { --glass-x: initial !important; --glass-y: initial !important; --glass-unlit: initial !important; }",
+      "no-lens":
+        ":root[data-liquid] .glass-surface { backdrop-filter: blur(8px) saturate(1.9) brightness(1.05) !important; } :root[data-liquid] .bar-glass.bar-glass-lens { backdrop-filter: blur(10px) saturate(1.9) brightness(1.05) !important; }",
+      "no-filter": "*, *::before, *::after { backdrop-filter: none !important; }",
+    };
+    const runs = {};
+    for (const variant of GLASS_VARIANTS.length ? GLASS_VARIANTS : Object.keys(variants)) {
+      if (!(variant in variants)) throw new Error(`no glass variant "${variant}" (${Object.keys(variants).join(", ")})`);
+      await evaluate((rules) => {
+        window.__dinGlassSheet ??= new CSSStyleSheet();
+        window.__dinGlassSheet.replaceSync(rules);
+        if (!document.adoptedStyleSheets.includes(window.__dinGlassSheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, window.__dinGlassSheet];
+      }, variants[variant]);
+      await moveTo(VIEWPORT.width - 200, 300);
+      await sleep(500);
+      GLASS_SHOTS = variant;
+      runs[variant] = {};
+      for (const [phase, run] of Object.entries(phases)) {
+        if (GLASS_PHASES.length && !GLASS_PHASES.includes(phase)) continue;
+        const { result, threads } = await trace(() => processCost(() => measure(() => framePacing(run))));
+        const { cost: main, result: paced } = result.result;
+        runs[variant][phase] = { ...paced.frames, mainCpuPct: main.cpuPct, stylePct: main.stylePct, styleRecalcs: main.styleRecalcs, ...result.processes, threads };
+        const r = runs[variant][phase];
+        console.log(
+          `  ${variant.padEnd(9)} ${phase.padEnd(13)} ${String(r.fps).padStart(5)} fps  p95 ${String(r.p95).padStart(3)}ms  main ${String(r.mainCpuPct).padStart(5)}%  renderer ${String(r.rendererCpuPct).padStart(5)}%  gpu process ${String(r.gpuProcessCpuPct).padStart(5)}%${r.gpuPct === undefined ? "" : `  gpu ${String(r.gpuPct).padStart(5)}%`}`,
+        );
+      }
+      await screenshot(`glass-${variant}`);
+    }
+    save("glass", { runs, errors: errors.slice(mark) });
   }
 
   // Raising windows, first among the light apps, then with the App Store's

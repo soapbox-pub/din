@@ -229,11 +229,11 @@
    content pane stays solid), of the same material as the glass. Maximized or
    snapped it eases, with the window's 250ms, to the near-opaque surface the
    strip behind the menu bar has (windowSurface.ts), so the two match. No
-   lens: over a window's whole size it halved the frame rate of a drag. */
+   lens: over a window's whole size it halved the frame rate of a drag. Its
+   light is a layer of its own (below). */
 @layer components {
   .window-glass {
     background-color: color-mix(in oklab, var(--window) 76%, transparent);
-    background-image: radial-gradient(600px circle at var(--glass-x, 25%) var(--glass-y, -20%), color-mix(in oklab, var(--glass-sheen) 60%, transparent), transparent 65%);
     -webkit-backdrop-filter: blur(20px) saturate(1.8) brightness(1.04);
     backdrop-filter: blur(20px) saturate(1.8) brightness(1.04);
     box-shadow:
@@ -257,6 +257,9 @@
     -webkit-backdrop-filter: blur(24px);
     backdrop-filter: blur(24px);
     box-shadow: none;
+  }
+  :root [data-window-flush] > .window-glass::before {
+    content: none;
   }
   @container style(--glass-material: solid) {
     :root .window-glass,
@@ -308,10 +311,10 @@
 
 /* The Dock's Modern backdrop and the taskbar (bar-glass) of Liquid glass:
    the theme's tint, saturated and lit, a rim of light and the pointer's
-   sheen; the Dock's rim bends what's behind it too (bar-glass-lens), the
-   taskbar's, as long as the screen, doesn't. Unlayered, so it wins over
-   their own utilities, which are what Frosted keeps; Solid is Reduce
-   transparency's, as for everything else. */
+   sheen; the Dock's rim bends what's behind it too (bar-glass-lens), and its
+   light is a layer of its own (below); the taskbar's, as long as the screen,
+   doesn't. Unlayered, so it wins over their own utilities, which are what
+   Frosted keeps; Solid is Reduce transparency's, as for everything else. */
 @container style(--glass-material: liquid) {
   .bar-glass {
     border-color: var(--glass-rim);
@@ -327,6 +330,7 @@
       inset 0 0 22px -8px var(--glass-glow);
   }
   .bar-glass.bar-glass-lens {
+    background-image: linear-gradient(to bottom, color-mix(in oklab, var(--glass-sheen) 40%, transparent), transparent 45%);
     box-shadow:
       inset 0 1px 0 var(--glass-highlight),
       inset 0 -1px 1px color-mix(in oklab, var(--glass-highlight) 25%, transparent),
@@ -344,16 +348,80 @@
    Terminal on its frosted window): the sheen along its top and the spotlight
    where the pointer is, which the page's own followPointer moves, since the
    desktop drawing the window can't see the pointer over the page. Under the
-   page's content, as window-glass's is; nothing under Frosted or Solid. */
+   page's content, as window-glass's is, the spotlight a layer of its own
+   (below); nothing under Frosted or Solid. */
 @container style(--glass-material: liquid) {
   .glass-sheen {
-    background-image:
-      radial-gradient(600px circle at var(--glass-x, 25%) var(--glass-y, -20%), color-mix(in oklab, var(--glass-sheen) 60%, transparent), transparent 65%),
-      linear-gradient(to bottom, color-mix(in oklab, var(--glass-sheen) 35%, transparent), transparent 96px);
+    position: relative;
+    isolation: isolate;
+    background-image: linear-gradient(to bottom, color-mix(in oklab, var(--glass-sheen) 35%, transparent), transparent 96px);
     box-shadow:
       inset 0 1px 0 var(--glass-highlight),
       inset 0 0 0 1px color-mix(in oklab, var(--glass-rim) 50%, transparent),
       inset 0 0 28px -10px var(--glass-glow);
+  }
+}
+
+/* Liquid glass's light where the glass is big (a window's frame, the Dock's
+   backdrop, a page that is glass itself): a disc of light on a layer of its
+   own, which the compositor slides to where the pointer is (--glass-x and
+   --glass-y, the surface's own, set by liquidGlass.ts), clipped to the
+   surface. As a gradient in the surface's own background, every move of the
+   pointer had the whole surface painted again, a window's glass and its
+   shadows at the window's size; this way nothing is. --light is the disc's
+   radius, where that gradient faded out, and until the pointer first moves
+   (--glass-unlit, which liquidGlass.ts then sets to 0) it rests at
+   --light-rest-x/y of the surface. Its whites lie over the surface's own
+   rim and glow, which are white too, so the order they're laid in shows
+   nowhere. A surface's coordinates are its own, not its children's. */
+@property --glass-x {
+  syntax: '*';
+  inherits: false;
+}
+@property --glass-y {
+  syntax: '*';
+  inherits: false;
+}
+@property --glass-unlit {
+  syntax: '*';
+  inherits: false;
+}
+@layer components {
+  @container style(--glass-material: liquid) {
+    .window-glass,
+    .bar-glass-lens,
+    .glass-sheen {
+      overflow: clip;
+    }
+    .window-glass::before,
+    .bar-glass-lens::before,
+    .glass-sheen::before {
+      --glass-x: inherit;
+      --glass-y: inherit;
+      --glass-unlit: inherit;
+      --light: 390px;
+      --light-rest-x: 25%;
+      --light-rest-y: -20%;
+      --light-color: color-mix(in oklab, var(--glass-sheen) 60%, transparent);
+      content: '';
+      position: absolute;
+      z-index: -1;
+      top: calc(var(--light-rest-y) * var(--glass-unlit, 1));
+      left: calc(var(--light-rest-x) * var(--glass-unlit, 1));
+      width: calc(var(--light) * 2);
+      height: calc(var(--light) * 2);
+      margin: calc(var(--light) * -1) 0 0 calc(var(--light) * -1);
+      background-image: radial-gradient(closest-side, var(--light-color), transparent);
+      translate: var(--glass-x, 0px) var(--glass-y, 0px);
+      will-change: translate;
+      pointer-events: none;
+    }
+    .bar-glass-lens::before {
+      --light: 234px;
+      --light-rest-x: 50%;
+      --light-rest-y: -40%;
+      --light-color: var(--glass-sheen);
+    }
   }
 }
 
