@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import { ArrowDownToLine, Copy, Globe, Info, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
+import { ArrowDownToLine, Copy, Globe, Info, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
@@ -12,14 +12,12 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import {
   useFlatpakActions,
   useFlatpakBusy,
-  useFlatpakCatalog,
   useFlatpakStatus,
   useInstalledFlatpaks,
 } from '@/hooks/useNostrFlatpaks';
@@ -28,9 +26,12 @@ import { useToast } from '@/hooks/useToast';
 import { formatBytes } from '@/lib/fs';
 import { NATIVE_APP_PREFIX } from '@/lib/nativeApps';
 import { flatpakNaddr, isOutdated, progressLabel, type FlatpakApp } from '@/lib/nostrFlatpaks';
-import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
+import { sanitizeImageUrl, sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
+
+// react-markdown is only loaded for a page with release notes.
+const ReleaseNotes = lazy(() => import('@/components/desktop/apps/appstore/ReleaseNotes'));
 
 /**
  * The App Store's Linux apps: NIP-82 apps whose releases carry a Flatpak
@@ -79,30 +80,76 @@ function usePublisher(pubkey: string, enabled = true) {
   };
 }
 
+/**
+ * How far an install has got, as a ring the pill's height, as the App Store
+ * on a phone shows it: filling while the share is known, spinning while
+ * it isn't. What it's doing is its tooltip and accessible name, or beside
+ * it with `withLabel`.
+ */
+function ProgressRing({ app, label, percent, withLabel }: { app: FlatpakApp; label: string; percent?: number; withLabel?: boolean }) {
+  const r = 13;
+  const circumference = 2 * Math.PI * r;
+  const known = percent !== undefined;
+  return (
+    <span className="relative z-10 flex shrink-0 items-center gap-2">
+      <span
+        role="progressbar"
+        aria-label={`${label}: ${app.name}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={known ? percent : undefined}
+        title={label}
+        className="grid size-8 place-items-center rounded-full bg-secondary"
+      >
+        <svg viewBox="0 0 32 32" className={cn('size-7 -rotate-90', !known && 'motion-safe:animate-spin')} aria-hidden>
+          <circle cx="16" cy="16" r={r} fill="none" strokeWidth="3" className="stroke-foreground/10" />
+          <circle
+            cx="16"
+            cy="16"
+            r={r}
+            fill="none"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - (known ? Math.max(percent, 2) : 25) / 100)}
+            className="stroke-ink-accent transition-[stroke-dashoffset] duration-300 motion-reduce:transition-none"
+          />
+        </svg>
+      </span>
+      {withLabel && <span className="text-sm tabular-nums text-muted-foreground" aria-hidden>{label}</span>}
+    </span>
+  );
+}
+
 /** Get, Update, Open, or how far it's got. */
-export function FlatpakPill({ app, className }: { app: FlatpakApp; className?: string }) {
+export function FlatpakPill({ app, className, withLabel }: { app: FlatpakApp; className?: string; withLabel?: boolean }) {
   const state = useFlatpakState(app);
-  const busy = !!state.progress;
-  const label = busy
-    ? progressLabel(state.progress, !!state.installed)
-    : state.outdated ? 'Update' : state.installed ? 'Open' : 'Get';
+  if (state.progress) {
+    return (
+      <ProgressRing
+        app={app}
+        label={progressLabel(state.progress, !!state.installed)}
+        percent={state.progress.percent}
+        withLabel={withLabel}
+      />
+    );
+  }
+  const label = state.outdated ? 'Update' : state.installed ? 'Open' : 'Get';
   return (
     <Button
       size="sm"
       variant="secondary"
-      onClick={busy ? undefined : state.installed && !state.outdated ? state.open : state.get}
+      onClick={state.installed && !state.outdated ? state.open : state.get}
       disabled={!state.installed && !state.canInstall}
       title={state.canInstall ? (state.installed ? undefined : app.asset.size ? `Downloads ${formatBytes(app.asset.size)}` : undefined) : 'Linux apps install in the Din desktop app, with Flatpak'}
-      aria-disabled={busy}
       aria-label={`${label} ${app.name}`}
       className={cn(
-        'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold tabular-nums',
+        'relative z-10 h-8 shrink-0 rounded-full px-5 font-semibold',
         'bg-secondary text-ink-accent hover:bg-secondary/80',
-        busy && 'cursor-default text-muted-foreground hover:bg-secondary',
         className,
       )}
     >
-      {busy ? <Loader2 className="animate-spin" aria-hidden /> : state.outdated ? <RefreshCw aria-hidden /> : null}
+      {state.outdated ? <RefreshCw aria-hidden /> : null}
       {label}
     </Button>
   );
@@ -163,7 +210,7 @@ function FlatpakIcon({ app, className }: { app: FlatpakApp; className?: string }
 }
 
 /** One app's card: icon, name, publisher, summary, and its pill. */
-function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app: FlatpakApp) => void }) {
+export function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app: FlatpakApp) => void }) {
   const [ref, seen] = useSeen<HTMLDivElement>();
   const publisher = usePublisher(app.pubkey, seen);
   return (
@@ -179,8 +226,8 @@ function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app: Flatp
           <FlatpakIcon app={app} className="size-14 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold" title={app.name}>{app.name}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {[publisher.name ? `by ${publisher.name}` : null, 'Linux app'].filter(Boolean).join(' · ')}
+            <p className="truncate text-xs text-muted-foreground" title={publisher.name ?? undefined}>
+              {publisher.name ? `by ${publisher.name}` : app.identifier}
             </p>
           </div>
           <FlatpakPill app={app} />
@@ -191,59 +238,14 @@ function FlatpakCard({ app, onSelect }: { app: FlatpakApp; onSelect: (app: Flatp
   );
 }
 
-export function FlatpakGrid({ apps, onSelect }: { apps: FlatpakApp[]; onSelect: (app: FlatpakApp) => void }) {
-  return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
-      {apps.map((app) => (
-        <FlatpakCard key={`${app.pubkey}:${app.identifier}`} app={app} onSelect={onSelect} />
-      ))}
-    </div>
-  );
-}
-
-function FlatpakGridSkeleton() {
-  return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
-      {Array.from({ length: 2 }, (_, i) => (
-        <div key={i} className="flex flex-col gap-3 rounded-xl bg-card clay p-4">
-          <div className="flex items-center gap-3">
-            <Skeleton className="size-14 shrink-0 rounded-2xl" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <Skeleton className="h-4 w-3/5" />
-              <Skeleton className="h-3 w-4/5" />
-            </div>
-            <Skeleton className="h-8 w-16 rounded-full" />
-          </div>
-          <Skeleton className="h-3.5 w-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const SECTION_TITLE = 'Linux Apps';
-const SECTION_SUBTITLE = 'Desktop apps published on Nostr, installed as Flatpaks.';
-
-/** The Apps section's Linux apps, where this computer can install them. */
-export function FlatpakAppsSection({ onSelect }: { onSelect: (app: FlatpakApp) => void }) {
-  const status = useFlatpakStatus();
-  const catalog = useFlatpakCatalog();
-  if (!status.data?.available) return null;
-  if (!catalog.isPending && !catalog.data?.length) return null;
-  return (
-    <section className="flex flex-col gap-4" aria-label={SECTION_TITLE}>
-      <SectionHeader title={SECTION_TITLE} subtitle={SECTION_SUBTITLE} />
-      {catalog.isPending ? <FlatpakGridSkeleton /> : <FlatpakGrid apps={catalog.data ?? []} onSelect={onSelect} />}
-    </section>
-  );
-}
-
 /** A Linux app's page: what it is, its newest release, and getting, updating, opening or removing it. */
 export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
   const publisher = usePublisher(app.pubkey);
   const state = useFlatpakState(app);
   const openUrl = useOpenUrl();
   const ref = useRef<HTMLDivElement>(null);
+  // Only a web address opens; an ngit nostr:// one shows as text.
+  const sourceUrl = app.repository && /^https?:\/\//i.test(app.repository) ? sanitizeNavigationUrl(app.repository) : null;
   const released = new Date(app.release.createdAt * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 
   // Take focus so Escape goes back without a click first.
@@ -251,7 +253,7 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
 
   return (
     <div ref={ref} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none" aria-label={`${app.name} details`}>
-      <div className="border-b border-border">
+      <div>
         <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4 @2xl:flex-row @2xl:items-center @2xl:gap-6 @2xl:p-6">
           <FlatpakIcon app={app} className="size-24 shrink-0 text-4xl drop-shadow-md @2xl:size-28" />
           <div className="flex min-w-0 flex-1 flex-col gap-3">
@@ -268,7 +270,7 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <FlatpakPill app={app} />
+              <FlatpakPill app={app} withLabel />
               {state.installed && (
                 <Button size="sm" variant="ghost" onClick={state.remove} disabled={!!state.progress} className="h-8 rounded-full px-4">
                   <Trash2 aria-hidden />
@@ -328,9 +330,9 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
         {app.release.notes && (
           <section className="flex flex-col gap-4" aria-label="What’s new">
             <SectionHeader title="What’s New" subtitle={`Version ${app.release.version} · ${released}`} />
-            <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-              {app.release.notes.length > 2000 ? `${app.release.notes.slice(0, 2000)}…` : app.release.notes}
-            </p>
+            <Suspense fallback={<p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{app.release.notes.slice(0, 400)}</p>}>
+              <ReleaseNotes text={app.release.notes.length > 6000 ? `${app.release.notes.slice(0, 6000)}…` : app.release.notes} />
+            </Suspense>
           </section>
         )}
 
@@ -343,7 +345,25 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
             <InfoRow label="Kind">Linux app (Flatpak)</InfoRow>
             <InfoRow label="Flatpak id"><span className="font-mono text-xs">{app.identifier}</span></InfoRow>
             {app.license && <InfoRow label="License">{app.license}</InfoRow>}
-            {app.repository && <InfoRow label="Source code"><span className="font-mono text-xs" title={app.repository}>{app.repository}</span></InfoRow>}
+            {app.repository && (
+              <InfoRow label="Source code">
+                {sourceUrl ? (
+                  <a
+                    href={sourceUrl}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      openUrl(sourceUrl);
+                    }}
+                    title={sourceUrl}
+                    className="rounded-sm font-mono text-xs text-ink-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    {app.repository}
+                  </a>
+                ) : (
+                  <span className="font-mono text-xs" title={app.repository}>{app.repository}</span>
+                )}
+              </InfoRow>
+            )}
             <InfoRow label="Publisher">{publisher.name ?? 'Unknown'}</InfoRow>
             <InfoRow label="Released">{released}</InfoRow>
           </dl>

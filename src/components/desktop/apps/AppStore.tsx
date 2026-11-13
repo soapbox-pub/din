@@ -36,12 +36,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
 import { FolderAppDetail, FolderAppsSection } from '@/components/desktop/apps/appstore/FolderApps';
-import {
-  FlatpakAppDetail,
-  FlatpakAppsSection,
-  FlatpakGrid,
-} from '@/components/desktop/apps/appstore/FlatpakApps';
-import { useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
+import { FlatpakAppDetail, FlatpakCard } from '@/components/desktop/apps/appstore/FlatpakApps';
+import { useFlatpakCatalog, useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
 import type { FlatpakApp } from '@/lib/nostrFlatpaks';
 import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
 import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
@@ -60,9 +56,12 @@ import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyl
 import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
+const NO_LINUX_APPS: FlatpakApp[] = [];
 
 /** Opens a site's detail page; provided by AppStore to every card. */
 const SelectAppContext = createContext<(app: StoreApp) => void>(() => {});
+/** Opens a Linux app's detail page; provided by AppStore to every grid. */
+const SelectFlatpakContext = createContext<(app: FlatpakApp) => void>(() => {});
 
 type StoreTab = 'apps' | 'themes' | 'cursors' | 'icons' | 'skins';
 
@@ -206,6 +205,8 @@ export function AppStore({ params }: AppComponentProps) {
 
   const searchPending = lookup.isAddress ? lookup.isLoading : catalog.isLoading;
   const linuxMatches = useFlatpakMatches(tab === 'apps' ? rawQuery : '');
+  const linuxCatalog = useFlatpakCatalog(tab === 'apps');
+  const linuxApps = linuxCatalog.data ?? NO_LINUX_APPS;
 
   const refreshing = onThemes
     ? themes.refreshing
@@ -350,6 +351,7 @@ export function AppStore({ params }: AppComponentProps) {
 
   return (
     <SelectAppContext.Provider value={setSelected}>
+      <SelectFlatpakContext.Provider value={setSelectedFlatpak}>
       {frame(
       <div
         className="flex min-h-0 flex-1 flex-col"
@@ -370,56 +372,44 @@ export function AppStore({ params }: AppComponentProps) {
         <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp || selectedFlatpak) && 'hidden')}>
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {searching ? (
-              <>
-                {linuxMatches.apps.length > 0 && (
-                  <section className="flex flex-col gap-4" aria-label="Linux apps found">
-                    <SectionHeader title={linuxMatches.isAddress ? 'Linux app at this address' : 'Linux Apps'} />
-                    <FlatpakGrid apps={linuxMatches.apps} onSelect={setSelectedFlatpak} />
-                  </section>
+              <section className="flex flex-col gap-4" aria-label="Search results">
+                <SectionHeader
+                  title={linuxMatches.isAddress || lookup.isAddress ? 'App at this address' : `Results for “${rawQuery}”`}
+                />
+                {searchMatches.length > 0 || linuxMatches.apps.length > 0 ? (
+                  // A pasted address asks for that one app, so it shows
+                  // whether or not the store would list it.
+                  <CatalogGrid apps={searchMatches} linux={linuxMatches.apps} />
+                ) : searchPending || linuxMatches.pending ? (
+                  <CatalogSkeleton />
+                ) : (
+                  <EmptyState
+                    message={
+                      lookup.isAddress || linuxMatches.isAddress
+                        ? 'No app is published at that address on your relays.'
+                        : `No apps match “${rawQuery}”. You can also paste an app’s address to find it.`
+                    }
+                  />
                 )}
-                {/* A Linux app's address names no site, so only the app shows for it. */}
-                {!(linuxMatches.isAddress && (linuxMatches.apps.length > 0 || linuxMatches.pending)) && (searchMatches.length > 0 || linuxMatches.apps.length === 0) && (
-                  <section className="flex flex-col gap-4" aria-label="Search results">
-                    <SectionHeader
-                      title={lookup.isAddress ? 'Site at this address' : `Results for “${rawQuery}”`}
-                    />
-                    {searchMatches.length > 0 ? (
-                      // A pasted address asks for that one site, so it shows
-                      // whether or not the store would list it.
-                      <CatalogGrid apps={searchMatches} />
-                    ) : searchPending || linuxMatches.pending ? (
-                      <CatalogSkeleton />
-                    ) : (
-                      <EmptyState
-                        message={
-                          lookup.isAddress
-                            ? 'No app is published at that address on your relays.'
-                            : `No apps match “${rawQuery}”. You can also paste an app’s address to find it.`
-                        }
-                      />
-                    )}
-                  </section>
-                )}
-              </>
+              </section>
             ) : (
               <>
                 <FeaturedSection />
-                <FlatpakAppsSection onSelect={setSelectedFlatpak} />
                 <FolderAppsSection onChose={setFolderApp} />
                 <section className="flex flex-col gap-4" aria-label="All apps">
                   <SectionHeader
                     title="All Apps"
-                    subtitle="Sites from Din’s publishers and the people you follow."
+                    subtitle="Apps from Din’s publishers and the people you follow."
                   />
                   {catalog.isLoading ? (
                     <CatalogSkeleton />
-                  ) : catalog.isError ? (
+                  ) : catalog.isError && !linuxApps.length ? (
                     <EmptyState message="Could not load the app catalog. Check your relay connections and try refreshing." />
-                  ) : catalog.apps.length === 0 && !catalog.hasMore ? (
+                  ) : catalog.apps.length === 0 && !catalog.hasMore && !linuxApps.length ? (
                     <EmptyState message="No apps found on your relays yet. Try refreshing, or add more relays in Settings." />
                   ) : (
                     <>
-                      <CatalogGrid apps={catalog.apps} />
+                      <CatalogGrid apps={catalog.apps} linux={linuxApps} complete={!catalog.hasMore} />
                       {catalog.hasMore && (
                         <MoreSentinel
                           onReached={catalog.loadMore}
@@ -435,6 +425,7 @@ export function AppStore({ params }: AppComponentProps) {
         </div>
       </div>,
       )}
+      </SelectFlatpakContext.Provider>
     </SelectAppContext.Provider>
   );
 }
@@ -612,12 +603,27 @@ const ShelfCard = memo(function ShelfCard({ app }: { app: StoreApp }) {
 });
 
 /** The catalog's cards. */
-function CatalogGrid({ apps }: { apps: StoreApp[] }) {
+function CatalogGrid({ apps, linux = [], complete = true }: {
+  apps: StoreApp[];
+  /** Linux apps (FlatpakApps), each placed before the first site published before its release. */
+  linux?: FlatpakApp[];
+  /** Whether `apps` is the whole list; until it is, Linux apps older than all of it wait for the next page. */
+  complete?: boolean;
+}) {
+  const selectLinux = useContext(SelectFlatpakContext);
+  const cards: ReactNode[] = [];
+  let next = 0;
+  const flatpakCard = (app: FlatpakApp) => (
+    <FlatpakCard key={`linux:${app.pubkey}:${app.identifier}`} app={app} onSelect={selectLinux} />
+  );
+  for (const app of apps) {
+    while (next < linux.length && linux[next].release.createdAt >= app.createdAt) cards.push(flatpakCard(linux[next++]));
+    cards.push(<StoreAppCard key={app.host} app={app} />);
+  }
+  if (complete) while (next < linux.length) cards.push(flatpakCard(linux[next++]));
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
-      {apps.map((app) => (
-        <StoreAppCard key={app.host} app={app} />
-      ))}
+      {cards}
     </div>
   );
 }
