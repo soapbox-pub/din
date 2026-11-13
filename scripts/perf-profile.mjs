@@ -43,7 +43,11 @@
  *                filter at all), so a part's cost is the difference from
  *                "liquid". Counts every process, not the main thread alone:
  *                the renderers' CPU (raster and the compositor too), the GPU
- *                process's, and with --gpu its time on the GPU.
+ *                process's, and with --gpu its time on the GPU. After each
+ *                phase, every process's memory too (`memory` in glass.json:
+ *                PSS, the GPU's own with --gpu, and Chromium's account of
+ *                its tiles, textures and image caches), which is where what
+ *                a phase leaves behind shows.
  *                --glass-variants and --glass-phases name the ones to run
  *   switch       four light windows open, click each title bar in turn for
  *                --rounds (6) rounds: pointer-down to next frame per raise
@@ -757,8 +761,12 @@ function sampleGpuBusy() {
   };
 }
 
-/** Nanoseconds process `pid` has had on the GPU's engines (the kernel's DRM fdinfo, one count per client), or null where it has no GPU. */
-function gpuEngineNs(pid) {
+/**
+ * The kernel's account of process `pid` on the GPU (DRM fdinfo, each client
+ * counted once): nanoseconds on its engines and KiB of the GPU's memory it
+ * holds, or null where it has no GPU.
+ */
+function gpuUse(pid) {
   const clients = new Map();
   let fds = [];
   try {
@@ -777,9 +785,12 @@ function gpuEngineNs(pid) {
     if (!client) continue;
     let ns = 0;
     for (const m of text.matchAll(/^drm-engine-\w+:\s*(\d+) ns/gm)) ns += Number(m[1]);
-    clients.set(client, ns);
+    let kb = 0;
+    for (const m of text.matchAll(/^drm-memory-(?:vram|gtt):\s*(\d+) (KiB|MiB)/gm)) kb += Number(m[1]) * (m[2] === "MiB" ? 1024 : 1);
+    clients.set(client, { ns, kb });
   }
-  return clients.size ? [...clients.values()].reduce((a, b) => a + b, 0) : null;
+  if (!clients.size) return null;
+  return [...clients.values()].reduce((a, b) => ({ ns: a.ns + b.ns, kb: a.kb + b.kb }));
 }
 
 /** CPU seconds so far of each kind of the browser's processes, every thread of them, and the GPU process's time on the GPU. */
@@ -790,9 +801,78 @@ async function processTimes() {
   for (const p of processInfo) {
     const kind = p.type === "GPU" ? "gpu" : p.type;
     if (kind in cpu) cpu[kind] += p.cpuTime;
-    if (p.type === "GPU") gpuNs = gpuEngineNs(p.id);
+    if (p.type === "GPU") gpuNs = gpuUse(p.id)?.ns ?? null;
   }
   return { cpu, gpuNs };
+}
+
+/**
+ * The memory of each kind of the browser's processes, in MB: PSS (a shared
+ * page split between the processes sharing it), and what the GPU process
+ * holds of the GPU's own (`gpuMB`, with --gpu: textures, a layer's tiles
+ * among them, which no process's PSS counts).
+ */
+async function processMemory() {
+  await cdp.send("HeapProfiler.collectGarbage");
+  const { processInfo } = await browser.send("SystemInfo.getProcessInfo");
+  const kb = { renderer: 0, gpu: 0, browser: 0 };
+  let gpuKb = null;
+  for (const p of processInfo) {
+    const kind = p.type === "GPU" ? "gpu" : p.type;
+    if (!(kind in kb)) continue;
+    try {
+      kb[kind] += Number(/^Pss:\s*(\d+) kB/m.exec(readFileSync(`/proc/${p.id}/smaps_rollup`, "utf8"))?.[1] ?? 0);
+    } catch {
+      // gone since it was listed
+    }
+    if (p.type === "GPU") gpuKb = gpuUse(p.id)?.kb ?? null;
+  }
+  const mb = (v) => Math.round(v / 102.4) / 10;
+  return { rendererMB: mb(kb.renderer), gpuProcessMB: mb(kb.gpu), browserMB: mb(kb.browser), ...(gpuKb === null ? {} : { gpuMB: mb(gpuKb) }), allocators: await allocators() };
+}
+
+/**
+ * Chromium's own account of what its compositing holds (a memory-infra dump,
+ * as chrome://tracing takes one), in MB by kind of process: each allocator
+ * under cc, gpu and skia, where layers' tiles and textures are counted.
+ */
+async function allocators() {
+  const events = [];
+  const collect = ({ value }) => events.push(...value);
+  browser.on("Tracing.dataCollected", collect);
+  const done = new Promise((res) => {
+    const fin = () => {
+      browser.off("Tracing.tracingComplete", fin);
+      res();
+    };
+    browser.on("Tracing.tracingComplete", fin);
+  });
+  await browser.send("Tracing.start", {
+    transferMode: "ReportEvents",
+    traceConfig: { includedCategories: ["disabled-by-default-memory-infra"], memoryDumpConfig: { triggers: [] } },
+  });
+  await browser.send("Tracing.requestMemoryDump", { deterministic: true, levelOfDetail: "detailed" });
+  await browser.send("Tracing.end");
+  await done;
+  browser.off("Tracing.dataCollected", collect);
+
+  const names = new Map();
+  for (const e of events) if (e.ph === "M" && e.name === "process_name") names.set(e.pid, e.args.name);
+  const out = {};
+  for (const e of events) {
+    const dumps = e.ph === "v" ? e.args?.dumps?.allocators : null;
+    if (!dumps) continue;
+    const kind = names.get(e.pid) ?? "?";
+    for (const [name, dump] of Object.entries(dumps)) {
+      const parts = name.split("/");
+      if (!["cc", "gpu", "skia"].includes(parts[0]) || parts.length > 2) continue;
+      const bytes = parseInt(dump.attrs?.size?.value ?? "0", 16);
+      if (!bytes) continue;
+      out[kind] ??= {};
+      out[kind][name] = Math.round(((out[kind][name] ?? 0) * 1048576 + bytes) / 104857.6) / 10;
+    }
+  }
+  return out;
 }
 
 /**
@@ -1407,13 +1487,15 @@ try {
         if (GLASS_PHASES.length && !GLASS_PHASES.includes(phase)) continue;
         const { result, threads } = await trace(() => processCost(() => measure(() => framePacing(run))));
         const { cost: main, result: paced } = result.result;
-        runs[variant][phase] = { ...paced.frames, mainCpuPct: main.cpuPct, stylePct: main.stylePct, styleRecalcs: main.styleRecalcs, ...result.processes, threads };
+        runs[variant][phase] = { ...paced.frames, mainCpuPct: main.cpuPct, stylePct: main.stylePct, styleRecalcs: main.styleRecalcs, ...result.processes, memory: await processMemory(), threads };
         const r = runs[variant][phase];
         console.log(
           `  ${variant.padEnd(9)} ${phase.padEnd(13)} ${String(r.fps).padStart(5)} fps  p95 ${String(r.p95).padStart(3)}ms  main ${String(r.mainCpuPct).padStart(5)}%  renderer ${String(r.rendererCpuPct).padStart(5)}%  gpu process ${String(r.gpuProcessCpuPct).padStart(5)}%${r.gpuPct === undefined ? "" : `  gpu ${String(r.gpuPct).padStart(5)}%`}`,
         );
       }
       await screenshot(`glass-${variant}`);
+      const memory = Object.values(runs[variant]).at(-1)?.memory;
+      if (memory) console.log(`  ${variant.padEnd(9)} memory         renderers ${memory.rendererMB} MB  gpu process ${memory.gpuProcessMB} MB${memory.gpuMB === undefined ? "" : `  gpu ${memory.gpuMB} MB`}`);
     }
     save("glass", { runs, errors: errors.slice(mark) });
   }

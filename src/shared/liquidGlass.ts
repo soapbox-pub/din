@@ -17,21 +17,51 @@ export const LIQUID_FILTER_ID = 'din-liquid';
  */
 function edgeRamp(channel: 'r' | 'g', rim: [number, number]): string {
   const c = (v: number) => (channel === 'r' ? `rgb(${v},0,0)` : `rgb(0,${v},0)`);
-  const end = channel === 'r' ? "x2='1' y2='0'" : "x2='0' y2='1'";
   const [near, far] = rim;
-  const stops = [
-    [0, 255],
-    [near, 196],
-    [far, 128],
-    [1 - far, 128],
-    [1 - near, 60],
-    [1, 0],
-  ]
-    .map(([at, v]) => `<stop offset='${at}' stop-color='${c(v)}'/>`)
-    .join('');
+  const stops: [at: number, color: string][] = [
+    [0, c(255)],
+    [near, c(196)],
+    [far, c(128)],
+    [1 - far, c(128)],
+    [1 - near, c(60)],
+    [1, c(0)],
+  ];
+  return rampPixels(channel, stops) ?? rampDrawing(channel, stops);
+}
+
+/** The ramp's length in pixels: enough that stretched over a panel it's the gradient itself, to the 8-bit level. */
+const RAMP_PX = 1024;
+
+/**
+ * The ramp as pixels, a line of them stretched over the panel. A drawing (an
+ * SVG, below) is drawn again, at the panel's size and into a bitmap of its
+ * own, every time a panel with the lens is painted, which while the pointer
+ * moves in a menu is every frame: hundreds of bitmaps a few seconds later,
+ * tens of megabytes kept by the page's image cache. Pixels are decoded once.
+ */
+function rampPixels(channel: 'r' | 'g', stops: [at: number, color: string][]): string | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = channel === 'r' ? RAMP_PX : 1;
+    canvas.height = channel === 'r' ? 1 : RAMP_PX;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const gradient = ctx.createLinearGradient(0, 0, channel === 'r' ? RAMP_PX : 0, channel === 'r' ? 0 : RAMP_PX);
+    for (const [at, color] of stops) gradient.addColorStop(at, color);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
+/** The ramp as a drawing, where there's no canvas to make pixels on. */
+function rampDrawing(channel: 'r' | 'g', stops: [at: number, color: string][]): string {
+  const end = channel === 'r' ? "x2='1' y2='0'" : "x2='0' y2='1'";
   const svg =
     `<svg xmlns='${SVG}' viewBox='0 0 100 100' preserveAspectRatio='none'>` +
-    `<linearGradient id='g' x1='0' y1='0' ${end}>${stops}</linearGradient>` +
+    `<linearGradient id='g' x1='0' y1='0' ${end}>${stops.map(([at, color]) => `<stop offset='${at}' stop-color='${color}'/>`).join('')}</linearGradient>` +
     `<rect width='100' height='100' fill='url(#g)'/></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
