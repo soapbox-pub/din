@@ -819,6 +819,17 @@ export interface InputSelection {
   composition: { start: number; end: number } | null;
 }
 
+/**
+ * The buttons a system puts under a keyboard that it leaves to the keyboard
+ * to draw, in the bottom of its window (below `screen.availHeight`): one that
+ * puts it away (`hide()`), and one that chooses another keyboard
+ * (`showPicker()`). Where the system draws its own, they're false.
+ */
+export interface InputMethodButtons {
+  hide: boolean;
+  switcher: boolean;
+}
+
 /** A field coming into the keyboard's hands, or going: what `onFieldChange` hears. */
 export interface InputFieldChange {
   /** The field, or null when there's none (the keyboard was put away). */
@@ -910,6 +921,13 @@ export interface DinInputMethod {
   hide(): void;
   /** Let the user choose another keyboard (the system's picker). */
   showPicker(): void;
+  /**
+   * Which of the system's buttons under a keyboard are the keyboard's to
+   * draw: Din Phone, on Android 16 and later, has Android leave its hide and
+   * switch-keyboard buttons to the keyboard, so they can look like it.
+   */
+  readonly buttons: InputMethodButtons;
+  onButtonsChange(cb: (buttons: InputMethodButtons) => void): Unsubscribe;
 }
 
 // ---------------------------------------------------------------------------

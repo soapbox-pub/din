@@ -108,6 +108,13 @@ after), in order:
   a taller window (`resizeTo()`) takes only touches that began in the keys.
 - `hide()`: put the keyboard away.
 - `showPicker()`: the system's choice of keyboards.
+- `buttons` and `onButtonsChange`: which of the buttons a system puts under
+  a keyboard (one to put it away, one to choose another keyboard) it leaves
+  to the keyboard, to draw in the bottom of its window, below
+  `screen.availHeight`, where the system would have. Din Phone has Android
+  16 and later leave both to the keyboard (the switcher only while there's
+  another keyboard to switch to); before that, Android draws its own and
+  they're false.
 
 The system's own settings for keyboards (which are on) are
 `window.open('din://settings/?section=keyboard')`, and for voice typing

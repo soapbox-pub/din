@@ -32,6 +32,7 @@ import type {
   DragInfo,
   InputField,
   InputFieldChange,
+  InputMethodButtons,
   InputSelection,
   FrameStyle,
   MenuItem,
@@ -1074,6 +1075,8 @@ export function installDin(transport: Transport): void {
   const fieldChanges = new Emitter<InputFieldChange>();
   const selectionChanges = new Emitter<InputSelection>();
   const caretChanges = new Emitter<Rect | null>();
+  let inputButtons: InputMethodButtons = { hide: false, switcher: false };
+  const buttonChanges = new Emitter<InputMethodButtons>();
   const takeField = (change: InputFieldChange) => {
     inputField = change.field;
     inputSelection = change.selection;
@@ -1087,6 +1090,9 @@ export function installDin(transport: Transport): void {
       selectionChanges.emit(p.selection);
     } else if (p.type === 'inputCaret') {
       caretChanges.emit(p.caret);
+    } else if (p.type === 'inputButtons') {
+      inputButtons = p.buttons;
+      buttonChanges.emit(p.buttons);
     }
   });
   // Edits in the same task go as one, in order, when the task is done.
@@ -1168,6 +1174,10 @@ export function installDin(transport: Transport): void {
     setInset: (height) => granted(() => tell('inputMethod.setInset', { height: Math.max(0, Number(height) || 0) })),
     hide: () => granted(() => tell('inputMethod.hide')),
     showPicker: () => granted(() => tell('inputMethod.showPicker')),
+    get buttons() {
+      return inputButtons;
+    },
+    onButtonsChange: (cb) => buttonChanges.on(cb),
   };
 
   // Filled in once the desktop has granted them.
@@ -1287,6 +1297,7 @@ export function installDin(transport: Transport): void {
     assistantUnread = hello.assistantUnread;
     powerMode = hello.powerMode;
     if (hello.inputField) takeField(hello.inputField);
+    if (hello.inputButtons) inputButtons = hello.inputButtons;
     if (permissions.has('nostr') && !('nostr' in window)) {
       Object.defineProperty(window, 'nostr', { value: nostr, configurable: false });
     }

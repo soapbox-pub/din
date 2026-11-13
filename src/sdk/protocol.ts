@@ -20,6 +20,7 @@ import type {
   RelatedApplication,
   OpenWithApp,
   InputFieldChange,
+  InputMethodButtons,
   InputSelection,
   InputText,
 } from '@/sdk/din';
@@ -180,6 +181,8 @@ export interface Hello {
   formFactor?: 'desktop' | 'phone';
   /** For a keyboard (`input-method`): the field it's typing in, if there's one already. */
   inputField?: InputFieldChange;
+  /** For a keyboard: the system's buttons it draws itself; none when absent. */
+  inputButtons?: InputMethodButtons;
 }
 
 /** One edit of the field a keyboard types in: `din.inputMethod`'s, as they cross. */
@@ -367,6 +370,8 @@ export type Push =
   | { type: 'inputSelection'; selection: InputSelection }
   /** Where the field's caret is, in the keyboard's CSS pixels, while followed. */
   | { type: 'inputCaret'; caret: Rect | null }
+  /** The system's buttons under a keyboard that the keyboard draws now. */
+  | { type: 'inputButtons'; buttons: InputMethodButtons }
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
   | { type: 'assistantUnread'; sessionIDs: string[] }
