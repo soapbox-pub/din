@@ -21,12 +21,15 @@
  *                                                   # (v8, malloc, cc's images and tiles, discardable, gpu…)
  *   node scripts/perf-memory.mjs --home /tmp/h --apps none   # boot only, in a home kept between runs:
  *                                                   # the second boot and after start with caches, as a computer's do
+ *   node scripts/perf-memory.mjs --chromium disable-features=AudioServiceOutOfProcess   # under Chromium switches (a=1,b)
  *
  * The run:
  *   boot   Electron started to the desktop answering the `din` socket, then
- *          the empty desktop (logged out) once it settles
+ *          the empty desktop (logged out) once it settles (--boot-settle,
+ *          35 s), and what it uses of a core at rest
  *   apps   each app (--apps, by id) opened --loads times (3), one at a time:
- *          what it added to Din's memory, and its page's load timings. The
+ *          what it added to Din's memory, its page's load timings, and what
+ *          it uses of a core left alone. The
  *          loads are cold, warm and hot in V8's code cache's sense: the first
  *          compiles, the second has the cache written, the third reads it
  *   all    every one of them open at once
@@ -34,15 +37,31 @@
  * Memory is PSS (each shared page split between the processes sharing it),
  * from /proc/<pid>/smaps_rollup, over the Electron main process and
  * everything under it (renderers, the GPU process, Electron's utilities,
- * the native apps' Xvfb, the Assistant's OpenCode server), after a forced GC
+ * the native apps' Xvfb) and the Assistant's OpenCode server, after a forced GC
  * in every page; `electronMB` is Electron's own processes alone. An app's
- * cost is how much those grow while it's open, its renderer and what it made
- * the GPU process and main hold: the rest come and go on their own (the
- * Assistant's server, nmcli) and would drown it.
+ * cost (`addedMB`) is how much those grow while it's open, its renderer and
+ * what it made the GPU process and main hold: the rest come and go on their
+ * own (the Assistant's server, nmcli) and would drown it. Each load is
+ * measured against the desktop settled after the window before it closed
+ * (--settle, 8 s, for both: see SETTLE_MS), and the loads agree to a few MB
+ * from run to run. `ownMB` is the processes the app started and `restMB` how
+ * the ones already there changed, by kind: those go down when an app opens,
+ * since PSS now splits the pages they share (Electron's own code) with one
+ * more process. Only the sum says what the app costs.
  *
- * Din runs with a throwaway home (HOME, XDG_RUNTIME_DIR), no session bus,
- * and on its own Xvfb (software GL, so the GPU process's memory isn't a real
- * GPU's) unless --visible. It never signs in and never publishes.
+ * CPU is what the processes used of one core with nothing asked of them, over
+ * --rest seconds (5; 0 to skip): the idle desktop's by kind, and for each
+ * app's last load its own processes' and the rest's. An app that reads above
+ * zero at rest is drawing or polling when it needn't.
+ *
+ * Din runs with a throwaway home (HOME, XDG_RUNTIME_DIR, XDG_STATE_HOME), no
+ * session bus, and on its own Xvfb (software GL, so the GPU process's memory
+ * and CPU aren't a real GPU's) unless --visible. It never signs in and never
+ * publishes. The Assistant's OpenCode server detaches from Din (its own
+ * session, not under Din's process tree), so it's found by the pid it writes
+ * down, counted as `opencode`, given a port of its own so that it neither
+ * collides with a server the user is running nor is left holding OpenCode's
+ * usual port, and stopped when the run ends.
  *
  * Output: `perf-reports/memory[-<label>].json` and a summary on stdout; with
  * --compare, each number's change from that report.
@@ -67,8 +86,16 @@ const APPS = opt("apps", "calculator,text-editor,file-browser,terminal,mail,mess
   .map((s) => s.trim())
   .filter((s) => s && s !== "none");
 const LOADS = Number(opt("loads", "3"));
-const SETTLE_MS = Number(opt("settle", "6")) * 1000;
-const BOOT_SETTLE_MS = Number(opt("boot-settle", "15")) * 1000;
+// Chromium's compositor keeps a tile or a buffer it has stopped using for five
+// seconds before letting it go, in the page's process and the GPU's both: a
+// window's opening and closing leave 10 to 20 MB of them. Sooner than that a
+// sample holds them or doesn't, by luck.
+const SETTLE_MS = Number(opt("settle", "8")) * 1000;
+// The main process keeps what starting up left on its heap until V8 gets to
+// it, half a minute in: about 30 MB, which the first app measured would be
+// credited with giving back.
+const BOOT_SETTLE_MS = Number(opt("boot-settle", "35")) * 1000;
+const REST_MS = Number(opt("rest", "5")) * 1000;
 const LABEL = opt("label", "");
 const COMPARE = opt("compare", "");
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -148,8 +175,55 @@ const env = {
   XDG_CONFIG_HOME: join(home, ".config"),
   XDG_CACHE_HOME: join(home, ".cache"),
   XDG_DATA_HOME: join(home, ".local/share"),
+  // Where OpenCode says which server is running: never the user's own, which Din would attach to.
+  XDG_STATE_HOME: join(home, ".local/state"),
   DBUS_SESSION_BUS_ADDRESS: "disabled:",
 };
+
+// The Assistant's OpenCode server takes a port of its own. On OpenCode's usual
+// one it would either fail against the server the user is running (Din trying
+// again every minute, three processes and 200 MB for twenty seconds each
+// time), or, with none running, take the port and be left holding it.
+const assistantConfig = join(env.XDG_CONFIG_HOME, "opencode/service.json");
+if (!existsSync(assistantConfig)) {
+  const port = await new Promise((res, rej) => {
+    const probe = net.createServer();
+    probe.once("error", rej);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => res(port));
+    });
+  });
+  mkdirSync(dirname(assistantConfig), { recursive: true });
+  writeFileSync(assistantConfig, `${JSON.stringify({ port })}\n`);
+}
+
+/**
+ * The Assistant's server, once Din has started it: OpenCode's own word for
+ * its pid. It leaves Din's process tree (a session of its own, so that it
+ * outlives the client that started it), so it's neither found under Din nor
+ * stopped with it.
+ */
+function assistantServer() {
+  try {
+    const { pid } = JSON.parse(readFileSync(join(env.XDG_STATE_HOME, "opencode/service.json"), "utf8"));
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    return cmdline.includes("serve") && cmdline.includes("--service") ? pid : null;
+  } catch {
+    return null;
+  }
+}
+// Before the home goes, which is where its pid is.
+cleanups.unshift(() => {
+  const pid = assistantServer();
+  if (pid === null) return;
+  try {
+    // It leads a process group of its own: whatever it started goes with it.
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    // already gone
+  }
+});
 // None of the session's: DIN_NOSTRD_SOCKET would hand it the user's signer,
 // DIN_POLKIT_AGENT a second agent on the system bus, and so on.
 for (const name of Object.keys(env)) if (name.startsWith("DIN_")) delete env[name];
@@ -175,6 +249,8 @@ const din = spawn(
     "--remote-debugging-port=0",
     "--enable-unsafe-swiftshader",
     ...(display ? ["--ozone-platform=x11"] : []),
+    // --chromium a=1,b: Chromium switches to try (--a=1 --b).
+    ...opt("chromium", "").split(",").filter(Boolean).map((s) => `--${s}`),
   ],
   { cwd: root, env, stdio: ["ignore", "ignore", "pipe"], detached: true },
 );
@@ -400,8 +476,8 @@ async function pageTimings(prefix, appearMs = 30_000) {
 
 // ─── Memory ─────────────────────────────────────────────────────────────────
 
-/** Every process under `pid`, with its parent's. */
-function descendants(pid) {
+/** Every process under these, themselves included. */
+function descendants(...roots) {
   const parent = new Map();
   for (const name of readdirSync("/proc")) {
     if (!/^\d+$/.test(name)) continue;
@@ -413,7 +489,7 @@ function descendants(pid) {
       // gone
     }
   }
-  const under = new Set([pid]);
+  const under = new Set(roots);
   let grew = true;
   while (grew) {
     grew = false;
@@ -443,14 +519,21 @@ function kindOf(pid) {
 /** Electron's own processes, as opposed to what Din runs (the Assistant's server, native apps, nmcli). */
 const isElectron = (kind) => ["main", "renderer", "gpu-process", "zygote"].includes(kind) || kind.startsWith("utility:");
 
+/** Din's whole process tree, and the Assistant's server and what it runs, which left it. */
+function dinProcesses() {
+  const server = assistantServer();
+  return descendants(din.pid, ...(server === null ? [] : [server]));
+}
+
 /** PSS of Din's whole process tree and of Electron's part of it, and by kind of process. */
 function measure() {
   const byKind = {};
+  const byPid = new Map();
   let totalKB = 0;
   let electronKB = 0;
   let processes = 0;
   let electronProcesses = 0;
-  for (const pid of descendants(din.pid)) {
+  for (const pid of dinProcesses()) {
     let pss;
     let kind;
     try {
@@ -459,6 +542,7 @@ function measure() {
     } catch {
       continue;
     }
+    byPid.set(pid, { kind, kb: pss });
     totalKB += pss;
     processes++;
     if (isElectron(kind)) {
@@ -469,8 +553,52 @@ function measure() {
     k.count++;
     k.mb = Math.round((k.mb + pss / 1024) * 10) / 10;
   }
-  return { totalMB: mb(totalKB), processes, electronMB: mb(electronKB), electronProcesses, byKind };
+  const sample = { totalMB: mb(totalKB), processes, electronMB: mb(electronKB), electronProcesses, byKind };
+  // Each process's own, for telling an app's from the rest: not part of the report.
+  Object.defineProperty(sample, "byPid", { value: byPid });
+  return sample;
 }
+
+/** CPU time a process has used so far (user and system), in seconds; null once it's gone. */
+function cpuSeconds(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return (Number(fields[11]) + Number(fields[12])) / 100;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What Din's processes use of one core over `ms` with nothing asked of them,
+ * in percent: `own` (an app's processes) together, and the rest by kind.
+ */
+async function restingCpu(sample, ms, own = new Set()) {
+  const before = new Map([...sample.byPid.keys()].map((pid) => [pid, cpuSeconds(pid)]));
+  const started = performance.now();
+  await sleep(ms);
+  const seconds = (performance.now() - started) / 1000;
+  const byKind = {};
+  let ownSeconds = 0;
+  for (const [pid, was] of before) {
+    const now = cpuSeconds(pid);
+    if (was === null || now === null) continue;
+    if (own.has(pid)) ownSeconds += now - was;
+    else byKind[sample.byPid.get(pid).kind] = (byKind[sample.byPid.get(pid).kind] ?? 0) + (now - was);
+  }
+  const pct = (s) => Math.round((s / seconds) * 1000) / 10;
+  return {
+    ...(own.size > 0 ? { ownPct: pct(ownSeconds) } : {}),
+    byKind: Object.fromEntries(Object.entries(byKind).map(([kind, s]) => [kind, pct(s)]).filter(([, p]) => p > 0)),
+  };
+}
+
+const cpuLine = (byKind) =>
+  Object.entries(byKind)
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, p]) => `${kind} ${p}%`)
+    .join(", ") || "nothing";
 
 const mainInspector = inspectorUrl ? CDP.connect(await inspectorUrl) : null;
 
@@ -632,6 +760,8 @@ try {
     `▶ idle desktop: ${report.idle.totalMB} MB in ${report.idle.processes} processes, ` +
       `Electron's ${report.idle.electronMB} MB in ${report.idle.electronProcesses}`,
   );
+  report.idle.cpu = (await restingCpu(report.idle, REST_MS * 2)).byKind;
+  console.log(`  at rest, of one core: ${cpuLine(report.idle.cpu)}`);
   if (MAIN_HEAP) {
     report.idle.main = await mainHeap();
     const h = report.idle.main;
@@ -648,13 +778,14 @@ try {
   const apps = APPS.filter((a) => known.has(a));
 
   if (apps.length > 0) console.log(`\n▶ apps, ${LOADS} loads each (cold, warm, hot)`);
+  // The desktop with nothing open, settled: what each load is measured against.
+  let before = measure();
   for (const id of apps) {
     const loads = [];
     let renderer = null;
     for (let n = 0; n < LOADS; n++) {
       // The last load's renderer, by Chromium's account.
       const last = flag("breakdown") && n === LOADS - 1;
-      const before = measure();
       const opened = await openApp(id).catch((error) => {
         console.warn(`  ${error.message}`);
         return undefined;
@@ -674,20 +805,37 @@ try {
           if (after) renderer.afterPurge = { footprintMB: after.footprintMB, allocators: after.allocators };
         }
       }
+      // The app's own processes, and what the ones there before it hold now, by kind.
+      const own = new Set([...open.byPid].filter(([pid, p]) => !before.byPid.has(pid) && isElectron(p.kind)).map(([pid]) => pid));
+      const ownKB = [...own].reduce((sum, pid) => sum + open.byPid.get(pid).kb, 0);
+      const rest = {};
+      for (const [pid, p] of open.byPid) {
+        const was = before.byPid.get(pid);
+        if (was && isElectron(p.kind)) rest[p.kind] = (rest[p.kind] ?? 0) + (p.kb - was.kb);
+      }
       const { timeOrigin: _, ...loadTimings } = timings ?? {};
       loads.push({
         ...loadTimings,
         addedMB: Math.round((open.electronMB - before.electronMB) * 10) / 10,
+        ownMB: mb(ownKB),
+        restMB: Object.fromEntries(Object.entries(rest).map(([kind, kb]) => [kind, mb(kb)]).filter(([, m]) => Math.abs(m) >= 0.5)),
         processesAdded: open.electronProcesses - before.electronProcesses,
+        // Once, on the last load: three loads' worth of waiting would tell no more.
+        ...(n === LOADS - 1 && REST_MS > 0 ? { cpu: await restingCpu(open, REST_MS, own) } : {}),
       });
       await opened.close();
-      await settledSample(3000);
+      // As long as an open window gets: what closing it left takes as long to go.
+      before = await settledSample(SETTLE_MS);
     }
     if (loads.length === 0) continue;
     report.apps[id] = loads;
     if (renderer) (report.renderers ??= {})[id] = renderer;
     const row = loads.map((l) => (l.loadMs !== undefined ? `${l.loadMs} ms` : "—")).join(" / ");
-    console.log(`  ${id.padEnd(16)} +${String(loads.at(-1).addedMB).padStart(6)} MB   load ${row}`);
+    const last = loads.at(-1);
+    const others = Object.values(last.cpu?.byKind ?? {}).reduce((sum, p) => sum + p, 0);
+    const resting = last.cpu ? `   at rest ${last.cpu.ownPct ?? 0}% its own, ${Math.round(others * 10) / 10}% the rest` : "";
+    const added = loads.map((l) => l.addedMB).join(" / ");
+    console.log(`  ${id.padEnd(16)} + ${added} MB (its own ${last.ownMB})   load ${row}${resting}`);
     if (renderer) {
       const top = Object.entries(renderer.allocators).slice(0, 8).map(([k, v]) => `${k} ${v}`);
       console.log(`  ${"".padEnd(16)} its renderer: ${renderer.footprintMB} MB · ${top.join(" · ")}`);
