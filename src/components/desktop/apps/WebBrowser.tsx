@@ -2367,18 +2367,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
             onClose={closeFind}
           />
         )}
+        {/* Over the page, not beside it: taking its height would resize the
+            page, and one sized to its window (YouTube Shorts) jumps to
+            another item when its height changes. */}
+        {downloads.length > 0 && (
+          <DownloadShelf
+            downloads={downloads}
+            bridge={browserBridge}
+            onDismiss={dismissDownload}
+            onCancel={cancelDownload}
+            onClearAll={clearFinishedDownloads}
+          />
+        )}
         </div>
       </div>
-
-      {downloads.length > 0 && (
-        <DownloadShelf
-          downloads={downloads}
-          bridge={browserBridge}
-          onDismiss={dismissDownload}
-          onCancel={cancelDownload}
-          onClearAll={clearFinishedDownloads}
-        />
-      )}
 
 
       <ClearBrowsingDataDialog
@@ -4041,10 +4043,12 @@ function formatBytes(n: number): string {
 }
 
 /**
- * A Chrome-style shelf pinned to the bottom of the browser, listing this
+ * A Chrome-style shelf floating over the bottom of the page, listing this
  * window's downloads. Files are already being saved to ~/Downloads by the
  * main process; the shelf makes that visible and offers open / show-in-folder
- * once a download completes.
+ * once a download completes. It floats rather than taking a row of the
+ * window, so the page under it is never resized by a download starting or
+ * the shelf being cleared.
  */
 function DownloadShelf({
   downloads,
@@ -4060,7 +4064,11 @@ function DownloadShelf({
   onClearAll: () => void;
 }) {
   return (
-    <div role="region" aria-label="Downloads" className="flex h-14 shrink-0 items-center gap-2 bg-background px-2">
+    <div
+      role="region"
+      aria-label="Downloads"
+      className="absolute inset-x-3 bottom-3 z-30 flex h-14 items-center gap-2 rounded-2xl glass-surface px-2 text-popover-foreground shadow-lg"
+    >
       <Download className="ml-1 size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {downloads.map((d) => (
