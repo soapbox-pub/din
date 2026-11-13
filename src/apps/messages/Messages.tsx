@@ -51,6 +51,13 @@ function recipientsOf(launch: Pick<Launch, 'params'>): Recipient[] {
   });
 }
 
+/** Text shared to Messages (its manifest's `share_target`), to start a new message with. */
+function sharedText(launch: Pick<Launch, 'params'>): { key: string; text: string } | null {
+  const { shareNonce, text } = launch.params;
+  if (typeof shareNonce !== 'string' || text === undefined || text === null) return null;
+  return { key: shareNonce, text: String(text).slice(0, 10_000) };
+}
+
 function sameAddresses(a: string[], b: string[]): boolean {
   const key = (list: string[]) => list.map((x) => phoneDigits(x) || x).sort().join(',');
   return key(a) === key(b);
@@ -60,7 +67,8 @@ function sameAddresses(a: string[], b: string[]): boolean {
  * Messages: the texts on the user's phones (Settings → Phone adds them), in
  * conversations, answered from here. A launch with `{ phoneId, threadId }`
  * (a notification's click) opens that conversation; the New Message
- * shortcut starts one, and `{ to: [{ name, address }] }` one to them.
+ * shortcut starts one, and `{ to: [{ name, address }] }` one to them. Text
+ * or a link shared to it (its `share_target`) starts one with it written in.
  */
 export function Messages() {
   const phone = usePhone();
@@ -77,6 +85,7 @@ export function Messages() {
   const [deleting, setDeleting] = useState<PhoneConversation | null>(null);
   const [newFrom, setNewFrom] = useState<string | null>(null);
   const [recipients, setRecipients] = useState<Recipient[]>(() => recipientsOf(windowLaunch()));
+  const [shared, setShared] = useState(() => sharedText(windowLaunch()));
 
   const phones = useMemo(() => state.data?.phones ?? [], [state.data]);
   const phoneById = useMemo(() => new Map(phones.map((p) => [p.id, p])), [phones]);
@@ -87,6 +96,8 @@ export function Messages() {
     if (next) setSelection(next);
     const to = recipientsOf(launch);
     if (to.length || next?.kind === 'new') setRecipients(to);
+    const text = sharedText(launch);
+    if (text) setShared(text);
   });
 
   // The conversation on screen: the one picked; one started here, under the
@@ -260,6 +271,7 @@ export function Messages() {
               onFrom={setNewFrom}
               recipients={recipients}
               onRecipients={setRecipients}
+              prefill={shared}
               narrow={narrow}
               onBack={() => setSelection(null)}
               onSend={async (phoneId, text) => {
@@ -386,6 +398,7 @@ function NewMessage({
   onFrom,
   recipients,
   onRecipients,
+  prefill,
   narrow,
   onBack,
   onSend,
@@ -395,6 +408,7 @@ function NewMessage({
   onFrom: (id: string) => void;
   recipients: Recipient[];
   onRecipients: (r: Recipient[]) => void;
+  prefill: { key: string; text: string } | null;
   narrow: boolean;
   onBack: () => void;
   onSend: (phoneId: string, text: string) => Promise<void>;
@@ -438,6 +452,7 @@ function NewMessage({
         </div>
         <Composer
           draftKey="new"
+          prefill={prefill}
           disabled={recipients.length === 0 ? 'Add who it’s to.' : sendBlocked(phone)}
           placeholder="Text Message"
           onSend={(text) => (from ? onSend(from, text) : Promise.reject(new Error('No phone')))}

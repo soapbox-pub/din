@@ -62,6 +62,7 @@ import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
 import { mimeOf } from '@/lib/mime';
+import { anchorOf, requestShare, stageSharedFiles, type ShareAnchor, type ShareData } from '@/lib/share';
 import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import {
@@ -366,8 +367,10 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     // Files an app opened this one with that it could only read itself stay read-only.
     const readOnly = new Set(Array.isArray(readOnlyPaths) ? readOnlyPaths.filter((x): x is string => typeof x === 'string') : []);
     const paths = launchPaths(p);
+    // A share opens at the app's share target (src/lib/share.ts).
+    const shareAction = typeof rest.shareNonce === 'string' ? manifest.share_target?.action : undefined;
     return {
-      url: launchUrl(appId, manifest, typeof shortcut === 'string' ? shortcut : null, rest),
+      url: launchUrl(appId, manifest, typeof shortcut === 'string' ? shortcut : null, rest, shareAction),
       files: (await Promise.all(paths.map((x) => grantPaths([x], !readOnly.has(x))))).flat(),
       state: relaunch ? null : windowStateOf(windowId),
       restored: !relaunch && wasRestored(windowId),
@@ -519,6 +522,46 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       // owns the site, nostr: links to their viewer, else the Web Browser.
       'app.openUrl': ({ url }) => {
         if (typeof url === 'string') live.current.openUrl(url);
+      },
+      // navigator.share: the desktop's share sheet, pointing at what was
+      // clicked. Only just after a key or click in the window, as the web
+      // asks, so an app can't put a sheet up on its own.
+      'app.share': async ({ title, text, url, files, handles, anchor }) => {
+        const s = session.current;
+        const apps = getAppsBridge();
+        if (apps && s?.webContentsId != null) {
+          const since = await apps.sinceInput(s.webContentsId).catch(() => null);
+          if (!live.current.isTop || ((since === null || since > GESTURE_MS) && Date.now() - s.menuPickedAt > GESTURE_MS)) {
+            const error = new Error('Sharing takes a click or a key press');
+            error.name = 'NotAllowedError';
+            throw error;
+          }
+        }
+        const held = await Promise.all((Array.isArray(handles) ? handles : []).map(usableGrant));
+        if (held.some((g) => g.kind !== 'file')) throw new TypeError('Only files can be shared, not folders');
+        const staged = await stageSharedFiles(Array.isArray(files) ? files : []);
+        const clip = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.slice(0, max) : undefined);
+        const data: ShareData = {
+          title: clip(title, 1000),
+          text: clip(text, 100_000),
+          url: clip(url, 8000),
+          files: [...held.map((g) => ({ path: g.path, name: basename(g.path), type: mimeOf(basename(g.path)) })), ...staged],
+        };
+        let at: ShareAnchor | null;
+        if (anchor && [anchor.x, anchor.y, anchor.width, anchor.height].every(Number.isFinite)) {
+          const p = toDesktop(anchor);
+          at = { x: p.clientX, y: p.clientY, width: anchor.width, height: anchor.height };
+        } else {
+          // Nothing to point at: the middle of the window.
+          const r = anchorOf(container.current);
+          at = r && { x: r.x + r.width / 2, y: r.y + r.height / 3, width: 1, height: 1 };
+        }
+        const result = await requestShare(data, { anchor: at, opener: appId });
+        if (result === null) {
+          const error = new Error('The share was canceled');
+          error.name = 'AbortError';
+          throw error;
+        }
       },
       'app.saveState': ({ state }) => {
         if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);

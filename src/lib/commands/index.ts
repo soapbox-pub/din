@@ -16,6 +16,7 @@ import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, 
 import { mailArea } from './mail';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
+import { shareArea } from './share';
 import { studioArea } from './studio';
 import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
@@ -43,6 +44,7 @@ export const AREAS: readonly Area[] = [
   browserArea,
   extensionsArea,
   openArea,
+  shareArea,
   screenshotArea,
   studioArea,
   cameraArea,

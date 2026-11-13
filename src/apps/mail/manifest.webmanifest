@@ -7,6 +7,17 @@
   "shortcuts": [
     { "name": "New Message", "url": "/?new", "din": { "id": "compose" } }
   ],
+  "share_target": {
+    "action": "/?new",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "subject",
+      "text": "text",
+      "url": "url",
+      "files": [{ "name": "attachments", "accept": ["*/*"] }]
+    }
+  },
   "din": {
     "permissions": ["mail"],
     "window": { "size": { "width": 1180, "height": 760 }, "frame": "custom" },

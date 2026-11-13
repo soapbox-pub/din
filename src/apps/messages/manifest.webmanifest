@@ -7,6 +7,10 @@
   "shortcuts": [
     { "name": "New Message", "url": "/?new", "din": { "id": "new" } }
   ],
+  "share_target": {
+    "action": "/?new",
+    "params": { "text": "text" }
+  },
   "din": {
     "permissions": ["phone"],
     "window": { "size": { "width": 980, "height": 680 }, "frame": "custom" },

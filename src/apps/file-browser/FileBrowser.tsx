@@ -1156,6 +1156,16 @@ function FileBrowserTab({
     [],
   );
 
+  // Share…: Din's share sheet, the files handed over as themselves.
+  const shareFiles = useCallback((paths: string[]) => {
+    Promise.all(paths.map((p) => din.files.fromPath(p)))
+      .then((handles) => din.app.share({ title: paths.length === 1 ? paths[0].split('/').pop() : undefined }, handles))
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        setStatus({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
+      });
+  }, [din]);
+
   const copyPaths = useCallback((paths: string[]) => {
     void navigator.clipboard?.writeText(paths.join('\n'));
     setStatus({ kind: 'info', text: paths.length === 1 ? 'Copied the path' : `Copied ${paths.length} paths` });
@@ -1984,6 +1994,9 @@ function FileBrowserTab({
                           >
                             Upload to Blossom…
                           </ContextMenuItem>
+                        )}
+                        {selectedEntries.every((e) => e.kind === 'file') && (
+                          <ContextMenuItem onSelect={() => shareFiles(pathsOf(selectedNames))}>Share…</ContextMenuItem>
                         )}
                       </>
                     )}

@@ -28,6 +28,7 @@ import { SystemNotificationsHost } from './SystemNotificationsHost';
 import { MailHost } from './MailHost';
 import { PhoneHost } from './PhoneHost';
 import { QuickShareHost } from './QuickShareHost';
+import { ShareSheetHost } from './ShareSheetHost';
 import { GuestInputHost } from './GuestInputHost';
 import { MenuHost } from '@/components/desktop/MenuHost';
 import { CursorEffectsLayer } from './CursorEffectsLayer';
@@ -155,6 +156,7 @@ const SessionHosts = memo(function SessionHosts() {
       <PhoneHost />
       <MailHost />
       <QuickShareHost />
+      <ShareSheetHost />
       <GuestInputHost />
       <MenuHost />
       <CursorEffectsLayer />

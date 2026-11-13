@@ -162,12 +162,13 @@ export function manifestActions(manifest: DinManifest): { label: string; params:
 
 /**
  * A launch's `targetURL`: the app's own URL (`din://<id>/`, wherever the
- * page is served from), at the shortcut's `url` when a shortcut launched it
- * (else the start URL), with the launch parameters in its query.
+ * page is served from), at `action` for a share (its `share_target`'s), the
+ * shortcut's `url` when a shortcut launched it, else the start URL, with the
+ * launch parameters in its query.
  */
-export function launchUrl(id: string, manifest: DinManifest, shortcut: string | null, params: Record<string, unknown>): string {
+export function launchUrl(id: string, manifest: DinManifest, shortcut: string | null, params: Record<string, unknown>, action?: string): string {
   const base = isFileAppId(id) ? `din+file://${id.slice('file-'.length)}/` : `din://${id}/`;
-  const path = (shortcut ? manifest.shortcuts?.find((s) => shortcutKey(s) === shortcut)?.url : undefined) ?? manifest.start_url ?? '/';
+  const path = action ?? (shortcut ? manifest.shortcuts?.find((s) => shortcutKey(s) === shortcut)?.url : undefined) ?? manifest.start_url ?? '/';
   const own = new URL(base);
   let url: URL;
   try {

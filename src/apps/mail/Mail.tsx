@@ -11,8 +11,8 @@ const Compose = lazy(() => import('./mail/Compose').then((m) => ({ default: m.Co
 
 /**
  * A window is a viewer (mailboxes, list, message) or, launched with
- * `{ compose: ComposeSeed }`, `{ mailto }` or `new` (the New Message shortcut's), a
- * message being written.
+ * `{ compose: ComposeSeed }`, `{ mailto }`, `new` (the New Message shortcut's)
+ * or a share (its `share_target`'s, the files attached), a message being written.
  */
 function seedOf(launch: Launch): ComposeSeed | null {
   const { params } = launch;
@@ -28,8 +28,29 @@ function seedOf(launch: Launch): ComposeSeed | null {
       html: m.body ? `<p>${escapeHtml(m.body).replace(/\r?\n/g, '<br>')}</p>` : '',
     };
   }
+  if (typeof params.shareNonce === 'string') return sharedSeed(params);
   if ('new' in params) return blankSeed(null);
   return null;
+}
+
+/** A message started with what was shared to Mail (its `share_target`): the title as its subject, the text and link as its body. */
+function sharedSeed(params: Record<string, unknown>): ComposeSeed {
+  const text = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
+  const body = text(params.text);
+  const url = text(params.url);
+  let link = '';
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:' || u.protocol === 'http:') link = `<p><a href="${escapeHtml(u.href)}">${escapeHtml(u.href)}</a></p>`;
+    else if (url) link = `<p>${escapeHtml(url)}</p>`;
+  } catch {
+    if (url) link = `<p>${escapeHtml(url)}</p>`;
+  }
+  return {
+    ...blankSeed(null),
+    subject: text(params.subject).slice(0, 500),
+    html: (body ? `<p>${escapeHtml(body).replace(/\r?\n/g, '<br>')}</p>` : '') + link,
+  };
 }
 
 export function Mail() {
@@ -38,7 +59,7 @@ export function Mail() {
   const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(windowLaunch())), [saved]);
   return seed ? (
     <Suspense>
-      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} />
+      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : windowLaunch().files} />
     </Suspense>
   ) : (
     <Viewer />

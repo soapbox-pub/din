@@ -14,14 +14,22 @@ export function Composer({
   placeholder,
   onSend,
   autoFocus,
+  prefill,
 }: {
   draftKey: string;
   disabled: string | null;
   placeholder: string;
   onSend: (text: string) => Promise<void>;
   autoFocus?: boolean;
+  /** Text to start the draft with (something shared here), put in again each time its `key` changes. */
+  prefill?: { key: string; text: string } | null;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => (prefill ? { [draftKey]: prefill.text } : {}));
+  const [filled, setFilled] = useState(prefill?.key ?? null);
+  if (prefill && prefill.key !== filled) {
+    setFilled(prefill.key);
+    setDrafts((d) => ({ ...d, [draftKey]: prefill.text }));
+  }
   const [sending, setSending] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const text = drafts[draftKey] ?? '';

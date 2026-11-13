@@ -212,6 +212,13 @@ export interface DinApp {
    * first. Takes `fs`.
    */
   openWithApps(file: FileSystemHandle): Promise<OpenWithApp[]>;
+  /**
+   * `navigator.share`, with files the app holds as handles: they're shared
+   * as themselves, not read into memory first (Files' Share…). Takes a user
+   * gesture, as `navigator.share` does, and rejects with an AbortError when
+   * the user closes the share sheet. docs/din/sharing.md.
+   */
+  share(data: ShareData, files?: FileSystemHandle[]): Promise<void>;
 }
 
 /** An installed app that opens a file (`din.app.openWithApps`). */
@@ -1119,6 +1126,32 @@ export interface DinSystem {
 // ---------------------------------------------------------------------------
 
 /**
+ * A manifest's `share_target` (the web's Web Share Target): where a share
+ * lands, and what each part of it is called there. A built-in app hears it
+ * in `launchQueue`: the `targetURL` is `action`, with the shared title, text
+ * and URL in its query under the names `params` gives them, and the shared
+ * files are the launch's files, read-only. docs/din/sharing.md.
+ */
+export interface ShareTarget {
+  /** The page the share opens, on the app's own origin. */
+  action: string;
+  /** How a website receives it; Din's apps all hear it in `launchQueue`. Default `GET`. */
+  method?: 'GET' | 'POST';
+  enctype?: 'application/x-www-form-urlencoded' | 'multipart/form-data';
+  params: {
+    /** The query parameter the shared title goes in. */
+    title?: string;
+    text?: string;
+    url?: string;
+    /**
+     * The files it takes: MIME types (`image/*`) or extensions (`.pdf`).
+     * Without this, it's offered only for shares with no files.
+     */
+    files?: { name: string; accept: string | string[] }[];
+  };
+}
+
+/**
  * An app's `manifest.webmanifest`: a W3C web app manifest with a `din`
  * section. docs/din/manifest.md.
  */
@@ -1146,6 +1179,11 @@ export interface DinManifest {
    * Only `protocol: "nostr"` counts.
    */
   protocol_handlers?: { protocol: string; url: string; kinds?: number[] }[];
+  /**
+   * What other apps can share to this one (Web Share Target): it's offered
+   * in Din's share sheet for what it takes. docs/din/sharing.md.
+   */
+  share_target?: ShareTarget;
   /** Apps whose presence `navigator.getInstalledRelatedApps()` may report: `{ platform: 'webapp', url: 'din://<id>/manifest.webmanifest' }`. */
   related_applications?: RelatedApplication[];
   /** `focus-existing` makes the app single-instance. */

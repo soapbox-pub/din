@@ -52,6 +52,7 @@ when the app is published as an nsite, and Din reads ordinary members
 | `file_handlers` | `appForFile` | Not read yet. Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
 | `related_applications` | | Apps `navigator.getInstalledRelatedApps()` may say are installed: `{ "platform": "webapp", "url": "din://<id>/manifest.webmanifest" }` ([lifecycle.md](lifecycle.md#opening-other-things)) |
 | `protocol_handlers` | | Which `nostr:` links open here, and which event kinds; see below |
+| `share_target` | | What the share sheet offers this app for, and where a share lands ([sharing.md](sharing.md)) |
 | `id`, `scope_extensions` | | Which websites' links an installed nsite opens; see below |
 
 ## Opening `nostr:` links

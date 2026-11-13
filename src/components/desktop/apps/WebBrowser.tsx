@@ -21,6 +21,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  Share,
   SquarePlus,
   Trash2,
   VenetianMask,
@@ -122,6 +123,7 @@ import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { stripTrackingParams } from '@/lib/trackingParams';
+import { anchorOf, requestShare } from '@/lib/share';
 import { normalizeThemeColor, themeColorTokens, untintedSource, untintedTokens } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useNsiteIcon } from '@/hooks/useNsiteIcon';
@@ -2173,6 +2175,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                   }
                 />
               )}
+              {shareableUrl(activeTab.url) && (
+                <SharePageButton onShare={(el) => sharePage(activeTab, el)} />
+              )}
               {isBookmarkableUrl(activeTab.url) && (
                 <BookmarkStarButton
                   url={activeTab.url}
@@ -2246,6 +2251,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onPrint={() => printTab(activeId)}
           downloadVideoDisabled={!canDownloadVideo}
           onDownloadVideo={(format) => downloadVideo(activeTab.wcId, format)}
+          shareDisabled={!shareableUrl(activeTab.url)}
+          onShare={(el) => sharePage(activeTab, el)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -4845,6 +4852,8 @@ function BrowserMenu({
   onPrint,
   downloadVideoDisabled,
   onDownloadVideo,
+  shareDisabled,
+  onShare,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -4873,6 +4882,10 @@ function BrowserMenu({
   /** Not a website's page (or a Tor tab's), whose video yt-dlp could save. */
   downloadVideoDisabled: boolean;
   onDownloadVideo: (format: VideoDownloadFormat) => void;
+  /** Not a page that can be shared (a blank or internal tab). */
+  shareDisabled: boolean;
+  /** Share the page, the sheet pointing at what's given (the menu's button). */
+  onShare: (anchor: Element | null) => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -4902,11 +4915,12 @@ function BrowserMenu({
       {shortcut && <DropdownMenuShortcut>{shortcut}</DropdownMenuShortcut>}
     </DropdownMenuItem>
   );
+  const trigger = useRef<HTMLButtonElement>(null);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <ToolButton label="Browser menu">
+        <ToolButton ref={trigger} label="Browser menu">
           <BarsStaggeredIcon className="size-4.5" />
         </ToolButton>
       </DropdownMenuTrigger>
@@ -4925,6 +4939,10 @@ function BrowserMenu({
             <DropdownMenuSeparator />
             {item(Search, 'Find in Page…', onFind, 'Ctrl+F', findDisabled)}
             {item(Printer, 'Print…', onPrint, 'Ctrl+P', printDisabled)}
+            <DropdownMenuItem disabled={shareDisabled} onSelect={() => onShare(trigger.current)}>
+              <Share aria-hidden />
+              Share…
+            </DropdownMenuItem>
             {/* The formats the address bar's button offers on a right-click. */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger disabled={downloadVideoDisabled}>
@@ -5094,6 +5112,35 @@ function ClearDataOption({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
     </div>
+  );
+}
+
+/** Whether a tab's page can be shared: a website's or an nsite's, not a blank or internal one. */
+function shareableUrl(url: string): boolean {
+  return /^(https?|nsite):\/\//i.test(url);
+}
+
+/** Share a tab's page (its address and title) through Din's share sheet, pointing at `anchor`. */
+function sharePage(tab: { url: string; title: string | null }, anchor: Element | null): void {
+  void requestShare({ title: tab.title?.trim() || undefined, url: tab.url, files: [] }, { anchor: anchorOf(anchor) });
+}
+
+/** The address bar's Share: the page's address, to an app or the clipboard. */
+function SharePageButton({ onShare }: { onShare: (anchor: Element) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Share this page"
+      title="Share this page"
+      onClick={(e) => onShare(e.currentTarget)}
+      className={cn(
+        'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+        'hover:bg-foreground/[0.07] hover:text-foreground',
+        'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+      )}
+    >
+      <Share className="size-4.5" strokeWidth={1.75} />
+    </button>
   );
 }
 

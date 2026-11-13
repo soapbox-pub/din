@@ -56,6 +56,7 @@ So Din is splitting into three layers, each trusting only the one below it:
 | [din/lifecycle.md](din/lifecycle.md) | Launching, launch params, `ready`, closing, hangs and force quit |
 | [din/menus.md](din/menus.md) | The menu bar, accelerators, menus that leave the window |
 | [din/files.md](din/files.md) | File handles, the picker, recent files |
+| [din/sharing.md](din/sharing.md) | `navigator.share`, the share sheet, and `share_target` |
 | [din/drag-and-drop.md](din/drag-and-drop.md) | Dragging files and tabs between apps |
 | [din/theme-and-account.md](din/theme-and-account.md) | Theme tokens, the signed-in user, `window.nostr`, notifications |
 | [din/media-and-desktop.md](din/media-and-desktop.md) | What's playing and the media keys, the wallpaper, dictation |

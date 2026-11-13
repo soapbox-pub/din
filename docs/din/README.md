@@ -41,6 +41,7 @@ din.app.ready();
 | `din.menus` | [menus.md](menus.md): the menu bar and menus that leave the window |
 | `showOpenFilePicker` and the web's file handles, `launchQueue`, `din.files`, files cut, copied and pasted | [files.md](files.md) |
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
+| `navigator.share`, `din.app.share`, the manifest's `share_target` | [sharing.md](sharing.md) |
 | `din.theme`, `window.nostr`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
 | `navigator.mediaSession`, `window.print()`, `din.desktop`, `SpeechRecognition`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.inputMethod`: being a keyboard | [input-method.md](input-method.md) |

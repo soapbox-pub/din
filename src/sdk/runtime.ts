@@ -57,7 +57,7 @@ import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
-import type { FromDesktop, InputEdit, MediaAction, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
+import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import { seedHandles } from '@/shared/handleStore';
@@ -225,6 +225,36 @@ function installNotifications(host: NotificationHost): void {
     configurable: true,
   });
   Object.defineProperty(navigator, 'clearAppBadge', { value: () => host.setBadge(null), configurable: true });
+}
+
+/** The most a share's files may come to, read into memory to cross the port. */
+const MAX_SHARE_BYTES = 256 * 1024 * 1024;
+
+/** Schemes a shared URL can't have: what's only this page's, or runs. */
+const UNSHAREABLE = new Set(['javascript:', 'data:', 'blob:', 'file:', 'about:', 'filesystem:']);
+
+/** A ShareData's parts as the Web Share API checks them: a TypeError for a URL that can't be shared. */
+function shareParts(data: ShareData | undefined): { title?: string; text?: string; url?: string; files: File[] } {
+  const d = data ?? {};
+  let url: string | undefined;
+  if (d.url !== undefined) {
+    let u: URL;
+    try {
+      u = new URL(String(d.url), location.href);
+    } catch {
+      throw new TypeError(`Not a URL: ${String(d.url)}`);
+    }
+    if (UNSHAREABLE.has(u.protocol)) throw new TypeError(`Can’t share a ${u.protocol} URL`);
+    url = u.href;
+  }
+  const files = d.files === undefined ? [] : Array.from(d.files);
+  if (files.some((f) => !(f instanceof File))) throw new TypeError('Only files can be shared as files');
+  return {
+    ...(d.title !== undefined ? { title: String(d.title) } : {}),
+    ...(d.text !== undefined ? { text: String(d.text) } : {}),
+    ...(url !== undefined ? { url } : {}),
+    files,
+  };
 }
 
 function rename(error: { name: string; message: string }): Error {
@@ -538,7 +568,66 @@ export function installDin(transport: Transport): void {
       const [handle] = (await idsOf([file])) ?? [];
       return handle ? request('app.openWithApps', { handle }) : [];
     },
+    share: (data, files) => share(data, files ?? []),
   };
+
+  // ---- sharing: the web's navigator.share, through the desktop's share sheet ----
+  /** What the user last pressed, for the sheet to point at. */
+  let pressed: Element | null = null;
+  window.addEventListener('pointerdown', (e) => (pressed = e.target instanceof Element ? e.target : null), true);
+  window.addEventListener('keydown', () => (pressed = null), true);
+  /** The control the share came from, in the page's CSS pixels: the one pressed, else the one focused. */
+  const shareAnchor = (): Rect | null => {
+    const clicked = pressed?.isConnected ? (pressed.closest('button, a, [role="button"], [role="menuitem"]') ?? pressed) : null;
+    const focused = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    const r = (clicked ?? focused)?.getBoundingClientRect();
+    return r && r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+  };
+  let sharing = false;
+  async function share(data: ShareData | undefined, handles: FileSystemHandle[]): Promise<void> {
+    const parts = shareParts(data);
+    if (!parts.title && !parts.text && !parts.url && parts.files.length === 0 && handles.length === 0) {
+      throw new TypeError('Nothing to share');
+    }
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+      throw new DOMException('Sharing takes a click or a key press', 'NotAllowedError');
+    }
+    if (sharing) throw new DOMException('A share is already open', 'InvalidStateError');
+    sharing = true;
+    try {
+      const anchor = shareAnchor();
+      let total = 0;
+      const files: FileData[] = [];
+      for (const f of parts.files) {
+        total += f.size;
+        if (total > MAX_SHARE_BYTES) throw new DOMException('Those files are too big to share', 'NotAllowedError');
+        files.push({ name: f.name || 'file', type: f.type, lastModified: f.lastModified, bytes: await f.arrayBuffer() });
+      }
+      await request('app.share', {
+        ...(parts.title ? { title: parts.title } : {}),
+        ...(parts.text ? { text: parts.text } : {}),
+        ...(parts.url ? { url: parts.url } : {}),
+        files,
+        handles: (await idsOf(handles)) ?? [],
+        anchor,
+      });
+    } finally {
+      sharing = false;
+    }
+  }
+  Object.defineProperty(navigator, 'share', { value: (data?: ShareData) => share(data, []), configurable: true, writable: true });
+  Object.defineProperty(navigator, 'canShare', {
+    value: (data?: ShareData) => {
+      try {
+        const parts = shareParts(data);
+        return !!(parts.title || parts.text || parts.url || parts.files.length > 0);
+      } catch {
+        return false;
+      }
+    },
+    configurable: true,
+    writable: true,
+  });
 
   // ---- window ----
   let state: WindowState = NO_STATE;

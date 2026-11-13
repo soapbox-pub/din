@@ -15,6 +15,8 @@ import { rememberAddresses, suggestAddresses } from './contacts';
 import { EMAIL, fileSize, formatAddress, parseAddresses, textToHtml, type ComposeSeed } from './format';
 import { messageTarget, type SavedWindow } from './restore';
 
+const NO_FILES: readonly FileSystemHandle[] = [];
+
 /** An attachment in the message, or one still loading from the message being forwarded. */
 type Attached = { id: string; file: MailAttachment | null; name: string; size: number };
 
@@ -194,8 +196,17 @@ function FormatButton({ label, active, onClick, children }: { label: string; act
 /**
  * `restored` when Din reopened the window: the seed is the message as it
  * was left (its body signed already), and `dirty` whether it was unsaved.
+ * `files` are attached as it starts (what was shared to Mail).
  */
-export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored?: { dirty: boolean } | null }) {
+export function Compose({
+  seed,
+  restored = null,
+  files = NO_FILES,
+}: {
+  seed: ComposeSeed;
+  restored?: { dirty: boolean } | null;
+  files?: readonly FileSystemHandle[];
+}) {
   const din = useDin();
   const mail = useMail();
   const accounts = useAccounts();
@@ -299,15 +310,26 @@ export function Compose({ seed, restored = null }: { seed: ComposeSeed; restored
     }
   }, [mail, seed.forwardFrom]);
 
-  const attach = useCallback(async () => {
-    const handles = await pickFiles({ title: 'Attach Files', multiple: true, mode: 'read', confirmLabel: 'Attach' });
+  const attachHandles = useCallback(async (handles: readonly FileSystemHandle[]) => {
     for (const h of handles) {
-      const file = await h.getFile();
+      if (h.kind !== 'file') continue;
+      const file = await (h as FileSystemFileHandle).getFile();
       const content = new Uint8Array(await file.arrayBuffer());
       setAttached((list) => [...list, { id: crypto.randomUUID(), name: h.name, size: content.byteLength, file: { filename: h.name, contentType: file.type || 'application/octet-stream', content } }]);
       setDirty(true);
     }
   }, []);
+  const attach = useCallback(async () => {
+    await attachHandles(await pickFiles({ title: 'Attach Files', multiple: true, mode: 'read', confirmLabel: 'Attach' }));
+  }, [attachHandles]);
+
+  // Files the message was started with (shared to Mail) are attached.
+  const tookFiles = useRef(false);
+  useEffect(() => {
+    if (tookFiles.current || files.length === 0) return;
+    tookFiles.current = true;
+    attachHandles(files).catch((e: unknown) => setError(`Couldn’t attach the files: ${e instanceof Error ? e.message : String(e)}`));
+  }, [files, attachHandles]);
 
   const message = useCallback((): OutgoingMessage => {
     const html = editor?.getHTML() ?? '';

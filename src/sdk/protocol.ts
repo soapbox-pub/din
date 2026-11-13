@@ -209,6 +209,13 @@ export interface Requests {
   /** The installed apps that open a file, by its type (Open With). */
   'app.openWithApps': [{ handle: string }, OpenWithApp[]];
   'app.openUrl': [{ url: string }, void];
+  /**
+   * `navigator.share` (and `din.app.share`): the desktop's share sheet, by
+   * `anchor` (what was clicked, in the app's CSS pixels). Files come as
+   * their bytes, or as handles the app holds. Rejects with an AbortError
+   * when the user closes the sheet.
+   */
+  'app.share': [{ title?: string; text?: string; url?: string; files: FileData[]; handles: string[]; anchor: Rect | null }, void];
   /** The manifest's `related_applications` that can be opened now. */
   'app.relatedApps': [void, RelatedApplication[]];
   'app.saveState': [{ state: unknown }, void];
