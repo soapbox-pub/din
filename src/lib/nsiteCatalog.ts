@@ -55,13 +55,6 @@ export const FEATURED_APPS_PACK = {
   identifier: 'k4p5w0n22suf',
 } as const;
 
-/**
- * The site pinned to the featured rail's hero slot: Team Soapbox's Ditto. A
- * site is named by its key, so this is a key and a `d` tag, never a name a
- * stranger could also claim.
- */
-export const FEATURED_HERO = { pubkey: TEAM_SOAPBOX_PUBKEY, dtag: 'ditto' } as const;
-
 /** An installable nsite, parsed from its manifest. */
 export interface StoreApp {
   /** Canonical nsite host: the app's identity, origin, and install key. */
@@ -164,7 +157,3 @@ export function isListedApp(details: NsiteAppDetails | undefined): boolean {
   return Boolean(details?.installable && details.icon);
 }
 
-/** True for the pinned hero site (FEATURED_HERO). */
-export function isFeaturedHero(app: StoreApp): boolean {
-  return app.pubkey === FEATURED_HERO.pubkey && app.dtag === FEATURED_HERO.dtag;
-}

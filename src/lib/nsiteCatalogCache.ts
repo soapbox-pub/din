@@ -8,7 +8,6 @@ import {
 import { blossomFileSource } from '@/lib/nsiteBlossom';
 import {
   FEATURED_APPS_PACK,
-  FEATURED_HERO,
   isListedApp,
   parseStoreApp,
   type StoreApp,
@@ -377,9 +376,11 @@ export async function loadCatalogPage(
 }
 
 /**
- * The featured rail: the curated follow pack (kind 39089) for its title, the
- * hero (FEATURED_HERO, Ditto) by its address, and the members' named sites
- * packaged as apps, with a `title` and a `description`.
+ * The featured rail: the curated follow pack (kind 39089) for its title, and
+ * the members' named sites packaged as apps, with a `title` and a
+ * `description`, most recently updated first. The first the store lists is
+ * the hero, and the rest fill the shelf under the pack's title
+ * (useFeaturedApps), so the hero is never on the shelf too.
  */
 export async function syncFeatured(relays: NRelay, signal: AbortSignal): Promise<void> {
   await loadCatalog();
@@ -408,30 +409,27 @@ export async function syncFeatured(relays: NRelay, signal: AbortSignal): Promise
           .map(([, value]) => value),
       ))
     : [];
-  const authors = [...new Set([FEATURED_HERO.pubkey, ...members])];
+  const events = members.length
+    ? await query(
+        relays,
+        [
+          { kinds: [NSITE_NAMED_KIND], authors: members, limit: 300 },
+          { kinds: [DELETION_KIND], authors: members, '#k': [String(NSITE_NAMED_KIND)] },
+        ],
+        signal,
+      )
+    : [];
+  ingest(events, new Set(members));
 
-  const events = await query(
-    relays,
-    [
-      { kinds: [NSITE_NAMED_KIND], authors: [FEATURED_HERO.pubkey], '#d': [FEATURED_HERO.dtag], limit: 1 },
-      ...(members.length ? [{ kinds: [NSITE_NAMED_KIND], authors: members, limit: 300 }] : []),
-      { kinds: [DELETION_KIND], authors, '#k': [String(NSITE_NAMED_KIND)] },
-    ],
-    signal,
-  );
-  ingest(events, new Set(authors));
-
-  const heroAddr = addrOf(FEATURED_HERO.pubkey, FEATURED_HERO.dtag);
   const memberSet = new Set(members);
-  const shelf = [...entries.values()]
+  const addrs = [...entries.values()]
     .filter((entry) => {
-      if (entry.addr === heroAddr || !memberSet.has(entry.event.pubkey)) return false;
+      if (!memberSet.has(entry.event.pubkey)) return false;
       const app = parseStoreApp(entry.event);
       return Boolean(app?.name && app.about);
     })
     .sort((a, b) => b.event.created_at - a.event.created_at)
     .map((entry) => entry.addr);
-  const addrs = entries.has(heroAddr) ? [heroAddr, ...shelf] : shelf;
 
   featured = addrs.length === 0
     ? null

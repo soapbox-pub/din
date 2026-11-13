@@ -21,7 +21,10 @@ export interface FeaturedApps {
   description?: string;
   /** Sanitized pack `image` URL, if present. */
   image?: string;
-  /** The hero first, then the members' packaged apps; only listed ones. */
+  /**
+   * The members' packaged apps, only listed ones, most recently updated
+   * first: the first is the hero, the rest the shelf.
+   */
   apps: StoreApp[];
 }
 
