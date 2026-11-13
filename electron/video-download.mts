@@ -10,10 +10,12 @@
 // browser download (`browser:download`), so the download shelf shows it, and
 // Cancel stops it, like any other.
 //
-// The page's cookies go with it, so a video the user can see signed in
-// (members-only, age-checked) downloads too: just the cookies the browser
-// would send that address, written for this run alone to a file only the
-// user can read, deleted when it ends. A private tab's are never written
+// It asks without the user's cookies first: signed in, yt-dlp asks YouTube
+// as other players do, and their streams answer 403. Only when that fails
+// does the page's cookies go with a second try, so a video the user can see
+// signed in (members-only, age-checked) downloads too: just the cookies the
+// browser would send that address, written for that run alone to a file
+// only the user can read, deleted when it ends. A private tab's are never written
 // out, and a Tor tab can't use this at all: yt-dlp would fetch the video
 // without Tor.
 //
@@ -174,25 +176,26 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
   ];
   const ff = ffmpeg();
   if (ff) args.push('--ffmpeg-location', ff);
-  if (request.cookies) {
-    const file = path.join(workDir, 'cookies.txt');
-    if (await writeCookies(request.cookies, url, file).catch(() => false)) args.push('--cookies', file);
-  }
   if (request.proxy) {
     const proxy = await proxyFor(request.proxy, url).catch(() => '');
     if (proxy) args.push('--proxy', proxy);
   }
-  args.push('--', url);
 
   const id = options.nextId();
-  const child = spawn(tool, args, {
-    cwd: workDir,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Its own process group, so Cancel stops the FFmpeg it runs as well.
-    detached: true,
-  });
-  const job: Job = { child, workDir, cancelled: false };
+  const spawnYtDlp = (cookies: string | null) =>
+    spawn(tool, [...args, ...(cookies ? ['--cookies', cookies] : []), '--', url], {
+      cwd: workDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Its own process group, so Cancel stops the FFmpeg it runs as well.
+      detached: true,
+    });
+  // First without the user's cookies: signed in, yt-dlp asks YouTube as
+  // other players do, whose streams then answer 403. Only what fails
+  // without them (a members-only video, one that wants your age, or a
+  // site that's sure you're a bot) is tried again with them.
+  const job: Job = { child: spawnYtDlp(null), workDir, cancelled: false };
   jobs.set(id, job);
+  let triedCookies = !request.cookies;
 
   let filename = request.title?.trim() || `Video from ${hostOf(url)}`;
   let savePath = path.join(downloads, filename);
@@ -250,15 +253,46 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
       error = line.slice('ERROR:'.length).trim().slice(0, 300);
     }
   };
-  createInterface({ input: child.stdout! }).on('line', onLine);
-  createInterface({ input: child.stderr! }).on('line', onLine);
+  const watch = (child: ChildProcess) => {
+    createInterface({ input: child.stdout! }).on('line', onLine);
+    createInterface({ input: child.stderr! }).on('line', onLine);
+    child.once('error', (err) => {
+      error = err.message;
+      void ended(child, null);
+    });
+    child.once('close', (code) => void ended(child, code));
+  };
+
+  const succeeded = (code: number | null) =>
+    code === 0 && savePath.startsWith(downloads + path.sep) && fs.existsSync(savePath);
+
+  // One run is over: finish, or try again with cookies.
+  const ended = async (child: ChildProcess, code: number | null) => {
+    if (job.child !== child || !jobs.has(id)) return;
+    if (!job.cancelled && !succeeded(code) && !triedCookies && request.cookies) {
+      triedCookies = true;
+      const file = path.join(workDir, 'cookies.txt');
+      if (await writeCookies(request.cookies, url, file).catch(() => false)) {
+        if (job.cancelled) return finish(code);
+        error = '';
+        finishedBytes = 0;
+        current = 0;
+        currentTotal = 0;
+        report('progressing', true);
+        job.child = spawnYtDlp(file);
+        watch(job.child);
+        return;
+      }
+    }
+    finish(code);
+  };
 
   const finish = (code: number | null) => {
     if (!jobs.has(id)) return;
     jobs.delete(id);
     void fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
     if (job.cancelled) report('cancelled', true);
-    else if (code === 0 && savePath.startsWith(downloads + path.sep) && fs.existsSync(savePath)) {
+    else if (succeeded(code)) {
       try {
         const size = fs.statSync(savePath).size;
         finishedBytes = size;
@@ -274,11 +308,7 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
       report('interrupted', true);
     }
   };
-  child.once('error', (err) => {
-    error = err.message;
-    finish(null);
-  });
-  child.once('close', (code) => finish(code));
+  watch(job.child);
   return id;
 }
 
