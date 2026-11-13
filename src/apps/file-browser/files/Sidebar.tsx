@@ -367,16 +367,7 @@ function SidebarItem({
               )}
             >
               <place.icon className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
-              {volume?.needs ? (
-                <span className="min-w-0">
-                  <span className="block truncate">{place.name}</span>
-                  <span className="block text-xs leading-snug text-muted-foreground">
-                    {needsFeature ? `Needs ${needsFeature.title}` : volume.needs}
-                  </span>
-                </span>
-              ) : (
-                <span className="truncate">{place.name}</span>
-              )}
+              <span className="truncate">{place.name}</span>
               {volume?.locked && (
                 <>
                   <Lock className="ml-auto size-3 shrink-0 text-muted-foreground" aria-hidden />
@@ -417,7 +408,14 @@ function SidebarItem({
           {place.path && <ContextMenuItem onSelect={() => onProperties(place.path)}>Properties</ContextMenuItem>}
         </ContextMenuContent>
       </ContextMenu>
-      {needsFeature && <FeatureInstallButton feature={needsFeature.id} inline className="mb-1 pl-9" />}
+      {/* What the device is waiting on, under its row (a row stays one line),
+          lined up with the name. */}
+      {volume?.needs && (
+        <p className="pr-2 pb-1 pl-9.5 text-xs leading-4 text-muted-foreground">
+          {needsFeature ? `Needs ${needsFeature.title}` : volume.needs}
+        </p>
+      )}
+      {needsFeature && <FeatureInstallButton feature={needsFeature.id} inline className="mb-1 pl-9.5" />}
     </>
   );
 }
