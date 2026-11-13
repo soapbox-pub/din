@@ -1,34 +1,18 @@
 import { useEffect, useRef } from 'react';
-import { FolderOpen, FolderPlus, MoreHorizontal, ShieldAlert, Trash2, type LucideIcon } from 'lucide-react';
+import { FolderOpen, ShieldAlert } from 'lucide-react';
 import { AppIcon } from '@/components/desktop/AppIcon';
 import { Button } from '@/components/ui/button';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useToast } from '@/hooks/useToast';
-import { getAppsBridge } from '@/lib/dinApps';
-import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
 import { fileAppDefinition, fileAppEntry, type FileAppEntry, type OpenedFolder } from '@/lib/fileApps';
 import { PERMISSION_LABELS, rememberApproval, requestedAccess } from '@/lib/launchedApps';
 
 /**
  * Apps from folders on this computer (src/lib/fileApps.ts), in the App
- * Store: the page a chosen folder opens on, and the section listing
- * the ones added.
+ * Store: the page a folder chosen with its title bar's folder button opens
+ * on. Once added, one is in the launcher like any other app.
  */
 
 /** Its manifest's name, as the launcher shows it. */
@@ -163,112 +147,5 @@ function FolderAppNotes() {
         <code className="font-mono">din.window</code>), and it reloads whenever you save a file in it.
       </p>
     </section>
-  );
-}
-
-interface Action {
-  label: string;
-  icon: LucideIcon;
-  run: () => void;
-  destructive?: boolean;
-}
-
-/** The apps added from folders, and a card to add another. Nothing outside the Electron shell. */
-export function FolderAppsSection({ onChose }: { onChose: (opened: OpenedFolder) => void }) {
-  const { fileApps, uninstallApp } = useInstalledApps();
-  const { open, closeApp } = useWindowActions();
-  const { choose, busy } = useChooseAppFolder();
-  if (!getAppsBridge()) return null;
-
-  const pick = async () => {
-    const opened = await choose();
-    if (opened) onChose(opened);
-  };
-
-  return (
-    <section className="flex flex-col gap-4" aria-label="Apps from your folders">
-      <SectionHeader title="From Your Folders" subtitle="Make your own app, and use it as you work on it." />
-      <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2 @7xl:grid-cols-3">
-        {[...fileApps].sort((a, b) => b.addedAt - a.addedAt).map((entry) => {
-          const actions: Action[][] = [
-            [{ label: 'Open', icon: FolderOpen, run: () => open(entry.appId) }],
-            [{
-              label: 'Remove',
-              icon: Trash2,
-              destructive: true,
-              run: () => {
-                closeApp(entry.appId);
-                uninstallApp(entry.appId);
-              },
-            }],
-          ];
-          return <FolderAppCard key={entry.appId} entry={entry} actions={actions} onOpen={() => open(entry.appId)} />;
-        })}
-        <button
-          type="button"
-          onClick={() => void pick()}
-          disabled={busy}
-          className="flex min-h-28 items-center gap-3 bg-foreground/[0.04] rounded-xl p-4 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
-        >
-          <span className="grid size-14 shrink-0 place-items-center rounded-[28%] bg-gradient-to-br from-warning/25 to-warning/5 text-warning">
-            <FolderPlus className="size-6" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className="block font-semibold">Add from a Folder…</span>
-            <span className="block text-sm text-muted-foreground">Any folder with an index.html</span>
-          </span>
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function FolderAppCard({ entry, actions, onOpen }: { entry: FileAppEntry; actions: Action[][]; onOpen: () => void }) {
-  const name = appName(entry);
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="relative flex min-h-28 items-center gap-3 rounded-xl bg-card clay p-4 transition-shadow motion-safe:hover:shadow-md">
-          <button
-            type="button"
-            onClick={onOpen}
-            aria-label={`Open ${name}`}
-            className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          />
-          <AppIcon icon={fileAppDefinition(entry).icon} className="size-14 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-semibold" title={name}>{name}</p>
-            <p className="truncate font-mono text-xs text-muted-foreground" title={entry.path}>{entry.path}</p>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" className="relative z-10 size-8 shrink-0 rounded-full" aria-label={`More for ${name}`}>
-                <MoreHorizontal aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {actions.map((group, i) => [
-                i > 0 && <DropdownMenuSeparator key={`sep-${i}`} />,
-                ...group.map(({ label, icon: Icon, run, destructive }) => (
-                  <DropdownMenuItem key={label} onSelect={run} variant={destructive ? 'destructive' : 'default'}>
-                    <Icon aria-hidden /> {label}
-                  </DropdownMenuItem>
-                )),
-              ])}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        {actions.map((group, i) => [
-          i > 0 && <ContextMenuSeparator key={`sep-${i}`} />,
-          ...group.map(({ label, icon: Icon, run, destructive }) => (
-            <ContextMenuItem key={label} onSelect={run} variant={destructive ? 'destructive' : 'default'}>
-              <Icon aria-hidden /> {label}
-            </ContextMenuItem>
-          )),
-        ])}
-      </ContextMenuContent>
-    </ContextMenu>
   );
 }

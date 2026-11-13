@@ -204,8 +204,8 @@ reads its metadata and asks, then answers `asking`, `added` or `failed`.
 ## Apps from folders: `din+file://`
 
 To keep an app you're working on in the launcher, add its folder in the
-App Store instead: the folder button in its title bar, or **Add from a
-Folder…** under From Your Folders. The folder is served the same way
+App Store instead, with the folder button in its title bar (Add an App
+from a Folder…). The folder is served the same way
 (inside it only, `index.html` for router paths, never one holding Din's
 profile), at `din+file://<hash>/`, where the hash is the sha256 of its
 path in base32: the same folder always gets the same origin, and its

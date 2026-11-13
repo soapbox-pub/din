@@ -35,7 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
-import { FolderAppDetail, FolderAppsSection } from '@/components/desktop/apps/appstore/FolderApps';
+import { FolderAppDetail } from '@/components/desktop/apps/appstore/FolderApps';
 import { FlatpakAppDetail, FlatpakCard } from '@/components/desktop/apps/appstore/FlatpakApps';
 import { useFlatpakCatalog, useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
 import type { FlatpakApp } from '@/lib/nostrFlatpaks';
@@ -141,8 +141,8 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * src/lib/nostrFlatpaks.ts, electron/nostr-flatpaks.mts).
  *
  * Apps can also come from a folder on this computer (src/lib/fileApps.ts),
- * for developing one: the title bar's folder button, or the From Your
- * Folders section, picks it and opens its page (FolderApps).
+ * for developing one: the title bar's folder button picks it and opens its
+ * page (FolderApps).
  */
 export function AppStore({ params }: AppComponentProps) {
   const catalog = useNsiteCatalog();
@@ -395,7 +395,6 @@ export function AppStore({ params }: AppComponentProps) {
             ) : (
               <>
                 <FeaturedSection />
-                <FolderAppsSection onChose={setFolderApp} />
                 <section className="flex flex-col gap-4" aria-label="All apps">
                   <SectionHeader
                     title="All Apps"

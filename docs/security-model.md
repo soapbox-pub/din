@@ -42,7 +42,7 @@ still apply, and moving apps out shrinks what code runs there.
   origin no built-in app has. Their manifests aren't reviewed, so the
   desktop drops the members that reach past the app (storage and file
   migration) and asks the user before granting permissions or folders.
-  **Apps from folders** (the App Store's "Add from a Folder…", the same
+  **Apps from folders** (the App Store's "Add an App from a Folder…", the same
   page) are the same, at `din+file://<hash>/`, a scheme of their own in
   the apps' session that serves only folders the desktop opened; their
   permissions are allowed by adding them, and asked about again whenever
