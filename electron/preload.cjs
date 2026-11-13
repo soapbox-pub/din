@@ -3176,6 +3176,14 @@ expose('browser', {
   cancelDownload: (id) => ipcRenderer.invoke('browser:cancelDownload', id),
 
   /**
+   * Save the video a tab's page plays (`wcId`), or any page's (`url`), to
+   * ~/Downloads with yt-dlp. Resolves with its download id (null if a tab's
+   * couldn't start: its failure arrives through onDownload).
+   * @param {{ wcId: number } | { url: string }} request
+   */
+  downloadVideo: (request) => ipcRenderer.invoke('browser:downloadVideo', request),
+
+  /**
    * What a site (`origin`) has been allowed or blocked, and whether the user
    * accepted an untrusted certificate for its host. `isPrivate` reads the
    * private window's session instead of the persistent one.

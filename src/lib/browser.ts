@@ -82,6 +82,10 @@ export interface DownloadInfo {
   totalBytes: number;
   /** Whether the download is currently paused. */
   paused?: boolean;
+  /** A page's video, saved by Download Video (yt-dlp) rather than as a file. */
+  video?: boolean;
+  /** Why it failed, for one that did ('interrupted'), when that's known. */
+  error?: string;
 }
 
 /** Options for a find-in-page query. */
@@ -152,6 +156,14 @@ export interface BrowserBridge {
   openDownload(savePath: string): Promise<void>;
   /** Stop a download in flight; its last update arrives as 'cancelled'. */
   cancelDownload(id: number): Promise<void>;
+  /**
+   * Save the video (or audio) a tab's page plays (`wcId`), or any page's
+   * (`url`), to ~/Downloads with yt-dlp, on any site it knows. Progress
+   * arrives through onDownload like any download's. Resolves with its id;
+   * a tab's that can't start resolves null and shows on its chip why, and a
+   * `url`'s rejects instead.
+   */
+  downloadVideo(request: { wcId: number } | { url: string }): Promise<number | null>;
   /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.

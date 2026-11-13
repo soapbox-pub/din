@@ -126,6 +126,7 @@ import { parkedTab } from '@/lib/tabTransfer';
 import { parentPath } from '@/lib/fs';
 import { appForFile } from '@/lib/fileTypes';
 import { isProgram } from '@/lib/nativeApps';
+import { useNowPlaying } from '@/lib/nowPlaying';
 import {
   claimBrowserSession,
   forgetBrowserWindow,
@@ -599,6 +600,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const torStatus = useTorStatus();
   const siteLocations = useSiteLocations(activeTab.wcId);
   const onionLocation = torStatus?.port != null ? siteLocations.onion : null;
+  // Download Video, for a website's page (never a Tor tab's: yt-dlp would
+  // go around Tor); its button shows while the page has something playing
+  // or paused, and the menu's item always.
+  const nowPlaying = useNowPlaying();
+  const canDownloadVideo =
+    !!getBrowserBridge() && !activeTab.tor && activeTab.wcId !== null && /^https?:\/\//i.test(activeTab.url);
+  const pageHasMedia = canDownloadVideo && nowPlaying.some((s) => s.id === `web:${activeTab.wcId}`);
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
@@ -1046,6 +1054,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const clearFinishedDownloads = useCallback(() => {
     setDownloads((prev) => prev.filter((d) => d.state === 'progressing'));
   }, []);
+  // Download Video: yt-dlp saves the page's video (video-download.mts), on
+  // any site it knows; its chip arrives through onDownload like a file's.
+  const downloadVideo = useCallback(
+    (wcId: number | null) => {
+      if (wcId !== null) void browserBridge?.downloadVideo({ wcId }).catch(() => {});
+    },
+    [browserBridge],
+  );
   // Closing the window stops its downloads: nothing would show them after,
   // or let them be canceled.
   useEffect(
@@ -2129,6 +2145,21 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           nsiteLocation={siteLocations.nsite}
           end={
             <>
+              {pageHasMedia && (
+                <button
+                  type="button"
+                  aria-label="Download video"
+                  title="Download video"
+                  onClick={() => downloadVideo(activeTab.wcId)}
+                  className={cn(
+                    'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+                    'hover:bg-foreground/[0.07] hover:text-foreground',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                  )}
+                >
+                  <Download className="size-4.5" strokeWidth={1.75} />
+                </button>
+              )}
               {/* Chrome's place for it: in the bar, before the star. */}
               {!activeTab.tor && (
                 <InstallSiteButton
@@ -2215,6 +2246,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           onViewSource={() => viewSource(activeId)}
           printDisabled={activeTab.wcId === null}
           onPrint={() => printTab(activeId)}
+          downloadVideoDisabled={!canDownloadVideo}
+          onDownloadVideo={() => downloadVideo(activeTab.wcId)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -4086,7 +4119,9 @@ function DownloadChip({
     : failed
       ? state === 'cancelled'
         ? 'Canceled'
-        : 'Failed'
+        : download.error
+          ? `Failed: ${download.error}`
+          : 'Failed'
       : pct !== null
         ? `${pct}% of ${formatBytes(totalBytes)}`
         : formatBytes(receivedBytes);
@@ -4110,7 +4145,7 @@ function DownloadChip({
             onClick={() => {
               if (done) openFile();
             }}
-            title={done ? `Open ${filename}` : filename}
+            title={done ? `Open ${filename}` : download.error ? `${filename}\n${download.error}` : filename}
           >
             <div className="truncate text-xs font-medium">{filename}</div>
             <div className="truncate text-[11px] text-muted-foreground">{subtitle}</div>
@@ -4802,6 +4837,8 @@ function BrowserMenu({
   onViewSource,
   printDisabled,
   onPrint,
+  downloadVideoDisabled,
+  onDownloadVideo,
   hasDevtools,
   devtoolsActive,
   devtoolsDisabled,
@@ -4827,6 +4864,9 @@ function BrowserMenu({
   /** No page to print (a blank or internal tab). */
   printDisabled: boolean;
   onPrint: () => void;
+  /** Not a website's page (or a Tor tab's), whose video yt-dlp could save. */
+  downloadVideoDisabled: boolean;
+  onDownloadVideo: () => void;
   /** Whether the docked-devtools control is available (webview mode). */
   hasDevtools: boolean;
   devtoolsActive: boolean;
@@ -4879,6 +4919,7 @@ function BrowserMenu({
             <DropdownMenuSeparator />
             {item(Search, 'Find in Page…', onFind, 'Ctrl+F', findDisabled)}
             {item(Printer, 'Print…', onPrint, 'Ctrl+P', printDisabled)}
+            {item(Download, 'Download Video', onDownloadVideo, undefined, downloadVideoDisabled)}
             {item(FileCode, 'View Page Source', onViewSource, 'Ctrl+U', viewSourceDisabled)}
           </>
         )}

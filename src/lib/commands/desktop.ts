@@ -1,5 +1,5 @@
 import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
-import { getBrowserBridge, siteOriginOf, type SiteCapability } from '@/lib/browser';
+import { getBrowserBridge, siteOriginOf, type DownloadInfo, type SiteCapability } from '@/lib/browser';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { DAILY_MINUTES, describeLimit, formatSpent, getSiteLimitsBridge, type SiteLimitMode } from '@/lib/siteLimits';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
@@ -498,7 +498,7 @@ function siteOrigin(site: string): string {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), site data, what each site may do, and the sites the user limited for their own sake',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), downloading a page’s video, site data, what each site may do, and the sites the user limited for their own sake',
   commands: [
     ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
@@ -518,6 +518,38 @@ export const browserArea: Area = {
       if (!ok) throw new CommandError('You didn’t allow it');
       await call(browser.clearSiteData(origin, false));
       return { text: `Deleted ${name}’s data` };
+    }),
+    command('browser', 'download-video', 'Save a page’s video (or audio) to Downloads, as the Web Browser’s Download Video does, from any site yt-dlp knows (YouTube’s included), with the browser’s cookies for it; waits until it’s saved', [
+      { name: 'url', type: 'string', positional: true, help: 'The page’s address, e.g. https://www.youtube.com/watch?v=…' },
+      { name: 'no-wait', type: 'boolean', optional: true, help: 'Start it and return, without waiting for it to finish' },
+    ], async (args) => {
+      const browser = need(getBrowserBridge(), 'The Web Browser');
+      const url = args.string('url');
+      if (!/^https?:\/\//i.test(url)) throw new CommandError(`Not a website’s address: ${url}`, 'usage');
+      const wait = !args.optBool('no-wait');
+      // Reports can come before the id does: keep them until it's known.
+      const seen = new Map<number, DownloadInfo>();
+      let settle: ((info: DownloadInfo) => void) | null = null;
+      let id: number | null = null;
+      const unsubscribe = wait
+        ? browser.onDownload((info) => {
+          if (info.state === 'progressing') return;
+          if (id === null) seen.set(info.id, info);
+          else if (info.id === id) settle?.(info);
+        })
+        : () => {};
+      try {
+        id = await call(browser.downloadVideo({ url }));
+        if (id === null) throw new CommandError('The video couldn’t be downloaded');
+        if (!wait) return { data: { id }, text: 'Downloading to Downloads' };
+        const started = id;
+        const done = seen.get(started) ?? (await new Promise<DownloadInfo>((resolve) => { settle = resolve; }));
+        if (done.state === 'completed') return { data: { path: done.savePath, bytes: done.receivedBytes }, text: done.savePath };
+        if (done.state === 'cancelled') throw new CommandError('The download was canceled');
+        throw new CommandError(done.error ?? 'The video couldn’t be downloaded');
+      } finally {
+        unsubscribe();
+      }
     }),
     command('browser', 'site-permissions', 'What a site may do, as its site info shows: camera, microphone, location, notifications, background refresh, the clipboard', [
       { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },

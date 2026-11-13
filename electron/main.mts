@@ -180,6 +180,7 @@ import { setNativeColorScheme, setNativePalette } from './gtk-theme.mts';
 import { setWindowsPalette } from './windows-apps.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
+import { cancelVideoDownload, registerVideoDownloads, startVideoDownload } from './video-download.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
 import { becomeWindowsDesktop, isWindows, isWindowsShell, windowsPower } from './windows-shell.mts';
@@ -5734,7 +5735,29 @@ function registerBrowserDownloadHandlers(): void {
   ipcMain.handle('browser:cancelDownload', (event, id) => {
     assertShellSender(event);
     if (typeof id !== 'number') return;
-    activeDownloads.get(id)?.cancel();
+    if (!cancelVideoDownload(id)) activeDownloads.get(id)?.cancel();
+  });
+
+  // Download Video (video-download.mts): a tab's page (`wcId`), or any
+  // address (`url`, for `din browser download-video`). Its progress comes as
+  // the browser's downloads' does; resolves with its id.
+  registerVideoDownloads({ sendToShell, nextId: () => nextDownloadId++ });
+  ipcMain.handle('browser:downloadVideo', async (event, request: unknown) => {
+    assertShellSender(event);
+    const r = request && typeof request === 'object' ? (request as { wcId?: unknown; url?: unknown }) : {};
+    if (typeof r.wcId === 'number') {
+      const contents = webContents.fromId(r.wcId);
+      if (!contents || contents.isDestroyed() || !isBrowserTabSession(contents.session)) {
+        throw new Error('That tab is gone');
+      }
+      // One that can't start says why on its chip, as one that fails does.
+      return downloadTabVideo(contents).catch((err: unknown) => {
+        sendToShell('browser:download', videoDownloadFailure(contents, err));
+        return null;
+      });
+    }
+    if (typeof r.url !== 'string') throw new Error('No address to download from');
+    return startVideoDownload({ url: r.url, wcId: -1, cookies: browserSession(), proxy: browserSession() });
   });
 
   // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else
@@ -5747,6 +5770,42 @@ function registerBrowserDownloadHandlers(): void {
     if (!isDownloadsPath(filePath) || !fs.existsSync(filePath)) return;
     if (isProgram(filePath)) return runProgram(filePath);
   });
+}
+
+/**
+ * Download Video for a browser tab: its page's address and title, its
+ * cookies unless it's private, and never from a Tor tab, whose video
+ * yt-dlp would fetch without Tor.
+ */
+function downloadTabVideo(contents: Electron.WebContents): Promise<number> {
+  if (contents.session === torBrowserSession()) {
+    return Promise.reject(new Error('Videos can’t be downloaded from a Tor tab'));
+  }
+  const persistent = contents.session === browserSession();
+  return startVideoDownload({
+    url: contents.getURL(),
+    wcId: contents.id,
+    title: contents.getTitle(),
+    cookies: persistent ? contents.session : null,
+    proxy: contents.session,
+  });
+}
+
+/** A failed Download Video's chip, for one that couldn't even start. */
+function videoDownloadFailure(contents: Electron.WebContents, err: unknown): Record<string, unknown> {
+  const url = contents.isDestroyed() ? '' : contents.getURL();
+  return {
+    id: nextDownloadId++,
+    wcId: contents.isDestroyed() ? -1 : contents.id,
+    url,
+    filename: (contents.isDestroyed() ? '' : contents.getTitle()) || 'Video',
+    savePath: app.getPath('downloads'),
+    state: 'interrupted',
+    receivedBytes: 0,
+    totalBytes: 0,
+    video: true,
+    error: err instanceof Error ? err.message : String(err),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -7476,6 +7535,28 @@ app.on('web-contents-created', (_event, contents) => {
           }),
         );
       }
+    }
+    // Download Video on a page's video or audio, as the address bar's button
+    // does: yt-dlp saves the page's, which a YouTube <video>'s blob: stream
+    // couldn't be (video-download.mts). Not from Tor, which it would bypass.
+    if (
+      isAnyBrowserTab &&
+      contents.session !== torBrowserSession() &&
+      (params.mediaType === 'video' || params.mediaType === 'audio') &&
+      /^https?:\/\//i.test(contents.getURL())
+    ) {
+      menu.insert(
+        0,
+        new MenuItem({
+          label: params.mediaType === 'video' ? 'Download Video' : 'Download Audio',
+          click: () => {
+            downloadTabVideo(contents).catch((err: unknown) =>
+              sendToShell('browser:download', videoDownloadFailure(contents, err)),
+            );
+          },
+        }),
+      );
+      menu.insert(1, new MenuItem({ type: 'separator' }));
     }
     // Chrome's "Search Google for “…”" on selected text, after "Copy". The
     // search opens in a new foreground tab with the same engine the address

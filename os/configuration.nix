@@ -530,6 +530,9 @@ let
     # carries its live streams to RTMP, and whisper.cpp's command-line tool
     # transcribes the takes, with dictation's model.
     export DIN_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
+    # The Web Browser's Download Video (electron/video-download.mts), which
+    # joins the video and audio with the FFmpeg above rather than its own.
+    export DIN_YTDLP=${pkgs.yt-dlp.override { ffmpegSupport = false; }}/bin/yt-dlp
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
