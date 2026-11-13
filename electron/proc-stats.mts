@@ -11,6 +11,7 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
@@ -188,16 +189,61 @@ export function startedAt(startTicks: number, cpu: CpuTimes): number {
   return (cpu.bootTime + startTicks / USER_HZ) * 1000;
 }
 
+/** Room for one of a process's own files (stat, status, cmdline, an fdinfo) in a single read, nearly always. */
+const SMALL_FILE_BYTES = 4096;
+/** How many are open at once, and so how many buffers there are: libuv reads them four at a time. */
+const SMALL_FILES_AT_ONCE = 32;
+const smallFileBuffers: Buffer[] = [];
+let smallFilesOpen = 0;
+const smallFilesWaiting: (() => void)[] = [];
+
+function readSmallFileNow(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    fs.open(file, 'r', (openError, fd) => {
+      if (openError) return reject(openError);
+      const buffer = smallFileBuffers.pop() ?? Buffer.allocUnsafeSlow(SMALL_FILE_BYTES);
+      fs.read(fd, buffer, 0, buffer.length, null, (readError, bytesRead) => {
+        // These files are written whole to whoever reads them, so a read that didn't fill the buffer got it all.
+        const text = readError || bytesRead === buffer.length ? null : buffer.toString('utf8', 0, bytesRead);
+        smallFileBuffers.push(buffer);
+        fs.close(fd, () => {
+          if (readError) reject(readError);
+          else if (text !== null) resolve(text);
+          // Longer than that (a long command line): the whole of it, the slow way.
+          else fsp.readFile(file, 'utf8').then(resolve, reject);
+        });
+      });
+    });
+  });
+}
+
+/**
+ * One of a process's own files in /proc, read into a buffer that's used
+ * again. fs.readFile can't know how long they are (/proc says 0), so it takes
+ * 64 KiB for each and asks for it twice over: a pass over a few hundred
+ * processes left 50 MB for the garbage collector and cost five times the CPU.
+ */
+async function readSmallFile(file: string): Promise<string> {
+  if (smallFilesOpen < SMALL_FILES_AT_ONCE) smallFilesOpen += 1;
+  else await new Promise<void>((resolve) => smallFilesWaiting.push(resolve));
+  try {
+    return await readSmallFileNow(file);
+  } finally {
+    // The next in line takes this one's place.
+    const next = smallFilesWaiting.shift();
+    if (next) next();
+    else smallFilesOpen -= 1;
+  }
+}
+
 /** One process's stat and status, or null when it's gone or a kernel thread. */
 async function readProcess(pid: number): Promise<ProcEntry | null> {
   try {
-    const [stat, status] = await Promise.all([
-      fsp.readFile(`/proc/${pid}/stat`, 'utf8'),
-      fsp.readFile(`/proc/${pid}/status`, 'utf8'),
-    ]);
-    const parsed = parseStat(stat);
-    const owner = parseStatus(status);
-    return parsed && owner ? { ...parsed, ...owner } : null;
+    const parsed = parseStat(await readSmallFile(`/proc/${pid}/stat`));
+    // Most of what's in /proc on an idle machine is the kernel's own threads.
+    if (!parsed) return null;
+    const owner = parseStatus(await readSmallFile(`/proc/${pid}/status`));
+    return owner ? { ...parsed, ...owner } : null;
   } catch {
     // It exited between the listing and the read.
     return null;
@@ -221,7 +267,7 @@ export async function readOwner(pid: number): Promise<{ uid: number; ppid: numbe
 /** A process's arguments, or [] when it has none (or is gone). */
 export async function readCmdline(pid: number): Promise<string[]> {
   try {
-    const text = await fsp.readFile(`/proc/${pid}/cmdline`, 'utf8');
+    const text = await readSmallFile(`/proc/${pid}/cmdline`);
     return text.split('\0').filter((arg) => arg.length > 0);
   } catch {
     return [];
@@ -344,7 +390,7 @@ export async function readDrmFds(pid: number): Promise<number[]> {
 /** The GPU clients open on a process's fds, one per client. */
 export async function readDrmClients(pid: number, fds: number[]): Promise<DrmClient[]> {
   const infos = await Promise.all(
-    fds.map((fd) => fsp.readFile(`/proc/${pid}/fdinfo/${fd}`, 'utf8').catch(() => '')),
+    fds.map((fd) => readSmallFile(`/proc/${pid}/fdinfo/${fd}`).catch(() => '')),
   );
   const clients = new Map<string, DrmClient>();
   for (const info of infos) {
