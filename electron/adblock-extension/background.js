@@ -1,6 +1,7 @@
 // Background page of Din's built-in ad blocker (see electron/adblock.mts).
 //
-// Network blocking for the browser's persistent session happens here, through
+// Network blocking for the browser's persistent session happens here (and
+// query stripping, electron/tracking-params.mts), through
 // chrome.webRequest, so it coexists with other installed extensions: a
 // session.webRequest listener in the main process would switch theirs off.
 // The main process owns the filter lists and settings; it hands this page a
@@ -18,7 +19,7 @@
 /* global chrome, DinAdblockEngine, dinAdblock */
 'use strict';
 
-const { FiltersEngine, Request } = DinAdblockEngine;
+const { FiltersEngine, Request, stripTrackingParams } = DinAdblockEngine;
 
 /** @type {InstanceType<typeof FiltersEngine> | null} */
 let engine = null;
@@ -106,6 +107,13 @@ function reportBlocked({ site, top }, url) {
 
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
+    // A page's or frame's tracking tokens (utm_source, fbclid, …) are taken
+    // off before the request goes out, ads blocked or not
+    // (electron/tracking-params.mts).
+    if (details.type === 'main_frame' || details.type === 'sub_frame') {
+      const clean = stripTrackingParams(details.url);
+      if (clean !== details.url) return { redirectUrl: clean };
+    }
     if (details.type === 'main_frame' || !enabled || !engine) return {};
     const page = pageOf(details);
     if (allowlist.has(page.site)) return {};

@@ -11,6 +11,7 @@
  */
 
 import { parseBlossomUri } from '@/lib/blossomUri';
+import { stripTrackingParams } from '@/lib/trackingParams';
 
 export interface TorStatus {
   /** Whether Din can turn Tor on and off here: DinOS, or where Din has a Tor of its own. */
@@ -109,11 +110,15 @@ function watchTlsHosts(): void {
  *
  * A Blossom link loads as `blossom://<sha256>.<ext>/?…` (the scheme is a
  * standard one, which Chromium needs to seek a video: electron/blossom.mts),
- * and shows in BUD-10's form, `blossom:<sha256>.<ext>?…`. Anything else comes
- * back as it is.
+ * and shows in BUD-10's form, `blossom:<sha256>.<ext>?…`.
+ *
+ * Tracking tokens (`utm_source`, `fbclid`, …) never show: the main process
+ * takes them off a page's request before it's sent, and this takes off any a
+ * page adds to its own address afterwards (src/lib/trackingParams.ts).
  */
-export function shownUrl(url: string): string {
-  if (/^blossom:/i.test(url)) return parseBlossomUri(url)?.uri ?? url;
+export function shownUrl(raw: string): string {
+  if (/^blossom:/i.test(raw)) return parseBlossomUri(raw)?.uri ?? raw;
+  const url = stripTrackingParams(raw);
   if (!/^https:/i.test(url)) return url;
   watchTlsHosts();
   let parsed: URL;

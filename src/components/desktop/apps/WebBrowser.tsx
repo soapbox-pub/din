@@ -121,6 +121,7 @@ import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
+import { stripTrackingParams } from '@/lib/trackingParams';
 import { normalizeThemeColor, themeColorTokens, untintedSource, untintedTokens } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useNsiteIcon } from '@/hooks/useNsiteIcon';
@@ -306,11 +307,13 @@ interface Tab {
 }
 
 function createTab(
-  url: string,
+  link: string,
   pendingRequestId: number | null = null,
   parentId: string | null = null,
-  tor = isOnionUrl(url),
+  tor = isOnionUrl(link),
 ): Tab {
+  // A link's tracking tokens never reach the site or the address bar.
+  const url = stripTrackingParams(link);
   // A blank new tab shows an empty address bar (ready to type), even though
   // its surface loads about:blank.
   const blank = url === NEW_TAB_URL;
@@ -1632,8 +1635,10 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   /** `typed`: the user asked for `raw` in the address bar or new-tab page's search box. */
   const navigateTab = useCallback(
     (id: string, raw: string, typed = false) => {
-      const resolved = resolveNavigation(historyDestination(historyRef.current, raw) ?? raw);
-      if (!resolved) return;
+      const destination = resolveNavigation(historyDestination(historyRef.current, raw) ?? raw);
+      if (!destination) return;
+      // Tracking tokens never reach the site or the address bar.
+      const resolved = stripTrackingParams(destination);
       // A .user.js address is a script install, not a page visit (mirrors
       // the main process's will-navigate intercept for link clicks).
       if (userscriptsBridge && isUserscriptUrl(resolved)) {

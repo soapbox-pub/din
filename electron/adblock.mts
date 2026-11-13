@@ -2,6 +2,10 @@
 // open-source filter engine with EasyList, EasyPrivacy, and uBlock Origin's
 // lists.
 //
+// It also takes tracking tokens off pages' and frames' URLs before they're
+// requested, in every browser session, whatever its settings
+// (tracking-params.mts).
+//
 // Blocking has three parts:
 //   - Network requests in the persistent browser session are blocked by an
 //     extension Din ships (electron/adblock-extension/), through
@@ -33,6 +37,7 @@ import { createRequire } from 'node:module';
 import { app, ipcMain, utilityProcess, webContents } from 'electron';
 import type { FiltersEngine, Request } from '@ghostery/adblocker';
 import { parse as parseDomain } from 'tldts-experimental';
+import { stripTrackingParams } from './tracking-params.mts';
 
 const require = createRequire(import.meta.url);
 
@@ -260,6 +265,15 @@ function blockInSession(session: Electron.Session): void {
     if (first) {
       callback(first);
       return;
+    }
+    // Tracking tokens come off a page or frame's URL before it's requested,
+    // as the extension does in the persistent session.
+    if (details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') {
+      const clean = stripTrackingParams(details.url);
+      if (clean !== details.url) {
+        callback({ redirectURL: clean });
+        return;
+      }
     }
     const tab = tabOf(details);
     if (details.resourceType === 'mainFrame' || !tab || !engine || !activeFor(tab)) {
