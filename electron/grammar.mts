@@ -62,8 +62,14 @@ const DEFAULTS: GrammarSettings = { enabled: true, style: true, dialect: 'americ
 
 /** Longer than this, a field isn't checked: a whole book in a text area. */
 const MAX_TEXT = 60_000;
-/** The worker stops after this long unused, giving its memory back. */
-const IDLE_MS = 10 * 60_000;
+/**
+ * The worker stops after this long unused, giving its memory back: about
+ * 220 MB of this process's, most of it Harper's dictionary and rules in
+ * WebAssembly memory, which only ever grows. Starting again takes under a
+ * second, off this thread, so it's held through a pause in typing and no
+ * longer: any text field typed in or clicked into starts it.
+ */
+const IDLE_MS = 60_000;
 /** How long a right-click's report waits for its menu. */
 const CONTEXT_MS = 2_000;
 /** Issues remembered per page, for the menu to look them up by hash. */
@@ -161,7 +167,9 @@ function startWorker(): Worker {
     else waiting.resolve(message.result);
   });
   const fail = (error: Error) => {
-    if (worker === started) worker = null;
+    // One stopped for being idle had nothing waiting; what's waiting now is the next one's.
+    if (worker !== started) return;
+    worker = null;
     for (const waiting of pending.values()) waiting.reject(error);
     pending.clear();
   };
@@ -183,15 +191,21 @@ function post(target: Worker, body: RequestBody): Promise<unknown> {
   });
 }
 
-function request<T>(body: RequestBody): Promise<T> {
-  worker ??= startWorker();
+function stopWhenIdle(): void {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     idleTimer = null;
+    // Still answering: it's not idle yet.
+    if (pending.size) return stopWhenIdle();
     const stopping = worker;
     worker = null;
     void stopping?.terminate();
   }, IDLE_MS);
+}
+
+function request<T>(body: RequestBody): Promise<T> {
+  worker ??= startWorker();
+  stopWhenIdle();
   return post(worker, body) as Promise<T>;
 }
 
