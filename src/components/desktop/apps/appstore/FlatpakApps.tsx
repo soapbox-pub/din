@@ -25,6 +25,7 @@ import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { useToast } from '@/hooks/useToast';
 import { formatBytes } from '@/lib/fs';
 import { NATIVE_APP_PREFIX } from '@/lib/nativeApps';
+import { ngitRepositoryUri } from '@/lib/nostrUri';
 import { flatpakNaddr, isOutdated, progressLabel, type FlatpakApp } from '@/lib/nostrFlatpaks';
 import { sanitizeImageUrl, sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
@@ -244,8 +245,13 @@ export function FlatpakAppDetail({ app }: { app: FlatpakApp }) {
   const state = useFlatpakState(app);
   const openUrl = useOpenUrl();
   const ref = useRef<HTMLDivElement>(null);
-  // Only a web address opens; an ngit nostr:// one shows as text.
-  const sourceUrl = app.repository && /^https?:\/\//i.test(app.repository) ? sanitizeNavigationUrl(app.repository) : null;
+  // A web address opens as itself, an ngit one (nostr://npub…/relay/repo) as
+  // its repository's nostr:naddr1… (NIP-21), which the Web Browser shows.
+  const sourceUrl = !app.repository
+    ? null
+    : /^https?:\/\//i.test(app.repository)
+      ? sanitizeNavigationUrl(app.repository)
+      : ngitRepositoryUri(app.repository);
   const released = new Date(app.release.createdAt * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 
   // Take focus so Escape goes back without a click first.

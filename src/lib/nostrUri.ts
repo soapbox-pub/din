@@ -211,3 +211,43 @@ export const COLLECT_PROTOCOL_HANDLERS_JS = `(async () => {
     return { base: res.url || href, manifest: { protocol_handlers: json && json.protocol_handlers, shortcuts: json && json.shortcuts } };
   } catch (e) { return null; }
 })()`;
+
+/**
+ * The NIP-21 `nostr:naddr1…` of the NIP-34 repository (kind 30617) an ngit
+ * clone address names, `nostr://<npub or nprofile>/[<relay>/]<identifier>`,
+ * the relay a hint in it; null for anything else, or one naming its owner
+ * by NIP-05, which can't be read without asking the network.
+ */
+export function ngitRepositoryUri(url: string): string | null {
+  const match = /^nostr:\/\/([a-z0-9]+)\/(?:([^/\s]+)\/)?([^/\s]+)\/?$/i.exec(url.trim());
+  if (!match) return null;
+  const [, owner, relay, identifier] = match;
+  let pubkey: string;
+  const hints: string[] = [];
+  try {
+    const decoded = nip19.decode(owner.toLowerCase());
+    if (decoded.type === 'npub') pubkey = decoded.data;
+    else if (decoded.type === 'nprofile') {
+      pubkey = decoded.data.pubkey;
+      hints.push(...(decoded.data.relays ?? []).slice(0, 2));
+    } else return null;
+  } catch {
+    return null;
+  }
+  if (relay) {
+    const candidate = /^wss?:\/\//i.test(relay) ? relay : `wss://${relay}`;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === 'wss:' || parsed.protocol === 'ws:') hints.unshift(parsed.toString());
+    } catch {
+      // A hint that isn't one is left out.
+    }
+  }
+  let d: string;
+  try {
+    d = decodeURIComponent(identifier);
+  } catch {
+    return null;
+  }
+  return `nostr:${nip19.naddrEncode({ kind: 30617, pubkey, identifier: d, relays: hints })}`;
+}
