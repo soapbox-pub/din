@@ -245,7 +245,7 @@ export function SiteInfoButton({
             : 'secure'
           : 'insecure';
   const { title, detail, warn } = SECURITY[security];
-  // nsites and onions wear the colors of their address-bar badges.
+  // nsites and onions wear colors of their own.
   const tint = security === 'verified' ? 'text-success' : security === 'onion' ? 'text-foreground' : null;
   // An nsite's host is a key; it goes by the name and icon its files give it.
   const site = identity.nsite ? identity.name : siteName(url);

@@ -2682,8 +2682,10 @@ function AddressBar({
   // Typing hides it, along with the site's icon.
   const showOnion = !!onionLocation && !open;
   const showNsite = !!nsiteLocation && !open;
-  const badgeClass = cn(
-    'flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-colors',
+  // Icon buttons like the bar's Install, Share and star beside them.
+  const altLocationClass = cn(
+    'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
+    'hover:bg-foreground/[0.07] hover:text-foreground',
     'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
     'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
   );
@@ -2829,13 +2831,9 @@ function AddressBar({
               onClick={() => onOpenLocation(nsiteLocation)}
               title={`Open this site's nsite in a new tab: ${nsiteLocation}`}
               aria-label="Open this site's nsite in a new tab"
-              className={cn(
-                badgeClass,
-                'text-success hover:bg-foreground/[0.07]',
-              )}
+              className={altLocationClass}
             >
-              <NsiteIcon className="size-3.5" />
-              nsite
+              <NsiteIcon className="size-4.5" strokeWidth={1.75} />
             </button>
           )}
           {showOnion && (
@@ -2844,13 +2842,9 @@ function AddressBar({
               onClick={() => onOpenLocation(onionLocation)}
               title={`Open this site's onion service in a new tab: ${hostnameOf(onionLocation) ?? onionLocation}`}
               aria-label="Open this site's onion service in a new tab"
-              className={cn(
-                badgeClass,
-                'text-foreground hover:bg-foreground/[0.07]',
-              )}
+              className={altLocationClass}
             >
-              <OnionIcon className="size-3.5" />
-              onion
+              <OnionIcon className="size-4.5" strokeWidth={1.75} />
             </button>
           )}
           {end}
