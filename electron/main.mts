@@ -349,11 +349,6 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// After a GPU reset, Chromium blocks WebGL for the pages it blames (or for
-// every page, when it can't tell). Din is the whole desktop: losing WebGL
-// leaves the Terminal on its DOM renderer until Din restarts.
-app.disableDomainBlockingFor3DAPIs();
-
 // WebGPU for everything on Din: the desktop, its apps, nsites, widgets and
 // the Web Browser's pages. Chromium ships it on only the GPUs it has vetted
 // per platform (on Linux, a few of Intel's), and gives every other one no
