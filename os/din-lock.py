@@ -17,10 +17,12 @@ encryption) there's nothing to lock with, and nothing locks.
     din-lock status   "available" when the computer can be locked
     din-lock resumed  after waking from hibernation: the disk's password
                       was just typed at boot, so let the user straight in
+    din-lock woke     after waking from sleep: draw the whole lock screen again
 """
 
 import ctypes
 import fcntl
+import glob
 import os
 import shutil
 import signal
@@ -86,6 +88,134 @@ def switch_to(vt):
     raise RuntimeError(f"couldn't switch to terminal {vt}")
 
 
+class DrmPlaneRes(ctypes.Structure):
+    _fields_ = [("count_planes", ctypes.c_uint32), ("planes", ctypes.POINTER(ctypes.c_uint32))]
+
+
+class DrmPlane(ctypes.Structure):
+    _fields_ = [
+        ("count_formats", ctypes.c_uint32),
+        ("formats", ctypes.POINTER(ctypes.c_uint32)),
+        ("plane_id", ctypes.c_uint32),
+        ("crtc_id", ctypes.c_uint32),
+        ("fb_id", ctypes.c_uint32),
+    ]
+
+
+class DrmObjectProperties(ctypes.Structure):
+    _fields_ = [
+        ("count_props", ctypes.c_uint32),
+        ("props", ctypes.POINTER(ctypes.c_uint32)),
+        ("prop_values", ctypes.POINTER(ctypes.c_uint64)),
+    ]
+
+
+class DrmProperty(ctypes.Structure):
+    _fields_ = [("prop_id", ctypes.c_uint32), ("flags", ctypes.c_uint32), ("name", ctypes.c_char * 32)]
+
+
+DRM_MODE_OBJECT_PLANE = 0xEEEEEEEE
+DRM_CLIENT_CAP_UNIVERSAL_PLANES = 2
+DRM_CLIENT_CAP_ATOMIC = 3
+DRM_PLANE_TYPE_PRIMARY = 1
+
+
+def libdrm():
+    lib = ctypes.CDLL(os.environ.get("DIN_LIBDRM", "libdrm.so.2"))
+    lib.drmModeGetPlaneResources.restype = ctypes.POINTER(DrmPlaneRes)
+    lib.drmModeGetPlane.restype = ctypes.POINTER(DrmPlane)
+    lib.drmModeGetPlane.argtypes = [ctypes.c_int, ctypes.c_uint32]
+    lib.drmModeObjectGetProperties.restype = ctypes.POINTER(DrmObjectProperties)
+    lib.drmModeObjectGetProperties.argtypes = [ctypes.c_int, ctypes.c_uint32, ctypes.c_uint32]
+    lib.drmModeGetProperty.restype = ctypes.POINTER(DrmProperty)
+    lib.drmModeGetProperty.argtypes = [ctypes.c_int, ctypes.c_uint32]
+    lib.drmModeAtomicAlloc.restype = ctypes.c_void_p
+    lib.drmModeAtomicAddProperty.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint64]
+    lib.drmModeAtomicCommit.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
+    lib.drmModeAtomicFree.argtypes = [ctypes.c_void_p]
+    lib.drmSetClientCap.argtypes = [ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64]
+    return lib
+
+
+def plane_properties(lib, fd, plane_id):
+    """A plane's properties, by name: (id, value)."""
+    found = {}
+    props = lib.drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE)
+    if not props:
+        return found
+    for i in range(props.contents.count_props):
+        prop = lib.drmModeGetProperty(fd, props.contents.props[i])
+        if prop:
+            found[prop.contents.name.decode()] = (prop.contents.prop_id, props.contents.prop_values[i])
+            lib.drmModeFreeProperty(prop)
+    lib.drmModeFreeObjectProperties(props)
+    return found
+
+
+def clear_planes(timeout=5):
+    """Turn off every plane but the screens' main ones, left as Din had them.
+
+    Din's compositor shows windows on planes of their own (a full-screen
+    overlay, the pointer), and when it loses the screen they stay as they
+    were. Plymouth only replaces the main plane, beneath them, so the lock
+    screen was hidden behind Din's last frame, frozen, while it took the
+    password unseen. This waits for logind to take the screen from Din's
+    session, the moment after the switch, then turns the others off.
+    """
+    try:
+        lib = libdrm()
+    except OSError:
+        return
+    for card in sorted(glob.glob("/dev/dri/card[0-9]*")):
+        try:
+            fd = os.open(card, os.O_RDWR | os.O_CLOEXEC)
+        except OSError:
+            continue
+        try:
+            deadline = time.monotonic() + timeout
+            while lib.drmSetMaster(fd) != 0:
+                if time.monotonic() > deadline:
+                    break
+                time.sleep(0.05)
+            else:
+                if (
+                    lib.drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) == 0
+                    and lib.drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) == 0
+                ):
+                    clear_card_planes(lib, fd)
+                lib.drmDropMaster(fd)
+        finally:
+            os.close(fd)
+
+
+def clear_card_planes(lib, fd):
+    res = lib.drmModeGetPlaneResources(fd)
+    if not res:
+        return
+    req = lib.drmModeAtomicAlloc()
+    count = 0
+    for i in range(res.contents.count_planes):
+        plane_id = res.contents.planes[i]
+        plane = lib.drmModeGetPlane(fd, plane_id)
+        if not plane:
+            continue
+        on = plane.contents.crtc_id != 0
+        lib.drmModeFreePlane(plane)
+        if not on:
+            continue
+        props = plane_properties(lib, fd, plane_id)
+        if props.get("type", (0, DRM_PLANE_TYPE_PRIMARY))[1] == DRM_PLANE_TYPE_PRIMARY:
+            continue
+        if "CRTC_ID" in props and "FB_ID" in props:
+            lib.drmModeAtomicAddProperty(req, plane_id, props["CRTC_ID"][0], 0)
+            lib.drmModeAtomicAddProperty(req, plane_id, props["FB_ID"][0], 0)
+            count += 1
+    if count:
+        lib.drmModeAtomicCommit(fd, req, 0, None)
+    lib.drmModeAtomicFree(req)
+    lib.drmModeFreePlaneResources(res)
+
+
 def plymouth(*args, **kwargs):
     return subprocess.run(["plymouth", *args], **kwargs)
 
@@ -126,12 +256,22 @@ def clock_format():
 
 
 class Clock(threading.Thread):
-    """Sends the time to the lock screen every minute, as at boot."""
+    """Sends the time to the lock screen every minute, as at boot.
+
+    It also redraws the whole screen when the computer wakes: Plymouth draws
+    the screen once and then only what changes, and some computers lose
+    what's on the screen while they sleep, which left it blank, though it
+    still took the password. The theme redraws all of it on "din-redraw"
+    (os/boot-screen/din.script), in the same Plymouth, so nothing is loaded
+    again and what's being typed stays.
+    """
 
     def __init__(self):
         super().__init__(daemon=True)
         self.format = clock_format()
         self.last = None
+        self.again = threading.Event()
+        self.redraw_screen = False
 
     def show(self):
         now = time.localtime()
@@ -142,21 +282,53 @@ class Clock(threading.Thread):
         plymouth("display-message", f"--text={text}")
         self.last = text
 
+    def woke(self):
+        """Redraw the screen, and the time, which moved on while asleep."""
+        self.redraw_screen = True
+        self.again.set()
+
+    def restarted(self):
+        """A new Plymouth has no clock yet."""
+        self.last = None
+        self.again.set()
+
     def run(self):
         while True:
+            if self.redraw_screen:
+                self.redraw_screen = False
+                plymouth("display-message", "--text=din-redraw")
+                plymouth("hide-message", "--text=din-redraw")
             self.show()
-            time.sleep(60 - time.localtime().tm_sec)
+            # Not time.sleep, which stops counting while the computer sleeps.
+            self.again.wait(60 - time.localtime().tm_sec)
+            self.again.clear()
 
 
 class Locker:
     def __init__(self):
         self.resumed = False
         self.asking = None
+        self.clock = None
 
     def on_resumed(self, _signum, _frame):
         self.resumed = True
         if self.asking:
             self.asking.terminate()
+
+    def on_woke(self, _signum, _frame):
+        if self.clock:
+            self.clock.woke()
+
+    def restart_plymouth(self):
+        """Plymouth again, when it has gone away; the screen stays locked."""
+        try:
+            self.start_plymouth()
+        except (OSError, subprocess.CalledProcessError) as err:
+            print(f"couldn't restart the lock screen: {err}", file=sys.stderr)
+            time.sleep(1)
+            return
+        if self.clock:
+            self.clock.restarted()
 
     def start_plymouth(self):
         plymouth("quit", stderr=subprocess.DEVNULL)
@@ -165,7 +337,12 @@ class Locker:
                 "plymouthd",
                 "--mode=boot",
                 f"--tty=tty{LOCK_VT}",
-                "--kernel-command-line=quiet splash plymouth.ignore-serial-consoles",
+                # Plymouth draws straight into the buffer on screen, and tells
+                # the kernel with DirtyFB, which amdgpu refuses from programs;
+                # with nothing asking for its frames, amdgpu's power saving
+                # doesn't fetch them, and only Plymouth's first frame shows.
+                # Setting the mode again on every redraw gets each to the screen.
+                "--kernel-command-line=quiet splash plymouth.ignore-serial-consoles plymouth.set-mode-on-redraws",
             ],
             check=True,
         )
@@ -175,7 +352,8 @@ class Locker:
         """Ask until the right password comes, or the machine wakes from hibernation."""
         while not self.resumed:
             if plymouth("--ping").returncode != 0:
-                self.start_plymouth()
+                self.restart_plymouth()
+                continue
             self.asking = subprocess.Popen(
                 ["plymouth", "ask-for-password", "--prompt=Password"],
                 stdout=subprocess.PIPE,
@@ -195,6 +373,7 @@ class Locker:
             notify("READY=1")
             return
         signal.signal(signal.SIGUSR1, self.on_resumed)
+        signal.signal(signal.SIGUSR2, self.on_woke)
         # Stopped (or timed out) by systemd: still give the terminals back.
         signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(1))
         previous = active_vt()
@@ -204,8 +383,10 @@ class Locker:
         switch_to(LOCK_VT)
         console_ioctl(VT_LOCKSWITCH)
         try:
+            clear_planes()
             self.start_plymouth()
-            Clock().start()
+            self.clock = Clock()
+            self.clock.start()
             notify("READY=1")
             self.ask(hashed)
         finally:
@@ -224,13 +405,16 @@ def main():
         subprocess.run(["systemctl", "start", "--no-block", UNIT], check=True)
     elif command == "status":
         print("available" if password_hash() else "unavailable")
-    elif command == "resumed":
-        subprocess.run(
-            ["systemctl", "kill", "--kill-whom=main", "--signal=SIGUSR1", UNIT],
-            stderr=subprocess.DEVNULL,
-        )
+    elif command in ("resumed", "woke"):
+        # Only while it's locked: with nothing to signal this does nothing.
+        if subprocess.run(["systemctl", "is-active", "--quiet", UNIT]).returncode == 0:
+            sig = "SIGUSR1" if command == "resumed" else "SIGUSR2"
+            subprocess.run(
+                ["systemctl", "kill", "--kill-whom=main", f"--signal={sig}", UNIT],
+                stderr=subprocess.DEVNULL,
+            )
     else:
-        sys.exit("usage: din-lock run | start | status | resumed")
+        sys.exit("usage: din-lock run | start | status | resumed | woke")
 
 
 if __name__ == "__main__":

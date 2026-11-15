@@ -71,7 +71,8 @@ black = Image("black.png");
 #------------------------------------ Wallpaper -------------------------------
 
 wallpaper = fader(Sprite(), -100);
-dim = fader(Sprite(black.Scale(screen.w, screen.h)), -90);
+dim_image = black.Scale(screen.w, screen.h);
+dim = fader(Sprite(dim_image), -90);
 dim.sprite.SetPosition(screen.x, screen.y, -90);
 # These two cover the screen, and Plymouth blends every pixel of a sprite whose
 # opacity is changing on the CPU, under a second a frame or worse on a screen of
@@ -138,6 +139,7 @@ fill.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 11);
 fill_image = Image("bar-fill.png");
 shown = 0;
 progress = 0;
+fill_width = 0;
 
 fun boot_progress(duration, value)
 {
@@ -238,6 +240,14 @@ fun display_normal()
 fun display_message(message)
 {
   message = String(message);
+  # The whole screen drawn again, as the lock screen asks after the computer
+  # wakes (os/din-lock.py): setting a sprite's image redraws all it covers,
+  # at any opacity, and the dimming covers the screen.
+  if (message == "din-redraw")
+  {
+    dim.sprite.SetImage(dim_image);
+    return;
+  }
   # What the computer is doing, in the clock's place: "Erasing…" while
   # os/din-erase.sh erases it.
   if (message.SubString(0, 11) == "din-status:")
@@ -303,8 +313,13 @@ fun refresh()
   # Eased toward the estimate, so it moves smoothly and never goes back.
   global.shown += (progress - shown) * 0.08;
   width = Math.Int(bar_w * shown);
-  if (width >= 1)
+  # Only when it grows: scaling it is work on the CPU, and setting an image
+  # redraws what it covers, even while the bar is hidden.
+  if (width >= 1 && width != fill_width)
+  {
     fill.sprite.SetImage(fill_image.Scale(width, bar_h));
+    global.fill_width = width;
+  }
 
   if (asked > 0 && !entered && Plymouth.GetCapslockState() != capslock)
   {

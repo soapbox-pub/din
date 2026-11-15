@@ -71,10 +71,30 @@ pkgs.testers.runNixOSTest {
         assert active_vt() == "tty1", active_vt()
         machine.succeed("timeout 5 chvt 2 && timeout 5 chvt 1")
 
+    with subtest("waking from sleep redraws the lock screen, keeping what's typed"):
+        machine.succeed("systemctl start din-lock")
+        assert active_vt() == "tty8", active_vt()
+        machine.sleep(3)
+        before = machine.succeed("pgrep -x plymouthd").strip()
+        machine.send_chars("hunter")
+        machine.sleep(1)
+        machine.succeed("SYSTEMD_SLEEP_ACTION=suspend /etc/systemd/system-sleep/din-lock post suspend")
+        machine.sleep(2)
+        machine.screenshot("woke")
+        # The same Plymouth, redrawn, not a new one.
+        assert machine.succeed("pgrep -x plymouthd").strip() == before
+        machine.succeed("systemctl is-active din-lock")
+        assert active_vt() == "tty8", active_vt()
+        machine.fail("timeout 5 chvt 1")
+        machine.send_chars("22\n")
+        machine.wait_until_fails("systemctl is-active din-lock")
+        assert active_vt() == "tty1", active_vt()
+
     with subtest("waking from hibernation unlocks"):
         machine.succeed("systemctl start din-lock")
         assert active_vt() == "tty8", active_vt()
         machine.succeed("SYSTEMD_SLEEP_ACTION=suspend /etc/systemd/system-sleep/din-lock post suspend-then-hibernate")
+        machine.wait_until_succeeds("pgrep -x plymouthd")
         machine.sleep(2)
         machine.succeed("systemctl is-active din-lock")
         machine.succeed("SYSTEMD_SLEEP_ACTION=hibernate /etc/systemd/system-sleep/din-lock post suspend-then-hibernate")

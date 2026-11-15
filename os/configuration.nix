@@ -335,6 +335,7 @@ let
     runtimeInputs = [ pkgs.python3 config.boot.plymouth.package config.systemd.package ];
     text = ''
       export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
+      export DIN_LIBDRM=${pkgs.libdrm}/lib/libdrm.so.2
       exec python3 ${./din-lock.py} "$@"
     '';
   };
@@ -1922,9 +1923,16 @@ in
       TimeoutStartSec = 60;
     };
   };
+  # Waking from sleep, it draws itself again from scratch: some computers
+  # lose what's on the screen while asleep, which left it blank, though it
+  # still took the password.
   environment.etc."systemd/system-sleep/din-lock".source = pkgs.writeShellScript "din-lock-sleep" ''
-    if [ "$1" = post ] && [ "$SYSTEMD_SLEEP_ACTION" = hibernate ]; then
-      ${din-lock}/bin/din-lock resumed
+    if [ "$1" = post ]; then
+      if [ "$SYSTEMD_SLEEP_ACTION" = hibernate ]; then
+        ${din-lock}/bin/din-lock resumed
+      else
+        ${din-lock}/bin/din-lock woke
+      fi
     fi
   '';
   systemd.sleep.settings.Sleep.HibernateDelaySec = "2h";
