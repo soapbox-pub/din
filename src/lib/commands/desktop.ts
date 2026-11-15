@@ -19,6 +19,9 @@ import { builtinWidget, builtinWidgets, widgetTitle, WIDGET_SIZES, type WidgetSi
 import { websiteLabel } from '@/lib/nsiteApps';
 import { getNativeAppsBridge, resetWindowsApps, WINDOWS_RESET_CONSEQUENCE } from '@/lib/nativeApps';
 import { reopenSkippedSession } from '@/lib/windowSession';
+import { getAppsBridge } from '@/lib/dinApps';
+import { addFileApp, fileAppEntry, folderError, type OpenedFolder } from '@/lib/fileApps';
+import { PERMISSION_LABELS, requestedAccess } from '@/lib/launchedApps';
 import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
@@ -62,7 +65,7 @@ const WINDOW: Param = { name: 'window', type: 'string', positional: true, help: 
 
 export const appsArea: Area = {
   name: 'apps',
-  summary: 'Apps: list, open, install (Linux apps from Nostr too), remove, and run your own (din apps run)',
+  summary: 'Apps: list, open, install (Linux apps from Nostr too), remove, and your own: run one (din apps run) or add its folder (din apps add-folder)',
   commands: [
     command('apps', 'list', 'Every app on the desktop', [
       { name: 'installed', type: 'boolean', optional: true, help: 'Only those you installed (web apps, nsites, folders)' },
@@ -116,6 +119,51 @@ export const appsArea: Area = {
       const app = ctx.apps.installNsiteApp(args.string('host'), args.optString('name'));
       if (!app) throw new CommandError('That isn’t an nsite’s canonical host, or nsites can’t run here');
       return { data: app };
+    }),
+    command('apps', 'add-folder', 'Add an app from a folder to the launcher, as the App Store’s Add an App from a Folder… does (asks on screen first if it asks for permissions)', [
+      { name: 'folder', type: 'path', positional: true, help: 'A folder with an index.html (or a project whose dist/ has one)' },
+      { name: 'open', type: 'boolean', optional: true, help: 'Open it once it’s added' },
+    ], async (args, ctx) => {
+      const bridge = need(getAppsBridge(), 'Apps from folders');
+      const folder = args.string('folder').replace(/\/+$/, '') || '/';
+      let opened: OpenedFolder;
+      try {
+        opened = await bridge.folder(folder);
+      } catch (error) {
+        // A project rather than its build: the build in its dist/, as `din apps run .` takes it.
+        const reason = folderError(error);
+        if (!reason.startsWith('No index.html')) throw new CommandError(reason);
+        opened = await bridge.folder(`${folder}/dist`).catch(() => {
+          throw new CommandError(`No index.html in ${folder} (or its dist/)`);
+        });
+      }
+      const entry = fileAppEntry(opened);
+      const name = entry.manifest.short_name ?? entry.manifest.name;
+      const already = ctx.apps.fileApps.some((e) => e.appId === opened.appId);
+      if (!already) {
+        const { permissions, folders } = requestedAccess(entry.manifest);
+        const asks = [
+          ...permissions.map((p) => PERMISSION_LABELS[p]),
+          ...(folders.length ? [`Read and change files in ${folders.join(', ')}`] : []),
+        ];
+        if (asks.length) {
+          const ok = await ctx.confirm({
+            title: `Add ${name}?`,
+            description: `A command asked to add the app in ${opened.path} to the launcher. Adding it allows it to: ${asks.map((a) => a.charAt(0).toLowerCase() + a.slice(1)).join('; ')}. Add it only if you trust whoever wrote it.`,
+            action: 'Add',
+          });
+          if (!ok) throw new CommandError('You didn’t allow it');
+        }
+        addFileApp(ctx.apps.installFileApp, opened);
+      } else {
+        // Already there: read its manifest afresh, as opening it does.
+        ctx.apps.refreshFileApp(opened);
+      }
+      if (args.optBool('open')) ctx.actions.open(opened.appId);
+      return {
+        data: { id: opened.appId, name, path: opened.path, added: !already },
+        text: already ? `${name} is already in the launcher (${opened.appId})` : `Added ${name} (${opened.appId}) from ${opened.path}`,
+      };
     }),
     command('apps', 'remove', 'Uninstall an app you installed', [
       { name: 'app', type: 'string', positional: true, help: 'Its id or name' },

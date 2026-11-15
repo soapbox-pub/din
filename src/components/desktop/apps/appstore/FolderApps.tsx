@@ -6,8 +6,8 @@ import { SectionHeader } from '@/components/desktop/apps/appstore/common';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useToast } from '@/hooks/useToast';
-import { fileAppDefinition, fileAppEntry, type FileAppEntry, type OpenedFolder } from '@/lib/fileApps';
-import { PERMISSION_LABELS, rememberApproval, requestedAccess } from '@/lib/launchedApps';
+import { addFileApp, fileAppDefinition, fileAppEntry, type FileAppEntry, type OpenedFolder } from '@/lib/fileApps';
+import { PERMISSION_LABELS, requestedAccess } from '@/lib/launchedApps';
 
 /**
  * Apps from folders on this computer (src/lib/fileApps.ts), in the App
@@ -46,8 +46,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
   }, [installed, open]);
 
   const add = () => {
-    const added = installFileApp(opened);
-    rememberApproval({ appId: added.appId, manifest: added.manifest, source: added.path, ephemeral: false, definition: fileAppDefinition(added) });
+    addFileApp(installFileApp, opened);
     openOnInstall.current = true;
     toast({ title: `${name} added`, description: 'Find it in the app launcher. It reloads whenever you change a file in its folder.' });
   };

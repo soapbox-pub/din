@@ -16,7 +16,7 @@ import { createElement, lazy } from 'react';
 import type { ComponentType } from 'react';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { getAppsBridge, isFileAppId } from '@/lib/dinApps';
-import { manifestDefinition, sanitizeManifest } from '@/lib/launchedApps';
+import { manifestDefinition, rememberApproval, sanitizeManifest } from '@/lib/launchedApps';
 import type { DinManifest } from '@/sdk/din';
 
 const FileAppFrame = lazy(() =>
@@ -75,6 +75,17 @@ export function parseFileApps(value: unknown): FileAppEntry[] {
       addedAt: typeof e.addedAt === 'number' ? e.addedAt : 0,
     }];
   });
+}
+
+/**
+ * Add a folder main opened to the launcher, allowing what its manifest asks
+ * for so its window doesn't ask again: the App Store's Add, and `din apps
+ * add-folder` once the user has said yes.
+ */
+export function addFileApp(install: (opened: OpenedFolder) => FileAppEntry, opened: OpenedFolder): FileAppEntry {
+  const added = install(opened);
+  rememberApproval({ appId: added.appId, manifest: added.manifest, source: added.path, ephemeral: false, definition: fileAppDefinition(added) });
+  return added;
 }
 
 /** Window bodies, one per app, so a window keeps its component as the manifest changes. */

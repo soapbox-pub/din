@@ -38,10 +38,12 @@ for `window.nostr`, `fs`, `notifications`, …) goes in `din.permissions`.
 - `din apps run ./folder` opens it in a window and prints its console in the terminal
   (`--origin <name>` keeps its storage between runs, `--detach` returns at once,
   `--url http://localhost:5173` runs a dev server with HMR).
-- To keep it, the user adds the folder in the App Store (**Add from a
-  Folder…**). It's then in the launcher at `din+file://…` and reloads
-  whenever a file in the folder changes, so `vite build --watch` into it
-  shows up at once. Only the user can do this step.
+- To keep it, `din apps add-folder ./folder` (or a project whose `dist/`
+  has the build) puts it in the launcher at `din+file://…`, as the App
+  Store's **Add an App from a Folder…** does. If its manifest asks for
+  permissions, Din asks the user on screen first and the command waits for
+  the answer. It then reloads whenever a file in the folder changes, so
+  `vite build --watch` into it shows up at once.
 
 ## References
 

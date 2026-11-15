@@ -38,7 +38,7 @@ a missing or bad argument).
 | --- | --- |
 | `settings` | Din's own preferences by key (`appearance.theme`, `dock.size`, `windows.tiling`, `datetime.clock-format`, `notifications.do-not-disturb`…), like `gsettings` |
 | `cursors`, `icons`, `skins` | Cursor themes, icon themes and Media Player skins: list, use (a skin opens the Media Player wearing it), publish to Nostr (asks on screen first), find in the App Store (`store`), install one by its address, remove one Din installed |
-| `apps` | List, open, install (websites, nsites), remove; the App Store's Linux apps, NIP-82 apps on Nostr with a Flatpak or an AppImage for this computer: list (`linux`), install or update one (`install-linux`, asks on screen first; `--as appimage` or `--as flatpak` picks the way, as the App Store's Get as … does), remove one (`remove-linux`); `apps run` runs your own (below) |
+| `apps` | List, open, install (websites, nsites), remove; the App Store's Linux apps, NIP-82 apps on Nostr with a Flatpak or an AppImage for this computer: list (`linux`), install or update one (`install-linux`, asks on screen first; `--as appimage` or `--as flatpak` picks the way, as the App Store's Get as … does), remove one (`remove-linux`); `apps run` runs your own and `apps add-folder` puts its folder in the launcher (below) |
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
@@ -219,6 +219,15 @@ more is asked about again, as a named origin's is. Whenever a file in the
 folder changes (outside `.git` and `node_modules`), its windows load
 again with the manifest read afresh, so `vite build --watch` into the
 folder, or saving a plain `index.html`, shows up at once.
+
+`din apps add-folder <folder>` does the same from the command line,
+calling the same code (`addFileApp` in `src/lib/fileApps.ts`). A project
+folder without an `index.html` is taken by its `dist/`, as `din apps run .`
+takes it. An app whose manifest asks for permissions or folders is asked
+about on screen first, listing them, and isn't added unless the user says
+**Add**; one that asks for nothing is added at once, as a website is by
+`din apps install`. A folder already in the launcher has its manifest read
+again. `--open` opens it once it's there.
 
 The list is this computer's, in the desktop's `localStorage`
 (`din:file-apps`, with each manifest as last read). Main serves only
