@@ -354,6 +354,19 @@ protocol.registerSchemesAsPrivileged([
 // leaves the Terminal on its DOM renderer until Din restarts.
 app.disableDomainBlockingFor3DAPIs();
 
+// WebGPU for everything on Din: the desktop, its apps, nsites, widgets and
+// the Web Browser's pages. Chromium ships it on only the GPUs it has vetted
+// per platform (on Linux, a few of Intel's), and gives every other one no
+// adapter, AMD's Radeons included, though they run it fine through Vulkan
+// with ANGLE on Vulkan, as DinOS draws on AMD. Lifting the blocklist exposes
+// only WebGPU as it ships. Not --enable-unsafe-webgpu: that also hands every
+// page Dawn's unreviewed APIs (finer GPU timers, experimental features), and
+// on AMD its adapter can't present to a canvas under ANGLE on Vulkan.
+// The switch lifts the rest of the GPU blocklist too, which on a Radeon 890M
+// turned nothing else off (WebGL, compositing and video decode were allowed).
+// DIN_GPU_BLOCKLIST=1 keeps Chromium's blocklist.
+if (process.env.DIN_GPU_BLOCKLIST !== '1') app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
 // Where Din is the desktop, cameras come from PipeWire (camera-portal.mts).
 // That goes through the session bus: without one, Chromium would wait on it
 // forever, and enumerateDevices with it, microphones included.
