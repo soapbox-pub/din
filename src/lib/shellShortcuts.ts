@@ -130,8 +130,8 @@ export type ShellShortcut =
   | {
       /**
        * Area-select capture: Shift+Print Screen inside a guest, or the
-       * dedicated box-select key on newer laptops (read from evdev by the
-       * main process, since Chromium can't identify its keysym).
+       * dedicated box-select key on newer laptops (which din-shell tells the
+       * main process about, since Chromium can't identify its keysym).
        */
       action: 'screenshot-area';
     }

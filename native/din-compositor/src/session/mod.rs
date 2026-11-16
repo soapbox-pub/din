@@ -39,6 +39,7 @@ mod direct;
 mod drm;
 mod edid;
 mod gamma;
+mod hotkeys;
 mod input;
 mod keys;
 mod layouts;
@@ -168,10 +169,28 @@ pub fn run(args: &[String]) -> i32 {
         Err(_) => None,
     };
 
+    // The keys Chromium can't name, for Din alone (hotkeys.rs).
+    let hotkeys_socket = match state.hotkeys.listener.as_ref().map(|listener| listener.try_clone()) {
+        Some(Ok(listener)) => {
+            event_loop
+                .handle()
+                .insert_source(Generic::new(listener, Interest::READ, Mode::Level), |_, _, state| {
+                    state.hotkeys_accept();
+                    Ok(PostAction::Continue)
+                })
+                .expect("hotkeys socket source");
+            Some(state.hotkeys.path.clone())
+        }
+        _ => None,
+    };
+
     let mut command = Command::new(&program[0]);
     command.args(&program[1..]).env("WAYLAND_DISPLAY", SOCKET);
     if let Some(path) = &direct_socket {
         command.env("DIN_DIRECT_SOCKET", path);
+    }
+    if let Some(path) = &hotkeys_socket {
+        command.env("DIN_SHELL_KEYS", path);
     }
     let mut child = match command.spawn() {
         Ok(child) => child,

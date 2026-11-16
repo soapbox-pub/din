@@ -6,9 +6,10 @@
 //! The kernel's driver (hid-magicmouse) turns a finger's slide into wheel
 //! steps, and libinput sees only those; it also reports each finger on the
 //! surface, which libinput ignores. So din-shell reads the fingers from the
-//! mouse's event device itself, as the user (who is in the `input` group),
-//! scrolls from them, and drops libinput's wheel steps from that mouse. Where
-//! the device can't be read, the wheel steps stay.
+//! mouse's event device itself, as the user (whom a udev rule lets read a
+//! Magic Mouse's, and no other device's: os/configuration.nix), scrolls from
+//! them, and drops libinput's wheel steps from that mouse. Where the device
+//! can't be read, the wheel steps stay.
 //!
 //! A finger only starts scrolling once it has slid a little and no other
 //! finger has, so a finger resting beside it doesn't stop it and clicking

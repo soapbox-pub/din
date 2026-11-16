@@ -475,7 +475,7 @@ impl State {
     }
 }
 
-fn peer_pid(stream: &UnixStream) -> Option<i32> {
+pub(super) fn peer_pid(stream: &UnixStream) -> Option<i32> {
     let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut length = size_of::<libc::ucred>() as libc::socklen_t;
     // SAFETY: SO_PEERCRED fills a ucred of the length given.

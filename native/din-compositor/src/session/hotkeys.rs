@@ -1,0 +1,115 @@
+//! The keys Din acts on that Chromium can't name, told to Din as they're
+//! pressed.
+//!
+//! - The area-screenshot key (KEY_SELECTIVE_SCREENSHOT, the dashed box
+//!   beside Print Screen on newer laptops): Screenshot's area mode.
+//! - The mic-mute key (KEY_MICMUTE): the default microphone's mute.
+//! - The display-switch key (KEY_SWITCHVIDEOMODE, F7 on ThinkPads): an
+//!   AirPlay receiver between extending the desktop and mirroring it.
+//!
+//! Chromium gives their keysyms no DOM key, so Din sees each as key
+//! "Unidentified" with no code, like any other key it can't name. Din used
+//! to read the keyboards' event devices itself for these, which needed the
+//! `input` group, and with it every process of the user's could read every
+//! key typed, passwords included. The compositor already has every key, from
+//! libinput, so it says when one of these is pressed instead.
+//!
+//! The socket is `din-shell-keys` in XDG_RUNTIME_DIR, told to Din as
+//! DIN_SHELL_KEYS. Only Din's own process (the one the compositor started)
+//! is kept; each press is a line: `screenshot-area`, `mic-mute` or
+//! `display-switch`. The keys still go on to whatever has the keyboard.
+
+use std::{
+    io::Write,
+    os::unix::net::{UnixListener, UnixStream},
+    path::PathBuf,
+};
+
+use tracing::{info, warn};
+
+use super::{direct::peer_pid, state::State};
+
+const KEY_SWITCHVIDEOMODE: u32 = 0xe3;
+const KEY_MICMUTE: u32 = 0xf8;
+const KEY_SELECTIVE_SCREENSHOT: u32 = 0x27a;
+
+/// What Din is told for the evdev key CODE, if it's one of these.
+fn name(code: u32) -> Option<&'static str> {
+    match code {
+        KEY_SELECTIVE_SCREENSHOT => Some("screenshot-area"),
+        KEY_MICMUTE => Some("mic-mute"),
+        KEY_SWITCHVIDEOMODE => Some("display-switch"),
+        _ => None,
+    }
+}
+
+pub struct Hotkeys {
+    pub listener: Option<UnixListener>,
+    pub path: PathBuf,
+    client: Option<UnixStream>,
+}
+
+impl Hotkeys {
+    pub fn bind() -> Self {
+        let dir = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()));
+        let path = dir.join("din-shell-keys");
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).and_then(|listener| {
+            listener.set_nonblocking(true)?;
+            Ok(listener)
+        });
+        let listener = listener.map_err(|err| warn!("hotkeys: {}: {err}", path.display())).ok();
+        Self { listener, path, client: None }
+    }
+}
+
+impl Drop for Hotkeys {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+impl State {
+    /// A process connected: kept if it's Din itself, in place of any before.
+    pub fn hotkeys_accept(&mut self) {
+        while let Some(Ok((stream, _))) = self.hotkeys.listener.as_ref().map(UnixListener::accept) {
+            match peer_pid(&stream) {
+                Some(pid) if pid as u32 == self.din_pid => {
+                    // Writes never wait on Din: a press it hasn't read yet
+                    // behind a full socket is one it's too busy to act on.
+                    if stream.set_nonblocking(true).is_err() {
+                        continue;
+                    }
+                    info!("hotkeys: Din ({pid}) connected");
+                    self.hotkeys.client = Some(stream);
+                }
+                pid => warn!("hotkeys: refusing process {pid:?}, which isn't Din"),
+            }
+        }
+    }
+
+    /// The evdev key CODE went down: tell Din, if it's one of its.
+    pub fn hotkey_pressed(&mut self, code: u32) {
+        let Some(name) = name(code) else { return };
+        let Some(client) = self.hotkeys.client.as_mut() else { return };
+        if let Err(err) = client.write_all(format!("{name}\n").as_bytes()) {
+            if err.kind() != std::io::ErrorKind::WouldBlock {
+                info!("hotkeys: Din's connection closed: {err}");
+                self.hotkeys.client = None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_only_its_keys() {
+        assert_eq!(name(0x27a), Some("screenshot-area"));
+        assert_eq!(name(0xf8), Some("mic-mute"));
+        assert_eq!(name(0xe3), Some("display-switch"));
+        assert_eq!(name(30), None);
+    }
+}

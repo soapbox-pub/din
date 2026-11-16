@@ -873,13 +873,13 @@ in
   # WiFi settings panel control connections without polkit prompts; `video`
   # lets the brightness bridge write the backlight (via brightnessctl's udev
   # rules below) without root; `audio` grants access to the sound devices the
-  # PipeWire sound bridge drives. `input` lets the Electron host read keyboard
-  # event nodes directly for the laptop box-select screenshot key
-  # (KEY_SELECTIVE_SCREENSHOT) and the mic-mute key (KEY_MICMUTE), whose
-  # keysyms Chromium can't identify - see
-  # electron/main.mts. The main process already observes every keystroke via
-  # before-input-event; nothing new is exposed to renderers. `wheel` gives
-  # the developer the machine: sudo, behind the user's approval (below).
+  # PipeWire sound bridge drives. Not `input`: that reads (and writes)
+  # every keyboard and mouse, so any program of the user's could log the
+  # passwords typed into Din's sudo prompt or the lock screen. din-shell has
+  # the keys Chromium can't name and tells Din (hotkeys.rs); the Magic
+  # Mouse's touches and the mic-mute LED have udev rules of their own
+  # (below); controllers are the seat's (uaccess). `wheel` gives the
+  # developer the machine: sudo, behind the user's approval (below).
   # The uid is pinned because this user used to be called `web`: installed
   # machines keep owning their home directory across the rename. `tor` lets
   # Din ask Tor, through its control socket, how far it has got connecting.
@@ -887,7 +887,7 @@ in
     isNormalUser = true;
     uid = 1000;
     description = "Din desktop user";
-    extraGroups = [ "wheel" "networkmanager" "video" "audio" "input" "tor" ];
+    extraGroups = [ "wheel" "networkmanager" "video" "audio" "tor" ];
     shell = pkgs.zsh;
   };
 
@@ -1176,8 +1176,8 @@ in
   # Game controllers, for the Games app and anything else that plays: the
   # kernel's own drivers (xpad, hid-playstation, hid-nintendo) handle
   # Xbox, PlayStation and Switch pads by USB and Bluetooth, and these
-  # rules give the logged-in user what they need beyond evdev, which the
-  # input group already reads: the raw HID nodes of Valve's controllers,
+  # rules give the logged-in user what they need beyond evdev, which
+  # systemd's uaccess already gives them for joysticks: the raw HID nodes of Valve's controllers,
   # Switch Pro and Joy-Cons, 8BitDo's and others (game-devices-udev-rules,
   # and steam-hardware's, which brings Steam Input's uinput too), so SDL
   # sees their gyros, rumble and LEDs (game-devices-udev-rules is in
@@ -1214,9 +1214,19 @@ in
   # The next gives `din` the Android phones libmtp's rules (69-libmtp.rules)
   # found speaking MTP, for jmtpfs (electron/phone-usb.mts).
   #
-  # The last pairs a Magic Mouse, Keyboard or Trackpad plugged in by USB
+  # The next pairs a Magic Mouse, Keyboard or Trackpad plugged in by USB
   # (din-apple-pair@, below), for each of an Apple USB device's HID
   # interfaces: the helper finds the one that answers.
+  #
+  # The next lets `din` read a Magic Mouse's event device, for din-shell to
+  # scroll from its fingers, which libinput ignores
+  # (native/din-compositor/src/session/magic_mouse.rs). Read only: writing
+  # to it would click for the user. Just this mouse, never a keyboard,
+  # which is why `din` isn't in `input`.
+  #
+  # The last gives the mic-mute key's LED to `video`, for Din to light from
+  # the microphone's mute (electron/main.mts), in place of brightnessctl's
+  # `input`, which every LED has.
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{power/wakeup}="enabled"
     ACTION=="add|change", SUBSYSTEM=="pci", ATTR{class}=="0x0c03*", ATTR{power/wakeup}="enabled"
@@ -1224,6 +1234,8 @@ in
     ACTION!="remove", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TEST=="/var/lib/din/keyboard-remap", IMPORT{file}="/var/lib/din/keyboard-remap", IMPORT{builtin}="keyboard"
     ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_MTP_DEVICE}=="1", OWNER="din", MODE="0660"
     ACTION=="add", SUBSYSTEM=="hidraw", SUBSYSTEMS=="usb", ATTRS{idVendor}=="05ac", TAG+="systemd", ENV{SYSTEMD_WANTS}+="din-apple-pair@%k.service"
+    ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{id/vendor}=="004c|05ac", ATTRS{id/product}=="030d|0269|0323", RUN+="${pkgs.acl}/bin/setfacl -m u:din:r $devnode"
+    ACTION=="add", SUBSYSTEM=="leds", KERNEL=="*::micmute", RUN+="${pkgs.coreutils}/bin/chgrp video /sys/class/leds/%k/brightness"
   '';
 
   # Pairs the Apple accessory on /dev/%I over Bluetooth (os/din-apple-pair.py)

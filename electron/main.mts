@@ -47,6 +47,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
+import netSocket from 'node:net';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -2604,9 +2605,9 @@ async function audioToggleInputMute(): Promise<AudioState> {
  * capture switch - on AMD ThinkPads the HDA codec's, while the built-in mic
  * is a digital one on a different card, so the LED stays lit whatever the mic
  * is doing. Din drives it from the default source's mute instead. Writing 0
- * to brightness detaches the trigger; the LED's brightness file is writable by
- * the `input` group (brightnessctl's udev rules), and anywhere it isn't this
- * quietly does nothing.
+ * to brightness detaches the trigger; on DinOS its brightness file is
+ * writable by the `video` group (a udev rule in os/configuration.nix), and
+ * anywhere it isn't this quietly does nothing.
  */
 const LEDS_DIR = '/sys/class/leds';
 const detachedMicLeds = new Set<string>();
@@ -2630,7 +2631,7 @@ async function syncMicMuteLed(): Promise<void> {
       }
       await fs.promises.writeFile(file, status.muted ? '1' : '0');
     } catch {
-      // Not writable here (no udev rule, not in `input`).
+      // Not writable here (no udev rule giving it to the user).
     }
   }
 }
@@ -3628,8 +3629,8 @@ function padCapture(
 
 
 /**
- * Brightness, volume and playback media keys (mic-mute is read from evdev; see
- * watchEvdevKeys). Electron's accelerator grammar has no brightness key
+ * Brightness, volume and playback media keys (mic-mute comes from din-shell;
+ * see watchShellHotkeys). Electron's accelerator grammar has no brightness key
  * names, and on Wayland globalShortcut can't grab anything,
  * but the compositor delivers XF86MonBrightness* and XF86Audio* keys to the
  * focused client as ordinary keyboard input ("BrightnessUp",
@@ -3783,7 +3784,7 @@ function registerScreenshotHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Keys Chromium can't identify, read from evdev instead:
+// Keys Chromium can't identify, which din-shell says are pressed:
 //
 // - The laptop "box select" screenshot key. Newer laptop keyboards carry a
 //   dedicated area-screenshot key (dashed-box icon) next to Print Screen; the
@@ -3800,96 +3801,28 @@ function registerScreenshotHandlers(): void {
 // Chromium has no DOM key for these keysyms, and its code for KEY_MICMUTE
 // has no name, so before-input-event reports them as key "Unidentified",
 // code "" - indistinguishable from any other unmapped key. GNOME/KDE handle
-// these at the evdev level; do the same: read the keyboard event nodes
-// directly.
-//
-// Reading /dev/input needs the `input` group (DinOS grants it to the
-// desktop user); anywhere else the watcher just stays off. The main process
-// already observes every keystroke via before-input-event, and nothing here
-// is exposed to renderers, so no new capability crosses a trust boundary.
+// these in the compositor, and so does din-shell: it has every key from
+// libinput already, and writes a line to DIN_SHELL_KEYS, a socket only this
+// process may connect to, as each is pressed
+// (native/din-compositor/src/session/hotkeys.rs). Din used to read the
+// keyboards' event devices itself, which needed the `input` group, and so
+// let every process of the user's read every key typed. Under any other
+// compositor these keys do nothing.
 // ---------------------------------------------------------------------------
 
-const EV_KEY = 0x01;
-const KEY_SWITCHVIDEOMODE = 0xe3;
-const KEY_MICMUTE = 0xf8;
-const KEY_SELECTIVE_SCREENSHOT = 0x27a;
-/** struct input_event on 64-bit Linux: 16-byte timeval + type + code + value. */
-const INPUT_EVENT_SIZE = 24;
-
-/** The /dev/input/event* nodes of keyboard devices, per /proc/bus/input/devices. */
-function keyboardEventNodes(): string[] {
-  let data: string;
-  try {
-    data = fs.readFileSync('/proc/bus/input/devices', 'utf8');
-  } catch {
-    return [];
-  }
-  const nodes: string[] = [];
-  for (const block of data.split('\n\n')) {
-    // Only devices with the "kbd" handler report key events (mice etc. don't).
-    const handlers = /^H: Handlers=(.*)$/m.exec(block)?.[1] ?? '';
-    if (!/(^|\s)kbd(\s|$)/.test(handlers)) continue;
-    for (const m of handlers.matchAll(/event\d+/g)) nodes.push(`/dev/input/${m[0]}`);
-  }
-  return nodes;
-}
-
-function watchEvdevKeys(): void {
-  if (process.platform !== 'linux') return;
-  const watched = new Map<string, ChildProcess>();
-  const scan = () => {
-    for (const node of keyboardEventNodes()) {
-      if (watched.has(node)) continue;
-      // Outside the input group (Din's session on another distribution)
-      // none can be read, and spawning a `cat` for each on every rescan
-      // forked this whole process six times every ten seconds, stalling
-      // Din's frames by ~130 ms each time.
-      try {
-        fs.accessSync(node, fs.constants.R_OK);
-      } catch {
-        continue;
-      }
-      let leftover: Buffer = Buffer.alloc(0);
-      // Read through `cat` and a pipe, not fs.createReadStream: a file stream
-      // parks one of libuv's four threadpool threads in read() for as long as
-      // the device is open, and laptops have four or more "keyboards" (sleep
-      // button, video bus, vendor hotkeys...). With the pool full, every
-      // async fs call in this process waits forever and the shell never
-      // loads - a black screen on a ThinkPad P14s Gen 7 AMD.
-      const reader = spawn('cat', [node], { stdio: ['ignore', 'pipe', 'ignore'] });
-      watched.set(node, reader);
-      const stream = reader.stdout;
-      stream.on('data', (chunk: string | Buffer) => {
-        const data = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-        const buf = leftover.length > 0 ? Buffer.concat([leftover, data]) : data;
-        const full = buf.length - (buf.length % INPUT_EVENT_SIZE);
-        for (let off = 0; off < full; off += INPUT_EVENT_SIZE) {
-          // value 1 = press (0 = release, 2 = autorepeat).
-          if (buf.readUInt16LE(off + 16) !== EV_KEY || buf.readInt32LE(off + 20) !== 1) continue;
-          const code = buf.readUInt16LE(off + 18);
-          if (code === KEY_SELECTIVE_SCREENSHOT) sendToShell('shortcut', { action: 'screenshot-area' });
-          else if (code === KEY_MICMUTE) pushInputOsd(audioToggleInputMute());
-          else if (code === KEY_SWITCHVIDEOMODE) switchAirPlayMode();
-        }
-        leftover = buf.subarray(full);
-      });
-      const unwatch = () => {
-        if (watched.get(node) === reader) watched.delete(node);
-      };
-      // Unreadable (permissions) or unplugged: drop it so the next rescan
-      // can retry (or pick up a replacement keyboard).
-      reader.on('error', unwatch);
-      reader.on('exit', unwatch);
-    }
-  };
-  // cat only notices its reader is gone on its next write, which may never
-  // come; stop the readers with the app.
-  app.on('will-quit', () => {
-    for (const reader of watched.values()) reader.kill();
+function watchShellHotkeys(): void {
+  const socket = process.env.DIN_SHELL_KEYS;
+  if (!socket) return;
+  // Din's children (Terminal's shells, apps) needn't see where it is: they
+  // couldn't connect anyway.
+  delete process.env.DIN_SHELL_KEYS;
+  const connection = netSocket.createConnection(socket);
+  connection.on('error', (err) => console.warn('[hotkeys] din-shell:', err.message));
+  createInterface({ input: connection }).on('line', (line) => {
+    if (line === 'screenshot-area') sendToShell('shortcut', { action: 'screenshot-area' });
+    else if (line === 'mic-mute') pushInputOsd(audioToggleInputMute());
+    else if (line === 'display-switch') switchAirPlayMode();
   });
-  scan();
-  // Keyboards come and go (docks, USB/BT keyboards): rescan periodically.
-  setInterval(scan, 10_000).unref();
 }
 
 // ---------------------------------------------------------------------------
@@ -6219,8 +6152,8 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // Print Screen (the laptop screenshot key): full-screen capture;
   // Shift+Print Screen: select an area. The dedicated box-select key on
   // newer laptops can't reach here - Chromium reports its keysym as
-  // "Unidentified" - so it's read from evdev directly instead (see
-  // watchEvdevKeys).
+  // "Unidentified" - so din-shell says when it's pressed instead (see
+  // watchShellHotkeys).
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
@@ -6606,7 +6539,7 @@ app.whenReady().then(() => {
     shellWindow: () => shellWindow,
     primaryBounds: async () => (await primaryDisplay(screen.getAllDisplays())).bounds,
   });
-  watchEvdevKeys();
+  watchShellHotkeys();
   registerCrxHandlers();
   registerCertificateHandling();
   registerBrowserDataHandlers();

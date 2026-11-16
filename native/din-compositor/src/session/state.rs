@@ -55,7 +55,7 @@ use smithay::{
 
 use tracing::{info, warn};
 
-use super::{accessibility, cursor, direct, drm, gamma, layouts, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
+use super::{accessibility, cursor, direct, drm, gamma, hotkeys, layouts, mouse, output_management, screencopy, shake, shell, virtual_output, virtual_pointer};
 
 /// CLOCK_MONOTONIC, the clock presentation times are in.
 const CLOCK_MONOTONIC: u32 = 1;
@@ -142,6 +142,7 @@ pub struct State {
     pub gamma: gamma::GammaControl,
     /// A full-screen game's frames, shown over Din's window (direct.rs).
     pub direct: direct::Direct,
+    pub hotkeys: hotkeys::Hotkeys,
     /// The session program's process: Din.
     pub din_pid: u32,
 }
@@ -243,6 +244,7 @@ impl State {
             screencopy,
             gamma,
             direct: direct::Direct::bind(),
+            hotkeys: hotkeys::Hotkeys::bind(),
             din_pid: 0,
         };
 
