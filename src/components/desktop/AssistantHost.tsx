@@ -1,8 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Dialog as DialogPrimitive } from 'radix-ui';
+import { FocusScope } from 'radix-ui/internal';
 import { CornerDownLeft } from 'lucide-react';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { AssistantHostContext } from '@/shared/assistant/host';
+import { usePickingHost } from '@/components/desktop/assistant/usePickingHost';
+import { cn } from '@/lib/utils';
 import { Composer } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
@@ -299,6 +303,7 @@ const QuickPrompt = memo(function QuickPrompt() {
   const { open: openApp } = useWindowActions();
   const { toast } = useToast();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { host, picking } = usePickingHost();
 
   useEffect(() => onToggleAssistantPrompt(() => setOpen((current) => !current)), []);
 
@@ -355,42 +360,60 @@ const QuickPrompt = memo(function QuickPrompt() {
       },
     );
 
+  // Not modal, so Din's file picker (a window, in this document) can be
+  // used while the prompt waits for it; it traps focus itself the rest of
+  // the time, and stays open, hidden, while the picker is open.
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => (next || !picking) && setOpen(next)} modal={false}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
+        <div
+          aria-hidden
+          data-state={open ? 'open' : 'closed'}
+          className={cn(
+            'fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
+            picking && 'invisible',
+          )}
+        />
         <DialogPrimitive.Content
           aria-describedby={undefined}
+          aria-hidden={picking || undefined}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             textareaRef.current?.focus();
           }}
-          className="fixed left-1/2 top-[18%] z-50 w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
+          className={cn(
+            'fixed left-1/2 top-[18%] z-50 w-[min(42rem,calc(100%-2rem))] -translate-x-1/2 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
+            picking && 'invisible pointer-events-none',
+          )}
         >
-          <DialogPrimitive.Title className="sr-only">Ask the assistant</DialogPrimitive.Title>
-          <div className="glass-surface rounded-3xl p-2">
-            <div className="flex items-center gap-2 px-3 pb-1 pt-2">
-              <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="size-6 object-contain" />
-              <p className="text-sm font-medium text-muted-foreground">Ask the assistant</p>
+          <FocusScope.FocusScope asChild loop trapped={!picking}>
+            <div className="glass-surface rounded-3xl p-2">
+              <DialogPrimitive.Title className="sr-only">Ask the assistant</DialogPrimitive.Title>
+              <div className="flex items-center gap-2 px-3 pb-1 pt-2">
+                <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="size-6 object-contain" />
+                <p className="text-sm font-medium text-muted-foreground">Ask the assistant</p>
+              </div>
+              {ready ? (
+                <>
+                  <AssistantHostContext value={host}>
+                    <Composer
+                      textareaRef={textareaRef}
+                      busy={start.isPending}
+                      placeholder="What should it do?"
+                      onSubmit={submit}
+                      className="border-0 bg-transparent shadow-none focus-within:shadow-none"
+                      toolbar={<ModelPicker models={models} value={model} onChange={setModel} />}
+                    />
+                  </AssistantHostContext>
+                  <p className="flex items-center justify-end gap-1.5 px-3 pb-1 pt-1 text-xs text-muted-foreground">
+                    <CornerDownLeft className="size-3" aria-hidden /> to send · Esc to close · Super+A anytime, hold it to speak
+                  </p>
+                </>
+              ) : (
+                <AssistantUnavailable compact />
+              )}
             </div>
-            {ready ? (
-              <>
-                <Composer
-                  textareaRef={textareaRef}
-                  busy={start.isPending}
-                  placeholder="What should it do?"
-                  onSubmit={submit}
-                  className="border-0 bg-transparent shadow-none focus-within:shadow-none"
-                  toolbar={<ModelPicker models={models} value={model} onChange={setModel} />}
-                />
-                <p className="flex items-center justify-end gap-1.5 px-3 pb-1 pt-1 text-xs text-muted-foreground">
-                  <CornerDownLeft className="size-3" aria-hidden /> to send · Esc to close · Super+A anytime, hold it to speak
-                </p>
-              </>
-            ) : (
-              <AssistantUnavailable compact />
-            )}
-          </div>
+          </FocusScope.FocusScope>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

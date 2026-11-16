@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
+import { AssistantHostContext } from '@/shared/assistant/host';
+import { usePickingHost } from '@/components/desktop/assistant/usePickingHost';
 import { Composer } from '@/shared/assistant/Composer';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/RequestCards';
@@ -51,6 +53,9 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
   const { roots } = useAssistantWork();
   const pending = usePendingRequests();
   const [open, setOpen] = useState(false);
+  // While Din's file picker is open for the composer, the panel stays open
+  // (hidden, out of the picker window's way) so what's picked lands in it.
+  const { host, picking } = usePickingHost();
 
   if (!getAssistantBridge() || !config.assistantEnabled) return null;
 
@@ -68,7 +73,7 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
           : 'Assistant';
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(next) => (next || !picking) && setOpen(next)}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -86,8 +91,14 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
           )}
         </Button>
       </PopoverTrigger>
-      <BarPopoverContent align="end" className="w-96 p-0">
-        <AssistantPanel onDone={() => setOpen(false)} />
+      <BarPopoverContent
+        align="end"
+        aria-hidden={picking || undefined}
+        className={cn('w-96 p-0', picking && 'invisible pointer-events-none')}
+      >
+        <AssistantHostContext value={host}>
+          <AssistantPanel onDone={() => setOpen(false)} />
+        </AssistantHostContext>
       </BarPopoverContent>
     </Popover>
   );
