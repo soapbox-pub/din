@@ -1755,6 +1755,11 @@ in
   # machine.
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = false;
+  # The boot menu picks a system; it doesn't edit one. With the editor (on
+  # by default), anyone at the keyboard could add `init=/bin/sh` or
+  # `systemd.debug-shell=1` to the kernel's command line: a root shell with
+  # no password, or one on tty9 as soon as the owner unlocked the disk.
+  boot.loader.systemd-boot.editor = false;
 
   # A quiet boot: no boot menu (holding Space while it starts brings it
   # back, for older systems), no kernel or systemd chatter, and no cursor.
