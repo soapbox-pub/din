@@ -137,6 +137,11 @@ let
     '';
   };
 
+  # The Vulkan layer that keeps web pages' WebGPU work from holding up the
+  # desktop: Dawn's compute on a compute queue of its own, at low priority
+  # (native/din-gpu-priority/layer.c). The launchers turn it on.
+  din-gpu-priority = pkgs.callPackage (din-root + "/native/din-gpu-priority/package.nix") { };
+
   # The N-API addon that hands the compositor's GPU buffers to Electron.
   din-fd = pkgs.rustPlatform.buildRustPackage {
     pname = "din-fd";
@@ -199,5 +204,5 @@ let
   };
 in
 {
-  inherit din-app din-compositor din-fd electron-hardened din-polkit-agent;
+  inherit din-app din-compositor din-fd electron-hardened din-polkit-agent din-gpu-priority;
 }

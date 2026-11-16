@@ -14,7 +14,7 @@ let
   # Din itself: its app, its compositors, din-fd and the Electron it runs on
   # (os/packages.nix), shared with the desktop module other NixOS systems
   # use (os/desktop-module.nix).
-  inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened din-polkit-agent;
+  inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened din-polkit-agent din-gpu-priority;
 
   # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
   # from its repository (the flake's `deckmon` input). It captures the screen
@@ -596,6 +596,14 @@ let
     if [ "''${DIN_ANGLE_GL:-0}" != 1 ] && ${pkgs.gnugrep}/bin/grep -qx 0x1002 /sys/class/drm/card*/device/vendor 2>/dev/null; then
       gpuFlags=(--use-angle=vulkan)
     fi
+    # Web pages' WebGPU work runs on Dawn, which put it on the graphics queue
+    # Din draws with, where a page's long compute job held every frame of the
+    # desktop until it finished. This Vulkan layer moves Dawn's compute to a
+    # compute queue of its own, beside the graphics one, at low priority
+    # (native/din-gpu-priority/layer.c); for anything else it passes calls
+    # straight through. DIN_GPU_PRIORITY_DISABLE=1 leaves it out.
+    export VK_ADD_IMPLICIT_LAYER_PATH=${din-gpu-priority}/share/vulkan/implicit_layer.d''${VK_ADD_IMPLICIT_LAYER_PATH:+:$VK_ADD_IMPLICIT_LAYER_PATH}
+    export DIN_GPU_PRIORITY=1
     # pam_systemd gives the session's processes CAP_WAKE_ALARM as an ambient
     # capability (its default for a seat), which everything Din and its
     # Terminal start would inherit. Programs that drop all their capabilities
