@@ -36,6 +36,12 @@ export type ShellPromptRequest =
       hostPermissions: string[];
       /** An installed extension asking for more than it has (chrome.permissions.request), not one being added. */
       more?: boolean;
+    }
+  | {
+      requestId: number;
+      /** The Chrome Web Store asking to remove an extension it installed. */
+      kind: 'extension-remove';
+      name: string;
     };
 
 export interface PromptHostBridge {

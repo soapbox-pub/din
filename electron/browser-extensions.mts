@@ -3,8 +3,9 @@
 // kind 32267, whose releases carry a .crx asset; NIP.md) and installed from
 // there.
 //
-// The Web Store's own installs live in Extensions/ (electron-chrome-web-store
-// loads them, see setupChromeExtensions in main.mts). Folders the user loads
+// The Web Store's own installs live in Extensions/ (chrome-web-store.mts
+// loads them, unpacked through unpackCrx here, see setupChromeExtensions in
+// main.mts). Folders the user loads
 // are remembered by path in local-extensions.json and loaded where they are,
 // so editing one and pressing Reload is the whole development loop. A .crx
 // file is checked and unpacked into PackedExtensions/<id>, the file kept in
@@ -30,7 +31,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { app, ipcMain, net } from 'electron';
-import { uninstallExtension } from 'electron-chrome-web-store';
+import { removeWebStoreInstall } from './chrome-web-store.mts';
 import { CrxError, extensionIdOfKey, newSigningKey, readCrx, writeCrx } from './crx.mts';
 import { checkPackageBase, fetchBlobs, isSha256, PackageError, safeRelative } from './themePackages.mts';
 
@@ -326,7 +327,10 @@ export function registerBrowserExtensionHandlers(options: {
   hidden: (id: string) => boolean;
   /** Ask the user to add an extension, showing what it can do; null when nobody answered. */
   askToAdd: (name: string, access: { permissions: string[]; hosts: string[] }) => Promise<boolean | null>;
-}): { loadSaved: () => Promise<void> } {
+}): {
+  loadSaved: () => Promise<void>;
+  unpackCrx: (data: Buffer, dest: string, fallbackName: string, previous?: string) => Promise<string>;
+} {
   const { assertShellSender } = options;
   const extensions = () => options.session().extensions;
 
@@ -388,7 +392,7 @@ export function registerBrowserExtensionHandlers(options: {
       await setLocalFolders(folders.filter((f) => f !== extension.path));
       return;
     }
-    await uninstallExtension(id, { session: options.session(), extensionsPath: options.webStorePath() });
+    await removeWebStoreInstall(options.session(), options.webStorePath(), id);
   };
 
   const exportExtension = async (extension: Electron.Extension, keys: Record<string, string>): Promise<ExtensionExport> => {
@@ -467,10 +471,11 @@ export function registerBrowserExtensionHandlers(options: {
 
   /**
    * Check a .crx, ask the user to add it (an update only when it wants more
-   * than what's at `dest` now), and unpack it there with its key as the
-   * manifest's `key`, as Chrome does, so it has the id it was signed with.
+   * than what's at `previous` now, `dest` unless said), and unpack it there
+   * with its key as the manifest's `key`, as Chrome does, so it has the id
+   * it was signed with.
    */
-  const unpackCrx = async (data: Buffer, dest: string, fallbackName: string): Promise<string> => {
+  const unpackCrx = async (data: Buffer, dest: string, fallbackName: string, previous = dest): Promise<string> => {
     let parsed;
     try {
       parsed = readCrx(data);
@@ -486,8 +491,8 @@ export function registerBrowserExtensionHandlers(options: {
     files.set('manifest.json', Buffer.from(JSON.stringify({ ...manifest, key: parsed.key }, null, 2)));
 
     const access = extensionAccess(manifest);
-    const installed = await fsp.access(dest).then(() => true, () => false);
-    const before = installed ? extensionAccess(await readManifest(dest).catch(() => ({}))) : null;
+    const installed = await fsp.access(previous).then(() => true, () => false);
+    const before = installed ? extensionAccess(await readManifest(previous).catch(() => ({}))) : null;
     const more = !before
       || access.permissions.some((p) => !before.permissions.includes(p))
       || access.hosts.some((h) => !before.hosts.includes(h));
@@ -669,5 +674,5 @@ export function registerBrowserExtensionHandlers(options: {
     }
   };
 
-  return { loadSaved };
+  return { loadSaved, unpackCrx };
 }

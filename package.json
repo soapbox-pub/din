@@ -32,7 +32,6 @@
     "@ghostery/adblocker-electron-preload": "^2.20.1",
     "@photostructure/tz-lookup": "^11.7.0",
     "electron-chrome-context-menu": "^1.1.0",
-    "electron-chrome-web-store": "^0.13.0",
     "fflate": "^0.8.3",
     "harper.js": "^3.0.0",
     "hash-wasm": "^4.12.0",

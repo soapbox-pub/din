@@ -50,11 +50,10 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import netSocket from 'node:net';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme } from 'electron';
 import { BROWSER_ACTION_PRELOAD, ElectronChromeExtensions } from './chrome-extensions.mts';
-import { installChromeWebStore } from 'electron-chrome-web-store';
-import { extensionAccess, registerBrowserExtensionHandlers } from './browser-extensions.mts';
+import { setupChromeWebStore } from './chrome-web-store.mts';
+import { registerBrowserExtensionHandlers } from './browser-extensions.mts';
 import { DevtoolsBridge } from './devtools-bridge.mts';
 import { allowLocalFile, allowLocalFileNavigation, serveLocalFile } from './local-files.mts';
 import {
@@ -196,8 +195,6 @@ import { startWatchdog } from './watchdog.mts';
 // named export too, which Node's ESM-CJS interop resolves statically.
 import { buildChromeContextMenu } from 'electron-chrome-context-menu';
 
-// require.resolve for hardenWebStorePreload (no ESM equivalent).
-const require = createRequire(import.meta.url);
 
 /** An IPC event from either ipcMain.on or ipcMain.handle. */
 type IpcEvent = Electron.IpcMainEvent | Electron.IpcMainInvokeEvent;
@@ -3829,7 +3826,7 @@ function watchShellHotkeys(): void {
 //
 // chrome-extensions.mts implements the chrome.* extension APIs that
 // Electron itself lacks (tabs, actions, popups, ...), and
-// electron-chrome-web-store lets users install extensions by browsing the
+// chrome-web-store.mts lets users install extensions by browsing the
 // Chrome Web Store inside the browser app. Everything is scoped to the
 // browser's session partition (persist:webbrowser):
 //   - extensions run against web pages only, browser tabs and installed apps'
@@ -3881,6 +3878,8 @@ const WEBBROWSER_TOR_PARTITION = 'din-webbrowser-tor';
  * and installed web apps, never private tabs.
  */
 const NOSTR_PRELOAD = path.join(import.meta.dirname, 'nostr-preload.cjs');
+/** The Chrome Web Store's chrome.webstorePrivate, on its own pages only (chrome-web-store.mts). */
+const WEB_STORE_PRELOAD = path.join(import.meta.dirname, 'chrome-web-store-preload.cjs');
 
 /**
  * Absolute path to the preload injected into the ad-hoc Web Browser's tabs.
@@ -4792,33 +4791,25 @@ function setupChromeExtensions(): void {
   });
 
   // Chrome Web Store installs: browsing chromewebstore.google.com inside a
-  // browser tab gets a working "Add to Chrome" button. Also re-loads all
-  // previously installed extensions from disk at startup.
-  installChromeWebStore({
+  // browser tab gets a working "Add to Chrome" button, answered only for the
+  // store's own top document; the package is checked and the user asked,
+  // from its own manifest, by unpackCrx, as for any .crx. Also loads what it
+  // installed before, and keeps it up to date.
+  const webStore = setupChromeWebStore({
     session: browserSession(),
     extensionsPath: extensionsPath(),
-    // Allow Manifest V2 so proven extensions like uBlock Origin keep working
-    // (Electron has no declarativeNetRequest, which most MV3 blockers need).
+    // Manifest V2 still installs, so proven extensions like uBlock Origin
+    // keep working (Electron has no declarativeNetRequest, which most MV3
+    // blockers need).
     minimumManifestVersion: 2,
-    allowUnpackedExtensions: true,
-    // The library installs with no confirmation unless this says otherwise.
-    // Require the genuine store origin (its own check is a prefix match, see
-    // hardenWebStorePreload) and the user's explicit go-ahead, Chrome-style.
-    beforeInstall: async ({ frame, localizedName, manifest }) => {
-      if (!frame || frame.isDestroyed() || frame.origin !== WEB_STORE_ORIGIN) {
-        return { action: 'deny' };
-      }
-      const raw = manifest as unknown as Record<string, unknown>;
-      const allow = await askToAddExtension(
-        localizedName || (typeof raw.name === 'string' ? raw.name : 'This extension'),
-        extensionAccess(raw),
-      );
-      return { action: allow ? 'allow' : 'deny' };
+    unpackCrx: (data, dest, name, previous) => {
+      if (!browserExtensions) throw new Error('Extensions aren’t ready yet');
+      return browserExtensions.unpackCrx(data, dest, name, previous);
     },
-  }).catch((error) => {
-    console.error('chrome-web-store setup failed:', error);
+    confirmRemove: async (name) => (await askShell({ kind: 'extension-remove', name })) === true,
   });
-  hardenWebStorePreload();
+  browserSession().registerPreloadScript({ id: 'din-chrome-web-store', type: 'frame', filePath: WEB_STORE_PRELOAD });
+  void webStore.loadAll().then(() => webStore.startUpdates());
 
   // Extensions loaded from folders and installed from Nostr.
   void browserExtensions?.loadSaved();
@@ -4838,34 +4829,6 @@ function setupChromeExtensions(): void {
 /** Ask the user to add an extension, Chrome-style, showing what it can reach. */
 function askToAddExtension(name: string, access: { permissions: string[]; hosts: string[] }): Promise<boolean | null> {
   return askShell({ kind: 'extension-install', name, permissions: access.permissions, hostPermissions: access.hosts });
-}
-
-/** The one origin allowed to drive extension installs. */
-const WEB_STORE_ORIGIN = 'https://chromewebstore.google.com';
-
-/**
- * Swap electron-chrome-web-store's frame preload for a copy gated on the exact
- * store origin. Upstream (0.13.0) gates its install API on
- * `location.href.startsWith("https://chromewebstore.google.com")`, which any
- * `chromewebstore.google.com.<attacker>` host also satisfies - handing that
- * page chrome.webstorePrivate (install any extension) and chrome.management
- * (list and uninstall them). Its IPC handlers make the same prefix check, but
- * with the API never exposed to a lookalike page, it has nothing to call them
- * with. If the upstream source no longer contains the gate we patch, fail
- * closed: unregister the preload and leave the store install button inert.
- */
-function hardenWebStorePreload(): void {
-  const s = browserSession();
-  s.unregisterPreloadScript('electron-chrome-web-store');
-  const gate = 'location.href.startsWith("https://chromewebstore.google.com")';
-  const source = fs.readFileSync(require.resolve('electron-chrome-web-store/preload'), 'utf8');
-  if (!source.includes(gate)) {
-    console.error('chrome-web-store: preload gate not found; store installs disabled');
-    return;
-  }
-  const file = path.join(app.getPath('userData'), 'chrome-web-store.preload.js');
-  fs.writeFileSync(file, source.replaceAll(gate, `location.origin === ${JSON.stringify(WEB_STORE_ORIGIN)}`));
-  s.registerPreloadScript({ id: 'din-chrome-web-store', type: 'frame', filePath: file });
 }
 
 // ---------------------------------------------------------------------------
@@ -4888,7 +4851,8 @@ const SITE_CAPABILITIES: readonly SiteCapability[] = [
 
 type ShellPrompt =
   | { kind: 'permission'; origin: string; capabilities: SiteCapability[]; remembered: boolean }
-  | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[]; more?: boolean };
+  | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[]; more?: boolean }
+  | { kind: 'extension-remove'; name: string };
 
 let nextPromptId = 1;
 const pendingPrompts = new Map<number, { resolve: (allow: boolean | null) => void; timer: NodeJS.Timeout }>();

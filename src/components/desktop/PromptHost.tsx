@@ -67,12 +67,24 @@ export function PromptHost() {
       <DialogContent key={current?.requestId} className="sm:max-w-md">
         {current?.kind === 'permission' && <PermissionPrompt request={current} />}
         {current?.kind === 'extension-install' && <ExtensionInstallPrompt request={current} />}
+        {current?.kind === 'extension-remove' && (
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Puzzle className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 break-words">Remove “{current.name}”?</span>
+            </DialogTitle>
+            <DialogDescription>The Chrome Web Store asks to remove it from the Web Browser.</DialogDescription>
+          </DialogHeader>
+        )}
         <DialogFooter>
           <Button variant="secondary" onClick={() => answer(false)}>
-            {current?.kind !== 'extension-install' ? 'Block' : current.more ? 'Don’t Allow' : 'Cancel'}
+            {current?.kind === 'permission' ? 'Block' : current?.kind === 'extension-install' && current.more ? 'Don’t Allow' : 'Cancel'}
           </Button>
-          <Button onClick={() => answer(true)}>
-            {current?.kind === 'extension-install' && !current.more ? 'Add extension' : 'Allow'}
+          <Button
+            variant={current?.kind === 'extension-remove' ? 'destructive' : 'default'}
+            onClick={() => answer(true)}
+          >
+            {current?.kind === 'extension-remove' ? 'Remove' : current?.kind === 'extension-install' && !current.more ? 'Add extension' : 'Allow'}
           </Button>
         </DialogFooter>
       </DialogContent>

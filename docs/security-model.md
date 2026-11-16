@@ -25,7 +25,12 @@
   link could go; more permissions only what its manifest lists as optional,
   and only when the user says yes. It can't close or hide the desktop's
   window, put a web page in its toolbar popup, or reach the desktop's
-  toolbar calls, which answer only the desktop's own document.
+  toolbar calls, which answer only the desktop's own document. The Chrome
+  Web Store's install API (`electron/chrome-web-store.mts`) answers only the
+  store's own top document, by exact origin; what's installed is checked
+  (every signature, and the id) and shown to the user from the package's
+  own manifest, never the page's, as are updates that want more; and the
+  store can remove only what it installed, once the user says so.
 
 We don't defend against a compromised desktop. The desktop holds the
 signer and `window.dinos`, so an XSS there is game over; the rules in

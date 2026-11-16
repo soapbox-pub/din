@@ -4142,7 +4142,8 @@ expose('filePickerHost', {
  * A question the main process needs the user to answer.
  * @typedef {(
  *   { requestId: number, kind: 'permission', origin: string, capabilities: string[], remembered: boolean } |
- *   { requestId: number, kind: 'extension-install', name: string, permissions: string[], hostPermissions: string[] }
+ *   { requestId: number, kind: 'extension-install', name: string, permissions: string[], hostPermissions: string[], more?: boolean } |
+ *   { requestId: number, kind: 'extension-remove', name: string }
  * )} ShellPromptRequest
  */
 
