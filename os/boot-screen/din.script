@@ -11,16 +11,41 @@
 # initrd (os/boot-screen.nix): the wallpaper is a file in ImageDir that may
 # only show up after this starts, and the time comes as display-message
 # lines "din-clock:<time>|<date>", since Plymouth scripts have no clock.
+#
+# Plymouth draws every screen from one canvas, the size of the largest screen,
+# with each screen a window centered on it. What's centered on the canvas is
+# centered on every screen, but only the smallest screen's area is on all of
+# them, so what sits at an edge (the logo, the bar) goes at the smallest's
+# edge, and sizes follow the smallest's height. The screens change while this
+# runs: Plymouth starts on the firmware's framebuffer, which may be the
+# laptop's own screen alone, and a moment later the GPU's driver replaces it
+# with every screen at its own size. So refresh measures them every frame and
+# lays everything out again when they change (layout, below).
 
 Window.SetBackgroundTopColor(0.043, 0.059, 0.078);
 Window.SetBackgroundBottomColor(0.043, 0.059, 0.078);
 
-screen.x = Window.GetX();
-screen.y = Window.GetY();
-screen.w = Window.GetWidth();
-screen.h = Window.GetHeight();
-# Sizes are designed for 1080 lines and follow the screen's height.
-scale = Math.Max(screen.h / 1080, 0.5);
+# The canvas (x, y, w, h) and the smallest screen's size on it (inner_w,
+# inner_h), which is centered on it like every screen.
+fun measure()
+{
+  local.m.x = Window.GetX();
+  m.y = Window.GetY();
+  m.w = Window.GetWidth();
+  m.h = Window.GetHeight();
+  m.inner_w = m.w;
+  m.inner_h = m.h;
+  for (i = 0; Window.GetWidth(i); i++)
+  {
+    m.inner_w = Math.Min(m.inner_w, Window.GetWidth(i));
+    m.inner_h = Math.Min(m.inner_h, Window.GetHeight(i));
+  }
+  return m;
+}
+
+screen = measure();
+# Sizes are designed for 1080 lines and follow the smallest screen's height.
+scale = Math.Max(screen.inner_h / 1080, 0.5);
 
 fun px(size)
 {
@@ -71,9 +96,7 @@ black = Image("black.png");
 #------------------------------------ Wallpaper -------------------------------
 
 wallpaper = fader(Sprite(), -100);
-dim_image = black.Scale(screen.w, screen.h);
-dim = fader(Sprite(dim_image), -90);
-dim.sprite.SetPosition(screen.x, screen.y, -90);
+dim = fader(Sprite(), -90);
 # These two cover the screen, and Plymouth blends every pixel of a sprite whose
 # opacity is changing on the CPU, under a second a frame or worse on a screen of
 # 5 million pixels. Easing counts frames, so that fade would last half a minute
@@ -82,18 +105,25 @@ wallpaper.instant = 1;
 dim.instant = 1;
 wallpaper_tries = 0;
 
-# Scaled to cover the screen, centered, as Din draws it.
-fun load_wallpaper()
+# Scaled to cover the canvas, centered, as Din draws it.
+fun place_wallpaper()
 {
-  image = Image("wallpaper.png");
-  if (!image)
-    return 0;
+  image = global.wallpaper_image;
   factor = Math.Max(screen.w / image.GetWidth(), screen.h / image.GetHeight());
   width = Math.Int(image.GetWidth() * factor + 0.999);
   height = Math.Int(image.GetHeight() * factor + 0.999);
   wallpaper.sprite.SetImage(image.Scale(width, height));
   wallpaper.sprite.SetX(screen.x + Math.Int((screen.w - width) / 2));
   wallpaper.sprite.SetY(screen.y + Math.Int((screen.h - height) / 2));
+}
+
+fun load_wallpaper()
+{
+  image = Image("wallpaper.png");
+  if (!image)
+    return 0;
+  global.wallpaper_image = image;
+  place_wallpaper();
   return 1;
 }
 
@@ -106,36 +136,17 @@ entry = fader(Sprite(), 11);
 caption = fader(Sprite(), 10);
 footer = fader(Sprite(), 10);
 
-clock_y = Math.Int(screen.h * 0.5) - px(190);
-date_y = clock_y + px(124);
-field_y = date_y + px(104);
-caption_y = field_y + px(64);
-
 field_image = Image("field.png");
-if (field_image)
-  center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
-
-logo_h = px(28);
 logo_image = Image("logo.png");
-if (logo_image)
-{
-  logo_w = Math.Int(logo_image.GetWidth() * logo_h / logo_image.GetHeight());
-  center(footer.sprite, logo_image.Scale(logo_w, logo_h), screen.h - px(40) - logo_h);
-}
 footer.target = 0.85;
 
 # The bar: Plymouth's estimate of how far booting has got, from how long the
 # last boots took. It fills to BAR_SHARE by the time Din starts, and Din's
 # veil goes on from there.
 BAR_SHARE = 0.7;
-bar_w = px(160);
-bar_h = Math.Max(px(4), 2);
-bar_y = screen.h - px(40) - logo_h - px(24) - bar_h;
-bar_x = Math.Int((screen.w - bar_w) / 2);
-track = fader(Sprite(Image("bar-track.png").Scale(bar_w, bar_h)), 10);
-track.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 10);
+track_image = Image("bar-track.png");
+track = fader(Sprite(), 10);
 fill = fader(Sprite(), 11);
-fill.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 11);
 fill_image = Image("bar-fill.png");
 shown = 0;
 progress = 0;
@@ -165,9 +176,8 @@ fun show_lock()
 
 # The caret, which blinks in the field while it waits for the password: before
 # the placeholder when the field is empty, after the dots once typing starts.
-caret_w = Math.Max(px(2), 1);
-caret_h = px(22);
-caret = Sprite(Image("cursor.png").Scale(caret_w, caret_h));
+caret_image = Image("cursor.png");
+caret = Sprite();
 caret.SetZ(12);
 caret.SetOpacity(0);
 caret_shown = 0;
@@ -179,8 +189,20 @@ CARET_NONE = 0;
 CARET_BEFORE = 1;
 CARET_AFTER = 2;
 
+# What the field, the caption and the clock show, kept so that layout can draw
+# them again at a new size.
+entry_set = 0;
+caption_set = 0;
+clock_size = 0;
+date_set = 0;
+
 fun set_entry(string, alpha, size, caret_at)
 {
+  global.entry_set = 1;
+  global.entry_text = string;
+  global.entry_alpha = alpha;
+  global.entry_size = size;
+  global.entry_caret = caret_at;
   image = text(string, alpha, "Regular", size);
   center(entry.sprite, image, field_y + Math.Int((px(48) - image.GetHeight()) / 2));
   left = Math.Int((screen.w - image.GetWidth()) / 2);
@@ -199,6 +221,8 @@ fun set_entry(string, alpha, size, caret_at)
 
 fun set_caption(string)
 {
+  global.caption_set = 1;
+  global.caption_text = string;
   center(caption.sprite, text(string, 0.55, "Regular", 13), caption_y);
 }
 
@@ -252,7 +276,7 @@ fun display_message(message)
   # os/din-erase.sh erases it.
   if (message.SubString(0, 11) == "din-status:")
   {
-    center(clock.sprite, text(message.SubString(11, message.Length()), 1, "Semi-Bold", 48), clock_y + px(24));
+    set_clock(message.SubString(11, message.Length()), 48, 24);
     clock.target = 1;
     return;
   }
@@ -262,9 +286,81 @@ fun display_message(message)
   bar = 0;
   while (bar < rest.Length() && rest.CharAt(bar) != "|")
     bar++;
-  center(clock.sprite, text(rest.SubString(0, bar), 1, "Semi-Bold", 72), clock_y);
-  center(date.sprite, text(rest.SubString(bar + 1, rest.Length()), 0.7, "Regular", 16), date_y);
+  set_clock(rest.SubString(0, bar), 72, 0);
+  global.date_set = 1;
+  global.date_text = rest.SubString(bar + 1, rest.Length());
+  center(date.sprite, text(date_text, 0.7, "Regular", 16), date_y);
 }
+
+# The clock's line, or what the computer is doing in its place, a little lower.
+fun set_clock(string, size, offset)
+{
+  global.clock_text = string;
+  global.clock_size = size;
+  global.clock_offset = offset;
+  center(clock.sprite, text(string, 1, "Semi-Bold", size), clock_y + px(offset));
+}
+
+#------------------------------------ Layout ----------------------------------
+
+# Places and sizes everything for the screens there are now (see the top).
+fun layout()
+{
+  global.screen = measure();
+  global.scale = Math.Max(screen.inner_h / 1080, 0.5);
+  # The smallest screen's bottom edge, on the canvas.
+  bottom = Math.Int((screen.h + screen.inner_h) / 2);
+
+  global.dim_image = black.Scale(screen.w, screen.h);
+  dim.sprite.SetImage(dim_image);
+  dim.sprite.SetPosition(screen.x, screen.y, -90);
+  if (wallpaper.loaded)
+    place_wallpaper();
+
+  global.clock_y = Math.Int(screen.h * 0.5) - px(190);
+  global.date_y = clock_y + px(124);
+  global.field_y = date_y + px(104);
+  global.caption_y = field_y + px(64);
+  if (field_image)
+    center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
+
+  global.logo_h = px(28);
+  if (logo_image)
+  {
+    logo_w = Math.Int(logo_image.GetWidth() * logo_h / logo_image.GetHeight());
+    center(footer.sprite, logo_image.Scale(logo_w, logo_h), bottom - px(40) - logo_h);
+  }
+
+  global.bar_w = px(160);
+  global.bar_h = Math.Max(px(4), 2);
+  bar_y = bottom - px(40) - logo_h - px(24) - bar_h;
+  bar_x = Math.Int((screen.w - bar_w) / 2);
+  track.sprite.SetImage(track_image.Scale(bar_w, bar_h));
+  track.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 10);
+  fill.sprite.SetPosition(screen.x + bar_x, screen.y + bar_y, 11);
+  # refresh scales the fill again for the new width.
+  global.fill_width = 0;
+
+  global.caret_w = Math.Max(px(2), 1);
+  global.caret_h = px(22);
+  caret.SetImage(caret_image.Scale(caret_w, caret_h));
+
+  if (clock_size)
+    set_clock(clock_text, clock_size, clock_offset);
+  if (date_set)
+    center(date.sprite, text(date_text, 0.7, "Regular", 16), date_y);
+  if (caption_set)
+    set_caption(caption_text);
+  if (entry_set)
+  {
+    # set_entry shows the caret solid again, as after a key; keep its blink.
+    frame = caret_frame;
+    set_entry(entry_text, entry_alpha, entry_size, entry_caret);
+    global.caret_frame = frame;
+  }
+}
+
+layout();
 
 #------------------------------------ Unlocked --------------------------------
 
@@ -288,6 +384,10 @@ capslock = 0;
 
 fun refresh()
 {
+  m = measure();
+  if (m.w != screen.w || m.h != screen.h || m.inner_w != screen.inner_w || m.inner_h != screen.inner_h)
+    layout();
+
   # The wallpaper is copied off the boot partition once that turns up, often
   # after this script starts; look for it for the first ten seconds.
   if (!wallpaper.loaded && wallpaper_tries < 500)
