@@ -442,6 +442,13 @@ export function Dock({
       // Touch has no hover: a finger only reveals by swiping up from the
       // edge (see the trigger strip below) and retracts by tapping elsewhere.
       if (e.pointerType === 'touch') return;
+      // A locked pointer (a game's mouse-look in a native window) hasn't
+      // gone anywhere: the cursor stays put, whatever the moves say. Pages'
+      // moves stop at main while they hold it (forwardGuestInput).
+      if (document.pointerLockElement) {
+        last = null;
+        return;
+      }
       last = { x: e.clientX, y: e.clientY };
       // At or past the viewport's bottom edge is the edge itself; past the
       // primary monitor's bottom but inside the viewport is another monitor.
@@ -463,7 +470,7 @@ export function Dock({
     };
     const onPointerOut = (e: PointerEvent) => {
       // A null relatedTarget on a mouse means it left the window itself.
-      if (e.relatedTarget !== null || e.pointerType !== 'mouse' || !last) return;
+      if (e.relatedTarget !== null || e.pointerType !== 'mouse' || !last || document.pointerLockElement) return;
       const { x, y } = last;
       if (x < primary.x || x >= primary.x + primary.width) return;
       const fromBottom = primary.y + primary.height - y;
@@ -474,11 +481,16 @@ export function Dock({
         setRevealed(true);
       }
     };
+    const onPointerLockChange = () => {
+      if (document.pointerLockElement) setRevealed(false);
+    };
     window.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerout', onPointerOut);
+    document.addEventListener('pointerlockchange', onPointerLockChange);
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerout', onPointerOut);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
     };
   }, [intersecting, primary, layout.lift, size, maxScale]);
 

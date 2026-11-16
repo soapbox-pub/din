@@ -3994,6 +3994,14 @@ const CHROME_APP_PRELOAD = path.join(import.meta.dirname, 'chrome-app-preload.cj
 const PRINT_PRELOAD = path.join(import.meta.dirname, 'print-preload.cjs');
 
 /**
+ * Absolute path to the session preload that tells main when a frame takes
+ * or lets go of the pointer (DOM Pointer Lock), so forwardGuestInput stops
+ * forwarding its made-up position. Pages and built-in apps get it, in every
+ * frame.
+ */
+const POINTER_LOCK_PRELOAD = path.join(import.meta.dirname, 'pointer-lock-preload.cjs');
+
+/**
  * Absolute path to the session preload that tells Din when a web page is
  * sharing the screen, so the menu bar can show it and stop it (see
  * electron/screen-share.mts). Every page gets it, in every frame.
@@ -4211,8 +4219,48 @@ function popupEditMenu(contents: Electron.WebContents, params: Electron.ContextM
   setImmediate(() => showMenu(contents, menu, params.x, params.y));
 }
 
+/**
+ * The frame holding the pointer locked in each guest, by WebContents id, as
+ * pointer-lock-preload.cjs reports it.
+ */
+const pointerLockFrames = new Map<number, { frame: Electron.WebFrameMain; key: string }>();
+
+const frameKey = (processId: number, routingId: number) => `${processId}:${routingId}`;
+
+/** Whether a guest has the pointer locked: the frame that took it is still there. */
+function holdsPointerLock(wcId: number): boolean {
+  const lock = pointerLockFrames.get(wcId);
+  if (!lock) return false;
+  if (lock.frame.isDestroyed() || lock.frame.detached) {
+    // A frame taken out while it held the lock never says it let go.
+    pointerLockFrames.delete(wcId);
+    return false;
+  }
+  return true;
+}
+
+function registerPointerLockReports(): void {
+  ipcMain.on('guest:pointer-lock', (event, locked) => {
+    const contents = event.sender;
+    const frame = event.senderFrame;
+    if (contents.getType() !== 'webview' || !frame) return;
+    const key = frameKey(frame.processId, frame.routingId);
+    if (locked === true) {
+      pointerLockFrames.set(contents.id, { frame, key });
+    } else if (pointerLockFrames.get(contents.id)?.key === key) {
+      pointerLockFrames.delete(contents.id);
+    }
+  });
+}
+
 function forwardGuestInput(contents: Electron.WebContents): void {
   const wcId = contents.id;
+  // A page holding the pointer locked (a game's mouse-look) lets go of it
+  // when the frame that took it navigates, without saying so.
+  contents.on('did-frame-navigate', (_event, _url, _code, _status, isMainFrame, processId, routingId) => {
+    const lock = pointerLockFrames.get(wcId);
+    if (lock && (isMainFrame || lock.key === frameKey(processId, routingId))) pointerLockFrames.delete(wcId);
+  });
   // Where the pointer is in the shell's own view, from the event's screen
   // position: the guest's view moves with its window, so a window being
   // dragged by a press inside it can't place itself by the guest-local
@@ -4240,6 +4288,11 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     // replayed move without it would read as Super released.
     const meta = mouse.modifiers?.includes('meta') ?? false;
     if (mouse.type === 'mouseMove') {
+      // While the page has the pointer locked, the cursor stays put and
+      // Chromium (on Wayland) makes the position up by adding up the
+      // mouse's motion without bound: a player looking down would carry it
+      // past the screen's bottom edge and bring up the Dock.
+      if (holdsPointerLock(wcId)) return;
       pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta };
       moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
     } else if (mouse.type === 'mouseDown') {
@@ -4262,6 +4315,7 @@ function forwardGuestInput(contents: Electron.WebContents): void {
   });
   contents.once('destroyed', () => {
     if (moveTimer) clearTimeout(moveTimer);
+    pointerLockFrames.delete(wcId);
   });
 }
 
@@ -6418,6 +6472,7 @@ app.whenReady().then(() => {
     s.registerPreloadScript({ id: 'din-passwords', type: 'frame', filePath: PASSWORDS_PRELOAD });
     s.registerPreloadScript({ id: 'din-passkeys', type: 'frame', filePath: PASSKEYS_PRELOAD });
     s.registerPreloadScript({ id: 'din-power-mode', type: 'frame', filePath: POWER_MODE_PRELOAD });
+    s.registerPreloadScript({ id: 'din-pointer-lock', type: 'frame', filePath: POINTER_LOCK_PRELOAD });
     allowScreenSharing(s);
   }
   registerScreenShareHandlers({
@@ -6477,6 +6532,8 @@ app.whenReady().then(() => {
   );
   // An app prints as a page does, with the web's print().
   appsSession().registerPreloadScript({ id: 'din-print', type: 'frame', filePath: PRINT_PRELOAD });
+  // An app can lock the pointer (din-apps.mts grants it) as a page can.
+  appsSession().registerPreloadScript({ id: 'din-pointer-lock', type: 'frame', filePath: POINTER_LOCK_PRELOAD });
   appsSession().registerPreloadScript({ id: 'din-app-sw', type: 'frame', filePath: DIN_APP_WORKER_PRELOAD });
   appsSession().registerPreloadScript({ id: 'din-app-sw-worker', type: 'service-worker', filePath: DIN_APP_WORKER_PRELOAD });
   registerWidgets(
@@ -6520,6 +6577,7 @@ app.whenReady().then(() => {
   registerSiteLocationHandlers({ assertShellSender, sendToShell });
   registerDisplayHandlers();
   registerPageFullscreenHandlers();
+  registerPointerLockReports();
   registerGuestVisibilityHandlers();
   // What a session needs running before its first page loads (GuestSurface waits for it).
   ipcMain.handle('guestSession:prepare', (event, partition: unknown) => {
