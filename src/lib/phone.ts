@@ -33,6 +33,12 @@ export interface PhoneDevice {
   receiveFiles: boolean;
   /** Whether verification codes in its texts are offered in web pages' code fields (electron/phone-codes.mts). */
   fillCodes: boolean;
+  /**
+   * Whether a text to several people goes as one group text (an MMS), which
+   * phones that share MMS over Bluetooth do (Android's); otherwise each gets
+   * their own. As of when it last connected.
+   */
+  groupTexts: boolean;
 }
 
 /** A phone that could be added: one paired over Bluetooth, or one found on the network. */
@@ -67,6 +73,8 @@ export interface PhoneMessage {
   status: 'sending' | 'sent' | 'failed' | null;
   /** Thumbnails of pictures, as data: URLs. */
   images: string[];
+  /** A picture or group message (MMS), read whole: its pictures and everyone it's to are all here. */
+  mms?: boolean;
 }
 
 export interface PhoneConversation {

@@ -75,9 +75,24 @@ export function bMessageText(text: string): string {
   return text.slice(start + 'BEGIN:MSG'.length, end).replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 }
 
-/** A bMessage to send a text to one number (MAP's PushMessage). */
-export function bMessage(address: string, body: string): string {
-  const text = body.replace(/\r?\n/g, '\r\n');
+/**
+ * A message body as Android's MAP server reads it back: its bMessage reader
+ * joins the lines between BEGIN:MSG and END:MSG with nothing between them,
+ * dropping every CRLF, so a line break that's to survive is a bare LF (which
+ * it keeps). The same reader is why a picture can't be sent this way: a MIME
+ * message's headers and parts are found by CRLFs that never reach its parser.
+ */
+export function androidBody(body: string): string {
+  return body.replace(/\r\n?/g, '\n').replace(/^\n+|\n+$/g, '').replace(/END:MSG/g, '/END\\:MSG');
+}
+
+/**
+ * A bMessage to send a text to one number (MAP's PushMessage). `lineBreaks`
+ * is how the text's own line breaks are written: CRLF for an iPhone, a bare
+ * LF for Android's reader, which drops CRLFs (androidBody).
+ */
+export function bMessage(address: string, body: string, lineBreaks: 'crlf' | 'lf' = 'crlf'): string {
+  const text = lineBreaks === 'lf' ? androidBody(body) : body.replace(/\r?\n/g, '\r\n');
   const message = `BEGIN:MSG\r\n${text}\r\nEND:MSG\r\n`;
   const tel = address.replace(/[\r\n]/g, '');
   return [

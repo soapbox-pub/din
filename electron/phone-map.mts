@@ -13,9 +13,19 @@
 // pushes a bMessage to the outbox. Contacts come over the Phone Book Access
 // Profile (the iPhone's "Sync Contacts"), in a session of their own.
 //
-// MAP carries no pictures or group conversations; that's the profile's limit,
-// the same on Windows. Conversations are by the other person's number, since
-// MAP has no threads.
+// Picture and group messages (MMS) come from phones that list them, which
+// Android phones do and iPhones don't (phone-mms.mts): each is fetched whole
+// with its attachments as soon as it's listed (Android doesn't mark a message
+// read for being fetched), for its pictures and for everyone it's to and
+// from. A text to more than one number goes to such a phone as one MMS to all
+// of them, a group text; to an iPhone, as a text to each. Pictures can't be
+// sent: Android's MAP server can't read an MMS with parts in it.
+//
+// Conversations are by the other person's number, or for a group by all of
+// theirs, since MAP's conversation ids are only for clients that ask for
+// listings in MAP 1.3's format, and obexd asks only phones that say so in a
+// way Android's don't. Who's "everyone else" needs the phone's own number,
+// which its texts' listings carry (the recipient of one received).
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -27,6 +37,7 @@ import { randomUUID } from 'node:crypto';
 import { bluetoothPhones } from './bluetooth.mts';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
 import { sessionBusAddress } from './native-display.mts';
+import { bMessageGroup, parseMms } from './phone-mms.mts';
 import { bMessage, bMessageText, parseVCards } from './phone-vcard.mts';
 import type { BackendMessage, PhoneConnection, PhoneHooks } from './phone.mts';
 
@@ -200,6 +211,11 @@ function digits(address: string): string {
   return d.length > 10 ? d.slice(-10) : d;
 }
 
+/** A group conversation's id: everyone else's numbers, so the same people are the same conversation (phone.mts names one to send to the same way). */
+export function groupThreadId(addresses: string[]): string {
+  return `g:${[...new Set(addresses.map((a) => digits(a) || a.toLowerCase()))].sort().join(',')}`;
+}
+
 // ---------------------------------------------------------------------------
 // A phone
 // ---------------------------------------------------------------------------
@@ -209,6 +225,19 @@ interface Known {
   /** Only the listing's subject so far: the whole text waits until it's read. */
   partial: boolean;
   message: BackendMessage;
+}
+
+/** What a MAP listing says of a message, as obexd has it. */
+type Listed = { objectPath: string; handle: string; props: Map<string, unknown>; type: string };
+
+/** What a picture message's attachments that aren't pictures are called, in its text. */
+function attachmentLabel(mime: string): string {
+  if (mime.startsWith('video/')) return '[Video]';
+  if (mime.startsWith('audio/')) return '[Audio]';
+  if (/vcard/i.test(mime)) return '[Contact card]';
+  if (/calendar/i.test(mime)) return '[Event]';
+  if (mime.startsWith('image/')) return '[Picture]';
+  return '[Attachment]';
 }
 
 export class MapConnection implements PhoneConnection {
@@ -227,6 +256,10 @@ export class MapConnection implements PhoneConnection {
   private contactsPulling: Promise<void> | null = null;
   /** What's been reported, by MAP handle. */
   private known = new Map<string, Known>();
+  /** Whether the phone lists and sends MMS (its MAP record says so): Android's do, iPhones don't. */
+  private mms = false;
+  /** The phone's own numbers, as digits, learned from its listings: not one of the others in a group. */
+  private own = new Set<string>();
 
   constructor(address: string, hooks: PhoneHooks) {
     this.address = address;
@@ -251,23 +284,27 @@ export class MapConnection implements PhoneConnection {
   }
 
   async send(addresses: string[], body: string): Promise<void> {
+    if (!this.session) throw new Error('The phone isn’t connected.');
+    // One MMS to all of them, where the phone sends MMS; a text to each where it doesn't.
+    if (addresses.length > 1 && this.mms) return this.push(bMessageGroup(addresses, body));
+    for (const address of addresses) await this.push(bMessage(address, body, this.mms ? 'lf' : 'crlf'));
+  }
+
+  private async push(bmessage: string): Promise<void> {
     const session = this.session;
     if (!session) throw new Error('The phone isn’t connected.');
-    // MAP sends to one number at a time.
-    for (const address of addresses) {
-      const file = scratchFile('bmsg');
-      await fs.writeFile(file, bMessage(address, body), { mode: 0o600 });
-      try {
-        const args = new Map([
-          ['Transparent', new Variant('b', false)],
-          ['Retry', new Variant('b', true)],
-          ['Charset', new Variant('s', 'utf8')],
-        ]);
-        const [transfer] = await call('PushMessage', session, MAP, 'ssa{sv}', [file, 'outbox', args]);
-        await waitTransfer(transfer as string);
-      } finally {
-        void fs.rm(file, { force: true });
-      }
+    const file = scratchFile('bmsg');
+    await fs.writeFile(file, bmessage, { mode: 0o600 });
+    try {
+      const args = new Map([
+        ['Transparent', new Variant('b', false)],
+        ['Retry', new Variant('b', true)],
+        ['Charset', new Variant('s', 'utf8')],
+      ]);
+      const [transfer] = await call('PushMessage', session, MAP, 'ssa{sv}', [file, 'outbox', args]);
+      await waitTransfer(transfer as string);
+    } finally {
+      void fs.rm(file, { force: true });
     }
   }
 
@@ -343,8 +380,9 @@ export class MapConnection implements PhoneConnection {
       this.session = session as string;
       sessionGone.set(this.session, () => this.lost());
       await this.enterMessages();
+      this.mms = await this.supportsMms();
       this.retryMs = RETRY_MIN_MS;
-      this.hooks.status({ status: 'connected', error: null });
+      this.hooks.status({ status: 'connected', error: null, groupTexts: this.mms });
       // Contacts first, so texts announced on connecting come with names.
       await Promise.race([this.maybePullContacts(true), new Promise((resolve) => setTimeout(resolve, CONTACTS_WAIT_MS))]);
       await this.sync();
@@ -362,6 +400,14 @@ export class MapConnection implements PhoneConnection {
     } finally {
       this.trying = false;
     }
+  }
+
+  /** Whether the phone's MAP record lists MMS among its message types. */
+  private async supportsMms(): Promise<boolean> {
+    const session = this.session as string;
+    const [types] = await call('Get', session, PROPERTIES, 'ss', [MAP, 'SupportedTypes']).catch(() => [null]);
+    const list = unwrap(types);
+    return Array.isArray(list) && list.some((t) => String(t).toUpperCase() === 'MMS');
   }
 
   /** Into telecom/msg, where the folders are. */
@@ -406,56 +452,150 @@ export class MapConnection implements PhoneConnection {
       ['SubjectLength', new Variant('y', 255)],
     ]);
     const [listing] = await call('ListMessages', session, MAP, 'sa{sv}', [folder, filter], SESSION_TIMEOUT_MS);
-    const out: BackendMessage[] = [];
+    const outgoing = folder !== 'inbox';
+    const listed: Listed[] = [];
     for (const [objectPath, rawProps] of listing as Map<string, Map<string, unknown>>) {
       const props = new Map([...rawProps].map(([k, v]) => [k, unwrap(v)]));
       const type = String(props.get('Type') ?? '');
       if (type === 'email') continue;
       const handle = objectPath.slice(objectPath.lastIndexOf('/message') + '/message'.length);
-      const read = props.get('Read') === true;
-      const known = this.known.get(handle);
-      if (known && known.read === read && !(read && known.partial)) continue;
-      const subject = String(props.get('Subject') ?? '');
-      const size = Number(props.get('Size') ?? 0);
-      // The listing's subject is the text, cut short (an iPhone's at 128 characters).
-      const cut = !known?.message.body && (size > Buffer.byteLength(subject, 'utf8') + 2);
-      let partial = known ? known.partial : cut;
-      let body = known?.message.body ?? subject;
-      // A whole text is fetched only once it's read: fetching reads it, on an
-      // iPhone, and it can't be set back to unread.
-      if (partial && read) {
-        const whole = await this.fetch(objectPath).catch(() => '');
-        if (whole) {
-          body = whole;
-          partial = false;
-        }
-      }
-      const outgoing = folder !== 'inbox';
-      const other = String((outgoing ? props.get('RecipientAddress') ?? props.get('Recipient') : props.get('SenderAddress') ?? props.get('Sender')) ?? '');
-      const message: BackendMessage = {
-        id: `bt:${handle}`,
-        threadId: digits(other) || other || 'unknown',
-        addresses: other ? [other] : [],
-        sender: outgoing ? null : other || null,
-        body: partial && !body.endsWith('…') ? `${body}…` : body,
-        time: parseTimestamp(props.get('Timestamp')),
-        outgoing,
-        read: outgoing || read,
-        images: [],
-      };
-      this.known.set(handle, { read, partial, message });
-      out.push(message);
+      listed.push({ objectPath, handle, props, type });
+      // A text's listing names the phone's own number: as the recipient of one received, the sender of one sent.
+      if (type.startsWith('sms')) this.learnOwn(String((outgoing ? props.get('SenderAddress') : props.get('RecipientAddress')) ?? ''));
+    }
+    const out: BackendMessage[] = [];
+    for (const entry of listed) {
+      const message = entry.type === 'mms' ? await this.listedMms(entry, outgoing) : await this.listedText(entry, outgoing);
+      if (message) out.push(message);
     }
     return out;
   }
 
-  /** A message's whole text. */
-  private async fetch(objectPath: string): Promise<string> {
+  private learnOwn(address: string): void {
+    const d = digits(address);
+    if (d.length >= 7) this.own.add(d);
+  }
+
+  private async listedText({ objectPath, handle, props }: Listed, outgoing: boolean): Promise<BackendMessage | null> {
+    const read = props.get('Read') === true;
+    const known = this.known.get(handle);
+    if (known && known.read === read && !(read && known.partial)) return null;
+    const subject = String(props.get('Subject') ?? '');
+    const size = Number(props.get('Size') ?? 0);
+    // The listing's subject is the text, cut short (an iPhone's at 128 characters).
+    const cut = !known?.message.body && (size > Buffer.byteLength(subject, 'utf8') + 2);
+    let partial = known ? known.partial : cut;
+    let body = known?.message.body ?? subject;
+    // A whole text is fetched only once it's read: fetching reads it, on an
+    // iPhone, and it can't be set back to unread.
+    if (partial && read) {
+      const whole = await this.fetch(objectPath).catch(() => '');
+      if (whole) {
+        body = whole;
+        partial = false;
+      }
+    }
+    const other = String((outgoing ? props.get('RecipientAddress') ?? props.get('Recipient') : props.get('SenderAddress') ?? props.get('Sender')) ?? '');
+    const message: BackendMessage = {
+      id: `bt:${handle}`,
+      threadId: digits(other) || other || 'unknown',
+      addresses: other ? [other] : [],
+      sender: outgoing ? null : other || null,
+      body: partial && !body.endsWith('…') ? `${body}…` : body,
+      time: parseTimestamp(props.get('Timestamp')),
+      outgoing,
+      read: outgoing || read,
+      images: [],
+    };
+    this.known.set(handle, { read, partial, message });
+    return message;
+  }
+
+  /**
+   * A picture or group message: fetched whole, attachments and all, the
+   * first time it's listed (or kept from before, if this computer has it
+   * whole already), then only its read state followed.
+   */
+  private async listedMms({ objectPath, handle, props }: Listed, outgoing: boolean): Promise<BackendMessage | null> {
+    const read = props.get('Read') === true;
+    const id = `bt:${handle}`;
+    const known = this.known.get(handle);
+    if (known) {
+      if (known.read === read) return null;
+      known.read = read;
+      known.message = { ...known.message, read: outgoing || read };
+      return known.message;
+    }
+    const kept = this.hooks.stored(id);
+    if (kept?.mms) {
+      const message = { ...kept, read: outgoing || read };
+      this.known.set(handle, { read, partial: false, message });
+      return kept.read === message.read ? null : message;
+    }
+    let whole = '';
+    try {
+      whole = await this.fetch(objectPath, true);
+    } catch (error) {
+      console.warn('phone: fetching a picture message failed', error instanceof Error ? error.message : error);
+    }
+    const listedOther = String((outgoing ? props.get('RecipientAddress') ?? props.get('Recipient') : props.get('SenderAddress') ?? props.get('Sender')) ?? '');
+    const time = parseTimestamp(props.get('Timestamp'));
+    if (!whole) {
+      // As a text from the listing, until the next connection tries again.
+      const message: BackendMessage = {
+        id,
+        threadId: digits(listedOther) || listedOther || 'unknown',
+        addresses: listedOther ? [listedOther] : [],
+        sender: outgoing ? null : listedOther || null,
+        body: String(props.get('Subject') ?? '') || '[Picture]',
+        time,
+        outgoing,
+        read: outgoing || read,
+        images: [],
+      };
+      this.known.set(handle, { read, partial: false, message });
+      return message;
+    }
+    const mms = parseMms(whole);
+    const sender = outgoing ? null : mms.from[0]?.address || listedOther || null;
+    // Received by the phone, and to one number: that number is the phone's own.
+    if (!outgoing && mms.to.length === 1 && sender && digits(mms.to[0].address) !== digits(sender)) this.learnOwn(mms.to[0].address);
+    const everyone = [...(outgoing ? [] : mms.from), ...mms.to, ...mms.cc].map((a) => a.address);
+    const others: string[] = [];
+    const seen = new Set<string>();
+    for (const address of everyone) {
+      const key = digits(address) || address.toLowerCase();
+      if (seen.has(key) || this.own.has(key)) continue;
+      seen.add(key);
+      others.push(address);
+    }
+    if (others.length === 0 && listedOther) others.push(listedOther);
+    const threadId = others.length > 1 ? groupThreadId(others) : digits(others[0] ?? '') || others[0] || 'unknown';
+    const labels = mms.others.map(attachmentLabel);
+    const message: BackendMessage = {
+      id,
+      threadId,
+      addresses: others,
+      sender,
+      body: [mms.text, ...labels].filter(Boolean).join('\n'),
+      time,
+      outgoing,
+      read: outgoing || read,
+      images: mms.images,
+      mms: true,
+    };
+    this.known.set(handle, { read, partial: false, message });
+    return message;
+  }
+
+  /** A message's whole text, or with `attachments` the whole bMessage, its pictures in it. */
+  private async fetch(objectPath: string, attachments = false): Promise<string> {
     const file = scratchFile('bmsg');
     try {
-      const [transfer] = await call('Get', objectPath, MESSAGE, 'sb', [file, false], SESSION_TIMEOUT_MS);
+      const [transfer] = await call('Get', objectPath, MESSAGE, 'sb', [file, attachments], SESSION_TIMEOUT_MS);
       await waitTransfer(transfer as string);
-      return bMessageText(await fs.readFile(file, 'utf8'));
+      const text = await fs.readFile(file, 'utf8');
+      return attachments ? text : bMessageText(text);
     } finally {
       void fs.rm(file, { force: true });
     }

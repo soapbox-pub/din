@@ -448,7 +448,8 @@ function NewMessage({
       <ContentPane inset={!narrow}>
         <Recipients recipients={recipients} contacts={contacts.data ?? []} onChange={onRecipients} />
         <div className="flex-1 p-6 text-center text-xs text-muted-foreground">
-          {recipients.length > 1 && 'The phone sends this to each of them separately.'}
+          {recipients.length > 1 &&
+            (phone?.groupTexts ? 'The phone sends this as a group text, to all of them.' : 'The phone sends this to each of them separately.')}
         </div>
         <Composer
           draftKey="new"

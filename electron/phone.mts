@@ -6,7 +6,9 @@
 // Profile, through BlueZ's obexd on the session bus. iPhones offer it once
 // "Show Notifications" is on for this computer in their Bluetooth settings,
 // and Android phones once they're allowed to share messages; it's what
-// Windows uses for iPhones too. Texts and replies, but no pictures or groups.
+// Windows uses for iPhones too. Texts and replies; from phones that share
+// MMS that way (Android's), pictures and group conversations too, and texts
+// to several people go to those as one group text.
 //
 // The phones and their messages live here. Each phone's messages are kept in
 // userData/phone/<id>.json, sealed with safeStorage (the login keyring) so
@@ -36,7 +38,7 @@ import path from 'node:path';
 import { app, ipcMain, safeStorage } from 'electron';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
 import { extractCode, forgetCodes, noteCode } from './phone-codes.mts';
-import { MapConnection } from './phone-map.mts';
+import { groupThreadId, MapConnection } from './phone-map.mts';
 import { cancelReceive, startReceiving } from './phone-receive.mts';
 import type {
   PhoneCandidate,
@@ -57,6 +59,8 @@ export interface LiveStatus {
   error: string | null;
   battery: number | null;
   charging: boolean | null;
+  /** Whether a text to several people goes as one group text (phone-map.mts). */
+  groupTexts?: boolean;
 }
 
 /** What a backend tells the hub about one phone. */
@@ -64,6 +68,8 @@ export interface PhoneHooks {
   status(patch: Partial<LiveStatus>): void;
   messages(messages: BackendMessage[]): void;
   contacts(contacts: PhoneContact[]): void;
+  /** The message with this id as this computer has it, if it does (in any conversation). */
+  stored(id: string): BackendMessage | null;
 }
 
 /** One phone's connection, as the hub drives it. */
@@ -90,6 +96,8 @@ interface StoredPhone {
   receiveFiles?: boolean;
   /** Off only once turned off: codes in its texts are offered in web pages' code fields unless so. */
   fillCodes?: boolean;
+  /** Whether it sent group texts as one, last time it connected. */
+  groupTexts?: boolean;
 }
 
 interface Thread {
@@ -252,6 +260,7 @@ function state(): PhoneState {
       lastSeen: p.lastSeen,
       receiveFiles: p.receiveFiles !== false,
       fillCodes: p.fillCodes !== false,
+      groupTexts: l?.groupTexts ?? p.groupTexts === true,
     };
   });
   const candidates = bluetoothCandidates.filter((c) => !added.has(c.id));
@@ -324,6 +333,16 @@ function upsert(phoneId: string, incoming: BackendMessage[]): void {
       if (JSON.stringify(before) === JSON.stringify(message)) continue;
       thread.messages[at] = message;
     } else {
+      // An MMS filed in another conversation before (a group message, as a text from one of them) moves here.
+      for (const [threadId, t] of message.mms ? Object.entries(d.threads) : []) {
+        if (threadId === m.threadId) continue;
+        const was = t.messages.findIndex((x) => x.id === message.id);
+        if (was < 0) continue;
+        t.messages.splice(was, 1);
+        touched.add(threadId);
+        if (t.messages.length === 0) delete d.threads[threadId];
+        break;
+      }
       // The phone's own copy of a text sent from here replaces the one shown while it went.
       if (message.outgoing) {
         for (const [threadId, t] of Object.entries(d.threads)) {
@@ -433,8 +452,9 @@ function threadFor(phoneId: string, addresses: string[]): string {
     if (last && sameAddresses(last.addresses, addresses)) return threadId;
   }
   const p = phones.find((x) => x.id === phoneId);
-  // Bluetooth phones' conversations are by number already (phone-map.mts).
+  // Bluetooth phones' conversations are by number already, and groups by everyone's (phone-map.mts).
   if (p?.kind === 'bluetooth' && addresses.length === 1) return phoneDigits(addresses[0]) || addresses[0];
+  if (p?.kind === 'bluetooth' && (live.get(phoneId)?.groupTexts ?? p.groupTexts)) return groupThreadId(addresses);
   return `new:${addresses.map((a) => phoneDigits(a) || a).sort().join(',')}`;
 }
 
@@ -475,6 +495,7 @@ function hooks(phoneId: string): PhoneHooks {
         const p = phones.find((x) => x.id === phoneId);
         if (p) {
           p.lastSeen = Date.now();
+          if (next.groupTexts !== undefined) p.groupTexts = next.groupTexts;
           savePhones();
         }
       }
@@ -491,6 +512,13 @@ function hooks(phoneId: string): PhoneHooks {
       changed();
       // Notifications that went up with a number get the name.
       for (const a of announced.filter((x) => x.phoneId === phoneId)) announceText(phoneId, a.message, true);
+    },
+    stored(id) {
+      for (const t of Object.values(phoneData(phoneId).threads)) {
+        const m = t.messages.find((x) => x.id === id);
+        if (m) return m;
+      }
+      return null;
     },
   };
 }

@@ -1037,8 +1037,11 @@ files — `git add` new source files before `npm run os:build`.
 - Messages reads and answers the texts on the user's phones, added in
   Settings → Phone (`electron/phone.mts`): iPhones and Android phones alike
   over Bluetooth's Message Access Profile, through BlueZ's obexd
-  (`electron/phone-map.mts`), as Windows does for iPhones; no pictures or
-  group conversations. New texts pop up as notifications with a reply field.
+  (`electron/phone-map.mts`), as Windows does for iPhones. From Android
+  phones, which share MMS that way, pictures and group conversations come
+  too (`electron/phone-mms.mts`), and a text to several people goes as one
+  group text; iPhones share texts alone, and nothing can send a picture.
+  New texts pop up as notifications with a reply field.
   Messages are kept only on this computer, sealed with the login keyring.
 - A text with a verification code in it (`electron/phone-codes.mts` finds
   it) has the code offered in the Web Browser's code fields for 10 minutes,
