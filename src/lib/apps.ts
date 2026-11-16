@@ -141,6 +141,13 @@ export interface AppDefinition {
    */
   actions?: { label: string; params: Record<string, unknown> }[];
   /**
+   * Its window is an app of its own (din://, din+file://, or an app the `din`
+   * command runs), which reads its launch params as coming from anyone.
+   * Another app may open it with params (src/lib/appLaunchPolicy.ts); the
+   * desktop's own windows take only the ones they list.
+   */
+  sandboxed?: boolean;
+  /**
    * An http(s) website installed as an app (a PWA, in effect). Its icon wears
    * a small globe in the corner, the way Android badges a Chrome-installed
    * web app, so it reads as a page from the web rather than an app Din keeps;
@@ -191,6 +198,7 @@ function dinApp(id: string): AppDefinition {
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
     dockAs: manifest.din.dockAs,
     actions: manifestActions(manifest),
+    sandboxed: true,
   };
 }
 

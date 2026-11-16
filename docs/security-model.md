@@ -152,6 +152,14 @@ main gain over today, where every app could read the whole home folder.
   main frame.
 - `window.open` and links are denied as pop-ups; http(s) and nsite URLs
   open in the Web Browser instead. Apps open URLs with the web's `window.open`.
+- Opening an app (`window.open(appLink(…))`, `din.app.launch`) goes
+  through `src/lib/appLaunchPolicy.ts`: other apps open with their params
+  minus the window manager's and the desktop's own (`frameless`, `xid`, a
+  browser's `restoreSession` and `adoptTab`, …); only a few of the desktop's
+  windows open at all, each with the params it lists. The desktop's windows
+  that grant something (Connect an App, the userscript installer, DevTools,
+  pop-ups, the file picker) are the desktop's alone to open
+  ([din/lifecycle.md](din/lifecycle.md#opening-other-things)).
 - The apps' session grants only clipboard, fullscreen and pointer lock;
   every other permission request is refused without a prompt.
 - Apps can't frame `app://` and can't fetch it: the apps' session has no

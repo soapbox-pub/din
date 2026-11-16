@@ -16,7 +16,15 @@ const Compose = lazy(() => import('./mail/Compose').then((m) => ({ default: m.Co
  */
 function seedOf(launch: Launch): ComposeSeed | null {
   const { params } = launch;
-  if (params.compose && typeof params.compose === 'object') return { ...blankSeed(null), ...(params.compose as Partial<ComposeSeed>) };
+  if (params.compose && typeof params.compose === 'object') {
+    const seed = { ...blankSeed(null), ...(params.compose as Partial<ComposeSeed>) };
+    // Another app's message is what a mailto: link could say: who, what,
+    // and words. Bringing another message's attachments along, carrying on
+    // a draft or marking a message answered is only Mail's own windows'.
+    const opener = window.din?.app.opener ?? null;
+    if (opener !== null && opener !== 'mail') return { ...seed, forwardFrom: null, draftUid: null, answering: null };
+    return seed;
+  }
   if (typeof params.mailto === 'string') {
     const m = parseMailto(params.mailto);
     return {

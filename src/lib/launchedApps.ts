@@ -278,6 +278,7 @@ export function manifestDefinition(appId: string, manifest: DinManifest, compone
     keywords: manifest.din.keywords,
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
     actions: manifestActions(manifest),
+    sandboxed: true,
   };
 }
 

@@ -98,6 +98,7 @@ import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/gu
 import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
 import type { AppComponentProps } from '@/lib/apps';
 import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession';
+import { appLaunchParams } from '@/lib/appLaunchPolicy';
 import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome } from '@/sdk/din';
 import type { FromApp, HandleData, Hello, LaunchData, MediaReport, SpeechErrorCode, Method, Push, Requests, WindowState } from '@/sdk/protocol';
 import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
@@ -465,14 +466,21 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'app.ready': () => setReady(true),
       'app.open': async ({ url, self, handles }) => {
         const target = self === true ? appId : linkedAppId(url);
-        // The Installer is the desktop's alone to open.
-        if (!target || target === 'installer') return;
-        const p = decodeLaunchParams(String(url));
-        // Paths in params grant nothing; files travel as handles, which the
-        // window manager hands on as paths (and the new window's frame
-        // turns back into handles). Nor can an app pass a launch off as a
-        // share (`shareNonce`): only the share sheet gives one.
-        const { path: _path, paths: _paths, readOnlyPaths: _readOnly, shareNonce: _shareNonce, ...clean } = p;
+        if (!target) return;
+        // Only what an app may open, with what it may say (appLaunchPolicy):
+        // never the desktop's own windows' setup (a browser's tabs, a
+        // pop-up's page, a userscript, a connection, a native window), nor
+        // the window manager's (frameless, a size, another's Dock tile).
+        // Paths in params grant nothing either; files travel as handles,
+        // which the window manager hands on as paths (and the new window's
+        // frame turns back into handles). Nor can an app pass a launch off
+        // as a share (`shareNonce`): only the share sheet gives one.
+        const clean = appLaunchParams(installed?.getApp(target), decodeLaunchParams(String(url)), permissions);
+        if (!clean) {
+          const error = new Error(`${appName} can’t open that`);
+          error.name = 'NotAllowedError';
+          throw error;
+        }
         const grants = await Promise.all((handles ?? []).map(usableGrant));
         const paths = grants.map((g) => g.path);
         const files = paths.length === 0 ? {} : paths.length === 1 ? { path: paths[0] } : { paths };

@@ -140,6 +140,21 @@ the opened app's `targetURL` has them; any URL of the app's own origin
 opens a new window of it. `window.open` can't carry file handles, so
 `din.app.launch(url, files)` takes the same URLs and hands the files on.
 
+What an app can open is limited (`src/lib/appLaunchPolicy.ts`), since the
+app opening it may be anyone's. Another app (built-in, from a folder, or
+run by the `din` command) opens with the params given, except the ones only
+the desktop sets: `frameless`, `dockAs`, `xid`, a browser window's
+`restoreSession` and `adoptTab`, `shareNonce`, `path`, `paths`,
+`readOnlyPaths`, `opener` and `actionAt`. An installed web app or nsite
+opens with none. Of the desktop's own windows, only a new Web Browser
+window (`private`), Settings (`section`, `add`, `nonce`), System Monitor,
+Screenshot and, with `assistant`, AI Provider (`provider`, `at`) open, with
+just those params; the rest (pop-ups, DevTools, the userscript installer,
+Connect an App, the file picker, printing, native windows, the Installer)
+are the desktop's alone, and `din.app.launch` rejects with
+`NotAllowedError`. So an app opened by another reads its params as it would
+a link's: a request it does on its own say, never one it takes on trust.
+
 Whether another app is there to open is the web's
 `navigator.getInstalledRelatedApps()`, which answers only for the apps the
 manifest lists in `related_applications`, each by its manifest's URL:

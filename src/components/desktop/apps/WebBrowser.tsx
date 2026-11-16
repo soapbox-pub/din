@@ -362,10 +362,20 @@ function pinnedFirst(tabs: Tab[]): Tab[] {
   return [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)];
 }
 
+/**
+ * Whether a saved tab's address is one to load again: what a tab can be
+ * opened at (the web, nsites, extensions' pages), Din's own pages, or a
+ * file (which main serves only from folders the user gave). A session is
+ * the desktop's own, but nothing else is loaded into a tab unchecked.
+ */
+function restorable(url: string): boolean {
+  return isAllowedTabUrl(url) || isInternalUrl(url) || url.startsWith('file:///');
+}
+
 /** Rebuild a window's tabs from its saved session. Only the selected one loads. */
 function restoreTabs(saved: SavedWindow): { tabs: Tab[]; activeId: string } {
   const created = saved.tabs.map((s, i) => ({
-    ...createTab(s.url || NEW_TAB_URL),
+    ...createTab(s.url && restorable(s.url) ? s.url : NEW_TAB_URL),
     title: s.title,
     favicon: s.favicon,
     pinned: s.pinned,
