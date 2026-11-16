@@ -452,7 +452,7 @@ type TabEvent =
  * additionally allowed when opened by the extension system.
  *
  * Inside the Electron shell, browser tabs are tracked by the Chrome extension
- * system (electron-chrome-extensions, see electron/main.cjs): the toolbar
+ * system (electron/chrome-extensions.mts): the toolbar
  * shows extension actions (<browser-action-list>), an extensions menu manages
  * installs, and extension tab commands arrive via the browserTabBus.
  *
@@ -4889,7 +4889,7 @@ function TabGlyph({ tab, className }: { tab: Tab; className?: string }) {
 
 /**
  * The Chrome extension toolbar actions (<browser-action-list>, a custom
- * element injected by electron-chrome-extensions' preload).
+ * element electron/browser-action-preload.cjs defines in the desktop).
  *
  * Its configuration must be set as DOM attributes imperatively: the element
  * only exposes getter properties backed by attributes, and React assigns to

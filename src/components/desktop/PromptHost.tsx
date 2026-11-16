@@ -69,10 +69,10 @@ export function PromptHost() {
         {current?.kind === 'extension-install' && <ExtensionInstallPrompt request={current} />}
         <DialogFooter>
           <Button variant="secondary" onClick={() => answer(false)}>
-            {current?.kind === 'extension-install' ? 'Cancel' : 'Block'}
+            {current?.kind !== 'extension-install' ? 'Block' : current.more ? 'Don’t Allow' : 'Cancel'}
           </Button>
           <Button onClick={() => answer(true)}>
-            {current?.kind === 'extension-install' ? 'Add extension' : 'Allow'}
+            {current?.kind === 'extension-install' && !current.more ? 'Add extension' : 'Allow'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -123,11 +123,14 @@ function ExtensionInstallPrompt({
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <Puzzle className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 break-words">Add “{request.name}”?</span>
+          <span className="min-w-0 break-words">
+            {request.more ? `“${request.name}” wants more access` : `Add “${request.name}”?`}
+          </span>
         </DialogTitle>
         <DialogDescription>
-          Extensions run inside the Web Browser with the access listed below.
-          Only add extensions you trust.
+          {request.more
+            ? 'It asks for the access below, besides what it has. Allow it only if you trust it.'
+            : 'Extensions run inside the Web Browser with the access listed below. Only add extensions you trust.'}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-3 text-sm">

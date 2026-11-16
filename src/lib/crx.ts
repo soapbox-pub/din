@@ -1,9 +1,9 @@
 /**
  * Typed access to the Chrome extension bridge exposed by the Electron preload
- * (`window.dinos.crx`, see electron/preload.cjs + electron/main.cjs).
+ * (`window.dinos.crx`, see electron/preload.cjs + electron/main.mts).
  *
  * The bridge lets the Web Browser app coordinate its tab UI with the Chrome
- * extension system running in the main process (electron-chrome-extensions):
+ * extension system running in the main process (electron/chrome-extensions.mts):
  *   - extensions issue tab commands (create/open/select/close) that the shell
  *     must apply to its <webview>-based tabs
  *   - the shell reports the active tab and answers tab-creation requests with

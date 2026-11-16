@@ -18,12 +18,11 @@ import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
  * Hosts Chrome-extension action popups (e.g. Bitwarden's unlock bubble)
  * inside the Din window, like Chrome's in-window bubble.
  *
- * electron-chrome-extensions opens chrome.action popups as separate native
- * frameless windows - fine on a windowing desktop, but Din is a
- * single-window kiosk where a popup toplevel detaches from the shell window
- * (under a kiosk compositor it can't even be positioned). Instead, the main
- * process routes popup requests here (window.dinos.crx; see the activateClick
- * override in electron/main.mts) and the popup page is hosted in an overlay
+ * A popup window of its own would detach from the shell window (under a
+ * kiosk compositor it can't even be positioned), so the main process sends
+ * popup requests here (window.dinos.crx; chrome-api-action.mts asks
+ * main.mts's openPopup) and the popup page, always one of the extension's
+ * own, is hosted in an overlay
  * <webview> anchored to the toolbar action that opened it. The anchor rect
  * arrives in shell-viewport CSS pixels (the action element's
  * getBoundingClientRect), which is exactly this overlay's coordinate space
@@ -38,7 +37,7 @@ import { GuestSurface, type GuestSurfaceHandle } from '@/platform/GuestSurface';
  * Renders nothing outside the Electron shell or when no popup is open.
  */
 
-/** Popup sizing bounds (mirror Chrome / electron-chrome-extensions). */
+/** Popup sizing bounds (Chrome's). */
 const MIN_WIDTH = 25;
 const MIN_HEIGHT = 25;
 const MAX_WIDTH = 800;

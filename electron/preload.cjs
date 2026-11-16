@@ -3248,7 +3248,7 @@ expose('browser', {
  */
 
 // Chrome extension bridge (window.dinos.crx), backed by the crx:* handlers in
-// main.mts (electron-chrome-extensions). Used by the web browser app to
+// main.mts (electron/chrome-extensions.mts). Used by the web browser app to
 // coordinate its tab UI with the extension system: extensions can ask for
 // tabs to be created/activated/closed, and the shell reports which tab is
 // active plus the WebContents id of each newly attached <webview> guest.

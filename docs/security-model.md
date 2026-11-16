@@ -16,6 +16,16 @@
 - **A hostile web page or nsite.** Unchanged from today: it gets what a
   browser gives it, plus what Din's guest preloads add (`window.nostr`
   with prompts, napp APIs for installed nsites).
+- **A hostile browser extension.** It gets what Chrome would give it for
+  the permissions it was installed with, and no more
+  (`electron/chrome-extensions*.mts`): who's calling is the calling
+  frame's or worker's own `chrome-extension://` origin, never what the call
+  says; cookies, a tab's address and title, and CSS in a page only for
+  sites its host permissions (or activeTab) reach; tabs opened only where a
+  link could go; more permissions only what its manifest lists as optional,
+  and only when the user says yes. It can't close or hide the desktop's
+  window, put a web page in its toolbar popup, or reach the desktop's
+  toolbar calls, which answer only the desktop's own document.
 
 We don't defend against a compromised desktop. The desktop holds the
 signer and `window.dinos`, so an XSS there is game over; the rules in

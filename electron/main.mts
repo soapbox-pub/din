@@ -52,7 +52,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, session, webContents, screen, globalShortcut, Menu, MenuItem, nativeImage, nativeTheme } from 'electron';
-import { ElectronChromeExtensions } from 'electron-chrome-extensions';
+import { BROWSER_ACTION_PRELOAD, ElectronChromeExtensions } from './chrome-extensions.mts';
 import { installChromeWebStore } from 'electron-chrome-web-store';
 import { extensionAccess, registerBrowserExtensionHandlers } from './browser-extensions.mts';
 import { DevtoolsBridge } from './devtools-bridge.mts';
@@ -196,7 +196,7 @@ import { startWatchdog } from './watchdog.mts';
 // named export too, which Node's ESM-CJS interop resolves statically.
 import { buildChromeContextMenu } from 'electron-chrome-context-menu';
 
-// require.resolve for ensureBrowserActionPreload (no ESM equivalent).
+// require.resolve for hardenWebStorePreload (no ESM equivalent).
 const require = createRequire(import.meta.url);
 
 /** An IPC event from either ipcMain.on or ipcMain.handle. */
@@ -230,9 +230,8 @@ const DIST = resolveDistDir();
 const INDEX = path.join(DIST, 'index.html');
 
 // Must be called before app is ready. NOTE: each call to
-// registerSchemesAsPrivileged REPLACES the full list, and importing
-// electron-chrome-extensions above already registered the crx scheme
-// (extension action icons) - so it must be re-declared here.
+// registerSchemesAsPrivileged REPLACES the full list, so every privileged
+// scheme is declared here, crx: (extension action icons) among them.
 //
 // `codeCache` keeps V8's compiled code for a scheme's scripts, as Chromium
 // does for http(s) and for nothing else unless asked: without it, the
@@ -3828,7 +3827,7 @@ function watchShellHotkeys(): void {
 // ---------------------------------------------------------------------------
 // Chrome extension support (the web browser app).
 //
-// electron-chrome-extensions implements the chrome.* extension APIs that
+// chrome-extensions.mts implements the chrome.* extension APIs that
 // Electron itself lacks (tabs, actions, popups, ...), and
 // electron-chrome-web-store lets users install extensions by browsing the
 // Chrome Web Store inside the browser app. Everything is scoped to the
@@ -4748,28 +4747,19 @@ function requestShellTab(details: { url?: string; active?: boolean }): Promise<E
   });
 }
 
-/**
- * Write a standalone preload that injects the <browser-action-list> custom
- * element (extension toolbar buttons) into the shell. The shell renderer is
- * sandboxed, so it can't require() the module itself - instead we concatenate
- * the library's self-contained script (its only external require is
- * 'electron', which sandboxed preloads may load) with a call to its export.
- */
-function ensureBrowserActionPreload(): string {
-  const source = fs.readFileSync(
-    require.resolve('electron-chrome-extensions/browser-action'),
-    'utf8',
-  );
-  const file = path.join(app.getPath('userData'), 'browser-action.preload.js');
-  fs.writeFileSync(file, `${source}\n;module.exports.injectBrowserAction();\n`);
-  return file;
-}
-
 function setupChromeExtensions(): void {
   chromeExtensions = new ElectronChromeExtensions({
-    // din is AGPL-3.0-or-later, compatible with the library's GPL-3.0.
-    license: 'GPL-3.0',
     session: browserSession(),
+    // The toolbar's calls: only from the desktop's own document.
+    isShell: (event) =>
+      event.sender.id === shellContentsId &&
+      !!event.senderFrame &&
+      event.senderFrame === event.sender.mainFrame &&
+      event.senderFrame.origin === SHELL_ORIGIN,
+    // chrome.permissions.request for what the manifest lists as optional:
+    // the user says, as for an extension being added.
+    requestPermissions: async (extension, { permissions = [], origins = [] }) =>
+      (await askShell({ kind: 'extension-install', name: extension.name, permissions, hostPermissions: origins, more: true })) === true,
 
     createTab: async (details) => {
       const contents = await requestShellTab(details);
@@ -4787,6 +4777,17 @@ function setupChromeExtensions(): void {
       const url = Array.isArray(details.url) ? details.url[0] : details.url;
       await requestShellTab({ url, active: true });
       return shellWindow!;
+    },
+    // A chrome.action popup (Bitwarden's unlock bubble) is drawn by the
+    // shell (ExtensionPopupHost) in an overlay <webview> anchored to its
+    // button, as Chrome's in-window bubble is: a window of its own would
+    // detach from the shell, which din-shell can't even place. The anchor is
+    // already in shell-viewport CSS pixels (the button's bounding rect).
+    openPopup: ({ extensionId, url, anchorRect }) => {
+      sendToShell('crx:openActionPopup', { extensionId, url, anchorRect });
+    },
+    closePopup: () => {
+      sendToShell('crx:closeActionPopup');
     },
   });
 
@@ -4824,13 +4825,13 @@ function setupChromeExtensions(): void {
 
   // Serve crx://extension-icon/... in the shell session so the toolbar's
   // <browser-action-list> and the extensions manager can render icons.
-  ElectronChromeExtensions.handleCRXProtocol(session.defaultSession);
+  chromeExtensions.handleCRXProtocol(session.defaultSession);
 
   // Inject the <browser-action-list> element into the shell.
   session.defaultSession.registerPreloadScript({
     id: 'crx-browser-action',
     type: 'frame',
-    filePath: ensureBrowserActionPreload(),
+    filePath: BROWSER_ACTION_PRELOAD,
   });
 }
 
@@ -4887,7 +4888,7 @@ const SITE_CAPABILITIES: readonly SiteCapability[] = [
 
 type ShellPrompt =
   | { kind: 'permission'; origin: string; capabilities: SiteCapability[]; remembered: boolean }
-  | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[] };
+  | { kind: 'extension-install'; name: string; permissions: string[]; hostPermissions: string[]; more?: boolean };
 
 let nextPromptId = 1;
 const pendingPrompts = new Map<number, { resolve: (allow: boolean | null) => void; timer: NodeJS.Timeout }>();
@@ -5348,102 +5349,6 @@ function registerSitePermissionHandlers(): void {
     }
     return sites;
   });
-}
-
-// ---------------------------------------------------------------------------
-// Extension action popups, rendered in-shell.
-//
-// electron-chrome-extensions opens chrome.action popups (e.g. Bitwarden's
-// unlock bubble) as a separate native frameless BrowserWindow positioned
-// next to the action button. That suits a windowing desktop, but Din is a
-// single-window kiosk: a popup toplevel detaches from the shell (under a
-// kiosk compositor like din-shell it can't be positioned at all) instead of
-// hugging the toolbar the way Chrome's in-window bubble does. So the
-// browserAction activateClick handler is overridden to route popup requests
-// to the shell renderer, which hosts the popup page in an overlay <webview>
-// anchored to the action button (ExtensionPopupHost). The anchor rect is
-// already in shell-viewport CSS pixels (the browser-action element's
-// getBoundingClientRect), so no coordinate translation is needed.
-// ---------------------------------------------------------------------------
-
-/** The action popup currently shown in the shell (drives toggle-close). */
-let openActionPopup: { extensionId: string } | null = null;
-
-/** Shape of the BrowserActionAPI internals the popup override relies on. */
-interface BrowserActionApiInternals {
-  activateClick(details: {
-    eventType?: string;
-    extensionId: string;
-    tabId: number;
-    anchorRect: { x: number; y: number; width: number; height: number };
-    alignment?: string;
-  }): void;
-  getPopupUrl(extensionId: string, tabId: number): string | undefined;
-  ctx: {
-    store: {
-      getTabById(id: number): Electron.WebContents | undefined;
-      getActiveTabOfCurrentWindow(): Electron.WebContents | undefined;
-      tabDetailsCache: Map<number, unknown>;
-    };
-    router: {
-      sendEvent(extensionId: string, name: string, ...args: unknown[]): void;
-    };
-  };
-}
-
-function overrideActionPopup(): void {
-  if (!chromeExtensions) return;
-  const api = (
-    chromeExtensions as unknown as {
-      api: { browserAction: BrowserActionApiInternals };
-    }
-  ).api.browserAction;
-  if (
-    !api ||
-    typeof api.activateClick !== 'function' ||
-    typeof api.getPopupUrl !== 'function' ||
-    !api.ctx
-  ) {
-    return;
-  }
-  const fallback = api.activateClick.bind(api);
-  api.activateClick = (details) => {
-    try {
-      const { extensionId, tabId, anchorRect } = details;
-      // Toggle: a second click on the same action closes its popup (mirrors
-      // the stock handler's PopupView toggle).
-      if (openActionPopup) {
-        const same = openActionPopup.extensionId === extensionId;
-        openActionPopup = null;
-        sendToShell('crx:closeActionPopup');
-        if (same) return;
-      }
-      const tab =
-        tabId >= 0
-          ? api.ctx.store.getTabById(tabId)
-          : api.ctx.store.getActiveTabOfCurrentWindow();
-      if (!tab) return;
-      const popupUrl = api.getPopupUrl(extensionId, tab.id);
-      if (popupUrl && anchorRect) {
-        openActionPopup = { extensionId };
-        sendToShell('crx:openActionPopup', {
-          extensionId,
-          url: popupUrl,
-          anchorRect,
-        });
-        return;
-      }
-      // No popup page: dispatch onClicked, as the stock handler does.
-      api.ctx.router.sendEvent(
-        extensionId,
-        'browserAction.onClicked',
-        api.ctx.store.tabDetailsCache.get(tab.id),
-      );
-    } catch {
-      // Internal API drift: degrade to the library's native popup window.
-      fallback(details);
-    }
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -5975,7 +5880,7 @@ function registerCrxHandlers(): void {
   // opens fresh rather than toggling closed.
   ipcMain.on('crx:actionPopupClosed', (event) => {
     assertShellSender(event);
-    openActionPopup = null;
+    chromeExtensions?.popupClosed();
   });
 
   // Listing, removing, loading from folders, publishing and installing from
@@ -6768,9 +6673,6 @@ app.whenReady().then(() => {
     sendToShell,
   });
 
-  // Route chrome.action popups into the shell instead of native windows.
-  overrideActionPopup();
-
   // Production runs with no window manager (din-shell, on DinOS or as a
   // login session elsewhere, or a bare X11 session). din-shell force-fills the one app across every
   // output, but bare X11 has nothing to honor the EWMH fullscreen hint, so
@@ -6949,7 +6851,7 @@ app.whenReady().then(() => {
     }
     if (params.partition === WEBBROWSER_PARTITION) {
       // Load frame preloads into sub-frames, not just the top document, so the
-      // chrome.* API preload (session-registered by electron-chrome-extensions
+      // chrome.* API preload (session-registered by chrome-extensions.mts
       // as type:'frame') reaches extension web_accessible_resource iframes -
       // e.g. Bitwarden's inline-autofill overlay, a chrome-extension:// iframe
       // the content script embeds in the page. Without this the overlay's own

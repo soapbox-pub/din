@@ -15,7 +15,7 @@
     "lib": ["ESNext", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": ["node"],
+    "types": ["node", "chrome"],
 
     "strict": true,
     "noEmit": true,

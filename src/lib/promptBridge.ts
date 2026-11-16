@@ -34,6 +34,8 @@ export type ShellPromptRequest =
       permissions: string[];
       /** Sites the extension can read and change (match patterns). */
       hostPermissions: string[];
+      /** An installed extension asking for more than it has (chrome.permissions.request), not one being added. */
+      more?: boolean;
     };
 
 export interface PromptHostBridge {

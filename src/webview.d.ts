@@ -6,8 +6,7 @@ import type { DetailedHTMLProps, HTMLAttributes } from 'react';
  * src/platform/, see docs/guest-surfaces.md.)
  *
  *   - <browser-action-list>: the Chrome extension toolbar-actions custom
- *     element injected by electron-chrome-extensions' preload (see
- *     `ensureBrowserActionPreload` in electron/main.cjs).
+ *     element electron/browser-action-preload.cjs defines in the desktop.
  *
  * Only the attributes the shell actually sets are declared.
  */

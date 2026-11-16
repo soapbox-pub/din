@@ -973,8 +973,11 @@ files — `git add` new source files before `npm run os:build`.
 ## Notes
 
 - The Web Browser app supports Chrome extensions (tabs, toolbar actions,
-  content scripts) via
-  [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell);
+  content scripts) with Din's own `chrome.*` APIs (`electron/chrome-extensions.mts`,
+  forked from [electron-chrome-extensions](https://github.com/samuelmaddock/electron-browser-shell)),
+  which hold each extension to the permissions it was installed with, as
+  Chrome does: a site's cookies, a tab's address and CSS in its page only
+  for an extension with access to the site;
   `about:extensions` (the browser menu's Extensions) lists the installed
   ones and adds more: from the Chrome Web Store, a folder (which Din keeps
   loading from where it is), a `.crx` file, or Nostr (NIP-82 apps with a
