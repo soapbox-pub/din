@@ -1,4 +1,5 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useContext, useMemo, useState, useSyncExternalStore } from 'react';
+import { MonitorsContext } from '@/contexts/MonitorsContext';
 import { Copy, Download, FileText, Files, Link2, Type } from 'lucide-react';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { AppIcon } from '@/components/desktop/AppIcon';
@@ -35,6 +36,7 @@ export function ShareSheetHost() {
 function ShareSheet({ request }: { request: ShareRequest }) {
   const installed = useInstalledApps();
   const actions = useWindowActions();
+  const monitors = useContext(MonitorsContext);
   const { data, anchor, opener } = request;
   const { apps, getApp } = installed;
   const targets = useMemo(() => shareTargets(data, { apps, getApp }, opener), [data, apps, getApp, opener]);
@@ -60,7 +62,15 @@ function ShareSheet({ request }: { request: ShareRequest }) {
     close('save');
   };
 
-  const box = anchor ?? { x: window.innerWidth / 2, y: window.innerHeight / 3, width: 1, height: 1 };
+  // The anchor is in viewport coordinates (getBoundingClientRect), but with
+  // more than one monitor <body> is the primary monitor's rectangle and the
+  // containing block for position: fixed (MonitorsProvider), so a fixed
+  // element's left/top are measured from the primary monitor's corner, not
+  // the viewport's. Take that offset back out, or with a monitor above or
+  // left of the primary the sheet points that far below or right of the
+  // button (and floating-ui pins it to the screen's edge).
+  const origin = monitors?.primary ?? { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+  const box = anchor ?? { x: origin.x + origin.width / 2, y: origin.y + origin.height / 3, width: 1, height: 1 };
   return (
     <Popover
       open
@@ -69,7 +79,7 @@ function ShareSheet({ request }: { request: ShareRequest }) {
       }}
     >
       <PopoverAnchor asChild>
-        <div aria-hidden className="pointer-events-none fixed" style={{ left: box.x, top: box.y, width: box.width, height: box.height }} />
+        <div aria-hidden className="pointer-events-none fixed" style={{ left: box.x - origin.x, top: box.y - origin.y, width: box.width, height: box.height }} />
       </PopoverAnchor>
       <PopoverContent
         side="bottom"
