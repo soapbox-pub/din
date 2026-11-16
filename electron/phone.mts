@@ -70,6 +70,9 @@ export interface PhoneHooks {
   contacts(contacts: PhoneContact[]): void;
   /** The message with this id as this computer has it, if it does (in any conversation). */
   stored(id: string): BackendMessage | null;
+  /** Whether older picture and group messages kept as texts are still to be read again (phone-map.mts, catchUp). */
+  olderMmsPending(): boolean;
+  olderMmsDone(): void;
 }
 
 /** One phone's connection, as the hub drives it. */
@@ -98,6 +101,8 @@ interface StoredPhone {
   fillCodes?: boolean;
   /** Whether it sent group texts as one, last time it connected. */
   groupTexts?: boolean;
+  /** When its older picture and group messages, kept as texts before, were read again into their groups. */
+  olderMmsAt?: number;
 }
 
 interface Thread {
@@ -512,6 +517,15 @@ function hooks(phoneId: string): PhoneHooks {
       changed();
       // Notifications that went up with a number get the name.
       for (const a of announced.filter((x) => x.phoneId === phoneId)) announceText(phoneId, a.message, true);
+    },
+    olderMmsPending() {
+      return !phones.find((x) => x.id === phoneId)?.olderMmsAt;
+    },
+    olderMmsDone() {
+      const p = phones.find((x) => x.id === phoneId);
+      if (!p || p.olderMmsAt) return;
+      p.olderMmsAt = Date.now();
+      savePhones();
     },
     stored(id) {
       for (const t of Object.values(phoneData(phoneId).threads)) {

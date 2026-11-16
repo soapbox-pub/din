@@ -65,6 +65,10 @@ const CONTACTS_RETRY_MS = 5 * 60_000;
 const CONTACTS_WAIT_MS = 20_000;
 /** How many of each folder's newest messages a listing asks for. */
 const LIST_COUNT = 60;
+/** Catching up on older MMS: a page of the listing, and at most this many pages and fetches a sync. */
+const CATCH_UP_PAGE = 100;
+const CATCH_UP_PAGES = 5;
+const CATCH_UP_FETCHES = 10;
 
 // ---------------------------------------------------------------------------
 // The session bus, shared
@@ -260,6 +264,8 @@ export class MapConnection implements PhoneConnection {
   private mms = false;
   /** The phone's own numbers, as digits, learned from its listings: not one of the others in a group. */
   private own = new Set<string>();
+  /** Where catching up on older picture and group messages has got to (catchUp). */
+  private catchUpAt = { folder: 0, offset: 0 };
 
   constructor(address: string, hooks: PhoneHooks) {
     this.address = address;
@@ -435,6 +441,7 @@ export class MapConnection implements PhoneConnection {
           found.push(...listed);
         }
         if (found.length) this.hooks.messages(found);
+        if (this.mms && this.hooks.olderMmsPending()) await this.catchUp();
       } catch (error) {
         if (this.session && /not connected|disconnected|closed|reset|NotConnected|No such/i.test(String(error))) this.lost();
       } finally {
@@ -469,6 +476,63 @@ export class MapConnection implements PhoneConnection {
       if (message) out.push(message);
     }
     return out;
+  }
+
+  /**
+   * Older picture and group messages, which this computer kept as texts
+   * before it read MMS whole, filed under whoever sent them: the newest
+   * listing (LIST_COUNT) never reaches them again, so each folder's MMS are
+   * paged through once, a few fetched each sync so new texts aren't kept
+   * waiting, and every one this computer has from before is read again
+   * (listedMms), which moves it into its group. Ones it never had stay on
+   * the phone. Once both folders are through, the phone doesn't do it again.
+   */
+  private async catchUp(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    const folders = ['inbox', 'sent'];
+    const outMessages: BackendMessage[] = [];
+    let fetches = 0;
+    let pages = 0;
+    while (this.catchUpAt.folder < folders.length && fetches < CATCH_UP_FETCHES && pages < CATCH_UP_PAGES) {
+      const folder = folders[this.catchUpAt.folder];
+      const filter = new Map([
+        ['Offset', new Variant('q', this.catchUpAt.offset)],
+        ['MaxCount', new Variant('q', CATCH_UP_PAGE)],
+        ['SubjectLength', new Variant('y', 255)],
+        // MAP's type filter names the types to leave out: everything but MMS.
+        ['Types', new Variant('as', ['sms', 'email'])],
+      ]);
+      pages++;
+      let listing: Map<string, Map<string, unknown>>;
+      try {
+        [listing] = (await call('ListMessages', session, MAP, 'sa{sv}', [folder, filter], SESSION_TIMEOUT_MS)) as [Map<string, Map<string, unknown>>];
+      } catch (error) {
+        // A folder the phone hasn't got: on to the next.
+        if (/not connected|disconnected|closed|reset|NotConnected/i.test(String(error))) throw error;
+        this.catchUpAt = { folder: this.catchUpAt.folder + 1, offset: 0 };
+        continue;
+      }
+      let seen = 0;
+      for (const [objectPath, rawProps] of listing) {
+        seen++;
+        const props = new Map([...rawProps].map(([k, v]) => [k, unwrap(v)]));
+        if (String(props.get('Type') ?? '') !== 'mms') continue;
+        const handle = objectPath.slice(objectPath.lastIndexOf('/message') + '/message'.length);
+        if (this.known.has(handle)) continue;
+        const kept = this.hooks.stored(`bt:${handle}`);
+        if (!kept || kept.mms) continue;
+        fetches++;
+        const message = await this.listedMms({ objectPath, handle, props, type: 'mms' }, folder !== 'inbox');
+        if (message) outMessages.push(message);
+      }
+      // Where the next sync picks up; a page cut short by the fetch limit is read again, which skips what's done.
+      if (fetches >= CATCH_UP_FETCHES) break;
+      if (seen < CATCH_UP_PAGE) this.catchUpAt = { folder: this.catchUpAt.folder + 1, offset: 0 };
+      else this.catchUpAt.offset += CATCH_UP_PAGE;
+    }
+    if (outMessages.length) this.hooks.messages(outMessages);
+    if (this.catchUpAt.folder >= folders.length) this.hooks.olderMmsDone();
   }
 
   private learnOwn(address: string): void {
