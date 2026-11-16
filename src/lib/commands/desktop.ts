@@ -3,6 +3,7 @@ import {
   getBrowserBridge, siteOriginOf, VIDEO_DOWNLOAD_FORMATS, type DownloadInfo, type SiteCapability, type VideoDownloadFormat,
 } from '@/lib/browser';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
+import { listTabAudio, setTabMuted } from '@/lib/tabAudio';
 import { DAILY_MINUTES, describeLimit, formatSpent, getSiteLimitsBridge, type SiteLimitMode } from '@/lib/siteLimits';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
 import { getFsBridge } from '@/lib/fs';
@@ -548,7 +549,7 @@ function siteOrigin(site: string): string {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), downloading a page’s video, site data, what each site may do, and the sites the user limited for their own sake',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), downloading a page’s video, the tabs making sound and muting them, site data, what each site may do, and the sites the user limited for their own sake',
   commands: [
     ...bookmarkCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
@@ -602,6 +603,30 @@ export const browserArea: Area = {
       } finally {
         unsubscribe();
       }
+    }),
+    command('browser', 'audio', 'The tabs making sound, and those muted, as the speakers on their tabs show', [], async () => {
+      const states = await call(listTabAudio());
+      if (states === null) throw new CommandError('Tabs’ sound needs Din’s Electron host');
+      const rows = states.map((s) => ({ id: s.wcId, state: s.muted ? 'muted' : 'playing', title: s.title, url: s.url }));
+      return { data: rows, text: rows.length ? rows.map((r) => `${r.id}\t${r.state}\t${r.title || r.url}`).join('\n') : 'No tab is making sound' };
+    }),
+    command('browser', 'mute', 'Mute a tab, or unmute it, as the speaker on the tab does', [
+      { name: 'tab', type: 'string', positional: true, rest: true, help: 'Its id (din browser audio), or words of its title or address' },
+      { name: 'off', type: 'boolean', optional: true, help: 'Unmute it instead' },
+    ], async (args) => {
+      const query = args.string('tab').trim();
+      const muted = !args.optBool('off');
+      let wcId = /^\d+$/.test(query) ? Number(query) : null;
+      if (wcId === null) {
+        const states = (await call(listTabAudio())) ?? [];
+        const words = query.toLowerCase();
+        const matches = states.filter((s) => `${s.title} ${s.url}`.toLowerCase().includes(words));
+        if (matches.length === 0) throw new CommandError(`No tab making sound matches “${query}” (din browser audio)`);
+        if (matches.length > 1) throw new CommandError(`More than one tab matches “${query}”: give its id (din browser audio)`);
+        wcId = matches[0].wcId;
+      }
+      if (!(await call(setTabMuted(wcId, muted)))) throw new CommandError(`No tab ${wcId}`);
+      return { text: muted ? 'Muted' : 'Unmuted' };
     }),
     command('browser', 'site-permissions', 'What a site may do, as its site info shows: camera, microphone, location, notifications, background refresh, the clipboard', [
       { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },

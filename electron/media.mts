@@ -12,14 +12,22 @@
 // no way to, but Pause always works: a page still audible a moment after
 // being asked to pause is muted, until Din plays it again.
 //
+// It also tells the shell which pages are making sound, for the speaker on
+// their browser tabs (src/lib/tabAudio.ts), and mutes a page the user mutes
+// there. A page counts as making sound for a moment after it goes quiet, as
+// Chrome's tabs do, so the speaker doesn't flicker between sentences.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import { ipcMain, webContents, type WebContents, type WebFrameMain } from 'electron';
 import { mprisControl, mprisPlayers, startMpris, type MprisAction } from './mpris.mts';
+import { isMutedFor, muteFor } from './audio-mute.mts';
 
 /** How long a paused page may stay audible before it's muted. */
 const PAUSE_GRACE_MS = 1500;
+/** How long a page that went quiet still shows its speaker (Chrome's, too). */
+const RECENTLY_AUDIBLE_MS = 2000;
 const MAX_TEXT = 300;
 const MAX_ARTWORK = 256 * 1024;
 
@@ -45,6 +53,17 @@ export interface ExternalMediaSource {
   wcId?: number;
 }
 
+/** A page making sound, or muted by the user, for its tab's speaker. */
+export interface TabAudioState {
+  wcId: number;
+  /** It made sound just now (or would have, muted). */
+  audible: boolean;
+  /** The user muted it. */
+  muted: boolean;
+  title: string;
+  url: string;
+}
+
 interface FrameState {
   playing: boolean;
   resumable: boolean;
@@ -59,6 +78,9 @@ interface Guest {
   contents: WebContents;
   frames: Map<string, { frame: WebFrameMain; state: FrameState }>;
   audible: boolean;
+  /** `audible`, held on for RECENTLY_AUDIBLE_MS after it goes quiet. */
+  recentlyAudible: boolean;
+  quietTimer: NodeJS.Timeout | null;
   since: number;
   listed: boolean;
   /** Din paused it, so Play is worth offering whatever the page says. */
@@ -79,6 +101,7 @@ interface Options {
 let options: Options | null = null;
 const guests = new Map<number, Guest>();
 let publishTimer: NodeJS.Timeout | null = null;
+let tabAudioTimer: NodeJS.Timeout | null = null;
 
 function frameKey(frame: WebFrameMain): string {
   return `${frame.processId}:${frame.routingId}`;
@@ -130,7 +153,53 @@ function setMuted(guest: Guest, muted: boolean): void {
   guest.muteTimer = null;
   if (guest.mutedByDin === muted) return;
   guest.mutedByDin = muted;
-  if (!guest.contents.isDestroyed()) guest.contents.setAudioMuted(muted);
+  muteFor(guest.contents, 'paused', muted);
+}
+
+/** The pages with a speaker to show: making sound, or muted by the user. */
+function listTabAudio(): TabAudioState[] {
+  const states: TabAudioState[] = [];
+  for (const { contents, recentlyAudible } of guests.values()) {
+    if (contents.isDestroyed()) continue;
+    const muted = isMutedFor(contents, 'user');
+    if (!recentlyAudible && !muted) continue;
+    states.push({ wcId: contents.id, audible: recentlyAudible, muted, title: contents.getTitle(), url: contents.getURL() });
+  }
+  return states;
+}
+
+function scheduleTabAudio(): void {
+  tabAudioTimer ??= setTimeout(() => {
+    tabAudioTimer = null;
+    options?.sendToShell('media:tabAudio', listTabAudio());
+  }, 50);
+}
+
+function setAudible(guest: Guest, audible: boolean): void {
+  guest.audible = audible;
+  if (audible) {
+    if (guest.quietTimer) clearTimeout(guest.quietTimer);
+    guest.quietTimer = null;
+    if (!guest.recentlyAudible) {
+      guest.recentlyAudible = true;
+      scheduleTabAudio();
+    }
+  } else if (guest.recentlyAudible && !guest.quietTimer) {
+    guest.quietTimer = setTimeout(() => {
+      guest.quietTimer = null;
+      guest.recentlyAudible = false;
+      scheduleTabAudio();
+    }, RECENTLY_AUDIBLE_MS);
+  }
+}
+
+/** Mute or unmute a page, as its tab's speaker does. False if there's no such page. */
+export function setTabMuted(wcId: number, muted: boolean): boolean {
+  const guest = guests.get(wcId);
+  if (!guest || guest.contents.isDestroyed()) return false;
+  muteFor(guest.contents, 'user', muted);
+  scheduleTabAudio();
+  return true;
 }
 
 /** It started playing again by itself: whatever Din did to pause it is over. */
@@ -143,10 +212,13 @@ function resumed(guest: Guest): void {
 function guestFor(contents: WebContents): Guest {
   let guest = guests.get(contents.id);
   if (guest) return guest;
+  const audible = contents.isCurrentlyAudible();
   guest = {
     contents,
     frames: new Map(),
-    audible: contents.isCurrentlyAudible(),
+    audible,
+    recentlyAudible: audible,
+    quietTimer: null,
     since: 0,
     listed: false,
     pausedByDin: false,
@@ -157,7 +229,7 @@ function guestFor(contents: WebContents): Guest {
   guests.set(contents.id, guest);
   const g = guest;
   contents.on('audio-state-changed', (event) => {
-    g.audible = event.audible;
+    setAudible(g, event.audible);
     schedulePublish();
   });
   contents.on('media-started-playing', () => {
@@ -175,8 +247,10 @@ function guestFor(contents: WebContents): Guest {
   });
   contents.once('destroyed', () => {
     if (g.muteTimer) clearTimeout(g.muteTimer);
+    if (g.quietTimer) clearTimeout(g.quietTimer);
     guests.delete(contents.id);
     schedulePublish();
+    if (g.recentlyAudible) scheduleTabAudio();
   });
   return guest;
 }
@@ -321,6 +395,17 @@ export function registerMediaHandlers(opts: Options): void {
   ipcMain.handle('media:list', (event) => {
     opts.assertShellSender(event);
     return listSources();
+  });
+
+  ipcMain.handle('media:tabAudio', (event) => {
+    opts.assertShellSender(event);
+    return listTabAudio();
+  });
+
+  ipcMain.handle('media:setTabMuted', (event, wcId: unknown, muted: unknown) => {
+    opts.assertShellSender(event);
+    if (typeof wcId !== 'number' || typeof muted !== 'boolean') return false;
+    return setTabMuted(wcId, muted);
   });
 
   ipcMain.handle('media:control', async (event, id: unknown, action: unknown) => {

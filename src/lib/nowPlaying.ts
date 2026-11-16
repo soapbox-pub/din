@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { localFileUrl } from '@/lib/fs';
+import type { TabAudioState } from '@/lib/tabAudio';
 
 /**
  * Everything playing on the computer, for the media controls in the volume
@@ -42,6 +43,10 @@ export interface MediaBridge {
   onChange(callback: (sources: MediaSource[]) => void): () => void;
   control(id: string, action: MediaAction): Promise<void>;
   onKey(callback: (key: MediaKey) => void): () => void;
+  /** The pages making sound or muted by the user (src/lib/tabAudio.ts). */
+  tabAudio(): Promise<TabAudioState[]>;
+  onTabAudio(callback: (states: TabAudioState[]) => void): () => void;
+  setTabMuted(wcId: number, muted: boolean): Promise<boolean>;
 }
 
 declare global {

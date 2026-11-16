@@ -25,6 +25,8 @@ import {
   SquarePlus,
   Trash2,
   VenetianMask,
+  Volume2,
+  VolumeX,
   WifiOff,
   X,
   ZoomIn,
@@ -136,6 +138,7 @@ import { parentPath } from '@/lib/fs';
 import { appForFile } from '@/lib/fileTypes';
 import { isProgram } from '@/lib/nativeApps';
 import { useNowPlaying } from '@/lib/nowPlaying';
+import { isTabMuted, setTabMuted, useTabAudio, type TabAudio } from '@/lib/tabAudio';
 import {
   claimBrowserSession,
   forgetBrowserWindow,
@@ -307,6 +310,8 @@ interface Tab {
    * tab is first selected.
    */
   dormant: boolean;
+  /** Mute the page once its guest attaches: it was muted in the window it came from. */
+  muteOnAttach: boolean;
 }
 
 function createTab(
@@ -346,6 +351,7 @@ function createTab(
     zoom: 1,
     pinned: false,
     dormant: false,
+    muteOnAttach: false,
   };
 }
 
@@ -397,6 +403,8 @@ interface TabTransferPayload {
   title: string | null;
   favicon: string | null;
   themeColor: string | null;
+  /** The user had muted it. */
+  muted?: boolean;
 }
 
 function isTabTransferPayload(value: unknown): value is TabTransferPayload {
@@ -410,6 +418,7 @@ function adoptTab(payload: TabTransferPayload): Tab {
     title: payload.title,
     favicon: payload.favicon,
     themeColor: payload.themeColor,
+    muteOnAttach: payload.muted === true,
   };
 }
 
@@ -843,8 +852,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     (id: string): TabTransferPayload | undefined => {
       const tab = tabsRef.current.find((t) => t.id === id);
       if (!tab) return undefined;
+      const muted = isTabMuted(tab.wcId);
       closeTab(id, false);
-      return { url: tab.url, title: tab.title, favicon: tab.favicon, themeColor: tab.themeColor };
+      return { url: tab.url, title: tab.title, favicon: tab.favicon, themeColor: tab.themeColor, muted };
     },
     [closeTab],
   );
@@ -1288,7 +1298,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           if (tab?.pendingRequestId != null) {
             crx?.resolveCreateTab(tab.pendingRequestId, event.value);
           }
-          updateTab(id, { wcId: event.value, pendingRequestId: null });
+          if (tab?.muteOnAttach) void setTabMuted(event.value, true);
+          updateTab(id, { wcId: event.value, pendingRequestId: null, muteOnAttach: false });
           break;
         }
       }
@@ -3186,6 +3197,7 @@ function tabMenuProps(menu: BrowserTabMenu, tab: Tab, tabs: Tab[], toRight: bool
       <>
         <ContextMenuItem onSelect={() => menu.reload(tab.id)}>Reload</ContextMenuItem>
         <ContextMenuItem onSelect={() => menu.duplicate(tab.id)}>Duplicate</ContextMenuItem>
+        <MuteTabItem wcId={tab.wcId} />
       </>
     ),
     onCloseOthers: () => menu.closeOthers(tab.id),
@@ -3211,6 +3223,56 @@ function StripContextMenu({ menu, children }: { menu: BrowserTabMenu; children: 
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+/** Mute tab / Unmute tab, in a tab's right-click menu, as its speaker does. */
+function MuteTabItem({ wcId }: { wcId: number | null }) {
+  const muted = useTabAudio(wcId) === 'muted';
+  return (
+    <ContextMenuItem disabled={wcId === null} onSelect={() => wcId !== null && void setTabMuted(wcId, !muted)}>
+      {muted ? 'Unmute tab' : 'Mute tab'}
+    </ContextMenuItem>
+  );
+}
+
+/**
+ * The speaker on a tab whose page is making sound, crossed out once the user
+ * mutes it, as Chrome's: after the title, and a click on it mutes or unmutes
+ * the page without switching to the tab.
+ */
+function TabSpeaker({ wcId, audio, className }: { wcId: number | null; audio: TabAudio; className?: string }) {
+  if (!audio || wcId === null) return null;
+  const muted = audio === 'muted';
+  const label = muted ? 'Unmute tab' : 'Mute tab';
+  const Icon = muted ? VolumeX : Volume2;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={muted}
+      // Neither a drag of the tab nor a switch to it.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        void setTabMuted(wcId, !muted);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      className={cn(
+        'grid size-5 shrink-0 place-items-center rounded-full text-foreground/70',
+        'hover:bg-foreground/10 hover:text-foreground',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        className,
+      )}
+    >
+      <Icon className="size-3.5" strokeWidth={2} />
+    </button>
+  );
+}
+
+/** How a tab's name reads aloud with what its speaker says. */
+function audioLabel(label: string, audio: TabAudio): string {
+  return audio === 'muted' ? `${label}, muted` : audio === 'playing' ? `${label}, playing audio` : label;
 }
 
 /** A tab's favicon, or its glyph while it has none. */
@@ -3252,6 +3314,7 @@ function TabButton({
 }) {
   const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
+  const audio = useTabAudio(tab.wcId);
   const widthOf = (el: Element) => el.closest('[role="tab"]')?.getBoundingClientRect().width;
 
   return (
@@ -3268,7 +3331,7 @@ function TabButton({
         onPointerDown={onPointerDown}
         role="tab"
         aria-selected={active}
-        aria-label={label}
+        aria-label={audioLabel(label, audio)}
         tabIndex={0}
         onClick={onActivate}
         onKeyDown={(e) => {
@@ -3291,20 +3354,26 @@ function TabButton({
         className={cn(
           // Unpinned tabs shrink from 13rem as the strip fills, and are
           // containers so their contents can collapse once they get narrow.
+          // A pinned tab making sound widens to fit its speaker, as Chrome's.
           tab.pinned
-            ? 'w-9 shrink-0'
+            ? audio ? 'shrink-0 gap-1 pl-2.5 pr-1.5' : 'w-9 shrink-0'
             : cn('@container basis-52 shrink', active ? 'min-w-10' : 'min-w-9'),
           tabClass({ active, dragging }),
         )}
       >
-        {/* Too narrow for its title, a tab shows just its icon, like Safari's. */}
+        {/* Too narrow for its title, a tab shows just its icon, like Safari's
+            (its speaker instead, while it has one, as Chrome's). */}
         {tab.pinned ? (
-          <TabIcon tab={tab} icon={icon} />
+          <>
+            <TabIcon tab={tab} icon={icon} />
+            <TabSpeaker wcId={tab.wcId} audio={audio} />
+          </>
         ) : (
           <>
             <span className={tabContentClass}>
-              <TabIcon tab={tab} icon={icon} className={tabIconClass} />
+              <TabIcon tab={tab} icon={icon} className={cn(tabIconClass, audio && '@max-[3.25rem]:hidden')} />
               <span className={tabTitleClass(true)}>{label}</span>
+              <TabSpeaker wcId={tab.wcId} audio={audio} className="-mx-0.5 @max-[3.25rem]:group-hover:invisible" />
             </span>
             <button
               type="button"
@@ -3600,6 +3669,7 @@ function TreeTabRow({
 }) {
   const label = tabLabel(tab);
   const icon = tab.favicon ? sanitizeImageUrl(tab.favicon) : null;
+  const audio = useTabAudio(tab.wcId);
   // The drop indicator to draw while another tab hovers over this row, or
   // null. The top/bottom thirds re-order (sibling before/after), the middle
   // nests (child); on an expanded parent the bottom zone also nests, since
@@ -3644,7 +3714,7 @@ function TreeTabRow({
       <div
         role="tab"
         aria-selected={active}
-        aria-label={label}
+        aria-label={audioLabel(label, audio)}
         tabIndex={0}
         draggable
         onClick={onActivate}
@@ -3734,6 +3804,7 @@ function TreeTabRow({
           <TabGlyph tab={tab} className="size-4 shrink-0 opacity-60" />
         )}
         <span className="min-w-0 flex-1 truncate">{label}</span>
+        <TabSpeaker wcId={tab.wcId} audio={audio} />
         <button
           type="button"
           aria-label={`Close ${label}`}

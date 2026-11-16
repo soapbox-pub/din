@@ -4352,8 +4352,6 @@ expose('capture', {
   onStreamEnded: (callback) => listen('capture:streamEnded', callback),
 });
 
-// Media playing in web pages and native apps (window.dinos.media), backed by
-// electron/media.mts, for the volume menu's media controls.
 // Power mode in web pages (see electron/power-mode.mts / src/lib/powerMode.ts).
 expose('powerMode', {
   /**
@@ -4376,6 +4374,9 @@ expose('powerMode', {
   },
 });
 
+// Media playing in web pages and native apps (window.dinos.media), backed by
+// electron/media.mts, for the volume menu's media controls and the speakers
+// on browser tabs.
 expose('media', {
   /** What's playing (or paused) now. */
   list: () => ipcRenderer.invoke('media:list'),
@@ -4397,6 +4398,28 @@ expose('media', {
    * @param {'play' | 'pause' | 'nexttrack' | 'previoustrack'} action
    */
   control: (id, action) => ipcRenderer.invoke('media:control', id, action),
+
+  /** The pages making sound or muted by the user, for their tabs' speakers. */
+  tabAudio: () => ipcRenderer.invoke('media:tabAudio'),
+
+  /**
+   * Subscribe to the pages making sound. Returns an unsubscribe fn.
+   * @param {(states: unknown[]) => void} callback
+   */
+  onTabAudio: (callback) => {
+    /** @type {(event: Electron.IpcRendererEvent, states: unknown[]) => void} */
+    const listener = (_event, states) => callback(states);
+    ipcRenderer.on('media:tabAudio', listener);
+    return () => ipcRenderer.removeListener('media:tabAudio', listener);
+  },
+
+  /**
+   * Mute or unmute a page, as its tab's speaker does. Resolves false if
+   * there's no such page.
+   * @param {number} wcId
+   * @param {boolean} muted
+   */
+  setTabMuted: (wcId, muted) => ipcRenderer.invoke('media:setTabMuted', wcId, muted),
 
   /**
    * Subscribe to the media keys (play/pause, next, previous, stop). Returns

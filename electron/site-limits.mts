@@ -33,6 +33,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { app, ipcMain, powerMonitor, webContents } from 'electron';
 import { getDomain } from 'tldts-experimental';
+import { muteFor } from './audio-mute.mts';
 
 export type SiteLimitMode = 'pause' | 'daily' | 'block';
 
@@ -98,8 +99,6 @@ let usage = new Map<string, Usage>();
 const passes = new Map<string, number>();
 /** Guests covered by a limit's page. */
 const blocks = new Map<number, SiteLimitBlock>();
-/** Guests muted because their time ran out while a page played. */
-const muted = new Set<number>();
 /** When each site last stopped a visit. */
 const lastTry = new Map<string, number>();
 const guests = new Set<Electron.WebContents>();
@@ -275,7 +274,7 @@ function block(contents: Electron.WebContents, url: string, limit: SiteLimit, is
 }
 
 function unblock(contents: Electron.WebContents): void {
-  if (muted.delete(contents.id) && !contents.isDestroyed()) contents.setAudioMuted(false);
+  muteFor(contents, 'site-limit', false);
   if (!blocks.delete(contents.id)) return;
   sendToShell('site-limits:block', { wcId: contents.id, block: null });
 }
@@ -303,10 +302,7 @@ function shutOpenPages(): void {
     const host = hostnameOf(url);
     const limit = host ? limitFor(host) : null;
     if (!limit || !isShut(limit)) continue;
-    if (!contents.isAudioMuted()) {
-      contents.setAudioMuted(true);
-      muted.add(contents.id);
-    }
+    muteFor(contents, 'site-limit', true);
     block(contents, url, limit, false);
   }
 }
@@ -374,10 +370,7 @@ export function attachSiteLimits(contents: Electron.WebContents): void {
       // One that committed at once (from the back/forward cache) stays
       // under the cover: keep it quiet there.
       const host = hostnameOf(contents.getURL());
-      if (host && limitFor(host) && blocks.has(contents.id) && !contents.isAudioMuted()) {
-        contents.setAudioMuted(true);
-        muted.add(contents.id);
-      }
+      if (host && limitFor(host) && blocks.has(contents.id)) muteFor(contents, 'site-limit', true);
     }));
   });
   contents.on('will-redirect', (event) => {
@@ -386,7 +379,6 @@ export function attachSiteLimits(contents: Electron.WebContents): void {
   contents.once('destroyed', () => {
     guests.delete(contents);
     blocks.delete(contents.id);
-    muted.delete(contents.id);
     updateTicker();
   });
 }
