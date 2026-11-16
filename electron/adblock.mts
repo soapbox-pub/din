@@ -256,6 +256,32 @@ function requestOf(details: Electron.OnBeforeRequestListenerDetails | Electron.O
   });
 }
 
+/**
+ * Whether a request blocked by `filter` is a site loading its own files, by a
+ * rule that would block the site itself, as the extension's blocksItsOwnSite:
+ * no page the user went to is blocked, so a generic rule naming its host
+ * (EasyList's `://ads.`, on ads.withgoogle.com) would only leave it white.
+ */
+function blocksItsOwnSite(
+  details: Electron.OnBeforeRequestListenerDetails,
+  filter: { getId(): number } | undefined,
+): boolean {
+  const source = details.frame?.url || details.referrer;
+  if (!engine || !filter || !source) return false;
+  let page: string;
+  try {
+    const url = new URL(source);
+    if (url.hostname !== hostnameOf(details.url)) return false;
+    page = `${url.origin}/`;
+  } catch {
+    return false;
+  }
+  const { filter: pageFilter } = engine.match(
+    ghostery().Request.fromRawDetails({ url: page, sourceUrl: page, type: 'main_frame' }),
+  );
+  return !!pageFilter && pageFilter.getId() === filter.getId();
+}
+
 function blockInSession(session: Electron.Session): void {
   const tabOf = (details: { webContentsId?: number }) =>
     details.webContentsId === undefined ? undefined : webContents.fromId(details.webContentsId);
@@ -280,8 +306,10 @@ function blockInSession(session: Electron.Session): void {
       callback({});
       return;
     }
-    const { match, redirect } = engine.match(requestOf(details));
-    if (redirect) {
+    const { match, redirect, filter } = engine.match(requestOf(details));
+    if ((match || redirect) && blocksItsOwnSite(details, filter)) {
+      callback({});
+    } else if (redirect) {
       countBlocked(tab.id, details.url);
       callback({ redirectURL: redirect.dataUrl });
     } else if (match) {

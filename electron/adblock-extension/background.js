@@ -84,6 +84,20 @@ function requestOf(details) {
   });
 }
 
+/**
+ * Whether a request blocked by `filter` is a site loading its own files, by a
+ * rule that would block the site itself. Din never blocks a page the user
+ * went to, so a generic rule that names its host (EasyList's `://ads.`, on
+ * ads.withgoogle.com) would only take its scripts and styles and leave it
+ * white. A rule aimed at one of its files, or at someone else's, still blocks.
+ */
+function blocksItsOwnSite(details, filter) {
+  if (!filter || !details.initiator || hostnameOf(details.url) !== hostnameOf(details.initiator)) return false;
+  const page = `${details.initiator}/`;
+  const { filter: pageFilter } = engine.match(Request.fromRawDetails({ url: page, sourceUrl: page, type: 'main_frame' }));
+  return !!pageFilter && pageFilter.getId() === filter.getId();
+}
+
 function reportBlocked({ site, top }, url) {
   if (!site) return;
   if (top) {
@@ -117,7 +131,8 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (details.type === 'main_frame' || !enabled || !engine) return {};
     const page = pageOf(details);
     if (allowlist.has(page.site)) return {};
-    const { match, redirect } = engine.match(requestOf(details));
+    const { match, redirect, filter } = engine.match(requestOf(details));
+    if ((match || redirect) && blocksItsOwnSite(details, filter)) return {};
     if (redirect) {
       reportBlocked(page, details.url);
       return { redirectUrl: redirect.dataUrl };
