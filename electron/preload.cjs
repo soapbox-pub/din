@@ -2681,8 +2681,9 @@ expose('dictation', {
   /**
    * The text spoken in a recording.
    * @param {Uint8Array} pcm 16 kHz mono 16-bit samples, little-endian.
+   * @param {string} [prompt] What was said just before it, for context.
    */
-  transcribe: (pcm) => ipcRenderer.invoke('dictation:transcribe', pcm),
+  transcribe: (pcm, prompt) => ipcRenderer.invoke('dictation:transcribe', pcm, prompt ?? ''),
 
   /**
    * Type text into a web page (a browser tab or web app), where its focus is.

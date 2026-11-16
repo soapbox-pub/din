@@ -944,12 +944,30 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           throw error;
         }
         const s = { id: Number(id), owner: {}, ended: false };
+        // Each segment Din hears is a result of its own, at the next index,
+        // its words so far a result that isn't final at that index first.
+        let index = 0;
+        let interimShown = false;
+        const result = (text: string, final: boolean) => {
+          if (!s.ended) push({ type: 'speech', id: s.id, event: 'result', index, text: text && index > 0 ? ` ${text}` : text, final });
+        };
         const started = startDictation(
           {
             owner: s.owner,
             insert: (text) => {
-              if (!s.ended) push({ type: 'speech', id: s.id, event: 'result', text });
-              endSpeech(s);
+              result(text.trim(), true);
+              index++;
+            },
+            update: (final, interim) => {
+              if (final) {
+                result(final, true);
+                index++;
+                interimShown = false;
+              }
+              if (interim || interimShown) {
+                result(interim, false);
+                interimShown = Boolean(interim);
+              }
             },
           },
           { held: continuous === true },
@@ -1340,9 +1358,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     });
   }, [windowId, push]);
 
-  // The app's recognition ending without words: cancelled, nothing heard,
-  // failed, or another session took the microphone. After a result, the
-  // session's own insert has ended it already, in the same task.
+  // The app's recognition ending: finished once its last result is sent,
+  // cancelled, nothing heard, failed, or another session took the
+  // microphone.
   useEffect(
     () =>
       subscribeDictation(() => {

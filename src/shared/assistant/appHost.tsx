@@ -6,6 +6,7 @@ import { toast } from '@/shared/toast';
 import { useAssistantEventSync } from '@/hooks/useAssistant';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
 import { appLink } from '@/shared/launch';
+import { dictationTyper } from '@/shared/dictationField';
 
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/')) || '/';
 
@@ -13,15 +14,11 @@ async function startIn(din: Din, path: string | undefined): Promise<FileSystemHa
   return path ? din.files.fromPath(path).catch(() => undefined) : undefined;
 }
 
-/** A space before the text unless it starts a line or follows one. */
-function spaced(before: string, text: string): string {
-  return before && !/\s$/.test(before) && !/^[.,!?;:]/.test(text) ? ` ${text}` : text;
-}
-
 /**
  * Dictation into the composer's field: the web's SpeechRecognition (Din's
  * dictation, in the window the user is in), what's said typed at the
- * cursor as if from the keyboard. Lit while its own session listens.
+ * cursor as if from the keyboard, the words shown as they're heard. Lit
+ * while its own session listens.
  */
 function useAppDictation(ref: RefObject<HTMLTextAreaElement | null>) {
   const [available, setAvailable] = useState(false);
@@ -49,14 +46,29 @@ function useAppDictation(ref: RefObject<HTMLTextAreaElement | null>) {
       if (!textarea) return;
       textarea.focus();
       const r = new SpeechRecognition();
+      r.interimResults = true;
+      const type = dictationTyper(textarea);
+      /** Results typed for good. */
+      let typed = 0;
       r.onresult = (e) => {
-        const text = e.results[0]?.[0]?.transcript ?? '';
-        const field = ref.current;
-        if (!text || !field?.isConnected) return;
-        field.focus();
-        document.execCommand('insertText', false, spaced(field.value.slice(0, field.selectionStart ?? field.value.length), text));
+        // The final results not typed yet, then the words heard after them.
+        let final = '';
+        let interim = '';
+        for (let i = typed; i < e.results.length; i++) {
+          const result = e.results[i];
+          const text = result?.[0]?.transcript.trim() ?? '';
+          if (result?.isFinal && i === typed) {
+            final = final && text ? `${final} ${text}` : final || text;
+            typed++;
+          } else if (text) {
+            interim = interim ? `${interim} ${text}` : text;
+          }
+        }
+        type(final, interim);
       };
       r.onend = () => {
+        // Anything heard that never came final goes.
+        type('', '');
         if (recognition.current === r) recognition.current = null;
         setActive(false);
       };

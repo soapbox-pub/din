@@ -386,9 +386,11 @@ export type Push =
   /**
    * This window's SpeechRecognition: speech heard beginning and ending,
    * what was said (`final` false for what's heard so far, absent or true
-   * for the last word on it), how it ended.
+   * for the last word on it; `index` the result it is, 0 if absent, a
+   * stretch of speech each; an empty one that isn't final takes back what
+   * was heard there), how it ended.
    */
-  | { type: 'speech'; id: number; event: 'result'; text: string; final?: boolean }
+  | { type: 'speech'; id: number; event: 'result'; index?: number; text: string; final?: boolean }
   | { type: 'speech'; id: number; event: 'speechstart' | 'speechend' }
   | { type: 'speech'; id: number; event: 'error'; error: SpeechErrorCode; message: string }
   | { type: 'speech'; id: number; event: 'end' }

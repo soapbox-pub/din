@@ -5,24 +5,34 @@
  * holding Super+A (into the assistant's prompt) or by a mic button (into
  * its own field). The shell records the microphone, and whisper.cpp turns
  * it into text in the main process (`window.dinos.dictation`, see
- * electron/dictation.mts). While you speak, what's been heard so far is
- * shown as a preview (DictationOverlay); when you stop, the final text goes
- * to the session's target.
+ * electron/dictation.mts).
  *
- * A toggled session ends by itself after a pause; a held one (Super+A) when
- * the key comes up.
+ * The recording is cut into segments, a sentence or so each, at the pauses
+ * between them (or, in a long run of speech, at a gap between words), and
+ * each is transcribed on its own, with what was said before it as context,
+ * and typed as soon as it's done. Short pieces keep whisper fast and well
+ * inside its 30-second window, where a whole long recording came back
+ * garbled, or empty. While a segment is heard, its words so far are shown
+ * in the field itself where the target can take them back (Din's own text
+ * fields, apps' SpeechRecognition with interim results), and in the
+ * overlay (DictationOverlay) everywhere.
+ *
+ * A toggled session ends by itself after a longer pause; a held one
+ * (Super+A) when the key comes up.
  *
  * Targets are found from the shell's focus: text fields get the text as if
  * typed (undo and React's onChange keep working), web pages through
  * Electron, and the components that put their own focus somewhere a field
  * can't reach (the Terminal, native app windows) register a target for
- * their element with registerDictationTarget.
+ * their element with registerDictationTarget. Those two get each segment
+ * once it's final.
  */
 import { getAudioBridge } from '@/lib/audio';
 import { getFeaturesBridge } from '@/lib/features';
 import { notifyWithFeature } from '@/lib/featureNotifications';
 import { holdMedia } from '@/lib/mediaPause';
 import { guestId, isGuestElement } from '@/platform/guest';
+import { dictationTyper } from '@/shared/dictationField';
 
 /** Why dictation can't start on DinOS before its optional feature is installed. */
 export const DICTATION_NEEDS_FEATURE = 'Dictation isn’t installed yet. Install Dictation & transcripts in Settings → Optional Features.';
@@ -67,7 +77,8 @@ async function missingReason(): Promise<string> {
 export interface DictationBridge {
   available(): Promise<boolean>;
   prepare(): Promise<void>;
-  transcribe(pcm: Uint8Array): Promise<string>;
+  /** The text in `pcm`; `prompt` is what was said before it. */
+  transcribe(pcm: Uint8Array, prompt?: string): Promise<string>;
   insertIntoGuest(wcId: number, text: string): Promise<boolean>;
 }
 
@@ -80,7 +91,14 @@ declare global {
 
 /** Where dictated text goes. */
 export interface DictationTarget {
+  /** Type `text`, a segment heard to the end. Later segments come with a space before them. */
   insert(text: string): void | Promise<void>;
+  /**
+   * For targets that can take words back: type `final` (heard to the end,
+   * '' for nothing new) and show `interim`, what's heard after it so far,
+   * in place of the interim text shown before. Used instead of insert.
+   */
+  update?(final: string, interim: string): void | Promise<void>;
   /** What it types into, for a mic button to know the session is its own. */
   owner?: unknown;
 }
@@ -91,7 +109,7 @@ export interface DictationState {
   status: DictationStatus;
   /** The microphone's level, 0-1. */
   level: number;
-  /** What's been heard so far. */
+  /** What's been heard and isn't typed yet. */
   preview: string;
   /** Why it stopped, when status is 'error'. */
   error: string | null;
@@ -102,13 +120,25 @@ export interface DictationState {
 
 const SAMPLE_RATE = 16_000;
 /** A toggled session ends after this much quiet once speech was heard. */
-const PAUSE_MS = 1_600;
+const PAUSE_MS = 3_000;
 /** And gives up after this long hearing nothing at all. */
 const NOTHING_HEARD_MS = 10_000;
-/** Recordings stop here. */
-const MAX_MS = 5 * 60_000;
-/** The preview is redone with this much new audio. */
+/** Sessions stop here. */
+const MAX_MS = 30 * 60_000;
+/** A segment ends after this much quiet: a breath between sentences. */
+const SEGMENT_PAUSE_MS = 700;
+/** Past this long, a segment ends at the next gap between words… */
+const SEGMENT_SOFT_MS = 12_000;
+/** …and here regardless. */
+const SEGMENT_MAX_MS = 20_000;
+/** Of the quiet before a segment's speech, this much is kept. */
+const LEAD_SAMPLES = SAMPLE_RATE / 2;
+/** Less speech than this is a cough or a click, not words. */
+const MIN_SEGMENT_SAMPLES = SAMPLE_RATE / 4;
+/** The interim text is redone with this much new audio. */
 const PREVIEW_STEP_SAMPLES = SAMPLE_RATE / 2;
+/** How much of what was said goes along as context. */
+const CONTEXT_CHARS = 400;
 /** Errors stay up this long. */
 const ERROR_MS = 4_000;
 
@@ -187,28 +217,16 @@ function isTextField(element: Element | null): element is TextField {
   );
 }
 
-/** A space before the text unless it starts a line or follows one. */
-function spaced(before: string, text: string): string {
-  return before && !/\s$/.test(before) && !/^[.,!?;:]/.test(text) ? ` ${text}` : text;
-}
-
-/** Type into a text field or editable element as if the keyboard had. */
+/**
+ * Type into a text field or editable element as if the keyboard had, the
+ * words shown as they're heard (src/shared/dictationField.ts).
+ */
 export function elementTarget(element: TextField | HTMLElement): DictationTarget {
+  const type = dictationTyper(element);
   return {
     owner: element,
-    insert: (text) => {
-      if (!element.isConnected) return;
-      element.focus();
-      let before = '';
-      if (isTextField(element)) {
-        before = element.value.slice(0, element.selectionStart ?? element.value.length);
-      } else {
-        const selection = window.getSelection();
-        const node = selection?.anchorNode;
-        if (node?.nodeType === Node.TEXT_NODE) before = (node.textContent ?? '').slice(0, selection?.anchorOffset ?? 0);
-      }
-      document.execCommand('insertText', false, spaced(before, text));
-    },
+    insert: (text) => type(text.trim(), ''),
+    update: type,
   };
 }
 
@@ -241,18 +259,40 @@ export function focusedDictationTarget(): DictationTarget | null {
 // Recording
 // ---------------------------------------------------------------------------
 
+/** A stretch of the recording, transcribed on its own. */
+interface Segment {
+  chunks: Int16Array[];
+  samples: number;
+  /** Whether there's speech in it. */
+  heard: boolean;
+  /** Its words so far, for the interim text. */
+  preview: string;
+  previewedSamples: number;
+}
+
 interface Session {
   target: DictationTarget;
   held: boolean;
   stream: MediaStream | null;
   context: AudioContext | null;
-  chunks: Int16Array[];
-  samples: number;
+  /** The segment being heard. */
+  segment: Segment;
+  /** Segments heard to the end and waiting for their text, oldest first. */
+  pending: Segment[];
+  /** Transcriptions of `pending`, one at a time and in order. */
+  transcribing: Promise<void>;
+  /** Calls to the target, in order. */
+  writing: Promise<void>;
+  /** What's been said and typed, for whisper's context. */
+  said: string;
+  /** Segments typed. */
+  typed: number;
+  /** The interim text the target shows. */
+  shown: string;
+  previewing: boolean;
   heard: boolean;
   startedAt: number;
   lastSpeechAt: number;
-  previewedSamples: number;
-  previewing: Promise<void> | null;
   ended: boolean;
   /** The microphone was muted, and was unmuted for this session. */
   remute: boolean;
@@ -265,13 +305,29 @@ let errorTimer: ReturnType<typeof setTimeout> | null = null;
 /** A finished session muting the microphone again. */
 let remuting: Promise<unknown> = Promise.resolve();
 
+function newSegment(): Segment {
+  return { chunks: [], samples: 0, heard: false, preview: '', previewedSamples: 0 };
+}
+
+/** End `current` without typing more: what's typed stays, the interim text goes. */
+function drop(current: Session): void {
+  current.ended = true;
+  stopRecording();
+  session = null;
+  const { target } = current;
+  if (target.update && current.shown) {
+    current.shown = '';
+    const update = target.update;
+    current.writing = current.writing.then(() => update('', '')).catch(() => {});
+  }
+}
+
 function fail(message: string): void {
   // The pill goes in a few seconds: a missing feature's Install button stays in a notification.
   if (message === DICTATION_NEEDS_FEATURE || message === DICTATION_LIVE) {
     void notifyWithFeature({ source: { name: 'Dictation' }, title: 'Dictation isn’t installed', body: message, replaceKey: 'dictation:feature' }, 'dictation');
   }
-  stopRecording();
-  session = null;
+  if (session) drop(session);
   setState({ ...IDLE, status: 'error', error: message });
   if (errorTimer) clearTimeout(errorTimer);
   errorTimer = setTimeout(() => {
@@ -293,30 +349,97 @@ function stopRecording(): void {
   }
 }
 
-function recording(current: Session): Uint8Array {
-  const all = new Int16Array(current.samples);
+function pcm(segment: Segment): Uint8Array {
+  const all = new Int16Array(segment.samples);
   let offset = 0;
-  for (const chunk of current.chunks) {
+  for (const chunk of segment.chunks) {
     all.set(chunk, offset);
     offset += chunk.length;
   }
   return new Uint8Array(all.buffer);
 }
 
-/** Retranscribe everything so far, if there's enough new to be worth it. */
+function joinWords(a: string, b: string): string {
+  return a && b ? `${a} ${b}` : a || b;
+}
+
+/** What's been heard and not typed: the waiting segments' words, then the current one's. */
+function interimText(current: Session): string {
+  return [...current.pending, current.segment].map((s) => s.preview).filter(Boolean).join(' ');
+}
+
+/**
+ * Type `final` (a segment's text, or '' for none) and show the interim text
+ * after it, where the target can; queued behind what's being typed.
+ */
+function deliver(current: Session, final: string): Promise<void> {
+  const interim = interimText(current);
+  if (session === current) setState({ preview: interim });
+  const { target } = current;
+  const update = target.update;
+  let call: (() => void | Promise<void>) | null = null;
+  if (update) {
+    if (final || interim !== current.shown) {
+      current.shown = interim;
+      call = () => update(final, interim);
+    }
+  } else if (final) {
+    const text = current.typed ? ` ${final}` : final;
+    call = () => target.insert(text);
+  }
+  if (final) current.typed++;
+  if (call) {
+    const run = call;
+    current.writing = current.writing.then(run).catch(() => {
+      if (session === current) fail('Couldn’t type the text there');
+    });
+  }
+  return current.writing;
+}
+
+/** End the current segment, and transcribe and type it once those before it are. */
+function cut(current: Session): void {
+  const segment = current.segment;
+  current.segment = newSegment();
+  const api = bridge();
+  if (!api || !segment.heard || segment.samples < MIN_SEGMENT_SAMPLES) return;
+  current.pending.push(segment);
+  const audio = pcm(segment);
+  current.transcribing = current.transcribing.then(async () => {
+    if (session !== current) return;
+    let text: string;
+    try {
+      text = cleanTranscript(await api.transcribe(audio, current.said.slice(-CONTEXT_CHARS)));
+    } catch (error) {
+      if (session === current) fail(cleanError(error));
+      return;
+    }
+    if (session !== current) return;
+    current.pending.splice(current.pending.indexOf(segment), 1);
+    current.said = joinWords(current.said, text).slice(-CONTEXT_CHARS * 2);
+    await deliver(current, text);
+  });
+}
+
+/** Transcribe the current segment so far, if there's enough new to be worth it. */
 function preview(current: Session): void {
   const api = bridge();
-  if (!api || current.previewing || current.ended || !current.heard) return;
-  if (current.samples - current.previewedSamples < PREVIEW_STEP_SAMPLES) return;
-  current.previewedSamples = current.samples;
-  current.previewing = api
-    .transcribe(recording(current))
+  const segment = current.segment;
+  // Waiting segments go first: whisper takes one request at a time.
+  if (!api || current.previewing || current.ended || !segment.heard || current.pending.length) return;
+  if (segment.samples - segment.previewedSamples < PREVIEW_STEP_SAMPLES) return;
+  segment.previewedSamples = segment.samples;
+  current.previewing = true;
+  api
+    .transcribe(pcm(segment), current.said.slice(-CONTEXT_CHARS))
     .then((text) => {
-      if (session === current && !current.ended) setState({ preview: cleanTranscript(text) });
+      if (session !== current || (current.segment !== segment && !current.pending.includes(segment))) return;
+      segment.preview = cleanTranscript(text);
+      void deliver(current, '');
     })
     .catch(() => {})
     .finally(() => {
-      current.previewing = null;
+      current.previewing = false;
     });
 }
 
@@ -384,13 +507,17 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     held: Boolean(options.held),
     stream: null,
     context: null,
-    chunks: [],
-    samples: 0,
+    segment: newSegment(),
+    pending: [],
+    transcribing: Promise.resolve(),
+    writing: Promise.resolve(),
+    said: '',
+    typed: 0,
+    shown: '',
+    previewing: false,
     heard: false,
     startedAt: Date.now(),
     lastSpeechAt: Date.now(),
-    previewedSamples: 0,
-    previewing: null,
     ended: false,
     remute: false,
     releaseMedia: null,
@@ -441,8 +568,9 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     if (session !== current || current.ended) return;
     const input = event.inputBuffer.getChannelData(0);
     const chunk = resample(input);
-    current.chunks.push(chunk);
-    current.samples += chunk.length;
+    const segment = current.segment;
+    segment.chunks.push(chunk);
+    segment.samples += chunk.length;
 
     let power = 0;
     for (let i = 0; i < input.length; i++) power += input[i] * input[i];
@@ -450,18 +578,29 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     // The background's level, followed down quickly and up slowly.
     floor = rms < floor ? floor * 0.5 + rms * 0.5 : floor * 0.995 + rms * 0.005;
     const now = Date.now();
-    if (rms > Math.max(0.012, floor * 2.5)) {
+    const speaking = rms > Math.max(0.012, floor * 2.5);
+    if (speaking) {
       current.heard = true;
+      segment.heard = true;
       current.lastSpeechAt = now;
+    } else if (!segment.heard) {
+      // Before anything's said, only the last moment of quiet is kept.
+      while (segment.chunks.length > 1 && segment.samples - segment.chunks[0].length >= LEAD_SAMPLES) {
+        segment.samples -= segment.chunks.shift()!.length;
+      }
     }
     setState({ level: Math.min(1, Math.sqrt(rms) * 2.2) });
 
+    const quiet = now - current.lastSpeechAt;
+    const length = (segment.samples / SAMPLE_RATE) * 1000;
     if (now - current.startedAt > MAX_MS) {
       void finishDictation();
-    } else if (!current.held && current.heard && now - current.lastSpeechAt > PAUSE_MS) {
+    } else if (!current.held && current.heard && quiet > PAUSE_MS) {
       void finishDictation();
     } else if (!current.held && !current.heard && now - current.startedAt > NOTHING_HEARD_MS) {
       fail('Didn’t hear anything');
+    } else if (segment.heard && (quiet > SEGMENT_PAUSE_MS || length > SEGMENT_MAX_MS || (length > SEGMENT_SOFT_MS && !speaking))) {
+      cut(current);
     } else {
       preview(current);
     }
@@ -471,44 +610,27 @@ export async function startDictation(target: DictationTarget, options: { held?: 
   processor.connect(context.destination);
 }
 
-/** Stop listening and type what was said. */
+/** Stop listening, and type the rest of what was said. */
 export async function finishDictation(): Promise<void> {
   const current = session;
-  const api = bridge();
-  if (!current || current.ended || !api) return;
+  if (!current || current.ended) return;
   current.ended = true;
   stopRecording();
-  if (!current.heard || current.samples < SAMPLE_RATE / 4) {
-    session = null;
-    setState(IDLE);
-    return;
-  }
-  setState({ status: 'transcribing', level: 0 });
-  let text: string;
-  try {
-    await current.previewing;
-    text = cleanTranscript(await api.transcribe(recording(current)));
-  } catch (error) {
-    if (session === current) fail(cleanError(error));
-    return;
-  }
+  cut(current);
+  if (current.pending.length) setState({ status: 'transcribing', level: 0 });
+  await current.transcribing;
+  if (session !== current) return;
+  // A segment that came back empty takes its interim words with it.
+  await deliver(current, '');
   if (session !== current) return;
   session = null;
   setState(IDLE);
-  if (!text) return;
-  try {
-    await current.target.insert(text);
-  } catch {
-    fail('Couldn’t type the text there');
-  }
 }
 
-/** Stop listening and throw the recording away. */
+/** Stop listening and throw away what isn't typed yet. */
 export function cancelDictation(): void {
   if (!session) return;
-  session.ended = true;
-  stopRecording();
-  session = null;
+  drop(session);
   setState(IDLE);
 }
 

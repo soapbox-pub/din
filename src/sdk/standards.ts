@@ -1110,8 +1110,11 @@ export function installClipboardFiles(host: ClipboardFilesHost): void {
 // ---------------------------------------------------------------------------
 
 export type SpeechEvent = { id: number } & (
-  /** What was said: `final` false for what's heard so far, which the next result replaces. */
-  | { event: 'result'; text: string; final?: boolean }
+  /**
+   * What was said, as result `index` (0 if absent): `final` false for
+   * what's heard so far, which the next result at that index replaces.
+   */
+  | { event: 'result'; index?: number; text: string; final?: boolean }
   | { event: 'speechstart' | 'speechend' }
   | { event: 'error'; error: string; message: string }
   | { event: 'end' }
@@ -1132,9 +1135,9 @@ type SpeechHandler = ((this: unknown, event: Event) => unknown) | null;
 /**
  * The Web Speech API's `SpeechRecognition` (and `webkitSpeechRecognition`)
  * over Din's dictation, which listens through the desktop and transcribes on
- * this computer. One final result per session, then `end`; with
- * `interimResults`, results that aren't final before it, where the host
- * hears as it goes, each the same result (index 0) heard further. `start()`
+ * this computer. A final result for each stretch of speech (a sentence or
+ * so, at the next index), then `end`; with `interimResults`, results that
+ * aren't final before each, its words so far, at the index it'll have. `start()`
  * while one is going throws `InvalidStateError`, as the web's does. The
  * draft's `SpeechRecognition.available()` answers `available` or
  * `unavailable`.
@@ -1174,12 +1177,15 @@ export function installSpeechRecognition(host: SpeechHost): void {
     onspeechstart: SpeechHandler = null;
     onspeechend: SpeechHandler = null;
     private running = false;
+    /** This session's results, a stretch of speech each. */
+    private results: object[] = [];
     /** @internal The session the desktop is running for it. */
     session = 0;
 
     start(): void {
       if (this.running) throw new DOMException('Recognition has already started.', 'InvalidStateError');
       this.running = true;
+      this.results = [];
       if (active && active !== this) active.abort();
       // The one session Din runs at a time, which the desktop's events are for.
       // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -1221,12 +1227,19 @@ export function installSpeechRecognition(host: SpeechHost): void {
       } else if (e.event === 'result') {
         const final = e.final !== false;
         if (!final && !this.interimResults) return;
+        const index = Math.max(0, Math.min(e.index ?? 0, this.results.length));
+        // What was heard there taken back: no event, as the web's never says so.
+        if (!final && !e.text) {
+          this.results.length = index;
+          return;
+        }
         const alternative = { transcript: e.text, confidence: final ? 1 : 0 };
-        const result = list([alternative], { isFinal: final });
+        this.results[index] = list([alternative], { isFinal: final });
+        this.results.length = index + 1;
         const event = new Event('result');
         Object.defineProperties(event, {
-          resultIndex: { value: 0, enumerable: true },
-          results: { value: list([result]), enumerable: true },
+          resultIndex: { value: index, enumerable: true },
+          results: { value: list([...this.results]), enumerable: true },
         });
         this.fire(event);
       } else if (e.event === 'error') {

@@ -731,12 +731,13 @@ export interface DinDesktop {
 // `SpeechRecognition` (and `webkitSpeechRecognition`), from the Web Speech
 // API, is Din's dictation (whisper.cpp, on this computer), in the window
 // the user is in: `start()` listens until a pause (until `stop()` with
-// `continuous`), then one final `result` brings what was said and `end`
-// follows. `SpeechRecognition.available()` says whether this computer can
-// take dictation. With `interimResults`, a host that hears as it goes (Din
-// Phone) sends what it's heard so far as results that aren't final, each
-// replacing the last; Din's desktop sends only the final one. `lang` is
-// passed on as a hint where the host takes one; whisper guesses otherwise.
+// `continuous`), each stretch of speech (a sentence or so) coming as a final
+// `result` at the next index of `results` as soon as it's heard, and `end`
+// follows the last. `SpeechRecognition.available()` says whether this
+// computer can take dictation. With `interimResults`, what's heard so far
+// comes first as a result that isn't final at the index its final one will
+// have, each replacing the last there, as the web's does. `lang` is passed
+// on as a hint where the host takes one; whisper guesses otherwise.
 
 declare global {
   // The Web Speech API's recognizer, which TypeScript's DOM types don't have.

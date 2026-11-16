@@ -161,12 +161,21 @@ function wav(samples: Int16Array): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-async function transcribe(samples: Int16Array): Promise<string> {
+/** How much of what came before goes along as context: whisper's prompt is short. */
+const MAX_PROMPT = 400;
+
+/**
+ * The text in `samples`. Dictation sends a sentence or so at a time, with
+ * what was said before it as `prompt`, which carries the casing,
+ * punctuation and names on across the cut.
+ */
+async function transcribe(samples: Int16Array, prompt: string): Promise<string> {
   const { port } = await ensureServer();
   const form = new FormData();
   form.append('file', new Blob([wav(samples)], { type: 'audio/wav' }), 'speech.wav');
   form.append('response_format', 'json');
   form.append('temperature', '0');
+  if (prompt) form.append('prompt', prompt);
   const response = await fetch(`http://127.0.0.1:${port}/inference`, { method: 'POST', body: form });
   if (!response.ok) throw new Error(`The speech recognizer failed (${response.status})`);
   const body = (await response.json()) as { text?: unknown; error?: unknown };
@@ -193,7 +202,7 @@ export function registerDictationHandlers(options: {
     await ensureServer();
   });
 
-  ipcMain.handle('dictation:transcribe', (event, pcm: unknown) => {
+  ipcMain.handle('dictation:transcribe', (event, pcm: unknown, prompt: unknown) => {
     assertShellSender(event);
     if (!available()) throw new Error('Dictation isn’t available here');
     if (!(pcm instanceof Uint8Array) || pcm.byteLength % 2 !== 0 || pcm.byteLength > MAX_SAMPLES * 2) {
@@ -201,8 +210,9 @@ export function registerDictationHandlers(options: {
     }
     // Copied: the IPC buffer may not be aligned for 16-bit reads.
     const samples = new Int16Array(new Uint8Array(pcm).buffer);
+    const context = typeof prompt === 'string' ? prompt.slice(-MAX_PROMPT) : '';
     touch();
-    const run = queue.then(() => transcribe(samples));
+    const run = queue.then(() => transcribe(samples, context));
     queue = run.catch(() => {});
     return run.then((text) => text.replace(/\s+/g, ' ').trim());
   });

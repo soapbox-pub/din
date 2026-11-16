@@ -105,7 +105,10 @@ to text (whisper.cpp, on this computer; `installSpeechRecognition` in
 if ((await SpeechRecognition.available({ langs: [], processLocally: true })) === 'available') {
   micButton.onclick = () => {
     const r = new SpeechRecognition();
-    r.onresult = (e) => insertAtCursor(e.results[0][0].transcript);
+    r.onresult = (e) => {
+      const result = e.results[e.resultIndex];
+      if (result.isFinal) insertAtCursor(result[0].transcript);
+    };
     r.onend = () => micButton.classList.remove('on');
     micButton.classList.add('on');
     r.start();
@@ -114,20 +117,24 @@ if ((await SpeechRecognition.available({ langs: [], processLocally: true })) ===
 ```
 
 `start()` listens until a pause, or with `continuous` until `stop()`
-(push to talk); `abort()` throws the recording away. What was said comes
-as one final `result`, then `end`; nothing is typed for the app, which
-puts the text where it wants it. Only the window the user is in can
-start listening (an `error` of `not-allowed` otherwise), and one session
-runs at a time on the desktop: a new one, or the dictation key, ends the
-last. `speechstart` and `speechend` (with `soundstart` and `soundend`)
-come where the host hears them. With `interimResults`, a host that hears
-as it goes (Din Phone, whose recognizer is Android's `RecognitionService`
-over whisper.cpp) sends what it has so far as results that aren't final,
-each the session's one result (`results[0]`) heard further, before the
-final one; Din's desktop sends only the final one. `lang` goes to the
-host as a hint; whisper guesses where there's none. The Assistant's
-composer (`src/shared/assistant/appHost.tsx`) types the text at its
-cursor as the keyboard would.
+(push to talk); `abort()` throws away what isn't final yet. What was said
+comes as it's heard, a final `result` for each stretch of speech (a
+sentence or so, cut at the pauses between them), each at the next index
+of `results` and starting with a space after the first, then `end`;
+nothing is typed for the app, which puts the text where it wants it. Only
+the window the user is in can start listening (an `error` of
+`not-allowed` otherwise), and one session runs at a time on the desktop:
+a new one, or the dictation key, ends the last. `speechstart` and
+`speechend` (with `soundstart` and `soundend`) come where the host hears
+them. With `interimResults`, what's heard so far comes first as a result
+that isn't final, at the index its final one will have, each replacing
+the last there (on the desktop, the stretch being heard and those waiting
+for their final text, together; on Din Phone, whose recognizer is
+Android's `RecognitionService` over whisper.cpp, `results[0]` heard
+further). `lang` goes to the host as a hint; whisper guesses where
+there's none. The Assistant's composer (`src/shared/assistant/appHost.tsx`)
+types the words into its field as they're heard, as Din's dictation does
+in the desktop's own fields (`src/shared/dictationField.ts`).
 
 ## `din.assistant` (permission `assistant`)
 
