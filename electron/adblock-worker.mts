@@ -11,6 +11,12 @@
 // refreshed by hand and was two months behind - long enough for YouTube to
 // get past every one of its rules.)
 //
+// Ghostery's CDN mirrors uBlock filters' year lists but not the rest of what
+// its filters.txt `!#include`s, so those come from uBlock Origin's own host
+// (UPSTREAM): filters-general.txt is where uBO keeps its defenses against
+// Ad-Shield and other ad reinjectors (gamebanana.com's, say), and without it
+// those sites' ads came back as fast as the engine blocked them.
+//
 // Writes the serialized engine to the path given as the first argument, and
 // the list revisions it was built from beside it. Exits 0 once a new engine
 // is there, 2 if the lists haven't changed since the last build (the engine's
@@ -21,9 +27,22 @@
 // syntax only, like the rest of electron/.
 
 import fs from 'node:fs';
-import { FiltersEngine } from '@ghostery/adblocker';
+import crypto from 'node:crypto';
+import { CosmeticFilter, FiltersEngine } from '@ghostery/adblocker';
 
 const CDN = 'https://cdn.ghostery.com/adblocker/resources';
+
+/** Where uBlock Origin itself fetches uAssets' lists, in the order it tries them. */
+const UPSTREAM_MIRRORS = [
+  'https://ublockorigin.github.io/uAssets/filters',
+  'https://ublockorigin.pages.dev/filters',
+];
+
+/**
+ * The lists uBlock filters (filters.txt) includes that Ghostery's CDN lacks.
+ * (filters-mobile.txt, the other, is only for uBO on phones.)
+ */
+const UPSTREAM = ['filters-general.txt', 'ubo-link-shorteners.txt'];
 
 /** uBlock Origin's default lists, as Ghostery names them. */
 const LISTS = [
@@ -91,15 +110,58 @@ async function download(name: string, revision: string): Promise<string> {
   return (await fetchOk(`${CDN}/${name}/${revision}/list.txt`)).text();
 }
 
+/**
+ * A scriptlet's arguments as Ghostery's CDN gives them: unquoted and
+ * percent-encoded, as the engine decodes each with decodeURIComponent (an
+ * argument with a `%` in it, or a `|`-separated regexp next to commas, would
+ * otherwise reach the scriptlet mangled, or throw).
+ */
+function normalizeScriptlets(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const at = line.indexOf('+js(');
+      if (at === -1 || line.startsWith('!') || !/#@?#\+js\($/.test(line.slice(0, at + 4))) return line;
+      const parsed = CosmeticFilter.parse(line)?.parseScript();
+      if (!parsed) return line;
+      return `${line.slice(0, at)}+js(${[parsed.name, ...parsed.args.map(encodeURIComponent)].join(', ')})`;
+    })
+    .join('\n');
+}
+
+/**
+ * An upstream list, normalized, and its revision (a hash of it), or null if
+ * no mirror has it: it's worth more to keep blocking with the rest.
+ */
+async function upstreamList(file: string): Promise<{ text: string; revision: string } | null> {
+  for (const mirror of UPSTREAM_MIRRORS) {
+    try {
+      const text = normalizeScriptlets(await (await fetchOk(`${mirror}/${file}`)).text());
+      return { text, revision: crypto.createHash('sha256').update(text).digest('hex') };
+    } catch (error) {
+      console.error(`adblock: couldn't fetch ${file} from ${mirror}:`, error);
+    }
+  }
+  return null;
+}
+
 try {
   const names = [...LISTS, RESOURCES];
+  const [cdnRevisions, upstream] = await Promise.all([
+    Promise.all(names.map(async (name) => [name, await latestRevision(name)] as const)),
+    Promise.all(UPSTREAM.map(async (file) => [file, await upstreamList(file)] as const)),
+  ]);
   const revisions = Object.fromEntries(
-    (await Promise.all(names.map(async (name) => [name, await latestRevision(name)] as const))).filter(
-      (entry): entry is readonly [string, string] => entry[1] !== null,
-    ),
+    cdnRevisions.filter((entry): entry is readonly [string, string] => entry[1] !== null),
   );
   for (const name of [RESOURCES, 'ublock-filters', 'ublock-quick-fixes', 'easylist']) {
     if (!revisions[name]) throw new Error(`${name} is unavailable`);
+  }
+  const upstreamLists: string[] = [];
+  for (const [file, list] of upstream) {
+    if (!list) continue;
+    revisions[file] = list.revision;
+    upstreamLists.push(list.text);
   }
 
   // The environment is part of what was built, so changing it rebuilds.
@@ -120,7 +182,7 @@ try {
     LISTS.filter((name) => revisions[name]).map((name) => download(name, revisions[name])),
   );
   const resources = await download(RESOURCES, revisions[RESOURCES]);
-  const engine = FiltersEngine.parse(lists.join('\n'), {
+  const engine = FiltersEngine.parse([...lists, ...upstreamLists].join('\n'), {
     enableMutationObserver: true,
     loadCosmeticFilters: true,
     loadNetworkFilters: true,
