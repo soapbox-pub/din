@@ -53,7 +53,6 @@ import {
   areaNear,
   EVEN_SPLIT,
   hasNeighbor,
-  primaryArea,
   screenEdges,
   snapRect,
   zoneRow,
@@ -429,16 +428,19 @@ export const Window = memo(function Window({
   window: win,
   isTop,
   covered,
+  onBar,
 }: {
   window: WindowState;
   isTop: boolean;
   /** Whether a window above this one, at rest, covers all of it. */
   covered: boolean;
+  /** Whether the menu bar takes this window's look (MenuBar's menuBarWindow). */
+  onBar: boolean;
 }) {
   // Actions only (stable identity): subscribing to the full manager would
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
-  // solely when its own `window` object, `isTop` or `covered` changes.
+  // solely when its own `window` object, `isTop`, `covered` or `onBar` changes.
   const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
     useWindowActions();
   const { config } = useAppContext();
@@ -475,9 +477,9 @@ export const Window = memo(function Window({
   });
   const sectionRef = useRef<HTMLElement>(null);
   // The strip of the window's title bar color behind the menu bar
-  // (BAR_STRIP_PX), shown while it's maximized on the monitor the bar is on.
+  // (BAR_STRIP_PX), shown while it's maximized and the bar takes its look:
+  // not under a window snapped over it, whose look the bar's text follows.
   const stripRef = useRef<HTMLDivElement>(null);
-  const onBar = config.desktopLayout !== 'taskbar' && (win.monitor === null || win.monitor === primaryArea(areas).id);
   const onBarRef = useRef(onBar);
   useLayoutEffect(() => {
     onBarRef.current = onBar;

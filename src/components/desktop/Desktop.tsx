@@ -12,6 +12,7 @@ import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
 import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
+import { menuBarWindow } from '@/lib/menuBarWindow';
 import { Taskbar } from './Taskbar';
 import { setPauseMediaWhileRecording } from '@/lib/mediaPause';
 import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
@@ -75,7 +76,7 @@ import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
-import { contains, workAreas, type WorkArea } from '@/lib/monitors';
+import { contains, primaryArea, workAreas, type WorkArea } from '@/lib/monitors';
 import { restoreCursorTryOn } from '@/lib/cursorTryOn';
 
 /** How long after a click a window it opens still counts as opened by it. */
@@ -312,6 +313,7 @@ function DesktopSession() {
   );
   const moving = useMovingWindows();
   const covered = coveredWindows(manager.windows, areas, moving);
+  const barWindowId = taskbar ? null : menuBarWindow(manager.windows, primaryArea(areas))?.id;
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -356,6 +358,7 @@ function DesktopSession() {
                             window={win}
                             isTop={isShown(win) && win.z === topZ}
                             covered={covered.has(win.id)}
+                            onBar={win.id === barWindowId}
                           />
                         ))}
                       </main>
