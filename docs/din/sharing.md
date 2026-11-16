@@ -52,9 +52,9 @@ The desktop's own UI calls `requestShare(data, { anchor })` from
 
 | Where | What it shares |
 |---|---|
-| The Web Browser's address bar and menu | The page's address and title |
+| The Web Browser's address bar and menu | The page's address and title; with a video playing, the video or its sound as a file instead |
 | Files' right-click menu (files, not folders) | The files, as themselves |
-| `din share [files…] [--text] [--url] [--title] [--to app]` | Anything; `--to` skips the sheet |
+| `din share [files…] [--text] [--url] [--title] [--as video\|audio] [--to app]` | Anything; `--to` skips the sheet |
 
 ## The sheet
 
@@ -64,6 +64,26 @@ take it as a grid, those picked lately first, and the sheet's own actions:
 **Copy** (the text and link; files go on Din's file clipboard, read-only) and
 **Save to Downloads** for files. The app that shared isn't offered. A new
 share replaces one still open.
+
+### Send as
+
+A share can come with other ways to send it (`alternatives` in
+`requestShare`, each a `ShareAlternative`), and the sheet then has a **Send
+as** control: Link (the share as it is) and each of them, the last one
+chosen remembered (`rememberAs`). An alternative's file doesn't exist until
+an app is picked: the sheet offers the apps that take its `sample`, then
+makes it (`prepare`) with its progress where the apps were and a Cancel,
+and gives the app a share of the file and the title (`deliverAlternative`).
+Closed meanwhile, the sheet lets it carry on and the share still goes.
+Its Save to Downloads is the alternative's own (`save`).
+
+The Web Browser's Share offers **Video** (with a quality: Best, 1080p,
+720p, 480p) and **Audio** for a page with a video playing or paused
+(`src/lib/videoShare.ts`): yt-dlp fetches it as Download Video does, into
+`~/.cache/din/shared/<random>/` (`forShare` in
+`electron/video-download.mts`), its progress on the download shelf too, so
+an app like Armada is POSTed the MP4 itself. Save to Downloads there is
+Download Video, which also stays in the browser's menu.
 
 ## Being shared to
 

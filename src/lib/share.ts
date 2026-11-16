@@ -60,6 +60,29 @@ export interface ShareApps {
   getApp: (id: string) => AppDefinition | undefined;
 }
 
+/**
+ * Another way to send a share, offered beside it in the sheet's "Send as"
+ * control: a page's video as the file itself rather than its link. Its file
+ * is made only once the user picks where it goes (`prepare`), which can take
+ * a while; the sheet picks targets by `sample` meanwhile.
+ */
+export interface ShareAlternative {
+  /** Its id, unique among the request's; never 'link'. */
+  id: string;
+  /** What the control calls it ("Video"). */
+  label: string;
+  /** What its file will be like, to find the apps that take it before it exists. */
+  sample: Pick<ShareFile, 'name' | 'type'>;
+  /** Choices of how it's made (a video's quality), the first the default. */
+  qualities?: readonly { value: string; label: string }[];
+  /** What it's called while it's made ("Preparing video"). */
+  preparing: string;
+  /** Make its files, reporting progress (0 to 1, or null when unknown); stops when `signal` aborts. */
+  prepare: (quality: string | null, onProgress: (progress: number | null) => void, signal: AbortSignal) => Promise<ShareFile[]>;
+  /** Save to Downloads its own way, without making it for the share first. */
+  save?: (quality: string | null) => void;
+}
+
 /** A share waiting on the user, for the sheet to show. */
 export interface ShareRequest {
   id: number;
@@ -68,6 +91,12 @@ export interface ShareRequest {
   anchor: ShareAnchor | null;
   /** The app that shared, by id (null for the desktop or the `din` command), which isn't offered as a target. */
   opener: string | null;
+  /** Other ways to send it, besides as it is (`data`), which the control calls Link. */
+  alternatives: readonly ShareAlternative[];
+  /** Where the sheet remembers which way was last chosen, for shares of the same kind. */
+  rememberAs: string | null;
+  /** The way the sheet opens on, over what it remembers: 'link' or an alternative's id. */
+  sendAs: string | null;
   /** The sheet's answer: the app it went to, an action's id, or null when it was closed. */
   finish: (result: string | null) => void;
 }
@@ -97,7 +126,16 @@ export function getShareRequest(): ShareRequest | null {
  * action's), or null when the user closed it, or another share took its
  * place.
  */
-export function requestShare(data: ShareData, options: { anchor?: ShareAnchor | null; opener?: string | null } = {}): Promise<string | null> {
+export function requestShare(
+  data: ShareData,
+  options: {
+    anchor?: ShareAnchor | null;
+    opener?: string | null;
+    alternatives?: readonly ShareAlternative[];
+    rememberAs?: string | null;
+    sendAs?: string | null;
+  } = {},
+): Promise<string | null> {
   current?.finish(null);
   return new Promise((resolve) => {
     const id = nextId++;
@@ -106,6 +144,9 @@ export function requestShare(data: ShareData, options: { anchor?: ShareAnchor | 
       data,
       anchor: options.anchor ?? null,
       opener: options.opener ?? null,
+      alternatives: options.alternatives ?? [],
+      rememberAs: options.rememberAs ?? null,
+      sendAs: options.sendAs ?? null,
       finish: (result) => {
         if (current?.id === id) set(null);
         resolve(result);
@@ -335,6 +376,57 @@ export function deliverShare(
   } else {
     open(app.id, shareLaunchParams(app.target, data, opener), { replaceParams: true });
   }
+}
+
+// ---- sending a share another way ----
+
+/** What an alternative will share, with its sample standing in for the file it hasn't made yet. */
+export function alternativeSample(data: ShareData, alt: ShareAlternative): ShareData {
+  return { title: data.title, files: [{ path: '', ...alt.sample }] };
+}
+
+const SEND_AS_KEY = 'din:share-as:';
+
+/** The way last chosen for shares remembered as `key`: 'link' or an alternative's id. */
+export function rememberedSendAs(key: string | null): string {
+  if (!key) return 'link';
+  try {
+    return localStorage.getItem(SEND_AS_KEY + key) ?? 'link';
+  } catch {
+    return 'link';
+  }
+}
+
+export function rememberSendAs(key: string | null, value: string): void {
+  if (!key) return;
+  try {
+    localStorage.setItem(SEND_AS_KEY + key, value);
+  } catch {
+    // Private mode or full: it just opens on Link.
+  }
+}
+
+/**
+ * Make an alternative's files and give them to an app, as a share of them
+ * and the share's title. Rejects if it couldn't be made, was stopped
+ * (`signal`), or turned out to be something the app doesn't take.
+ */
+export async function deliverAlternative(
+  alt: ShareAlternative,
+  quality: string | null,
+  app: ShareTargetApp,
+  data: ShareData,
+  opener: string | null,
+  open: Parameters<typeof deliverShare>[3],
+  onProgress: (progress: number | null) => void = () => {},
+  signal: AbortSignal = new AbortController().signal,
+): Promise<ShareData> {
+  const files = await alt.prepare(quality, onProgress, signal);
+  if (signal.aborted) throw new DOMException('Canceled', 'AbortError');
+  const made: ShareData = { title: data.title, files };
+  if (!takesShare(app.target, made)) throw new Error(`${app.name} doesn’t take ${files.map((f) => f.name).join(', ')}`);
+  deliverShare(app, made, opener, open);
+  return made;
 }
 
 // ---- what the sheet does itself ----

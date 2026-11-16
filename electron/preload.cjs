@@ -3178,9 +3178,10 @@ expose('browser', {
 
   /**
    * Save the video a tab's page plays (`wcId`), or any page's (`url`), to
-   * ~/Downloads with yt-dlp. Resolves with its download id (null if a tab's
-   * couldn't start: its failure arrives through onDownload).
-   * @param {({ wcId: number } | { url: string }) & { format?: string }} request
+   * ~/Downloads with yt-dlp (or, `forShare`, the share cache). Resolves with
+   * its download id (null if a tab's couldn't start: its failure arrives
+   * through onDownload).
+   * @param {({ wcId: number } | { url: string }) & { format?: string, forShare?: boolean }} request
    */
   downloadVideo: (request) => ipcRenderer.invoke('browser:downloadVideo', request),
 

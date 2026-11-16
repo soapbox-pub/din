@@ -1,6 +1,8 @@
+import { getBrowserBridge } from '@/lib/browser';
 import { getFsBridge } from '@/lib/fs';
 import { mimeOf } from '@/lib/mime';
-import { deliverShare, requestShare, shareTargets, type ShareData } from '@/lib/share';
+import { alternativeSample, deliverAlternative, deliverShare, requestShare, shareTargets, type ShareAlternative, type ShareData } from '@/lib/share';
+import { VIDEO_SHARE_KEY, videoShareAlternatives } from '@/lib/videoShare';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type Args, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
@@ -15,6 +17,7 @@ const WHAT: Param[] = [
   { name: 'text', type: 'string', optional: true, help: 'Text to share' },
   { name: 'url', type: 'string', optional: true, help: 'A link to share' },
   { name: 'title', type: 'string', optional: true, help: 'Its title (an email’s subject)' },
+  { name: 'as', type: 'string', optional: true, help: 'Send the --url page’s video (or its sound) as the file, as the Web Browser’s Share does for a page with a video: fetched with yt-dlp once an app is picked', choices: ['video', 'audio'] },
 ];
 
 /** What the arguments share: their files (which must be files), text, link and title. */
@@ -48,6 +51,16 @@ async function shareOf(args: Args, ctx: CommandContext): Promise<ShareData> {
   return data;
 }
 
+/** The page's video or sound (`--as`), as the sheet's Send as offers it; null for a share as it is. */
+function alternativeOf(args: Args, data: ShareData): { alternatives: ShareAlternative[]; chosen: ShareAlternative } | null {
+  const as = args.optString('as');
+  if (as === undefined) return null;
+  if (!data.url || !/^https?:\/\//i.test(data.url)) throw new CommandError('--as takes a website’s --url', 'usage');
+  if (data.files.length > 0 || data.text) throw new CommandError('--as shares the page’s video alone, without files or --text', 'usage');
+  const alternatives = videoShareAlternatives(need(getBrowserBridge(), 'The Web Browser'), { url: data.url });
+  return { alternatives, chosen: alternatives.find((a) => a.id === as)! };
+}
+
 export const shareArea: Area = {
   name: 'share',
   summary: 'Share files, text or a link to an app, as the share sheet does',
@@ -55,23 +68,28 @@ export const shareArea: Area = {
     bare(command('share', 'share', 'Show the share sheet for files, text or a link, or share them straight to an app with --to', [
       ...WHAT,
       { name: 'to', type: 'string', optional: true, help: 'The app to share to (an id or name `din share targets` lists); without it, the share sheet asks' },
+      { name: 'quality', type: 'string', optional: true, help: 'With --as video and --to: the best quality (default), or video up to a height', choices: ['best', '1080p', '720p', '480p'] },
     ], async (args, ctx) => {
       const data = await shareOf(args, ctx);
+      const alt = alternativeOf(args, data);
       const to = args.optString('to');
       if (to !== undefined) {
-        const targets = shareTargets(data, ctx.apps);
+        const targets = shareTargets(alt ? alternativeSample(data, alt.chosen) : data, ctx.apps);
         if (targets.length === 0) throw new CommandError('No app here takes that');
         const target = pick(targets, to, (t) => [t.id, t.name], 'app that takes it');
-        deliverShare(target, data, null, ctx.actions.open);
+        if (alt) await call(deliverAlternative(alt.chosen, args.optString('quality') ?? null, target, data, null, ctx.actions.open));
+        else deliverShare(target, data, null, ctx.actions.open);
         return { data: { to: target.id }, text: `Shared to ${target.name}` };
       }
-      const result = await requestShare(data);
+      const result = await requestShare(data, alt ? { alternatives: alt.alternatives, rememberAs: VIDEO_SHARE_KEY, sendAs: alt.chosen.id } : {});
       if (result === null) return { data: { to: null }, text: 'Not shared' };
       const app = ctx.apps.getApp(result);
       return { data: { to: result }, text: app ? `Shared to ${app.name}` : result === 'copy' ? 'Copied' : 'Saved to Downloads' };
     })),
     command('share', 'targets', 'The apps that take files, text or a link', WHAT, async (args, ctx) => {
-      const targets = shareTargets(await shareOf(args, ctx), ctx.apps);
+      const data = await shareOf(args, ctx);
+      const alt = alternativeOf(args, data);
+      const targets = shareTargets(alt ? alternativeSample(data, alt.chosen) : data, ctx.apps);
       return {
         data: targets.map((t) => ({ id: t.id, name: t.name })),
         text: targets.length === 0 ? 'No app here takes that' : targets.map((t) => `${t.id}\t${t.name}`).join('\n'),

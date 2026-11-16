@@ -124,6 +124,7 @@ import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowChrome } from '@/contexts/WindowChromeContext';
 import { stripTrackingParams } from '@/lib/trackingParams';
 import { anchorOf, requestShare } from '@/lib/share';
+import { VIDEO_SHARE_KEY, videoShareAlternatives } from '@/lib/videoShare';
 import { normalizeThemeColor, themeColorTokens, untintedSource, untintedTokens } from '@/lib/themeColor';
 import { useToast } from '@/hooks/useToast';
 import { useNsiteIcon } from '@/hooks/useNsiteIcon';
@@ -611,8 +612,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const siteLocations = useSiteLocations(activeTab.wcId);
   const onionLocation = torStatus?.port != null ? siteLocations.onion : null;
   // Download Video, for a website's page (never a Tor tab's: yt-dlp would
-  // go around Tor); its button shows while the page has something playing
-  // or paused, and the menu's item always.
+  // go around Tor); the share sheet offers to send it as the video (and save
+  // it from there) while the page has something playing or paused, and the
+  // menu's item always.
   const nowPlaying = useNowPlaying();
   const canDownloadVideo =
     !!getBrowserBridge() && !activeTab.tor && activeTab.wcId !== null && /^https?:\/\//i.test(activeTab.url);
@@ -1320,6 +1322,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (!browserBridge) return;
     return browserBridge.onDownload((info) => {
       if (!tabsRef.current.some((t) => t.wcId === info.wcId)) return;
+      // A video fetched for a share shows while it comes, with its Cancel,
+      // and goes once it's handed on: it isn't in Downloads to open.
+      if (info.forShare && info.state === 'completed') {
+        setDownloads((prev) => prev.filter((d) => d.id !== info.id));
+        return;
+      }
       setDownloads((prev) => {
         const idx = prev.findIndex((d) => d.id === info.id);
         if (idx === -1) return [info, ...prev].slice(0, 20);
@@ -2157,9 +2165,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           nsiteLocation={siteLocations.nsite}
           end={
             <>
-              {pageHasMedia && (
-                <DownloadVideoButton onDownload={(format) => downloadVideo(activeTab.wcId, format)} />
-              )}
               {/* Chrome's place for it: in the bar, before the star. */}
               {!activeTab.tor && (
                 <InstallSiteButton
@@ -2176,7 +2181,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                 />
               )}
               {shareableUrl(activeTab.url) && (
-                <SharePageButton onShare={(el) => sharePage(activeTab, el)} />
+                <SharePageButton onShare={(el) => sharePage(activeTab, el, pageHasMedia)} />
               )}
               {isBookmarkableUrl(activeTab.url) && (
                 <BookmarkStarButton
@@ -2252,7 +2257,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           downloadVideoDisabled={!canDownloadVideo}
           onDownloadVideo={(format) => downloadVideo(activeTab.wcId, format)}
           shareDisabled={!shareableUrl(activeTab.url)}
-          onShare={(el) => sharePage(activeTab, el)}
+          onShare={(el) => sharePage(activeTab, el, pageHasMedia)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -5114,9 +5119,19 @@ function shareableUrl(url: string): boolean {
   return /^(https?|nsite):\/\//i.test(url);
 }
 
-/** Share a tab's page (its address and title) through Din's share sheet, pointing at `anchor`. */
-function sharePage(tab: { url: string; title: string | null }, anchor: Element | null): void {
-  void requestShare({ title: tab.title?.trim() || undefined, url: tab.url, files: [] }, { anchor: anchorOf(anchor) });
+/**
+ * Share a tab's page (its address and title) through Din's share sheet,
+ * pointing at `anchor`. A page with a video playing (`video`) can send it as
+ * the video or its sound instead (src/lib/videoShare.ts), and save it to
+ * Downloads from there, as Download Video does.
+ */
+function sharePage(tab: { url: string; title: string | null; wcId: number | null }, anchor: Element | null, video: boolean): void {
+  const bridge = getBrowserBridge();
+  const alternatives = video && bridge && tab.wcId !== null ? videoShareAlternatives(bridge, { wcId: tab.wcId }) : [];
+  void requestShare(
+    { title: tab.title?.trim() || undefined, url: tab.url, files: [] },
+    { anchor: anchorOf(anchor), alternatives, rememberAs: VIDEO_SHARE_KEY },
+  );
 }
 
 /** The address bar's Share: the page's address, to an app or the clipboard. */
@@ -5135,40 +5150,6 @@ function SharePageButton({ onShare }: { onShare: (anchor: Element) => void }) {
     >
       <Share className="size-4.5" strokeWidth={1.75} />
     </button>
-  );
-}
-
-/**
- * The address bar's Download Video: a click saves the best there is; a
- * right-click picks a smaller one, or just
- * the sound, as the browser menu's Download Video does.
- */
-function DownloadVideoButton({ onDownload }: { onDownload: (format: VideoDownloadFormat) => void }) {
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="Download video (right-click for other formats)"
-          title="Download video (right-click for other formats)"
-          onClick={() => onDownload('best')}
-          className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
-            'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
-            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-          )}
-        >
-          <Download className="size-4.5" strokeWidth={1.75} />
-        </button>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        {VIDEO_DOWNLOAD_FORMATS.map(({ format, label }) => (
-          <ContextMenuItem key={format} onSelect={() => onDownload(format)}>
-            {label}
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
-    </ContextMenu>
   );
 }
 

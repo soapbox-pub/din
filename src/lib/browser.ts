@@ -84,6 +84,8 @@ export interface DownloadInfo {
   paused?: boolean;
   /** A page's video, saved by Download Video (yt-dlp) rather than as a file. */
   video?: boolean;
+  /** A page's video fetched for a share, into the share cache rather than ~/Downloads. */
+  forShare?: boolean;
   /** Why it failed, for one that did ('interrupted'), when that's known. */
   error?: string;
 }
@@ -177,9 +179,10 @@ export interface BrowserBridge {
    * (`url`), to ~/Downloads with yt-dlp, on any site it knows. Progress
    * arrives through onDownload like any download's. Resolves with its id;
    * a tab's that can't start resolves null and shows on its chip why, and a
-   * `url`'s rejects instead.
+   * `url`'s rejects instead. `forShare` saves it into a folder of its own in
+   * the share cache (`~/.cache/din/shared/`), for the share sheet to hand on.
    */
-  downloadVideo(request: ({ wcId: number } | { url: string }) & { format?: VideoDownloadFormat }): Promise<number | null>;
+  downloadVideo(request: ({ wcId: number } | { url: string }) & { format?: VideoDownloadFormat; forShare?: boolean }): Promise<number | null>;
   /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.

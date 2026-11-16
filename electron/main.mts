@@ -5808,21 +5808,22 @@ function registerBrowserDownloadHandlers(): void {
   registerVideoDownloads({ sendToShell, nextId: () => nextDownloadId++ });
   ipcMain.handle('browser:downloadVideo', async (event, request: unknown) => {
     assertShellSender(event);
-    const r = request && typeof request === 'object' ? (request as { wcId?: unknown; url?: unknown; format?: unknown }) : {};
+    const r = request && typeof request === 'object' ? (request as { wcId?: unknown; url?: unknown; format?: unknown; forShare?: unknown }) : {};
     const format = VIDEO_DOWNLOAD_FORMATS.find((f) => f === r.format) ?? 'best';
+    const forShare = r.forShare === true;
     if (typeof r.wcId === 'number') {
       const contents = webContents.fromId(r.wcId);
       if (!contents || contents.isDestroyed() || !isBrowserTabSession(contents.session)) {
         throw new Error('That tab is gone');
       }
       // One that can't start says why on its chip, as one that fails does.
-      return downloadTabVideo(contents, format).catch((err: unknown) => {
+      return downloadTabVideo(contents, format, forShare).catch((err: unknown) => {
         sendToShell('browser:download', videoDownloadFailure(contents, err));
         return null;
       });
     }
     if (typeof r.url !== 'string') throw new Error('No address to download from');
-    return startVideoDownload({ url: r.url, format, wcId: -1, cookies: browserSession(), proxy: browserSession() });
+    return startVideoDownload({ url: r.url, format, wcId: -1, cookies: browserSession(), proxy: browserSession(), forShare });
   });
 
   // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else
@@ -5842,7 +5843,7 @@ function registerBrowserDownloadHandlers(): void {
  * cookies unless it's private, and never from a Tor tab, whose video
  * yt-dlp would fetch without Tor.
  */
-function downloadTabVideo(contents: Electron.WebContents, format: VideoDownloadFormat = 'best'): Promise<number> {
+function downloadTabVideo(contents: Electron.WebContents, format: VideoDownloadFormat = 'best', forShare = false): Promise<number> {
   if (contents.session === torBrowserSession()) {
     return Promise.reject(new Error('Videos can’t be downloaded from a Tor tab'));
   }
@@ -5854,6 +5855,7 @@ function downloadTabVideo(contents: Electron.WebContents, format: VideoDownloadF
     title: contents.getTitle(),
     cookies: persistent ? contents.session : null,
     proxy: contents.session,
+    forShare,
   });
 }
 

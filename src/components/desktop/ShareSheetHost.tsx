@@ -9,16 +9,24 @@ import { toast } from '@/hooks/useToast';
 import { setFileClipboard } from '@/lib/fileClipboard';
 import { getFsBridge, localFileUrl } from '@/lib/fs';
 import {
+  alternativeSample,
+  deliverAlternative,
   deliverShare,
   getShareRequest,
+  rememberedSendAs,
+  rememberSendAs,
   saveSharedFiles,
   shareTargets,
   shareText,
   subscribeShare,
   type ShareData,
   type ShareRequest,
+  type ShareTargetApp,
 } from '@/lib/share';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { SegmentedControl } from '@/shared/appChrome';
 import { focusRing } from '@/shared/appChromeStyles';
 import { trayList, trayRowClass, trayRuleTop, trayTokenClass } from './trayPanel';
 
@@ -26,6 +34,9 @@ import { trayList, trayRowClass, trayRuleTop, trayTokenClass } from './trayPanel
  * The share sheet (src/lib/share.ts): a glass popover pointing at what was
  * clicked to share, with what's being shared, the apps that take it, and
  * the sheet's own actions. Choosing one, Escape, or a click away closes it.
+ * A share that can go another way (a page's video as the file) has a "Send
+ * as" control; one of those is made after an app's picked, the sheet
+ * showing how far along it is.
  */
 export function ShareSheetHost() {
   const request = useSyncExternalStore(subscribeShare, getShareRequest);
@@ -33,14 +44,59 @@ export function ShareSheetHost() {
   return <ShareSheet key={request.id} request={request} />;
 }
 
+/** A share being made another way before it goes: to which app, how far along. */
+interface Preparing {
+  target: ShareTargetApp;
+  progress: number | null;
+  controller: AbortController;
+}
+
 function ShareSheet({ request }: { request: ShareRequest }) {
   const installed = useInstalledApps();
   const actions = useWindowActions();
   const monitors = useContext(MonitorsContext);
-  const { data, anchor, opener } = request;
+  const { data, anchor, opener, alternatives, rememberAs } = request;
   const { apps, getApp } = installed;
-  const targets = useMemo(() => shareTargets(data, { apps, getApp }, opener), [data, apps, getApp, opener]);
+  // Link, or one of the other ways to send it (a page's video as the file).
+  const [sendAs, setSendAs] = useState(() => {
+    const remembered = request.sendAs ?? rememberedSendAs(rememberAs);
+    return alternatives.some((a) => a.id === remembered) ? remembered : 'link';
+  });
+  const alt = alternatives.find((a) => a.id === sendAs) ?? null;
+  const [qualities, setQualities] = useState<Record<string, string>>({});
+  const quality = alt ? (qualities[alt.id] ?? alt.qualities?.[0]?.value ?? null) : null;
+  const [preparing, setPreparing] = useState<Preparing | null>(null);
+  const shown = useMemo(() => (alt ? alternativeSample(data, alt) : data), [data, alt]);
+  const targets = useMemo(() => shareTargets(shown, { apps, getApp }, opener), [shown, apps, getApp, opener]);
   const close = (answer: string | null) => request.finish(answer);
+  const chooseSendAs = (value: string) => {
+    setSendAs(value);
+    rememberSendAs(rememberAs, value);
+  };
+
+  const share = (t: ShareTargetApp) => {
+    if (!alt) {
+      deliverShare(t, data, opener, actions.open);
+      close(t.id);
+      return;
+    }
+    // Made first, which can take a while: the sheet shows how far along it
+    // is, and it carries on if the sheet's closed meanwhile.
+    const controller = new AbortController();
+    setPreparing({ target: t, progress: null, controller });
+    void deliverAlternative(alt, quality, t, data, opener, actions.open, (progress) => setPreparing((p) => (p?.controller === controller ? { ...p, progress } : p)), controller.signal).then(
+      () => close(t.id),
+      (error: unknown) => {
+        if (controller.signal.aborted) return;
+        toast({ title: `Couldn’t share to ${t.name}`, description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+        close(null);
+      },
+    );
+  };
+  const cancelPreparing = () => {
+    preparing?.controller.abort();
+    setPreparing(null);
+  };
 
   const copy = () => {
     if (data.files.length > 0) {
@@ -55,6 +111,11 @@ function ShareSheet({ request }: { request: ShareRequest }) {
     close('copy');
   };
   const save = () => {
+    if (alt?.save) {
+      alt.save(quality);
+      close('save');
+      return;
+    }
     void saveSharedFiles(data.files).then(
       (paths) => toast({ title: paths.length === 1 ? 'Saved to Downloads' : `${paths.length} files saved to Downloads` }),
       (error: unknown) => toast({ title: 'Couldn’t save', description: error instanceof Error ? error.message : String(error), variant: 'destructive' }),
@@ -75,7 +136,12 @@ function ShareSheet({ request }: { request: ShareRequest }) {
     <Popover
       open
       onOpenChange={(o) => {
-        if (!o) close(null);
+        if (o) return;
+        if (preparing) {
+          // It still goes once it's made; the Web Browser's downloads show how far along.
+          toast({ title: `Sharing to ${preparing.target.name} once it’s ready` });
+          close(preparing.target.id);
+        } else close(null);
       }}
     >
       <PopoverAnchor asChild>
@@ -90,45 +156,82 @@ function ShareSheet({ request }: { request: ShareRequest }) {
         className="w-88 rounded-xl p-0"
       >
         <Preview data={data} from={opener ? (getApp(opener)?.name ?? opener) : null} />
-        <div className={cn(trayRuleTop, 'p-2')}>
-          {targets.length > 0 ? (
-            <ul aria-label="Share to" className="grid grid-cols-4 gap-1">
-              {targets.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      deliverShare(t, data, opener, actions.open);
-                      close(t.id);
-                    }}
-                    className={cn('flex w-full flex-col items-center gap-1.5 rounded-lg px-1 pt-2 pb-1.5 hover:bg-foreground/[0.07]', focusRing)}
-                  >
-                    <AppIcon icon={t.icon} className="size-12" />
-                    <span className="w-full truncate text-center text-xs text-foreground">{t.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-2 py-3 text-center text-sm text-muted-foreground">No apps here take this.</p>
-          )}
-        </div>
-        <div className={cn(trayRuleTop, trayList)}>
-          <button type="button" onClick={copy} className={trayRowClass()}>
-            <span className={trayTokenClass(false)}>
-              <Copy className="size-4.5" strokeWidth={1.75} aria-hidden />
-            </span>
-            {data.files.length > 0 ? (data.files.length === 1 ? 'Copy File' : 'Copy Files') : data.url && !data.text ? 'Copy Link' : 'Copy'}
-          </button>
-          {data.files.length > 0 && getFsBridge() && (
-            <button type="button" onClick={save} className={trayRowClass()}>
-              <span className={trayTokenClass(false)}>
-                <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
-              </span>
-              Save to Downloads
-            </button>
-          )}
-        </div>
+        {alternatives.length > 0 && !preparing && (
+          <div className="flex flex-col items-center gap-2 px-4 pb-3">
+            <SegmentedControl
+              label="Send as"
+              value={sendAs}
+              options={[{ value: 'link', label: 'Link' }, ...alternatives.map((a) => ({ value: a.id, label: a.label }))]}
+              onValueChange={chooseSendAs}
+            />
+            {alt?.qualities && alt.qualities.length > 1 && (
+              <SegmentedControl
+                label={`${alt.label} quality`}
+                value={quality ?? alt.qualities[0].value}
+                options={alt.qualities}
+                onValueChange={(q) => setQualities((qs) => ({ ...qs, [alt.id]: q }))}
+              />
+            )}
+          </div>
+        )}
+        {preparing ? (
+          <div className={cn(trayRuleTop, 'flex flex-col gap-3 px-4 py-4')} role="status" aria-live="polite">
+            <div className="flex items-center gap-3">
+              <AppIcon icon={preparing.target.icon} className="size-10 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-foreground">
+                  {alt?.preparing ?? 'Preparing'} for {preparing.target.name}…
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {preparing.progress === null ? 'Starting' : `${Math.round(preparing.progress * 100)}%`}
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" className="rounded-full" onClick={cancelPreparing}>
+                Cancel
+              </Button>
+            </div>
+            <Progress value={(preparing.progress ?? 0) * 100} aria-label={alt?.preparing ?? 'Preparing'} />
+          </div>
+        ) : (
+          <>
+            <div className={cn(trayRuleTop, 'p-2')}>
+              {targets.length > 0 ? (
+                <ul aria-label="Share to" className="grid grid-cols-4 gap-1">
+                  {targets.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => share(t)}
+                        className={cn('flex w-full flex-col items-center gap-1.5 rounded-lg px-1 pt-2 pb-1.5 hover:bg-foreground/[0.07]', focusRing)}
+                      >
+                        <AppIcon icon={t.icon} className="size-12" />
+                        <span className="w-full truncate text-center text-xs text-foreground">{t.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-2 py-3 text-center text-sm text-muted-foreground">No apps here take this.</p>
+              )}
+            </div>
+            <div className={cn(trayRuleTop, trayList)}>
+              <button type="button" onClick={copy} className={trayRowClass()}>
+                <span className={trayTokenClass(false)}>
+                  <Copy className="size-4.5" strokeWidth={1.75} aria-hidden />
+                </span>
+                {data.files.length > 0 ? (data.files.length === 1 ? 'Copy File' : 'Copy Files') : data.url && !data.text ? 'Copy Link' : 'Copy'}
+              </button>
+              {(alt ? !!alt.save : data.files.length > 0 && getFsBridge()) && (
+                <button type="button" onClick={save} className={trayRowClass()}>
+                  <span className={trayTokenClass(false)}>
+                    <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
+                  </span>
+                  Save to Downloads
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );

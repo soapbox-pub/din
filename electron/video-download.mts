@@ -19,10 +19,16 @@
 // out, and a Tor tab can't use this at all: yt-dlp would fetch the video
 // without Tor.
 //
+// For a share (`forShare`), the finished file goes to a folder of its own in
+// the share sheet's cache, ~/.cache/din/shared/<random>/ (src/lib/share.ts),
+// instead of ~/Downloads, for the app the user shared it to; the sheet's
+// cache clears it out after a day.
+//
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +73,13 @@ export interface VideoDownloadRequest {
   cookies: Electron.Session | null;
   /** The session whose proxy settings yt-dlp should follow. */
   proxy: Electron.Session | null;
+  /** Save it for a share, in a folder of its own under the share cache, rather than to ~/Downloads. */
+  forShare?: boolean;
+}
+
+/** The share sheet's cache, as src/lib/share.ts names it. */
+function shareCache(): string {
+  return path.join(os.homedir(), '.cache', 'din', 'shared');
 }
 
 interface Job {
@@ -154,7 +167,8 @@ function hostOf(url: string): string {
 }
 
 /**
- * Start saving a page's video to ~/Downloads. Returns the download's id, as
+ * Start saving a page's video to ~/Downloads (or, for a share, the share
+ * cache). Returns the download's id, as
  * its `browser:download` reports carry it; throws if it can't start.
  */
 export async function startVideoDownload(request: VideoDownloadRequest): Promise<number> {
@@ -172,7 +186,7 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
   if (!tool) throw new Error('yt-dlp isn’t installed');
 
   const url = parsed.href;
-  const downloads = app.getPath('downloads');
+  const downloads = request.forShare ? path.join(shareCache(), randomUUID()) : app.getPath('downloads');
   await fs.promises.mkdir(downloads, { recursive: true });
   await fs.promises.mkdir(cacheRoot(), { recursive: true, mode: 0o700 });
   const workDir = await fs.promises.mkdtemp(path.join(cacheRoot(), 'job-'));
@@ -239,6 +253,7 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
       receivedBytes: finishedBytes + current,
       totalBytes: currentTotal > 0 ? finishedBytes + currentTotal : 0,
       video: true,
+      ...(request.forShare ? { forShare: true } : {}),
       ...(error && state === 'interrupted' ? { error } : {}),
     });
   };
@@ -311,6 +326,10 @@ export async function startVideoDownload(request: VideoDownloadRequest): Promise
     if (!jobs.has(id)) return;
     jobs.delete(id);
     void fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+    // A share's folder holds nothing worth keeping unless it's done.
+    if (request.forShare && !(!job.cancelled && succeeded(code))) {
+      void fs.promises.rm(downloads, { recursive: true, force: true }).catch(() => {});
+    }
     if (job.cancelled) report('cancelled', true);
     else if (succeeded(code)) {
       try {
