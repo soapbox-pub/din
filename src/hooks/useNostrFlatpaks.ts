@@ -1,26 +1,19 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useManifestRelays } from '@/hooks/useNsiteCatalog';
-import { useCatalogAuthors } from '@/hooks/useThemePackages';
-import { useToast } from '@/hooks/useToast';
+import { useMemo, useSyncExternalStore } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
-  cleanFlatpakError,
-  fetchFlatpakApp,
-  fetchFlatpakCatalog,
   getFlatpaksBridge,
   installRequest,
-  parseAppNaddr,
   type FlatpakProgress,
   type LinuxApp,
   type LinuxFormat,
-  type FlatpakQuery,
   type InstalledFlatpak,
 } from '@/lib/nostrFlatpaks';
 
 /**
- * The App Store's Linux apps: NIP-82 apps with a Flatpak or an AppImage for
- * this computer (src/lib/nostrFlatpaks.ts), what of them is installed, and
- * installing and removing them through window.dinos.flatpaks.
+ * Linux apps from Nostr on this computer: NIP-82 apps with a Flatpak or an
+ * AppImage (src/lib/nostrFlatpaks.ts), what of them is installed, and
+ * installing and removing them through window.dinos.flatpaks, for the App
+ * Store (through din.store, dinHost/StoreHost.tsx) and the `din` command.
  */
 
 export const FLATPAKS_KEY = ['nostr-flatpaks'] as const;
@@ -34,40 +27,6 @@ export function useFlatpakStatus() {
     enabled: !!bridge,
     queryFn: async () => (await bridge?.status()) ?? null,
     staleTime: Infinity,
-  });
-}
-
-function useQueryFn(): FlatpakQuery {
-  const relays = useManifestRelays();
-  return useCallback(
-    (filters, signal) => relays.query(filters, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10_000)]) }),
-    [relays],
-  );
-}
-
-/** The Linux apps Din's publishers, the user and the people they follow publish for this computer. */
-export function useFlatpakCatalog(enabled = true) {
-  const authors = useCatalogAuthors();
-  const status = useFlatpakStatus();
-  const platform = status.data?.available ? status.data.platform : null;
-  const query = useQueryFn();
-  return useQuery({
-    queryKey: [...FLATPAKS_KEY, 'catalog', platform, authors],
-    enabled: enabled && !!platform,
-    queryFn: ({ signal }) => fetchFlatpakCatalog(authors, platform as string, query, signal),
-    staleTime: 5 * 60_000,
-  });
-}
-
-/** One app by its address, when it has a Flatpak or an AppImage for this computer. */
-export function useFlatpakApp(address: { pubkey: string; identifier: string } | null) {
-  const status = useFlatpakStatus();
-  const platform = status.data?.available ? status.data.platform : null;
-  const query = useQueryFn();
-  return useQuery({
-    queryKey: [...FLATPAKS_KEY, 'one', platform, address?.pubkey, address?.identifier],
-    enabled: !!address && !!platform,
-    queryFn: ({ signal }) => (address ? fetchFlatpakApp(address, platform as string, query, signal) : null),
   });
 }
 
@@ -109,52 +68,11 @@ function subscribeBusy(listener: () => void): () => void {
   };
 }
 
-/** How the app with this id is getting on being installed or removed, if it is. */
-export function useFlatpakBusy(appId: string): FlatpakProgress | undefined {
-  useSyncExternalStore(subscribeBusy, () => busyVersion);
-  return busy.get(appId);
-}
-
-/**
- * Install (or update) and remove apps, sharing the work with the `din`
- * command (installFlatpak, removeFlatpak), refreshing what shows them.
- */
-export function useFlatpakActions() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: INSTALLED_KEY });
-  }, [queryClient]);
-
-  const install = useCallback(async (app: LinuxApp, format: LinuxFormat, installed?: InstalledFlatpak) => {
-    try {
-      await installFlatpak(app, format);
-      toast({
-        title: installed ? `${app.name} is up to date` : `${app.name} installed`,
-        description: installed ? `Version ${app.release.version}.` : 'Find it in the app launcher.',
-      });
-      return true;
-    } catch (error) {
-      toast({ title: `Couldn’t ${installed ? 'update' : 'install'} ${app.name}`, description: cleanFlatpakError(error), variant: 'destructive' });
-      return false;
-    } finally {
-      refresh();
-    }
-  }, [refresh, toast]);
-
-  const remove = useCallback(async (appId: string, name: string) => {
-    try {
-      await removeFlatpak(appId);
-      toast({ title: `${name} removed` });
-    } catch (error) {
-      toast({ title: `Couldn’t remove ${name}`, description: cleanFlatpakError(error), variant: 'destructive' });
-    } finally {
-      refresh();
-    }
-  }, [refresh, toast]);
-
-  return useMemo(() => ({ install, remove }), [install, remove]);
+/** Every app being installed or removed now, and how far each has got. */
+export function useFlatpaksBusy(): FlatpakProgress[] {
+  const version = useSyncExternalStore(subscribeBusy, () => busyVersion);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` is what changes when `busy` does.
+  return useMemo(() => [...busy.values()], [version]);
 }
 
 /** Install or update an app from its release, one way, showing it busy meanwhile. */
@@ -189,18 +107,3 @@ export async function removeFlatpak(appId: string): Promise<void> {
   }
 }
 
-/** The Linux apps a search finds: by name and summary, or the one at a pasted address. */
-export function useFlatpakMatches(query: string): { apps: LinuxApp[]; pending: boolean; isAddress: boolean } {
-  const q = query.trim();
-  const address = useMemo(() => parseAppNaddr(q), [q]);
-  const catalog = useFlatpakCatalog(!!q && !address);
-  const lookup = useFlatpakApp(address);
-  const apps = useMemo(() => {
-    if (!q) return [];
-    if (address) return lookup.data ? [lookup.data] : [];
-    const needle = q.toLowerCase();
-    return (catalog.data ?? []).filter((app) =>
-      [app.name, app.summary, app.identifier, ...app.categories].join('\u0000').toLowerCase().includes(needle));
-  }, [q, address, lookup.data, catalog.data]);
-  return { apps, pending: address ? lookup.isLoading : catalog.isLoading, isAddress: !!address };
-}

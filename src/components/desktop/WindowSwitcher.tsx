@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { getShellShortcuts } from '@/lib/shellShortcuts';

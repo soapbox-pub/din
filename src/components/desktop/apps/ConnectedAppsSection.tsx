@@ -16,7 +16,7 @@ import {
 import { useSiteIdentity } from '@/hooks/useSiteIdentity';
 import { grantRules, type GuardedMethod, type Decision, type SiteGrant } from '@/lib/signerPermissions';
 import { ruleLabel } from '@/lib/signerLabels';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';

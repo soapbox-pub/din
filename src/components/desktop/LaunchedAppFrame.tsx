@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FolderOpen, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { DinAppFrame } from '@/components/desktop/DinAppFrame';
 import type { AppComponentProps } from '@/lib/apps';
 import {

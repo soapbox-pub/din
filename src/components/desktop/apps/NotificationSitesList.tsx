@@ -1,7 +1,7 @@
 import { useEffect, type ComponentProps } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, BellOff, Globe, RotateCcw } from 'lucide-react';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,

@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
 import { ENV_NAME_RE, getNappHost, MAX_ENV_VALUE, MAX_ENV_VARS, type NappStatus } from '@/lib/napp';
 import type { SiteCapability } from '@/lib/promptBridge';

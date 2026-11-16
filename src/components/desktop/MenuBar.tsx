@@ -29,7 +29,7 @@ import AuthDialog from '@/components/auth/AuthDialog';
 import { QuickLoginDialog } from '@/components/auth/QuickLoginDialog';
 import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { useTaskbarEdge } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';

@@ -13,7 +13,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useAppContext } from '@/hooks/useAppContext';
 import { usePinnedApps, useTileBadges } from '@/hooks/usePinnedApps';
 import { useDragReorder } from '@/hooks/useDragReorder';

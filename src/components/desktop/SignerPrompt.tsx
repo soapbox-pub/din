@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { NostrSigner } from '@nostrify/nostrify';
 import { AppWindow, ChevronRight, Globe, Loader2, Smartphone } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { EmbeddedEvent, UnreadableEvent } from '@/components/EmbeddedEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';

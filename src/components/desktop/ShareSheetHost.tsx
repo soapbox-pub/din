@@ -2,7 +2,7 @@ import { useContext, useMemo, useState, useSyncExternalStore } from 'react';
 import { MonitorsContext } from '@/contexts/MonitorsContext';
 import { Copy, Download, FileText, Files, Link2, Type } from 'lucide-react';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { toast } from '@/hooks/useToast';

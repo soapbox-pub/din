@@ -7,7 +7,7 @@ import { USERSCRIPT_INSTALL_APP_ID, WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
-import { ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID } from '@/lib/settingsWindows';
+import { ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
@@ -51,8 +51,8 @@ const Screenshot = lazy(() =>
 const DevTools = lazy(() =>
   import('@/components/desktop/apps/DevTools').then((m) => ({ default: m.DevTools })),
 );
-const AppStore = lazy(() =>
-  import('@/components/desktop/apps/AppStore').then((m) => ({ default: m.AppStore })),
+const FolderAppWindow = lazy(() =>
+  import('@/components/desktop/apps/FolderAppWindow').then((m) => ({ default: m.FolderAppWindow })),
 );
 const SystemMonitor = lazy(() =>
   import('@/components/desktop/apps/SystemMonitor').then((m) => ({ default: m.SystemMonitor })),
@@ -382,12 +382,24 @@ export const APPS: readonly AppDefinition[] = [
     keywords: ['task manager', 'activity monitor', 'processes', 'CPU', 'memory', 'force quit', 'kill'],
     singleInstance: true,
   },
+  // Apps (nsites and Linux apps from Nostr), themes, cursors, icons and
+  // skins. It renders strangers' listings, so it's an app of its own,
+  // reaching the desktop through din.store (permission `store`). Launch
+  // params `{ tab }`, `{ theme: naddr }`, `{ package: naddr }` and
+  // `{ publishSkin }` (src/apps/app-store/AppStore.tsx).
+  dinApp('app-store'),
   {
-    id: 'app-store',
-    name: 'App Store',
+    // Adding an app from a folder, which allows what it asks for: the
+    // desktop's, beside the App Store that chose the folder. Hidden; opened
+    // by din.store.addFolderApp with the folder's `path`.
+    id: FOLDER_APP_WINDOW_ID,
+    name: 'Add an App',
     icon: '/icons/apps/app-store.png',
-    component: AppStore,
-    defaultSize: { width: 900, height: 640 },
+    component: FolderAppWindow,
+    defaultSize: { width: 720, height: 560 },
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'app-store',
   },
   {
     id: 'screenshot',

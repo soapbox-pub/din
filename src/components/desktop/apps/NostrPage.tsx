@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AtSign, Check, ChevronDown, Copy, ExternalLink, Pin } from 'lucide-react';
 
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import {
   DropdownMenu,
   DropdownMenuContent,

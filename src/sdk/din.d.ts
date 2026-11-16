@@ -35,6 +35,7 @@ import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge } from '@/lib/features';
+import type { FlatpakProgress, InstalledFlatpak, LinuxAppsStatus, LinuxFormat } from '@/lib/nostrFlatpaks';
 
 export type Unsubscribe = () => void;
 
@@ -71,6 +72,8 @@ export interface Din {
   theme: DinTheme;
   desktop: DinDesktop;
   assistant: DinAssistant;
+  /** The App Store's installing and trying on (permission `store`). */
+  store: DinStore;
   /** Being a keyboard: the field being typed in, and editing it (permission `input-method`). */
   inputMethod: DinInputMethod;
   /** Privileged system bridges, present only when the manifest asks for them. */
@@ -975,6 +978,124 @@ export interface DinAssistant {
 }
 
 // ---------------------------------------------------------------------------
+// The App Store (permission `store`)
+// ---------------------------------------------------------------------------
+
+/** What the App Store gets and wears: cursor themes, icon sets and Media Player skins. */
+export type StorePackageType = 'cursor' | 'icon' | 'skin';
+
+/**
+ * What the App Store installs. Everything is named by where it's published
+ * (an nsite's canonical host, an `naddr1…`), never by its contents: the
+ * desktop looks it up on the user's relays itself, checks who signed it, and
+ * installs that, so what's installed is what's published there whatever the
+ * app says about it.
+ */
+export type StoreItem =
+  | { type: 'nsite'; host: string }
+  /** A cursor theme, icon set or skin (kinds 34628, 34642, 34675). */
+  | { type: 'package'; address: string }
+  /** A NIP-82 app with a Flatpak or an AppImage for this computer: Get, or Get as … with `format`. */
+  | { type: 'linux'; address: string; format?: LinuxFormat };
+
+/** One installed cursor theme, icon set or skin got from Nostr. */
+export interface StoreInstalledPackage {
+  /** `<kind>:<pubkey>:<d>`. */
+  coordinate: string;
+  /** What it's installed as (its folder or file name). */
+  id: string;
+  /** The `created_at` of the release installed. */
+  publishedAt: number;
+}
+
+/** What the App Store shows of this computer and who's signed in, pushed again whenever it changes. */
+export interface StoreState {
+  /** The signed-in user, or null. */
+  pubkey: string | null;
+  /** Where to read the catalog: the user's read relays, and the relay nsites are published to. */
+  relays: string[];
+  nsites: {
+    /** Whether nsites install here (Din's desktop app, not a browser). */
+    canInstall: boolean;
+    /** The canonical hosts of the nsites installed as apps. */
+    installed: string[];
+  };
+  packages: Record<StorePackageType, {
+    canInstall: boolean;
+    /** The cursor theme or icon set in use; a skin is the Media Player's own, so always null. */
+    current: string | null;
+    installed: StoreInstalledPackage[];
+  }>;
+  /** Linux apps from Nostr; null where they don't install. */
+  linux: (LinuxAppsStatus & {
+    installed: InstalledFlatpak[];
+    /** What's being installed or removed now. */
+    busy: FlatpakProgress[];
+    /** The Linux apps (by Flatpak id) the launcher has, which `open` can open. */
+    launchable: string[];
+  }) | null;
+  /** The cursor theme or icon set tried on, by address, and whether it's still being got ready. */
+  tryingOn: { address: string; loading: boolean } | null;
+  themes: {
+    /** The theme worn now, with where it came from if it's a published one. */
+    worn: { pubkey: string | null; identifier: string | null; look: unknown } | null;
+    /** The themes in the user's library (Settings → Themes), as `36767:<pubkey>:<d>`. */
+    library: string[];
+    /** The theme tried on, by address. */
+    trying: string | null;
+    /** The last theme used since the store opened, by address, while Revert can still put back what was worn before. */
+    using: string | null;
+  };
+  /** Whether apps can be added from folders here. */
+  canAddFolderApps: boolean;
+}
+
+/**
+ * Themes from the App Store worn on the desktop: tried on (worn until
+ * stopped, never published), used (worn and added to the user's themes),
+ * and reverted. What a window tried on comes off when it closes.
+ */
+export interface DinStoreThemes {
+  tryOn(address: string): Promise<void>;
+  stopTrying(): Promise<void>;
+  use(address: string): Promise<void>;
+  /** Put back what was worn before the first theme used, and take back what Use added. */
+  revert(): Promise<void>;
+  /** Keep what's used, and publish it as the profile theme. */
+  done(): Promise<void>;
+  removeFromLibrary(address: string): Promise<void>;
+}
+
+/**
+ * The App Store's piece of the desktop (permission `store`): what's
+ * installed, installing what's published at an address (which the desktop
+ * looks up and checks itself), trying on, and the desktop's own windows for
+ * what the store can't do itself (publishing, adding an app from a folder).
+ * Linux apps, and deleting from Nostr, ask on screen first.
+ */
+export interface DinStore {
+  state(): Promise<StoreState>;
+  onChange(cb: (state: StoreState) => void): Unsubscribe;
+  /** Get, or update, what's published at an address; resolves with what it's installed as. */
+  install(item: StoreItem): Promise<string>;
+  /** Wear an installed cursor theme or icon set, or open the Media Player wearing a skin. */
+  use(type: StorePackageType, id: string): Promise<void>;
+  remove(item: { type: StorePackageType; id: string } | { type: 'linux'; appId: string }): Promise<void>;
+  /** Open an installed nsite or Linux app. */
+  open(item: { type: 'nsite'; host: string } | { type: 'linux'; appId: string }): Promise<void>;
+  /** Try on a cursor theme or icon set by its address; the pointer stays until `endTryOn`, which with `keep` keeps it, installed. */
+  tryOn(address: string): Promise<void>;
+  endTryOn(keep?: boolean): Promise<void>;
+  themes: DinStoreThemes;
+  /** Ask on screen to delete one of the user's own cursor themes, icon sets or skins from Nostr; false if they didn't allow it. */
+  deletePublished(address: string): Promise<boolean>;
+  /** The desktop's Publish to Nostr for a skin in the Media Player's skins folder, by file name. */
+  publishSkin(fileName: string): Promise<void>;
+  /** Choose a folder, and show it as an app to add, in a window of the desktop's. */
+  addFolderApp(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // Permissions and din.system
 // ---------------------------------------------------------------------------
 
@@ -1060,6 +1181,14 @@ export type Permission =
    * app does that needs one (Files' archives, Studio's transcripts).
    */
   | 'features'
+  /**
+   * The App Store's piece of the desktop (`din.store`): what's installed
+   * here, installing what's published at an address (looked up and checked
+   * by the desktop), trying cursors, icons and themes on, and the desktop's
+   * windows for publishing and adding an app from a folder. Built-in apps
+   * only. App Store.
+   */
+  | 'store'
   /**
    * `din.system.fs` scoped to the folders of the files the user handed the
    * app (opened, saved, dropped, launched with), and `handle.parent()`.

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { sanitizeAppUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { isDarkThemeColor, normalizeThemeColor } from '@/lib/themeColor';
 import { BrowserView, type BrowserViewHandle } from '@/components/desktop/apps/BrowserView';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { NappInfoButton } from '@/components/desktop/apps/NappInfoButton';
 import { useWindowAccent } from '@/contexts/WindowAccentContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';

@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useInstalledApps, type InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import { SYSTEM_HISTORY_LENGTH, useSystemMonitor } from '@/hooks/useSystemMonitor';
 import { useToast } from '@/hooks/useToast';

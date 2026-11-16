@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { queryManifests, useManifestRelays } from '@/hooks/useNsiteCatalog';
+import { queryManifests } from './useNsiteCatalog';
+import { useManifestRelays } from '../store';
 import {
   NSITE_NAMED_KIND,
   NSITE_ROOT_KIND,

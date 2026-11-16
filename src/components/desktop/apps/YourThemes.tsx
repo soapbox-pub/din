@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Check, Copy, MoreHorizontal, Paintbrush, Pencil, Store, Trash2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ThemeSwatch } from '@/components/desktop/ThemeSwatch';
+import { ThemeSwatch } from '@/shared/ThemeSwatch';
 import {
   AlertDialog,
   AlertDialogAction,

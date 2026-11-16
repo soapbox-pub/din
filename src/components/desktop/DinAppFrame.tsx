@@ -13,11 +13,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { ScreenLayer } from '@/components/desktop/MonitorsProvider';
 import { DataMenuBar, PointMenu } from '@/components/desktop/dinHost/DataMenus';
 import { onThemeChange, themeSnapshot } from '@/components/desktop/dinHost/theme';
 import { sanitizeImageUrl } from '@/components/desktop/dinHost/urls';
+import { StoreHost } from '@/components/desktop/dinHost/StoreHost';
+import { STORE_METHODS, type StoreHandlers } from '@/components/desktop/dinHost/storeMethods';
 import { WindowMenuItems } from '@/components/desktop/WindowContextMenu';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWindowFrame, useOwnWindowHeader } from '@/contexts/WindowFrameContext';
@@ -380,6 +382,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   }, [appId, manifest, grantPaths, windowId]);
 
   // ---- requests ----
+  /** din.store's answers, while the app has `store` (StoreHost, rendered below). */
+  const store = useRef<StoreHandlers>(null);
   const handlers = useRef<{ [M in Method]?: (params: Requests[M][0]) => Promise<Requests[M][1]> | Requests[M][1] }>({});
   const need = (permission: Permission) => {
     if (!permissions.includes(permission)) {
@@ -1109,6 +1113,13 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           wcId: session.current?.webContentsId ?? null,
         }));
       },
+
+      ...(Object.fromEntries(STORE_METHODS.map((method) => [method, (params: never) => {
+        need('store');
+        const host = store.current;
+        if (!host) throw new Error('The App Store isn’t connected yet');
+        return (host[method] as (p: never) => unknown)(params);
+      }])) as Partial<StoreHandlers>),
     };
   });
 
@@ -1547,6 +1558,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         </div>
       )}
       {overlay}
+      {permissions.includes('store') && <StoreHost api={store} push={push} appName={appName} />}
       {accessRequest && (
         <AlertDialog open onOpenChange={(open) => !open && accessRequest.resolve(false)}>
           <AlertDialogContent>

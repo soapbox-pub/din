@@ -19,6 +19,8 @@ import type {
   Din,
   DinApp,
   DinAssistant,
+  DinStore,
+  StoreState,
   AssistantSettings,
   DinClipboard,
   DinDesktop,
@@ -1144,6 +1146,39 @@ export function installDin(transport: Transport): void {
     },
   };
 
+  // ---- the App Store's (store) ----
+  const storeChanges = new Emitter<StoreState>();
+  pushes.on((p) => {
+    if (p.type === 'store') storeChanges.emit(p.state);
+  });
+  /** A store request, once hello has said whether the app may make it. */
+  const ask = async <M extends Method>(method: M, ...params: Requests[M][0] extends void ? [] : [Requests[M][0]]) => {
+    await ready;
+    need('store');
+    return request(method, ...params);
+  };
+  const store: DinStore = {
+    state: () => ask('store.state'),
+    onChange: (cb) => storeChanges.on(cb),
+    install: (item) => ask('store.install', { item }),
+    use: (type, id) => ask('store.use', { type, id }),
+    remove: (item) => ask('store.remove', { item }),
+    open: (item) => ask('store.open', { item }),
+    tryOn: (address) => ask('store.tryOn', { address }),
+    endTryOn: (keep = false) => ask('store.endTryOn', { keep }),
+    themes: {
+      tryOn: (address) => ask('store.themes.tryOn', { address }),
+      stopTrying: () => ask('store.themes.stopTrying'),
+      use: (address) => ask('store.themes.use', { address }),
+      revert: () => ask('store.themes.revert'),
+      done: () => ask('store.themes.done'),
+      removeFromLibrary: (address) => ask('store.themes.removeFromLibrary', { address }),
+    },
+    deletePublished: (address) => ask('store.deletePublished', { address }),
+    publishSkin: (fileName) => ask('store.publishSkin', { fileName }),
+    addFolderApp: () => ask('store.addFolderApp'),
+  };
+
   // ---- being a keyboard ----
   let inputField: InputField | null = null;
   let inputSelection: InputSelection | null = null;
@@ -1320,6 +1355,7 @@ export function installDin(transport: Transport): void {
     theme,
     desktop,
     assistant,
+    store,
     inputMethod,
     system,
     fetch: dinFetch,

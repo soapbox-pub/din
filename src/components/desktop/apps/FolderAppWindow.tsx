@@ -1,19 +1,50 @@
 import { useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { FolderOpen, ShieldAlert } from 'lucide-react';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { Button } from '@/components/ui/button';
-import { SectionHeader } from '@/components/desktop/apps/appstore/common';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState, SectionHeader } from '@/shared/store/common';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
+import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useToast } from '@/hooks/useToast';
-import { addFileApp, fileAppDefinition, fileAppEntry, type FileAppEntry, type OpenedFolder } from '@/lib/fileApps';
+import type { AppComponentProps } from '@/lib/apps';
+import { getAppsBridge } from '@/lib/dinApps';
+import { addFileApp, fileAppDefinition, fileAppEntry, folderError, type FileAppEntry, type OpenedFolder } from '@/lib/fileApps';
 import { PERMISSION_LABELS, requestedAccess } from '@/lib/launchedApps';
 
 /**
- * Apps from folders on this computer (src/lib/fileApps.ts), in the App
- * Store: the page a folder chosen with its title bar's folder button opens
- * on. Once added, one is in the launcher like any other app.
+ * Apps from folders on this computer (src/lib/fileApps.ts): the window the
+ * App Store's Add an App from a Folder… opens on the folder chosen (with
+ * `{ path }`), the app as its manifest describes it and Add. It's the
+ * desktop's, not the store's, since adding one allows what it asks for.
+ * Once added, one is in the launcher like any other app.
  */
+
+export function FolderAppWindow({ params }: AppComponentProps) {
+  const path = typeof params?.path === 'string' ? params.path : null;
+  const opened = useQuery({
+    queryKey: ['file-app-folder', path],
+    enabled: !!path,
+    retry: false,
+    queryFn: () => getAppsBridge()?.folder(path as string) ?? null,
+  });
+  return (
+    <div className="flex size-full min-h-0 flex-col bg-background text-foreground @container">
+      {opened.data ? (
+        <FolderAppDetail key={opened.data.appId} opened={opened.data} />
+      ) : opened.isPending && path ? (
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
+          <Skeleton className="size-24 rounded-[22%]" />
+          <Skeleton className="h-8 w-1/3" />
+        </div>
+      ) : (
+        <EmptyState message={opened.error ? `That folder isn’t an app: ${folderError(opened.error)}` : 'No folder was chosen.'} />
+      )}
+    </div>
+  );
+}
 
 /** Its manifest's name, as the launcher shows it. */
 function appName(entry: FileAppEntry): string {
@@ -25,7 +56,7 @@ function appName(entry: FileAppEntry): string {
  * what it asks for, and Add (which allows that, so its window doesn't ask
  * again), or Open once it's in the launcher.
  */
-export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
+function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
   const { fileApps, installFileApp } = useInstalledApps();
   const { open } = useWindowActions();
   const { toast } = useToast();
@@ -33,6 +64,7 @@ export function FolderAppDetail({ opened }: { opened: OpenedFolder }) {
   const installed = fileApps.find((e) => e.appId === opened.appId);
   const entry = installed ?? fileAppEntry(opened);
   const name = appName(entry);
+  useWindowTitle(`Add ${name}`);
   const { permissions, folders } = requestedAccess(entry.manifest);
   const asks = permissions.length > 0 || folders.length > 0;
   // Set by Add; the app opens once it's in the registry, a render later.

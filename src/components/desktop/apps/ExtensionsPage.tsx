@@ -12,15 +12,15 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import { EmptyState } from '@/components/desktop/apps/appstore/common';
-import { DeleteDialog, ExtensionAccess, InfoRow, PackageContextMenu } from '@/components/desktop/apps/appstore/PackageStore';
+import { EmptyState } from '@/shared/store/common';
+import { DeleteDialog, ExtensionAccess, InfoRow, PackageContextMenu } from '@/shared/store/packageParts';
 import {
   useCopyAddress,
   usePackageAuthor,
   usePackageHandlers,
   type PackageHandlers,
-} from '@/components/desktop/apps/appstore/usePackageHandlers';
-import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
+} from '@/components/desktop/apps/usePackageHandlers';
+import { useSeen } from '@/shared/store/useSeen';
 import { InstalledExtensions, type InstalledExtensionsProps } from '@/components/desktop/apps/InstalledExtensions';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';

@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/context-menu';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import {
   AccountMenuItem,
   AirPlayMenuItem,

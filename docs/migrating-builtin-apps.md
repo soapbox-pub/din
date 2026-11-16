@@ -2,7 +2,7 @@
 
 > **Status: done.** Moved: Calculator, Paint, Word Processor,
 > Spreadsheet, Slides, Photo Editor, Vector Editor, Publisher, Text Editor,
-> Terminal, Media Player, Preview, Assistant, CAD, Files.
+> Terminal, Media Player, Preview, Assistant, CAD, Files, App Store.
 
 Each app moves in its own commit: its folder goes from
 `src/components/desktop/apps/` to `src/apps/<id>/`, it gets an
@@ -104,6 +104,7 @@ a time.
 | 7 | Text Editor, Terminal ✓ | `custom` headers with tabs, `fs` and `pty`, tab drags |
 | 8 | Files ✓ | Drag sources, the file clipboard, `wallpaper` |
 | 9 | CAD ✓, Assistant ✓ | The `assistant` permission |
+| 10 | App Store ✓ | `din.store` (permission `store`): installing by address, try-on, the desktop's windows for what grants trust |
 
 Staying in the desktop, as its own system UI rather than apps:
 
@@ -113,11 +114,21 @@ Staying in the desktop, as its own system UI rather than apps:
   part of the window manager.
 - **Screenshot**: draws over the whole desktop.
 - **Installer**: runs before anyone is signed in.
-- **Settings, System Monitor, App Store**: they manage the computer and
-  the desktop itself (Wi-Fi, displays, sound, power, processes, installed
-  apps, the signer and relays), so they'd need most of `window.dinos`.
-  Isolating them would buy a process of their own and little else; they
-  stay with the desktop, as Din's control panel.
+- **Settings, System Monitor**: they manage the computer and the desktop
+  itself (Wi-Fi, displays, sound, power, processes, the signer and
+  relays), so they'd need most of `window.dinos`. Isolating them would buy
+  a process of their own and little else; they stay with the desktop, as
+  Din's control panel.
+
+The App Store moved for a different reason than the others: it renders
+strangers' content (listings, icons, screenshots, release notes, theme
+definitions, cursor files), so a bug in any of that was code running as the
+desktop. In its own process it reaches only `din.store`, which names what
+to install or wear by address; the desktop looks it up on the user's relays
+again itself (`src/components/desktop/dinHost/StoreHost.tsx`), asks on
+screen before a Linux app or a deletion from Nostr, and keeps for itself
+what grants trust: publishing (the signer), and adding an app from a folder
+(its permissions), which open the desktop's own dialog and window.
 
 ## What moving changed, and how it was put back
 

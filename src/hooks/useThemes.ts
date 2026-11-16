@@ -1,14 +1,12 @@
 import { useCallback, useMemo } from 'react';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { z } from 'zod';
 import { useAppData } from '@/hooks/useAppData';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
 import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadLocalPicture } from '@/hooks/useUploadLocalPicture';
-import { NSITE_CATALOG_PUBKEYS } from '@/lib/nsiteCatalog';
 import { isLocalBackground, toProfileTheme, type DesktopTheme } from '@/lib/profileTheme';
 import {
   THEME_DEFINITION_KIND,
@@ -17,97 +15,12 @@ import {
   parseThemeDefinition,
   themeCoordinate,
   titleToSlug,
+  themeDeletionsFilter,
   type ThemeDefinition,
 } from '@/lib/themeDefinition';
 
-/** How many named themes the store asks for at a time. */
-const THEME_PAGE = 40;
-
 /** Kind 5 deletions of named themes, by the given authors. */
-function deletionsFilter(authors: string[]): NostrFilter {
-  return { kinds: [5], authors, '#k': [String(THEME_DEFINITION_KIND)] };
-}
-
-/**
- * The App Store's themes: named themes (kind 36767) by the same publishers
- * whose apps it offers, plus the user and the people they follow, from the
- * user's read relays and the catalog relay. Paged newest first.
- */
-export function useThemeCatalog(enabled = true) {
-  const relays = useManifestRelays();
-  const { user } = useCurrentUser();
-  const following = useFollowingPubkeys();
-
-  const authors = useMemo(() => {
-    const set = new Set(NSITE_CATALOG_PUBKEYS);
-    if (user) set.add(user.pubkey);
-    for (const pubkey of following) set.add(pubkey);
-    return [...set];
-  }, [user, following]);
-
-  const query = useInfiniteQuery({
-    queryKey: ['theme-catalog', authors],
-    enabled,
-    initialPageParam: undefined as number | undefined,
-    queryFn: async ({ pageParam, signal }) => {
-      const allowed = new Set(authors);
-      const filters: NostrFilter[] = [
-        { kinds: [THEME_DEFINITION_KIND], authors, limit: THEME_PAGE, until: pageParam },
-      ];
-      // Deletions only need asking for once.
-      if (pageParam === undefined) filters.push(deletionsFilter(authors));
-      const events = await relays.query(filters, {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
-      });
-      // The author is the only trust boundary for an addressable event.
-      return events.filter((event) => allowed.has(event.pubkey));
-    },
-    getNextPageParam: (page) => {
-      const themes = page.filter((event) => event.kind === THEME_DEFINITION_KIND);
-      if (themes.length < THEME_PAGE) return undefined;
-      return Math.min(...themes.map((event) => event.created_at)) - 1;
-    },
-    staleTime: 60_000,
-  });
-
-  const themes = useMemo(
-    () => buildThemeCatalog(query.data?.pages.flat() ?? []),
-    [query.data],
-  );
-
-  return {
-    themes,
-    isLoading: query.isPending && query.fetchStatus !== 'idle',
-    isError: query.isError,
-    hasMore: query.hasNextPage,
-    isLoadingMore: query.isFetchingNextPage,
-    loadMore: query.fetchNextPage,
-    refresh: query.refetch,
-    refreshing: query.isRefetching,
-  };
-}
-
-/** One named theme, by its author and `d` tag. */
-export function useThemeDefinition(address: { pubkey: string; identifier: string } | null) {
-  const relays = useManifestRelays();
-  return useQuery({
-    queryKey: ['theme-definition', address?.pubkey, address?.identifier],
-    enabled: !!address,
-    queryFn: async ({ signal }) => {
-      if (!address) return null;
-      const events = await relays.query(
-        [
-          { kinds: [THEME_DEFINITION_KIND], authors: [address.pubkey], '#d': [address.identifier] },
-          { ...deletionsFilter([address.pubkey]), '#a': [themeCoordinate(address)] },
-        ],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
-      );
-      return (
-        buildThemeCatalog(events.filter((event) => event.pubkey === address.pubkey))[0] ?? null
-      );
-    },
-  });
-}
+const deletionsFilter = themeDeletionsFilter;
 
 const ThemeLibrarySchema = z.array(
   z.object({
@@ -248,7 +161,7 @@ export function useThemeActions() {
   );
 
   const removeFromLibrary = useCallback(
-    (theme: ThemeDefinition) => {
+    (theme: { pubkey: string; identifier: string }) => {
       const a = themeCoordinate(theme);
       setEntries((prev) => prev.filter((entry) => entry.a !== a));
     },
@@ -317,5 +230,8 @@ export function useThemeActions() {
     [publishEvent, queryClient, refresh],
   );
 
-  return { isOwn, isAdded, add, removeFromLibrary, publish, remove };
+  /** The themes added from the store, as `36767:<pubkey>:<d>`. */
+  const library = useMemo(() => entries.map((entry) => entry.a), [entries]);
+
+  return { isOwn, isAdded, add, removeFromLibrary, publish, remove, library };
 }

@@ -23,6 +23,9 @@ import type {
   InputMethodButtons,
   InputSelection,
   InputText,
+  StoreItem,
+  StorePackageType,
+  StoreState,
 } from '@/sdk/din';
 import type { StoredHandle } from '@/sdk/standards';
 
@@ -328,6 +331,24 @@ export interface Requests {
   'nostr.signEvent': [{ event: unknown }, unknown];
   'nostr.encrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
   'nostr.decrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
+
+  /** The App Store's (`store`): docs/din/permissions.md. */
+  'store.state': [void, StoreState];
+  'store.install': [{ item: StoreItem }, string];
+  'store.use': [{ type: StorePackageType; id: string }, void];
+  'store.remove': [{ item: { type: StorePackageType; id: string } | { type: 'linux'; appId: string } }, void];
+  'store.open': [{ item: { type: 'nsite'; host: string } | { type: 'linux'; appId: string } }, void];
+  'store.tryOn': [{ address: string }, void];
+  'store.endTryOn': [{ keep: boolean }, void];
+  'store.themes.tryOn': [{ address: string }, void];
+  'store.themes.stopTrying': [void, void];
+  'store.themes.use': [{ address: string }, void];
+  'store.themes.revert': [void, void];
+  'store.themes.done': [void, void];
+  'store.themes.removeFromLibrary': [{ address: string }, void];
+  'store.deletePublished': [{ address: string }, boolean];
+  'store.publishSkin': [{ fileName: string }, void];
+  'store.addFolderApp': [void, void];
 }
 
 export type DropResultData = { kind: 'files'; files: HandleData[]; operation: 'copy' | 'move' | 'link' };
@@ -382,7 +403,9 @@ export type Push =
   | { type: 'tabHover'; at: Point | null }
   | { type: 'assistantSettings'; settings: AssistantSettings }
   | { type: 'assistantUnread'; sessionIDs: string[] }
-  | { type: 'powerMode'; on: boolean };
+  | { type: 'powerMode'; on: boolean }
+  /** What the App Store shows changed (`store`). */
+  | { type: 'store'; state: StoreState };
 
 /** SpeechRecognitionErrorEvent's `error`, as Din's dictation can fail. */
 export type SpeechErrorCode = 'no-speech' | 'audio-capture' | 'service-not-allowed' | 'network' | 'not-allowed' | 'language-not-supported' | 'aborted';

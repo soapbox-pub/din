@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useCatalogVersion, useManifestRelays } from '@/hooks/useNsiteCatalog';
+import { useCatalogVersion } from './useNsiteCatalog';
+import { useManifestRelays } from '../store';
 import type { StoreApp } from '@/lib/nsiteCatalog';
 import {
   catalogEntry,

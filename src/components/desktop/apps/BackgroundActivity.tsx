@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Globe, MoreHorizontal, Pause, Play, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import {
   AlertDialog,
   AlertDialogAction,

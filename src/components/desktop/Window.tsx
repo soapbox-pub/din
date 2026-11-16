@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
 import { windowTile, type AppComponentProps } from '@/lib/apps';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
 import { TITLE_BAR_CONTROLS } from '@/shared/titleBarControls';
 import { WindowFrameContext, WindowOwnHeaderContext, type WindowFrame } from '@/contexts/WindowFrameContext';

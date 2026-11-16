@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, Eye, EyeOff, Info, Paintbrush, Undo2, X } from 'lucide-react';
-import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
-import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
-import { ThemeSwatch } from '@/components/desktop/ThemeSwatch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,10 +11,7 @@ import {
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useDesktopThemeEditor, type ThemeSnapshot } from '@/hooks/useDesktopTheme';
-import { useToast } from '@/hooks/useToast';
-import { useThemeActions, useThemeCatalog, useThemeDefinition } from '@/hooks/useThemes';
-import { sameThemeLook } from '@/lib/profileTheme';
+import { sameThemeLook, type DesktopTheme } from '@/lib/profileTheme';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import {
   parseThemeNaddr,
@@ -27,10 +21,17 @@ import {
 } from '@/lib/themeDefinition';
 import { cn } from '@/lib/utils';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { EmptyState, MoreSentinel, SectionHeader } from '@/shared/store/common';
+import { useSeen } from '@/shared/store/useSeen';
+import { ThemeSwatch } from '@/shared/ThemeSwatch';
+import { toast } from '@/shared/toast';
+import { useThemeDefinition, type CatalogState } from './catalog/catalogs';
+import { errorText } from './packages';
+import { dinStore, usePubkey, useStoreState } from './store';
 
 export type ThemeAddress = { pubkey: string; identifier: string };
 
-type ThemeCatalog = ReturnType<typeof useThemeCatalog>;
+type ThemeCatalog = CatalogState<ThemeDefinition>;
 
 /** What a card or detail page can do with a theme; shared by its buttons and right-click menu. */
 interface ThemeHandlers {
@@ -41,19 +42,10 @@ interface ThemeHandlers {
   tryOn: (theme: ThemeDefinition) => void;
   stopTrying: () => void;
   isTrying: (theme: ThemeDefinition) => boolean;
-}
-
-/** A theme being tried on, and what was worn before it. */
-interface Trial {
-  theme: ThemeDefinition;
-  previous: ThemeSnapshot;
-}
-
-/** What was worn before a run of themes was put on, and what that run added to the user's themes. */
-interface Streak {
-  previous: ThemeSnapshot;
-  added: ThemeDefinition[];
-  current: ThemeDefinition;
+  /** In the user's themes, from the store, so it can be taken out again. */
+  removable: (theme: ThemeDefinition) => boolean;
+  removeFromLibrary: (theme: ThemeDefinition) => void;
+  copyAddress: (theme: ThemeDefinition) => void;
 }
 
 /**
@@ -66,9 +58,12 @@ interface Streak {
  * Settings → Themes lists. A bar then offers Revert, which puts back what
  * was worn before the first theme used and takes back what Use added.
  *
- * Themes used are held: the profile theme is published when the bar is
- * dismissed, the Themes page closes, or a while passes untouched, so
- * clicking around doesn't publish every theme on the way.
+ * The desktop does the wearing (din.store.themes), looking each theme up by
+ * its address itself, and keeps what was worn before; it says what's worn,
+ * tried on and used now. Themes used are held: the profile theme is
+ * published when the bar is dismissed, the Themes page or the window
+ * closes, or a while passes untouched, so clicking around doesn't publish
+ * every theme on the way.
  */
 export function ThemeStore({
   catalog,
@@ -81,108 +76,58 @@ export function ThemeStore({
   selected: ThemeAddress | null;
   onSelect: (address: ThemeAddress | null) => void;
 }) {
-  const editor = useDesktopThemeEditor();
-  const actions = useThemeActions();
-  const { toast } = useToast();
-  const [streak, setStreak] = useState<Streak | null>(null);
-  const [trial, setTrial] = useState<Trial | null>(null);
+  const themes = useStoreState()?.themes;
+  const pubkey = usePubkey();
+  const trying = themes?.trying ?? null;
+  // The themes this window used and tried, to name them in the bars.
+  const [known, setKnown] = useState<ReadonlyMap<string, ThemeDefinition>>(new Map());
+  const remember = (theme: ThemeDefinition) => setKnown((prev) => new Map(prev).set(themeNaddr(theme), theme));
 
-  // Leaving takes off what's being tried on, and sends what was used.
-  const { commit, restore } = editor;
-  const leave = useRef(() => {});
+  // Leaving the Themes page takes off what's being tried on, and sends what was used.
+  const tryingNow = useRef(trying);
   useEffect(() => {
-    leave.current = () => {
-      if (trial) restore(trial.previous);
-      else commit();
-    };
-  }, [trial, restore, commit]);
-  useEffect(() => () => leave.current(), []);
+    tryingNow.current = trying;
+  }, [trying]);
+  useEffect(() => () => {
+    if (tryingNow.current) void dinStore().themes.stopTrying();
+    else void dinStore().themes.done();
+  }, []);
 
-  const sameTheme = (a: ThemeDefinition, b: ThemeDefinition) => a.pubkey === b.pubkey && a.identifier === b.identifier;
-  const isTrying = (theme: ThemeDefinition) => !!trial && sameTheme(trial.theme, theme);
-
+  const ask = (run: Promise<void>, failure: string) =>
+    void run.catch((error: unknown) => toast(failure, { body: errorText(error), destructive: true }));
+  const isTrying = (theme: ThemeDefinition) => trying === themeNaddr(theme);
+  const worn = themes?.worn ?? null;
   const isWorn = (theme: ThemeDefinition) =>
     !isTrying(theme) &&
-    !!editor.theme &&
-    editor.theme.source?.pubkey === theme.pubkey &&
-    editor.theme.source.identifier === theme.identifier &&
-    sameThemeLook(editor.theme, theme.theme);
-
-  // A theme tried on is never published by itself; one used is held a while.
-  const wear = (theme: ThemeDefinition, failure: string, hold: true | 'until-commit' = true): boolean => {
-    try {
-      editor.apply(theme.theme, { hold });
-      return true;
-    } catch (error) {
-      toast({
-        title: failure,
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-      return false;
-    }
-  };
-
-  const tryOn = (theme: ThemeDefinition) => {
-    if (isTrying(theme) || isWorn(theme)) return;
-    const previous = trial?.previous ?? editor.snapshot();
-    if (wear(theme, 'Couldn’t try on this theme', 'until-commit')) setTrial({ theme, previous });
-  };
-
-  const stopTrying = () => {
-    if (!trial) return;
-    try {
-      editor.restore(trial.previous);
-    } catch (error) {
-      toast({
-        title: 'Couldn’t take it off',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-      return;
-    }
-    setTrial(null);
-  };
-
-  const use = (theme: ThemeDefinition) => {
-    if (isWorn(theme)) return;
-    // What was worn before trying on is what Revert puts back.
-    const previous = trial?.previous ?? editor.snapshot();
-    if (!wear(theme, 'Couldn’t use this theme')) return;
-    setTrial(null);
-    const adds = !actions.isAdded(theme);
-    if (adds) actions.add(theme);
-    setStreak((prev) => ({
-      previous: prev?.previous ?? previous,
-      added: adds ? [...(prev?.added ?? []), theme] : (prev?.added ?? []),
-      current: theme,
-    }));
-  };
-
-  const revert = () => {
-    if (!streak) return;
-    try {
-      editor.restore(streak.previous);
-    } catch (error) {
-      toast({
-        title: 'Couldn’t revert',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-      return;
-    }
-    for (const theme of streak.added) actions.removeFromLibrary(theme);
-    setStreak(null);
-  };
+    !!worn &&
+    worn.pubkey === theme.pubkey &&
+    worn.identifier === theme.identifier &&
+    sameThemeLook(worn.look as DesktopTheme, theme.theme);
 
   const handlers: ThemeHandlers = {
     select: (theme) => onSelect({ pubkey: theme.pubkey, identifier: theme.identifier }),
-    use,
+    use: (theme) => {
+      if (isWorn(theme)) return;
+      remember(theme);
+      ask(dinStore().themes.use(themeNaddr(theme)), 'Couldn’t use this theme');
+    },
     isWorn,
-    tryOn,
-    stopTrying,
+    tryOn: (theme) => {
+      if (isTrying(theme) || isWorn(theme)) return;
+      remember(theme);
+      ask(dinStore().themes.tryOn(themeNaddr(theme)), 'Couldn’t try on this theme');
+    },
+    stopTrying: () => ask(dinStore().themes.stopTrying(), 'Couldn’t take it off'),
     isTrying,
+    removable: (theme) => theme.pubkey !== pubkey && !!themes?.library.includes(themeCoordinate(theme)),
+    removeFromLibrary: (theme) => ask(dinStore().themes.removeFromLibrary(themeNaddr(theme)), 'Couldn’t remove it'),
+    copyAddress: (theme) => void navigator.clipboard.writeText(themeNaddr(theme)).then(() => toast('Address copied')),
   };
+
+  const lookUp = (naddr: string | null) =>
+    naddr ? (known.get(naddr) ?? catalog.items.find((theme) => themeNaddr(theme) === naddr) ?? null) : null;
+  const trial = lookUp(trying);
+  const using = lookUp(themes?.using ?? null);
 
   const query = search.trim();
   const address = parseThemeNaddr(query);
@@ -191,14 +136,14 @@ export function ThemeStore({
   const matches = useMemo(() => {
     if (!query || address) return [];
     const q = query.toLowerCase();
-    return catalog.themes.filter((theme) =>
+    return catalog.items.filter((theme) =>
       `${theme.title}\u0000${theme.description}\u0000${theme.identifier}`.toLowerCase().includes(q),
     );
-  }, [query, address, catalog.themes]);
+  }, [query, address, catalog.items]);
 
   const selectedTheme =
     selected &&
-    catalog.themes.find((theme) => themeCoordinate(theme) === themeCoordinate(selected));
+    catalog.items.find((theme) => themeCoordinate(theme) === themeCoordinate(selected));
 
   return (
     <div
@@ -214,7 +159,7 @@ export function ThemeStore({
           key={themeCoordinate(selected)}
           address={selected}
           known={selectedTheme ?? null}
-          more={catalog.themes.filter(
+          more={catalog.items.filter(
             (theme) =>
               theme.pubkey === selected.pubkey && theme.identifier !== selected.identifier,
           )}
@@ -256,11 +201,11 @@ export function ThemeStore({
                   <ThemeGridSkeleton />
                 ) : catalog.isError ? (
                   <EmptyState message="Could not load themes. Check your relay connections and try refreshing." />
-                ) : catalog.themes.length === 0 ? (
+                ) : catalog.items.length === 0 ? (
                   <EmptyState message="No themes found on your relays yet. Make one in Settings → Themes and save it, or follow people who share theirs." />
                 ) : (
                   <>
-                    <ThemeGrid themes={catalog.themes} handlers={handlers} />
+                    <ThemeGrid themes={catalog.items} handlers={handlers} />
                     {catalog.hasMore && (
                       <MoreSentinel
                         onReached={() => void catalog.loadMore()}
@@ -275,15 +220,12 @@ export function ThemeStore({
         </div>
       )}
       {trial ? (
-        <TryOnBar theme={trial.theme} handlers={handlers} />
-      ) : streak && (
+        <TryOnBar theme={trial} handlers={handlers} />
+      ) : using && (
         <RevertBar
-          theme={streak.current}
-          onRevert={revert}
-          onDone={() => {
-            commit();
-            setStreak(null);
-          }}
+          theme={using}
+          onRevert={() => ask(dinStore().themes.revert(), 'Couldn’t revert')}
+          onDone={() => ask(dinStore().themes.done(), 'Couldn’t keep it')}
         />
       )}
     </div>
@@ -358,9 +300,7 @@ function ThemeContextMenu({
   handlers: ThemeHandlers;
   children: ReactNode;
 }) {
-  const actions = useThemeActions();
-  const copy = useCopyThemeAddress();
-  const removable = !actions.isOwn(theme) && actions.isAdded(theme);
+  const removable = handlers.removable(theme);
 
   return (
     <ContextMenu>
@@ -381,28 +321,19 @@ function ThemeContextMenu({
           View Details
         </ContextMenuItem>
         {removable && (
-          <ContextMenuItem onSelect={() => actions.removeFromLibrary(theme)}>
+          <ContextMenuItem onSelect={() => handlers.removeFromLibrary(theme)}>
             <X aria-hidden />
             Remove from My Themes
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => copy(theme)}>
+        <ContextMenuItem onSelect={() => handlers.copyAddress(theme)}>
           <Copy aria-hidden />
           Copy Address
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
-}
-
-function useCopyThemeAddress() {
-  const { toast } = useToast();
-  return (theme: ThemeDefinition) => {
-    void navigator.clipboard
-      .writeText(themeNaddr(theme))
-      .then(() => toast({ title: 'Address copied' }));
-  };
 }
 
 /** "Use" wears a theme; "In Use" on the one worn. */
@@ -442,7 +373,6 @@ function ThemeDetailPage({
   const lookup = useThemeDefinition(known ? null : address);
   const theme = known ?? lookup.data ?? null;
   const author = useThemeAuthor(address.pubkey);
-  const copy = useCopyThemeAddress();
   const ref = useRef<HTMLDivElement>(null);
 
   // Take focus so Escape goes back without a click first.
@@ -510,7 +440,7 @@ function ThemeDetailPage({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => copy(theme)}
+                onClick={() => handlers.copyAddress(theme)}
                 className="h-8 rounded-full px-4"
               >
                 <Copy aria-hidden />

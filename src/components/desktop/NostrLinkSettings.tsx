@@ -1,6 +1,6 @@
 import { RotateCcw } from 'lucide-react';
 
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,

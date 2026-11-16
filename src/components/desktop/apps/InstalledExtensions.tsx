@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileArchive, FolderOpen, MoreHorizontal, Puzzle, RotateCw, Share, Store, Trash2 } from 'lucide-react';
-import { SectionHeader } from '@/components/desktop/apps/appstore/common';
+import { SectionHeader } from '@/shared/store/common';
 import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { UserscriptsSection } from '@/components/desktop/apps/UserscriptManager';
 import { Badge } from '@/components/ui/badge';

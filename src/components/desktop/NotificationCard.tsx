@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Bell, BellOff, Loader2, Reply, SendHorizontal, X } from 'lucide-react';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import {
   ContextMenu,
   ContextMenuContent,

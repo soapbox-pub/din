@@ -23,7 +23,7 @@ import { getBrowserBridge, siteOriginOf, type SiteInfo } from '@/lib/browser';
 import { getPopupsBridge } from '@/lib/popups';
 import { getAdblockBridge } from '@/lib/adblock';
 import { isOnionUrl } from '@/lib/tor';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { NsiteIcon } from '@/components/icons/NsiteIcon';
 import { useSiteIdentity } from '@/hooks/useSiteIdentity';
 import { OnionIcon } from '@/components/icons/OnionIcon';

@@ -1,8 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { ArrowDownToLine, ChevronDown, Copy, Globe, Info, Play, RefreshCw, Trash2 } from 'lucide-react';
-import { AppIcon } from '@/components/desktop/AppIcon';
-import { SectionHeader } from '@/components/desktop/apps/appstore/common';
-import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
+import { AppIcon } from '@/shared/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,19 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAuthor } from '@/hooks/useAuthor';
-import {
-  useFlatpakActions,
-  useFlatpakBusy,
-  useFlatpakStatus,
-  useInstalledFlatpaks,
-} from '@/hooks/useNostrFlatpaks';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
-import { useToast } from '@/hooks/useToast';
 import { formatBytes } from '@/lib/fs';
-import { NATIVE_APP_PREFIX } from '@/lib/nativeApps';
 import { ngitRepositoryUri } from '@/lib/nostrUri';
 import {
   chosenFormat,
@@ -45,15 +32,22 @@ import {
 import { sanitizeImageUrl, sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { SectionHeader } from '@/shared/store/common';
+import { useSeen } from '@/shared/store/useSeen';
+import { toast } from '@/shared/toast';
+import { errorText } from './packages';
+import { dinStore, useStoreState } from './store';
 
 // react-markdown is only loaded for a page with release notes.
-const ReleaseNotes = lazy(() => import('@/components/desktop/apps/appstore/ReleaseNotes'));
+const ReleaseNotes = lazy(() => import('./ReleaseNotes'));
 
 /**
  * The App Store's Linux apps: NIP-82 apps whose releases carry a Flatpak or
  * an AppImage for this computer (src/lib/nostrFlatpaks.ts), in the Apps
- * section beside the nsites. Get downloads the release's bundle, checks it
- * against its hash, and installs it (electron/nostr-flatpaks.mts): a
+ * section beside the nsites. Get asks the desktop (din.store.install) to
+ * look the app up by its address, ask the user, download the release's
+ * bundle, check it against its hash, and install it
+ * (electron/nostr-flatpaks.mts): a
  * Flatpak from Din's own Flatpak remote where it has one and Flatpak is
  * here, else its AppImage. It's then an installed Linux app like any other,
  * in the launcher, and Update brings it to the newest release the same way.
@@ -64,19 +58,15 @@ const ReleaseNotes = lazy(() => import('@/components/desktop/apps/appstore/Relea
 
 /** Everything a card or page shows of an app's state here, and its actions. */
 function useFlatpakState(app: LinuxApp) {
-  const installed = useInstalledFlatpaks().data?.get(app.identifier);
-  const progress = useFlatpakBusy(app.identifier);
-  const { install, remove } = useFlatpakActions();
-  const { getApp } = useInstalledApps();
-  const { open } = useWindowActions();
-  const { toast } = useToast();
-  const status = useFlatpakStatus();
-  const nativeId = NATIVE_APP_PREFIX + app.identifier;
+  const linux = useStoreState()?.linux ?? null;
+  const installed = linux?.installed.find((a) => a.appId === app.identifier);
+  const progress = linux?.busy.find((p) => p.appId === app.identifier);
   const outdated = !!installed && isOutdated(installed, app);
-  const formats = status.data?.formats ?? [];
+  const formats = linux?.formats ?? [];
   const ways = installFormats(app, formats);
   const format = chosenFormat(app, formats, installed);
   const canInstall = installed ? ways.includes(installed.format) : ways.length > 0;
+  const launchable = !!linux?.launchable.includes(app.identifier);
 
   return {
     installed,
@@ -87,13 +77,29 @@ function useFlatpakState(app: LinuxApp) {
     format,
     /** The other ways to get it, by name in Get's menu; none once it's installed. */
     others: installed ? [] : ways.slice(1),
-    get: (way: LinuxFormat = format) => void install(app, way, installed),
-    open: () => {
-      if (getApp(nativeId)) open(nativeId);
-      else toast({ title: `${app.name} isn’t in the launcher yet`, description: 'It shows up there in a moment.' });
+    get: (way: LinuxFormat = format) => {
+      void dinStore().install({ type: 'linux', address: flatpakNaddr(app), format: way }).then(
+        () => toast(installed ? `${app.name} is up to date` : `${app.name} installed`, {
+          body: installed ? `Version ${app.release.version}.` : 'Find it in the app launcher.',
+        }),
+        (error: unknown) => {
+          // Not allowing it is the user's own answer, not a failure.
+          if (error instanceof Error && error.name === 'AbortError') return;
+          toast(`Couldn’t ${installed ? 'update' : 'install'} ${app.name}`, { body: errorText(error), destructive: true });
+        },
+      );
     },
-    remove: () => void remove(app.identifier, app.name),
-    copy: () => void navigator.clipboard.writeText(flatpakNaddr(app)).then(() => toast({ title: 'Address copied' })),
+    open: () => {
+      if (launchable) void dinStore().open({ type: 'linux', appId: app.identifier }).catch((error: unknown) => toast(`Couldn’t open ${app.name}`, { body: errorText(error), destructive: true }));
+      else toast(`${app.name} isn’t in the launcher yet`, { body: 'It shows up there in a moment.' });
+    },
+    remove: () => {
+      void dinStore().remove({ type: 'linux', appId: app.identifier }).then(
+        () => toast(`${app.name} removed`),
+        (error: unknown) => toast(`Couldn’t remove ${app.name}`, { body: errorText(error), destructive: true }),
+      );
+    },
+    copy: () => void navigator.clipboard.writeText(flatpakNaddr(app)).then(() => toast('Address copied')),
   };
 }
 
@@ -304,7 +310,6 @@ export function FlatpakCard({ app, onSelect }: { app: LinuxApp; onSelect: (app: 
 export function FlatpakAppDetail({ app }: { app: LinuxApp }) {
   const publisher = usePublisher(app.pubkey);
   const state = useFlatpakState(app);
-  const openUrl = useOpenUrl();
   const ref = useRef<HTMLDivElement>(null);
   // A web address opens as itself, an ngit one (nostr://npub…/relay/repo) as
   // its repository's nostr:naddr1… (NIP-21), which the Web Browser shows.
@@ -346,7 +351,7 @@ export function FlatpakAppDetail({ app }: { app: LinuxApp }) {
                 </Button>
               )}
               {app.website && (
-                <Button size="sm" variant="ghost" onClick={() => app.website && openUrl(app.website)} className="h-8 rounded-full px-4">
+                <Button size="sm" variant="ghost" onClick={() => app.website && window.open(app.website)} className="h-8 rounded-full px-4">
                   <Globe aria-hidden />
                   Website
                 </Button>
@@ -420,7 +425,7 @@ export function FlatpakAppDetail({ app }: { app: LinuxApp }) {
                     href={sourceUrl}
                     onClick={(event) => {
                       event.preventDefault();
-                      openUrl(sourceUrl);
+                      window.open(sourceUrl);
                     }}
                     title={sourceUrl}
                     className="rounded-sm font-mono text-xs text-ink-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"

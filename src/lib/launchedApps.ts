@@ -98,11 +98,12 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   preview: 'Show web servers running on this computer, and web pages from your files',
   'file-folders': 'Reach the folders of files you give it',
   features: 'Install optional features it needs',
+  store: 'Install apps, themes, cursors, icons and skins you get from it, and try them on',
   'input-method': 'Be a keyboard: see and change what you type in every app, and what you copy',
 };
 
 /** Permissions only a built-in app's reviewed manifest gets, never one the user is asked about. */
-const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo', 'features']);
+const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo', 'features', 'store']);
 
 const FRAMES: readonly FrameMode[] = ['standard', 'custom', 'none'];
 

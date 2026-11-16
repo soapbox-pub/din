@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { NostrFilter } from '@nostrify/nostrify';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAppData } from '@/hooks/useAppData';
@@ -30,14 +29,11 @@ import { getIconThemeBridge } from '@/lib/iconTheme';
 import { NSITE_CATALOG_PUBKEYS } from '@/lib/nsiteCatalog';
 import { getSystemCursorBridge } from '@/lib/systemCursor';
 import {
-  PACKAGE_KIND,
-  buildPackageCatalog,
   fetchThemePackage,
   installThemePackage,
   installedPackages,
   applyTheme,
   packageDeletion,
-  packageDeletionsFilter,
   removeTheme,
   type ExtensionKeyStore,
   type InstallDeps,
@@ -137,9 +133,6 @@ export function useExtensionKeys(): ExtensionKeyStore {
   }), [setKeys]);
 }
 
-/** How many published themes the store asks for at a time. */
-const PAGE = 40;
-
 /** Who the store lists themes by: Din's publishers, the user, and the people they follow. */
 export function useCatalogAuthors(): string[] {
   const { user } = useCurrentUser();
@@ -157,46 +150,6 @@ export function canKeepPackages(type: PackageType): boolean {
   if (type === 'skin') return getFsBridge() !== undefined;
   if (type === 'extension') return getCrxBridge() !== undefined;
   return (type === 'cursor' ? getSystemCursorBridge() : getIconThemeBridge()) !== undefined;
-}
-
-/** The App Store's published cursor themes, icon themes or skins, newest first, a page at a time. */
-export function usePackageCatalog(type: PackageType, enabled = true) {
-  const relays = useManifestRelays();
-  const authors = useCatalogAuthors();
-  const kind = PACKAGE_KIND[type];
-
-  const query = useInfiniteQuery({
-    queryKey: ['theme-packages', 'catalog', type, authors],
-    enabled,
-    initialPageParam: undefined as number | undefined,
-    queryFn: async ({ pageParam, signal }) => {
-      const allowed = new Set(authors);
-      const filters: NostrFilter[] = [{ kinds: [kind], authors, limit: PAGE, until: pageParam }];
-      if (pageParam === undefined) filters.push(packageDeletionsFilter(type, authors));
-      const events = await relays.query(filters, { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) });
-      // The author is the only trust boundary for an addressable event.
-      return events.filter((event) => allowed.has(event.pubkey));
-    },
-    getNextPageParam: (page) => {
-      const found = page.filter((event) => event.kind === kind);
-      if (found.length < PAGE) return undefined;
-      return Math.min(...found.map((event) => event.created_at)) - 1;
-    },
-    staleTime: 60_000,
-  });
-
-  const packages = useMemo(() => buildPackageCatalog(query.data?.pages.flat() ?? []), [query.data]);
-
-  return {
-    packages,
-    isLoading: query.isPending && query.fetchStatus !== 'idle',
-    isError: query.isError,
-    hasMore: query.hasNextPage,
-    isLoadingMore: query.isFetchingNextPage,
-    loadMore: query.fetchNextPage,
-    refresh: query.refetch,
-    refreshing: query.isRefetching,
-  };
 }
 
 /** One published theme by its address. */

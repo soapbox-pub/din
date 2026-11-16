@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, MoreHorizontal, Share, Store, Trash2 } from 'lucide-react';
-import { GlyphTile } from '@/components/desktop/AppIcon';
+import { GlyphTile } from '@/shared/AppIcon';
 import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { Button } from '@/components/ui/button';
 import {

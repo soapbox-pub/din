@@ -10,50 +10,39 @@ import {
 } from 'react';
 import { Brush, Check, ChevronLeft, Copy, FolderPlus, Globe, LayoutGrid, MousePointer2, Palette, RefreshCw, Shapes } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
 import type { StoreApp } from '@/lib/nsiteCatalog';
 import { canonicalNsiteUrl } from '@/lib/nsite';
-import { nsiteAppId } from '@/lib/nsiteApps';
-import { getNsiteStore } from '@/lib/nsiteStore';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
-import { isWebviewAvailable } from '@/lib/isElectron';
-import { useNsiteCatalog } from '@/hooks/useNsiteCatalog';
-import { useNsiteLookup } from '@/hooks/useNsiteLookup';
-import { useFeaturedApps } from '@/hooks/useFeaturedApps';
-import { useStoreAppDetails } from '@/hooks/useStoreAppDetails';
-import { useStoreAppListing } from '@/hooks/useStoreAppListing';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
-import { useToast } from '@/hooks/useToast';
-import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
-import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { WindowControls, WindowDragRegion } from '@/sdk/react';
+import { AppIcon } from '@/shared/AppIcon';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { EmptyState, MoreSentinel, SectionHeader } from '@/components/desktop/apps/appstore/common';
-import { useSeen } from '@/components/desktop/apps/appstore/useSeen';
-import { FolderAppDetail } from '@/components/desktop/apps/appstore/FolderApps';
-import { FlatpakAppDetail, FlatpakCard } from '@/components/desktop/apps/appstore/FlatpakApps';
-import { useFlatpakCatalog, useFlatpakMatches } from '@/hooks/useNostrFlatpaks';
+import { EmptyState, MoreSentinel, SectionHeader } from '@/shared/store/common';
+import { useSeen } from '@/shared/store/useSeen';
 import type { LinuxApp } from '@/lib/nostrFlatpaks';
-import { useChooseAppFolder } from '@/hooks/useChooseAppFolder';
-import { canAddFileApps, type OpenedFolder } from '@/lib/fileApps';
-import { ThemeStore, type ThemeAddress } from '@/components/desktop/apps/appstore/ThemeStore';
-import { PackageStore } from '@/components/desktop/apps/appstore/PackageStore';
-import { useThemeCatalog } from '@/hooks/useThemes';
-import { usePackageCatalog } from '@/hooks/useThemePackages';
 import { parseThemeNaddr } from '@/lib/themeDefinition';
 import { parsePackageNaddr, type PackageAddress, type PackageType } from '@/lib/themePackages';
 import { isSkinFileName } from '@/lib/skinPackages';
-import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { ContentPane, SearchField, SidebarRow, SidebarTitle, ToolButton } from '@/shared/appChrome';
+import { ContentPane, SearchField, SidebarRow, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
 import { sidebarWidthClass, titleSearch, toolIcon } from '@/shared/appChromeStyles';
+import { windowLaunch } from '@/shared/launch';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { toast } from '@/shared/toast';
+import { useFeaturedApps } from './catalog/useFeaturedApps';
+import { useNsiteCatalog } from './catalog/useNsiteCatalog';
+import { useNsiteLookup } from './catalog/useNsiteLookup';
+import { useStoreAppDetails } from './catalog/useStoreAppDetails';
+import { useStoreAppListing } from './catalog/useStoreAppListing';
+import { useFlatpakCatalog, useFlatpakMatches, usePackageCatalog, useThemeCatalog } from './catalog/catalogs';
+import { FlatpakAppDetail, FlatpakCard } from './FlatpakApps';
+import { PackageStore } from './PackageStore';
+import { errorText } from './packages';
+import { dinStore, useStoreState } from './store';
+import { ThemeStore, type ThemeAddress } from './ThemeStore';
 
 const APP_STORE_ICON = '/icons/apps/app-store.png';
 const NO_LINUX_APPS: LinuxApp[] = [];
@@ -84,26 +73,27 @@ const TAB_ICONS: Record<StoreTab, LucideIcon> = {
 
 /** The tab each kind of published theme is in, and back. Extensions are the Web Browser's (about:extensions). */
 const PACKAGE_TABS: Record<Exclude<PackageType, 'extension'>, StoreTab> = { cursor: 'cursors', icon: 'icons', skin: 'skins' };
-const TAB_PACKAGES: Partial<Record<StoreTab, PackageType>> = { cursors: 'cursor', icons: 'icon', skins: 'skin' };
+const TAB_PACKAGES: Partial<Record<StoreTab, Exclude<PackageType, 'extension'>>> = { cursors: 'cursor', icons: 'icon', skins: 'skin' };
 
 /** A published theme the App Store lists, leaving out extensions. */
 function storePackage(address: PackageAddress | null): PackageAddress | null {
   return address && address.type !== 'extension' ? address : null;
 }
 
+type Params = Record<string, unknown>;
+
 /** The skin file a launch asks to publish: a name in the Media Player's skins folder, never a path. */
-function skinToPublish(params: AppComponentProps['params']): PublishTarget | null {
-  const name = params?.publishSkin;
-  if (typeof name !== 'string' || !isSkinFileName(name)) return null;
-  return { type: 'skin', id: name, name: name.replace(/\.[^.]+$/, '').replace(/_/g, ' ') };
+function skinToPublish(params: Params): string | null {
+  const name = params.publishSkin;
+  return typeof name === 'string' && isSkinFileName(name) ? name : null;
 }
 
 /** The tab a launch opens on: the one asked for, or the one an address it names is in. */
-function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | null): StoreTab {
+function initialTab(params: Params, pkg: PackageAddress | null): StoreTab {
   if (pkg && pkg.type !== 'extension') return PACKAGE_TABS[pkg.type];
   if (skinToPublish(params)) return 'skins';
-  if (typeof params?.theme === 'string') return 'themes';
-  return TABS.some((t) => t.id === params?.tab) ? (params?.tab as StoreTab) : 'apps';
+  if (typeof params.theme === 'string') return 'themes';
+  return TABS.some((t) => t.id === params.tab) ? (params.tab as StoreTab) : 'apps';
 }
 
 /**
@@ -113,8 +103,15 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * a category, `{ theme: 'naddr1…' }` on one theme's page, and
  * `{ package: 'naddr1…' }` on one cursor theme's, icon set's or skin's.
  * `{ publishSkin: '<file name>' }`, which the Media Player sends, opens
- * Skins with Publish to Nostr… for that file in its skins folder, since an
- * app can't sign or upload itself.
+ * Skins with the desktop's Publish to Nostr… for that file in its skins
+ * folder, since neither app signs or uploads itself.
+ *
+ * It's an app of its own (din://app-store), since it shows strangers'
+ * listings: names, descriptions, icons, screenshots, release notes,
+ * themes and cursor files, read and decoded here, in its own process. What
+ * it asks of the desktop goes through din.store (permission `store`), by
+ * address: the desktop looks up what's published there itself before it
+ * installs or wears anything, and asks before a Linux app.
  *
  * Apps are nsites (NIP-5A static websites), installed in one click.
  *
@@ -131,9 +128,9 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * Each card reads the site's icon and name from its own files on Blossom
  * (useStoreAppDetails), the same derivation the launcher uses, so the store
  * shows the icon the user will get. Installing goes through the same
- * installNsiteApp() path as the browser's "install site as app" button: the
- * nsite store downloads every file, and the entry roams via encrypted app
- * data.
+ * installNsiteApp() path as the browser's "install site as app" button, in
+ * the desktop: the nsite store downloads every file, and the entry roams
+ * via encrypted app data.
  *
  * Linux apps are there too: NIP-82 apps whose newest release carries a
  * .flatpak or an AppImage for this computer, a Flatpak installed through a
@@ -142,14 +139,16 @@ function initialTab(params: AppComponentProps['params'], pkg: PackageAddress | n
  * electron/nostr-flatpaks.mts).
  *
  * Apps can also come from a folder on this computer (src/lib/fileApps.ts),
- * for developing one: the title bar's folder button picks it and opens its
- * page (FolderApps).
+ * for developing one: the title bar's folder button has the desktop pick it
+ * and open its page (FolderAppWindow), since adding one allows what it asks.
  */
-export function AppStore({ params }: AppComponentProps) {
+export function AppStore() {
+  const [params] = useState<Params>(() => windowLaunch().params);
+  const store = useStoreState();
   const catalog = useNsiteCatalog();
   const featured = useFeaturedApps();
   const [selectedPackage, setSelectedPackage] = useState<PackageAddress | null>(() =>
-    typeof params?.package === 'string' ? storePackage(parsePackageNaddr(params.package)) : null,
+    typeof params.package === 'string' ? storePackage(parsePackageNaddr(params.package)) : null,
   );
   const [tab, setTab] = useState<StoreTab>(() => initialTab(params, selectedPackage));
   const themes = useThemeCatalog(tab === 'themes');
@@ -158,25 +157,26 @@ export function AppStore({ params }: AppComponentProps) {
   const skins = usePackageCatalog('skin', tab === 'skins');
   const packageType = TAB_PACKAGES[tab] ?? null;
   const packages = packageType === 'cursor' ? cursors : packageType === 'icon' ? icons : packageType === 'skin' ? skins : null;
-  const [publishing, setPublishing] = useState<PublishTarget | null>(() => skinToPublish(params));
+  // The Media Player's Publish to Nostr…: the desktop's, once.
+  useEffect(() => {
+    const skin = skinToPublish(params);
+    if (skin) void dinStore().publishSkin(skin).catch((error: unknown) => toast('Couldn’t publish it', { body: errorText(error), destructive: true }));
+  }, [params]);
   const [search, setSearch] = useState('');
   // The site whose detail page is showing. The list stays mounted underneath
   // so going back returns to the same scroll position.
   const [selected, setSelected] = useState<StoreApp | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<ThemeAddress | null>(() =>
-    typeof params?.theme === 'string' ? parseThemeNaddr(params.theme) : null,
+    typeof params.theme === 'string' ? parseThemeNaddr(params.theme) : null,
   );
-  // A folder chosen to add as an app, whose page is showing.
-  const [folderApp, setFolderApp] = useState<OpenedFolder | null>(null);
   // A Linux app (a NIP-82 app with a Flatpak or an AppImage) whose page is showing.
   const [selectedFlatpak, setSelectedFlatpak] = useState<LinuxApp | null>(null);
-  const { choose: chooseAppFolder, busy: choosingFolder } = useChooseAppFolder();
+  const [choosingFolder, setChoosingFolder] = useState(false);
   const onThemes = tab === 'themes';
   const onPackages = packages !== null;
-  const detailOpen = onThemes ? !!selectedTheme : onPackages ? !!selectedPackage : !!selected || !!folderApp || !!selectedFlatpak;
+  const detailOpen = onThemes ? !!selectedTheme : onPackages ? !!selectedPackage : !!selected || !!selectedFlatpak;
   const closeDetail = () => {
     setSelected(null);
-    setFolderApp(null);
     setSelectedFlatpak(null);
     setSelectedTheme(null);
     setSelectedPackage(null);
@@ -217,7 +217,6 @@ export function AppStore({ params }: AppComponentProps) {
   const refreshDisabled = (onThemes ? themes.isLoading : packages ? packages.isLoading : catalog.isLoading) || refreshing;
   // A sidebar of sections, as Settings has, and over the content the
   // section's title bar with the store's search across it, as Mail's.
-  useOwnWindowHeader();
   const refreshAll = () => {
     if (onThemes) {
       void themes.refresh();
@@ -235,15 +234,15 @@ export function AppStore({ params }: AppComponentProps) {
     <aside aria-label="App Store" className={cn('flex shrink-0 flex-col pb-2', sidebarWidthClass)}>
       {/* The store's own actions beside its name, as the Assistant's and
           Messages' are; the bar over the content holds only its search. */}
-      <SidebarTitle region={WindowDragRegion} icon={<AppIcon icon={APP_STORE_ICON} className="size-6 shrink-0 object-contain" />} title="App Store">
-          {tab === 'apps' && canAddFileApps() && (
+      <SidebarTitle icon={<SidebarTitleIcon src={APP_STORE_ICON} />} title="App Store">
+          {tab === 'apps' && store?.canAddFolderApps && (
             <ToolButton
               onClick={() => {
-                void chooseAppFolder().then((opened) => {
-                  if (!opened) return;
-                  setSelected(null);
-                  setFolderApp(opened);
-                });
+                setChoosingFolder(true);
+                void dinStore()
+                  .addFolderApp()
+                  .catch((error: unknown) => toast('Couldn’t add an app', { body: errorText(error), destructive: true }))
+                  .finally(() => setChoosingFolder(false));
               }}
               disabled={choosingFolder}
               label="Add an app from a folder"
@@ -332,7 +331,6 @@ export function AppStore({ params }: AppComponentProps) {
           selected={selectedPackage}
           onSelect={setSelectedPackage}
         />
-        <PublishThemePackage target={publishing} onClose={() => setPublishing(null)} />
       </>,
     );
   }
@@ -357,7 +355,7 @@ export function AppStore({ params }: AppComponentProps) {
       <div
         className="flex min-h-0 flex-1 flex-col"
         onKeyDown={(e) => {
-          if ((selected || folderApp || selectedFlatpak) && e.key === 'Escape') {
+          if ((selected || selectedFlatpak) && e.key === 'Escape') {
             closeDetail();
           }
         }}
@@ -365,12 +363,11 @@ export function AppStore({ params }: AppComponentProps) {
         {selected && (
           <AppDetail key={selected.host} app={selected} moreFromPublisher={moreFromPublisher} />
         )}
-        {folderApp && !selected && <FolderAppDetail key={folderApp.appId} opened={folderApp} />}
-        {selectedFlatpak && !selected && !folderApp && (
+        {selectedFlatpak && !selected && (
           <FlatpakAppDetail key={`${selectedFlatpak.pubkey}:${selectedFlatpak.identifier}`} app={selectedFlatpak} />
         )}
         {/* Content */}
-        <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || folderApp || selectedFlatpak) && 'hidden')}>
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', (selected || selectedFlatpak) && 'hidden')}>
           <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 @2xl:p-6">
             {searching ? (
               <section className="flex flex-col gap-4" aria-label="Search results">
@@ -697,7 +694,6 @@ function AppDetail({
 }) {
   const view = useStoreAppView(app);
   const listing = useStoreAppListing(app);
-  const openUrl = useOpenUrl();
   const [copied, setCopied] = useState(false);
 
   // The publisher's hashtags, then the manifest's own categories.
@@ -766,17 +762,15 @@ function AppDetail({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <GetPill app={app} name={view.name} />
-              {isWebviewAvailable() && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => openUrl(address)}
-                  className="h-8 rounded-full px-4"
-                >
-                  <Globe aria-hidden />
-                  Open in Browser
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => window.open(address)}
+                className="h-8 rounded-full px-4"
+              >
+                <Globe aria-hidden />
+                Open in Browser
+              </Button>
             </div>
           </div>
         </div>
@@ -964,46 +958,33 @@ function GetPill({
   onHero?: boolean;
   className?: string;
 }) {
-  const { installNsiteApp, findNsiteApp } = useInstalledApps();
-  const { open: openApp } = useWindowActions();
-  const { toast } = useToast();
-  const canInstall = Boolean(getNsiteStore());
+  const nsites = useStoreState()?.nsites;
+  const canInstall = !!nsites?.canInstall;
+  const installed = !!nsites?.installed.includes(app.host);
+  const [getting, setGetting] = useState(false);
 
-  const installed = findNsiteApp(app.host);
-  // Set by "Get"; the app launches once it's in the registry, which is a
-  // render after installNsiteApp() (open() can't see it any sooner).
-  const launchOnInstall = useRef(false);
-
-  useEffect(() => {
-    if (!launchOnInstall.current || !installed) return;
-    launchOnInstall.current = false;
-    openApp(nsiteAppId(app.host));
-  }, [installed, openApp, app.host]);
-
+  // The desktop installs it, by its address, and opens it once it's in the launcher.
   const install = () => {
-    const entry = installNsiteApp(app.host);
-    if (!entry) {
-      toast({
-        title: 'Could not install app',
-        description: 'This site’s address is not one Din can install.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    launchOnInstall.current = true;
-    toast({
-      title: `${name} installed`,
-      description:
-        'Find it in the app launcher. Its files are downloading, so it will work offline too.',
-    });
+    setGetting(true);
+    void dinStore()
+      .install({ type: 'nsite', host: app.host })
+      .then(
+        () => toast(`${name} installed`, { body: 'Find it in the app launcher. Its files are downloading, so it will work offline too.' }),
+        (error: unknown) => toast('Could not install app', { body: errorText(error), destructive: true }),
+      )
+      .finally(() => setGetting(false));
+  };
+  const open = () => {
+    void dinStore().open({ type: 'nsite', host: app.host }).catch((error: unknown) =>
+      toast(`Couldn’t open ${name}`, { body: errorText(error), destructive: true }));
   };
 
   return (
     <Button
       size="sm"
       variant="secondary"
-      onClick={installed ? () => openApp(nsiteAppId(app.host)) : install}
-      disabled={!installed && !canInstall}
+      onClick={installed ? open : install}
+      disabled={(!installed && !canInstall) || getting}
       title={canInstall ? undefined : 'Apps install in the Din desktop app'}
       aria-label={installed ? `Open ${name}` : `Install ${name}`}
       className={cn(

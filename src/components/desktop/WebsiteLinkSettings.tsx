@@ -1,4 +1,4 @@
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import {
   ContextMenu,
   ContextMenuCheckboxItem,

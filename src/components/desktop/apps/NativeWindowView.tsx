@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AppComponentProps } from '@/lib/apps';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';

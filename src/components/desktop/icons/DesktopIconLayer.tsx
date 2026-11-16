@@ -13,7 +13,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import { useDesktopIcons, type DesktopIcon, type DesktopIconsContextValue } from '@/contexts/DesktopIconsContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useAppContext } from '@/hooks/useAppContext';

@@ -15,3 +15,9 @@ export function addPrinterParams(): Record<string, unknown> {
 export function connectAppParams(link = ''): Record<string, unknown> {
   return { link, at: Date.now() };
 }
+
+/**
+ * The App Store's Add an App from a Folder…: the desktop's window, since
+ * adding one allows what it asks for. `{ path }` is the folder chosen.
+ */
+export const FOLDER_APP_WINDOW_ID = 'add-folder-app';

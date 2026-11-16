@@ -7,8 +7,10 @@
 ## What we defend against
 
 - **A compromised app.** A document app parses untrusted files (DOCX,
-  PSD, DWG, skins, playlists). A bug there must not reach anything beyond
-  the files the user gave that app.
+  PSD, DWG, skins, playlists), and the App Store renders strangers'
+  listings, icons and cursor files. A bug there must not reach anything
+  beyond the files the user gave that app, or for the App Store, beyond
+  installing what's published at an address the desktop looks up itself.
 - **A hung or crashing app.** One app's infinite loop or out-of-memory
   must not stop the desktop, or any other app.
 - **A hostile web page or nsite.** Unchanged from today: it gets what a

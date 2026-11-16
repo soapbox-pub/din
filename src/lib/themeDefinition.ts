@@ -1,4 +1,4 @@
-import type { NostrEvent } from '@nostrify/nostrify';
+import type { NostrEvent, NostrFilter, NRelay } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import {
   THEME_DEFINITION_KIND,
@@ -129,4 +129,25 @@ export function buildThemeCatalog(events: NostrEvent[]): ThemeDefinition[] {
   return [...newest.values()]
     .filter((theme) => (deleted.get(themeCoordinate(theme)) ?? -1) < theme.createdAt)
     .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Kind 5 deletions of named themes, by the given authors. */
+export function themeDeletionsFilter(authors: string[]): NostrFilter {
+  return { kinds: [5], authors, '#k': [String(THEME_DEFINITION_KIND)] };
+}
+
+/** One named theme by its author and `d` tag, unless its author deleted it; only its author's events count. */
+export async function fetchThemeDefinition(
+  address: { pubkey: string; identifier: string },
+  relays: Pick<NRelay, 'query'>,
+  signal?: AbortSignal,
+): Promise<ThemeDefinition | null> {
+  const events = await relays.query(
+    [
+      { kinds: [THEME_DEFINITION_KIND], authors: [address.pubkey], '#d': [address.identifier] },
+      { ...themeDeletionsFilter([address.pubkey]), '#a': [themeCoordinate(address)] },
+    ],
+    { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(8000)]) },
+  );
+  return buildThemeCatalog(events.filter((event) => event.pubkey === address.pubkey))[0] ?? null;
 }

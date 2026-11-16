@@ -206,7 +206,7 @@ import { getIconThemeBridge } from '@/lib/iconTheme';
 import { IconThemePicker } from '@/components/desktop/apps/IconThemePicker';
 import { PublishThemePackage, type PublishTarget } from '@/components/desktop/apps/PublishThemePackage';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
-import { AppIcon } from '@/components/desktop/AppIcon';
+import { AppIcon } from '@/shared/AppIcon';
 import type { SystemCursorTheme } from '@/lib/systemCursor';
 import {
   useImportSystemCursor,

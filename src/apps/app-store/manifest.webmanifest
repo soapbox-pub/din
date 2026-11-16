@@ -1,0 +1,11 @@
+{
+  "name": "App Store",
+  "description": "Apps, themes, cursors, icons and Media Player skins, published on Nostr by Din’s publishers and the people you follow.",
+  "icons": [{ "src": "/icons/apps/app-store.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "din": {
+    "permissions": ["store"],
+    "window": { "size": { "width": 900, "height": 640 }, "frame": "custom" },
+    "keywords": ["store", "apps", "get apps", "install", "nsite", "flatpak", "appimage", "linux apps", "themes", "cursors", "icons", "skins", "winamp"]
+  }
+}

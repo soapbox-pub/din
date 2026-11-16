@@ -24,7 +24,7 @@ When nsites get `window.din`, the user approves the list at install.
 
 | Permission | Grants | Built-in apps that need it |
 |---|---|---|
-| `nostr` | `window.nostr` (NIP-07): the signed-in user's pubkey, and signing as them | App Store, Calendar |
+| `nostr` | `window.nostr` (NIP-07): the signed-in user's pubkey, and signing as them | Calendar |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
 | `pty` | `din.system.pty`: terminals | Terminal |
 | `notifications` | `new Notification()` and `navigator.setAppBadge()`; with `background`, `registration.showNotification()` from the app's service worker | Assistant, Terminal |
@@ -46,6 +46,7 @@ When nsites get `window.din`, the user approves the list at install.
 | `vms` | `din.system.vms`: QEMU virtual machines in `~/VMs` (`src/lib/vms.ts`), run in main by `electron/vms.mts`: creating, starting and stopping them, installing a system on a new one (downloaded by main from the system's own servers, `electron/vm-installers.mts`), their settings and snapshots, and their screens as RFB streams (the bytes go only to the window that opened one). A machine's CD drive takes any path, so this reaches what `fs` reads | Virtual Machines |
 | `games` | `din.system.games`: the games in `~/roms` (`src/lib/games.ts`), read and played by `electron/games.mts`: the library (systems, games and their copies, box art from libretro-thumbnails, favorites, play time), playing a game full screen in RetroArch as an app of its own, quitting it, and where each was left. A game is named by its id and a copy by one of its own paths: the app can't run a file or program of its choosing | Games |
 | `features` | `din.system.features`: the optional features (Settings → Optional Features, `electron/features.mts`), whether one is installed, and installing it: DinOS's own, or the system's packages elsewhere, which asks for the password. Not removing them. Built-in apps only: an app from a folder can't ask for it, since it would start downloads of gigabytes, or password prompts, whenever it liked. `FeatureInstallButton` (`src/shared/FeatureInstall.tsx`) is the button, given the feature's id by what failed; it shows only while that feature can be installed and isn't | Files, Preview, Studio, Virtual Machines |
+| `store` | `din.store`: what the App Store shows of this computer (who's signed in, the relays to read, what's installed and in use), pushed as it changes; installing nsites, Linux apps, cursor themes, icon sets and skins, using and removing them, and trying cursors, icons and themes on. Everything is named by where it's published (an nsite's host, an `naddr1…`): the desktop looks it up on the user's relays itself, keeping only its author's events, and installs what it finds, so nothing the app says about it is trusted. A Linux app asks on screen first, as deleting one of the user's own from Nostr does; publishing and adding an app from a folder are the desktop's own dialog and window (`publishSkin`, `addFolderApp`), since they sign and grant permissions. What a window tried on comes off when it closes. The app signs nothing. Built-in apps only | App Store |
 | `file-folders` | `din.system.fs` scoped to the folders of files the user hands the app, and `din.files.parent(handle)` ([files.md](files.md#some-folders-by-path)) | Preview, Publisher |
 | `input-method` | `din.inputMethod`: being a keyboard, shown where one goes, typing into whatever field has focus in any app, and hearing what's copied anywhere ([input-method.md](input-method.md)). Only hosts that show keyboards answer it (Din Phone); Din's desktop has none yet | Din Keyboard (in Din Phone) |
 
@@ -77,6 +78,29 @@ web's names a permission grants answer the same way: `notifications`,
 for `camera` or `capture`, and `display-capture` for `capture`. `usePermission('fs')` from
 `@/sdk/react` is the same for a component. Calling something without its
 permission rejects with `DinPermissionError`.
+
+## `din.store`
+
+The App Store's piece of the desktop, for the one app that shows
+strangers' catalogs (`src/apps/app-store/`), answered by the desktop's
+`StoreHost` (`src/components/desktop/dinHost/StoreHost.tsx`):
+
+```ts
+const state = await din.store.state();     // pubkey, relays, what's installed and worn
+din.store.onChange((next) => render(next));
+await din.store.install({ type: 'package', address: 'naddr1…' });
+await din.store.tryOn('naddr1…');           // a cursor theme or icon set, until endTryOn()
+await din.store.themes.use('naddr1…');      // then themes.revert() or themes.done()
+```
+
+The app reads the catalog itself, from the relays `state.relays` names,
+with its own pool, and decodes what it shows (icons, screenshots, cursor
+files, release notes) in its own process. The desktop never takes its word
+for what something is: each request names an address, and the desktop
+fetches what's published there, from its author, before it installs or
+wears it. Nothing is signed for the app: deleting from Nostr asks on screen
+and signs in the desktop, and publishing (`publishSkin`) is the desktop's
+own Publish to Nostr dialog.
 
 ## `din.system`
 

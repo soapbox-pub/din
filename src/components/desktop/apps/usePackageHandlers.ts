@@ -7,11 +7,16 @@ import { canKeepPackages, useInstalledPackages, useThemePackageActions } from '@
 import { useToast } from '@/hooks/useToast';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { packageCoordinate, packageNaddr, type PackageAddress, type PackageType, type ThemePackage } from '@/lib/themePackages';
+import type { PackageHandlers, PackageState } from '@/shared/store/packageParts';
+
+export type { PackageHandlers, PackageState };
 
 /**
- * What the App Store's Cursors, Icons and Skins (PackageStore) and the Web
- * Browser's about:extensions (ExtensionsPage) do with a published theme or
- * extension: Get, Update, Use, Remove, Delete from Nostr, and who made it.
+ * What the Web Browser's about:extensions (ExtensionsPage) does with a
+ * published extension: Get, Update, Remove, Delete from Nostr, and who made
+ * it, through the desktop's own hooks. The App Store's Cursors, Icons and
+ * Skins, in its own app, do the same over din.store
+ * (src/apps/app-store/packageHandlers.ts).
  */
 
 /** What a theme becomes once it's got, for the toast. */
@@ -21,32 +26,6 @@ const BECOMES: Record<PackageType, string> = {
   skin: 'The Media Player is wearing it.',
   extension: 'It runs on the sites you browse.',
 };
-
-/** Where a published theme stands on this computer, and what its button does. */
-export interface PackageState {
-  /** Its directory name, when installed. */
-  id: string | null;
-  /** Installed, but an older version than this. */
-  outdated: boolean;
-  /** The pointer's or the icons' now. */
-  inUse: boolean;
-  busy: boolean;
-}
-
-export interface PackageHandlers {
-  stateOf: (pkg: ThemePackage) => PackageState;
-  /** Get, Update or Use, whichever it needs. */
-  act: (pkg: ThemePackage) => void;
-  remove: (pkg: ThemePackage) => void;
-  /** Ask to delete one of the user's own from Nostr; `deleting` is the one asked about. */
-  deleteOwn: (pkg: ThemePackage) => void;
-  deleting: ThemePackage | null;
-  cancelDelete: () => void;
-  confirmDelete: (pkg: ThemePackage) => void;
-  select: (pkg: ThemePackage) => void;
-  canInstall: boolean;
-  isOwn: (pkg: ThemePackage) => boolean;
-}
 
 function cleanError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -61,6 +40,7 @@ export function usePackageHandlers(type: PackageType, onSelect: (address: Packag
   const actions = useThemePackageActions();
   const { user } = useCurrentUser();
   const { toast } = useToast();
+  const copyAddress = useCopyAddress();
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<ThemePackage | null>(null);
 
@@ -129,6 +109,7 @@ export function usePackageHandlers(type: PackageType, onSelect: (address: Packag
     remove,
     deleteOwn: setDeleting,
     select: (pkg) => onSelect({ type: pkg.type, pubkey: pkg.pubkey, identifier: pkg.identifier }),
+    copyAddress,
     canInstall,
     isOwn: (pkg) => pkg.pubkey === user?.pubkey,
     deleting,

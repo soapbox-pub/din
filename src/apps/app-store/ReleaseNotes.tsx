@@ -1,6 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 
@@ -15,7 +14,6 @@ const DISALLOWED = ['img'];
  * small, under the page's own.
  */
 export default function ReleaseNotes({ text, className }: { text: string; className?: string }) {
-  const openUrl = useOpenUrl();
   const components: Components = {
     a: ({ href, children }) => {
       // Only whole web addresses: a relative one would be guessed into a host.
@@ -26,7 +24,7 @@ export default function ReleaseNotes({ text, className }: { text: string; classN
           href={url}
           onClick={(event) => {
             event.preventDefault();
-            openUrl(url);
+            window.open(url);
           }}
           className="font-medium text-ink-accent underline underline-offset-2 hover:text-ink-accent/80"
         >
