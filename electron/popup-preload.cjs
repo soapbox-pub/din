@@ -157,6 +157,27 @@ function installPopupBridge(bridge) {
       get opener() {
         return id === null ? null : window;
       },
+      // The rest of what a page may touch on a cross-origin window. Its
+      // frames can't be reached from here, so it has none: Firebase's auth
+      // handler looks through window.opener.frames for its relay iframe and,
+      // finding none, hands the result over in localStorage instead. Without
+      // `frames` its lookup threw, and the pop-up closed with the result lost.
+      get frames() {
+        return win;
+      },
+      get self() {
+        return win;
+      },
+      get window() {
+        return win;
+      },
+      get top() {
+        return win;
+      },
+      get parent() {
+        return win;
+      },
+      length: 0,
     };
     return win;
   };
