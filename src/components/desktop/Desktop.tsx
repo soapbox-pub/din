@@ -14,6 +14,7 @@ import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
 import { Taskbar } from './Taskbar';
 import { setPauseMediaWhileRecording } from '@/lib/mediaPause';
+import { setSpeechVoice } from '@/lib/speech';
 import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
 import { VolumeOsd } from './VolumeOsd';
@@ -280,6 +281,7 @@ function DesktopSession() {
   );
   const taskbar = config.desktopLayout === 'taskbar';
   useEffect(() => setPauseMediaWhileRecording(config.pauseMediaWhileRecording !== false), [config.pauseMediaWhileRecording]);
+  useEffect(() => setSpeechVoice(config.speechVoice ?? ''), [config.speechVoice]);
   const tilingRef = useRef(tiling);
   const getTiling = useCallback(() => tilingRef.current, []);
 

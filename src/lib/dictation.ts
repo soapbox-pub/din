@@ -115,6 +115,8 @@ export interface DictationState {
   error: string | null;
   /** Whether it ends when a held key comes up, rather than after a pause. */
   held: boolean;
+  /** Whether the overlay shows it; an app listening without end shows that it does itself. */
+  overlay: boolean;
   owner: unknown;
 }
 
@@ -142,7 +144,7 @@ const CONTEXT_CHARS = 400;
 /** Errors stay up this long. */
 const ERROR_MS = 4_000;
 
-const IDLE: DictationState = { status: 'idle', level: 0, preview: '', error: null, held: false, owner: null };
+const IDLE: DictationState = { status: 'idle', level: 0, preview: '', error: null, held: false, overlay: true, owner: null };
 
 let state: DictationState = IDLE;
 const listeners = new Set<() => void>();
@@ -492,7 +494,7 @@ async function unmuteFor(current: Session): Promise<void> {
  * Start listening for `target`. A held session goes until finishDictation;
  * otherwise it ends after a pause. A session already running is cancelled.
  */
-export async function startDictation(target: DictationTarget, options: { held?: boolean } = {}): Promise<void> {
+export async function startDictation(target: DictationTarget, options: { held?: boolean; overlay?: boolean } = {}): Promise<void> {
   if (session) {
     cancelDictation();
   }
@@ -523,7 +525,7 @@ export async function startDictation(target: DictationTarget, options: { held?: 
     releaseMedia: null,
   };
   session = current;
-  setState({ ...IDLE, status: 'listening', held: current.held, owner: target.owner ?? null });
+  setState({ ...IDLE, status: 'listening', held: current.held, overlay: options.overlay !== false, owner: target.owner ?? null });
 
   const ok = await api.available().catch(() => false);
   if (session !== current) return;

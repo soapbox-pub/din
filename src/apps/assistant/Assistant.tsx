@@ -27,6 +27,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
+import { CallBar } from '@/shared/assistant/Call';
+import { carryCall, useCall } from '@/shared/assistant/useCall';
+import { speakNextReply, useReplyVoice } from '@/shared/assistant/replyVoice';
 import { ConversationTitleInput, DeleteConversationDialog } from '@/shared/assistant/ConversationActions';
 import { Composer, type ComposerHandle, type SlashCommand } from '@/shared/assistant/Composer';
 import { ModelPicker, ThinkingPicker } from '@/shared/assistant/ModelPicker';
@@ -319,12 +322,15 @@ function launchRequest({ params }: Pick<Launch, 'params'>): {
   sessionID: string | null;
   directory: string | null;
   focusPassword: boolean;
+  /** Its message was spoken (Super+A held, the menu bar's mic): its reply is to be read aloud. */
+  speakReply: boolean;
 } {
   return {
     sessionID: typeof params.sessionID === 'string' ? params.sessionID : null,
     directory: typeof params.directory === 'string' ? params.directory : null,
     // Params are merged into the last launch's, so only this launch's nonce counts.
     focusPassword: params.focusPassword !== undefined && params.focusPassword === params.nonce,
+    speakReply: params.speakReply !== undefined && params.speakReply === params.nonce,
   };
 }
 
@@ -415,6 +421,12 @@ function AssistantWindow() {
     [host, model, startConversation],
   );
   const ranIntent = useRef<unknown>(null);
+  // A spoken message's reply is read aloud, once it comes.
+  useEffect(() => {
+    const launch = windowLaunch();
+    const { sessionID, speakReply } = launchRequest(launch);
+    if (sessionID && speakReply) speakNextReply(sessionID, Number(launch.params.nonce) || Date.now());
+  }, []);
   useEffect(() => {
     const launch = windowLaunch();
     const intent = intentOf(launch, din.app.opener, wasReopened());
@@ -431,7 +443,8 @@ function AssistantWindow() {
       runIntent(intent);
       return;
     }
-    const { sessionID, directory, focusPassword } = launchRequest(launch);
+    const { sessionID, directory, focusPassword, speakReply } = launchRequest(launch);
+    if (sessionID && speakReply) speakNextReply(sessionID, Number(launch.params.nonce) || Date.now());
     setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
     setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
   });
@@ -1147,6 +1160,18 @@ function Conversation({
   const fail = (title: string) => (error: unknown) =>
     notify({ title, description: cleanAssistantError(error), destructive: true });
 
+  // Talking with it: a call, and its replies read aloud.
+  const call = useCall({
+    sessionID,
+    running,
+    send: (text) => {
+      stick.current = true;
+      return send.mutateAsync({ text, files: [] }, { onError: fail('Couldn’t send what you said') });
+    },
+  });
+  const onCall = call?.active ?? false;
+  useReplyVoice({ sessionID, messages, call: onCall });
+
   // The one being switched to, so a quick second Shift+Tab goes on from there.
   const agent = (switchAgent.isPending ? switchAgent.variables?.agent : session?.agent) ?? 'build';
   const changeAgent = (agent: string) => switchAgent.mutate({ sessionID, agent }, { onError: fail('Couldn’t switch') });
@@ -1317,16 +1342,19 @@ function Conversation({
             onFocused={onPasswordFocused}
           />
         ))}
-        <div ref={composerRef} hidden={forms.length > 0}>
+        {onCall && forms.length === 0 && <CallBar call={call!} />}
+        <div ref={composerRef} hidden={forms.length > 0 || onCall}>
           <Composer
             ref={composer}
             autoFocus
             draftKey={sessionID}
+            onCall={call?.start}
             running={running}
             busy={send.isPending || compact.isPending || undo.isPending || redo.isPending}
             placeholder={running ? 'Add something while it works…' : 'Reply, or type / for commands…'}
-            onSubmit={(text, files) => {
+            onSubmit={(text, files, { spoken }) => {
               stick.current = true;
+              if (spoken) speakNextReply(sessionID);
               return send.mutateAsync({ text, files }, { onError: fail('Couldn’t send') });
             }}
             commands={commands}
@@ -1508,15 +1536,32 @@ function NewConversation({
   const folder = directory ?? defaultDirectory;
   const commands = useSlashCommands(folder, NEW_COMMANDS);
 
-  const begin = (text: string, files: PromptAttachment[] = [], command?: string) =>
-    start.mutateAsync(
+  const callRef = useRef<ReturnType<typeof useCall>>(null);
+  const begin = (text: string, files: PromptAttachment[] = [], command?: string, spoken = false) => {
+    const sent = Date.now();
+    return start.mutateAsync(
       { text, files, model, agent, directory: folder, command },
       {
-        onSuccess: (session) => onStarted(session.id),
+        onSuccess: (session) => {
+          if (spoken) speakNextReply(session.id, sent);
+          // A call goes on in the conversation its first words started.
+          const call = callRef.current;
+          if (call?.active) carryCall(session.id, call.startedAt);
+          onStarted(session.id);
+        },
         onError: (error) =>
           notify({ title: 'Couldn’t start the conversation', description: cleanAssistantError(error), destructive: true }),
       },
     );
+  };
+  // Words said while the first ones start the conversation wait for it: they'd start another.
+  const call = useCall({
+    running: start.isPending,
+    send: (text) => (start.isPending ? Promise.reject(new Error('Starting')) : begin(text, [], undefined, true)),
+  });
+  useEffect(() => {
+    callRef.current = call;
+  });
 
   const chooseFolder = async () => {
     const picked = await pickFolder({ title: 'Work in a folder', confirmLabel: 'Choose', initialPath: folder }).catch(() => null);
@@ -1538,12 +1583,15 @@ function NewConversation({
               anything its rules say to check with you.
             </p>
           </div>
+          {call?.active && <CallBar call={call} />}
           <Composer
             autoFocus
             draftKey={draftKey}
+            className={call?.active ? 'hidden' : undefined}
+            onCall={call?.start}
             busy={start.isPending}
             placeholder="Ask the assistant to do something…"
-            onSubmit={(text, files) => begin(text, files)}
+            onSubmit={(text, files, { spoken }) => begin(text, files, undefined, spoken)}
             commands={commands}
             onCommand={(name, args, files) => (name === 'connect' ? onAddProvider() : begin(args, files, name))}
             toolbar={

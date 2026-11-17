@@ -136,6 +136,37 @@ there's none. The Assistant's composer (`src/shared/assistant/appHost.tsx`)
 types the words into its field as they're heard, as Din's dictation does
 in the desktop's own fields (`src/shared/dictationField.ts`).
 
+A `continuous` session shows no overlay of Din's (its "Let go to finish"
+is for a held key): an app that listens without end, as the Assistant
+does on a call (`src/shared/assistant/useCall.ts`), shows that it's
+listening itself. Its errors still show.
+
+## Reading aloud: `speechSynthesis`
+
+`speechSynthesis` and `SpeechSynthesisUtterance` are Din's voice
+(`installSpeechSynthesis` in `src/sdk/standards.ts`): Kokoro, on this
+computer, through the desktop's speaker (`src/lib/speech.ts`), once the
+Speech optional feature is installed:
+
+```ts
+const u = new SpeechSynthesisUtterance('Your build finished.');
+u.onend = () => console.log('said');
+speechSynthesis.speak(u);
+```
+
+Din has one voice for everyone, so an app's utterances wait their turn
+behind the assistant's and other apps', and its `cancel()`, `pause()` and
+`resume()` touch only its own; they go when its window closes. Anything
+that opens the microphone for the user's voice (dictation, Record Audio)
+stops what's being said. `getVoices()` lists Din's voices, all local, the
+one chosen in Settings → Assistant `default`; it's empty until the feature
+is installed, and `voiceschanged` comes when that changes. Without a
+`voice`, the user's is used, or one for the utterance's `lang` (or the
+page's) if theirs doesn't speak it. `rate` (0.5 to 2) and `volume` are
+heard; `pitch` isn't, and `boundary` and `mark` never come. Long text is
+read a sentence or so at a time, the next made while one plays, so it
+starts within a second or two. `din speak` says text from a shell.
+
 ## `din.assistant` (permission `assistant`)
 
 For apps that show the assistant (the Assistant, CAD's palette). The
@@ -143,7 +174,7 @@ desktop keeps Din's settings for it and announces requests, questions and
 finished turns, so it needs to know what an app shows:
 
 ```ts
-din.assistant.settings;                   // { enabled, directory, colorfulReplies, model: { id, providerID, variant? } }
+din.assistant.settings;                   // { enabled, directory, colorfulReplies, speakReplies, model: { id, providerID, variant? } }
 din.assistant.onSettingsChange(apply);
 din.assistant.setSettings({ model });     // or { enabled: true }
 din.assistant.follow(sessionID);          // started or written in here: Din says when it finishes

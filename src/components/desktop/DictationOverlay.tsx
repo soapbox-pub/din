@@ -10,8 +10,9 @@ import { glassPanel } from '@/shared/appChromeStyles';
  * where the keyboard was.
  */
 export function DictationOverlay() {
-  const { status, level, preview, error, held } = useDictation();
-  const visible = status !== 'idle';
+  const { status, level, preview, error, held, overlay } = useDictation();
+  // An app listening without end (a call) shows that it does itself; its errors still show here.
+  const visible = status !== 'idle' && (overlay || status === 'error');
 
   const hint =
     status === 'transcribing'

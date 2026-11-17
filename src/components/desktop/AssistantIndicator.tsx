@@ -107,8 +107,10 @@ export const AssistantMenuItem = memo(function AssistantMenuItem() {
 function AssistantPanel({ onDone }: { onDone: () => void }) {
   const ready = useAssistantReady();
   const { open } = useWindowActions();
-  const show = (sessionID?: string) => {
-    open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce: Date.now() });
+  /** Show a conversation in the Assistant; `spoken` when its message was dictated, for the reply to be read aloud. */
+  const show = (sessionID?: string, spoken = false) => {
+    const nonce = Date.now();
+    open(ASSISTANT_APP_ID, { sessionID, directory: undefined, nonce, speakReply: spoken ? nonce : undefined });
     onDone();
   };
 
@@ -146,7 +148,7 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
   );
 }
 
-function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; onDone: () => void }) {
+function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string, spoken?: boolean) => void; onDone: () => void }) {
   const { data: sessions, isLoading } = useAssistantSessions();
   const { busy } = useAssistantWork();
   const pending = usePendingRequests();
@@ -183,11 +185,11 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
           busy={start.isPending}
           placeholder="Ask the assistant…"
           className="rounded-xl"
-          onSubmit={(text, files) =>
+          onSubmit={(text, files, { spoken }) =>
             start.mutateAsync(
               { text, files, model, directory },
               {
-                onSuccess: (session) => onShow(session.id),
+                onSuccess: (session) => onShow(session.id, spoken),
                 onError: (error) =>
                   toast({ title: 'Couldn’t ask the assistant', description: cleanAssistantError(error), variant: 'destructive' }),
               },
@@ -203,7 +205,7 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string) => void; 
         </p>
       ) : (
         recent.length > 0 && (
-          <SessionSection title="Recent" sessions={recent} busy={busy} home={home} onShow={onShow} />
+          <SessionSection title="Recent" sessions={recent} busy={busy} home={home} onShow={(id) => onShow(id)} />
         )
       )}
       <div className={trayFooter}>

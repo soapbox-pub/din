@@ -4,7 +4,8 @@ import { pickFiles, pickFolder } from '@/shared/fileHandles';
 import { useDin } from '@/sdk/react';
 import { toast } from '@/shared/toast';
 import { useAssistantEventSync } from '@/hooks/useAssistant';
-import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
+import { AssistantHostContext, type AssistantHost, type ListenHandlers, type Listening } from '@/shared/assistant/host';
+import { createVoice, speechSynthesisEngine, useVoiceStore, type VoiceStore } from '@/shared/assistant/voice';
 import { appLink } from '@/shared/launch';
 import { dictationTyper } from '@/shared/dictationField';
 
@@ -79,6 +80,54 @@ function useAppDictation(ref: RefObject<HTMLTextAreaElement | null>) {
   };
 }
 
+/** The window's voice: speechSynthesis, which in a Din app is Din's. */
+let appVoice: VoiceStore | null = null;
+function useAppVoice() {
+  appVoice ??= createVoice(speechSynthesisEngine());
+  return useVoiceStore(appVoice);
+}
+
+/**
+ * A call's listening: the web's SpeechRecognition, continuous, with what's
+ * heard so far as it goes. Each final result is a stretch of speech.
+ */
+function listen(handlers: ListenHandlers): Listening {
+  const r = new SpeechRecognition();
+  r.continuous = true;
+  r.interimResults = true;
+  let done = 0;
+  let failed: { code: string; message: string } | null = null;
+  let stopped = false;
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = done; i < e.results.length; i++) {
+      const result = e.results[i];
+      const text = result?.[0]?.transcript.trim() ?? '';
+      if (result?.isFinal && i === done) {
+        done++;
+        if (text) handlers.onFinal(text);
+      } else if (text) {
+        interim = interim ? `${interim} ${text}` : text;
+      }
+    }
+    handlers.onInterim(interim);
+  };
+  r.onerror = (e) => {
+    if (e.error !== 'aborted') failed = { code: e.error, message: e.message };
+  };
+  r.onend = () => {
+    handlers.onInterim('');
+    handlers.onEnd(stopped ? null : failed);
+  };
+  r.start();
+  return {
+    stop: () => {
+      stopped = true;
+      r.abort();
+    },
+  };
+}
+
 /**
  * The assistant's UI in an app: window.din for what the desktop does, and
  * the app's own copy of the queries kept current from the server's events.
@@ -96,6 +145,7 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
     (): AssistantHost => ({
       directory: settings.directory,
       colorfulReplies: settings.colorfulReplies,
+      speakReplies: settings.speakReplies,
       setEnabled: (enabled) => din.assistant.setSettings({ enabled }),
       openApp: (appId, params) => void window.open(appLink(appId, params)),
       openUrl: (url) => window.open(url),
@@ -125,8 +175,10 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
       notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
       useDictation: (ref) => useAppDictation(ref),
       pauseMedia: () => din.desktop.pauseMedia(),
+      useVoice: useAppVoice,
+      listen: typeof SpeechRecognition === 'function' ? listen : undefined,
     }),
-    [din, settings.directory, settings.colorfulReplies],
+    [din, settings.directory, settings.colorfulReplies, settings.speakReplies],
   );
 
   return <AssistantHostContext value={host}>{children}</AssistantHostContext>;

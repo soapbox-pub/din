@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   AppWindow,
   Archive,
+  AudioLines,
   Ban,
   Boxes,
   Download,
@@ -56,6 +57,7 @@ const ICONS: Record<string, LucideIcon> = {
   vms: Monitor,
   games: Gamepad2,
   dictation: Mic,
+  speech: AudioLines,
   containers: Boxes,
   webkit: Globe,
   xvfb: SquareTerminal,

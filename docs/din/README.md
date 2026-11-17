@@ -43,7 +43,7 @@ din.app.ready();
 | `din.drag` | [drag-and-drop.md](drag-and-drop.md) |
 | `navigator.share`, `din.app.share`, the manifest's `share_target` | [sharing.md](sharing.md) |
 | `din.theme`, `window.nostr`, `Notification`, `navigator.setAppBadge`, the app's own toasts | [theme-and-account.md](theme-and-account.md) |
-| `navigator.mediaSession`, `window.print()`, `din.desktop`, `SpeechRecognition`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
+| `navigator.mediaSession`, `window.print()`, `din.desktop`, `SpeechRecognition`, `speechSynthesis`, `din.assistant` | [media-and-desktop.md](media-and-desktop.md) |
 | `din.inputMethod`: being a keyboard | [input-method.md](input-method.md) |
 | `navigator.permissions.query`, `din.system`, `din.store` | [permissions.md](permissions.md) |
 | Service workers, `registration.periodicSync` | [background.md](background.md) |

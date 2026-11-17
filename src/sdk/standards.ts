@@ -1274,6 +1274,208 @@ export function installSpeechRecognition(host: SpeechHost): void {
 }
 
 // ---------------------------------------------------------------------------
+// Text to speech
+// ---------------------------------------------------------------------------
+
+/** A voice Din speaks in: Kokoro's id for it, a person's name, its language. */
+export interface SynthesisVoice {
+  id: string;
+  name: string;
+  lang: string;
+}
+
+export type UtteranceEvent = { id: number } & (
+  | { event: 'start' | 'end' | 'pause' | 'resume' }
+  | { event: 'error'; error: string; message: string }
+);
+
+export interface SynthesisHost {
+  /** The voices, and the one the user chose (Settings → Assistant). */
+  voices(): { voices: SynthesisVoice[]; default: string };
+  onVoicesChange(cb: () => void): Unsubscribe;
+  /** Queue utterance `id` behind what's being said (anyone's: Din has one voice). */
+  speak(id: number, utterance: { text: string; voice: string; rate: number; volume: number }): void;
+  /** Take back this window's utterances: the one being said, and those waiting. */
+  cancel(): void;
+  pause(): void;
+  resume(): void;
+  onEvent(cb: (event: UtteranceEvent) => void): Unsubscribe;
+}
+
+/** The web's limit on an utterance's text. */
+const MAX_UTTERANCE = 32_767;
+
+/**
+ * The Web Speech API's `speechSynthesis` and `SpeechSynthesisUtterance`
+ * over Din's voice, which the desktop speaks in for everyone, one utterance
+ * at a time: an app's wait their turn behind the assistant's and other
+ * apps', and its cancel() takes back only its own. Voices are Din's
+ * (`getVoices()`, all local, the user's choice `default`), and
+ * `voiceschanged` comes when they do (the Speech optional feature
+ * installed). `pitch` is kept but not heard; `boundary` and `mark` never
+ * come, as in many browsers.
+ */
+export function installSpeechSynthesis(host: SynthesisHost): void {
+  let nextId = 1;
+  const live = new Map<number, DinUtterance>();
+  /** This window's utterances, in the order they'll be said. */
+  const mine: DinUtterance[] = [];
+  let paused = false;
+
+  class DinVoice {
+    readonly voiceURI: string;
+    readonly name: string;
+    readonly lang: string;
+    readonly localService = true;
+    readonly default: boolean;
+    constructor(v: SynthesisVoice, isDefault: boolean) {
+      this.voiceURI = `din:${v.id}`;
+      this.name = v.name;
+      this.lang = v.lang;
+      this.default = isDefault;
+    }
+  }
+  const voiceIds = new WeakMap<object, string>();
+  let voices: DinVoice[] = [];
+  const readVoices = () => {
+    const { voices: list, default: chosen } = host.voices();
+    voices = list.map((v) => {
+      const voice = new DinVoice(v, v.id === chosen);
+      voiceIds.set(voice, v.id);
+      return voice;
+    });
+  };
+  readVoices();
+  /**
+   * Without a voice, the user's if it speaks the utterance's language (or
+   * the page's), else the first that does, as near as can be ("en-GB",
+   * then "en"); '' for the user's.
+   */
+  const voiceForLang = (lang: string): string => {
+    const want = (lang || document.documentElement.lang || '').toLowerCase();
+    if (!want) return '';
+    const base = (tag: string) => tag.toLowerCase().split('-')[0];
+    const exact = voices.filter((v) => v.lang.toLowerCase() === want);
+    const pool = exact.length > 0 ? exact : voices.filter((v) => base(v.lang) === base(want));
+    if (pool.length === 0 || pool.some((v) => v.default)) return '';
+    return voiceIds.get(pool[0]!) ?? '';
+  };
+
+  type Handler = ((this: unknown, event: Event) => unknown) | null;
+  const fire = (target: EventTarget, event: Event) => {
+    target.dispatchEvent(event);
+    const handler = (target as unknown as Record<string, Handler>)[`on${event.type}`];
+    try {
+      handler?.call(target, event);
+    } catch (error) {
+      console.error('din: speechSynthesis handler threw:', error);
+    }
+  };
+
+  class DinUtterance extends EventTarget {
+    text: string;
+    lang = '';
+    voice: DinVoice | null = null;
+    volume = 1;
+    rate = 1;
+    pitch = 1;
+    onstart: Handler = null;
+    onend: Handler = null;
+    onerror: Handler = null;
+    onpause: Handler = null;
+    onresume: Handler = null;
+    onboundary: Handler = null;
+    onmark: Handler = null;
+    /** @internal When it started being said, for elapsedTime. */
+    startedAt = 0;
+    constructor(text?: string) {
+      super();
+      this.text = text === undefined ? '' : String(text);
+    }
+  }
+
+  const finish = (u: DinUtterance) => {
+    const index = mine.indexOf(u);
+    if (index >= 0) mine.splice(index, 1);
+    for (const [id, x] of live) if (x === u) live.delete(id);
+    if (mine.length === 0) paused = false;
+  };
+
+  host.onEvent((e) => {
+    const u = live.get(e.id);
+    if (!u) return;
+    const event = new Event(e.event);
+    if (e.event === 'start') u.startedAt = performance.now();
+    if (e.event === 'end' || e.event === 'error') finish(u);
+    Object.defineProperties(event, {
+      utterance: { value: u, enumerable: true },
+      charIndex: { value: e.event === 'end' ? u.text.length : 0, enumerable: true },
+      charLength: { value: 0, enumerable: true },
+      elapsedTime: { value: u.startedAt ? performance.now() - u.startedAt : 0, enumerable: true },
+      name: { value: '', enumerable: true },
+    });
+    if (e.event === 'error') Object.defineProperty(event, 'error', { value: e.error, enumerable: true });
+    fire(u, event);
+  });
+
+  class DinSpeechSynthesis extends EventTarget {
+    onvoiceschanged: Handler = null;
+    get speaking(): boolean {
+      return mine.length > 0;
+    }
+    get pending(): boolean {
+      return mine.length > 1;
+    }
+    get paused(): boolean {
+      return paused;
+    }
+    getVoices(): DinVoice[] {
+      return [...voices];
+    }
+    speak(utterance: DinUtterance): void {
+      if (!(utterance instanceof DinUtterance)) {
+        throw new TypeError("Failed to execute 'speak' on 'SpeechSynthesis': parameter 1 is not of type 'SpeechSynthesisUtterance'.");
+      }
+      const id = nextId++;
+      live.set(id, utterance);
+      mine.push(utterance);
+      const rate = Number(utterance.rate);
+      const volume = Number(utterance.volume);
+      host.speak(id, {
+        text: String(utterance.text ?? '').slice(0, MAX_UTTERANCE),
+        voice: utterance.voice ? (voiceIds.get(utterance.voice) ?? '') : voiceForLang(String(utterance.lang ?? '')),
+        rate: Number.isFinite(rate) ? Math.min(2, Math.max(0.5, rate)) : 1,
+        volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1,
+      });
+    }
+    cancel(): void {
+      if (mine.length === 0) return;
+      host.cancel();
+    }
+    pause(): void {
+      if (paused || mine.length === 0) return;
+      paused = true;
+      host.pause();
+    }
+    resume(): void {
+      if (!paused) return;
+      paused = false;
+      host.resume();
+    }
+  }
+
+  const synthesis = new DinSpeechSynthesis();
+  host.onVoicesChange(() => {
+    readVoices();
+    fire(synthesis, new Event('voiceschanged'));
+  });
+
+  Object.defineProperty(window, 'speechSynthesis', { get: () => synthesis, configurable: true });
+  Object.defineProperty(window, 'SpeechSynthesisUtterance', { value: DinUtterance, writable: true, configurable: true });
+  Object.defineProperty(window, 'SpeechSynthesisVoice', { value: DinVoice, writable: true, configurable: true });
+}
+
+// ---------------------------------------------------------------------------
 // Handles kept in IndexedDB
 // ---------------------------------------------------------------------------
 

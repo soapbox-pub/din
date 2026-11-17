@@ -27,7 +27,7 @@ import type {
   StorePackageType,
   StoreState,
 } from '@/sdk/din';
-import type { StoredHandle } from '@/sdk/standards';
+import type { StoredHandle, SynthesisVoice } from '@/sdk/standards';
 
 /**
  * What an app's page is playing, for Din's media controls and the media
@@ -164,6 +164,8 @@ export interface Hello {
   clipboardFiles: { count: number; cut: boolean } | null;
   /** Whether this computer can take dictation (the runtime's SpeechRecognition). */
   dictation: { available: boolean };
+  /** The voices speechSynthesis speaks in (none until the Speech optional feature is installed), and the user's. */
+  speech: { voices: SynthesisVoice[]; default: string };
   /** Din's assistant settings, for apps with the assistant permission. */
   assistant: AssistantSettings | null;
   /** The conversations with unread notifications, for apps with the assistant permission. */
@@ -294,6 +296,16 @@ export interface Requests {
   'speech.start': [{ id: number; continuous: boolean; interim?: boolean; lang?: string }, void];
   'speech.stop': [void, void];
   'speech.abort': [void, void];
+  /**
+   * speechSynthesis.speak(): say `text` once what's ahead of it is said (Din
+   * has one voice), in `voice` ('' for the user's), its events as
+   * `utterance` pushes naming `id`.
+   */
+  'synthesis.speak': [{ id: number; text: string; voice: string; rate: number; volume: number }, void];
+  /** Take back this window's utterances, the one being said and those waiting. */
+  'synthesis.cancel': [void, void];
+  'synthesis.pause': [void, void];
+  'synthesis.resume': [void, void];
 
   /** The token is the app's own (random); the desktop refuses one already in use. */
   'drag.startFiles': [{ token: string; handles: string[]; label: string }, void];
@@ -394,6 +406,11 @@ export type Push =
   | { type: 'speech'; id: number; event: 'speechstart' | 'speechend' }
   | { type: 'speech'; id: number; event: 'error'; error: SpeechErrorCode; message: string }
   | { type: 'speech'; id: number; event: 'end' }
+  /** One of this window's utterances (speechSynthesis) starting, ending or failing. */
+  | { type: 'utterance'; id: number; event: 'start' | 'end' | 'pause' | 'resume' }
+  | { type: 'utterance'; id: number; event: 'error'; error: string; message: string }
+  /** speechSynthesis's voices changed: installed or removed, or the user chose another. */
+  | { type: 'voices'; voices: SynthesisVoice[]; default: string }
   /** A keyboard's field: another one, or none. */
   | { type: 'inputField'; change: InputFieldChange }
   /** The keyboard's field's selection, as the app reports it. */

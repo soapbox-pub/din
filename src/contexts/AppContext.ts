@@ -282,7 +282,17 @@ export interface AppConfig {
   assistantDirectory: string;
   /** Whether the assistant's replies color their headings, emphasis, code and links. */
   assistantColorfulReplies: boolean;
+  /**
+   * When the assistant reads its replies aloud, in Din's voice: never, when
+   * the message it answers was spoken (dictated), or always, for the
+   * conversations Din follows.
+   */
+  assistantSpeakReplies: AssistantSpeakReplies;
+  /** The voice Din speaks in (src/lib/speech.ts): a voice's id, or empty for the first. */
+  speechVoice: string;
 }
+
+export type AssistantSpeakReplies = 'never' | 'dictated' | 'always';
 
 export interface AppContextType {
   /** Current application configuration */

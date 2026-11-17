@@ -173,6 +173,7 @@ import { registerSystemPackageHandlers } from './system-packages.mts';
 import { registerLoginSessionHandlers } from './login-session.mts';
 import { registerAssistantHandlers } from './assistant.mts';
 import { registerDictationHandlers } from './dictation.mts';
+import { registerSpeechHandlers } from './speech.mts';
 import { allowScreenSharing, registerScreenShareHandlers } from './screen-share.mts';
 import { registerEyeDropperHandlers } from './eyedropper.mts';
 import { registerScreenRecorderHandlers, stopScreenRecording } from './screen-recorder.mts';
@@ -6525,6 +6526,7 @@ app.whenReady().then(() => {
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });
+  registerSpeechHandlers({ assertShellSender });
   registerBootScreenHandlers({ assertShellSender });
   registerLockHandlers({ assertShellSender });
   registerEraseHandlers({ assertShellSender });

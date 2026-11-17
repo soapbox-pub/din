@@ -737,7 +737,16 @@ export interface DinDesktop {
 // computer can take dictation. With `interimResults`, what's heard so far
 // comes first as a result that isn't final at the index its final one will
 // have, each replacing the last there, as the web's does. `lang` is passed
-// on as a hint where the host takes one; whisper guesses otherwise.
+// on as a hint where the host takes one; whisper guesses otherwise. A
+// `continuous` session shows no overlay of Din's: the app shows it listens.
+//
+// Text to speech is the web's `speechSynthesis` and
+// `SpeechSynthesisUtterance`, in Din's voice (Kokoro, on this computer,
+// with the Speech optional feature): one voice for all of Din, so an app's
+// utterances wait behind others', and its cancel(), pause() and resume()
+// touch only its own. getVoices() is Din's voices (empty until installed,
+// `voiceschanged` when that changes), the user's choice `default`. `rate`
+// and `volume` are heard; `pitch`, `boundary` and `mark` aren't.
 
 declare global {
   // The Web Speech API's recognizer, which TypeScript's DOM types don't have.
@@ -951,6 +960,11 @@ export interface AssistantSettings {
   /** The folder new conversations work in; '' for the home folder. */
   directory: string;
   colorfulReplies: boolean;
+  /**
+   * When replies are read aloud by themselves: never, when the message they
+   * answer was spoken (dictated, or on a call), or always.
+   */
+  speakReplies: 'never' | 'dictated' | 'always';
   /** The model new conversations use, if one was chosen, and how hard it thinks (`variant`, unset for its default). */
   model: { id: string; providerID: string; variant?: string } | null;
 }

@@ -1,7 +1,8 @@
 import { useMutation } from '@tanstack/react-query';
-import { ArrowUpCircle, Bot, CircleAlert, Folder, Loader2, Palette, RotateCw } from 'lucide-react';
+import { ArrowUpCircle, AudioLines, Bot, CircleAlert, Download, Folder, Loader2, MessageSquareText, Palette, Play, RotateCw, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { ProviderList } from '@/shared/assistant/Providers';
@@ -9,6 +10,11 @@ import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useAssistantStatus, useHomeDirectory, useSetAssistantEnabled } from '@/hooks/useAssistant';
 import { useToast } from '@/hooks/useToast';
+import { useFeatures } from '@/hooks/useFeatures';
+import { useSpeech } from '@/hooks/useSpeech';
+import type { AssistantSpeakReplies } from '@/contexts/AppContext';
+import { cleanFeaturesError, describeFeature, findFeature, formatFeatureSize, getFeaturesBridge } from '@/lib/features';
+import { cancelSpeech, defaultSpeechVoice, speak } from '@/lib/speech';
 import { cleanAssistantError, getAssistantBridge, tildify } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { settingsCard, settingsGroup } from '@/shared/settingsChromeStyles';
@@ -19,7 +25,8 @@ import { bundledIconProps } from '@/shared/iconSizes';
 /**
  * Settings → Assistant: whether Din keeps OpenCode running, the state of
  * its server, the AI providers it may use, and below them where new
- * conversations work and how replies look.
+ * conversations work, how replies look, and when and in what voice they're
+ * read aloud.
  */
 export function AssistantSettingsSection() {
   const { config, updateConfig } = useAppContext();
@@ -85,6 +92,7 @@ export function AssistantSettingsSection() {
                   />
                 </div>
               </div>
+              <VoiceSettings />
             </>
           )}
         </>
@@ -220,6 +228,138 @@ function FolderSetting({ value, onChange }: { value: string; onChange: (path: st
           Choose…
         </Button>
       </div>
+    </div>
+  );
+}
+
+const SPEAK_REPLIES: { value: AssistantSpeakReplies; label: string }[] = [
+  { value: 'dictated', label: 'When I speak' },
+  { value: 'always', label: 'Always' },
+  { value: 'never', label: 'Never' },
+];
+
+/** Whose Settings' sample is, so playing another stops it. */
+const SAMPLE = { name: 'settings' };
+
+/**
+ * When the assistant reads its replies aloud, and in which of Din's voices
+ * (src/lib/speech.ts), with a sample; until the Speech optional feature is
+ * installed, a way to install it.
+ */
+function VoiceSettings() {
+  const { config, updateConfig } = useAppContext();
+  const speech = useSpeech();
+  const features = useFeatures();
+  const { toast } = useToast();
+  const feature = findFeature(features.data, 'speech');
+  const voice = speech.voices.some((v) => v.id === config.speechVoice) ? config.speechVoice : defaultSpeechVoice();
+  const playing = speech.current?.owner === SAMPLE;
+
+  const play = (id: string) => {
+    cancelSpeech(SAMPLE);
+    const name = speech.voices.find((v) => v.id === id)?.name ?? 'Din';
+    speak({ text: `Hi, I’m ${name}. This is how I’ll read the assistant’s replies to you.`, voice: id, owner: SAMPLE });
+  };
+  const install = () => {
+    getFeaturesBridge()
+      ?.install('speech')
+      .catch((error: unknown) => toast({ title: 'Couldn’t install Speech', description: cleanFeaturesError(error), variant: 'destructive' }));
+  };
+
+  return (
+    <div className={settingsGroup}>
+      <div className="flex items-center justify-between gap-4 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <SettingsToken icon={MessageSquareText} />
+          <div className="min-w-0">
+            <Label htmlFor="assistant-speak-replies" className="text-sm font-normal">
+              Read replies aloud
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              When I speak: after a message you dictated. On a call, replies are always read aloud.
+            </p>
+          </div>
+        </div>
+        <Select
+          value={config.assistantSpeakReplies ?? 'dictated'}
+          onValueChange={(value) => updateConfig((current) => ({ ...current, assistantSpeakReplies: value as AssistantSpeakReplies }))}
+        >
+          <SelectTrigger id="assistant-speak-replies" size="sm" className="w-40 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SPEAK_REPLIES.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {speech.available ? (
+        <div className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <SettingsToken icon={AudioLines} />
+            <div className="min-w-0">
+              <Label htmlFor="speech-voice" className="text-sm font-normal">
+                Voice
+              </Label>
+              <p className="text-xs text-muted-foreground">How Din sounds, for the assistant and apps that read aloud.</p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-full"
+              aria-label={playing ? 'Stop the sample' : 'Play a sample'}
+              title={playing ? 'Stop' : 'Play a sample'}
+              onClick={() => (playing ? cancelSpeech(SAMPLE) : play(voice))}
+            >
+              {playing ? <Square className="size-3.5 fill-current" aria-hidden /> : <Play className="size-4" aria-hidden />}
+            </Button>
+            <Select
+              value={voice}
+              onValueChange={(speechVoice) => {
+                updateConfig((current) => ({ ...current, speechVoice }));
+                play(speechVoice);
+              }}
+            >
+              <SelectTrigger id="speech-voice" size="sm" className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {speech.voices.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.name} · {v.lang === 'en-GB' ? 'British' : 'American'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      ) : (
+        feature && (
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <SettingsToken icon={AudioLines} />
+              <div className="min-w-0">
+                <p className="text-sm">Speech isn’t installed</p>
+                <p className="text-xs text-muted-foreground">
+                  Din’s voice, which reads replies aloud on this computer. {describeFeature(feature)}.
+                </p>
+              </div>
+            </div>
+            {!feature.busy && (
+              <Button variant="outline" size="sm" className="shrink-0" onClick={install}>
+                <Download className="size-4" aria-hidden />
+                Install ({formatFeatureSize(feature.size)})
+              </Button>
+            )}
+            {feature.busy && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
+          </div>
+        )
+      )}
     </div>
   );
 }

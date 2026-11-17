@@ -39,6 +39,8 @@
 //     server, for the Assistant app, its menu-bar item and Settings
 //   - window.dinos.dictation: speech to text with whisper.cpp, for Super+H, the
 //     assistant's mic button and holding Super+A
+//   - window.dinos.speech: text to speech with Kokoro, for the desktop's voice
+//     (the assistant's spoken replies, apps' speechSynthesis)
 //   - window.dinos.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
 //   - window.dinos.phone: text messages from the user's phones over Bluetooth,
@@ -2691,6 +2693,27 @@ expose('dictation', {
    * @param {string} text
    */
   insertIntoGuest: (wcId, text) => ipcRenderer.invoke('dictation:insert-guest', wcId, text),
+});
+
+// Speech bridge (window.dinos.speech), backed by electron/speech.mts:
+// Kokoro's voices through sherpa-onnx, which the desktop plays.
+expose('speech', {
+  /** Whether the voice and its model are installed. */
+  available: () => ipcRenderer.invoke('speech:available'),
+
+  /** The voices: [{ id, name, lang }], none when it isn't installed. */
+  voices: () => ipcRenderer.invoke('speech:voices'),
+
+  /**
+   * A WAV file of `text` read aloud.
+   * @param {string} text A sentence or a few.
+   * @param {string} [voice] A voice's id; the first if not given.
+   * @param {number} [rate] 0.5 to 2, 1 for normal speed.
+   */
+  synthesize: (text, voice, rate) => ipcRenderer.invoke('speech:synthesize', text, voice ?? '', rate ?? 1),
+
+  /** Stop what's being made and drop what's waiting. */
+  cancel: () => ipcRenderer.invoke('speech:cancel'),
 });
 
 // Assistant bridge (window.dinos.assistant), backed by electron/assistant.mts:

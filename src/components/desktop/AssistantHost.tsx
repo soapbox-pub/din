@@ -347,13 +347,15 @@ const QuickPrompt = memo(function QuickPrompt() {
     return () => cancelAnimationFrame(frame);
   }, [open, holdNonce, ready]);
 
-  const submit = (text: string, files: Parameters<typeof start.mutateAsync>[0]['files']) =>
+  const submit = (text: string, files: Parameters<typeof start.mutateAsync>[0]['files'], { spoken }: { spoken: boolean }) =>
     start.mutateAsync(
       { text, files, model, directory },
       {
         onSuccess: (session) => {
           setOpen(false);
-          openApp(ASSISTANT_APP_ID, { sessionID: session.id, directory: undefined, nonce: Date.now() });
+          // Spoken (held Super+A, or the mic), it's answered aloud.
+          const nonce = Date.now();
+          openApp(ASSISTANT_APP_ID, { sessionID: session.id, directory: undefined, nonce, speakReply: spoken ? nonce : undefined });
         },
         onError: (error) =>
           toast({ title: 'Couldn’t ask the assistant', description: cleanAssistantError(error), variant: 'destructive' }),

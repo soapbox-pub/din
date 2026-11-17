@@ -115,6 +115,8 @@ const defaultConfig: AppConfig = {
   assistantEnabled: true,
   assistantDirectory: '',
   assistantColorfulReplies: true,
+  assistantSpeakReplies: 'dictated',
+  speechVoice: '',
 };
 
 export function App() {

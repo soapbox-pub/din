@@ -28,12 +28,26 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
+import { ReadAloudButton } from '@/shared/assistant/ReadAloudButton';
+import {
+  backgroundNotice,
+  blocks,
+  group,
+  replyCut,
+  replyText,
+  type AssistantMessage,
+  type Block,
+  type ReasoningPart,
+  type Step,
+  type ToolPart,
+  type TurnEntry,
+  type UserMessage,
+} from '@/shared/assistant/turns';
 import { Markdown } from '@/shared/assistant/Markdown';
 import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
 import {
   tildify,
   toolTaskID,
-  type AssistantContent,
   type PromptFile,
   type QueuedMessage,
   type SessionMessage,
@@ -46,73 +60,6 @@ import { useAgentColor } from '@/hooks/useAssistant';
 /** Tool output shown in full up to this many characters. */
 const MAX_OUTPUT_CHARS = 20_000;
 
-type AssistantMessage = Extract<SessionMessage, { type: 'assistant' }>;
-type UserMessage = Extract<SessionMessage, { type: 'user' }>;
-type IdleMessage = Extract<SessionMessage, { type: 'idle' }>;
-
-/** The agent's work on one prompt: from the user's message to the session going idle. */
-interface TurnEntry {
-  kind: 'turn';
-  id: string;
-  /** When the prompt was sent. */
-  start: number;
-  /** Its assistant messages, and whatever else the session recorded meanwhile. */
-  items: SessionMessage[];
-  /** How it ended, once it has. */
-  idle?: IdleMessage;
-}
-
-/** Messages grouped as the transcript shows them. */
-type Entry = { kind: 'user'; message: UserMessage } | TurnEntry | { kind: 'note'; message: SessionMessage };
-
-function group(messages: SessionMessage[]): Entry[] {
-  const entries: Entry[] = [];
-  let turn: TurnEntry | undefined;
-  // The prompt the agent is working on, until the session goes idle.
-  let prompt: UserMessage | undefined;
-  // A compaction partway through a prompt splits its turn; the rest is keyed by the compaction.
-  let compaction: SessionMessage | undefined;
-  const open = (first: SessionMessage): TurnEntry => {
-    // A turn whose prompt is past the loaded window would otherwise be keyed by its
-    // first visible message, which changes as the window slides and remounts it.
-    const from = compaction ?? prompt;
-    turn = {
-      kind: 'turn',
-      id: compaction ? `turn:${compaction.id}` : prompt ? `turn:${prompt.id}` : entries.length === 0 ? 'turn:earlier' : first.id,
-      start: from?.time.created ?? first.time.created,
-      items: [],
-    };
-    entries.push(turn);
-    return turn;
-  };
-  for (const message of messages) {
-    if (message.type === 'user') {
-      // One sent while it works closes the turn so far; the agent's next steps start another.
-      entries.push({ kind: 'user', message });
-      turn = undefined;
-      prompt = message;
-      compaction = undefined;
-    } else if (message.type === 'compaction') {
-      // The summary reads as a reply of its own, not as part of the work.
-      entries.push({ kind: 'note', message });
-      turn = undefined;
-      if (prompt) compaction = message;
-    } else if (message.type === 'idle') {
-      if (!turn && prompt) open(message);
-      if (turn) turn.idle = message;
-      else entries.push({ kind: 'note', message });
-      turn = undefined;
-      prompt = undefined;
-      compaction = undefined;
-    } else if (message.type === 'assistant' || turn || prompt || backgroundNotice(message)) {
-      // Background work finishing wakes the agent as a prompt would: its
-      // notice opens the turn, folded into the work with what that does.
-      (turn ?? open(message)).items.push(message);
-    } else entries.push({ kind: 'note', message });
-  }
-  return entries;
-}
-
 const NO_TASKS: ReadonlySet<string> = new Set();
 
 /** The ids of the commands and subagents the conversation started that still run. */
@@ -123,11 +70,6 @@ function stillRunning(step: Step, tasks: ReadonlySet<string>): boolean {
   if (step.type !== 'tool' || toolRunning(step)) return false;
   const id = toolTaskID(step);
   return id !== undefined && tasks.has(id);
-}
-
-/** The session's notice that a command, subagent or other work it left running has finished. */
-function backgroundNotice(message: SessionMessage): boolean {
-  return (message.type === 'synthetic' || message.type === 'system') && !!message.metadata?.source;
 }
 
 function compacting(message: SessionMessage): boolean {
@@ -402,42 +344,6 @@ function Working() {
   );
 }
 
-type ToolPart = Extract<AssistantContent, { type: 'tool' }>;
-type ReasoningPart = Extract<AssistantContent, { type: 'reasoning' }>;
-type Step = (ToolPart | ReasoningPart) & { key: string };
-
-/** A turn as it's shown: prose, and each unbroken run of tool calls and thinking folded into one line. */
-type Block =
-  | { kind: 'text'; key: string; text: string }
-  | { kind: 'steps'; key: string; steps: Step[] }
-  | { kind: 'error'; key: string; message: string }
-  | { kind: 'note'; key: string; message: SessionMessage };
-
-function blocks(items: SessionMessage[]): Block[] {
-  const out: Block[] = [];
-  for (const message of items) {
-    if (message.type !== 'assistant') {
-      out.push({ kind: 'note', key: message.id, message });
-      continue;
-    }
-    message.content.forEach((part, index) => {
-      const key = part.type === 'tool' ? part.id : `${message.id}:${index}`;
-      if (part.type === 'text') {
-        if (part.text.trim()) out.push({ kind: 'text', key, text: part.text });
-        return;
-      }
-      if (part.type === 'reasoning' && !part.text.trim()) return;
-      const last = out[out.length - 1];
-      if (last?.kind === 'steps') last.steps.push({ ...part, key });
-      else out.push({ kind: 'steps', key, steps: [{ ...part, key }] });
-    });
-    if (message.error) {
-      out.push({ kind: 'error', key: `${message.id}:error`, message: message.error.message ?? message.error.type ?? 'Something went wrong' });
-    }
-  }
-  return out;
-}
-
 function toolRunning(step: Step): boolean {
   return step.type === 'tool' && (step.state.status === 'streaming' || step.state.status === 'running');
 }
@@ -491,14 +397,11 @@ function Turn({
   const live = working && tail?.kind === 'steps' && stepsLive(tail.steps);
 
   // The reply is the prose after the last step; everything before it is the work.
-  let cut = -1;
-  list.forEach((block, index) => {
-    if (block.kind === 'steps' || block.kind === 'note') cut = index;
-  });
+  const cut = replyCut(list);
   const work = list.slice(0, cut + 1).filter((block) => block.kind !== 'error');
   const workErrors = list.slice(0, cut + 1).filter((block) => block.kind === 'error');
   const after = list.slice(cut + 1);
-  const reply = after.flatMap((block) => (block.kind === 'text' ? [block.text.trim()] : [])).join('\n\n');
+  const reply = replyText(after);
 
   const outcome = turn.idle?.outcome ?? (lastMessage?.error ? 'failed' : 'succeeded');
   const end = turn.idle?.time.created ?? Math.max(turn.start, ...assistants.map((m) => m.time.completed ?? m.time.created));
@@ -564,10 +467,11 @@ function Turn({
         <div
           className={cn(
             '-ml-2 -mt-2 flex',
-            !latest && 'opacity-0 focus-within:opacity-100 group-hover/turn:opacity-100',
+            !latest && 'opacity-0 focus-within:opacity-100 group-hover/turn:opacity-100 has-[[data-speaking]]:opacity-100',
           )}
         >
           <CopyButton text={reply} label="Copy reply" />
+          <ReadAloudButton text={reply} id={turn.id} />
         </div>
       )}
     </div>

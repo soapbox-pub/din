@@ -1,4 +1,6 @@
 import { createContext, useContext, type RefObject } from 'react';
+import type { AssistantSpeakReplies } from '@/contexts/AppContext';
+import type { Voice } from '@/shared/assistant/voice';
 
 /**
  * What the assistant's UI needs from wherever it's drawn: the desktop (the
@@ -12,6 +14,8 @@ export interface AssistantHost {
   directory: string;
   /** Replies colored as in OpenCode's terminal (Settings). */
   colorfulReplies: boolean;
+  /** When replies are read aloud by themselves (Settings → Assistant). */
+  speakReplies: AssistantSpeakReplies;
   /** Turn the assistant on or off, where Din's settings can be changed; else undefined. */
   setEnabled?: (enabled: boolean) => void;
   openApp(appId: string, params?: Record<string, unknown>): void;
@@ -44,6 +48,30 @@ export interface AssistantHost {
    * function returned is called (src/lib/mediaPause.ts).
    */
   pauseMedia(): () => void;
+  /**
+   * Din's voice, for Read Aloud and spoken replies (voice.ts): whether it's
+   * installed, what's being said, speaking and stopping. A hook.
+   */
+  useVoice(): Voice;
+  /**
+   * Listening until stopped, for a call (Call.tsx): Din's dictation, each
+   * stretch of speech handed back as it's heard rather than typed. Absent
+   * where the assistant can't take calls.
+   */
+  listen?: (handlers: ListenHandlers) => Listening;
+}
+
+export interface ListenHandlers {
+  /** A stretch of speech (a sentence or so) heard to the end. */
+  onFinal(text: string): void;
+  /** What's heard so far of the next one; '' once it's final or taken back. */
+  onInterim(text: string): void;
+  /** It stopped by itself, with why if it failed (null if it just ended), or after stop(). */
+  onEnd(error: { code: string; message: string } | null): void;
+}
+
+export interface Listening {
+  stop(): void;
 }
 
 export const AssistantHostContext = createContext<AssistantHost | null>(null);

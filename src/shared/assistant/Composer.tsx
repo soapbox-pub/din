@@ -1,5 +1,5 @@
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { ArrowUp, AudioLines, Mic, Paperclip, Plus, Square } from 'lucide-react';
+import { ArrowUp, AudioLines, Mic, Paperclip, Phone, Plus, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
@@ -150,11 +150,15 @@ export function Composer({
   className,
   textareaRef,
   draftKey,
+  onCall,
   ref: handleRef,
 }: {
   ref?: Ref<ComposerHandle>;
-  /** Resolves once sent; the text stays put if it rejects. */
-  onSubmit: (text: string, files: PromptAttachment[]) => Promise<unknown> | void;
+  /**
+   * Resolves once sent; the text stays put if it rejects. `spoken` when
+   * dictation wrote some of it, for its reply to be read aloud.
+   */
+  onSubmit: (text: string, files: PromptAttachment[], options: { spoken: boolean }) => Promise<unknown> | void;
   commands?: SlashCommand[];
   /** Like `onSubmit`, for a command: its name and what followed it. */
   onCommand?: (name: string, args: string, files: PromptAttachment[]) => Promise<unknown> | void;
@@ -173,6 +177,8 @@ export function Composer({
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   /** Keeps unsent text and files across restarts, one draft per key. */
   draftKey?: string;
+  /** Call the assistant (Call.tsx): a phone button beside the mic. */
+  onCall?: () => void;
 }) {
   const [text, setText] = useDraft(draftKey);
   const [files, setFiles] = useDraftFiles(draftKey);
@@ -181,6 +187,14 @@ export function Composer({
   const host = useAssistantHost();
   const dictation = host.useDictation(ref);
   const dictating = dictation.active;
+  // Whether dictation wrote any of the message, until it's sent or emptied.
+  const spoken = useRef(false);
+  useEffect(() => {
+    if (dictating) spoken.current = true;
+  }, [dictating]);
+  useEffect(() => {
+    if (!text && !dictating) spoken.current = false;
+  }, [text, dictating]);
 
   const menuID = useId();
   // The text Escape put the menu away for; typing on brings it back.
@@ -295,6 +309,8 @@ export function Composer({
     if (!message && attached.length === 0) return;
     const command = parseSlashCommand(message);
     const known = command && onCommand && commands.some((c) => c.name === command.name) ? command : null;
+    const wasSpoken = spoken.current;
+    spoken.current = false;
     setText('');
     setFiles([]);
     try {
@@ -303,7 +319,7 @@ export function Composer({
         await onCommand!(known.name, out.text, out.files);
       } else {
         const out = withAttachedPaths(message, attached);
-        await onSubmit(out.text, out.files);
+        await onSubmit(out.text, out.files, { spoken: wasSpoken });
       }
     } catch {
       // Give it back to try again.
@@ -612,6 +628,20 @@ export function Composer({
             )}
           >
             <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />
+          </Button>
+        )}
+        {onCall && !recording && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onCall}
+            disabled={disabled}
+            aria-label="Call the assistant"
+            title="Call — talk, and hear its replies"
+            className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+          >
+            <Phone className="size-4" aria-hidden />
           </Button>
         )}
         {running && onStop && (

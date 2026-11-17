@@ -77,6 +77,7 @@ import {
   installDroppedFiles,
   installPermissionsQuery,
   installSpeechRecognition,
+  installSpeechSynthesis,
   installStoredHandles,
   installSavedState,
   installWindowState,
@@ -344,7 +345,7 @@ const NO_STATE: WindowState = {
   id: '', focused: false, visible: true, minimized: false, maximized: false, snapped: null, fullscreen: false,
   bounds: NO_RECT, workArea: NO_RECT,
 };
-const NO_ASSISTANT: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, model: null };
+const NO_ASSISTANT: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, speakReplies: 'dictated', model: null };
 
 /** Define window.din, talking to the desktop over this transport. Once per document. */
 export function installDin(transport: Transport): void {
@@ -1107,6 +1108,29 @@ export function installDin(transport: Transport): void {
     abort: () => tell('speech.abort'),
     onEvent: (cb) => pushes.on((p) => {
       if (p.type === 'speech') cb(p);
+    }),
+  });
+  let speechVoices: Hello['speech'] = { voices: [], default: '' };
+  const voiceChanges = new Emitter<void>();
+  pushes.on((p) => {
+    if (p.type !== 'voices') return;
+    speechVoices = { voices: p.voices, default: p.default };
+    voiceChanges.emit();
+  });
+  void helloArrived.then((hello) => {
+    if (!hello.speech?.voices.length) return;
+    speechVoices = hello.speech;
+    voiceChanges.emit();
+  });
+  installSpeechSynthesis({
+    voices: () => speechVoices,
+    onVoicesChange: (cb) => voiceChanges.on(cb),
+    speak: (id, utterance) => tell('synthesis.speak', { id, ...utterance }),
+    cancel: () => tell('synthesis.cancel'),
+    pause: () => tell('synthesis.pause'),
+    resume: () => tell('synthesis.resume'),
+    onEvent: (cb) => pushes.on((p) => {
+      if (p.type === 'utterance') cb(p);
     }),
   });
 

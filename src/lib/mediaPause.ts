@@ -1,4 +1,5 @@
 import { controlMedia, getNowPlaying, subscribeNowPlaying } from '@/lib/nowPlaying';
+import { cancelSpeech } from '@/lib/speech';
 
 /**
  * Other media pauses while the microphone records the user's voice, as iOS
@@ -16,6 +17,9 @@ import { controlMedia, getNowPlaying, subscribeNowPlaying } from '@/lib/nowPlayi
  * Holders: dictation (src/lib/dictation.ts, and so apps' SpeechRecognition),
  * and the assistant's Record Audio (its host's `pauseMedia`, on the desktop
  * or an app's `din.desktop.pauseMedia()`).
+ *
+ * Din's own voice (src/lib/speech.ts) stops for good at a hold, switch or
+ * no switch: the user is talking now, and what it was saying is stale.
  */
 
 /** What plays again waits this long after the recording stops, so the two don't overlap. */
@@ -60,6 +64,7 @@ function resume(): void {
 
 /** Pause what's playing until the returned function is called. */
 export function holdMedia(): () => void {
+  cancelSpeech();
   if (!enabled) return () => {};
   holds++;
   if (resumeTimer) {

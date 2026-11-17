@@ -57,6 +57,7 @@ import {
   startDictation,
   subscribeDictation,
 } from '@/lib/dictation';
+import { cancelSpeech, defaultSpeechVoice, getSpeechState, pauseSpeech, resumeSpeech, speak, subscribeSpeech } from '@/lib/speech';
 import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
 import { getNativeAppsBridge, isProgram, openInInstalledApp } from '@/lib/nativeApps';
@@ -305,6 +306,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     mediaHold.current = null;
   }, []);
   useEffect(() => releaseMedia, [releaseMedia]);
+  /** Whose the app's speechSynthesis utterances are in Din's one voice; they go with the window. */
+  const speechOwner = useRef({});
+  useEffect(() => () => cancelSpeech(speechOwner.current), []);
   /** The app's SpeechRecognition session, which owns Din's dictation while it listens. */
   const speech = useRef<{ id: number; owner: object; ended: boolean } | null>(null);
   const endSpeech = useCallback((s: { id: number; owner: object; ended: boolean }) => {
@@ -317,6 +321,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     enabled: live.current.config.assistantEnabled !== false,
     directory: live.current.config.assistantDirectory ?? '',
     colorfulReplies: live.current.config.assistantColorfulReplies !== false,
+    speakReplies: live.current.config.assistantSpeakReplies ?? 'dictated',
     model: readStoredModel(),
   });
 
@@ -970,7 +975,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
               }
             },
           },
-          { held: continuous === true },
+          // Listening without end, the app shows it listens (the Assistant's call).
+          { held: continuous === true, overlay: continuous !== true },
         );
         speech.current = s;
         await started;
@@ -981,6 +987,23 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'speech.abort': () => {
         if (speech.current && getDictationState().owner === speech.current.owner) cancelDictation();
       },
+      // speechSynthesis: Din's one voice, the app's turn among everyone's.
+      'synthesis.speak': ({ id, text, voice, rate, volume }) => {
+        const n = Number(id);
+        speak({
+          text: typeof text === 'string' ? text.slice(0, 32_767) : '',
+          voice: typeof voice === 'string' ? voice : undefined,
+          rate: typeof rate === 'number' ? rate : undefined,
+          volume: typeof volume === 'number' ? volume : undefined,
+          owner: speechOwner.current,
+          onStart: () => push({ type: 'utterance', id: n, event: 'start' }),
+          onEnd: () => push({ type: 'utterance', id: n, event: 'end' }),
+          onError: (error, message) => push({ type: 'utterance', id: n, event: 'error', error, message }),
+        });
+      },
+      'synthesis.cancel': () => cancelSpeech(speechOwner.current),
+      'synthesis.pause': () => pauseSpeech(speechOwner.current),
+      'synthesis.resume': () => resumeSpeech(speechOwner.current),
 
       'drag.startFiles': async ({ token, handles, label }) => {
         const grants = await Promise.all(handles.map(usableGrant));
@@ -1276,6 +1299,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       drag: dragInfo(currentDrag()),
       clipboardFiles: fileClipboardInfo(),
       dictation: { available: hasDictationBridge() },
+      speech: { voices: getSpeechState().voices, default: defaultSpeechVoice() },
       powerMode: powerModeOn(),
       fsUrlBase,
       scopedFs,
@@ -1373,9 +1397,31 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     [push, endSpeech],
   );
 
+  // speechSynthesis's voices: installed, removed, or another chosen.
+  const voicesSent = useRef<string | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const voices = getSpeechState().voices;
+      const chosen = defaultSpeechVoice();
+      const key = JSON.stringify([voices, chosen]);
+      // The hello says what they are at first.
+      const first = voicesSent.current === null;
+      if (key === voicesSent.current) return;
+      voicesSent.current = key;
+      if (!first) push({ type: 'voices', voices, default: chosen });
+    };
+    update();
+    return subscribeSpeech(update);
+  }, [push]);
+
   // Din's assistant settings, for apps that show the assistant.
   const assistantJson = permissions.includes('assistant')
-    ? JSON.stringify({ enabled: config.assistantEnabled, directory: config.assistantDirectory, colorfulReplies: config.assistantColorfulReplies })
+    ? JSON.stringify({
+        enabled: config.assistantEnabled,
+        directory: config.assistantDirectory,
+        colorfulReplies: config.assistantColorfulReplies,
+        speakReplies: config.assistantSpeakReplies,
+      })
     : '';
   useEffect(() => {
     if (!assistantJson) return;

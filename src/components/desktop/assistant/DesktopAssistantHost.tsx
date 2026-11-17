@@ -11,7 +11,19 @@ import { appForFile } from '@/lib/fileTypes';
 import { getFileClipboard } from '@/lib/fileClipboard';
 import { holdMedia } from '@/lib/mediaPause';
 import { parentPath } from '@/lib/fs';
+import { cancelSpeech, getSpeechState, speak, subscribeSpeech } from '@/lib/speech';
 import { AssistantHostContext, type AssistantHost } from '@/shared/assistant/host';
+import { createVoice, useVoiceStore } from '@/shared/assistant/voice';
+
+/** The desktop's assistant speaking: Din's voice, straight. */
+const ASSISTANT = { name: 'assistant' };
+const desktopVoice = createVoice({
+  available: () => getSpeechState().available,
+  subscribe: subscribeSpeech,
+  speak: (text, { onStart, onEnd }) => speak({ text, owner: ASSISTANT, onStart, onEnd, onError: onEnd }),
+  cancel: () => cancelSpeech(ASSISTANT),
+});
+const useDesktopVoice = () => useVoiceStore(desktopVoice);
 
 function useDesktopDictation(ref: RefObject<HTMLTextAreaElement | null>) {
   const active = useIsDictatingInto(ref);
@@ -44,6 +56,7 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
     (): AssistantHost => ({
       directory: config.assistantDirectory,
       colorfulReplies: config.assistantColorfulReplies,
+      speakReplies: config.assistantSpeakReplies ?? 'dictated',
       setEnabled,
       openApp: (appId, params) => open(appId, params),
       openUrl,
@@ -64,8 +77,9 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,
       pauseMedia: holdMedia,
+      useVoice: useDesktopVoice,
     }),
-    [config.assistantDirectory, config.assistantColorfulReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast],
+    [config.assistantDirectory, config.assistantColorfulReplies, config.assistantSpeakReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast],
   );
 
   return <AssistantHostContext value={host}>{children}</AssistantHostContext>;

@@ -173,6 +173,25 @@ let
       default = true;
       parts = { whisper = pkgs.whisper-cpp-vulkan; model = whisperModel; };
     };
+    # Din's voice (electron/speech.mts): sherpa-onnx's offline TTS, on the
+    # CPU, reading Kokoro v0.19 (Apache-2.0, 82M parameters, quantized to
+    # int8) in its eleven English voices, a few times faster than it speaks.
+    # The model is k2-fsa's packaging of it, with espeak-ng's data for
+    # turning words into sounds; the hash is its unpacked tree's.
+    speech = {
+      title = "Speech";
+      description = "Kokoro, which reads text aloud on this computer, for the Assistant’s spoken replies and calls.";
+      size = 290;
+      parts = {
+        sherpa = pkgs.sherpa-onnx;
+        kokoro = {
+          name = "kokoro-int8-en-v0_19";
+          url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2";
+          unpack = true;
+          hash = "sha256-ogksVIKtlfXxQ9FASILFsU+lWNMjLtWWT3QsCOrl4Ro=";
+        };
+      };
+    };
     # WebKitGTK, the system webview Tauri, wry and other GTK webview apps
     # load instead of bundling a browser engine, on nix-ld's library path
     # (below).
@@ -537,6 +556,9 @@ let
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
+    # Din's voice (electron/speech.mts): sherpa-onnx and Kokoro's model.
+    export DIN_TTS=${featurePart "speech" "sherpa"}/bin/sherpa-onnx-offline-tts
+    export DIN_TTS_MODEL=${featurePart "speech" "kokoro"}
     # .NET for Windows programs (electron/windows-apps.mts): each
     # architecture's parts, merged into C:\Program Files\dotnet and
     # C:\Program Files (x86)\dotnet, the Desktop one (its unpacked

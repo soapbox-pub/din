@@ -86,4 +86,6 @@ export const AppConfigSchema = z.object({
   assistantEnabled: z.boolean(),
   assistantDirectory: z.string(),
   assistantColorfulReplies: z.boolean(),
+  assistantSpeakReplies: z.enum(['never', 'dictated', 'always']),
+  speechVoice: z.string(),
 }) satisfies z.ZodType<AppConfig>;

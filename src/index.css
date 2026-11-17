@@ -822,6 +822,17 @@
   animation: death-blink 1s infinite steps(1);
 }
 
+/* The Assistant's call: its bars while it speaks (src/shared/assistant/Call.tsx). */
+@keyframes call-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 @keyframes death-flicker {
   0%, 100% { opacity: 1; }
   7% { opacity: 0.8; }
