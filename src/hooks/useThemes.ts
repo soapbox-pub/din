@@ -4,9 +4,11 @@ import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
 import { z } from 'zod';
 import { useAppData } from '@/hooks/useAppData';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useFollowingPubkeys } from '@/hooks/useFollowingPubkeys';
 import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadLocalPicture } from '@/hooks/useUploadLocalPicture';
+import { NSITE_CATALOG_PUBKEYS } from '@/lib/nsiteCatalog';
 import { isLocalBackground, toProfileTheme, type DesktopTheme } from '@/lib/profileTheme';
 import {
   THEME_DEFINITION_KIND,
@@ -113,6 +115,38 @@ export function useThemeLibrary() {
       isLoading: query.isPending && query.fetchStatus !== 'idle',
     };
   }, [themes, entries, pubkey, query.isPending, query.fetchStatus]);
+}
+
+/**
+ * Named themes to choose from, as the App Store's Themes lists them: by
+ * Din's publishers, the user and the people they follow, newest first, the
+ * first `limit` of them. Only those authors' events are kept: for an
+ * addressable event the author is the only trust boundary.
+ */
+export function useThemeCatalog(limit = 40) {
+  const relays = useManifestRelays();
+  const { user } = useCurrentUser();
+  const following = useFollowingPubkeys();
+  const authors = useMemo(() => {
+    const set = new Set(NSITE_CATALOG_PUBKEYS);
+    if (user) set.add(user.pubkey);
+    for (const pubkey of following) set.add(pubkey);
+    return [...set];
+  }, [user, following]);
+
+  return useQuery<ThemeDefinition[]>({
+    queryKey: ['theme-catalog', authors, limit],
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
+    queryFn: async ({ signal }) => {
+      const events = await relays.query(
+        [{ kinds: [THEME_DEFINITION_KIND], authors, limit }, deletionsFilter(authors)],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+      const allowed = new Set(authors);
+      return buildThemeCatalog(events.filter((event) => allowed.has(event.pubkey)));
+    },
+  });
 }
 
 function themeCoordinateOf(event: NostrEvent): string {
