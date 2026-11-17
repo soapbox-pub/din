@@ -27,7 +27,8 @@ import {
 } from '@/components/desktop/apps/appearanceControls';
 
 /**
- * Customize: a few choices to make Din one's own, a step at a time, opened
+ * Customize: a few choices to make Din one's own, a step at a time, starting
+ * straight on the first (there's no cover page), opened
  * once when someone first uses Din (CustomizeAutoOpen) and from the Dock,
  * beside Settings, after. Each step is the same control Settings has
  * (appearanceControls.tsx), so what's chosen here is what Settings shows.
@@ -35,31 +36,15 @@ import {
 
 const CUSTOMIZE_ICON = '/icons/apps/customize.png';
 
-const STEPS = ['welcome', 'theme', 'layout', 'effects', 'done'] as const;
+const STEPS = ['theme', 'layout', 'effects', 'done'] as const;
 type Step = (typeof STEPS)[number];
 
 export function Customize({ windowId }: AppComponentProps) {
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>('theme');
   const { open, close } = useWindowActions();
   const index = STEPS.indexOf(step);
   const back = index > 0 ? () => setStep(STEPS[index - 1]) : undefined;
   const next = () => setStep(STEPS[Math.min(index + 1, STEPS.length - 1)]);
-
-  if (step === 'welcome') {
-    return (
-      <Hero
-        title="Make Din yours"
-        body="Pick a theme, how the desktop is laid out, and how much it moves. It takes a minute, and everything here is in Settings too, to change any time."
-      >
-        <Button size="lg" onClick={next}>
-          Get started
-        </Button>
-        <Button variant="ghost" onClick={() => close(windowId)}>
-          Not now
-        </Button>
-      </Hero>
-    );
-  }
 
   if (step === 'done') {
     return (
@@ -87,7 +72,7 @@ export function Customize({ windowId }: AppComponentProps) {
 
   return (
     <Page
-      step={index}
+      step={index + 1}
       title={step === 'theme' ? 'Choose a look' : step === 'layout' ? 'Lay out the desktop' : 'Motion and effects'}
       description={
         step === 'theme'
@@ -277,7 +262,7 @@ function EffectsStep({ windowId }: { windowId: string }) {
   );
 }
 
-/** The welcome and the end: the app's icon, a heading, a line, and what to do next. */
+/** The end: the app's icon, a heading, a line, and what to do next. */
 function Hero({
   title,
   body,
@@ -349,9 +334,9 @@ function Page({
   );
 }
 
-/** Where a step is among the ones with choices (the welcome and the end aren't counted). */
+/** Where a step is among the ones with choices (the end isn't counted). */
 function StepDots({ current }: { current: number }) {
-  const total = STEPS.length - 2;
+  const total = STEPS.length - 1;
   return (
     <span className="flex items-center gap-1.5" role="img" aria-label={`Step ${current} of ${total}`}>
       {Array.from({ length: total }, (_, i) => (
