@@ -66,6 +66,8 @@ export interface ListenHandlers {
   onFinal(text: string): void;
   /** What's heard so far of the next one; '' once it's final or taken back. */
   onInterim(text: string): void;
+  /** The user started or stopped speaking (a breath's pause ends it; its words come after). */
+  onSpeaking(speaking: boolean): void;
   /** It stopped by itself, with why if it failed (null if it just ended), or after stop(). */
   onEnd(error: { code: string; message: string } | null): void;
 }

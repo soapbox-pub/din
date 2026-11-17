@@ -117,6 +117,8 @@ export interface DictationState {
   held: boolean;
   /** Whether the overlay shows it; an app listening without end shows that it does itself. */
   overlay: boolean;
+  /** The user is speaking now (until a breath's pause): speechstart and speechend for apps. */
+  voiced: boolean;
   owner: unknown;
 }
 
@@ -144,7 +146,7 @@ const CONTEXT_CHARS = 400;
 /** Errors stay up this long. */
 const ERROR_MS = 4_000;
 
-const IDLE: DictationState = { status: 'idle', level: 0, preview: '', error: null, held: false, overlay: true, owner: null };
+const IDLE: DictationState = { status: 'idle', level: 0, preview: '', error: null, held: false, overlay: true, voiced: false, owner: null };
 
 let state: DictationState = IDLE;
 const listeners = new Set<() => void>();
@@ -275,6 +277,13 @@ interface Segment {
 interface Session {
   target: DictationTarget;
   held: boolean;
+  /**
+   * Whether the target is shown the words as they're heard. Each look is a
+   * whole transcription of the stretch so far, back to back while the user
+   * talks, which keeps the GPU busy (and the screen, which shares it,
+   * stuttering); a target that only wants what's final is spared them.
+   */
+  interim: boolean;
   stream: MediaStream | null;
   context: AudioContext | null;
   /** The segment being heard. */
@@ -428,7 +437,7 @@ function preview(current: Session): void {
   const api = bridge();
   const segment = current.segment;
   // Waiting segments go first: whisper takes one request at a time.
-  if (!api || current.previewing || current.ended || !segment.heard || current.pending.length) return;
+  if (!api || !current.interim || current.previewing || current.ended || !segment.heard || current.pending.length) return;
   if (segment.samples - segment.previewedSamples < PREVIEW_STEP_SAMPLES) return;
   segment.previewedSamples = segment.samples;
   current.previewing = true;
@@ -494,7 +503,10 @@ async function unmuteFor(current: Session): Promise<void> {
  * Start listening for `target`. A held session goes until finishDictation;
  * otherwise it ends after a pause. A session already running is cancelled.
  */
-export async function startDictation(target: DictationTarget, options: { held?: boolean; overlay?: boolean } = {}): Promise<void> {
+export async function startDictation(
+  target: DictationTarget,
+  options: { held?: boolean; overlay?: boolean; interim?: boolean } = {},
+): Promise<void> {
   if (session) {
     cancelDictation();
   }
@@ -507,6 +519,7 @@ export async function startDictation(target: DictationTarget, options: { held?: 
   const current: Session = {
     target,
     held: Boolean(options.held),
+    interim: options.interim !== false,
     stream: null,
     context: null,
     segment: newSegment(),
@@ -591,9 +604,10 @@ export async function startDictation(target: DictationTarget, options: { held?: 
         segment.samples -= segment.chunks.shift()!.length;
       }
     }
-    setState({ level: Math.min(1, Math.sqrt(rms) * 2.2) });
-
     const quiet = now - current.lastSpeechAt;
+    const voiced = segment.heard && quiet <= SEGMENT_PAUSE_MS;
+    setState(voiced !== state.voiced ? { level: Math.min(1, Math.sqrt(rms) * 2.2), voiced } : { level: Math.min(1, Math.sqrt(rms) * 2.2) });
+
     const length = (segment.samples / SAMPLE_RATE) * 1000;
     if (now - current.startedAt > MAX_MS) {
       void finishDictation();

@@ -11,8 +11,11 @@ import { useAssistantHost, type Listening } from '@/shared/assistant/host';
  * shows it in the composer's place.
  */
 
-/** What was said goes once the user has been quiet this long after it. */
-const SEND_AFTER_MS = 1500;
+/**
+ * What was said goes this long after its last words came back, if the user
+ * hasn't started again: they'd paused a breath before those were heard.
+ */
+const SEND_AFTER_MS = 1000;
 /** Words heard this soon after the voice stops are the end of its own. */
 const ECHO_MS = 1200;
 
@@ -32,6 +35,8 @@ export interface Call {
   phase: CallPhase;
   /** What's been heard and not sent yet. */
   heard: string;
+  /** The user is speaking now (their words come once they pause). */
+  talking: boolean;
   /** Why listening stopped, while paused. */
   problem: string | null;
   startedAt: number;
@@ -81,6 +86,8 @@ export function useCall({
   const [paused, setPaused] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [heard, setHeard] = useState('');
+  const [talking, setTalking] = useState(false);
+  const talkingNow = useRef(false);
   const [startedAt, setStartedAt] = useState(0);
 
   const listening = useRef<Listening | null>(null);
@@ -109,7 +116,7 @@ export function useCall({
   const flush = () => {
     timer.current = null;
     // Still talking: wait for the end of it.
-    if (interim.current) return;
+    if (interim.current || talkingNow.current) return;
     const text = said.current.trim();
     said.current = '';
     show();
@@ -138,6 +145,13 @@ export function useCall({
         interim.current = '';
         show();
         schedule();
+      },
+      onSpeaking: (now) => {
+        if (now && ownVoice()) return;
+        talkingNow.current = now;
+        setTalking(now);
+        if (now) clearTimer();
+        else schedule();
       },
       onInterim: (text) => {
         if (ownVoice()) return;
@@ -179,6 +193,7 @@ export function useCall({
       timer.current = null;
       said.current = '';
       interim.current = '';
+      talkingNow.current = false;
     } else {
       spokeUntil.current = Date.now();
     }
@@ -211,6 +226,7 @@ export function useCall({
     active,
     phase,
     heard,
+    talking: talking && phase !== 'speaking',
     problem,
     startedAt,
     start: () => {

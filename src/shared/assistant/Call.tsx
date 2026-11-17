@@ -32,7 +32,7 @@ export function CallBar({ call }: { call: Call }) {
   const { phase } = call;
   // While it speaks, what's heard is its own voice.
   const heard = phase === 'speaking' ? '' : call.heard;
-  const live = phase === 'listening' || phase === 'thinking';
+  const live = (phase === 'listening' || phase === 'thinking') && call.talking;
   return (
     <div
       role="region"
@@ -66,7 +66,7 @@ export function CallBar({ call }: { call: Call }) {
       </span>
       <div className="min-w-0 flex-1" aria-live="polite">
         <p className={cn('line-clamp-2 text-sm', heard ? 'text-foreground' : 'text-muted-foreground')}>
-          {phase === 'paused' ? call.problem : heard || STATUS[phase]}
+          {phase === 'paused' ? call.problem : heard ? (call.talking ? `${heard} …` : heard) : call.talking ? 'Hearing you…' : STATUS[phase]}
         </p>
         <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">On a call · {elapsed}</p>
       </div>

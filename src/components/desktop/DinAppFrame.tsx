@@ -941,7 +941,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
         }
       },
       // What's said goes back to the app, not typed anywhere.
-      'speech.start': async ({ id, continuous }) => {
+      'speech.start': async ({ id, continuous, interim }) => {
         // Only the window the user is in may open the microphone.
         if (!live.current.isTop) {
           const error = new Error('Only the focused window can listen');
@@ -976,7 +976,8 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
             },
           },
           // Listening without end, the app shows it listens (the Assistant's call).
-          { held: continuous === true, overlay: continuous !== true },
+          // Words as they're heard only for an app that asked for them: each look costs a transcription.
+          { held: continuous === true, overlay: continuous !== true, interim: interim === true },
         );
         speech.current = s;
         await started;
@@ -1396,6 +1397,19 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       }),
     [push, endSpeech],
   );
+
+  // The app's recognition hearing speech begin and end.
+  useEffect(() => {
+    let voiced = false;
+    return subscribeDictation(() => {
+      const s = speech.current;
+      const state = getDictationState();
+      const now = !!s && !s.ended && state.owner === s.owner && state.voiced;
+      if (now === voiced) return;
+      voiced = now;
+      if (s && !s.ended) push({ type: 'speech', id: s.id, event: now ? 'speechstart' : 'speechend' });
+    });
+  }, [push]);
 
   // speechSynthesis's voices: installed, removed, or another chosen.
   const voicesSent = useRef<string | null>(null);

@@ -88,13 +88,18 @@ function useAppVoice() {
 }
 
 /**
- * A call's listening: the web's SpeechRecognition, continuous, with what's
- * heard so far as it goes. Each final result is a stretch of speech.
+ * A call's listening: the web's SpeechRecognition, continuous, each final
+ * result a stretch of speech, and speechstart and speechend for when the
+ * user talks. No interim results: each costs Din a whole transcription,
+ * back to back for as long as the user talks, which over a call kept the
+ * GPU busy and the screen stuttering.
  */
 function listen(handlers: ListenHandlers): Listening {
   const r = new SpeechRecognition();
   r.continuous = true;
-  r.interimResults = true;
+  r.interimResults = false;
+  r.onspeechstart = () => handlers.onSpeaking(true);
+  r.onspeechend = () => handlers.onSpeaking(false);
   let done = 0;
   let failed: { code: string; message: string } | null = null;
   let stopped = false;
@@ -117,6 +122,7 @@ function listen(handlers: ListenHandlers): Listening {
   };
   r.onend = () => {
     handlers.onInterim('');
+    handlers.onSpeaking(false);
     handlers.onEnd(stopped ? null : failed);
   };
   r.start();
