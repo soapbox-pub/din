@@ -6,7 +6,12 @@
 // (mail.mts's tabOf).
 //
 // Mail from a person has none of what's looked for, so it stays in
-// Primary. Mail from a social network is Social; from a service about the
+// Primary. So does what the user is waiting on or part of, whoever sends
+// it: a sign-in's code or link, or word that someone signed in, and a
+// service's notice of a thread the user wrote, commented on, was mentioned
+// or asked to review in (GitHub says why it wrote in the Cc, as
+// mention@noreply.github.com; GitLab in X-GitLab-NotificationReason),
+// though not one the user only watches. Mail from a social network is Social; from a service about the
 // user's own work and accounts (GitHub's and the like, whose notifications
 // are sent as mailing lists) is Updates; a mailing list people write to
 // (List-Post) is Forums. Other mail is automated when it says so (bulk
@@ -28,14 +33,14 @@ export const CATEGORIES: readonly MailCategory[] = ['primary', 'promotions', 'so
  * (MessageSummary.sorted): raised when they change, so the inbox's mail is
  * sorted again.
  */
-export const SORTER_VERSION = 2;
+export const SORTER_VERSION = 3;
 
 export function isCategory(v: unknown): v is MailCategory {
   return typeof v === 'string' && (CATEGORIES as readonly string[]).includes(v);
 }
 
 /** The headers the sorter reads, as IMAP names them (List-Unsubscribe is fetched for every summary already). */
-export const CATEGORY_HEADERS = ['list-id', 'list-post', 'precedence', 'auto-submitted', 'x-auto-response-suppress'];
+export const CATEGORY_HEADERS = ['list-id', 'list-post', 'precedence', 'auto-submitted', 'x-auto-response-suppress', 'x-github-reason', 'x-gitlab-notificationreason'];
 
 const SOCIAL = [
   'facebookmail.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'x.com', 'twitter.com', 'reddit.com', 'redditmail.com',
@@ -74,6 +79,13 @@ const SENDING_HOST = /^(e|em|email|emails|emailinfo|mail|mailer|mailing|mailings
 const TRANSACTIONAL_SUBJECT =
   /\b(receipt|invoice|your order|pre-?order|order (#|no\.?|number|confirm)|(has|have) shipped|shipped \d|shipping (confirmation|update)|out for delivery|delivered|payment (of|received|confirm|failed)|(has )?charged|received \$?\d[\d,.]*|\$\d[\d,.]* (from|to|payment|charge)|refund|payment (info|method|details)|action required|alert|invited you|your (\w+ )?(account|card|credit limit)\b|deposit(ed)?|verification code|security (alert|code)|login code|password|sign[- ]?in|log[- ]?in|statements?|reservation|booking|appointment|itinerary|prescription|ready for pickup|(will )?expires? in|expir(ed|ing)|renew(al)?|due (date|on)|overdue|moderate)\b/i;
 
+/** A sign-in: its code or link, the address or identity it checks, or word of a new one. */
+const SIGN_IN_SUBJECT =
+  /\b((log[- ]?in|sign[- ]?in|verification|security|one[- ]time|access|confirmation|authentication|2fa|two[- ]factor|mfa) (code|link|pin)|pass ?code|otp\b|magic link|is your( [\w.-]+){0,3} (code|pin)|your code is|verify your (identity|email|e-mail|address|account|login|sign[- ]?in|device)|confirm your (email|e-mail|address|account|sign[- ]?in|login)|(new|unrecognized|unusual|suspicious) (device |location |browser )?(sign[- ]?in|log[- ]?in|login)|(sign[- ]?in|log[- ]?in|login) (from|on|to your account from) (a )?new|security alert for|reset your password|password reset)\b|^[^:]{0,40}:\s*(sign|log) ?in$|^(sign|log) ?in to\b/i;
+
+/** Why GitHub or GitLab wrote, when it's because of something the user did or was asked to: not a repository they watch. */
+const PARTICIPATING = new Set(['author', 'comment', 'mention', 'team_mention', 'assign', 'review_requested', 'manual', 'state_change', 'mentioned', 'assigned', 'approval_required']);
+
 const PROMO_SUBJECT =
   /(\d+\s?% (off|more|bonus|back)|\$\d+ off|\b(sale|deals?|save (big|up|\d|\$)|savings|last chance|limited time|free shipping|bonus|restock(ed)?|back in stock|exclusive|don['’]t miss|ends (today|tonight|soon)|early bird|new arrivals|shop (now|the)|promo|coupon|discount|black friday|cyber monday|gift (guide|edition)|now open for sale)\b)/i;
 
@@ -101,12 +113,17 @@ export function isAutomatedAddress(address: string): boolean {
  * Which tab a message goes in, from its header fields (lowercased, as
  * headerFields gives them), sender and subject.
  */
-export function categorize(fields: Map<string, string[]> | null, from: MailAddress | undefined, subject: string): MailCategory {
+export function categorize(fields: Map<string, string[]> | null, from: MailAddress | undefined, subject: string, cc: MailAddress[] = []): MailCategory {
   const address = (from?.address ?? '').toLowerCase();
   const at = address.lastIndexOf('@');
   const local = at > 0 ? address.slice(0, at) : address;
   const domain = at > 0 ? address.slice(at + 1) : '';
   const first = (key: string) => fields?.get(key)?.find((v) => /\S/.test(v))?.trim() ?? '';
+
+  if (SIGN_IN_SUBJECT.test(subject) && !PROMO_SUBJECT.test(subject)) return 'primary';
+  const reasons = [first('x-github-reason'), first('x-gitlab-notificationreason')];
+  if (domain === 'github.com') for (const c of cc) if (c.address.toLowerCase().endsWith('@noreply.github.com')) reasons.push(c.address.slice(0, c.address.indexOf('@')));
+  if (reasons.some((r) => PARTICIPATING.has(r.toLowerCase()))) return 'primary';
 
   if (within(domain, SOCIAL)) return 'social';
   if (within(domain, UPDATES)) return 'updates';

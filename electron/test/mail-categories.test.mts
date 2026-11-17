@@ -23,6 +23,31 @@ describe('categorize', () => {
     expect(tab('noreply@github.com', '[GitHub] A workflow will be disabled')).toBe('updates');
   });
 
+  it('keeps threads the user is part of in Primary, not ones they only watch', () => {
+    const cc = (reason: string) => [{ name: '', address: 'alex@example.org' }, { name: '', address: `${reason}@noreply.github.com` }];
+    const subject = 'Re: [org/repo] Fix the build (PR #12)';
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('mention'))).toBe('primary');
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('author'))).toBe('primary');
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('subscribed'))).toBe('updates');
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('push'))).toBe('updates');
+    const gitlab = (reason: string) => new Map([...BULK, ['x-gitlab-notificationreason', [reason]]]);
+    expect(tab('gitlab@mg.gitlab.com', 'Re: Project | Uploads fail (#338)', gitlab('mentioned'))).toBe('primary');
+    expect(tab('gitlab@mg.gitlab.com', 'Re: Project | Uploads fail (#338)', gitlab(''))).toBe('updates');
+  });
+
+  it('keeps sign-ins in Primary, from any sender', () => {
+    expect(tab('no-reply@getalby.com', 'Alby one-time login code: NIWH5E', BULK)).toBe('primary');
+    expect(tab('no-reply@getalby.com', 'Alby: Login from new location or device')).toBe('primary');
+    expect(tab('no-reply@instacart.com', '016360 is your Instacart verification code')).toBe('primary');
+    expect(tab('no-reply@hs.email.nextdoor.com', 'Your login code is 901454', BULK)).toBe('primary');
+    expect(tab('info@opencollective.com', 'Open Collective: Sign In')).toBe('primary');
+    expect(tab('gitlab@mg.gitlab.com', 'Verify your identity')).toBe('primary');
+    expect(tab('noreply@uber.com', 'New device sign-in')).toBe('primary');
+    expect(tab('noreply@patient-message.com', 'Confirm your upcoming appointment')).toBe('updates');
+    expect(tab('bot@notifications.heroku.com', 'Remember to Register a Backup MFA Verification Method')).toBe('updates');
+    expect(tab('news@email.store.example', 'Sign in to save 20% off today', BULK)).toBe('promotions');
+  });
+
   it('puts a mailing list people write to in Forums', () => {
     const list = new Map([['list-id', ['<dev.lists.example.org>']], ['list-post', ['<mailto:dev@lists.example.org>']]]);
     expect(tab('someone@example.org', 'Re: [dev] Release plans', list)).toBe('forums');

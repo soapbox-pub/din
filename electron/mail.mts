@@ -1362,7 +1362,7 @@ function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
     references: keptReferences(messageIds(headers?.get('references')?.join(' '))),
     senderVerified: senderVouched(raw, from0Domain(m)),
     // Gmail's are asked of Gmail (fetchSummaries).
-    category: gmail ? undefined : categorize(headers, addresses(m.envelope?.from)[0], m.envelope?.subject ?? ''),
+    category: gmail ? undefined : categorize(headers, addresses(m.envelope?.from)[0], m.envelope?.subject ?? '', addresses(m.envelope?.cc)),
     sorted: SORTER_VERSION,
   };
 }
