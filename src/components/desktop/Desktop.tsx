@@ -58,6 +58,7 @@ import { SystemEventsHost } from './SystemEventsHost';
 import { NativeLinksHost } from './NativeLinksHost';
 import { LaunchHost } from './LaunchHost';
 import { CommandHost } from './CommandHost';
+import { CustomizeAutoOpen } from './CustomizeAutoOpen';
 import { InstallerAutoOpen } from './InstallerAutoOpen';
 import { UpdateNotifier } from './UpdateNotifier';
 import { AirPlayOsd, AirPlayPromptHost } from './AirPlayIndicator';
@@ -163,6 +164,7 @@ const SessionHosts = memo(function SessionHosts() {
       <CursorEffectsLayer />
       <DinDragOverlay />
       <InstallerAutoOpen />
+      <CustomizeAutoOpen />
       <UpdateNotifier />
       <AirPlayPromptHost />
       <BluetoothPromptHost />

@@ -119,6 +119,9 @@ Staying in the desktop, as its own system UI rather than apps:
   relays), so they'd need most of `window.dinos`. Isolating them would buy
   a process of their own and little else; they stay with the desktop, as
   Din's control panel.
+- **Customize**: a few of Settings' own controls (theme, glass, layout,
+  effects) as a flow for someone new, so it lives where they do
+  (`appearanceControls.tsx`).
 
 The App Store moved for a different reason than the others: it renders
 strangers' content (listings, icons, screenshots, release notes, theme

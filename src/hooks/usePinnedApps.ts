@@ -6,7 +6,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { hiddenBadges } from '@/lib/hiddenBadges';
 
 /** Apps kept in the Dock (or taskbar) out of the box. */
-const DEFAULT_PINNED = ['file-browser', 'settings', 'web-browser', 'app-store'];
+const DEFAULT_PINNED = ['file-browser', 'settings', 'customize', 'web-browser', 'app-store'];
 
 const PinnedAppsSchema = z.array(z.string());
 

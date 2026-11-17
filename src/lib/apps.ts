@@ -24,6 +24,9 @@ const WebBrowser = lazy(() =>
 const WebPopup = lazy(() =>
   import('@/components/desktop/apps/WebPopup').then((m) => ({ default: m.WebPopup })),
 );
+const Customize = lazy(() =>
+  import('@/components/desktop/apps/Customize').then((m) => ({ default: m.Customize })),
+);
 const Settings = lazy(() =>
   import('@/components/desktop/apps/Settings').then((m) => ({ default: m.Settings })),
 );
@@ -309,6 +312,18 @@ export const APPS: readonly AppDefinition[] = [
     component: Settings,
     defaultSize: { width: 960, height: 680 },
     keywords: ['preferences', 'control panel', 'system settings', 'options'],
+    singleInstance: true,
+  },
+  {
+    // A few choices to make Din one's own, a step at a time: theme, layout,
+    // effects. Opens by itself the first time (CustomizeAutoOpen), and is
+    // pinned beside Settings.
+    id: 'customize',
+    name: 'Customize',
+    icon: '/icons/apps/customize.png',
+    component: Customize,
+    defaultSize: { width: 680, height: 640 },
+    keywords: ['personalize', 'personalise', 'appearance', 'theme', 'welcome', 'get started', 'setup', 'look and feel', 'effects', 'dark mode'],
     singleInstance: true,
   },
   {

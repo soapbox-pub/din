@@ -71,3 +71,9 @@ export const settingsNotice = 'rounded-xl bg-selected';
 
 /** A notice that something went wrong. */
 export const settingsAlert = 'rounded-xl bg-destructive/10';
+
+/** The wallpaper of the desktops Settings draws in miniature, in the theme's primary. */
+export const PREVIEW_WALLPAPER = 'bg-linear-to-br from-primary/85 via-primary/55 to-foreground/35';
+
+/** The stand-in apps on the miniature desktops' Docks and taskbars. */
+export const PREVIEW_APPS = ['bg-card', 'bg-card/75', 'bg-card/50'];
