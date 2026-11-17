@@ -62,7 +62,8 @@ function takeCarried(sessionID: string | undefined): number | null {
 /**
  * The call in a conversation (or on the new-conversation screen, without
  * `sessionID`): `send` sends what was said as a message, `running` whether
- * the assistant is working. Null where there's no voice or no dictation.
+ * the assistant is working. Null where there's no dictation; without Din's
+ * voice, starting one points to where to install it.
  */
 export function useCall({
   sessionID,
@@ -192,7 +193,7 @@ export function useCall({
     [],
   );
 
-  if (!host.listen || !voice.available) return null;
+  if (!host.listen) return null;
 
   const end = () => {
     drop();
@@ -214,6 +215,12 @@ export function useCall({
     startedAt,
     start: () => {
       if (active) return;
+      // Replies are read aloud, which needs Din's voice: where to get it.
+      if (!voice.available) {
+        host.notify({ title: 'Calls need Speech', description: 'Install Speech in Settings → Optional Features, then call again.' });
+        host.openApp('settings', { section: 'features' });
+        return;
+      }
       setActive(true);
       setMuted(false);
       setStartedAt(Date.now());
