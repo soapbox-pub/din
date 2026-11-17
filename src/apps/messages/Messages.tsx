@@ -24,7 +24,7 @@ import { useContacts, useConversations, useMessages, usePhone, usePhoneState, us
 import { Avatar } from './messages/Avatar';
 import { Composer } from './messages/Composer';
 import { ConversationList } from './messages/ConversationList';
-import { conversationKey, displayName, groupTitle, type Person } from './messages/format';
+import { conversationKey, displayName, groupTitle, namedFirst, type Person } from './messages/format';
 import { Recipients, type Recipient } from './messages/Recipients';
 import { Thread } from './messages/Thread';
 import { bundledIconProps } from '@/shared/iconSizes';
@@ -353,7 +353,7 @@ function ConversationPane({
   );
   const people: Person[] = useMemo(() => conversation.addresses.map((address) => ({ address, name: nameOf(address) })), [conversation.addresses, nameOf]);
   const name = group ? groupTitle(people) : displayName(conversation.name);
-  const everyone = people.map((p) => p.name).join(', ');
+  const everyone = namedFirst(people).map((p) => displayName(p.name)).join(', ');
 
   return (
     <>

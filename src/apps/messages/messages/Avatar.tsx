@@ -1,6 +1,6 @@
 import { User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { colorsFor, initials, type Person, type PersonColor } from './format';
+import { colorsFor, initials, namedFirst, type Person, type PersonColor } from './format';
 
 /**
  * Someone's avatar, or a group's. A person's is a circle in their own color
@@ -36,7 +36,9 @@ export function Avatar({
       </span>
     );
   }
-  const shown = people.length > 4 ? people.slice(0, 3) : people;
+  // Contacts' tiles first, so the mosaic shows the faces you know.
+  const ordered = namedFirst(people);
+  const shown = ordered.length > 4 ? ordered.slice(0, 3) : ordered;
   const more = people.length - shown.length;
   return (
     <span

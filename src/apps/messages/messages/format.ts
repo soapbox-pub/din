@@ -100,9 +100,19 @@ export function shortName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
-/** A group's title: first names, and how many more past three. */
+/** Whether a person is named (a contact), not just a number. */
+function named(p: Person): boolean {
+  return !/^[+\d\s().-]+$/.test(p.name);
+}
+
+/** People with contact names first, then bare numbers, each in the order they came. */
+export function namedFirst(people: Person[]): Person[] {
+  return [...people.filter(named), ...people.filter((p) => !named(p))];
+}
+
+/** A group's title: first names, contacts before numbers, and how many more past three. */
 export function groupTitle(people: Person[]): string {
-  const names = people.map((p) => shortName(p.name));
+  const names = namedFirst(people).map((p) => shortName(p.name));
   if (names.length <= 3) return names.join(', ');
   return `${names.slice(0, 3).join(', ')} & ${names.length - 3} more`;
 }
