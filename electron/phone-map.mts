@@ -69,6 +69,8 @@ const LIST_COUNT = 60;
 const CATCH_UP_PAGE = 100;
 const CATCH_UP_PAGES = 5;
 const CATCH_UP_FETCHES = 10;
+/** A picture message the phone won't give is asked for this many syncs running before it's shown as a placeholder. */
+const MMS_TRIES = 4;
 
 // ---------------------------------------------------------------------------
 // The session bus, shared
@@ -264,8 +266,10 @@ export class MapConnection implements PhoneConnection {
   private mms = false;
   /** The phone's own numbers, as digits, learned from its listings: not one of the others in a group. */
   private own = new Set<string>();
-  /** Where catching up on older picture and group messages has got to (catchUp). */
-  private catchUpAt = { folder: 0, offset: 0 };
+  /** Where catching up on older picture and group messages has got to (catchUp), and whether any wouldn't come. */
+  private catchUpAt = { folder: 0, offset: 0, failed: false };
+  /** Picture messages the phone wouldn't give, and how many times it's been asked this connection. */
+  private fetchFailures = new Map<string, number>();
 
   constructor(address: string, hooks: PhoneHooks) {
     this.address = address;
@@ -387,6 +391,10 @@ export class MapConnection implements PhoneConnection {
       sessionGone.set(this.session, () => this.lost());
       await this.enterMessages();
       this.mms = await this.supportsMms();
+      // Picture messages the phone wouldn't give last time are asked for again.
+      this.fetchFailures.clear();
+      for (const [handle, k] of this.known) if (k.message.unfetched) this.known.delete(handle);
+      this.catchUpAt = { folder: 0, offset: 0, failed: false };
       this.retryMs = RETRY_MIN_MS;
       this.hooks.status({ status: 'connected', error: null, groupTexts: this.mms });
       // Contacts first, so texts announced on connecting come with names.
@@ -441,7 +449,7 @@ export class MapConnection implements PhoneConnection {
           found.push(...listed);
         }
         if (found.length) this.hooks.messages(found);
-        if (this.mms && this.hooks.olderMmsPending()) await this.catchUp();
+        if (this.mms && this.catchUpAt.folder < 2 && this.hooks.olderMmsPending()) await this.catchUp();
       } catch (error) {
         if (this.session && /not connected|disconnected|closed|reset|NotConnected|No such/i.test(String(error))) this.lost();
       } finally {
@@ -510,7 +518,7 @@ export class MapConnection implements PhoneConnection {
       } catch (error) {
         // A folder the phone hasn't got: on to the next.
         if (/not connected|disconnected|closed|reset|NotConnected/i.test(String(error))) throw error;
-        this.catchUpAt = { folder: this.catchUpAt.folder + 1, offset: 0 };
+        this.catchUpAt = { ...this.catchUpAt, folder: this.catchUpAt.folder + 1, offset: 0 };
         continue;
       }
       let seen = 0;
@@ -524,15 +532,17 @@ export class MapConnection implements PhoneConnection {
         if (!kept || kept.mms) continue;
         fetches++;
         const message = await this.listedMms({ objectPath, handle, props, type: 'mms' }, folder !== 'inbox');
-        if (message) outMessages.push(message);
+        if (message && !message.unfetched) outMessages.push(message);
+        // Not marked done while any wouldn't come: the next connection goes through again for them.
+        if (this.fetchFailures.has(handle)) this.catchUpAt.failed = true;
       }
       // Where the next sync picks up; a page cut short by the fetch limit is read again, which skips what's done.
       if (fetches >= CATCH_UP_FETCHES) break;
-      if (seen < CATCH_UP_PAGE) this.catchUpAt = { folder: this.catchUpAt.folder + 1, offset: 0 };
+      if (seen < CATCH_UP_PAGE) this.catchUpAt = { ...this.catchUpAt, folder: this.catchUpAt.folder + 1, offset: 0 };
       else this.catchUpAt.offset += CATCH_UP_PAGE;
     }
     if (outMessages.length) this.hooks.messages(outMessages);
-    if (this.catchUpAt.folder >= folders.length) this.hooks.olderMmsDone();
+    if (this.catchUpAt.folder >= folders.length && !this.catchUpAt.failed) this.hooks.olderMmsDone();
   }
 
   private learnOwn(address: string): void {
@@ -605,21 +615,29 @@ export class MapConnection implements PhoneConnection {
     const listedOther = String((outgoing ? props.get('RecipientAddress') ?? props.get('Recipient') : props.get('SenderAddress') ?? props.get('Sender')) ?? '');
     const time = parseTimestamp(props.get('Timestamp'));
     if (!whole) {
-      // As a text from the listing, until the next connection tries again.
+      // Android lists an MMS as it arrives, before it has downloaded it, and
+      // won't give it until then: it's tried again each sync, and only after
+      // a few tries shown, as a placeholder under whoever sent it, until the
+      // next connection tries again.
+      const tries = (this.fetchFailures.get(handle) ?? 0) + 1;
+      this.fetchFailures.set(handle, tries);
+      if (tries < MMS_TRIES) return null;
       const message: BackendMessage = {
         id,
-        threadId: digits(listedOther) || listedOther || 'unknown',
-        addresses: listedOther ? [listedOther] : [],
-        sender: outgoing ? null : listedOther || null,
-        body: String(props.get('Subject') ?? '') || '[Picture]',
+        threadId: kept?.threadId ?? (digits(listedOther) || listedOther || 'unknown'),
+        addresses: kept?.addresses ?? (listedOther ? [listedOther] : []),
+        sender: outgoing ? null : kept?.sender ?? (listedOther || null),
+        body: '',
         time,
         outgoing,
         read: outgoing || read,
         images: [],
+        unfetched: true,
       };
       this.known.set(handle, { read, partial: false, message });
       return message;
     }
+    this.fetchFailures.delete(handle);
     const mms = parseMms(whole);
     const sender = outgoing ? null : mms.from[0]?.address || listedOther || null;
     // Received by the phone, and to one number: that number is the phone's own.

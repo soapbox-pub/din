@@ -49,7 +49,7 @@ export function PhoneHost() {
       const name = rawName.split(', ').map(formatAddress).join(', ');
       const group = message.addresses.length > 1;
       const pictures = message.images.length;
-      const body = message.body || (pictures ? (pictures === 1 ? 'Sent a picture' : `Sent ${pictures} pictures`) : '');
+      const body = message.body || (pictures ? (pictures === 1 ? 'Sent a picture' : `Sent ${pictures} pictures`) : message.unfetched ? 'Sent a picture message' : '');
       const replaceKey = key(message.phoneId, message.threadId);
       const reply = {
         placeholder: `Reply to ${name}`,

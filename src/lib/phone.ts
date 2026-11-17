@@ -75,6 +75,8 @@ export interface PhoneMessage {
   images: string[];
   /** A picture or group message (MMS), read whole: its pictures and everyone it's to are all here. */
   mms?: boolean;
+  /** A picture or group message the phone wouldn't give whole yet: who sent it is all that's known. */
+  unfetched?: boolean;
 }
 
 export interface PhoneConversation {

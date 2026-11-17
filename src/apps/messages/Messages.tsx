@@ -24,7 +24,7 @@ import { useContacts, useConversations, useMessages, usePhone, usePhoneState, us
 import { Avatar } from './messages/Avatar';
 import { Composer } from './messages/Composer';
 import { ConversationList } from './messages/ConversationList';
-import { conversationKey, displayName } from './messages/format';
+import { conversationKey, displayName, groupTitle, type Person } from './messages/format';
 import { Recipients, type Recipient } from './messages/Recipients';
 import { Thread } from './messages/Thread';
 import { bundledIconProps } from '@/shared/iconSizes';
@@ -344,7 +344,6 @@ function ConversationPane({
   const messages = useMessages(conversation.phoneId, conversation.threadId);
   const contacts = useContacts(conversation.phoneId);
   const group = conversation.addresses.length > 1;
-  const name = displayName(conversation.name);
   const nameOf = useCallback(
     (address: string) => {
       const digits = phoneDigits(address);
@@ -352,6 +351,9 @@ function ConversationPane({
     },
     [contacts.data],
   );
+  const people: Person[] = useMemo(() => conversation.addresses.map((address) => ({ address, name: nameOf(address) })), [conversation.addresses, nameOf]);
+  const name = group ? groupTitle(people) : displayName(conversation.name);
+  const everyone = people.map((p) => p.name).join(', ');
 
   return (
     <>
@@ -363,11 +365,15 @@ function ConversationPane({
         ) : (
           <span className="w-1" />
         )}
-        <Avatar name={conversation.name} group={group} className="size-8 text-xs" />
+        <Avatar people={people} className="size-8 text-xs" />
         <div className="min-w-0 flex-1 leading-tight">
           <h2 className="truncate text-[15px] font-semibold">{name}</h2>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {name === conversation.addresses.map(formatAddress).join(', ') ? phone?.name : conversation.addresses.map(formatAddress).join(', ')}
+          <p className="truncate text-[11px] text-muted-foreground" title={group ? everyone : undefined}>
+            {group
+              ? `${people.length + 1} people: you, ${everyone}`
+              : name === conversation.addresses.map(formatAddress).join(', ')
+                ? phone?.name
+                : conversation.addresses.map(formatAddress).join(', ')}
           </p>
         </div>
         <WindowControls />
@@ -377,6 +383,7 @@ function ConversationPane({
           messages={messages.data ?? []}
           loading={messages.isPending}
           group={group}
+          people={conversation.addresses}
           nameOf={nameOf}
           onRetry={onRetry}
         />

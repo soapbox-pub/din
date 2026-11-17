@@ -125,7 +125,7 @@ export function Recipients({
               onMouseEnter={() => setActive(i)}
               className={cn('flex cursor-default items-center gap-2.5 rounded-lg px-2 py-1.5', i === active && 'bg-accent')}
             >
-              <Avatar name={m.name} className="size-7 text-xs" />
+              <Avatar people={[m]} className="size-7 text-xs" />
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">{m.name}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{formatAddress(m.address)}</span>
             </li>

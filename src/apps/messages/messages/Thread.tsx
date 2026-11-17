@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useRef } from 'react';
-import { Copy, RotateCcw } from 'lucide-react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { Copy, ImageOff, RotateCcw } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,7 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { PhoneMessage } from '@/lib/phone';
 import { formatAddress } from '@/shared/phone';
 import { cn } from '@/lib/utils';
-import { separatorTime } from './format';
+import { Avatar } from './Avatar';
+import { colorsFor, separatorTime, type PersonColor } from './format';
 
 /** A new heading over the messages after this long a gap. */
 const SEPARATOR_GAP_MS = 60 * 60_000;
@@ -26,12 +27,15 @@ export function Thread({
   messages,
   loading,
   group,
+  people,
   nameOf,
   onRetry,
 }: {
   messages: PhoneMessage[];
   loading: boolean;
   group: boolean;
+  /** Everyone else in the conversation, for their colors. */
+  people: string[];
   nameOf: (address: string) => string;
   onRetry: (message: PhoneMessage) => void;
 }) {
@@ -55,6 +59,7 @@ export function Thread({
   }, [messages]);
 
   const lastOutgoing = [...messages].reverse().find((m) => m.outgoing);
+  const colors = useMemo(() => colorsFor(people), [people]);
 
   return (
     <div
@@ -88,10 +93,11 @@ export function Thread({
                 {separator && (
                   <p className="mt-3 mb-2 text-center text-[11px] font-medium text-muted-foreground">{separatorTime(m.time)}</p>
                 )}
-                {group && !m.outgoing && startsRun && m.sender && (
-                  <p className="mt-1 mb-0.5 ml-3 text-[11px] text-muted-foreground">{nameOf(m.sender)}</p>
+                {group && !m.outgoing ? (
+                  <GroupRow message={m} startsRun={startsRun} endsRun={endsRun} nameOf={nameOf} colors={colors} onRetry={() => onRetry(m)} />
+                ) : (
+                  <Bubble message={m} startsRun={startsRun} endsRun={endsRun} onRetry={() => onRetry(m)} />
                 )}
-                <Bubble message={m} startsRun={startsRun} endsRun={endsRun} onRetry={() => onRetry(m)} />
                 {m === lastOutgoing && m.status !== 'sent' && m.status !== null && (
                   <p className={cn('mt-0.5 mr-1 text-right text-[11px]', m.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>
                     {m.status === 'failed' ? 'Not sent' : 'Sending…'}
@@ -103,6 +109,45 @@ export function Thread({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Someone else's message in a group: their name over the first of a run, in
+ * their color, and their avatar beside the last, so whose each run is reads
+ * at a glance down the left edge.
+ */
+function GroupRow({
+  message,
+  startsRun,
+  endsRun,
+  nameOf,
+  colors,
+  onRetry,
+}: {
+  message: PhoneMessage;
+  startsRun: boolean;
+  endsRun: boolean;
+  nameOf: (address: string) => string;
+  colors: (address: string) => PersonColor;
+  onRetry: () => void;
+}) {
+  const sender = message.sender ?? '';
+  const name = sender ? nameOf(sender) : 'Unknown';
+  return (
+    <>
+      {startsRun && (
+        <p className={cn('mt-2 mb-0.5 ml-12 truncate text-xs font-medium', sender ? colors(sender).text : 'text-muted-foreground')}>{name}</p>
+      )}
+      <div className="flex items-end gap-2">
+        <div className="w-7 shrink-0">
+          {endsRun && <Avatar people={[{ name, address: sender }]} colors={colors} className="size-7 text-[11px]" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <Bubble message={message} startsRun={false} endsRun={endsRun} onRetry={onRetry} />
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -145,6 +190,18 @@ function Bubble({
               )}
             >
               {message.body}
+            </div>
+          )}
+          {message.unfetched && !message.body && message.images.length === 0 && (
+            <div
+              title={time}
+              className={cn(
+                'flex max-w-[70%] items-center gap-2 rounded-[20px] border border-dashed border-foreground/20 px-3.5 py-2 text-sm text-muted-foreground',
+                !mine && endsRun && 'rounded-bl-md',
+              )}
+            >
+              <ImageOff className="size-4.5 shrink-0" strokeWidth={1.75} aria-hidden />
+              Picture message the phone hasn’t sent yet
             </div>
           )}
         </div>

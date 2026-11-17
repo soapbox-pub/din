@@ -11,7 +11,7 @@ import type { PhoneConversation } from '@/lib/phone';
 import { cn } from '@/lib/utils';
 import { focusRing, listRowClass } from '@/shared/appChromeStyles';
 import { Avatar } from './Avatar';
-import { conversationKey, displayName, listTime, preview } from './format';
+import { conversationKey, displayName, groupTitle, listTime, peopleOf, preview } from './format';
 
 /**
  * The conversations, newest first. Right-click a row for what can be done
@@ -76,7 +76,8 @@ export function ConversationList({
       {conversations.map((c) => {
         const key = conversationKey(c);
         const current = key === selected;
-        const name = displayName(c.name);
+        const people = peopleOf(c);
+        const name = people.length > 1 ? groupTitle(people) : displayName(c.name);
         return (
           <ContextMenu key={key}>
             <ContextMenuTrigger asChild>
@@ -99,7 +100,7 @@ export function ConversationList({
                 )}
               >
                 <div className="relative">
-                  <Avatar name={c.name} group={c.addresses.length > 1} className="size-11 text-base" />
+                  <Avatar people={people} className="size-11 text-base" />
                   {c.unread > 0 && !current && (
                     <span className="absolute -left-1 top-1/2 size-2.5 -translate-y-1/2 rounded-full bg-primary ring-2 ring-background" aria-hidden />
                   )}

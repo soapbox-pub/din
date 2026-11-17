@@ -101,8 +101,12 @@ interface StoredPhone {
   fillCodes?: boolean;
   /** Whether it sent group texts as one, last time it connected. */
   groupTexts?: boolean;
-  /** When its older picture and group messages, kept as texts before, were read again into their groups. */
-  olderMmsAt?: number;
+  /**
+   * Which pass at reading its older picture and group messages again into
+   * their groups (kept as texts before) it has finished: OLDER_MMS_PASS
+   * once it's done, the latest pass's number.
+   */
+  olderMmsPass?: number;
 }
 
 interface Thread {
@@ -127,6 +131,12 @@ const ECHO_MS = 10 * 60_000;
 const SAVE_DELAY_MS = 1000;
 const EMIT_DELAY_MS = 100;
 const MAX_BODY = 5000;
+/**
+ * The pass at reading older picture and group messages again that phones
+ * should have finished (phone-map.mts, catchUp). 2: the first pass counted
+ * itself done even when the phone wouldn't give some of them.
+ */
+const OLDER_MMS_PASS = 2;
 
 type Deps = {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
@@ -519,12 +529,13 @@ function hooks(phoneId: string): PhoneHooks {
       for (const a of announced.filter((x) => x.phoneId === phoneId)) announceText(phoneId, a.message, true);
     },
     olderMmsPending() {
-      return !phones.find((x) => x.id === phoneId)?.olderMmsAt;
+      return (phones.find((x) => x.id === phoneId)?.olderMmsPass ?? 0) < OLDER_MMS_PASS;
     },
     olderMmsDone() {
       const p = phones.find((x) => x.id === phoneId);
-      if (!p || p.olderMmsAt) return;
-      p.olderMmsAt = Date.now();
+      if (!p || (p.olderMmsPass ?? 0) >= OLDER_MMS_PASS) return;
+      p.olderMmsPass = OLDER_MMS_PASS;
+      delete (p as { olderMmsAt?: number }).olderMmsAt;
       savePhones();
     },
     stored(id) {
