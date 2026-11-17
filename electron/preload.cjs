@@ -2712,8 +2712,11 @@ expose('speech', {
    */
   synthesize: (text, voice, rate) => ipcRenderer.invoke('speech:synthesize', text, voice ?? '', rate ?? 1),
 
-  /** Stop what's being made and drop what's waiting. */
+  /** Drop what's waiting to be made. */
   cancel: () => ipcRenderer.invoke('speech:cancel'),
+
+  /** Load the voice ahead of what's to be said. */
+  prepare: () => ipcRenderer.invoke('speech:prepare'),
 });
 
 // Assistant bridge (window.dinos.assistant), backed by electron/assistant.mts:

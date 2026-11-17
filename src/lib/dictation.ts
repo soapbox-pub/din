@@ -33,6 +33,7 @@ import { notifyWithFeature } from '@/lib/featureNotifications';
 import { holdMedia } from '@/lib/mediaPause';
 import { guestId, isGuestElement } from '@/platform/guest';
 import { dictationTyper } from '@/shared/dictationField';
+import { speechOutputLevel } from '@/lib/speech';
 
 /** Why dictation can't start on DinOS before its optional feature is installed. */
 export const DICTATION_NEEDS_FEATURE = 'Dictation isn’t installed yet. Install Dictation & transcripts in Settings → Optional Features.';
@@ -578,7 +579,19 @@ export async function startDictation(
   // that the main thread keeps up.
   const processor = context.createScriptProcessor(4096, 1, 1);
   const resample = makeResampler(context.sampleRate);
+  const chunkMs = (4096 / context.sampleRate) * 1000;
   let floor = 0.004;
+  // While Din speaks (a call), what the microphone hears is mostly its voice
+  // coming back from the speakers, which echo cancellation may or may not
+  // take out. How loud that comes back, per unit of what's played, is
+  // learned while it speaks: it's speech only when the microphone is well
+  // above that, for long enough to be a word (the user talking over it),
+  // so Din's own words neither start a segment, costing a transcription,
+  // nor count as the user's.
+  let echo = 0;
+  let output = 0;
+  let outputFor = 0;
+  let over = 0;
   processor.onaudioprocess = (event) => {
     if (session !== current || current.ended) return;
     const input = event.inputBuffer.getChannelData(0);
@@ -593,7 +606,27 @@ export async function startDictation(
     // The background's level, followed down quickly and up slowly.
     floor = rms < floor ? floor * 0.5 + rms * 0.5 : floor * 0.995 + rms * 0.005;
     const now = Date.now();
-    const speaking = rms > Math.max(0.012, floor * 2.5);
+    let speaking = rms > Math.max(0.012, floor * 2.5);
+    // What's played, held over a word's gaps and the room's delay.
+    output = Math.max(speechOutputLevel(), output * 0.6);
+    if (output > 0.004) {
+      const ratio = rms / output;
+      outputFor += chunkMs;
+      if (outputFor < 500) {
+        // The echo's level, learned as the voice starts.
+        echo = Math.max(echo, ratio);
+        over = 0;
+        speaking = false;
+      } else {
+        // Followed down quickly, and up slowly, so the user's voice doesn't teach it.
+        echo = ratio < echo ? echo * 0.6 + ratio * 0.4 : echo * 0.97 + ratio * 0.03;
+        over = speaking && rms > echo * output * 3 ? over + chunkMs : 0;
+        speaking = over >= 250;
+      }
+    } else {
+      outputFor = 0;
+      over = 0;
+    }
     if (speaking) {
       current.heard = true;
       segment.heard = true;

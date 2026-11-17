@@ -34,6 +34,8 @@ export interface SpeechBridge {
   /** A WAV file of `text` read aloud. */
   synthesize(text: string, voice?: string, rate?: number): Promise<Uint8Array>;
   cancel(): Promise<void>;
+  /** Load the voice ahead of what's to be said. */
+  prepare(): Promise<void>;
 }
 
 declare global {
@@ -168,10 +170,34 @@ interface Playing {
 const queue: Utterance[] = [];
 let playing: Playing | null = null;
 let context: AudioContext | null = null;
+/** What's being played, for speechOutputLevel. */
+let analyser: AnalyserNode | null = null;
+const levelBuffer = new Float32Array(1024);
 
 function audio(): AudioContext {
-  context ??= new AudioContext();
+  if (!context) {
+    context = new AudioContext();
+    analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+  }
   return context;
+}
+
+/**
+ * How loud Din's voice is playing right now (RMS, 0 to 1), 0 while it's
+ * quiet: dictation tells the user talking over it from its echo.
+ */
+export function speechOutputLevel(): number {
+  if (!analyser || !playing?.source || playing.paused) return 0;
+  analyser.getFloatTimeDomainData(levelBuffer);
+  let power = 0;
+  for (let i = 0; i < levelBuffer.length; i++) power += levelBuffer[i]! * levelBuffer[i]!;
+  return Math.sqrt(power / levelBuffer.length);
+}
+
+/** Load the voice now, ahead of what's to be said (a call starting), so the first words come sooner. */
+export function prepareSpeech(): void {
+  if (state.available) void bridge()?.prepare().catch(() => {});
 }
 
 function cleanError(error: unknown): string {
@@ -213,6 +239,7 @@ export function cancelSpeech(owner?: unknown): void {
       // Not started yet.
     }
     p.finishPiece?.();
+    // Drops what's waiting to be made; the piece being made is short.
     void bridge()?.cancel().catch(() => {});
   }
   publish();
@@ -287,6 +314,7 @@ async function say(p: Playing): Promise<void> {
     const gain = ctx.createGain();
     gain.gain.value = Math.min(1, Math.max(0, utterance.volume ?? 1));
     source.connect(gain).connect(ctx.destination);
+    if (analyser) gain.connect(analyser);
     p.source = source;
     await new Promise<void>((resolve) => {
       p.finishPiece = resolve;

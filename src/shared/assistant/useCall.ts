@@ -6,7 +6,8 @@ import { useAssistantHost, type Listening } from '@/shared/assistant/host';
  * time the user pauses; its replies are read aloud (replyVoice.ts, which
  * reads every reply during a call). Listening is Din's dictation, without
  * end, in the window the call is in. While the assistant speaks, what the
- * microphone hears is its own voice and isn't sent; Interrupt stops it.
+ * microphone hears is mostly its own voice coming back, which isn't sent;
+ * talking over it stops it (or Interrupt).
  * Mute turns the microphone off without hanging up. CallBar (Call.tsx)
  * shows it in the composer's place.
  */
@@ -16,8 +17,12 @@ import { useAssistantHost, type Listening } from '@/shared/assistant/host';
  * hasn't started again: they'd paused a breath before those were heard.
  */
 const SEND_AFTER_MS = 1000;
-/** Words heard this soon after the voice stops are the end of its own. */
-const ECHO_MS = 1200;
+/**
+ * Words heard this soon after the voice stops are the end of its own.
+ * Dictation tells the user from the voice's echo while it plays
+ * (src/lib/dictation.ts), so this only covers the room's last ringing.
+ */
+const ECHO_MS = 300;
 
 export type CallPhase =
   /** Listening, the assistant idle: the user's turn. */
@@ -147,7 +152,15 @@ export function useCall({
         schedule();
       },
       onSpeaking: (now) => {
-        if (now && ownVoice()) return;
+        // Talking over it interrupts it, as on a phone call: dictation
+        // tells the user's voice from its echo, so this is them.
+        if (now && speakingNow.current) {
+          latest.current.voice.stop();
+          speakingNow.current = false;
+          spokeUntil.current = 0;
+        } else if (now && ownVoice()) {
+          return;
+        }
         talkingNow.current = now;
         setTalking(now);
         if (now) clearTimer();

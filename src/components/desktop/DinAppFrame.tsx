@@ -57,7 +57,7 @@ import {
   startDictation,
   subscribeDictation,
 } from '@/lib/dictation';
-import { cancelSpeech, defaultSpeechVoice, getSpeechState, pauseSpeech, resumeSpeech, speak, subscribeSpeech } from '@/lib/speech';
+import { cancelSpeech, defaultSpeechVoice, getSpeechState, pauseSpeech, prepareSpeech, resumeSpeech, speak, subscribeSpeech } from '@/lib/speech';
 import { DesktopBackgroundContext } from '@/contexts/DesktopBackgroundContext';
 import { InstalledAppsContext } from '@/contexts/InstalledAppsContext';
 import { getNativeAppsBridge, isProgram, openInInstalledApp } from '@/lib/nativeApps';
@@ -980,6 +980,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           { held: continuous === true, overlay: continuous !== true, interim: interim === true },
         );
         speech.current = s;
+        // Listening without end is a conversation (the Assistant's call), whose
+        // replies come in Din's voice: loaded now, they start sooner.
+        if (continuous === true) prepareSpeech();
         await started;
       },
       'speech.stop': () => {

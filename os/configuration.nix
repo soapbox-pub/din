@@ -173,22 +173,23 @@ let
       default = true;
       parts = { whisper = pkgs.whisper-cpp-vulkan; model = whisperModel; };
     };
-    # Din's voice (electron/speech.mts): sherpa-onnx's offline TTS, on the
-    # CPU, reading Kokoro v0.19 (Apache-2.0, 82M parameters, quantized to
-    # int8) in its eleven English voices, a few times faster than it speaks.
-    # The model is k2-fsa's packaging of it, with espeak-ng's data for
-    # turning words into sounds; the hash is its unpacked tree's.
+    # Din's voice (electron/speech.mts): sherpa-onnx's library, opened by
+    # din-tts (below), reading Kokoro 1.0 (Apache-2.0, 82M parameters) on the
+    # CPU about five times faster than it speaks. Full precision: int8 was
+    # half as fast on this kind of CPU, and sounded worse. The model is
+    # k2-fsa's packaging of it, with espeak-ng's data and Kokoro's lexicons;
+    # the hash is its unpacked tree's.
     speech = {
       title = "Speech";
       description = "Kokoro, which reads text aloud on this computer, for the Assistant’s spoken replies and calls.";
-      size = 290;
+      size = 500;
       parts = {
         sherpa = pkgs.sherpa-onnx;
         kokoro = {
-          name = "kokoro-int8-en-v0_19";
-          url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2";
+          name = "kokoro-multi-lang-v1_0";
+          url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2";
           unpack = true;
-          hash = "sha256-ogksVIKtlfXxQ9FASILFsU+lWNMjLtWWT3QsCOrl4Ro=";
+          hash = "sha256-HKrjB25Dqlu7p000Js6S6+y32h/dDEjn7vQqWnCU74E=";
         };
       };
     };
@@ -261,6 +262,18 @@ let
     fi
     exec "$podman" "$@"
   '';
+
+  # Din's voice kept loaded (os/din-tts.c, electron/speech.mts): built
+  # against sherpa-onnx's header only, and opening its library at run time
+  # from the Speech optional feature, so the system doesn't carry it.
+  din-tts = pkgs.stdenv.mkDerivation {
+    name = "din-tts";
+    src = ./din-tts.c;
+    dontUnpack = true;
+    buildPhase = "$CC -O2 -Wall -I${pkgs.sherpa-onnx}/include -o din-tts $src -ldl";
+    installPhase = "install -Dm755 din-tts $out/bin/din-tts";
+    disallowedReferences = [ pkgs.sherpa-onnx ];
+  };
 
   # The privileged half of the Installer app, which copies a live USB boot
   # onto the computer's own disk (see the script, and electron/installer.mts).
@@ -556,8 +569,10 @@ let
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
-    # Din's voice (electron/speech.mts): sherpa-onnx and Kokoro's model.
-    export DIN_TTS=${featurePart "speech" "sherpa"}/bin/sherpa-onnx-offline-tts
+    # Din's voice (electron/speech.mts): din-tts, the feature's sherpa-onnx
+    # library it opens, and Kokoro's model.
+    export DIN_TTS_HELPER=${din-tts}/bin/din-tts
+    export DIN_TTS_LIB=${featurePart "speech" "sherpa"}/lib/libsherpa-onnx-c-api.so
     export DIN_TTS_MODEL=${featurePart "speech" "kokoro"}
     # .NET for Windows programs (electron/windows-apps.mts): each
     # architecture's parts, merged into C:\Program Files\dotnet and
