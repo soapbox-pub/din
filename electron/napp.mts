@@ -6,8 +6,9 @@
 //     with a `push` event whose data is { $type: 'napp.push.payload',
 //     event_id, event, relays }.
 //   - registration.showNotification / getNotifications, from the page and the
-//     worker, into Din's notification center. A click opens the app at
-//     `data.url` and raises `notificationclick` in the worker; dismissing one
+//     worker, into Din's notification center. A click raises the app's
+//     window (opening it at `data.url` if it isn't open) and raises
+//     `notificationclick` in the worker; dismissing one
 //     raises `notificationclose`.
 //   - napp.fetch / self.napp.fetch: a request without CORS (napp-fetch.mts).
 //   - registration.periodicSync: the worker woken on a schedule, at most every

@@ -73,8 +73,8 @@ export interface SystemNotification {
   tag: string;
   /**
    * For an installed nsite's (napp.mts): its host, and where a click opens
-   * it (its `data.url`, already checked to be on the site), or null for its
-   * front page.
+   * it if it isn't open (its `data.url`, already checked to be on the site),
+   * or null for its front page.
    */
   site: { host: string; url: string | null } | null;
   /**

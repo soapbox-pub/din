@@ -29,8 +29,9 @@ const MIN_POPUP_MS = 2000;
  * src/lib/systemNotifications.ts) in the notification center, and reports
  * back what the user did with them. A click also brings the sender forward:
  * a Linux app's window, the tab or web app a page's came from, or an
- * installed nsite's window at the notification's `data.url` - which its
- * service worker may then move (clients.openWindow, see electron/napp.mts).
+ * installed nsite's window - opened at the notification's `data.url` if it
+ * wasn't open, and in either case its service worker's to move
+ * (clients.openWindow, see electron/napp.mts).
  * A website's service worker decides for itself what a click on its
  * notification opens or focuses (electron/web-push.mts), as in Chrome, and so
  * does a Din app's (electron/din-app-workers.mts).
@@ -141,8 +142,14 @@ export function SystemNotificationsHost() {
             return;
           }
           if (site) {
-            // Open at once; the worker's notificationclick comes after.
-            if (action === 'default') openSite(site.host, site.url);
+            // At once, before the worker's notificationclick. An open window is
+            // only raised: loading `data.url` in it would reload the page (and
+            // end a call in it), so where it goes is the worker's to decide.
+            if (action === 'default') {
+              const appId = nsiteAppId(site.host);
+              if (windowsRef.current.some((w) => w.appId === appId && !w.closing)) raiseApp(appId);
+              else openSite(site.host, site.url);
+            }
             bridge.activate(n.id, action);
             return;
           }
