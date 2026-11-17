@@ -6,6 +6,7 @@ import { parentPath } from '@/lib/fs';
 import { closeNotificationByKey, getNotificationState, notify, updateNotificationByKey, type NotifyInput } from '@/lib/notificationCenter';
 import { getPhoneDesktopBridge, type PhoneReceive } from '@/lib/phone';
 import { cleanPhoneError, formatAddress } from '@/shared/phone';
+import { describeReaction } from '@/shared/phoneReactions';
 
 /**
  * New texts from the user's phones (electron/phone.mts), as notifications
@@ -49,7 +50,7 @@ export function PhoneHost() {
       const name = rawName.split(', ').map(formatAddress).join(', ');
       const group = message.addresses.length > 1;
       const pictures = message.images.length;
-      const body = message.body || (pictures ? (pictures === 1 ? 'Sent a picture' : `Sent ${pictures} pictures`) : message.unfetched ? 'Sent a picture message' : '');
+      const body = describeReaction(message.body) ?? (message.body || (pictures ? (pictures === 1 ? 'Sent a picture' : `Sent ${pictures} pictures`) : message.unfetched ? 'Sent a picture message' : ''));
       const replaceKey = key(message.phoneId, message.threadId);
       const reply = {
         placeholder: `Reply to ${name}`,

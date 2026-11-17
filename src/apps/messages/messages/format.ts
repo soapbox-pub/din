@@ -1,5 +1,6 @@
 import type { PhoneConversation } from '@/lib/phone';
 import { formatAddress, phoneDigits } from '@/shared/phone';
+import { describeReaction } from '@/shared/phoneReactions';
 
 /** "3:41 PM" today, "Yesterday", a weekday this week, then a date. */
 export function listTime(ms: number): string {
@@ -134,8 +135,9 @@ export function conversationKey(c: { phoneId: string; threadId: string }): strin
 export function preview(c: PhoneConversation): string {
   const m = c.last;
   const text =
-    m.body.replace(/\s+/g, ' ').trim() ||
-    (m.images.length ? (m.images.length === 1 ? 'Picture' : `${m.images.length} pictures`) : m.unfetched ? 'Picture message' : '');
+    describeReaction(m.body) ??
+    (m.body.replace(/\s+/g, ' ').trim() ||
+      (m.images.length ? (m.images.length === 1 ? 'Picture' : `${m.images.length} pictures`) : m.unfetched ? 'Picture message' : ''));
   if (m.outgoing) return `You: ${text}`;
   // In a group, whose it is.
   if (c.addresses.length > 1 && m.sender) {

@@ -25,6 +25,7 @@ import { Avatar } from './messages/Avatar';
 import { Composer } from './messages/Composer';
 import { ConversationList } from './messages/ConversationList';
 import { conversationKey, displayName, groupTitle, namedFirst, type Person } from './messages/format';
+import { reactionText } from '@/shared/phoneReactions';
 import { Recipients, type Recipient } from './messages/Recipients';
 import { Thread } from './messages/Thread';
 import { bundledIconProps } from '@/shared/iconSizes';
@@ -386,6 +387,7 @@ function ConversationPane({
           people={conversation.addresses}
           nameOf={nameOf}
           onRetry={onRetry}
+          onReact={sendBlocked(phone) ? null : (m, emoji, removed) => void onSend(reactionText(m, emoji, removed)).catch(() => {})}
         />
         <Composer
           draftKey={`${conversation.phoneId}\u0000${conversation.threadId}`}

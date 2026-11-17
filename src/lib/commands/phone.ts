@@ -1,5 +1,6 @@
 import { describePhone, getPhoneDesktopBridge, type PhoneConversation, type PhoneDevice } from '@/lib/phone';
 import { formatAddress, phoneDigits } from '@/shared/phone';
+import { parseReaction, reactionText, threadReactions } from '@/shared/phoneReactions';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
@@ -101,6 +102,34 @@ export const phoneArea: Area = {
       if (!ok) throw new CommandError('You didn’t allow it');
       await call(phone().send(p.id, addresses, body));
       return { text: `Sent to ${name}` };
+    }),
+    command('phone', 'react', 'React to a message with an emoji, as Messages’ right-click does (asks on screen first)', [
+      CONVERSATION,
+      { name: 'emoji', type: 'string', positional: true, help: 'The reaction, e.g. ❤️ or 👍' },
+      { name: 'to', type: 'string', optional: true, help: 'Words in the message to react to (default: their latest)' },
+      { name: 'remove', type: 'boolean', optional: true, help: 'Take the reaction back' },
+      PHONE,
+    ], async (args, ctx) => {
+      const p = await device(args.optString('phone'));
+      const c = await conversation(args.string('conversation'), p.id);
+      const emoji = args.string('emoji').trim();
+      if (!/\p{Extended_Pictographic}/u.test(emoji) || emoji.length > 16) throw new CommandError('That isn’t an emoji', 'usage');
+      const messages = await call(phone().messages(p.id, c.threadId));
+      const { hidden } = threadReactions(messages);
+      const words = args.optString('to')?.toLowerCase();
+      // Not a reaction itself, nor a message that never reached the phone.
+      const candidates = messages.filter((m) => !hidden.has(m.id) && !parseReaction(m.body) && m.status !== 'failed' && m.status !== 'sending' && !m.unfetched);
+      const target = [...candidates].reverse().find((m) => (words ? m.body.toLowerCase().includes(words) : !m.outgoing));
+      if (!target) throw new CommandError(words ? 'No message says that' : 'They haven’t sent anything to react to');
+      const text = reactionText(target, emoji, (args.optBool('remove') ?? false));
+      const ok = await ctx.confirm({
+        title: `${(args.optBool('remove') ?? false) ? 'Take back' : 'Send'} ${emoji} in ${c.name}?`,
+        description: `Sent as the text “${text.length > 200 ? `${text.slice(0, 200)}…` : text}”, from ${p.name}.`,
+        action: 'Send',
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await call(phone().send(p.id, c.addresses, text));
+      return { data: { text }, text: `Sent: ${text}` };
     }),
     command('phone', 'mark-read', 'Mark a conversation read', [CONVERSATION, PHONE], async (args) => {
       const p = await device(args.optString('phone'));
