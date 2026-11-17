@@ -30,6 +30,7 @@ import {
   registerDinApps,
 } from './din-apps.mts';
 import { registerDinAppWorkers } from './din-app-workers.mts';
+import { sayChrome, setupUserAgents } from './user-agent.mts';
 import { grammarMenuItems, registerGrammarHandlers, registerGrammarPreload } from './grammar.mts';
 import { periodicSyncPermissionChanged, registerPeriodicSyncHandlers } from './periodic-sync.mts';
 import {
@@ -6204,6 +6205,9 @@ function registerDevtoolsHandlers(): void {
   });
 }
 
+// Before the default session is created (electron/user-agent.mts).
+setupUserAgents();
+
 app.whenReady().then(() => {
   if (process.env.DIN_DESKTOP_SESSION === '1' && hasSessionBus) {
     sessionBusAddress().then(allowCameraThroughPortal).catch((error) => {
@@ -6592,11 +6596,8 @@ app.whenReady().then(() => {
   });
 
   // Browser tabs (and installed apps, which share their session) say they're
-  // Chrome, as Chromium-based browsers do: Electron's default user agent
-  // names Electron, which sites like YouTube take as a sign of an ad blocker.
-  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) {
-    s.setUserAgent(s.getUserAgent().replace(/\s(Electron|din)\/\S+/gi, ''));
-  }
+  // Chrome (electron/user-agent.mts).
+  for (const s of [browserSession(), privateBrowserSession(), torBrowserSession()]) sayChrome(s);
 
   // Must run before any <webview> is created so the extension system's
   // preload/APIs are in place when the first tab loads.
