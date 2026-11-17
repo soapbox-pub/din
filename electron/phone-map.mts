@@ -267,7 +267,7 @@ export class MapConnection implements PhoneConnection {
   /** The phone's own numbers, as digits, learned from its listings: not one of the others in a group. */
   private own = new Set<string>();
   /** Where catching up on older picture and group messages has got to (catchUp), and whether any wouldn't come. */
-  private catchUpAt = { folder: 0, offset: 0, failed: false };
+  private catchUpAt = { folder: 0, offset: 0, failed: false, incomplete: false, listed: new Set<string>() };
   /** Picture messages the phone wouldn't give, and how many times it's been asked this connection. */
   private fetchFailures = new Map<string, number>();
 
@@ -394,7 +394,7 @@ export class MapConnection implements PhoneConnection {
       // Picture messages the phone wouldn't give last time are asked for again.
       this.fetchFailures.clear();
       for (const [handle, k] of this.known) if (k.message.unfetched) this.known.delete(handle);
-      this.catchUpAt = { folder: 0, offset: 0, failed: false };
+      this.catchUpAt = { folder: 0, offset: 0, failed: false, incomplete: false, listed: new Set() };
       this.retryMs = RETRY_MIN_MS;
       this.hooks.status({ status: 'connected', error: null, groupTexts: this.mms });
       // Contacts first, so texts announced on connecting come with names.
@@ -488,6 +488,7 @@ export class MapConnection implements PhoneConnection {
 
   /**
    * Older picture and group messages, which this computer kept as texts
+   * (and stand-ins for ones it couldn't read: see the end)
    * before it read MMS whole, filed under whoever sent them: the newest
    * listing (LIST_COUNT) never reaches them again, so each folder's MMS are
    * paged through once, a few fetched each sync so new texts aren't kept
@@ -516,9 +517,9 @@ export class MapConnection implements PhoneConnection {
       try {
         [listing] = (await call('ListMessages', session, MAP, 'sa{sv}', [folder, filter], SESSION_TIMEOUT_MS)) as [Map<string, Map<string, unknown>>];
       } catch (error) {
-        // A folder the phone hasn't got: on to the next.
+        // A folder the phone hasn't got: on to the next, though what it lists is then not all there is.
         if (/not connected|disconnected|closed|reset|NotConnected/i.test(String(error))) throw error;
-        this.catchUpAt = { ...this.catchUpAt, folder: this.catchUpAt.folder + 1, offset: 0 };
+        this.catchUpAt = { ...this.catchUpAt, folder: this.catchUpAt.folder + 1, offset: 0, incomplete: true };
         continue;
       }
       let seen = 0;
@@ -527,6 +528,7 @@ export class MapConnection implements PhoneConnection {
         const props = new Map([...rawProps].map(([k, v]) => [k, unwrap(v)]));
         if (String(props.get('Type') ?? '') !== 'mms') continue;
         const handle = objectPath.slice(objectPath.lastIndexOf('/message') + '/message'.length);
+        this.catchUpAt.listed.add(`bt:${handle}`);
         if (this.known.has(handle)) continue;
         const kept = this.hooks.stored(`bt:${handle}`);
         if (!kept || kept.mms) continue;
@@ -542,7 +544,12 @@ export class MapConnection implements PhoneConnection {
       else this.catchUpAt.offset += CATCH_UP_PAGE;
     }
     if (outMessages.length) this.hooks.messages(outMessages);
-    if (this.catchUpAt.folder >= folders.length && !this.catchUpAt.failed) this.hooks.olderMmsDone();
+    if (this.catchUpAt.folder < folders.length) return;
+    // Every MMS the phone has is listed now: one kept here only as a stand-in
+    // that it no longer lists was a download notice, which Android deletes
+    // once it has the message and writes that under an id of its own.
+    if (!this.catchUpAt.incomplete) this.hooks.forgetStaleMms(this.catchUpAt.listed);
+    if (!this.catchUpAt.failed) this.hooks.olderMmsDone();
   }
 
   private learnOwn(address: string): void {

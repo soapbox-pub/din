@@ -73,6 +73,11 @@ export interface PhoneHooks {
   /** Whether older picture and group messages kept as texts are still to be read again (phone-map.mts, catchUp). */
   olderMmsPending(): boolean;
   olderMmsDone(): void;
+  /**
+   * Of the MMS kept here only as stand-ins (not read whole), forget those
+   * whose ids aren't among these, every MMS the phone lists.
+   */
+  forgetStaleMms(listed: Set<string>): void;
 }
 
 /** One phone's connection, as the hub drives it. */
@@ -134,9 +139,10 @@ const MAX_BODY = 5000;
 /**
  * The pass at reading older picture and group messages again that phones
  * should have finished (phone-map.mts, catchUp). 2: the first pass counted
- * itself done even when the phone wouldn't give some of them.
+ * itself done even when the phone wouldn't give some of them. 3: stand-ins
+ * for MMS download notices, which the phone deletes, are forgotten.
  */
-const OLDER_MMS_PASS = 2;
+const OLDER_MMS_PASS = 3;
 
 type Deps = {
   assertShellSender: (event: Electron.IpcMainInvokeEvent) => void;
@@ -324,6 +330,12 @@ function conversationName(d: PhoneData, addresses: string[]): string {
 function phoneDigits(address: string): string {
   const digits = address.replace(/\D/g, '');
   return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+/** Whether a Bluetooth message id is an MMS's: Android's MAP handles carry the type in their top byte, 0x01 for MMS. */
+function isMmsId(id: string): boolean {
+  if (!/^bt:\d+$/.test(id)) return false;
+  return BigInt(id.slice(3)) >> 56n === 1n;
 }
 
 function sameAddresses(a: string[], b: string[]): boolean {
@@ -537,6 +549,21 @@ function hooks(phoneId: string): PhoneHooks {
       p.olderMmsPass = OLDER_MMS_PASS;
       delete (p as { olderMmsAt?: number }).olderMmsAt;
       savePhones();
+    },
+    forgetStaleMms(listed) {
+      const d = phoneData(phoneId);
+      const touched: string[] = [];
+      for (const [threadId, t] of Object.entries(d.threads)) {
+        const before = t.messages.length;
+        t.messages = t.messages.filter((m) => m.mms || !isMmsId(m.id) || listed.has(m.id));
+        if (t.messages.length === before) continue;
+        touched.push(threadId);
+        if (t.messages.length === 0) delete d.threads[threadId];
+      }
+      if (touched.length === 0) return;
+      scheduleSave(phoneId);
+      deps.sendToShell('phone:messages', { phoneId, threadIds: touched });
+      changed();
     },
     stored(id) {
       for (const t of Object.values(phoneData(phoneId).threads)) {
