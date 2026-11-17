@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { Check, ChevronLeft, ChevronRight, MoreHorizontal, Play, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -104,6 +104,8 @@ export function CursorEffectsSettings() {
 
   const imported = packages.data ?? [];
   const tint = useCursorEffectTint(config.cursorThemeColor);
+  // Unique, as Settings shows these in Cursors and Effects, and search both at once.
+  const uid = useId();
   return (
     <div className="flex flex-col gap-3">
       <EffectCarousel
@@ -128,7 +130,7 @@ export function CursorEffectsSettings() {
       />
       <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
         <div className="min-w-0 flex-1">
-          <Label htmlFor="cursor-theme-color" className="cursor-pointer text-sm">
+          <Label htmlFor={`cursor-theme-color-${uid}`} className="cursor-pointer text-sm">
             Match theme color
           </Label>
           <p className="text-xs text-muted-foreground">
@@ -136,7 +138,7 @@ export function CursorEffectsSettings() {
           </p>
         </div>
         <Switch
-          id="cursor-theme-color"
+          id={`cursor-theme-color-${uid}`}
           checked={config.cursorThemeColor}
           onCheckedChange={(cursorThemeColor) => updateConfig((current) => ({ ...current, cursorThemeColor }))}
         />
@@ -144,7 +146,7 @@ export function CursorEffectsSettings() {
       {shellPointer && (
         <div className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
           <div className="min-w-0 flex-1">
-            <Label htmlFor="cursor-shake-to-find" className="cursor-pointer text-sm">
+            <Label htmlFor={`cursor-shake-to-find-${uid}`} className="cursor-pointer text-sm">
               Shake to find the pointer
             </Label>
             <p className="text-xs text-muted-foreground">
@@ -152,7 +154,7 @@ export function CursorEffectsSettings() {
             </p>
           </div>
           <Switch
-            id="cursor-shake-to-find"
+            id={`cursor-shake-to-find-${uid}`}
             checked={config.cursorShakeToFind}
             onCheckedChange={(cursorShakeToFind) => updateConfig((current) => ({ ...current, cursorShakeToFind }))}
           />
@@ -184,7 +186,7 @@ export function CursorEffectsSettings() {
       />
       <p className="text-xs text-muted-foreground">
         Import a CursorFX theme or effects package with “Import file…” above to add its trail and click effect here.
-        Effects are off while your system asks for reduced motion.
+        They stay still while Motion and effects is off, in Settings → Effects, or the system asks for reduced motion.
       </p>
     </div>
   );
@@ -213,7 +215,7 @@ function EffectCarousel({
   const card = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
-  const labelId = `cursor-${kind}-label`;
+  const labelId = `cursor-${kind}-label-${useId()}`;
   const tabbable = choices.some((c) => c.id === value) ? value : choices[0].id;
 
   const updateEdges = () => {
@@ -460,7 +462,7 @@ function PluginRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
-  const id = `cursor-${kind}`;
+  const id = `cursor-${kind}-${useId()}`;
   return (
     <div ref={row} className={cn(settingsCard, 'flex items-center gap-3 px-4 py-3')}>
       <button

@@ -131,14 +131,14 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Appearance',
     name: 'Effects',
     icon: Sparkles,
-    search: ['Appearance', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Typing', 'Power mode', 'Shake the window', 'Compiz', 'animation', 'genie', 'magic lamp', 'burn', 'explode', 'sparks'],
+    search: ['Appearance', 'Motion and effects', 'Reduce motion', 'prefers-reduced-motion', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Cursor', 'Cursor effects', 'Trail', 'Click effect', 'Show Mouse', 'Fire Paint', 'Water', 'Typing', 'Power mode', 'Shake the window', 'Compiz', 'animation', 'animations', 'motion', 'genie', 'magic lamp', 'burn', 'explode', 'sparks'],
   },
   {
     id: 'windows',
     group: 'Personal',
     name: 'Windows',
     icon: LayoutDashboard,
-    search: ['Tiling', 'Tile windows', 'Gaps', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
+    search: ['Tiling', 'Tile windows', 'Gaps', 'Window effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
   },
   {
     id: 'desktop',

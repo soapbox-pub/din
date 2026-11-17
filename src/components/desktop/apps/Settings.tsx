@@ -1,4 +1,4 @@
-import { Fragment, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Airplay,
   ArrowDown,
@@ -7,6 +7,8 @@ import {
   Contrast,
   Type,
   Zap,
+  Sparkles,
+  Waves,
   BatteryFull,
   BellOff,
   Bomb,
@@ -293,6 +295,7 @@ import { isTaskbarVertical, TASKBAR_BUTTONS, TASKBAR_POSITIONS, TASKBAR_STYLES }
 import { WM_BINDING_HELP } from '@/lib/wmBindings';
 import { SECTIONS, matchingSections } from '@/lib/settingsSections';
 import type { SectionId } from '@/lib/settingsSections';
+import { useReducedMotion } from '@/shared/reducedMotion';
 
 /**
  * Settings - system preferences for the shell.
@@ -328,9 +331,11 @@ import type { SectionId } from '@/lib/settingsSections';
  * Themes switches the shell theme between light, dark and a custom one of
  * colors, fonts and a background picture, synced with the profile theme or
  * kept on this computer (ThemeSettings); Cursors picks the pointer and its
- * effects; Icons the icon theme; and Effects toggles desktop effects like
- * wobbly windows.
- * Windows turns Hyprland-style tiling on or off, sets its gaps, and lists the
+ * effects; Icons the icon theme; and Effects leads with Motion and effects
+ * (Accessibility's Reduce motion, the other way round) over every desktop
+ * effect: windows', the cursor's and typing's.
+ * Windows turns Hyprland-style tiling on or off, sets its gaps, how windows
+ * wobble, minimize and close (shared with Effects), and lists the
  * Super-key shortcuts for windows and workspaces (src/lib/wmBindings.ts).
  * Dock turns its magnification on or off and picks its backdrop, as its own
  * right-click menu does.
@@ -483,7 +488,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
     ) : id === 'effects' ? (
       <EffectsSection windowId={windowId} />
     ) : id === 'windows' ? (
-      <WindowsSection />
+      <WindowsSection windowId={windowId} />
     ) : id === 'desktop' ? (
       <DesktopSection />
     ) : id === 'dock' ? (
@@ -3950,51 +3955,125 @@ function IconsSection() {
   );
 }
 
-function EffectsSection({ windowId }: { windowId: string }) {
+/**
+ * Whether motion and effects are on: Accessibility's Reduce motion, the
+ * other way round, which Effects leads with as its master switch. The
+ * system's preference counts too (src/shared/reducedMotion.ts); on DinOS it's
+ * Din's own setting, so it only differs in a browser, where Din can't
+ * overrule it.
+ */
+function useMotion() {
   const { config, updateConfig } = useAppContext();
+  const reduced = useReducedMotion();
+  return {
+    /** Din's own setting allows motion. */
+    on: !config.reduceMotion,
+    /** Motion is held back, by Din's setting or the system's. */
+    held: reduced || config.reduceMotion,
+    /** The system asks for reduced motion though Din's setting doesn't. */
+    bySystem: reduced && !config.reduceMotion,
+    set: (on: boolean) => updateConfig((current) => ({ ...current, reduceMotion: !on })),
+  };
+}
+
+/** Dims and disables effects while motion is held back. */
+function MotionGate({ children }: { children: React.ReactNode }) {
+  const { held } = useMotion();
+  return (
+    <fieldset disabled={held} className={cn('m-0 flex min-w-0 flex-col gap-3 border-0 p-0', held && 'opacity-50')}>
+      {children}
+    </fieldset>
+  );
+}
+
+/** Wobbly windows, in Effects and in Windows: one setting in two places. */
+function WobblyWindowsRow() {
+  const { config, updateConfig } = useAppContext();
+  // Unique, as Settings search can show Effects and Windows at once.
+  const id = `wobbly-windows-${useId()}`;
+  return (
+    <SettingSwitchRow
+      id={id}
+      icon={Waves}
+      label="Wobbly windows"
+      description="Windows wriggle like jelly while you drag them, Compiz style."
+      checked={config.wobblyWindows}
+      onCheckedChange={(checked) => updateConfig((current) => ({ ...current, wobblyWindows: checked }))}
+    />
+  );
+}
+
+/** How windows minimize and close, in Effects and in Windows. */
+function WindowEffectPickers({ windowId }: { windowId: string }) {
+  const { config, updateConfig } = useAppContext();
+  return (
+    <>
+      <WindowEffectPicker
+        event="minimize"
+        label="Minimize effect"
+        description="How a window goes into the Dock. It plays backwards when the window comes back."
+        windowId={windowId}
+        value={config.minimizeEffect}
+        onChange={(minimizeEffect) => updateConfig((current) => ({ ...current, minimizeEffect }))}
+      />
+      <WindowEffectPicker
+        event="close"
+        label="Close effect"
+        description="How a window leaves when it closes."
+        windowId={windowId}
+        value={config.closeEffect}
+        onChange={(closeEffect) => updateConfig((current) => ({ ...current, closeEffect }))}
+      />
+    </>
+  );
+}
+
+/** Why a window's effects are off, under them, while they are. */
+function MotionHeldNote() {
+  const { held, bySystem } = useMotion();
+  if (!held) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {bySystem
+        ? 'Off because the system asks for reduced motion.'
+        : 'Off while Motion and effects is off, in Effects (Reduce motion, in Accessibility).'}
+    </p>
+  );
+}
+
+function EffectsSection({ windowId }: { windowId: string }) {
+  const motion = useMotion();
 
   return (
     <SectionShell title="Effects">
+      <SettingSwitchRow
+        id="motion-effects"
+        icon={Sparkles}
+        label="Motion and effects"
+        description={
+          motion.bySystem
+            ? 'The system asks for reduced motion, so windows, the Dock and menus don’t animate and the effects below stay still.'
+            : 'Windows, the Dock and menus animate, and the effects below play. Off is Reduce motion, in Accessibility, and apps are asked to keep still too.'
+        }
+        checked={motion.on}
+        onCheckedChange={motion.set}
+      />
+
       <SubHeading>Windows</SubHeading>
-      <div className={cn(settingsCard, 'flex items-center justify-between gap-4 px-4 py-3')}>
-        <div className="min-w-0">
-          <Label htmlFor="wobbly-windows" className="cursor-pointer text-sm">
-            Wobbly windows
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Windows wriggle like jelly while you drag them, Compiz style.
-            Off while Reduce motion is on, in Accessibility or the system.
-          </p>
-        </div>
-        <Switch
-          id="wobbly-windows"
-          checked={config.wobblyWindows}
-          onCheckedChange={(checked) =>
-            updateConfig((current) => ({ ...current, wobblyWindows: checked }))
-          }
-        />
-      </div>
-      <div className="mt-3 flex flex-col gap-3">
-        <WindowEffectPicker
-          event="minimize"
-          label="Minimize effect"
-          description="How a window goes into the Dock. It plays backwards when the window comes back."
-          windowId={windowId}
-          value={config.minimizeEffect}
-          onChange={(minimizeEffect) => updateConfig((current) => ({ ...current, minimizeEffect }))}
-        />
-        <WindowEffectPicker
-          event="close"
-          label="Close effect"
-          description="How a window leaves when it closes."
-          windowId={windowId}
-          value={config.closeEffect}
-          onChange={(closeEffect) => updateConfig((current) => ({ ...current, closeEffect }))}
-        />
-      </div>
+      <MotionGate>
+        <WobblyWindowsRow />
+        <WindowEffectPickers windowId={windowId} />
+      </MotionGate>
+
+      <SubHeading>Cursor</SubHeading>
+      <MotionGate>
+        <CursorEffectsSettings />
+      </MotionGate>
 
       <SubHeading>Typing</SubHeading>
-      <PowerModeSettings />
+      <MotionGate>
+        <PowerModeSettings />
+      </MotionGate>
     </SectionShell>
   );
 }
@@ -4025,7 +4104,7 @@ function AccessibilitySection() {
           id="reduce-motion"
           icon={Zap}
           label="Reduce motion"
-          description="Windows, the Dock and menus appear and move without animating, and effects like wobbly windows and cursor trails stay still. Apps are asked to do the same."
+          description="Windows, the Dock and menus appear and move without animating, and effects like wobbly windows and cursor trails stay still. Apps are asked to do the same. It’s Effects’ Motion and effects switch, turned off."
           checked={config.reduceMotion}
           onCheckedChange={(reduceMotion) => set({ reduceMotion })}
         />
@@ -4185,7 +4264,7 @@ function ColorFilterPreview({ filter }: { filter: ColorFilter }) {
 /** The largest gap Settings offers between tiles, in pixels. */
 const MAX_TILING_GAP = 32;
 
-function WindowsSection() {
+function WindowsSection({ windowId }: { windowId: string }) {
   const { config, updateConfig } = useAppContext();
   const [gap, setGap] = useState(config.tilingGap);
   const [lastGap, setLastGap] = useState(config.tilingGap);
@@ -4231,6 +4310,13 @@ function WindowsSection() {
         />
         <p className="text-xs text-muted-foreground">Space between tiled windows, and around them.</p>
       </div>
+
+      <SubHeading>Window effects</SubHeading>
+      <MotionGate>
+        <WobblyWindowsRow />
+        <WindowEffectPickers windowId={windowId} />
+      </MotionGate>
+      <MotionHeldNote />
 
       <p className="mt-2 text-sm text-muted-foreground">
         Keyboard shortcuts work whether tiling is on or not. Each monitor has workspaces 1 to 10 of its own.

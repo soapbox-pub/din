@@ -33,6 +33,11 @@ const SETTINGS: Setting[] = [
   { key: 'appearance.custom-theme', field: 'customThemeEnabled', help: 'Wear a custom theme of colors, fonts and a background', param: bool },
   { key: 'appearance.sync-profile-theme', field: 'syncProfileTheme', help: 'The custom theme is your profile theme, rather than this computer’s', param: bool },
   { key: 'appearance.glass', field: 'glass', help: 'Menus, panels and window frames of liquid or frosted glass (accessibility.reduce-transparency makes them solid)', param: { type: 'string', choices: ['liquid', 'frosted'] } },
+  {
+    key: 'appearance.effects', help: 'Windows, the Dock and menus animate and effects play (accessibility.reduce-motion, the other way round)', param: bool,
+    get: (ctx) => !ctx.config.reduceMotion,
+    set: (ctx, value) => ctx.updateConfig((current) => ({ ...current, reduceMotion: value !== true })),
+  },
   { key: 'appearance.wobbly-windows', field: 'wobblyWindows', help: 'Windows wobble as they’re dragged', param: bool },
   {
     key: 'appearance.minimize-effect', field: 'minimizeEffect', help: 'The effect windows minimize with',
@@ -198,6 +203,12 @@ export const settingsArea: Area = {
         ctx.updateConfig((current) => {
           const next = { ...current };
           delete next[field];
+          return next;
+        });
+      } else if (setting.key === 'appearance.effects') {
+        ctx.updateConfig((current) => {
+          const next = { ...current };
+          delete next.reduceMotion;
           return next;
         });
       } else if (setting.key === 'notifications.do-not-disturb') {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Play, Shuffle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -64,7 +64,7 @@ export function WindowEffectPicker({
   const canCapture = !!getScreenshotBridge()?.captureRegion;
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
-  const labelId = `${event}-effect-label`;
+  const labelId = `${event}-effect-label-${useId()}`;
   // An unknown choice (a setting from a newer Din) leaves the first tile tabbable.
   const tabbable = choices.some((c) => c.id === value) ? value : choices[0].id;
 
