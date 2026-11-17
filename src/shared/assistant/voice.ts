@@ -29,6 +29,14 @@ export interface Voice {
   started: boolean;
   /** Read Markdown aloud under `key`, stopping whatever this window was saying; `done` once it's over either way. */
   speak(markdown: string, key: string, done?: () => void): void;
+  /**
+   * Read Markdown being written, a piece at a time, under `key`: without a
+   * `reading`, it stops whatever this window was saying and starts a new
+   * reading, whose number it returns; with one, the piece waits its turn
+   * behind the rest of that reading. Null once that reading was stopped
+   * (stop(), or something else read), so the writer stops too.
+   */
+  append(markdown: string, key: string, reading?: number): number | null;
   stop(): void;
 }
 
@@ -41,37 +49,28 @@ export function createVoice(engine: VoiceEngine): VoiceStore {
   const listeners = new Set<() => void>();
   let speaking: string | null = null;
   let started = false;
-  /** Which speak() is current, so a stopped one's late ending changes nothing. */
-  let turn = 0;
+  /** The current reading, so a stopped one's late endings change nothing. */
+  let reading = 0;
+  /** Its pieces not yet said. */
+  let pending = 0;
   let snapshot: Voice;
 
   const publish = () => {
-    snapshot = { available: engine.available(), speaking, started, speak, stop };
+    snapshot = { available: engine.available(), speaking, started, speak, append, stop };
     for (const listener of listeners) listener();
   };
 
-  function speak(markdown: string, key: string, done?: () => void): void {
-    const text = speakableText(markdown);
-    const mine = ++turn;
-    if (speaking !== null) engine.cancel();
-    if (!text || !engine.available()) {
-      speaking = null;
-      started = false;
-      publish();
-      done?.();
-      return;
-    }
-    speaking = key;
-    started = false;
-    publish();
+  /** Say a piece as part of reading `mine`; `done` once it's over. */
+  const say = (text: string, mine: number, done?: () => void) => {
+    pending++;
     engine.speak(text, {
       onStart: () => {
-        if (turn !== mine) return;
+        if (reading !== mine || started) return;
         started = true;
         publish();
       },
       onEnd: () => {
-        if (turn === mine) {
+        if (reading === mine && --pending === 0) {
           speaking = null;
           started = false;
           publish();
@@ -79,10 +78,54 @@ export function createVoice(engine: VoiceEngine): VoiceStore {
         done?.();
       },
     });
+  };
+
+  /** A new reading under `key`, stopping this window's last. */
+  const begin = (key: string): number => {
+    const mine = ++reading;
+    if (speaking !== null) engine.cancel();
+    pending = 0;
+    speaking = key;
+    started = false;
+    return mine;
+  };
+
+  function speak(markdown: string, key: string, done?: () => void): void {
+    const text = speakableText(markdown);
+    if (!text || !engine.available()) {
+      reading++;
+      if (speaking !== null) engine.cancel();
+      speaking = null;
+      started = false;
+      publish();
+      done?.();
+      return;
+    }
+    const mine = begin(key);
+    publish();
+    say(text, mine, done);
+  }
+
+  function append(markdown: string, key: string, ongoing?: number): number | null {
+    if (ongoing !== undefined && ongoing !== reading) return null;
+    if (!engine.available()) return null;
+    const mine = ongoing ?? begin(key);
+    const text = speakableText(markdown);
+    if (text) {
+      if (speaking !== key) {
+        // Between pieces it had gone quiet: the same reading, speaking again.
+        speaking = key;
+        started = false;
+      }
+      say(text, mine);
+    }
+    publish();
+    return mine;
   }
 
   function stop(): void {
-    turn++;
+    reading++;
+    pending = 0;
     if (speaking === null) return;
     speaking = null;
     started = false;
@@ -90,7 +133,7 @@ export function createVoice(engine: VoiceEngine): VoiceStore {
     publish();
   }
 
-  snapshot = { available: engine.available(), speaking, started, speak, stop };
+  snapshot = { available: engine.available(), speaking, started, speak, append, stop };
   engine.subscribe(() => {
     if (engine.available() !== snapshot.available) publish();
   });
@@ -112,7 +155,8 @@ export function useVoiceStore(store: VoiceStore): Voice {
 /** An engine over the web's speechSynthesis, which in a Din app is Din's voice. */
 export function speechSynthesisEngine(): VoiceEngine {
   const synthesis = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
-  let current: SpeechSynthesisUtterance | null = null;
+  /** This window's utterances not yet over. */
+  const current = new Set<SpeechSynthesisUtterance>();
   return {
     available: () => (synthesis?.getVoices().length ?? 0) > 0,
     subscribe: (cb) => {
@@ -122,12 +166,12 @@ export function speechSynthesisEngine(): VoiceEngine {
     speak: (text, { onStart, onEnd }) => {
       if (!synthesis) return onEnd();
       const utterance = new SpeechSynthesisUtterance(text);
-      current = utterance;
+      current.add(utterance);
       let ended = false;
       const end = () => {
         if (ended) return;
         ended = true;
-        if (current === utterance) current = null;
+        current.delete(utterance);
         onEnd();
       };
       utterance.onstart = onStart;
@@ -136,7 +180,9 @@ export function speechSynthesisEngine(): VoiceEngine {
       synthesis.speak(utterance);
     },
     cancel: () => {
-      if (current) synthesis?.cancel();
+      if (current.size === 0) return;
+      current.clear();
+      synthesis?.cancel();
     },
   };
 }

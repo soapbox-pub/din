@@ -165,7 +165,12 @@ interface Playing {
   /** Resolves the wait for the piece playing now. */
   finishPiece: (() => void) | null;
   paused: boolean;
+  /** Its last piece is playing (or being made ready): the next utterance's first can be made now. */
+  last: boolean;
 }
+
+/** The first piece of utterances waiting, made while the one before finishes, so they follow without a gap. */
+const prefetched = new WeakMap<Utterance, Promise<AudioBuffer>>();
 
 const queue: Utterance[] = [];
 let playing: Playing | null = null;
@@ -218,6 +223,9 @@ export function speak(utterance: Utterance): void {
   queue.push(utterance);
   publish();
   if (!playing) void next();
+  // What's playing is on its last piece: this one's first is made meanwhile
+  // (a reply read as it's written comes a sentence at a time).
+  else if (playing.last) prefetchNext();
 }
 
 /**
@@ -239,8 +247,9 @@ export function cancelSpeech(owner?: unknown): void {
       // Not started yet.
     }
     p.finishPiece?.();
-    // Drops what's waiting to be made; the piece being made is short.
-    void bridge()?.cancel().catch(() => {});
+    // Drops what's waiting to be made (the piece being made is short),
+    // unless others' utterances are waiting with theirs.
+    if (queue.length === 0) void bridge()?.cancel().catch(() => {});
   }
   publish();
 }
@@ -272,7 +281,7 @@ async function next(): Promise<void> {
     publish();
     return;
   }
-  const p: Playing = { utterance, stopped: false, source: null, finishPiece: null, paused: false };
+  const p: Playing = { utterance, stopped: false, source: null, finishPiece: null, paused: false, last: false };
   playing = p;
   publish();
   try {
@@ -293,22 +302,26 @@ async function say(p: Playing): Promise<void> {
   if (!state.available) await refreshSpeech();
   if (!state.available) throw new Error(SPEECH_NEEDS_FEATURE);
   const { utterance } = p;
-  const voice = state.voices.some((v) => v.id === utterance.voice) ? utterance.voice! : defaultSpeechVoice();
-  const rate = Math.min(2, Math.max(0.5, utterance.rate ?? 1));
   const pieces = speechPieces(utterance.text);
   const ctx = audio();
   if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
-  const make = (text: string) =>
-    api.synthesize(text, voice, rate).then((wav) => ctx.decodeAudioData(new Uint8Array(wav).buffer));
-  // Each piece is made while the one before plays.
-  let coming = pieces.length > 0 ? make(pieces[0]!) : null;
+  // Each piece is made while the one before plays; the first may have been
+  // made while the utterance before this one finished.
+  const early = prefetched.get(utterance);
+  // Made early and dropped since (a cancel meant for others): made again.
+  let coming = pieces.length > 0 ? (early?.catch(() => makePiece(api, utterance, pieces[0]!)) ?? makePiece(api, utterance, pieces[0]!)) : null;
+  prefetched.delete(utterance);
   coming?.catch(() => {});
   let started = false;
   for (let i = 0; i < pieces.length && coming; i++) {
     const buffer = await coming;
     if (p.stopped) return;
-    coming = i + 1 < pieces.length ? make(pieces[i + 1]!) : null;
+    coming = i + 1 < pieces.length ? makePiece(api, utterance, pieces[i + 1]!) : null;
     coming?.catch(() => {});
+    if (!coming) {
+      p.last = true;
+      prefetchNext();
+    }
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gain = ctx.createGain();
@@ -329,4 +342,24 @@ async function say(p: Playing): Promise<void> {
     p.finishPiece = null;
     if (p.stopped) return;
   }
+}
+
+/** A piece of `utterance`, made in its voice and at its speed. */
+function makePiece(api: SpeechBridge, utterance: Utterance, text: string): Promise<AudioBuffer> {
+  const voice = state.voices.some((v) => v.id === utterance.voice) ? utterance.voice! : defaultSpeechVoice();
+  const rate = Math.min(2, Math.max(0.5, utterance.rate ?? 1));
+  const ctx = audio();
+  return api.synthesize(text, voice, rate).then((wav) => ctx.decodeAudioData(new Uint8Array(wav).buffer));
+}
+
+/** Make the next utterance's first piece now, while the one playing finishes. */
+function prefetchNext(): void {
+  const api = bridge();
+  const next = queue[0];
+  if (!api || !next || prefetched.has(next) || !state.available) return;
+  const first = speechPieces(next.text)[0];
+  if (!first) return;
+  const made = makePiece(api, next, first);
+  made.catch(() => {});
+  prefetched.set(next, made);
 }

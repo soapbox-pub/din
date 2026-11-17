@@ -128,15 +128,36 @@ export function replyText(after: Block[]): string {
   return after.flatMap((block) => (block.kind === 'text' ? [block.text.trim()] : [])).join('\n\n');
 }
 
+
+/** A block of a turn's prose, as it streams in: done once something follows it or its message or turn ends. */
+export interface ProsePart {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
 /**
- * The conversation's latest reply, the prose after its last turn's work
- * (what Copy reply copies and Read Aloud reads), keyed as its turn is, and
- * when the turn ended, if it has; null while the latest thing is the user's.
+ * The latest turn's prose as it's written, every text block in order (the
+ * notes between its steps and then its reply; never its thinking, tools or
+ * output), for reading it aloud while it works (replyVoice.ts); null while
+ * the latest thing is the user's.
  */
-export function latestReply(messages: SessionMessage[]): { key: string; text: string; endedAt: number | null } | null {
+export function latestTurnProse(
+  messages: SessionMessage[],
+): { key: string; start: number; endedAt: number | null; parts: ProsePart[] } | null {
   const entries = group(messages);
   const last = entries[entries.length - 1];
   if (last?.kind !== 'turn') return null;
-  const list = blocks(last.items);
-  return { key: last.id, text: replyText(list.slice(replyCut(list) + 1)), endedAt: last.idle?.time.created ?? null };
+  const ended = !!last.idle;
+  const assistants = last.items.filter((m): m is AssistantMessage => m.type === 'assistant');
+  const parts: ProsePart[] = [];
+  assistants.forEach((message, m) => {
+    const lastMessage = m === assistants.length - 1;
+    message.content.forEach((part, index) => {
+      if (part.type !== 'text' || !part.text.trim()) return;
+      const followed = index < message.content.length - 1 || !lastMessage;
+      parts.push({ id: `${message.id}:${index}`, text: part.text, done: ended || followed || !!message.time.completed });
+    });
+  });
+  return { key: last.id, start: last.start, endedAt: last.idle?.time.created ?? null, parts };
 }

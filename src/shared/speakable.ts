@@ -123,3 +123,36 @@ export function speechPieces(text: string): string[] {
   }
   return pieces;
 }
+
+/**
+ * How far Markdown being written can be read aloud yet, from `from`: to the
+ * end of its last whole sentence or line, never inside a code block (which
+ * goes whole, once closed, and is left out of what's said), or to its end
+ * once it's `done`. `from` itself if nothing new is ready.
+ */
+export function speakableUpTo(markdown: string, from: number, done: boolean): number {
+  if (done) return markdown.length;
+  let cut = from;
+  let fenced = false;
+  let lineStart = 0;
+  for (let i = 0; i < markdown.length; i++) {
+    const ch = markdown[i];
+    if (i === lineStart) {
+      const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(markdown.slice(i, i + 8));
+      if (fence) fenced = !fenced;
+    }
+    if (ch === '\n') {
+      lineStart = i + 1;
+      // A whole line: a heading, a list item, the end of a paragraph.
+      if (!fenced && i + 1 > cut && i >= from) cut = i + 1;
+      continue;
+    }
+    // A sentence's end: its stop (and any closing quote or bracket), then a space.
+    if (!fenced && i >= from && /[.!?…]/.test(ch!)) {
+      let j = i + 1;
+      while (j < markdown.length && /["'”’)\]*_]/.test(markdown[j]!)) j++;
+      if (j < markdown.length && /\s/.test(markdown[j]!) && j + 1 > cut) cut = j + 1;
+    }
+  }
+  return cut;
+}
