@@ -400,8 +400,6 @@ function StatCard({
   history,
   max,
   tone,
-  secondaryHistory,
-  secondaryTone,
   warning = 'ok',
   className,
   children,
@@ -415,9 +413,6 @@ function StatCard({
   /** The graph's top; 100 for percentages. */
   max?: number;
   tone: string;
-  /** A second series, drawn as a dashed line over the first. */
-  secondaryHistory?: number[];
-  secondaryTone?: string;
   warning?: SpaceLevel;
   className?: string;
   children?: ReactNode;
@@ -455,13 +450,7 @@ function StatCard({
         {warning !== 'ok' && <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
         <span className="truncate">{detail}</span>
       </p>
-      <Sparkline
-        values={history}
-        max={max}
-        secondary={secondaryHistory}
-        secondaryTone={secondaryTone}
-        className={cn('mt-2 h-10 w-full flex-auto', tone)}
-      />
+      <Sparkline values={history} max={max} className={cn('mt-2 h-10 w-full flex-auto', tone)} />
       {children}
     </section>
   );
@@ -567,38 +556,6 @@ function DiskCard({ disk, history, className }: { disk: DiskTotals; history: num
 /** The smallest top the network graph scales to, so an idle connection's chatter stays near the floor. */
 const NETWORK_GRAPH_FLOOR = 64 * 1024;
 
-function NetworkCard({
-  network,
-  receiveHistory,
-  sendHistory,
-  className,
-}: {
-  network: NetworkTotals | null;
-  receiveHistory: number[];
-  sendHistory: number[];
-  className?: string;
-}) {
-  const max = Math.max(NETWORK_GRAPH_FLOOR, ...receiveHistory, ...sendHistory);
-  return (
-    <StatCard
-      label="Network"
-      value={network ? formatRate(network.receiveRate + network.sendRate) : '–'}
-      detail={network ? `down ${formatRate(network.receiveRate)} · up ${formatRate(network.sendRate)}` : 'No network adapter'}
-      detailTitle={
-        network
-          ? `Received ${formatBytes(network.received)} and sent ${formatBytes(network.sent)} since the computer started. The dashed line is what's sent.`
-          : undefined
-      }
-      history={receiveHistory}
-      secondaryHistory={sendHistory}
-      secondaryTone="text-chart-1"
-      max={max}
-      tone="text-chart-5"
-      className={className}
-    />
-  );
-}
-
 /**
  * The Network view's graph: the computer's traffic over the last minute,
  * received filled and sent dashed, wide enough to read, in place of the
@@ -670,22 +627,21 @@ function SystemHeader({
   memoryHistory,
   gpuHistory,
   diskHistory,
-  receiveHistory,
-  sendHistory,
 }: {
   snapshot: SystemSnapshot | null;
   cpuHistory: number[];
   memoryHistory: number[];
   gpuHistory: number[];
   diskHistory: number[];
-  receiveHistory: number[];
-  sendHistory: number[];
 }) {
   if (!snapshot) {
     return (
-      <div className="grid grid-cols-2 gap-3 p-3 pb-2 @2xl:grid-cols-4" aria-hidden>
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="space-y-2 rounded-xl bg-card clay p-3">
+      <div className="grid grid-cols-2 gap-3 p-3 pb-2 @2xl:grid-cols-3" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className={cn('space-y-2 rounded-xl bg-card clay p-3', i === 2 && 'col-span-2 @2xl:col-span-1')}
+          >
             <div className="flex justify-between">
               <Skeleton className="h-3 w-16" />
               <Skeleton className="h-5 w-12" />
@@ -701,7 +657,7 @@ function SystemHeader({
   const swap =
     memory.swapTotal > 0 ? ` · swap ${formatBytes(memory.swapUsed)} of ${formatBytes(memory.swapTotal)}` : '';
   return (
-    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu ? '@xl:grid-cols-3 @4xl:grid-cols-5' : '@2xl:grid-cols-4')}>
+    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu ? '@2xl:grid-cols-4' : '@2xl:grid-cols-3')}>
       <StatCard
         label="CPU"
         value={formatPercent(snapshot.cpu)}
@@ -729,14 +685,7 @@ function SystemHeader({
           tone="text-chart-3"
         />
       )}
-      <DiskCard disk={disk} history={diskHistory} />
-      <NetworkCard
-        network={snapshot.network}
-        receiveHistory={receiveHistory}
-        sendHistory={sendHistory}
-        // Five cards in two or three columns leave this one the last row's rest.
-        className={cn(gpu && 'col-span-2 @4xl:col-span-1')}
-      />
+      <DiskCard disk={disk} history={diskHistory} className={cn(!gpu && 'col-span-2 @2xl:col-span-1')} />
     </div>
   );
 }
@@ -930,7 +879,7 @@ export function SystemMonitor() {
   const { toast } = useToast();
 
   const [view, setView] = useState<View>('processes');
-  const [networkMode, setNetworkMode] = useState<NetworkMode>('requests');
+  const [networkMode, setNetworkMode] = useState<NetworkMode>('connections');
   const [paused, setPaused] = useState(false);
   // Each view has a search of its own, so leaving one keeps what was looked for.
   const [networkQuery, setNetworkQuery] = useState('');
@@ -1157,8 +1106,8 @@ export function SystemMonitor() {
               label="What to show"
               value={networkMode}
               options={[
-                { value: 'requests', label: 'Requests', title: 'What Din’s apps and pages load' },
                 { value: 'connections', label: 'Connections', title: 'Every program’s open connections' },
+                { value: 'requests', label: 'Requests', title: 'What Din’s apps and pages load' },
               ]}
               onValueChange={setNetworkMode}
             />
@@ -1240,8 +1189,6 @@ export function SystemMonitor() {
           memoryHistory={memoryHistory}
           gpuHistory={gpuHistory}
           diskHistory={diskHistory}
-          receiveHistory={receiveHistory}
-          sendHistory={sendHistory}
         />
       ) : (
         <NetworkStrip
