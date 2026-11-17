@@ -566,6 +566,9 @@ let
     # The Web Browser's Download Video (electron/video-download.mts), which
     # joins the video and audio with the FFmpeg above rather than its own.
     export DIN_YTDLP=${pkgs.yt-dlp.override { ffmpegSupport = false; }}/bin/yt-dlp
+    # The same yt-dlp's Python module, which tells from a page's address
+    # whether it's a video's, for Share's Send as Video.
+    export DIN_YTDLP_PYTHON=${pkgs.python3.withPackages (ps: [ (ps.yt-dlp.override { ffmpegSupport = false; }) ])}/bin/python3
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}

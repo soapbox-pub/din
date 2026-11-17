@@ -61,6 +61,17 @@ function alternativeOf(args: Args, data: ShareData): { alternatives: ShareAltern
   return { alternatives, chosen: alternatives.find((a) => a.id === as)! };
 }
 
+/**
+ * The sheet's Video and Audio for a link alone to a page yt-dlp knows as a
+ * video's, as the Web Browser's Share offers them; none for anything else.
+ */
+async function videoPageAlternatives(data: ShareData): Promise<ShareAlternative[]> {
+  const bridge = getBrowserBridge();
+  if (!bridge || !data.url || !/^https?:\/\//i.test(data.url) || data.files.length > 0 || data.text) return [];
+  const hit = await bridge.isVideoPage(data.url).catch(() => false);
+  return hit ? videoShareAlternatives(bridge, { url: data.url }) : [];
+}
+
 export const shareArea: Area = {
   name: 'share',
   summary: 'Share files, text or a link to an app, as the share sheet does',
@@ -81,7 +92,8 @@ export const shareArea: Area = {
         else deliverShare(target, data, null, ctx.actions.open);
         return { data: { to: target.id }, text: `Shared to ${target.name}` };
       }
-      const result = await requestShare(data, alt ? { alternatives: alt.alternatives, rememberAs: VIDEO_SHARE_KEY, sendAs: alt.chosen.id } : {});
+      const offered = alt ? alt.alternatives : await videoPageAlternatives(data);
+      const result = await requestShare(data, offered.length > 0 ? { alternatives: offered, rememberAs: VIDEO_SHARE_KEY, sendAs: alt?.chosen.id } : {});
       if (result === null) return { data: { to: null }, text: 'Not shared' };
       const app = ctx.apps.getApp(result);
       return { data: { to: result }, text: app ? `Shared to ${app.name}` : result === 'copy' ? 'Copied' : 'Saved to Downloads' };

@@ -184,6 +184,12 @@ export interface BrowserBridge {
    */
   downloadVideo(request: ({ wcId: number } | { url: string }) & { format?: VideoDownloadFormat; forShare?: boolean }): Promise<number | null>;
   /**
+   * Whether yt-dlp knows the page at `url` as one with a video (not a
+   * playlist, like a profile or channel), from its address alone: one of
+   * its site extractors claims it. No request is made; false without yt-dlp.
+   */
+  isVideoPage(url: string): Promise<boolean>;
+  /**
    * What a site (`origin`, e.g. `https://meet.example`) has been allowed or
    * blocked. `isPrivate` reads the private window's answers instead.
    */

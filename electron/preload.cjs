@@ -3238,6 +3238,13 @@ expose('browser', {
   downloadVideo: (request) => ipcRenderer.invoke('browser:downloadVideo', request),
 
   /**
+   * Whether yt-dlp knows the page at `url` as one with a video (not a
+   * playlist), from its address alone: no request is made.
+   * @param {string} url
+   */
+  isVideoPage: (url) => ipcRenderer.invoke('browser:isVideoPage', url),
+
+  /**
    * What a site (`origin`) has been allowed or blocked, and whether the user
    * accepted an untrusted certificate for its host. `isPrivate` reads the
    * private window's session instead of the persistent one.

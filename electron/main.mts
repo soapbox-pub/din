@@ -184,7 +184,7 @@ import { setWindowsPalette } from './windows-apps.mts';
 import { registerCaptureHandlers, stopCapture } from './capture.mts';
 import { pauseAllMedia, registerMediaHandlers, watchMediaGuest } from './media.mts';
 import {
-  cancelVideoDownload, registerVideoDownloads, startVideoDownload, VIDEO_DOWNLOAD_FORMATS, type VideoDownloadFormat,
+  cancelVideoDownload, isVideoPage, registerVideoDownloads, startVideoDownload, VIDEO_DOWNLOAD_FORMATS, type VideoDownloadFormat,
 } from './video-download.mts';
 import { registerPowerModeHandlers } from './power-mode.mts';
 import { CommandError, runCommand, watchCommand } from './system.mts';
@@ -5629,6 +5629,13 @@ function registerBrowserDownloadHandlers(): void {
     }
     if (typeof r.url !== 'string') throw new Error('No address to download from');
     return startVideoDownload({ url: r.url, format, wcId: -1, cookies: browserSession(), proxy: browserSession(), forShare });
+  });
+
+  // Whether yt-dlp knows an address as a page with a video, from the address
+  // alone (no request is made), for Share's Send as Video.
+  ipcMain.handle('browser:isVideoPage', (event, url: unknown) => {
+    assertShellSender(event);
+    return typeof url === 'string' ? isVideoPage(url) : false;
   });
 
   // Run a downloaded setup.exe, the way it would on Windows, or an AppImage. Everything else

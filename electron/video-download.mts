@@ -114,6 +114,113 @@ function ffmpeg(): string | null {
   return named && fs.existsSync(named) ? named : null;
 }
 
+// Whether a page has a video yt-dlp can save, from its address alone: one of
+// yt-dlp's extractors for a particular site (not its generic one, which takes
+// any address) claims it, and gives a video (not a playlist, like a profile
+// or a channel). That's offline, a regex per site, asked of yt-dlp's own
+// Python module, so the Web Browser's Share can offer the video before
+// anything plays (Instagram's reels start muted). Loading it takes about
+// 0.4 s, so one helper answers every address, one per line, and goes away
+// when it's been idle a while.
+
+/** The helper: reads `n<TAB>url` lines, answers `n<TAB>1` or `n<TAB>0`. */
+const MATCHER = `
+import sys
+from yt_dlp.extractor import gen_extractor_classes
+ies = [ie for ie in gen_extractor_classes()
+       if ie.ie_key() != 'Generic' and getattr(ie, '_RETURN_TYPE', None) in ('video', 'any') and ie.working()]
+for line in sys.stdin:
+    n, _, url = line.rstrip('\\n').partition('\\t')
+    try:
+        hit = any(ie.suitable(url) for ie in ies)
+    except Exception:
+        hit = False
+    sys.stdout.write(n + '\\t' + ('1' if hit else '0') + '\\n')
+    sys.stdout.flush()
+`;
+const MATCHER_IDLE_MS = 5 * 60_000;
+const MATCH_CACHE_MAX = 500;
+
+interface Matcher {
+  child: ChildProcess;
+  /** Each address asked about, by its line's number, till it's answered. */
+  pending: Map<number, { key: string; resolve: (hit: boolean) => void }>;
+  next: number;
+  idle: NodeJS.Timeout | null;
+}
+
+let matcher: Matcher | null = null;
+/** yt-dlp's module can't be loaded here: every answer is no. */
+let matcherBroken = false;
+const matchCache = new Map<string, boolean>();
+
+/** A Python that has yt-dlp's module: DinOS's, else python3 on PATH. */
+function matcherPython(): string {
+  return process.env.DIN_YTDLP_PYTHON || 'python3';
+}
+
+function startMatcher(): Matcher | null {
+  if (matcherBroken) return null;
+  if (matcher) return matcher;
+  const child = spawn(matcherPython(), ['-I', '-c', MATCHER], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const m: Matcher = { child, pending: new Map(), next: 0, idle: null };
+  let answered = false;
+  createInterface({ input: child.stdout! }).on('line', (line) => {
+    const [n, hit] = line.split('\t');
+    const asked = m.pending.get(Number(n));
+    if (!asked) return;
+    answered = true;
+    m.pending.delete(Number(n));
+    if (matchCache.size >= MATCH_CACHE_MAX) matchCache.delete(matchCache.keys().next().value!);
+    matchCache.set(asked.key, hit === '1');
+    asked.resolve(hit === '1');
+  });
+  const gone = () => {
+    if (matcher === m) matcher = null;
+    if (m.idle) clearTimeout(m.idle);
+    // It never answered: no yt-dlp module for this Python.
+    if (!answered) matcherBroken = true;
+    for (const { resolve } of m.pending.values()) resolve(false);
+    m.pending.clear();
+  };
+  child.once('error', gone);
+  child.once('close', gone);
+  child.stdin!.on('error', () => {});
+  matcher = m;
+  return m;
+}
+
+/**
+ * Whether yt-dlp knows the page at `url` as one with a video (not a
+ * playlist), by its address alone. False when there's no yt-dlp.
+ */
+export function isVideoPage(url: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return Promise.resolve(false);
+  }
+  if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.hostname.endsWith('.onion')) {
+    return Promise.resolve(false);
+  }
+  parsed.hash = '';
+  const key = parsed.href;
+  const known = matchCache.get(key);
+  if (known !== undefined) return Promise.resolve(known);
+  if (!ytDlp()) return Promise.resolve(false);
+  const m = startMatcher();
+  if (!m) return Promise.resolve(false);
+  if (m.idle) clearTimeout(m.idle);
+  m.idle = setTimeout(() => m.child.kill(), MATCHER_IDLE_MS);
+  m.idle.unref();
+  const n = m.next++;
+  return new Promise((resolve) => {
+    m.pending.set(n, { key, resolve });
+    m.child.stdin!.write(`${n}\t${key}\n`);
+  });
+}
+
 function cacheRoot(): string {
   const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
   return path.join(base, 'din', 'video-downloads');
@@ -375,6 +482,7 @@ export function registerVideoDownloads(opts: Options): void {
   // Nothing survives a restart: whatever was left half done is just space.
   void fs.promises.rm(cacheRoot(), { recursive: true, force: true }).catch(() => {});
   app.on('will-quit', () => {
+    matcher?.child.kill();
     for (const job of jobs.values()) {
       job.cancelled = true;
       killJob(job);

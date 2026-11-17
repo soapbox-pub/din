@@ -78,8 +78,14 @@ Closed meanwhile, the sheet lets it carry on and the share still goes.
 Its Save to Downloads is the alternative's own (`save`).
 
 The Web Browser's Share offers **Video** (with a quality: Best, 1080p,
-720p, 480p) and **Audio** for a page with a video playing or paused
-(`src/lib/videoShare.ts`): yt-dlp fetches it as Download Video does, into
+720p, 480p) and **Audio** for a page yt-dlp knows by its address as a
+video's, or one with something playing or paused (`src/lib/videoShare.ts`).
+The address is checked offline against yt-dlp's site extractors, those that
+give a video rather than a playlist (`isVideoPage` in
+`electron/video-download.mts`, one long-lived Python helper loading
+yt-dlp's module), so an Instagram reel, which starts muted, offers its video
+before it's heard; `din share --url` offers the same for such a page. Picked,
+yt-dlp fetches it as Download Video does, into
 `~/.cache/din/shared/<random>/` (`forShare` in
 `electron/video-download.mts`), its progress on the download shelf too, so
 an app like Armada is POSTed the MP4 itself. Save to Downloads there is

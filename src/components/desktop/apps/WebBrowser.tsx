@@ -632,12 +632,14 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const onionLocation = torStatus?.port != null ? siteLocations.onion : null;
   // Download Video, for a website's page (never a Tor tab's: yt-dlp would
   // go around Tor); the share sheet offers to send it as the video (and save
-  // it from there) while the page has something playing or paused, and the
-  // menu's item always.
+  // it from there) on a page yt-dlp knows by its address as a video's (an
+  // Instagram reel, which starts muted, before it's heard), or while the page
+  // has something playing or paused; the menu's item always.
   const nowPlaying = useNowPlaying();
   const canDownloadVideo =
     !!getBrowserBridge() && !activeTab.tor && activeTab.wcId !== null && /^https?:\/\//i.test(activeTab.url);
-  const pageHasMedia = canDownloadVideo && nowPlaying.some((s) => s.id === `web:${activeTab.wcId}`);
+  const videoPage = useIsVideoPage(canDownloadVideo ? activeTab.url : null);
+  const pageHasMedia = canDownloadVideo && (videoPage || nowPlaying.some((s) => s.id === `web:${activeTab.wcId}`));
 
   const updateTab = useCallback(
     (id: string, patch: Partial<Tab> | ((tab: Tab) => Partial<Tab>)) => {
@@ -5193,6 +5195,25 @@ function ClearDataOption({
       </div>
     </div>
   );
+}
+
+/**
+ * Whether yt-dlp knows the page at `url` as a video's, by its address alone
+ * (no request is made); false for null, and until it's answered.
+ */
+function useIsVideoPage(url: string | null): boolean {
+  const [answer, setAnswer] = useState<{ url: string; hit: boolean } | null>(null);
+  useEffect(() => {
+    const bridge = getBrowserBridge();
+    if (!url || !bridge) return;
+    let live = true;
+    bridge.isVideoPage(url).then(
+      (hit) => { if (live) setAnswer({ url, hit }); },
+      () => {},
+    );
+    return () => { live = false; };
+  }, [url]);
+  return !!url && answer?.url === url && answer.hit;
 }
 
 /** Whether a tab's page can be shared: a website's or an nsite's, not a blank or internal one. */
