@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getSystemMonitorBridge, type SystemSnapshot } from '@/lib/systemMonitor';
 
-/** Snapshots kept for the CPU, memory, GPU and disk graphs: a minute's worth. */
+/** Snapshots kept for the CPU, memory, GPU, disk and network graphs: a minute's worth. */
 export const SYSTEM_HISTORY_LENGTH = 30;
 
 interface SystemMonitorState {
@@ -14,6 +14,9 @@ interface SystemMonitorState {
   gpuHistory: number[];
   /** Recent disk traffic, read and write together, in bytes per second, oldest first. */
   diskHistory: number[];
+  /** Recent network traffic, in bytes per second, oldest first. */
+  receiveHistory: number[];
+  sendHistory: number[];
 }
 
 const EMPTY: SystemMonitorState = {
@@ -22,6 +25,8 @@ const EMPTY: SystemMonitorState = {
   memoryHistory: [],
   gpuHistory: [],
   diskHistory: [],
+  receiveHistory: [],
+  sendHistory: [],
 };
 
 /**
@@ -48,6 +53,8 @@ export function useSystemMonitor() {
           ...prev.diskHistory,
           snapshot.disk.io ? snapshot.disk.io.readRate + snapshot.disk.io.writeRate : 0,
         ].slice(-SYSTEM_HISTORY_LENGTH),
+        receiveHistory: [...prev.receiveHistory, snapshot.network?.receiveRate ?? 0].slice(-SYSTEM_HISTORY_LENGTH),
+        sendHistory: [...prev.sendHistory, snapshot.network?.sendRate ?? 0].slice(-SYSTEM_HISTORY_LENGTH),
       })),
     );
   }, [bridge]);

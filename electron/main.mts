@@ -155,6 +155,7 @@ import { registerVolumesHandlers } from './volumes.mts';
 import { registerDriveHandlers } from './drive.mts';
 import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
+import { registerNetworkMonitorHandlers } from './network-monitor.mts';
 import { registerResourceAlertHandlers } from './resource-alerts.mts';
 import { registerNostrdHandlers } from './nostrd.mts';
 import { registerBunkerHandlers } from './bunker.mts';
@@ -6510,18 +6511,23 @@ app.whenReady().then(() => {
   });
   app.on('will-quit', cleanUpPrinting);
   registerResourceAlertHandlers({ assertShellSender, sendToShell });
-  registerSystemMonitorHandlers({
+  const monitorPageKind = (contents: Electron.WebContents) => {
+    if (contents.getType() !== 'webview') return 'page';
+    if (isAppGuest(contents)) return 'web-app';
+    if (contents.session === browserSession()) return 'browser-tab';
+    if (isEphemeralBrowserSession(contents.session)) return 'private-tab';
+    if (contents.session === devtoolsSession()) return 'devtools';
+    return 'page';
+  };
+  const monitorShell = () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null);
+  registerSystemMonitorHandlers({ assertShellSender, sendToShell, shell: monitorShell, pageKind: monitorPageKind });
+  registerNetworkMonitorHandlers({
     assertShellSender,
     sendToShell,
-    shell: () => (shellWindow && !shellWindow.isDestroyed() ? shellWindow.webContents : null),
-    pageKind: (contents) => {
-      if (contents.getType() !== 'webview') return 'page';
-      if (isAppGuest(contents)) return 'web-app';
-      if (contents.session === browserSession()) return 'browser-tab';
-      if (isEphemeralBrowserSession(contents.session)) return 'private-tab';
-      if (contents.session === devtoolsSession()) return 'devtools';
-      return 'page';
-    },
+    shell: monitorShell,
+    pageKind: monitorPageKind,
+    // Private and Tor tabs leave no trace, here included; DevTools' pages are its own.
+    ignore: (contents) => isEphemeralBrowserSession(contents.session) || contents.session === devtoolsSession(),
   });
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });

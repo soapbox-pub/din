@@ -3,11 +3,14 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
+  Ban,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Circle,
   Cog,
   OctagonX,
+  Pause,
   TriangleAlert,
 } from 'lucide-react';
 import {
@@ -36,6 +39,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { AppIcon } from '@/shared/AppIcon';
 import { useInstalledApps, type InstalledAppsManager } from '@/contexts/InstalledAppsContext';
+import { useNetworkRecording } from '@/hooks/useNetworkRecording';
 import { SYSTEM_HISTORY_LENGTH, useSystemMonitor } from '@/hooks/useSystemMonitor';
 import { useToast } from '@/hooks/useToast';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
@@ -46,13 +50,15 @@ import {
   getSystemMonitorBridge,
   type DiskTotals,
   type FilesystemSpace,
+  type NetworkTotals,
   type PageInfo,
   type ProcessInfo,
   type SpaceLevel,
   type SystemSnapshot,
 } from '@/lib/systemMonitor';
 import { cn } from '@/lib/utils';
-import { SearchField, SegmentedControl, StatusBar } from '@/shared/appChrome';
+import { SearchField, SegmentedControl, StatusBar, ToolButton, ToolbarDivider } from '@/shared/appChrome';
+import { ConnectionsView, RequestsView, type Identity } from './systemMonitor/NetworkView';
 
 const ROW_HEIGHT = 40;
 const DIN_ICON = '/din-logo.svg';
@@ -60,6 +66,8 @@ const DIN_ICON = '/din-logo.svg';
 const PROCESS_ICON: LucideIcon = Cog;
 
 type SortKey = 'name' | 'cpu' | 'gpu' | 'memory' | 'pid' | 'user';
+type View = 'processes' | 'network';
+type NetworkMode = 'requests' | 'connections';
 interface SortOrder {
   key: SortKey;
   descending: boolean;
@@ -322,14 +330,35 @@ function formatUptime(seconds: number): string {
   return `${minutes} min`;
 }
 
-/** A small line graph of the last minute, from 0 to `max`. */
-function Sparkline({ values, max = 100, className }: { values: number[]; max?: number; className?: string }) {
+/** The SVG path of a series over the last minute, from 0 to `max`, or '' with too few points. */
+function seriesPath(values: number[], max: number): { line: string; start: number; width: number } {
   const width = SYSTEM_HISTORY_LENGTH - 1;
   const start = width - (values.length - 1);
   const points = values.map(
     (v, i) => `${start + i},${(100 - Math.min(100, Math.max(0, (v / max) * 100))).toFixed(2)}`,
   );
-  const line = points.length > 1 ? `M${points.join('L')}` : '';
+  return { line: points.length > 1 ? `M${points.join('L')}` : '', start, width };
+}
+
+/**
+ * A small line graph of the last minute, from 0 to `max`, and a second
+ * series (`secondary`, in `secondaryTone`) drawn as a line over it.
+ */
+function Sparkline({
+  values,
+  max = 100,
+  className,
+  secondary,
+  secondaryTone,
+}: {
+  values: number[];
+  max?: number;
+  className?: string;
+  secondary?: number[];
+  secondaryTone?: string;
+}) {
+  const { line, start, width } = seriesPath(values, max);
+  const second = secondary ? seriesPath(secondary, max).line : '';
   return (
     <svg
       viewBox={`0 0 ${width} 100`}
@@ -349,6 +378,16 @@ function Sparkline({ values, max = 100, className }: { values: number[]; max?: n
           />
         </>
       )}
+      {second && (
+        <path
+          d={second}
+          className={cn('fill-none stroke-current', secondaryTone)}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeDasharray="3 2"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
     </svg>
   );
 }
@@ -361,6 +400,8 @@ function StatCard({
   history,
   max,
   tone,
+  secondaryHistory,
+  secondaryTone,
   warning = 'ok',
   className,
   children,
@@ -374,6 +415,9 @@ function StatCard({
   /** The graph's top; 100 for percentages. */
   max?: number;
   tone: string;
+  /** A second series, drawn as a dashed line over the first. */
+  secondaryHistory?: number[];
+  secondaryTone?: string;
   warning?: SpaceLevel;
   className?: string;
   children?: ReactNode;
@@ -411,7 +455,13 @@ function StatCard({
         {warning !== 'ok' && <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
         <span className="truncate">{detail}</span>
       </p>
-      <Sparkline values={history} max={max} className={cn('mt-2 h-10 w-full flex-auto', tone)} />
+      <Sparkline
+        values={history}
+        max={max}
+        secondary={secondaryHistory}
+        secondaryTone={secondaryTone}
+        className={cn('mt-2 h-10 w-full flex-auto', tone)}
+      />
       {children}
     </section>
   );
@@ -514,27 +564,128 @@ function DiskCard({ disk, history, className }: { disk: DiskTotals; history: num
   );
 }
 
+/** The smallest top the network graph scales to, so an idle connection's chatter stays near the floor. */
+const NETWORK_GRAPH_FLOOR = 64 * 1024;
+
+function NetworkCard({
+  network,
+  receiveHistory,
+  sendHistory,
+  className,
+}: {
+  network: NetworkTotals | null;
+  receiveHistory: number[];
+  sendHistory: number[];
+  className?: string;
+}) {
+  const max = Math.max(NETWORK_GRAPH_FLOOR, ...receiveHistory, ...sendHistory);
+  return (
+    <StatCard
+      label="Network"
+      value={network ? formatRate(network.receiveRate + network.sendRate) : '–'}
+      detail={network ? `down ${formatRate(network.receiveRate)} · up ${formatRate(network.sendRate)}` : 'No network adapter'}
+      detailTitle={
+        network
+          ? `Received ${formatBytes(network.received)} and sent ${formatBytes(network.sent)} since the computer started. The dashed line is what's sent.`
+          : undefined
+      }
+      history={receiveHistory}
+      secondaryHistory={sendHistory}
+      secondaryTone="text-chart-1"
+      max={max}
+      tone="text-chart-5"
+      className={className}
+    />
+  );
+}
+
+/**
+ * The Network view's graph: the computer's traffic over the last minute,
+ * received filled and sent dashed, wide enough to read, in place of the
+ * Processes view's cards.
+ */
+function NetworkStrip({
+  network,
+  receiveHistory,
+  sendHistory,
+  loading,
+}: {
+  network: NetworkTotals | null;
+  receiveHistory: number[];
+  sendHistory: number[];
+  loading: boolean;
+}) {
+  const max = Math.max(NETWORK_GRAPH_FLOOR, ...receiveHistory, ...sendHistory);
+  return (
+    <section
+      aria-label="Network traffic"
+      className="mx-3 mb-2 flex h-20 shrink-0 items-stretch gap-4 rounded-xl border border-border/60 bg-gradient-to-b from-foreground/[0.03] to-transparent p-3 shadow-xs"
+    >
+      <dl className="flex w-36 shrink-0 flex-col justify-center gap-1">
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-chart-5" />
+          <dt className="w-10 text-xs text-muted-foreground">Down</dt>
+          <dd className="text-sm font-semibold tabular-nums">
+            {loading ? <Skeleton className="h-4 w-16" /> : network ? formatRate(network.receiveRate) : '–'}
+          </dd>
+        </div>
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="h-0 w-2 shrink-0 border-t-2 border-dashed border-chart-1" />
+          <dt className="w-10 text-xs text-muted-foreground">Up</dt>
+          <dd className="text-sm font-semibold tabular-nums">
+            {loading ? <Skeleton className="h-4 w-16" /> : network ? formatRate(network.sendRate) : '–'}
+          </dd>
+        </div>
+      </dl>
+      {network || loading ? (
+        <Sparkline
+          values={receiveHistory}
+          secondary={sendHistory}
+          secondaryTone="text-chart-1"
+          max={max}
+          className="h-full min-w-0 flex-1 text-chart-5"
+        />
+      ) : (
+        <p className="flex flex-1 items-center text-xs text-muted-foreground">No network adapter to measure.</p>
+      )}
+      {network && (
+        <dl className="hidden shrink-0 flex-col justify-center gap-1 text-xs @2xl:flex">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Received</dt>
+            <dd className="tabular-nums">{formatBytes(network.received)}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Sent</dt>
+            <dd className="tabular-nums">{formatBytes(network.sent)}</dd>
+          </div>
+        </dl>
+      )}
+    </section>
+  );
+}
+
 function SystemHeader({
   snapshot,
   cpuHistory,
   memoryHistory,
   gpuHistory,
   diskHistory,
+  receiveHistory,
+  sendHistory,
 }: {
   snapshot: SystemSnapshot | null;
   cpuHistory: number[];
   memoryHistory: number[];
   gpuHistory: number[];
   diskHistory: number[];
+  receiveHistory: number[];
+  sendHistory: number[];
 }) {
   if (!snapshot) {
     return (
-      <div className="grid grid-cols-2 gap-3 p-3 pb-2 @2xl:grid-cols-3" aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className={cn('space-y-2 rounded-xl bg-card clay p-3', i === 2 && 'col-span-2 @2xl:col-span-1')}
-          >
+      <div className="grid grid-cols-2 gap-3 p-3 pb-2 @2xl:grid-cols-4" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="space-y-2 rounded-xl bg-card clay p-3">
             <div className="flex justify-between">
               <Skeleton className="h-3 w-16" />
               <Skeleton className="h-5 w-12" />
@@ -550,7 +701,7 @@ function SystemHeader({
   const swap =
     memory.swapTotal > 0 ? ` · swap ${formatBytes(memory.swapUsed)} of ${formatBytes(memory.swapTotal)}` : '';
   return (
-    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu ? '@2xl:grid-cols-4' : '@2xl:grid-cols-3')}>
+    <div className={cn('grid grid-cols-2 gap-3 p-3 pb-2', gpu ? '@xl:grid-cols-3 @4xl:grid-cols-5' : '@2xl:grid-cols-4')}>
       <StatCard
         label="CPU"
         value={formatPercent(snapshot.cpu)}
@@ -578,7 +729,14 @@ function SystemHeader({
           tone="text-chart-3"
         />
       )}
-      <DiskCard disk={disk} history={diskHistory} className={cn(!gpu && 'col-span-2 @2xl:col-span-1')} />
+      <DiskCard disk={disk} history={diskHistory} />
+      <NetworkCard
+        network={snapshot.network}
+        receiveHistory={receiveHistory}
+        sendHistory={sendHistory}
+        // Five cards in two or three columns leave this one the last row's rest.
+        className={cn(gpu && 'col-span-2 @4xl:col-span-1')}
+      />
     </div>
   );
 }
@@ -766,9 +924,18 @@ function TableSkeleton() {
  * Disk shows traffic, not a percentage, and how full /home is.
  */
 export function SystemMonitor() {
-  const { available, snapshot, cpuHistory, memoryHistory, gpuHistory, diskHistory } = useSystemMonitor();
+  const { available, snapshot, cpuHistory, memoryHistory, gpuHistory, diskHistory, receiveHistory, sendHistory } =
+    useSystemMonitor();
   const { getApp, findAppIdForUrl } = useInstalledApps();
   const { toast } = useToast();
+
+  const [view, setView] = useState<View>('processes');
+  const [networkMode, setNetworkMode] = useState<NetworkMode>('requests');
+  const [paused, setPaused] = useState(false);
+  // Each view has a search of its own, so leaving one keeps what was looked for.
+  const [networkQuery, setNetworkQuery] = useState('');
+  const recordingActive = view === 'network' && networkMode === 'requests' && !paused;
+  const network = useNetworkRecording(recordingActive);
 
   const [mineOnly, setMineOnly] = useState(true);
   const [query, setQuery] = useState('');
@@ -788,6 +955,35 @@ export function SystemMonitor() {
   );
   const selectedIndex = rows.findIndex((row) => row.key === selectedKey);
   const selected = selectedIndex >= 0 ? rows[selectedIndex] : null;
+
+  /** A process by pid as the Processes view names it: its app, or itself. */
+  const identities = useMemo(() => {
+    const byPid = new Map<number, Identity>();
+    for (const group of groups) {
+      for (const member of group.members) byPid.set(member.process.pid, { label: group.label, icon: group.icon });
+    }
+    return byPid;
+  }, [groups]);
+  const identify = useCallback((pid: number) => identities.get(pid) ?? null, [identities]);
+
+  /** Show a process in the Processes view: its group, opened, with it chosen. */
+  const showProcess = useCallback(
+    (pid: number) => {
+      const group = groups.find((g) => g.members.some((m) => m.process.pid === pid));
+      const mine = group?.members.find((m) => m.process.pid === pid)?.process.mine ?? true;
+      setView('processes');
+      setQuery('');
+      if (!mine) setMineOnly(false);
+      if (!group) return;
+      if (group.members.length > 1) {
+        setExpanded((prev) => new Set(prev).add(group.key));
+        setSelectedKey(`${group.key}/${pid}`);
+      } else {
+        setSelectedKey(group.key);
+      }
+    },
+    [groups],
+  );
 
   const { containerRef, onScroll, start, end, totalHeight } = useVirtualRows({
     count: rows.length,
@@ -923,144 +1119,236 @@ export function SystemMonitor() {
   return (
     <div className="@container flex h-full w-full flex-col bg-background text-foreground">
       <div className="flex h-12 shrink-0 items-center gap-2 px-2">
-        <SearchField
-          size="sm"
-          value={query}
-          onValueChange={setQuery}
-          placeholder="Search processes"
-          aria-label="Search processes"
-          className="min-w-40 flex-1"
-        />
         <SegmentedControl
           size="md"
-          label="Which processes to show"
-          value={mineOnly ? 'mine' : 'all'}
+          label="View"
+          value={view}
           options={[
-            { value: 'mine', label: 'My processes' },
-            { value: 'all', label: 'All processes' },
+            { value: 'processes', label: 'Processes' },
+            { value: 'network', label: 'Network' },
           ]}
-          onValueChange={(value) => setMineOnly(value === 'mine')}
+          onValueChange={setView}
         />
-        <div className="flex">
-          <Button
+        {view === 'processes' ? (
+          <SearchField
+            key="processes"
             size="sm"
-            variant="outline"
-            className="rounded-r-none border-r-0"
-            disabled={!canEnd}
-            title={selected?.blocked ?? undefined}
-            aria-label={endLabel}
-            onClick={() => selected && void endRow(selected, false)}
-          >
-            End
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search processes"
+            aria-label="Search processes"
+            className="min-w-40 flex-1"
+          />
+        ) : (
+          <SearchField
+            key="network"
+            size="sm"
+            value={networkQuery}
+            onValueChange={setNetworkQuery}
+            placeholder={networkMode === 'requests' ? 'Search requests' : 'Search connections'}
+            aria-label={networkMode === 'requests' ? 'Search requests' : 'Search connections'}
+            className="min-w-40 flex-1"
+          />
+        )}
+        {view === 'network' ? (
+          <>
+            <SegmentedControl
+              size="md"
+              label="What to show"
+              value={networkMode}
+              options={[
+                { value: 'requests', label: 'Requests', title: 'What Din’s apps and pages load' },
+                { value: 'connections', label: 'Connections', title: 'Every program’s open connections' },
+              ]}
+              onValueChange={setNetworkMode}
+            />
+            {networkMode === 'requests' && (
+              <>
+                <ToolbarDivider />
+                <ToolButton
+                  label={paused ? 'Record' : 'Pause recording'}
+                  pressed={!paused}
+                  onClick={() => setPaused((p) => !p)}
+                >
+                  {paused ? (
+                    <Circle className="size-4.5" strokeWidth={1.75} aria-hidden />
+                  ) : (
+                    <Pause className="size-4.5" strokeWidth={1.75} aria-hidden />
+                  )}
+                </ToolButton>
+                <ToolButton
+                  label="Clear requests"
+                  disabled={network.requests.size === 0}
+                  onClick={network.clear}
+                >
+                  <Ban className="size-4.5" strokeWidth={1.75} aria-hidden />
+                </ToolButton>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <SegmentedControl
+              size="md"
+              label="Which processes to show"
+              value={mineOnly ? 'mine' : 'all'}
+              options={[
+                { value: 'mine', label: 'My processes' },
+                { value: 'all', label: 'All processes' },
+              ]}
+              onValueChange={(value) => setMineOnly(value === 'mine')}
+            />
+            <div className="flex">
               <Button
-                size="icon-sm"
+                size="sm"
                 variant="outline"
-                className="w-7 rounded-l-none"
+                className="rounded-r-none border-r-0"
                 disabled={!canEnd}
-                aria-label="More ways to end it"
+                title={selected?.blocked ?? undefined}
+                aria-label={endLabel}
+                onClick={() => selected && void endRow(selected, false)}
               >
-                <ChevronDown aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onSelect={() => selected && setConfirming(selected)}>
-                <OctagonX aria-hidden /> Force Quit…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      <SystemHeader
-        snapshot={snapshot}
-        cpuHistory={cpuHistory}
-        memoryHistory={memoryHistory}
-        gpuHistory={gpuHistory}
-        diskHistory={diskHistory}
-      />
-
-      <div
-        role="treegrid"
-        aria-label="Processes"
-        aria-rowcount={rows.length + 1}
-        aria-multiselectable={false}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <TableHeader sort={sort} onSort={onSort} showGpu={showGpu} />
-        <ContextMenu>
-          <ContextMenuTrigger asChild disabled={!selected}>
-            <div
-              ref={containerRef}
-              onScroll={onScroll}
-              // The treegrid's rows hold the keyboard here, beside its header,
-              // so the right-click menu's trigger has it.
-              // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
-              tabIndex={0}
-              aria-activedescendant={selected ? rowDomId(selected.key) : undefined}
-              onKeyDown={onGridKeyDown}
-              onFocus={() => {
-                setGridFocused(true);
-                if (!selected && rows.length > 0) setSelectedKey(rows[0].key);
-              }}
-              onBlur={() => setGridFocused(false)}
-              onMouseDown={(e: MouseEvent<HTMLDivElement>) => {
-                // A click on empty space below the rows clears the selection.
-                if (e.target === e.currentTarget) setSelectedKey(null);
-              }}
-              className="relative min-h-0 flex-1 overflow-y-auto px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              {!snapshot ? (
-                <TableSkeleton />
-              ) : rows.length === 0 ? (
-                <div className="grid h-full place-items-center p-6">
-                  <div className="max-w-sm rounded-xl px-8 py-10 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      {query ? `Nothing running matches “${query.trim()}”.` : 'No processes to show.'}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative" style={{ height: totalHeight }}>
-                  {rows.slice(start, end).map((row, i) => (
-                    <TableRow
-                      key={row.key}
-                      row={row}
-                      index={start + i}
-                      selected={row.key === selectedKey}
-                      focused={gridFocused}
-                      showGpu={showGpu}
-                      onSelect={setSelectedKey}
-                      onToggle={toggle}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </ContextMenuTrigger>
-          {selected && (
-            <ContextMenuContent>
-              <ContextMenuItem disabled={!canEnd} onSelect={() => void endRow(selected, false)}>
                 End
-              </ContextMenuItem>
-              <ContextMenuItem
-                variant="destructive"
-                disabled={!canEnd}
-                onSelect={() => setConfirming(selected)}
-              >
-                Force Quit…
-              </ContextMenuItem>
-            </ContextMenuContent>
-          )}
-        </ContextMenu>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    className="w-7 rounded-l-none"
+                    disabled={!canEnd}
+                    aria-label="More ways to end it"
+                  >
+                    <ChevronDown aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem variant="destructive" onSelect={() => selected && setConfirming(selected)}>
+                    <OctagonX aria-hidden /> Force Quit…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </>
+        )}
       </div>
 
-      <StatusBar aria-live="off" className="px-4">
-        {snapshot ? `${processCount} processes · ` : ''}
-        CPU is a share of the whole computer: all cores busy is 100%.
-      </StatusBar>
+      {view === 'processes' ? (
+        <SystemHeader
+          snapshot={snapshot}
+          cpuHistory={cpuHistory}
+          memoryHistory={memoryHistory}
+          gpuHistory={gpuHistory}
+          diskHistory={diskHistory}
+          receiveHistory={receiveHistory}
+          sendHistory={sendHistory}
+        />
+      ) : (
+        <NetworkStrip
+          network={snapshot?.network ?? null}
+          receiveHistory={receiveHistory}
+          sendHistory={sendHistory}
+          loading={!snapshot}
+        />
+      )}
+
+      {view === 'network' ? (
+        networkMode === 'requests' ? (
+          <RequestsView
+            requests={network.requests}
+            frames={network.frames}
+            framesDropped={network.framesDropped}
+            recording={recordingActive}
+            query={networkQuery}
+            onQueryChange={setNetworkQuery}
+            onClear={network.clear}
+          />
+        ) : (
+          <ConnectionsView query={networkQuery} identify={identify} onShowProcess={showProcess} />
+        )
+      ) : (
+        <>
+          <div
+            role="treegrid"
+            aria-label="Processes"
+            aria-rowcount={rows.length + 1}
+            aria-multiselectable={false}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TableHeader sort={sort} onSort={onSort} showGpu={showGpu} />
+            <ContextMenu>
+              <ContextMenuTrigger asChild disabled={!selected}>
+                <div
+                  ref={containerRef}
+                  onScroll={onScroll}
+                  // The treegrid's rows hold the keyboard here, beside its header,
+                  // so the right-click menu's trigger has it.
+                  // eslint-disable-next-line jsx-a11y-x/no-noninteractive-tabindex
+                  tabIndex={0}
+                  aria-activedescendant={selected ? rowDomId(selected.key) : undefined}
+                  onKeyDown={onGridKeyDown}
+                  onFocus={() => {
+                    setGridFocused(true);
+                    if (!selected && rows.length > 0) setSelectedKey(rows[0].key);
+                  }}
+                  onBlur={() => setGridFocused(false)}
+                  onMouseDown={(e: MouseEvent<HTMLDivElement>) => {
+                    // A click on empty space below the rows clears the selection.
+                    if (e.target === e.currentTarget) setSelectedKey(null);
+                  }}
+                  className="relative min-h-0 flex-1 overflow-y-auto px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  {!snapshot ? (
+                    <TableSkeleton />
+                  ) : rows.length === 0 ? (
+                    <div className="grid h-full place-items-center p-6">
+                      <div className="max-w-sm rounded-xl px-8 py-10 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          {query ? `Nothing running matches “${query.trim()}”.` : 'No processes to show.'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="relative" style={{ height: totalHeight }}>
+                      {rows.slice(start, end).map((row, i) => (
+                        <TableRow
+                          key={row.key}
+                          row={row}
+                          index={start + i}
+                          selected={row.key === selectedKey}
+                          focused={gridFocused}
+                          showGpu={showGpu}
+                          onSelect={setSelectedKey}
+                          onToggle={toggle}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </ContextMenuTrigger>
+              {selected && (
+                <ContextMenuContent>
+                  <ContextMenuItem disabled={!canEnd} onSelect={() => void endRow(selected, false)}>
+                    End
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    variant="destructive"
+                    disabled={!canEnd}
+                    onSelect={() => setConfirming(selected)}
+                  >
+                    Force Quit…
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              )}
+            </ContextMenu>
+          </div>
+
+          <StatusBar aria-live="off" className="px-4">
+            {snapshot ? `${processCount} processes · ` : ''}
+            CPU is a share of the whole computer: all cores busy is 100%.
+          </StatusBar>
+        </>
+      )}
 
       <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
         <AlertDialogContent>

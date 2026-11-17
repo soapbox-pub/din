@@ -5,6 +5,7 @@ import { calendarArea } from './calendar';
 import { contactsArea } from './contacts';
 import { bluetoothArea, torArea, vpnArea, wifiArea } from './connections';
 import { disksArea } from './disks';
+import { networkArea } from './network';
 import { driveArea } from './drive';
 import { extensionsArea } from './extensions';
 import { featuresArea } from './features';
@@ -65,6 +66,7 @@ export const AREAS: readonly Area[] = [
   grammarArea,
   printersArea,
   disksArea,
+  networkArea,
   driveArea,
   powerArea,
   datetimeArea,

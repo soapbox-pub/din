@@ -104,6 +104,16 @@ export interface DiskTotals {
   filesystems: FilesystemSpace[];
 }
 
+/** Traffic since the last snapshot, every physical network interface together. */
+export interface NetworkTotals {
+  /** Bytes per second. */
+  receiveRate: number;
+  sendRate: number;
+  /** Bytes since boot. */
+  received: number;
+  sent: number;
+}
+
 export interface SystemSnapshot {
   /** When it was taken, in ms since the epoch. */
   at: number;
@@ -114,6 +124,8 @@ export interface SystemSnapshot {
   /** Null without a GPU whose driver says how busy it is (amdgpu and xe do). */
   gpu: GpuTotals | null;
   disk: DiskTotals;
+  /** Null without a physical network interface to read (Wi-Fi, Ethernet, a USB adapter). */
+  network: NetworkTotals | null;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */

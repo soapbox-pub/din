@@ -29,6 +29,11 @@
 // what it can do. Space is statfs on /home, whose level the
 // low-space notification (disk-space.mts) shares.
 //
+// Network: bytes received and sent per second, every physical interface
+// together (/proc/net/dev), so a VPN's tunnel or a container's bridge doesn't
+// count the same bytes twice. What each page and program sends is
+// network-monitor.mts's.
+//
 // Processes are labelled with what the user sees. Electron's own processes
 // come from app.getAppMetrics(), and each page renderer from the
 // WebContents it hosts (a browser tab, an installed web app). Native apps
@@ -60,6 +65,7 @@ import {
   readFilesystems,
   readGpu,
   readMemory,
+  readNetIo,
   readOwner,
   readProcesses,
   readUptimeAndLoad,
@@ -71,6 +77,7 @@ import {
   type FilesystemSpace,
   type GpuTotals,
   type MemoryTotals,
+  type NetIo,
   type ProcEntry,
 } from './proc-stats.mts';
 
@@ -151,6 +158,16 @@ export interface DiskTotals {
   filesystems: FilesystemSpace[];
 }
 
+/** Traffic since the last sample, every physical interface together. */
+export interface NetworkTotals {
+  /** Bytes per second. */
+  receiveRate: number;
+  sendRate: number;
+  /** Bytes since boot. */
+  received: number;
+  sent: number;
+}
+
 export interface SystemSnapshot {
   /** When it was taken, in ms since the epoch. */
   at: number;
@@ -161,6 +178,8 @@ export interface SystemSnapshot {
   /** Null without a GPU whose driver says how busy it is. */
   gpu: GpuTotals | null;
   disk: DiskTotals;
+  /** Null without a physical network interface to read. */
+  network: NetworkTotals | null;
   /** Seconds since boot. */
   uptime: number;
   /** 1, 5 and 15-minute load averages. */
@@ -184,6 +203,7 @@ let previous: {
   at: bigint;
   gpuNs: Map<string, number>;
   diskIo: DiskIo | null;
+  netIo: NetIo | null;
 } | null = null;
 /** Each process's fds on the GPU, as last looked for. */
 let drmFds = new Map<string, number[]>();
@@ -351,11 +371,12 @@ async function gpuTimes(entries: ProcEntry[], me: number, wallNs: number): Promi
 }
 
 async function sample(): Promise<SystemSnapshot | null> {
-  const [cpu, memory, gpu, diskIo, filesystems, entries, { uptime, load }] = await Promise.all([
+  const [cpu, memory, gpu, diskIo, netIo, filesystems, entries, { uptime, load }] = await Promise.all([
     readCpuTimes(),
     readMemory(),
     readGpu(),
     readDiskIo(),
+    readNetIo(),
     readFilesystems(),
     readProcesses(),
     readUptimeAndLoad(),
@@ -467,7 +488,15 @@ async function sample(): Promise<SystemSnapshot | null> {
     },
     filesystems,
   };
-  previous = { cpu, ticks, at, gpuNs, diskIo };
+  const netBefore = previous?.netIo;
+  const netMeasured = netBefore && seconds > 0;
+  const network: NetworkTotals | null = netIo && {
+    receiveRate: netMeasured ? rate(netIo.received, netBefore.received) : 0,
+    sendRate: netMeasured ? rate(netIo.sent, netBefore.sent) : 0,
+    received: netIo.received,
+    sent: netIo.sent,
+  };
+  previous = { cpu, ticks, at, gpuNs, diskIo, netIo };
   return {
     at: Date.now(),
     cpu: Math.min(100, Math.max(0, busy * 100)),
@@ -475,6 +504,7 @@ async function sample(): Promise<SystemSnapshot | null> {
     memory,
     gpu,
     disk,
+    network,
     uptime,
     load,
     processes,

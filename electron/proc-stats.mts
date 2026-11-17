@@ -438,6 +438,69 @@ export async function readDiskIo(): Promise<DiskIo | null> {
   }
 }
 
+/** Bytes received and sent so far, every physical network interface together. */
+export interface NetIo {
+  received: number;
+  sent: number;
+}
+
+/**
+ * Parse /proc/net/dev for the named interfaces. Only physical ones count: a
+ * VPN's tunnel, a bridge or a container's veth carries bytes that also cross
+ * a physical interface, and loopback never leaves the computer.
+ */
+export function parseNetDev(text: string, interfaces: Set<string>): NetIo {
+  const io: NetIo = { received: 0, sent: 0 };
+  for (const line of text.split('\n')) {
+    const colon = line.indexOf(':');
+    if (colon < 0) continue;
+    const name = line.slice(0, colon).trim();
+    if (!interfaces.has(name)) continue;
+    // rx: bytes packets errs drop fifo frame compressed multicast, then tx: bytes ...
+    const fields = line.slice(colon + 1).trim().split(/\s+/);
+    if (fields.length < 9) continue;
+    io.received += Number(fields[0]) || 0;
+    io.sent += Number(fields[8]) || 0;
+  }
+  return io;
+}
+
+/**
+ * The physical network interfaces (those with a device behind them), looked
+ * for again every so often: a USB adapter or phone tether comes and goes.
+ */
+let physicalInterfaces: { at: number; names: Promise<Set<string>> } | null = null;
+const INTERFACE_RESCAN_MS = 30_000;
+function findPhysicalInterfaces(): Promise<Set<string>> {
+  if (!physicalInterfaces || Date.now() - physicalInterfaces.at > INTERFACE_RESCAN_MS) {
+    physicalInterfaces = {
+      at: Date.now(),
+      names: (async () => {
+        const names = await fsp.readdir('/sys/class/net').catch(() => [] as string[]);
+        const found = await Promise.all(
+          names.map((name) =>
+            fsp.access(`/sys/class/net/${name}/device`).then(
+              () => name,
+              () => null,
+            ),
+          ),
+        );
+        return new Set(found.filter((name): name is string => name !== null));
+      })(),
+    };
+  }
+  return physicalInterfaces.names;
+}
+
+export async function readNetIo(): Promise<NetIo | null> {
+  try {
+    const [text, interfaces] = await Promise.all([fsp.readFile('/proc/net/dev', 'utf8'), findPhysicalInterfaces()]);
+    return interfaces.size > 0 ? parseNetDev(text, interfaces) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The space on /home, the filesystem people fill (on a machine without a
  * home of its own, that's /'s). The system volume isn't shown: on DinOS it

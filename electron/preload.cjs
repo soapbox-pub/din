@@ -59,6 +59,8 @@
 //     for Settings → Keyboard
 //   - window.dinos.systemMonitor: running processes, CPU, memory and disks, and
 //     ending them, for the System Monitor app
+//   - window.dinos.networkMonitor: pages' requests and programs' connections,
+//     for the System Monitor's Network view
 //   - window.dinos.bluetoothLogin: receive the account key from a phone over
 //     Bluetooth LE, for the login screen
 //   - window.dinos.nostrd: the signer daemon that holds the account keys, for the
@@ -2282,6 +2284,29 @@ expose('systemMonitor', {
       void ipcRenderer.invoke('system-monitor:alerts', false);
     };
   },
+});
+
+// Network monitor bridge (window.dinos.networkMonitor), backed by
+// electron/network-monitor.mts: the System Monitor's Network view. Pages'
+// requests are recorded only while someone records; connections are read
+// when asked. Types in src/lib/networkMonitor.ts.
+expose('networkMonitor', {
+  /**
+   * Record every page's requests (but private and Tor tabs'), in batches.
+   * Returns a fn that stops.
+   * @param {(events: unknown) => void} callback
+   */
+  record: (callback) => {
+    const stop = listen('network-monitor:events', callback);
+    void ipcRenderer.invoke('network-monitor:record');
+    return () => {
+      stop();
+      void ipcRenderer.invoke('network-monitor:stop');
+    };
+  },
+
+  /** Every program's open connections, read now. */
+  connections: () => ipcRenderer.invoke('network-monitor:connections'),
 });
 
 // Bluetooth login bridge (window.dinos.bluetoothLogin), backed by

@@ -401,8 +401,8 @@ export const APPS: readonly AppDefinition[] = [
     name: 'System Monitor',
     icon: '/icons/apps/system-monitor.png',
     component: SystemMonitor,
-    defaultSize: { width: 760, height: 560 },
-    keywords: ['task manager', 'activity monitor', 'processes', 'CPU', 'memory', 'force quit', 'kill'],
+    defaultSize: { width: 880, height: 640 },
+    keywords: ['task manager', 'activity monitor', 'processes', 'CPU', 'memory', 'force quit', 'kill', 'network', 'connections', 'bandwidth', 'requests'],
     singleInstance: true,
   },
   // Apps (nsites and Linux apps from Nostr), themes, cursors, icons and
