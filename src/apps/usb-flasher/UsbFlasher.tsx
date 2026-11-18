@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentProps, type DragEvent, type ReactNod
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
+  ChevronLeft,
   CircleAlert,
   Disc3,
   FileArchive,
@@ -12,6 +13,7 @@ import {
   Square,
   TriangleAlert,
   Usb,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -44,8 +46,6 @@ import {
 import { cn } from '@/lib/utils';
 import { ContentPane, EmptyState, SidebarTitleIcon } from '@/shared/appChrome';
 import { droppedHandles, fileTypes, pickFiles, useLaunchFiles } from '@/shared/fileHandles';
-import { RadioMark } from '@/shared/settingsChrome';
-import { settingsChoiceClass } from '@/shared/settingsChromeStyles';
 import { WindowControls, WindowDragRegion, useDin, useMenuBar, useWindowTitle } from '@/sdk/react';
 
 const ICON = '/icons/apps/usb-flasher.png';
@@ -83,6 +83,8 @@ export function UsbFlasher() {
   const status = useFlasher(bridge);
   const [image, setImage] = useState<FlashImageInfo | null>(null);
   const [kind, setKind] = useState<Kind | null>(null);
+  /** The setup's page: what to write, then where. */
+  const [page, setPage] = useState<'source' | 'drive'>('source');
   const [drivePath, setDrivePath] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +109,7 @@ export function UsbFlasher() {
     try {
       setImage(await bridge.inspect(path));
       setKind('file');
+      setPage('source');
     } catch (e) {
       setError(cleanFlasherError(e));
     } finally {
@@ -210,68 +213,84 @@ export function UsbFlasher() {
         error={error}
       />
     );
+  } else if (page === 'source' || !chosen) {
+    const version = data!.dinos.version;
+    body = (
+      <SetupPage
+        title="What do you want to write?"
+        footer={
+          <Button size="lg" className="min-w-28" disabled={!chosen} onClick={() => setPage('drive')}>
+            Next
+          </Button>
+        }
+      >
+        <div role="radiogroup" aria-label="What to write" className="grid grid-cols-1 gap-4 @md:grid-cols-2">
+          <SourceTile
+            selected={chosen === 'dinos'}
+            disabled={!data!.dinos.available}
+            onSelect={chooseDinos}
+            art={<img src={DIN_LOGO} alt="" draggable={false} className="h-12 w-auto object-contain" />}
+            title="DinOS"
+            subtitle={data!.dinos.available ? (version ? `Version ${version}` : 'This computer’s system') : (data!.dinos.reason ?? 'Not available here')}
+          />
+          <ImageTile
+            image={image}
+            selected={chosen === 'file'}
+            opening={opening}
+            onSelect={() => (image && chosen !== 'file' ? setKind('file') : void chooseFile())}
+            onChoose={() => void chooseFile()}
+            onClear={() => {
+              setImage(null);
+              if (kind === 'file') setKind(null);
+            }}
+          />
+        </div>
+        {error && <ErrorNote>{error}</ErrorNote>}
+      </SetupPage>
+    );
   } else {
     body = (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-6 [&>*]:shrink-0">
-          <Section number={1} title="Choose what to write">
-            <div role="radiogroup" aria-label="What to write" className="flex flex-col gap-2">
-              <ImageChoice
-                image={image}
-                selected={chosen === 'file'}
-                opening={opening}
-                onSelect={() => (image ? setKind('file') : void chooseFile())}
-                onChoose={() => void chooseFile()}
-                onClear={() => {
-                  setImage(null);
-                  if (kind === 'file') setKind(null);
+      <SetupPage
+        title="Choose a drive"
+        subtitle={sourceName ? `For ${sourceName}` : undefined}
+        onBack={() => setPage('source')}
+        footer={
+          <>
+            <p className="mr-auto text-sm text-muted-foreground">
+              {data!.asksPassword ? 'It’s erased, and asks for your password.' : 'Everything on it is erased.'}
+            </p>
+            <Button variant="destructive" size="lg" disabled={!ready} onClick={() => setConfirming(true)}>
+              Erase and Write
+            </Button>
+          </>
+        }
+      >
+        {drives.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border">
+            <EmptyState icon={Usb} title="Plug in a USB drive">
+              Or put in a memory card.
+            </EmptyState>
+          </div>
+        ) : (
+          <div role="radiogroup" aria-label="Drive" className="flex flex-col gap-2">
+            {drives.map((d) => (
+              <DriveRow
+                key={d.path}
+                drive={d}
+                selected={drive?.path === d.path}
+                problem={driveProblem(d, imageBytes, imagePath)}
+                sourceName={sourceName}
+                onSelect={() => setDrivePath(d.path)}
+                onWrite={() => {
+                  setDrivePath(d.path);
+                  setConfirming(true);
                 }}
               />
-              <DinosChoice status={data!.dinos} selected={chosen === 'dinos'} onSelect={chooseDinos} />
-            </div>
-          </Section>
-
-          <Section number={2} title="Choose a drive">
-            {drives.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border">
-                <EmptyState icon={Usb} title="No USB drives">
-                  Plug in a USB drive or put in a memory card. Whatever is on it will be erased.
-                </EmptyState>
-              </div>
-            ) : (
-              <div role="radiogroup" aria-label="Drive" className="flex flex-col gap-2">
-                {drives.map((d) => (
-                  <DriveChoice
-                    key={d.path}
-                    drive={d}
-                    selected={drive?.path === d.path}
-                    problem={chosen ? driveProblem(d, imageBytes, imagePath) : null}
-                    canWrite={!!chosen && !driveProblem(d, imageBytes, imagePath)}
-                    sourceName={sourceName}
-                    onSelect={() => setDrivePath(d.path)}
-                    onWrite={() => {
-                      setDrivePath(d.path);
-                      setConfirming(true);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </Section>
-
-          {error && <ErrorNote>{error}</ErrorNote>}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 px-6 pb-6">
-          <p className="mr-auto text-sm text-muted-foreground">
-            {data!.asksPassword ? 'Writing asks for your password. ' : ''}
-            Everything on the drive is erased.
-          </p>
-          <Button variant="destructive" disabled={!ready} onClick={() => setConfirming(true)}>
-            Erase and Write
-          </Button>
-        </div>
-      </div>
+            ))}
+          </div>
+        )}
+        {error && <ErrorNote>{error}</ErrorNote>}
+      </SetupPage>
     );
   }
 
@@ -324,75 +343,100 @@ export function UsbFlasher() {
 // Choosing
 // ---------------------------------------------------------------------------
 
-function Section({ number, title, children }: { number: number; title: string; children: ReactNode }) {
+/** A page of the setup: a big heading, what's chosen, and its buttons along the foot. */
+function SetupPage({
+  title,
+  subtitle,
+  onBack,
+  footer,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  onBack?: () => void;
+  footer: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <section className="flex flex-col gap-3" aria-label={title}>
-      <h2 className="flex items-center gap-2.5 text-base font-semibold text-foreground">
-        <span className="grid size-6 place-items-center rounded-full bg-foreground/10 text-xs font-semibold text-foreground/75 clay" aria-hidden>
-          {number}
-        </span>
-        {title}
-      </h2>
-      {children}
-    </section>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-8 pt-6 pb-4 [&>*]:shrink-0">
+        <div className="flex items-start gap-2">
+          {onBack && (
+            <Button variant="ghost" size="icon" className="-ml-2 shrink-0" onClick={onBack} aria-label="Back">
+              <ChevronLeft className="size-5" />
+            </Button>
+          )}
+          <div className="min-w-0">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h2>
+            {subtitle && <p className="mt-1 truncate text-sm text-muted-foreground">{subtitle}</p>}
+          </div>
+        </div>
+        {children}
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-4 px-8 pb-6">{footer}</div>
+    </div>
   );
 }
 
-/** A choice card, as the Installer's: a radio mark, an icon, a title and a line under it. */
-function Choice({
+/** A big choice, as a card with a picture: what to write. */
+function SourceTile({
   selected,
   disabled,
   onSelect,
-  icon,
+  art,
   title,
-  description,
-  children,
+  subtitle,
+  note,
   ...props
 }: {
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
-  icon: ReactNode;
-  title: ReactNode;
-  description: ReactNode;
-  children?: ReactNode;
-} & Omit<ComponentProps<'div'>, 'title' | 'onSelect'>) {
+  art: ReactNode;
+  title: string;
+  subtitle: string;
+  note?: string | null;
+} & Omit<ComponentProps<'button'>, 'title' | 'onSelect'>) {
   return (
-    <div {...props} className={cn(settingsChoiceClass(selected), 'flex items-center gap-3 p-4', disabled && 'opacity-60')}>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={selected}
-        disabled={disabled}
-        onClick={onSelect}
-        className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed"
-      >
-        <RadioMark checked={selected} className="mt-0.5" />
-        <span className="mt-px shrink-0 text-ink-accent [&_svg]:size-4.5" aria-hidden>
-          {icon}
+    <button
+      {...props}
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        'relative flex min-h-52 flex-col items-center justify-center gap-4 rounded-2xl px-6 py-8 text-center transition-colors clay',
+        'outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-55',
+        selected ? 'bg-selected ring-2 ring-ink-accent/70' : 'bg-card hover:bg-foreground/5',
+      )}
+    >
+      {selected && (
+        <span className="absolute top-3 right-3 grid size-6 place-items-center rounded-full bg-pigment text-primary-foreground clay-pigment" aria-hidden>
+          <Check className="size-3.5" strokeWidth={2.5} />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">{title}</span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
+      )}
+      <span className="grid h-16 place-items-center text-ink-accent" aria-hidden>
+        {art}
+      </span>
+      <span className="flex min-w-0 max-w-full flex-col gap-1">
+        <span className="truncate text-lg font-semibold text-foreground">{title}</span>
+        <span className="line-clamp-2 text-sm text-muted-foreground" title={subtitle}>
+          {subtitle}
         </span>
-      </button>
-      {children}
-    </div>
+        {note && (
+          <span className="mt-1 inline-flex items-center justify-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="size-3.5" aria-hidden />
+            {note}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
-function describeImage(image: FlashImageInfo): string {
-  const size = image.imageBytes !== null ? formatDriveSize(image.imageBytes) : null;
-  if (image.compression) {
-    return size
-      ? `${formatDriveSize(image.fileBytes)}, ${image.compression}-compressed: ${size} on the drive`
-      : `${formatDriveSize(image.fileBytes)}, ${image.compression}-compressed`;
-  }
-  return `${image.iso ? 'Disc image' : 'Disk image'}, ${size}`;
-}
-
-function ImageChoice({
-  image: chosen,
+function ImageTile({
+  image,
   selected,
   opening,
   onSelect,
@@ -406,76 +450,47 @@ function ImageChoice({
   onChoose: () => void;
   onClear: () => void;
 }) {
-  const Icon = chosen?.compression ? FileArchive : Disc3;
-  const card = (
-    <Choice
+  const Art = opening ? Loader2 : image?.compression ? FileArchive : Disc3;
+  const tile = (
+    <SourceTile
       selected={selected}
       onSelect={onSelect}
-      icon={opening ? <Loader2 className="motion-safe:animate-spin" /> : <Icon />}
-      title={chosen ? chosen.name : 'A disk image'}
-      description={
-        chosen ? (
-          <>
-            {describeImage(chosen)}
-            {chosen.notBootableFromUsb && (
-              <span className="mt-1.5 flex items-start gap-1.5 text-foreground/80">
-                <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-                This disc image isn’t made to start from a USB drive, so computers may not start from it. Windows’ own
-                discs need Microsoft’s Media Creation Tool instead.
-              </span>
-            )}
-          </>
-        ) : (
-          'An ISO or .img file, such as Linux or a Raspberry Pi system, compressed or not. You can drop one here.'
-        )
+      art={<Art className={cn('size-14', opening && 'motion-safe:animate-spin')} strokeWidth={1.25} />}
+      title={image ? image.name : 'Disk Image'}
+      subtitle={
+        image
+          ? image.imageBytes !== null
+            ? formatDriveSize(image.imageBytes)
+            : formatDriveSize(image.fileBytes)
+          : 'An ISO or IMG file'
       }
-    >
-      <Button variant="outline" size="sm" className="shrink-0" onClick={onChoose} disabled={opening}>
-        <FolderOpen className="size-4" />
-        {chosen ? 'Change…' : 'Choose…'}
-      </Button>
-    </Choice>
+      note={image?.notBootableFromUsb ? 'May not start from USB' : null}
+      aria-label={image ? `Disk image ${image.name}` : 'Choose a disk image'}
+    />
   );
-  if (!chosen) return card;
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
+      <ContextMenuTrigger asChild>{tile}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onChoose}>
           <FolderOpen />
-          Choose Another Image…
+          {image ? 'Choose Another Image…' : 'Choose an Image…'}
         </ContextMenuItem>
-        <ContextMenuItem onSelect={onClear}>
-          <Square />
-          Clear
-        </ContextMenuItem>
+        {image && (
+          <ContextMenuItem onSelect={onClear}>
+            <X />
+            Clear
+          </ContextMenuItem>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
 }
 
-function DinosChoice({ status, selected, onSelect }: { status: FlasherStatus['dinos']; selected: boolean; onSelect: () => void }) {
-  return (
-    <Choice
-      selected={selected}
-      disabled={!status.available}
-      onSelect={onSelect}
-      icon={<img src={DIN_LOGO} alt="" className="size-4.5 object-contain" draggable={false} />}
-      title={`DinOS${status.version ? ` ${status.version}` : ''}`}
-      description={
-        status.available
-          ? `The DinOS on this computer${status.commit ? ` (${status.commit.slice(0, 7)})` : ''}, made into a USB stick to try or install it on another computer. It’s made from this computer’s system, which takes a while.`
-          : (status.reason ?? 'DinOS can’t be made here.')
-      }
-    />
-  );
-}
-
-function DriveChoice({
+function DriveRow({
   drive,
   selected,
   problem,
-  canWrite,
   sourceName,
   onSelect,
   onWrite,
@@ -483,36 +498,50 @@ function DriveChoice({
   drive: FlashDrive;
   selected: boolean;
   problem: string | null;
-  canWrite: boolean;
   sourceName: string | null;
   onSelect: () => void;
   onWrite: () => void;
 }) {
   const Icon = drive.transport === 'mmc' ? MemoryStick : Usb;
-  const contents = drive.labels.length > 0 ? drive.labels.join(', ') : null;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <Choice
-          selected={selected}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={selected}
           disabled={problem !== null}
-          onSelect={onSelect}
-          icon={<Icon />}
-          title={
-            <>
-              {drive.name}
-              <span className="ml-2 font-normal text-muted-foreground">{formatDriveSize(drive.sizeBytes)}</span>
-            </>
-          }
-          description={problem ?? [drive.path, contents && `Has ${contents}`].filter(Boolean).join(' · ')}
-        />
+          onClick={onSelect}
+          className={cn(
+            'flex items-center gap-4 rounded-2xl px-4 py-3 text-left transition-colors',
+            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-55',
+            selected ? 'bg-selected ring-2 ring-ink-accent/70' : 'hover:bg-foreground/5',
+          )}
+        >
+          <span
+            className={cn(
+              'grid size-11 shrink-0 place-items-center rounded-xl',
+              selected ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/75 clay',
+            )}
+            aria-hidden
+          >
+            <Icon className="size-5.5" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-base font-medium text-foreground">{drive.name}</span>
+            <span className="block truncate text-sm text-muted-foreground">
+              {problem ?? [formatDriveSize(drive.sizeBytes), drive.labels[0]].filter(Boolean).join(' · ')}
+            </span>
+          </span>
+          {selected && <Check className="size-5 shrink-0 text-ink-accent" strokeWidth={2.25} aria-hidden />}
+        </button>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onSelect} disabled={problem !== null}>
           <Check />
           Choose This Drive
         </ContextMenuItem>
-        <ContextMenuItem variant="destructive" onSelect={onWrite} disabled={!canWrite}>
+        <ContextMenuItem variant="destructive" onSelect={onWrite} disabled={problem !== null || !sourceName}>
           <Usb />
           {sourceName ? `Erase and Write ${sourceName}…` : 'Erase and Write…'}
         </ContextMenuItem>
@@ -782,21 +811,17 @@ function ErrorNote({ children }: { children: ReactNode }) {
 
 function SetupSkeleton() {
   return (
-    <div className="flex flex-col gap-6 p-6" aria-hidden>
-      {[0, 1].map((section) => (
-        <div key={section} className="flex flex-col gap-3">
-          <Skeleton className="h-5 w-48 bg-foreground/10" />
-          {[0, 1].map((i) => (
-            <div key={i} className="flex items-start gap-3 rounded-xl bg-card p-4 clay">
-              <Skeleton className="size-4 shrink-0 rounded-full bg-foreground/10" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-48 bg-foreground/10" />
-                <Skeleton className="h-3 w-64 bg-foreground/10" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
+    <div className="flex flex-col gap-6 px-8 pt-6" aria-hidden>
+      <Skeleton className="h-8 w-72 bg-foreground/10" />
+      <div className="grid grid-cols-1 gap-4 @md:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="flex min-h-52 flex-col items-center justify-center gap-4 rounded-2xl bg-card clay">
+            <Skeleton className="size-14 rounded-2xl bg-foreground/10" />
+            <Skeleton className="h-5 w-24 bg-foreground/10" />
+            <Skeleton className="h-4 w-32 bg-foreground/10" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
