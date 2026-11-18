@@ -5,6 +5,7 @@ import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MouseHost } from './MouseHost';
 import { DeviceBatteryHost } from './DeviceBatteryHost';
+import { BatteryWarningHost } from './BatteryWarningHost';
 import { ResourceAlertsHost } from './ResourceAlertsHost';
 import { AssistantHost } from './AssistantHost';
 import { DesktopAssistantHost } from './assistant/DesktopAssistantHost';
@@ -145,6 +146,7 @@ const SessionHosts = memo(function SessionHosts() {
       <EyeDropperHost />
       <DesktopHotkeys />
       <MouseHost />
+      <BatteryWarningHost />
       <DeviceBatteryHost />
       <ResourceAlertsHost />
       <AssistantHost />

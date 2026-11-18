@@ -1247,8 +1247,22 @@ in
   # fans). Its GPU actions (panel power savings, DPM) are off by default, so
   # the GPU and panel are left alone. UPower tells it when the computer is on
   # battery, so balanced leans toward saving power then.
+  #
+  # UPower also acts when the battery runs out: at 4% it puts the computer
+  # into hybrid sleep, or hibernates it, or (where neither can be done, as
+  # on an unencrypted disk with no swap to hibernate to) shuts it down
+  # cleanly. 4% rather than its default 2%, since a worn battery's last
+  # percent or two often isn't there, and the computer would just die. Din
+  # warns before then (src/components/desktop/BatteryWarningHost.tsx), at
+  # 20%, and at 10% and 5% with a warning that stays up.
   services.power-profiles-daemon.enable = true;
-  services.upower.enable = true;
+  services.upower = {
+    enable = true;
+    percentageLow = 20;
+    percentageCritical = 10;
+    percentageAction = 4;
+    criticalPowerAction = "HybridSleep";
+  };
 
   # Let a docked USB keyboard/mouse wake the machine from suspend. Laptops arm
   # only the lid switch as a wake source by default, so when docked (lid shut)

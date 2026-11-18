@@ -178,6 +178,9 @@ in
       hardware.bluetooth.enable = lib.mkDefault true;
       services.udisks2.enable = lib.mkDefault true;
       services.upower.enable = lib.mkDefault true;
+      # Sleep or shut down at 4%, not 2%, as DinOS does: a worn battery's
+      # last percent often isn't there. Din warns at 20%, 10% and 5%.
+      services.upower.percentageAction = lib.mkDefault 4;
       services.gnome.gnome-keyring.enable = lib.mkDefault true;
       security.rtkit.enable = lib.mkDefault true;
       services.pipewire = {
