@@ -1,4 +1,4 @@
-import { Bell, BellOff, Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
+import { Bell, BellOff, Info, Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -11,12 +11,13 @@ import type { AppBadge } from '@/lib/appBadges';
 import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
 import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
+import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { cn } from '@/lib/utils';
 
 /**
  * A Dock or taskbar tile's right-click menu: its app's windows by what
  * they're showing, the app's own actions, a new window, pin or unpin, add to
- * the desktop, hide or show its badge, close, and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
+ * the desktop, hide or show its badge, App Info, close, and uninstall. `bar` names the bar in the pin item ("Keep in Dock").
  * Given `taskWindow`, it's the menu of that one window's taskbar button, which
  * leads with what can be done to the window and closes it alone.
  */
@@ -137,6 +138,9 @@ export function TileMenuContent({
           <BellOff aria-hidden /> Hide badge
         </ContextMenuItem>
       )}
+      <ContextMenuItem onSelect={() => open(APP_INFO_APP_ID, appInfoParams(app.id))}>
+        <Info aria-hidden /> App Info
+      </ContextMenuItem>
       {taskWindow ? (
         <>
           <ContextMenuSeparator />

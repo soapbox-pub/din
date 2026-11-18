@@ -1,5 +1,6 @@
-import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff } from 'lucide-react';
+import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, CalendarDays, CircleUserRound, EthernetPort, Info, LayoutGrid, Lock, LogOut, Power, RotateCcw, Search, Settings2, Trash2, UserMinus, UserPlus, WifiOff } from 'lucide-react';
 import { WifiXIcon } from '@/components/icons/WifiXIcon';
+import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -603,6 +604,12 @@ const AppTile = memo(function AppTile({
           </ContextMenuItem>
         ))}
         <AddToDesktopItem appId={app.id} />
+        {/* The launcher closes, rather than staying over the window. */}
+        <PopoverClose asChild>
+          <ContextMenuItem onSelect={() => onOpen(APP_INFO_APP_ID, appInfoParams(app.id))}>
+            <Info aria-hidden /> App Info
+          </ContextMenuItem>
+        </PopoverClose>
         {uninstallable && (
           <ContextMenuItem
             variant="destructive"

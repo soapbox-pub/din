@@ -24,6 +24,10 @@ import { getAppsBridge } from '@/lib/dinApps';
 import { addFileApp, fileAppEntry, folderError, type OpenedFolder } from '@/lib/fileApps';
 import { PERMISSION_LABELS, requestedAccess } from '@/lib/launchedApps';
 import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
+import { APP_KIND_LABELS, appFacts, nostrLinksLabel } from '@/lib/appInfo';
+import { windowTile } from '@/lib/apps';
+import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
+import { getPeriodicSyncBridge, tagSummary } from '@/lib/periodicSync';
 import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
@@ -165,6 +169,51 @@ export const appsArea: Area = {
         data: { id: opened.appId, name, path: opened.path, added: !already },
         text: already ? `${name} is already in the launcher (${opened.appId})` : `Added ${name} (${opened.appId}) from ${opened.path}`,
       };
+    }),
+    command('apps', 'info', 'An app’s info, as its App Info window shows it: what it is, where it’s from, what it may do, what it does while closed and what it opens', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+      { name: 'window', type: 'boolean', optional: true, help: 'Open its App Info window instead' },
+    ], async (args, ctx) => {
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      if (args.optBool('window')) {
+        ctx.actions.open(APP_INFO_APP_ID, appInfoParams(app.id));
+        return { text: `Opened ${app.name}’s App Info` };
+      }
+      const native = app.native ? (await getNativeAppsBridge()?.list().catch(() => null))?.apps.find((n) => n.id === app.id) : undefined;
+      const facts = appFacts(app, ctx.apps, native);
+      const browser = getBrowserBridge();
+      const site = (facts.kind === 'web' || facts.kind === 'nsite') && facts.origin && browser
+        ? await browser.getSiteInfo(facts.origin, false).catch(() => null)
+        : null;
+      const sync = getPeriodicSyncBridge();
+      const status = facts.origin && sync ? await sync.status().catch(() => null) : null;
+      const background = status?.sites.find((s) => s.origin === facts.origin);
+      const windows = live(ctx).filter((w) => windowTile(w, ctx.apps.getApp) === app.id).length;
+      const data = {
+        ...facts,
+        windows,
+        badgeHidden: hiddenBadges(ctx.config).includes(app.id),
+        sitePermissions: site?.permissions ?? null,
+        background: background
+          ? { paused: background.paused, allowed: background.allowed, tags: background.tags.map((t) => ({ tag: t.tag, summary: tagSummary(t, background, status!.enabled) })) }
+          : null,
+      };
+      const lines = [
+        `${facts.name} (${facts.id})`,
+        APP_KIND_LABELS[facts.kind] + (windows ? `, ${windows} window${windows === 1 ? '' : 's'} open` : ''),
+        facts.description,
+        facts.address && `From: ${facts.address}`,
+        facts.installedAt !== null && `Installed: ${new Date(facts.installedAt).toLocaleDateString()}`,
+        facts.permissions.length > 0 && `Permissions: ${facts.permissions.join(', ')}`,
+        facts.folders.length > 0 && `Folders: ${facts.folders.join(', ')}`,
+        site && Object.keys(site.permissions).length > 0 && `Allowed: ${Object.entries(site.permissions).map(([c, on]) => `${SITE_CAPABILITIES[c as SiteCapability].name} ${on ? 'allowed' : 'blocked'}`).join(', ')}`,
+        background && `In the background: ${background.paused ? 'paused' : background.tags.map((t) => tagSummary(t, background, status!.enabled)).join('; ') || 'nothing scheduled'}`,
+        nostrLinksLabel(facts.nostrKinds) && `nostr: links: ${nostrLinksLabel(facts.nostrKinds)}`,
+        facts.fileTypes.length > 0 && `Files: ${facts.fileTypes.join(', ')}`,
+        facts.takesShares && 'Takes shares',
+        facts.uninstallable && 'Can be uninstalled (din apps remove)',
+      ].filter((line): line is string => typeof line === 'string' && line.length > 0);
+      return { data, text: lines.join('\n') };
     }),
     command('apps', 'remove', 'Uninstall an app you installed', [
       { name: 'app', type: 'string', positional: true, help: 'Its id or name' },

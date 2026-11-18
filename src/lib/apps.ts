@@ -7,7 +7,7 @@ import { USERSCRIPT_INSTALL_APP_ID, WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
-import { ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID } from '@/lib/settingsWindows';
+import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
@@ -38,6 +38,9 @@ const UserscriptInstallWindow = lazy(() =>
 );
 const AddPrinterWindow = lazy(() =>
   import('@/components/desktop/apps/AddPrinterWindow').then((m) => ({ default: m.AddPrinterWindow })),
+);
+const AppInfoWindow = lazy(() =>
+  import('@/components/desktop/apps/AppInfoWindow').then((m) => ({ default: m.AppInfoWindow })),
 );
 const ConnectAppWindow = lazy(() =>
   import('@/components/desktop/apps/ConnectedAppsSection').then((m) => ({ default: m.ConnectAppWindow })),
@@ -353,6 +356,20 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: AddPrinterWindow,
     defaultSize: { width: 480, height: 520 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'settings',
+  },
+  {
+    // One app's info, as Android's App info: from the Dock's, the taskbar's
+    // and the apps menu's right-click menus. Hidden from the launcher;
+    // opened with appInfoParams(appId).
+    id: APP_INFO_APP_ID,
+    name: 'App Info',
+    icon: '/icons/apps/settings.png',
+    component: AppInfoWindow,
+    defaultSize: { width: 560, height: 720 },
     floating: true,
     hidden: true,
     singleInstance: true,

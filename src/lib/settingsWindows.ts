@@ -21,3 +21,15 @@ export function connectAppParams(link = ''): Record<string, unknown> {
  * adding one allows what it asks for. `{ path }` is the folder chosen.
  */
 export const FOLDER_APP_WINDOW_ID = 'add-folder-app';
+
+/**
+ * App info, as Android has it: one app's permissions, storage, what it opens
+ * and where it's from, from its right-click menus. One window, under
+ * Settings in the Dock.
+ */
+export const APP_INFO_APP_ID = 'app-info';
+
+/** App info's launch params, for the app with this id. `at` starts it over. */
+export function appInfoParams(appId: string): Record<string, unknown> {
+  return { app: appId, at: Date.now() };
+}
