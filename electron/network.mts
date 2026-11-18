@@ -1039,16 +1039,19 @@ export function registerWifiHandlers(options: {
     }
   });
 
-  ipcMain.handle('wifi:networks', async (event, rescan) => {
+  ipcMain.handle('wifi:networks', async (event, scan) => {
     assertShellSender(event);
     // A refresh lists what a scan it saw finish found, not what's left of the last one.
-    if (rescan === true) await freshScan();
+    if (scan === 'fresh') await freshScan();
     const rows = terseRows(
       await nmcli(
         [
           '-t', '-f', 'IN-USE,SSID,SIGNAL,SECURITY,FREQ,DEVICE',
           'device', 'wifi', 'list',
-          '--rescan', rescan === true ? 'no' : 'auto',
+          // 'auto' has NetworkManager scan first when its list is over 30 seconds old, which
+          // takes the radio off its channel for seconds: for a list someone is looking at,
+          // not for the menu bar's glyph ('none'), which only wants the network it's on.
+          '--rescan', scan === 'fresh' || scan === 'none' ? 'no' : 'auto',
         ],
         30_000,
       ),

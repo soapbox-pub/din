@@ -1287,6 +1287,14 @@ async function restoreSavedLayout(): Promise<void> {
   const key = outputSetKey(outputs);
   if (key === lastOutputSet) return;
   lastOutputSet = key;
+  // With the lid shut, a change of displays starts the hand-off over: one
+  // unplugged ends it, so what's left gets its arrangement back, and the panel
+  // (lit again by the compositor, or by a monitor plugged back in) goes off
+  // while there's another to hand off to.
+  if (lidState === 'closed') {
+    lidAutoArranged = false;
+    if (outputs.some((o) => o.enabled && INTERNAL_OUTPUT.test(o.name))) await onLidClosed();
+  }
   const saved = readSavedLayouts()[key];
   if (!saved || lidAutoArranged || layoutMatches(outputs, saved)) return;
   try {
@@ -6428,7 +6436,7 @@ app.whenReady().then(() => {
   registerBrowserPreconnectHandler();
   registerFindHandlers();
   registerThemeHandler();
-  registerUserscriptHandlers({ assertShellSender });
+  registerUserscriptHandlers({ assertShellSender, sendToShell });
   registerDevtoolsHandlers();
   registerNostrBridge();
   registerHighlightBridge();

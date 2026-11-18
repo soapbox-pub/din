@@ -1,12 +1,13 @@
 /**
  * Userscripts for the Web Browser app.
  *
- * The shell renderer owns the script library (persisted per-device in
- * localStorage, see useUserscripts) and syncs it to the main process over the
- * `window.dinos.userscripts` bridge (electron/preload.cjs). The main process
- * (electron/userscripts.cjs) matches scripts against page URLs and injects
- * them into browser-tab <webview> guests as pages load — so scripts behave
- * like extensions: installed once, running automatically on matching sites.
+ * The main process keeps the script library (electron/userscripts.mts, one
+ * file per device), matches scripts against page URLs and injects them into
+ * browser-tab <webview> guests as pages load — so scripts behave like
+ * extensions: installed once, running automatically on matching sites. The
+ * desktop reaches it over the `window.dinos.userscripts` bridge
+ * (electron/preload.cjs, see useUserscripts): it's told what's installed,
+ * never a script's code, which it holds only while installing one.
  *
  * Navigations to *.user.js files inside a browser tab are intercepted by the
  * main process and surfaced here as install requests, mirroring how a
@@ -37,11 +38,10 @@ export interface UserscriptMeta {
   excludes: string[];
 }
 
-/** An installed userscript: parsed metadata plus source and install state. */
+/** An installed userscript: parsed metadata and install state, without its code. */
 export interface Userscript extends UserscriptMeta {
   id: string;
   enabled: boolean;
-  code: string;
   /** URL the script was installed from (a *.user.js link), if any. */
   downloadUrl?: string;
   installedAt: number;
@@ -133,12 +133,6 @@ export function isUserscriptUrl(url: string): boolean {
   }
 }
 
-/** A fresh unique script id (also embedded in injected code as a run guard). */
-export function newUserscriptId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return `us-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
-}
-
 /** A *.user.js navigation intercepted by the main process. */
 export interface UserscriptInstallRequested {
   /** The script file's URL. */
@@ -147,9 +141,30 @@ export interface UserscriptInstallRequested {
   wcId: number;
 }
 
+/** A script to install: its parsed metadata, its source, and where it's from. */
+export interface UserscriptInstall extends UserscriptMeta {
+  code: string;
+  downloadUrl?: string;
+}
+
 export interface UserscriptsBridge {
-  /** Replace the main process's script list (the renderer is authoritative). */
-  sync(scripts: Userscript[]): void;
+  /** What's installed. */
+  list(): Promise<Userscript[]>;
+  /**
+   * Install a script, or replace the one from the same link or of the same
+   * name and namespace, which keeps its id and whether it's on.
+   */
+  install(script: UserscriptInstall): Promise<Userscript>;
+  remove(id: string): Promise<void>;
+  setEnabled(id: string, enabled: boolean): Promise<void>;
+  /**
+   * Hand over the library this device kept in the desktop's localStorage
+   * before the main process kept it. Resolves true once it's safely there (or
+   * already was), when the desktop's copy can go.
+   */
+  adopt(scripts: unknown[]): Promise<boolean>;
+  /** Subscribe to what's installed, as it changes. Returns an unsubscribe fn. */
+  onChanged(callback: (scripts: Userscript[]) => void): () => void;
   /** Fetch a userscript's source text over https (size-capped, in main). */
   fetchText(url: string): Promise<string>;
   /** Subscribe to *.user.js install requests. Returns an unsubscribe fn. */

@@ -136,15 +136,22 @@ function UserscriptInstall({ windowId, initial, url }: { windowId: string; initi
   const [code, setCode] = useState(initial);
   const meta = useMemo(() => (code.trim() ? parseUserscriptMeta(code) : null), [code]);
 
-  const submit = () => {
+  const [installing, setInstalling] = useState(false);
+
+  const submit = async () => {
+    setInstalling(true);
     try {
-      const script = install(code, url);
+      const script = await install(code, url);
       toast({ title: `${script.name} installed`, description: 'It runs on matching pages from their next load.' });
       close(windowId);
     } catch (error) {
+      setInstalling(false);
       toast({
         title: "Couldn't install userscript",
-        description: error instanceof Error ? error.message : undefined,
+        description:
+          error instanceof Error
+            ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+            : undefined,
         variant: 'destructive',
       });
     }
@@ -191,7 +198,7 @@ function UserscriptInstall({ windowId, initial, url }: { windowId: string; initi
         <Button variant="ghost" onClick={() => close(windowId)}>
           Cancel
         </Button>
-        <Button disabled={!meta} onClick={submit}>
+        <Button disabled={!meta || installing} onClick={() => void submit()}>
           Install
         </Button>
       </div>

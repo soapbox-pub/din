@@ -1,119 +1,118 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import {
   getUserscriptsBridge,
-  newUserscriptId,
   parseUserscriptMeta,
   type Userscript,
+  type UserscriptsBridge,
 } from '@/lib/userscripts';
 
-const STORAGE_KEY = 'din:browser:userscripts';
-/** Same-document change signal (the `storage` event only fires cross-tab). */
-const CHANGE_EVENT = 'din:userscripts-changed';
+/** Where the library was kept before the main process kept it. */
+const LEGACY_KEY = 'din:browser:userscripts';
 
-function readAll(): Userscript[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as Userscript[]) : [];
-  } catch (error) {
-    console.warn('Failed to load userscripts:', error);
-    return [];
-  }
-}
+const NONE: Userscript[] = [];
 
-function writeAll(scripts: Userscript[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(scripts));
-  } catch (error) {
-    console.warn('Failed to save userscripts:', error);
-  }
-  getUserscriptsBridge()?.sync(scripts);
-  window.dispatchEvent(new Event(CHANGE_EVENT));
+// One copy of what's installed for the whole desktop, however many browser
+// windows are showing it.
+let scripts = NONE;
+/** Counts what main has told us, so an older answer never replaces a newer one. */
+let told = 0;
+let ready: Promise<void> | null = null;
+const listeners = new Set<() => void>();
+
+function set(next: Userscript[]) {
+  scripts = next;
+  told += 1;
+  for (const listener of listeners) listener();
 }
 
 /**
- * The browser's userscript library. Scripts persist per-device in
- * localStorage; every change is synced to the Electron main process, which
- * injects matching scripts into browser tabs (see src/lib/userscripts.ts).
- *
- * Mutations re-read localStorage first, so concurrent hook instances (e.g.
- * two browser windows) never clobber each other's edits with stale state.
+ * Give the main process the library this device kept in localStorage, and
+ * drop it from there once main has it: megabytes of script that the browser
+ * otherwise holds in memory for as long as the desktop is open.
+ */
+async function handOver(bridge: UserscriptsBridge) {
+  const raw = localStorage.getItem(LEGACY_KEY);
+  if (raw === null) return;
+  let legacy: unknown = null;
+  try {
+    legacy = JSON.parse(raw);
+  } catch {
+    // Unreadable, so it was already showing as an empty library.
+  }
+  if (!Array.isArray(legacy) || (await bridge.adopt(legacy))) localStorage.removeItem(LEGACY_KEY);
+}
+
+/** Start following what's installed: once, on first use. */
+function start(): Promise<void> {
+  ready ??= (async () => {
+    const bridge = getUserscriptsBridge();
+    if (!bridge) return;
+    bridge.onChanged(set);
+    try {
+      await handOver(bridge);
+    } catch (error) {
+      console.warn('Failed to hand over userscripts:', error);
+    }
+    const before = told;
+    try {
+      const list = await bridge.list();
+      if (told === before) set(list);
+    } catch (error) {
+      console.warn('Failed to load userscripts:', error);
+    }
+  })();
+  return ready;
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  void start();
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function snapshot() {
+  return scripts;
+}
+
+/** The bridge, once the library from before it is where a change can't lose it. */
+async function library(): Promise<UserscriptsBridge> {
+  const bridge = getUserscriptsBridge();
+  if (!bridge) throw new Error('Userscripts are only available in Din');
+  await start();
+  return bridge;
+}
+
+/**
+ * Install (or update) a script from its source text. Re-installing a script
+ * with the same download URL, or the same name + namespace, replaces the
+ * existing entry in place, keeping its id and enabled state.
+ * Rejects when the source has no valid ==UserScript== block.
+ */
+async function install(code: string, downloadUrl?: string): Promise<Userscript> {
+  const meta = parseUserscriptMeta(code);
+  if (!meta) {
+    throw new Error('Missing or invalid ==UserScript== metadata block');
+  }
+  return (await library()).install({ ...meta, code, downloadUrl });
+}
+
+async function remove(id: string): Promise<void> {
+  await (await library()).remove(id);
+}
+
+async function setEnabled(id: string, enabled: boolean): Promise<void> {
+  await (await library()).setEnabled(id, enabled);
+}
+
+/**
+ * The browser's userscript library. The main process keeps it, per device,
+ * and injects matching scripts into browser tabs (see src/lib/userscripts.ts);
+ * here is what's installed, without the scripts' code, and the ways to change
+ * it, each resolving once the change is saved.
  */
 export function useUserscripts() {
-  const [scripts, setScripts] = useState<Userscript[]>(readAll);
-
-  useEffect(() => {
-    // Prime the main process with the persisted library on mount.
-    getUserscriptsBridge()?.sync(readAll());
-
-    const refresh = () => setScripts(readAll());
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) refresh();
-    };
-    window.addEventListener(CHANGE_EVENT, refresh);
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener(CHANGE_EVENT, refresh);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
-
-  const mutate = useCallback((fn: (prev: Userscript[]) => Userscript[]) => {
-    const next = fn(readAll());
-    writeAll(next);
-    setScripts(next);
-  }, []);
-
-  /**
-   * Install (or update) a script from its source text. Re-installing a script
-   * with the same download URL, or the same name + namespace, replaces the
-   * existing entry in place, keeping its id and enabled state.
-   * Throws when the source has no valid ==UserScript== block.
-   */
-  const install = useCallback(
-    (code: string, downloadUrl?: string): Userscript => {
-      const meta = parseUserscriptMeta(code);
-      if (!meta) {
-        throw new Error('Missing or invalid ==UserScript== metadata block');
-      }
-      let installed: Userscript | undefined;
-      mutate((prev) => {
-        const existing = prev.find(
-          (s) =>
-            (downloadUrl !== undefined && s.downloadUrl === downloadUrl) ||
-            (s.name === meta.name && s.namespace === meta.namespace),
-        );
-        const now = Date.now();
-        installed = {
-          ...meta,
-          id: existing?.id ?? newUserscriptId(),
-          enabled: existing?.enabled ?? true,
-          code,
-          downloadUrl: downloadUrl ?? existing?.downloadUrl,
-          installedAt: existing?.installedAt ?? now,
-          updatedAt: now,
-        };
-        const script = installed;
-        return existing
-          ? prev.map((s) => (s.id === script.id ? script : s))
-          : [...prev, script];
-      });
-      if (!installed) throw new Error('Install failed');
-      return installed;
-    },
-    [mutate],
-  );
-
-  const remove = useCallback(
-    (id: string) => mutate((prev) => prev.filter((s) => s.id !== id)),
-    [mutate],
-  );
-
-  const setEnabled = useCallback(
-    (id: string, enabled: boolean) =>
-      mutate((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s))),
-    [mutate],
-  );
-
+  const scripts = useSyncExternalStore(subscribe, snapshot);
   return { scripts, install, remove, setEnabled };
 }

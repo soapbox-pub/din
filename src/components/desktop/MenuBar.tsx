@@ -85,30 +85,16 @@ import { themeColorTokens } from '@/lib/themeColor';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
-import { EVEN_SPLIT, primaryArea, snapRect, underMenuBar, type Rect, type SnapSplit, type SnapZone, type WorkArea } from '@/lib/monitors';
+import { primaryArea } from '@/lib/monitors';
+import { menuBarWindow } from '@/lib/menuBarWindow';
 import { useWallpaperTone } from '@/hooks/useWallpaperTone';
 import type { AppDefinition } from '@/lib/apps';
-import { focusedWindow, isShown } from '@/hooks/useWindows';
+import { focusedWindow } from '@/hooks/useWindows';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import { KeyboardMenuItem } from '@/components/desktop/KeyboardIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import { APP_MIME } from '@/components/desktop/icons/wallpaper';
-
-/** Whether windows under the bar, maximized or snapped along the top, span the whole width of its work area between them. */
-function coversWidth(under: { maximized: boolean; snapped: SnapZone | null; split: SnapSplit | null }[], area: WorkArea): boolean {
-  const spans = under
-    .map((w) => (w.maximized ? area : w.snapped ? snapRect(area, w.snapped, w.split ?? EVEN_SPLIT) : null))
-    .filter((r): r is Rect => r !== null)
-    .map((r) => [r.x, r.x + r.width] as const)
-    .sort((a, b) => a[0] - b[0]);
-  let reach = area.x;
-  for (const [from, to] of spans) {
-    if (from > reach + 1) return false;
-    reach = Math.max(reach, to);
-  }
-  return reach >= area.x + area.width - 1;
-}
 
 /** How the bar's layers change: with the window that changes them (genie.ts's FLIP_DURATION_MS and its cubic ease-out). */
 const BAR_FADE = 'transition-opacity duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none';
@@ -150,7 +136,8 @@ const WALLPAPER_SCRIM: Record<'dark' | 'light', string> = {
  * app's accent, the default frosted chrome, or for a frameless window, whose
  * title bar's color isn't known, solid white or black. A maximized window
  * paints that strip itself (Window's bar strip), so every animation of the
- * window carries the color with it; for windows side by side the bar paints
+ * window carries the color with it, but only while it's that top one (a
+ * window snapped over it takes the bar); for windows side by side the bar paints
  * it, the whole width in the look of the one on top, rather than a patchwork
  * of each window's own.
  */
@@ -163,12 +150,7 @@ export function MenuBar() {
   // top, on the primary monitor - give it their look only once they cover
   // its whole width, and of several, the one on top's; one snapped half
   // leaves it the wallpaper's, as its text can't be both.
-  const area = primaryArea(useWorkAreas());
-  const primaryId = area.id;
-  const under = windows.filter((w) => underMenuBar(w) && isShown(w) && (w.monitor === null || w.monitor === primaryId));
-  const fullscreen = coversWidth(under, area)
-    ? under.reduce<(typeof under)[number] | null>((top, w) => (!top || w.z > top.z ? w : top), null)
-    : null;
+  const fullscreen = menuBarWindow(windows, primaryArea(useWorkAreas()));
   const accent = fullscreen && !fullscreen.frameless ? fullscreen.accent : null;
   // The focused window is the highest visible one, as for its focus ring.
   const focused = focusedWindow(windows);

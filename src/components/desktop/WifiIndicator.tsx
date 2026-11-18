@@ -48,7 +48,7 @@ export function WifiPopoverBody() {
   const radioEnabled = status.data?.radioEnabled ?? false;
   const hasAdapter = status.data?.device != null;
   const ethernet = isEthernetConnected(status.data);
-  const networks = useWifiNetworks(radioEnabled && hasAdapter);
+  const networks = useWifiNetworks(radioEnabled && hasAdapter, { scan: true });
   const saved = useSavedNetworks();
   const { connect, disconnect, setRadio } = useWifiMutations();
   const { open } = useWindowActions();

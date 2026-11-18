@@ -17,21 +17,51 @@ export const LIQUID_FILTER_ID = 'din-liquid';
  */
 function edgeRamp(channel: 'r' | 'g', rim: [number, number]): string {
   const c = (v: number) => (channel === 'r' ? `rgb(${v},0,0)` : `rgb(0,${v},0)`);
-  const end = channel === 'r' ? "x2='1' y2='0'" : "x2='0' y2='1'";
   const [near, far] = rim;
-  const stops = [
-    [0, 255],
-    [near, 196],
-    [far, 128],
-    [1 - far, 128],
-    [1 - near, 60],
-    [1, 0],
-  ]
-    .map(([at, v]) => `<stop offset='${at}' stop-color='${c(v)}'/>`)
-    .join('');
+  const stops: [at: number, color: string][] = [
+    [0, c(255)],
+    [near, c(196)],
+    [far, c(128)],
+    [1 - far, c(128)],
+    [1 - near, c(60)],
+    [1, c(0)],
+  ];
+  return rampPixels(channel, stops) ?? rampDrawing(channel, stops);
+}
+
+/** The ramp's length in pixels: enough that stretched over a panel it's the gradient itself, to the 8-bit level. */
+const RAMP_PX = 1024;
+
+/**
+ * The ramp as pixels, a line of them stretched over the panel. A drawing (an
+ * SVG, below) is drawn again, at the panel's size and into a bitmap of its
+ * own, every time a panel with the lens is painted, which while the pointer
+ * moves in a menu is every frame: hundreds of bitmaps a few seconds later,
+ * tens of megabytes kept by the page's image cache. Pixels are decoded once.
+ */
+function rampPixels(channel: 'r' | 'g', stops: [at: number, color: string][]): string | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = channel === 'r' ? RAMP_PX : 1;
+    canvas.height = channel === 'r' ? 1 : RAMP_PX;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const gradient = ctx.createLinearGradient(0, 0, channel === 'r' ? RAMP_PX : 0, channel === 'r' ? 0 : RAMP_PX);
+    for (const [at, color] of stops) gradient.addColorStop(at, color);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
+/** The ramp as a drawing, where there's no canvas to make pixels on. */
+function rampDrawing(channel: 'r' | 'g', stops: [at: number, color: string][]): string {
+  const end = channel === 'r' ? "x2='1' y2='0'" : "x2='0' y2='1'";
   const svg =
     `<svg xmlns='${SVG}' viewBox='0 0 100 100' preserveAspectRatio='none'>` +
-    `<linearGradient id='g' x1='0' y1='0' ${end}>${stops}</linearGradient>` +
+    `<linearGradient id='g' x1='0' y1='0' ${end}>${stops.map(([at, color]) => `<stop offset='${at}' stop-color='${color}'/>`).join('')}</linearGradient>` +
     `<rect width='100' height='100' fill='url(#g)'/></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
@@ -77,12 +107,20 @@ export function installLiquidGlass(): void {
 }
 
 /**
- * How far past a surface's edge the light can be and still show: its
- * gradients' widest (window-glass's 600px circle) and then some. Further
- * out, the light is held at this distance, where it looks the same (none),
- * so the pointer moving far away doesn't repaint the surface.
+ * How far past each kind of surface's edge its light can be and still show:
+ * where its gradient fades out in index.css (65% of a 600px circle for a
+ * window's glass, 70% of 140px for a tab), and a little more. Further out,
+ * the light is held at this distance, where it looks the same (none), so
+ * the pointer moving far away changes nothing on the surface.
  */
-const LIGHT_REACH = 640;
+const LIGHT_REACH: [surface: string, px: number][] = [
+  ['window-glass', 400],
+  ['glass-sheen', 400],
+  ['bar-glass', 240],
+  ['glass-surface', 216],
+  ['glass-control', 104],
+];
+const SURFACES = LIGHT_REACH.map(([surface]) => `.${surface}`).join(', ');
 
 /**
  * Set while a window is being moved, resized or animated (the desktop's
@@ -96,11 +134,13 @@ export const WINDOW_GESTURE_ATTR = 'data-window-gesture';
  * coordinates (--glass-x/--glass-y), once a frame while it moves, and only
  * while Liquid is chosen (the root's --glass-material, which the desktop and
  * the theme it sends its apps set inline). Set on the surfaces themselves
- * rather than the root, so a move restyles them and not the whole document.
- * Every surface is measured before any is written, as a write between two
- * reads makes the second lay the page out again, and only a surface whose
- * light moved is written, as each write repaints the whole surface: a
- * window's glass is as big as the window.
+ * rather than the root, so a move restyles them and not the whole document
+ * (nor their children: the properties aren't inherited, index.css). Every
+ * surface is measured before any is written, as a write between two reads
+ * makes the second lay the page out again, and only a surface that's seen
+ * and whose light moved is written: a small one (a menu, a tab) is painted
+ * again for it, and a big one's light is a layer of its own that only
+ * slides (index.css).
  */
 function followPointer(): void {
   let frame = 0;
@@ -112,14 +152,25 @@ function followPointer(): void {
     const root = document.documentElement;
     if (root.hasAttribute(WINDOW_GESTURE_ATTR)) return;
     if (root.style.getPropertyValue('--glass-material').trim() !== 'liquid') return;
-    const surfaces = [...document.querySelectorAll<HTMLElement>('.glass-surface, .window-glass, .glass-control, .bar-glass, .glass-sheen')];
+    // Not what can't be seen (the Dock's labels until they're pointed at, a
+    // window put away), unless it's on its way in: fading in from nothing.
+    let animated: Element[] | undefined;
+    const surfaces = [...document.querySelectorAll<HTMLElement>(SURFACES)].filter((el) => {
+      if (el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return true;
+      animated ??= document.getAnimations().flatMap((a) => (a.effect instanceof KeyframeEffect && a.effect.target ? [a.effect.target] : []));
+      return animated.some((target) => target.contains(el));
+    });
     const rects = surfaces.map((el) => el.getBoundingClientRect());
     surfaces.forEach((el, i) => {
       const r = rects[i];
-      const lx = Math.round(Math.min(Math.max(x - r.left, -LIGHT_REACH), r.width + LIGHT_REACH));
-      const ly = Math.round(Math.min(Math.max(y - r.top, -LIGHT_REACH), r.height + LIGHT_REACH));
+      const reach = LIGHT_REACH.find(([surface]) => el.classList.contains(surface))?.[1] ?? 0;
+      const lx = Math.round(Math.min(Math.max(x - r.left, -reach), r.width + reach));
+      const ly = Math.round(Math.min(Math.max(y - r.top, -reach), r.height + reach));
       const key = `${lx},${ly}`;
-      if (lit.get(el) === key) return;
+      const was = lit.get(el);
+      if (was === key) return;
+      // From here its light is where the pointer is, not at rest (index.css).
+      if (was === undefined) el.style.setProperty('--glass-unlit', '0');
       lit.set(el, key);
       el.style.setProperty('--glass-x', `${lx}px`);
       el.style.setProperty('--glass-y', `${ly}px`);

@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { THEMED_APP_ICONS, WEB_APP_ICON } from '@/lib/appIcons';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
-import { bundledIconProps } from '@/shared/iconSizes';
+import { bundledIconProps, releaseAutoSized } from '@/shared/iconSizes';
 import { isGlyphIcon, themeIcon, useThemeIcons } from '@/shared/themeIcons';
 
 /**
@@ -23,10 +23,13 @@ import { isGlyphIcon, themeIcon, useThemeIcons } from '@/shared/themeIcons';
  * still references - for a closed App Store, its whole detached card grid
  * and the React tree behind it, held for as long as a slow host takes.
  * Module-level, so React only runs it at mount and its cleanup at unmount.
+ * The one ref an <img> has, so it's a bundled icon's own too (releaseAutoSized).
  */
 function cancelLoadOnUnmount(img: HTMLImageElement | null) {
+  const release = releaseAutoSized(img);
   return () => {
     if (img && !img.complete) img.removeAttribute('src');
+    release?.();
   };
 }
 
@@ -79,8 +82,8 @@ export function AppIcon({
     <GlyphTile src={shown} className={web ? 'size-full' : className} />
   ) : (
     <img
-      ref={cancelLoadOnUnmount}
       {...bundledIconProps(shown)}
+      ref={cancelLoadOnUnmount}
       alt=""
       aria-hidden
       draggable={false}

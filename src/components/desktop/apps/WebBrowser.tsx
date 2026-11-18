@@ -1940,10 +1940,16 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     () => ({
       onOpenUrl: (url) => openTab(url),
       userscripts: userscriptsBridge ? userscriptList : null,
-      onSetUserscriptEnabled: setUserscriptEnabled,
+      onSetUserscriptEnabled: (id, enabled) => {
+        setUserscriptEnabled(id, enabled).catch(() =>
+          toast({ title: "Couldn't change the userscript", variant: 'destructive' }),
+        );
+      },
       onRemoveUserscript: (script) => {
-        removeUserscript(script.id);
-        toast({ title: `${script.name} removed` });
+        removeUserscript(script.id).then(
+          () => toast({ title: `${script.name} removed` }),
+          () => toast({ title: `Couldn't remove ${script.name}`, variant: 'destructive' }),
+        );
       },
       onAddUserscript: () => openWindow(USERSCRIPT_INSTALL_APP_ID, userscriptInstallParams('')),
     }),
