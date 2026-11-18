@@ -527,6 +527,23 @@ export class PushPool {
     return { sites, relays: [...this.#relays.values()].map((relay) => relay.status()) };
   }
 
+  /** The sites with subscriptions on each relay, by the relay's host name (System Monitor's names). */
+  relaySites(): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    for (const relay of this.#relays.values()) {
+      let host: string;
+      try {
+        host = new URL(relay.url).hostname.toLowerCase();
+      } catch {
+        continue;
+      }
+      const sites = out.get(host) ?? [];
+      for (const { site } of relay.subs.values()) if (!sites.includes(site)) sites.push(site);
+      out.set(host, sites);
+    }
+    return out;
+  }
+
   #siteStats(site: string): SiteStats {
     let stats = this.#stats.get(site);
     if (!stats) {

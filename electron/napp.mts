@@ -672,6 +672,11 @@ export function nappPermissionChanged(origin: string, capability: string, allow:
   if (capability === 'notifications' && stored.push[host]) setPush(host, []);
 }
 
+/** The installed nsites with background subscriptions on each relay host, for System Monitor. */
+export function nappRelaySites(): Map<string, string[]> {
+  return pool ? pool.relaySites() : new Map();
+}
+
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------

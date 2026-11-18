@@ -22,12 +22,25 @@
 // with the bytes each TCP one has carried, from `ss` (iproute2), read when
 // asked. Other users' sockets are listed without their program, which only
 // root could see. Connections to this computer itself (loopback) aren't
-// listed. Remote addresses are named by the hosts Din's own requests reached
-// at them, else by reverse DNS, cached.
+// listed.
+//
+// A connection is named, and given to what in Din opened it, by what Din
+// knows of its own connections, always and not only while recording: the
+// main process's own sockets by their local port (undici's connected
+// channel: fetch and WebSocket in main, the background relay subscriptions
+// of installed nsites among them, whose sites `backgroundSites` names); and
+// pages' WebSockets, which connection-preload.cjs reports by host, as it
+// does each page's own address, resolved to addresses through the page's
+// session (Chromium's own host cache, so the addresses it connected to).
+// What Din didn't open, or opened before it was watched, is named by the
+// hosts recorded requests reached at its address, else by reverse DNS,
+// cached, which is the network's name for the address (often its hosting
+// company's) rather than the one it was asked for by.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import diagnostics from 'node:diagnostics_channel';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { app, ipcMain, webContents } from 'electron';
@@ -45,6 +58,10 @@ const HOST_CACHE_LIMIT = 4000;
 /** Reverse lookups at once, and how long one gets. */
 const REVERSE_CONCURRENCY = 4;
 const REVERSE_TIMEOUT_MS = 3000;
+/** How long a host's addresses are trusted before they're asked for again. */
+const RESOLVE_TTL_MS = 60_000;
+/** Socket hosts kept per page. */
+const PAGE_HOST_LIMIT = 200;
 
 /** Who made a request: the desktop itself, or one of its pages. */
 export interface RequestSource {
@@ -114,6 +131,14 @@ export interface NetworkEvents {
   framesDropped: number;
 }
 
+/** Something in Din a connection is for: a page, or an installed nsite's background subscriptions. */
+export interface ConnectionUser {
+  kind: RequestSource['kind'] | 'background';
+  /** The page's address, or the nsite's origin (nsite://host). */
+  url: string;
+  title: string;
+}
+
 export interface Connection {
   protocol: 'tcp' | 'udp';
   localAddress: string;
@@ -122,6 +147,15 @@ export interface Connection {
   remotePort: number;
   /** The remote's name, when known. */
   remoteHost: string | null;
+  /**
+   * Where `remoteHost` is from: `din` for the name Din connected by, `reverse`
+   * for reverse DNS (the address's own name, often its hosting company's).
+   */
+  hostFrom: 'din' | 'reverse' | null;
+  /** Other names Din reached at the same address (a CDN's are shared), so maybe this one's. */
+  otherHosts: string[];
+  /** What in Din it's for, when Din opened it and knows; empty for Din itself or anything else. */
+  users: ConnectionUser[];
   /** Null for another user's, whose program only root can see. */
   pid: number | null;
   program: string | null;
@@ -603,13 +637,195 @@ function isLoopback(address: string): boolean {
   return address === '::1' || address.startsWith('127.') || address === 'localhost';
 }
 
+/** A connection as `ss` has it, before it's named. */
+export type SsConnection = Omit<Connection, 'remoteHost' | 'hostFrom' | 'otherHosts' | 'users'>;
+
+/** A URL's host name, lowercased, or null for an address, loopback or none. */
+function nameHost(url: string): string | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || net.isIP(host.replace(/^\[|\]$/g, ''))) return null;
+  return host;
+}
+
+// --- What Din knows of its own connections ---------------------------------
+
+/** The main process's own sockets: the host each was opened for, by local port. */
+const mainSockets = new Map<number, string>();
+
+diagnostics.subscribe('undici:client:connected', (message) => {
+  const { connectParams, socket } = message as {
+    connectParams?: { hostname?: string };
+    socket?: net.Socket;
+  };
+  const host = connectParams?.hostname?.toLowerCase();
+  const port = socket?.localPort;
+  if (!host || !socket || !port) return;
+  mainSockets.set(port, host);
+  socket.once('close', () => {
+    if (mainSockets.get(port) === host) mainSockets.delete(port);
+  });
+});
+
+/** The hosts each page opened WebSockets to (connection-preload.cjs), by WebContents id. */
+const pageSockets = new Map<number, { contents: Electron.WebContents; hosts: Set<string> }>();
+
+function noteSocket(contents: Electron.WebContents, url: unknown): void {
+  if (typeof url !== 'string' || url.length > 4096 || !eligible(contents)) return;
+  const host = nameHost(url);
+  if (!host) return;
+  let entry = pageSockets.get(contents.id);
+  if (!entry) {
+    entry = { contents, hosts: new Set() };
+    pageSockets.set(contents.id, entry);
+    const id = contents.id;
+    // A new document's sockets are its own; the last one's are closed.
+    const navigated = () => pageSockets.get(id)?.hosts.clear();
+    contents.on('did-navigate', navigated);
+    contents.once('destroyed', () => pageSockets.delete(id));
+  }
+  if (entry.hosts.size < PAGE_HOST_LIMIT) entry.hosts.add(host);
+}
+
+/** Each host's addresses as its session resolves them, by session and host. */
+const resolved = new WeakMap<Electron.Session, Map<string, { addresses: string[]; at: number; pending: boolean }>>();
+
+/** A host's addresses, as of the last lookup; starts one when it's stale. */
+function addressesOf(session: Electron.Session, host: string): string[] {
+  let bySession = resolved.get(session);
+  if (!bySession) {
+    bySession = new Map();
+    resolved.set(session, bySession);
+  }
+  let entry = bySession.get(host);
+  if (!entry) {
+    entry = { addresses: [], at: 0, pending: false };
+    bySession.set(host, entry);
+    if (bySession.size > HOST_CACHE_LIMIT) bySession.delete(bySession.keys().next().value as string);
+  }
+  const current = entry;
+  if (!current.pending && Date.now() - current.at > RESOLVE_TTL_MS) {
+    current.pending = true;
+    session
+      .resolveHost(host)
+      .then(
+        (result) => {
+          current.addresses = result.endpoints.map((e) => splitEndpoint(`${e.address}:0`).address);
+        },
+        () => {
+          current.addresses = [];
+        },
+      )
+      .finally(() => {
+        current.at = Date.now();
+        current.pending = false;
+      });
+  }
+  return current.addresses;
+}
+
+interface AddressUse {
+  /** The names Din reached at the address, in the order seen. */
+  hosts: Map<string, ConnectionUser[]>;
+}
+
+function addUse(index: Map<string, AddressUse>, address: string, host: string, user: ConnectionUser | null): void {
+  let use = index.get(address);
+  if (!use) {
+    use = { hosts: new Map() };
+    index.set(address, use);
+  }
+  let users = use.hosts.get(host);
+  if (!users) {
+    users = [];
+    use.hosts.set(host, users);
+  }
+  if (user && !users.some((u) => u.kind === user.kind && u.url === user.url)) users.push(user);
+}
+
+function userOf(contents: Electron.WebContents): ConnectionUser {
+  const { kind, url, title } = sourceOf(contents);
+  return { kind, url, title };
+}
+
+/**
+ * Every address Din's pages are connected to, as far as it knows: their
+ * WebSockets' hosts and their own, resolved through their sessions.
+ */
+function pageAddresses(): Map<string, AddressUse> {
+  const index = new Map<string, AddressUse>();
+  const pages = new Map<number, { contents: Electron.WebContents; hosts: Set<string> }>();
+  for (const contents of webContents.getAllWebContents()) {
+    if (!eligible(contents)) continue;
+    const hosts = new Set(pageSockets.get(contents.id)?.hosts ?? []);
+    const own = /^(https?|wss?):/i.test(contents.getURL()) ? nameHost(contents.getURL()) : null;
+    if (own) hosts.add(own);
+    if (hosts.size > 0) pages.set(contents.id, { contents, hosts });
+  }
+  for (const { contents, hosts } of pages.values()) {
+    const user = userOf(contents);
+    for (const host of hosts) {
+      for (const address of addressesOf(contents.session, host)) addUse(index, address, host, user);
+    }
+  }
+  return index;
+}
+
+let backgroundSites: () => Map<string, string[]> = () => new Map();
+
+/** The installed nsites whose background subscriptions are on a relay host. */
+function backgroundUsers(host: string, sites: Map<string, string[]>): ConnectionUser[] {
+  return (sites.get(host) ?? []).map((site) => ({ kind: 'background', url: `nsite://${site}/`, title: site }));
+}
+
+/** Din's own processes, whose connections it can say more about. */
+function dinPids(): Set<number> {
+  return new Set(app.getAppMetrics().map((m) => m.pid));
+}
+
+/** A connection named by what Din knows of it, else by recorded requests or reverse DNS. */
+function nameConnection(
+  c: SsConnection,
+  pages: Map<string, AddressUse>,
+  sites: Map<string, string[]>,
+  din: Set<number>,
+): Connection {
+  const ours = c.pid !== null && din.has(c.pid);
+  if (c.pid === process.pid) {
+    const host = mainSockets.get(c.localPort);
+    if (host) {
+      return { ...c, remoteHost: host, hostFrom: 'din', otherHosts: [], users: backgroundUsers(host, sites) };
+    }
+  }
+  const use = pages.get(c.remoteAddress);
+  if (use) {
+    // Busiest first: the likeliest of names sharing an address.
+    const hosts = [...use.hosts].sort((a, b) => b[1].length - a[1].length);
+    const users: ConnectionUser[] = [];
+    if (ours && c.pid !== process.pid) {
+      for (const [, list] of hosts) {
+        for (const user of list) if (!users.some((u) => u.kind === user.kind && u.url === user.url)) users.push(user);
+      }
+    }
+    return { ...c, remoteHost: hosts[0][0], hostFrom: 'din', otherHosts: hosts.slice(1).map(([h]) => h), users };
+  }
+  const known = hostsByIp.get(c.remoteAddress);
+  if (known) return { ...c, remoteHost: known, hostFrom: 'din', otherHosts: [], users: [] };
+  const reverse = reverseFor(c.remoteAddress);
+  return { ...c, remoteHost: reverse, hostFrom: reverse ? 'reverse' : null, otherHosts: [], users: [] };
+}
+
 /**
  * Parse `ss -tuniHpeO state established`: one socket a line, Netid first, no
  * State column (the filter has it), then the queues, the two ends, and
  * key:value details, tcp_info's bytes among them.
  */
-export function parseSs(text: string): Omit<Connection, 'remoteHost'>[] {
-  const out: Omit<Connection, 'remoteHost'>[] = [];
+export function parseSs(text: string): SsConnection[] {
+  const out: SsConnection[] = [];
   for (const line of text.split('\n')) {
     const fields = line.trim().split(/\s+/);
     if (fields.length < 5) continue;
@@ -660,10 +876,8 @@ function pumpReverse(): void {
   }
 }
 
-/** The name an address goes by: a host Din reached there, else its reverse DNS once looked up. */
-function hostFor(ip: string): string | null {
-  const known = hostsByIp.get(ip);
-  if (known) return known;
+/** An address's reverse DNS name, once looked up. */
+function reverseFor(ip: string): string | null {
   if (reverseNames.has(ip)) return reverseNames.get(ip) ?? null;
   if (!reverseQueue.includes(ip)) {
     reverseQueue.push(ip);
@@ -683,9 +897,17 @@ async function readConnections(): Promise<ConnectionsResult> {
     if (error instanceof CommandError && error.code === 'ENOENT') return { available: false, connections: [] };
     throw error;
   }
+  const pages = pageAddresses();
+  let sites = new Map<string, string[]>();
+  try {
+    sites = backgroundSites();
+  } catch {
+    // Named without them.
+  }
+  const din = dinPids();
   return {
     available: true,
-    connections: parseSs(stdout).map((c) => ({ ...c, remoteHost: hostFor(c.remoteAddress) })),
+    connections: parseSs(stdout).map((c) => nameConnection(c, pages, sites, din)),
   };
 }
 
@@ -696,12 +918,20 @@ export function registerNetworkMonitorHandlers(options: {
   pageKind: (contents: Electron.WebContents) => string;
   /** Pages never recorded: private and Tor tabs, DevTools. */
   ignore: (contents: Electron.WebContents) => boolean;
+  /** The installed nsites with background subscriptions on each relay host. */
+  backgroundSites?: () => Map<string, string[]>;
 }): void {
   const { assertShellSender } = options;
   sendToShell = options.sendToShell;
   shell = options.shell;
   pageKind = options.pageKind;
   ignored = options.ignore;
+  if (options.backgroundSites) backgroundSites = options.backgroundSites;
+
+  // From connection-preload.cjs, in any page: a WebSocket it opened. Only
+  // ever a name for System Monitor; a page that lies about it misnames its
+  // own connections.
+  ipcMain.on('network-monitor:socket', (event, url: unknown) => noteSocket(event.sender, url));
 
   ipcMain.handle('network-monitor:record', (event) => {
     assertShellSender(event);

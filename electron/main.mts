@@ -142,7 +142,7 @@ import {
   siteIdentity,
 } from './site-identities.mts';
 import { registerGeolocationHandlers } from './geolocation.mts';
-import { forgetNappSite, nappPermissionChanged, registerNappHandlers } from './napp.mts';
+import { forgetNappSite, nappPermissionChanged, nappRelaySites, registerNappHandlers } from './napp.mts';
 import { forgetWebPushSubscriptions, registerWebPushHandlers, webPushPermissionChanged } from './web-push.mts';
 import { watchDiskSpace } from './disk-space.mts';
 import { watchLiveStick } from './live-stick.mts';
@@ -3922,6 +3922,7 @@ const GEOLOCATION_PRELOAD = path.join(import.meta.dirname, 'geolocation-preload.
  * site-permissions:state). Every page gets it.
  */
 const PERMISSIONS_PRELOAD = path.join(import.meta.dirname, 'permissions-preload.cjs');
+const CONNECTION_PRELOAD = path.join(import.meta.dirname, 'connection-preload.cjs');
 
 /**
  * Absolute path to the session preload that gives window.chrome the `app`
@@ -6547,7 +6548,14 @@ app.whenReady().then(() => {
     pageKind: monitorPageKind,
     // Private and Tor tabs leave no trace, here included; DevTools' pages are its own.
     ignore: (contents) => isEphemeralBrowserSession(contents.session) || contents.session === devtoolsSession(),
+    backgroundSites: nappRelaySites,
   });
+  // Every page tells it the hosts its WebSockets connect to, so System
+  // Monitor can say what each connection is and what it's for; private and
+  // Tor tabs don't.
+  for (const s of [session.defaultSession, appsSession(), widgetsSession(), browserSession()]) {
+    s.registerPreloadScript({ id: 'din-connections', type: 'frame', filePath: CONNECTION_PRELOAD });
+  }
   registerNostrdHandlers({ assertShellSender, sendToShell });
   registerAssistantHandlers({ assertShellSender, sendToShell });
   registerDictationHandlers({ assertShellSender, guestFromId: shellGuestFromId });

@@ -31,6 +31,7 @@ import { formatBytes } from '@/lib/fs';
 import {
   getNetworkMonitorBridge,
   type Connection,
+  type ConnectionUser,
   type NetworkRequest,
   type RequestSource,
   type WebSocketFrame,
@@ -154,10 +155,10 @@ function typeLabel(type: string): string {
 }
 
 /** Who a request came from, to the user. */
-function useSourceIdentity(): (source: RequestSource) => Identity {
+function useSourceIdentity(): (source: Omit<RequestSource, 'contentsId'>) => Identity {
   const { getApp, findAppIdForUrl } = useInstalledApps();
   return useCallback(
-    (source: RequestSource): Identity => {
+    (source: Omit<RequestSource, 'contentsId'>): Identity => {
       if (source.kind === 'desktop') return { label: 'Din', icon: DIN_ICON };
       let scheme = '';
       let host = '';
@@ -1006,12 +1007,48 @@ function connectionKey(c: Connection): string {
   return `${c.protocol}|${c.inode}|${c.localAddress}:${c.localPort}|${c.remoteAddress}:${c.remotePort}`;
 }
 
+/** The name a connection's other end goes by: the one Din connected by, else its address. */
 function remoteLabel(c: Connection): string {
-  return c.remoteHost ?? c.remoteAddress;
+  return c.hostFrom === 'din' && c.remoteHost ? c.remoteHost : c.remoteAddress;
+}
+
+/** What a connection is for, as one identity: the app's, or several apps' names under the first's icon. */
+function usersIdentity(users: ConnectionUser[], identify: (source: Omit<RequestSource, 'contentsId'>) => Identity): Identity | null {
+  const identities: Identity[] = [];
+  // Din's own desktop last: an app's connection it shares is the app's.
+  const ordered = [...users].sort((a, b) => Number(a.kind === 'desktop') - Number(b.kind === 'desktop'));
+  for (const { kind, url, title } of ordered) {
+    let identity: Identity;
+    if (kind === 'background') {
+      const app = identify({ kind: 'web-app', url, title });
+      identity = { ...app, label: `${app.label} (background)` };
+    } else {
+      identity = identify({ kind, url, title });
+    }
+    if (!identities.some((i) => i.label === identity.label)) identities.push(identity);
+  }
+  if (identities.length === 0) return null;
+  return { label: identities.map((i) => i.label).join(', '), icon: identities[0].icon };
 }
 
 function endpoint(address: string, port: number): string {
   return `${address.includes(':') ? `[${address}]` : address}:${port}`;
+}
+
+/** A connection row's tooltip: who, to what by which names, from where. */
+function connectionTitle(row: ConnectionRow): string {
+  const c = row.connection;
+  const lines = [
+    `${row.owner.label}${c.program && c.program !== row.owner.label ? ` (${c.program}${c.pid !== null ? ` ${c.pid}` : ''})` : c.pid !== null ? ` (${c.pid})` : ''}`,
+    `→ ${endpoint(c.remoteAddress, c.remotePort)} from ${endpoint(c.localAddress, c.localPort)}`,
+  ];
+  if (c.hostFrom === 'din' && c.remoteHost) {
+    lines.push(c.otherHosts.length > 0 ? `Connected for one of: ${[c.remoteHost, ...c.otherHosts].join(', ')}` : `Connected for ${c.remoteHost}`);
+  } else if (c.hostFrom === 'reverse' && c.remoteHost) {
+    lines.push(`The address’s own name (reverse DNS), often its hosting company’s: ${c.remoteHost}`);
+  }
+  if (c.pid === null) lines.push('Another user’s program, which only root can see');
+  return lines.join('\n');
 }
 
 function totalOf(c: Connection): number {
@@ -1050,6 +1087,7 @@ export function ConnectionsView({
   onShowProcess: (pid: number) => void;
 }) {
   const { toast } = useToast();
+  const identifySource = useSourceIdentity();
   const [state, setState] = useState<{
     available: boolean;
     at: number;
@@ -1105,6 +1143,7 @@ export function ConnectionsView({
       const key = connectionKey(connection);
       const rate = state.rates.get(key);
       const owner =
+        usersIdentity(connection.users, identifySource) ??
         (connection.pid !== null ? identify(connection.pid) : null) ??
         (connection.program
           ? { label: connection.program, icon: Cog }
@@ -1117,6 +1156,7 @@ export function ConnectionsView({
             owner.label.toLowerCase().includes(q) ||
             (c.program ?? '').toLowerCase().includes(q) ||
             (c.remoteHost ?? '').toLowerCase().includes(q) ||
+            c.otherHosts.some((h) => h.includes(q)) ||
             c.remoteAddress.includes(q) ||
             String(c.remotePort) === q ||
             String(c.pid ?? '') === q ||
@@ -1127,7 +1167,7 @@ export function ConnectionsView({
       const order = compareConnections(a, b, sort.key) || NAME_COLLATOR.compare(a.key, b.key);
       return sort.descending ? -order : order;
     });
-  }, [state, query, sort, identify]);
+  }, [state, query, sort, identify, identifySource]);
   const ids = useMemo(() => rows.map((row) => row.key), [rows]);
   const selectedIndex = selectedKey ? ids.indexOf(selectedKey) : -1;
   const selected = selectedIndex >= 0 ? rows[selectedIndex] : null;
@@ -1193,7 +1233,7 @@ export function ConnectionsView({
                         role="row"
                         aria-selected={isSelected}
                         aria-rowindex={index + 2}
-                        title={`${c.program ?? row.owner.label}${c.pid !== null ? ` (${c.pid})` : ''} → ${endpoint(c.remoteAddress, c.remotePort)} from ${endpoint(c.localAddress, c.localPort)}`}
+                        title={connectionTitle(row)}
                         className={cn(
                           'absolute inset-x-0 flex items-center gap-3 rounded-md pl-2 pr-3 text-sm',
                           isSelected ? (focused ? 'bg-selected' : 'bg-foreground/10') : 'hover:bg-foreground/5',
@@ -1209,8 +1249,14 @@ export function ConnectionsView({
                         </div>
                         <span role="gridcell" className="min-w-0 flex-1 truncate">
                           {remoteLabel(c)}
-                          {c.remoteHost && (
-                            <span className="ml-2 text-xs text-muted-foreground">{c.remoteAddress}</span>
+                          {c.remoteHost && c.hostFrom === 'din' && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {c.otherHosts.length > 0 ? `or ${c.otherHosts.length} more · ` : ''}
+                              {c.remoteAddress}
+                            </span>
+                          )}
+                          {c.remoteHost && c.hostFrom === 'reverse' && (
+                            <span className="ml-2 text-xs text-muted-foreground">{c.remoteHost}</span>
                           )}
                         </span>
                         <span role="gridcell" className="hidden w-24 shrink-0 truncate text-xs text-muted-foreground @lg:block">
@@ -1263,7 +1309,7 @@ export function ConnectionsView({
           {state ? `${rows.length} connections · down ${formatRate(down)} · up ${formatRate(up)}` : ''}
         </span>
         <span className="ml-auto hidden shrink-0 @2xl:inline">
-          UDP isn’t counted per connection. Another user’s programs show as System.
+          A gray name is the address’s own, not the one it was reached by. Another user’s programs show as System.
         </span>
       </StatusBar>
     </div>

@@ -63,8 +63,12 @@ export const networkArea: Area = {
         text: list.length
           ? list
               .map((c) => {
-                const who = c.program ? `${c.program} (${c.pid})` : 'system';
-                const where = `${c.remoteHost ?? c.remoteAddress}:${c.remotePort}`;
+                const users = [...new Set(c.users.map((u) => (u.kind === 'background' ? `${u.title} (background)` : u.title || u.url)))];
+                const who = `${c.program ? `${c.program} (${c.pid})` : 'system'}${users.length ? ` for ${users.join(', ')}` : ''}`;
+                const where =
+                  c.hostFrom === 'din' && c.remoteHost
+                    ? `${c.remoteHost}:${c.remotePort} (${c.remoteAddress})`
+                    : `${c.remoteAddress}:${c.remotePort}${c.remoteHost ? ` (reverse DNS: ${c.remoteHost})` : ''}`;
                 const bytes = c.received === null ? '' : `\t↓ ${formatBytes(c.received)} ↑ ${formatBytes(c.sent ?? 0)}`;
                 return `${who}\t${c.protocol}\t${where}${bytes}`;
               })

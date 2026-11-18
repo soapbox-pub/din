@@ -72,14 +72,31 @@ export interface NetworkEvents {
   framesDropped: number;
 }
 
+/** Something in Din a connection is for: a page, or an installed nsite's background subscriptions. */
+export interface ConnectionUser {
+  kind: RequestSource['kind'] | 'background';
+  /** The page's address, or the nsite's origin (nsite://host/). */
+  url: string;
+  title: string;
+}
+
 export interface Connection {
   protocol: 'tcp' | 'udp';
   localAddress: string;
   localPort: number;
   remoteAddress: string;
   remotePort: number;
-  /** A host Din's requests reached at the address, else its reverse DNS name. */
+  /** The name Din connected to the address by, else its reverse DNS name. */
   remoteHost: string | null;
+  /**
+   * Where `remoteHost` is from: `din` for the name Din connected by, `reverse`
+   * for reverse DNS (the address's own name, often its hosting company's).
+   */
+  hostFrom: 'din' | 'reverse' | null;
+  /** Other names Din reached at the same address (a CDN's are shared), so maybe this one's. */
+  otherHosts: string[];
+  /** What in Din it's for, when Din opened it and knows; empty for Din itself or anything else. */
+  users: ConnectionUser[];
   /** Null for another user's, whose program only root can see. */
   pid: number | null;
   program: string | null;
