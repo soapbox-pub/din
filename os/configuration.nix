@@ -1569,7 +1569,8 @@ in
   # What install scripts and a developer's first hour assume is present.
   # Linux containers (distrobox and Podman, an optional feature above) are the
   # escape hatch for anything else. ngit brings git-remote-nostr, so git takes
-  # nostr:// remotes, Din's own among them.
+  # nostr:// remotes, Din's own among them; it's patched to sign through
+  # nostrd (flake.nix), as the account signed in to Din unless one is chosen.
   # din-update is there for DIN_UPDATER, above. FFmpeg is how the Assistant
   # edits Studio's takes (os/opencode/skills/studio). `docker` is Podman's,
   # once Linux containers are installed (above).

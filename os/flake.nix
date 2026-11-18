@@ -58,6 +58,18 @@
       # version.
       electron = { _module.args.electron = pkgs.electron_43; };
 
+      # ngit, patched to sign through nostrd (ngit-signer-socket.patch): for
+      # any account nostrd holds, ngit asks it for signatures over its socket
+      # instead of reading a key or opening a bunker connection of its own,
+      # and with no account selected it signs as nostrd's active one, the
+      # account signed in to Din. Accounts nostrd doesn't hold, and keys or
+      # bunkers given on ngit's command line, sign as before;
+      # `git config --global nostr.signer-socket false` turns it off. Rebase
+      # the patch when the ngit input is bumped.
+      ngitPackage = ngit.packages.${system}.default.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./ngit-signer-socket.patch ];
+      });
+
       # The commit the system is built from, which system updates compare
       # with the tip they fetch (os/din-update.sh): `self.rev` for a clean
       # checkout, `dirtyRev` (the commit plus "-dirty") for one with changes.
@@ -130,14 +142,14 @@
 
       nixosConfigurations.dinos = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
+        specialArgs = { inherit din deckmon; ngit = ngitPackage; };
         modules = [ nostrd.nixosModules.default din-drive.nixosModules.default electron revision registry ./configuration.nix ];
       };
 
       # The same system plus remote access (debug.nix), for real hardware.
       nixosConfigurations.dinos-debug = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit din deckmon; ngit = ngit.packages.${system}.default; };
+        specialArgs = { inherit din deckmon; ngit = ngitPackage; };
         modules = [ nostrd.nixosModules.default din-drive.nixosModules.default electron revision registry ./configuration.nix ./debug.nix ];
       };
 
@@ -176,7 +188,7 @@
               { boot.consoleLogLevel = nixpkgs.lib.mkForce 7; }
             ];
             inherit din deckmon;
-            ngit = ngit.packages.${system}.default;
+            ngit = ngitPackage;
           };
           test = file: import file args;
         in
