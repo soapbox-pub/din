@@ -64,14 +64,16 @@ export function FileViewerBody({
   const category = fileCategory(name, 'file');
   const base = useFileUrl(isViewableImage(name) || isPlayableVideo(name) || isPlayableAudio(name) || category === 'pdf' || isViewableModel(name) ? path : null);
   // Bust Chromium's media cache when the file changes under the same name.
+  // Views are keyed by the file, not the version, so a changed file reloads
+  // where it was (the page, the zoom, the time) rather than starting over.
   const url = base && `${base}${mtimeMs ? `?v=${Math.floor(mtimeMs)}` : ''}`;
 
-  if (isViewableImage(name)) return url ? <ImageView key={url} url={url} name={name} /> : null;
+  if (isViewableImage(name)) return url ? <ImageView key={base} url={url} name={name} /> : null;
   if (isPlayableVideo(name)) {
     if (!url) return <div className="h-full bg-black" />;
     return (
       <div className="grid h-full place-items-center bg-black">
-        <video key={url} src={url} controls autoPlay className="max-h-full max-w-full" />
+        <MediaPlayer key={base} kind="video" url={url} className="max-h-full max-w-full" />
       </div>
     );
   }
@@ -80,14 +82,14 @@ export function FileViewerBody({
       <div className="flex h-full flex-col items-center justify-center gap-6 p-6">
         <FileIcon path={path} name={name} kind="file" size={size} mtimeMs={mtimeMs} px={96} />
         <p className="max-w-full truncate text-lg font-medium text-foreground">{name}</p>
-        {url && <audio key={url} src={url} controls autoPlay className="w-full max-w-md" />}
+        {url && <MediaPlayer key={base} kind="audio" url={url} className="w-full max-w-md" />}
       </div>
     );
   }
   if (category === 'pdf') {
     return (
       <Suspense fallback={null}>
-        {url && <PdfView key={url} url={url} />}
+        {url && <PdfView key={base} url={url} />}
       </Suspense>
     );
   }
@@ -105,7 +107,7 @@ export function FileViewerBody({
       </Suspense>
     );
   }
-  if (isExtractable(name)) return <ArchiveView path={path} onExtract={onExtract} />;
+  if (isExtractable(name)) return <ArchiveView path={path} mtimeMs={mtimeMs} onExtract={onExtract} />;
   if (category === 'document' || category === 'disk' || category === 'model' || category === 'program' || category === 'image' || category === 'video') {
     return <NoPreview path={path} name={name} size={size} mtimeMs={mtimeMs} />;
   }
@@ -147,7 +149,9 @@ function ImageView({ url, name }: { url: string; name: string }) {
   // Fit to the window (null), or a scale of the picture's own size. Click
   // switches between fit and actual size; + and - zoom in and out, 0 fits.
   const [zoom, setZoom] = useState<number | null>(null);
-  const [failed, setFailed] = useState(false);
+  // A version that fails (caught half-written) is replaced by the next.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = failedUrl === url;
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The point of the picture at the middle of the view, as fractions of the
@@ -227,7 +231,7 @@ function ImageView({ url, name }: { url: string; name: string }) {
             alt={name}
             draggable={false}
             onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
-            onError={() => setFailed(true)}
+            onError={() => setFailedUrl(url)}
             style={zoom !== null && natural ? { width: natural.width * zoom, height: natural.height * zoom } : undefined}
             className={cn(zoom === null ? 'size-full object-contain' : 'max-w-none')}
           />
@@ -242,12 +246,14 @@ function ImageView({ url, name }: { url: string; name: string }) {
   );
 }
 
-function ArchiveView({ path, onExtract }: { path: string; onExtract?: () => void }) {
+function ArchiveView({ path, mtimeMs, onExtract }: { path: string; mtimeMs: number | null; onExtract?: () => void }) {
   const listing = useQuery({
-    queryKey: ['fs', 'listArchive', path],
+    queryKey: ['fs', 'listArchive', path, mtimeMs],
     queryFn: () => getFsBridge()!.listArchive(path),
     enabled: getFsBridge() !== undefined,
     retry: false,
+    // A new version of the archive replaces the old listing, not a skeleton.
+    placeholderData: (previous, query) => (query?.queryKey[2] === path ? previous : undefined),
   });
 
   return (
@@ -352,6 +358,16 @@ function TextView({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const content = useFileContent(path, TEXT_MAX_BYTES);
+  // Read it again when it changes on disk; the editor decides what to do
+  // with the new text.
+  const queryClient = useQueryClient();
+  const seen = useRef({ path, mtimeMs });
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = { path, mtimeMs };
+    if (before.path !== path || before.mtimeMs === mtimeMs || before.mtimeMs === null) return;
+    void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', path] });
+  }, [path, mtimeMs, queryClient]);
 
   const text = useMemo(() => {
     if (!content.data) return null;
@@ -408,7 +424,37 @@ function TextEditor({
   const [value, setValue] = useState(initial);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The file's text on disk, when it changed there under unsaved edits.
+  const [changed, setChanged] = useState<string | null>(null);
   const dirty = value !== saved;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const selection = useRef<[number, number]>([0, 0]);
+  const scrolled = useRef(0);
+
+  // A new version on disk: taken quietly when nothing here is unsaved (the
+  // caret kept), offered when something is.
+  const [lastInitial, setLastInitial] = useState(initial);
+  const [reloads, setReloads] = useState(0);
+  if (initial !== lastInitial) {
+    setLastInitial(initial);
+    if (initial === saved) {
+      setChanged(null);
+    } else if (value === saved) {
+      setSaved(initial);
+      setValue(initial);
+      setChanged(null);
+      setReloads((n) => n + 1);
+    } else {
+      setChanged(initial);
+    }
+  }
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el || reloads === 0) return;
+    const [start, end] = selection.current;
+    el.setSelectionRange(Math.min(start, el.value.length), Math.min(end, el.value.length));
+    el.scrollTop = scrolled.current;
+  }, [reloads]);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -423,6 +469,7 @@ function TextEditor({
     try {
       await getFsBridge()!.writeFile(path, encodeText(contents, encoding));
       setSaved(contents);
+      setChanged(null);
       setStatus('Saved');
       void queryClient.invalidateQueries({ queryKey: ['fs', 'readFile', path] });
     } catch (error) {
@@ -434,8 +481,39 @@ function TextEditor({
 
   return (
     <div className="flex h-full flex-col">
+      {changed !== null && (
+        <div role="alert" className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-warning/10 px-3 py-1.5 text-xs text-foreground">
+          <span className="min-w-0 flex-1">This file was changed by another app. Your edits aren’t saved.</span>
+          <button
+            type="button"
+            onClick={() => setChanged(null)}
+            className="h-7 rounded-full px-3 font-medium hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            Keep My Edits
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSaved(changed);
+              setValue(changed);
+              setChanged(null);
+              setStatus(null);
+            }}
+            className="h-7 rounded-full px-3 font-medium hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            Revert to Saved
+          </button>
+        </div>
+      )}
       <textarea
+        ref={textareaRef}
         value={value}
+        onScroll={(e) => {
+          scrolled.current = e.currentTarget.scrollTop;
+        }}
+        onSelect={(e) => {
+          selection.current = [e.currentTarget.selectionStart, e.currentTarget.selectionEnd];
+        }}
         onChange={(e) => {
           setValue(e.target.value);
           setStatus(null);
@@ -472,6 +550,49 @@ function TextEditor({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * A video or a song that plays from where it was when its file changes:
+ * at once while it's paused, and once it's paused or ends while playing,
+ * so a change never cuts it off. Only the first version plays by itself.
+ */
+function MediaPlayer({ kind, url, className }: { kind: 'video' | 'audio'; url: string; className?: string }) {
+  const ref = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const [src, setSrc] = useState(url);
+  const [first] = useState(url);
+  const resumeAt = useRef<number | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || url === src) return;
+    const swap = () => {
+      resumeAt.current = el.ended ? null : el.currentTime;
+      setSrc(url);
+    };
+    if (el.paused || el.ended) {
+      swap();
+      return;
+    }
+    el.addEventListener('pause', swap, { once: true });
+    return () => el.removeEventListener('pause', swap);
+  }, [url, src]);
+
+  const Tag = kind;
+  return (
+    <Tag
+      ref={ref}
+      src={src}
+      controls
+      autoPlay={src === first}
+      onLoadedMetadata={(e) => {
+        const at = resumeAt.current;
+        resumeAt.current = null;
+        if (at !== null) e.currentTarget.currentTime = Math.min(at, e.currentTarget.duration || at);
+      }}
+      className={className}
+    />
   );
 }
 

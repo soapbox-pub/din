@@ -7,7 +7,7 @@ import { isPhotoEditable, isPlayableVideo, isViewableImage } from '@/lib/fileTyp
 import { cleanPrintingError, isPrintableFile } from '@/lib/printing';
 import { printFile } from '@/shared/print';
 import { useQueryClient } from '@tanstack/react-query';
-import { invalidateListings, useDirectory } from '@/hooks/useFileSystem';
+import { invalidateListings, useDirectory, useWatchDirectory } from '@/hooks/useFileSystem';
 import type { Din } from '@/sdk';
 import { useDin, usePermission, useWindowIcon, useWindowTitle } from '@/sdk/react';
 import { FeatureInstallButton } from '@/shared/FeatureInstall';
@@ -74,6 +74,9 @@ export function Preview() {
 
   const dir = path ? parentPath(path) : null;
   const listing = useDirectory(dir);
+  // The folder is watched, so a file changed on disk (a PDF rebuilt, a
+  // picture re-exported) shows its new version: its mtime is in the listing.
+  useWatchDirectory(dir);
   const entry = listing.data?.entries.find((e) => e.name === name);
   const siblings = useMemo(() => {
     if (!isMedia(name)) return [];
@@ -230,7 +233,8 @@ export function Preview() {
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={!image}>
           <div className="min-h-0 flex-1">
-            <FileViewerBody
+            {/* After the listing, so the file opens once, as of its mtime. */}
+            {!listing.isPending && <FileViewerBody
               path={path}
               size={entry?.size}
               mtimeMs={entry?.mtimeMs}
@@ -238,7 +242,7 @@ export function Preview() {
               onDirtyChange={setDirty}
               onExtract={() => void extract()}
               onUseCursor={canUseCursor ? installCursor : undefined}
-            />
+            />}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>

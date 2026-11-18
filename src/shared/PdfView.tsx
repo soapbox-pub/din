@@ -31,12 +31,13 @@ interface Find {
  * pdf.js's viewer, with text to select and copy, links that go where they
  * point, a page number to jump with, zoom (the menu, Ctrl+plus and minus,
  * Ctrl+scroll), and Find (Ctrl+F). A locked PDF asks for its password.
+ * Given a new `url` (the same file, changed), it reloads in place.
  */
 export default function PdfView({ url }: { url: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
-  const parts = useRef<{ viewer: PDFViewer; eventBus: EventBus } | null>(null);
+  const parts = useRef<{ viewer: PDFViewer; eventBus: EventBus; linkService: PDFLinkService } | null>(null);
 
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [pages, setPages] = useState(0);
@@ -44,6 +45,16 @@ export default function PdfView({ url }: { url: string }) {
   const [pageInput, setPageInput] = useState('1');
   const [scale, setScale] = useState<{ value: number; preset: string | null }>({ value: 1, preset: 'auto' });
   const [find, setFind] = useState<Find | null>(null);
+
+  // What the shown document was opened with, and where it was left, so a
+  // new version of the file opens where the old one was.
+  const shown = useRef<{ task: pdfjs.PDFDocumentLoadingTask; password: string | null } | null>(null);
+  const restore = useRef<{ scale: string; top: number; left: number } | null>(null);
+  const findQuery = useRef('');
+  const query = find?.query ?? '';
+  useEffect(() => {
+    findQuery.current = query;
+  }, [query]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -67,11 +78,22 @@ export default function PdfView({ url }: { url: string }) {
       annotationMode: pdfjs.AnnotationMode.ENABLE,
     });
     linkService.setViewer(viewer);
-    parts.current = { viewer, eventBus };
+    parts.current = { viewer, eventBus, linkService };
 
     eventBus.on('pagesinit', () => {
-      setScaleValue(viewer, 'auto');
+      const back = restore.current;
+      restore.current = null;
+      setScaleValue(viewer, back?.scale ?? 'auto');
       setPages(viewer.pagesCount);
+      if (!back) return;
+      container.scrollTop = back.top;
+      container.scrollLeft = back.left;
+      if (findQuery.current) {
+        eventBus.dispatch('find', {
+          source: null, type: '', query: findQuery.current, caseSensitive: false,
+          entireWord: false, highlightAll: true, findPrevious: false, matchDiacritics: false,
+        });
+      }
     });
     eventBus.on('pagechanging', ({ pageNumber }: { pageNumber: number }) => {
       setPage(pageNumber);
@@ -92,24 +114,65 @@ export default function PdfView({ url }: { url: string }) {
     eventBus.on('updatefindmatchescount', ({ matchesCount }: { matchesCount: { current: number; total: number } }) => {
       setFind((f) => f && { ...f, current: matchesCount.current, total: matchesCount.total });
     });
+    return () => {
+      parts.current = null;
+      viewer.cleanup();
+      void shown.current?.task.destroy();
+      shown.current = null;
+    };
+  }, []);
 
+  // Each version of the file (the URL changes with its modification time)
+  // is opened alongside the one shown, and takes its place once it opens,
+  // at the same page, zoom and scroll; one that won't open (still being
+  // written, say) leaves the last one up, as the next change will come.
+  useEffect(() => {
+    const container = containerRef.current;
     let live = true;
+    let password: string | null = null;
     const task = openPdf(url);
     task.onPassword = (answer: (password: string) => void, reason: number) => {
-      if (live) setStatus({ kind: 'password', wrong: reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD, answer });
+      if (!live) return;
+      const remembered = shown.current?.password;
+      if (remembered && reason !== pdfjs.PasswordResponses.INCORRECT_PASSWORD && password === null) {
+        password = remembered;
+        answer(remembered);
+        return;
+      }
+      setStatus({
+        kind: 'password',
+        wrong: reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD,
+        answer: (given) => {
+          password = given;
+          answer(given);
+        },
+      });
     };
     task.promise.then(
       (doc) => {
-        if (!live) return;
-        viewer.setDocument(doc);
-        linkService.setDocument(doc, null);
+        const p = parts.current;
+        if (!live || !p) return;
+        const previous = shown.current;
+        if (previous && p.viewer.pdfDocument && container) {
+          restore.current = { scale: String(p.viewer.currentScaleValue), top: container.scrollTop, left: container.scrollLeft };
+        }
+        p.viewer.setDocument(doc);
+        p.linkService.setDocument(doc, null);
+        shown.current = { task, password };
+        void previous?.task.destroy();
         setStatus({ kind: 'ready' });
+        if (previous) return;
         // Keys scroll the pages when nothing else around has asked for them.
         const active = document.activeElement;
-        if (!active || active === document.body || active.contains(container)) container.focus({ preventScroll: true });
+        if (container && (!active || active === document.body || active.contains(container))) container.focus({ preventScroll: true });
       },
       (error: unknown) => {
         if (!live) return;
+        void task.destroy();
+        if (shown.current) {
+          setStatus({ kind: 'ready' });
+          return;
+        }
         setStatus({
           kind: 'error',
           message: error instanceof pdfjs.InvalidPDFException
@@ -120,9 +183,7 @@ export default function PdfView({ url }: { url: string }) {
     );
     return () => {
       live = false;
-      parts.current = null;
-      viewer.cleanup();
-      void task.destroy();
+      if (shown.current?.task !== task) void task.destroy();
     };
   }, [url]);
 
