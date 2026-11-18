@@ -135,6 +135,11 @@ export interface AppDefinition {
    */
   singleInstance?: boolean;
   /**
+   * One window per value of this launch param: launching with a value a
+   * window already shows focuses that window instead (App Info's `app`).
+   */
+  instanceParam?: string;
+  /**
    * Another app whose Dock tile this app's windows go under, rather than a
    * tile of their own. E.g. the browser's pop-up windows, under Web Browser.
    */
@@ -363,17 +368,17 @@ export const APPS: readonly AppDefinition[] = [
   },
   {
     // One app's info, as Android's App info: from the Dock's, the taskbar's
-    // and the apps menu's right-click menus. Hidden from the launcher;
-    // opened with appInfoParams(appId).
+    // and the apps menu's right-click menus. A window per app, with a tile
+    // of its own wearing that app's icon with a cog (AppInfoWindow).
+    // Hidden from the launcher; opened with appInfoParams(appId).
     id: APP_INFO_APP_ID,
     name: 'App Info',
     icon: '/icons/apps/settings.png',
     component: AppInfoWindow,
-    defaultSize: { width: 560, height: 720 },
+    defaultSize: { width: 520, height: 600 },
     floating: true,
     hidden: true,
-    singleInstance: true,
-    dockAs: 'settings',
+    instanceParam: 'app',
   },
   {
     // Connecting an app to the account (NIP-46), from Settings → Connected

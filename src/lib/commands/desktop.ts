@@ -24,7 +24,7 @@ import { getAppsBridge } from '@/lib/dinApps';
 import { addFileApp, fileAppEntry, folderError, type OpenedFolder } from '@/lib/fileApps';
 import { PERMISSION_LABELS, requestedAccess } from '@/lib/launchedApps';
 import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
-import { APP_KIND_LABELS, appFacts, nostrLinksLabel } from '@/lib/appInfo';
+import { APP_KIND_LABELS, appFacts, appNotificationsState, nostrLinksLabel, notifiesBySite, setAppNotifications } from '@/lib/appInfo';
 import { windowTile } from '@/lib/apps';
 import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { getPeriodicSyncBridge, tagSummary } from '@/lib/periodicSync';
@@ -182,7 +182,7 @@ export const appsArea: Area = {
       const native = app.native ? (await getNativeAppsBridge()?.list().catch(() => null))?.apps.find((n) => n.id === app.id) : undefined;
       const facts = appFacts(app, ctx.apps, native);
       const browser = getBrowserBridge();
-      const site = (facts.kind === 'web' || facts.kind === 'nsite') && facts.origin && browser
+      const site = notifiesBySite(facts) && facts.origin && browser
         ? await browser.getSiteInfo(facts.origin, false).catch(() => null)
         : null;
       const sync = getPeriodicSyncBridge();
@@ -192,6 +192,7 @@ export const appsArea: Area = {
       const data = {
         ...facts,
         windows,
+        notifications: appNotificationsState(facts, site),
         badgeHidden: hiddenBadges(ctx.config).includes(app.id),
         sitePermissions: site?.permissions ?? null,
         background: background
@@ -203,6 +204,7 @@ export const appsArea: Area = {
         APP_KIND_LABELS[facts.kind] + (windows ? `, ${windows} window${windows === 1 ? '' : 's'} open` : ''),
         facts.description,
         facts.address && `From: ${facts.address}`,
+        `Notifications: ${appNotificationsState(facts, site)}`,
         facts.installedAt !== null && `Installed: ${new Date(facts.installedAt).toLocaleDateString()}`,
         facts.permissions.length > 0 && `Permissions: ${facts.permissions.join(', ')}`,
         facts.folders.length > 0 && `Folders: ${facts.folders.join(', ')}`,
@@ -479,7 +481,7 @@ export const desktopIconsArea: Area = {
 
 export const notificationsArea: Area = {
   name: 'notifications',
-  summary: 'Notifications: list, send, dismiss, hide an app’s badge (Do Not Disturb is under din settings)',
+  summary: 'Notifications: list, send, dismiss, turn an app’s off, hide an app’s badge (Do Not Disturb is under din settings)',
   commands: [
     command('notifications', 'list', 'Notifications in the list, newest first', [], () => ({
       data: getNotificationState().notifications.map((n) => ({
@@ -517,6 +519,24 @@ export const notificationsArea: Area = {
     }),
     command('notifications', 'clear', 'Dismiss them all', [], () => {
       clearNotifications();
+    }),
+    command('notifications', 'off', 'Turn an app’s notifications off, as its App Info does: a website or nsite is blocked, anything else isn’t heard from', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+    ], async (args, ctx) => {
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      await call(setAppNotifications(appFacts(app, ctx.apps), false));
+      return { text: `${app.name}’s notifications are off` };
+    }),
+    command('notifications', 'on', 'Turn an app’s notifications back on (a website or nsite is allowed)', [
+      { name: 'app', type: 'string', positional: true, help: 'Its id or name' },
+    ], async (args, ctx) => {
+      const app = pick(ctx.apps.apps, args.string('app'), (a) => [a.id, a.name], 'app');
+      await call(setAppNotifications(appFacts(app, ctx.apps), true));
+      return { text: `${app.name}’s notifications are on` };
+    }),
+    command('notifications', 'off-apps', 'The apps whose notifications are turned off (websites’ and nsites’ are in din browser site-permissions)', [], (_args, ctx) => {
+      const rows = getNotificationState().appsOff.map((id) => ({ id, name: appRow(ctx, id) }));
+      return { data: rows, text: rows.map((r) => `${r.id}\t${r.name}`).join('\n') || 'No app’s notifications are off' };
     }),
     command('notifications', 'hide-badge', 'Stop showing an app’s badge on its Dock or taskbar icon (its notifications still come)', [
       { name: 'app', type: 'string', positional: true, help: 'Its id or name' },

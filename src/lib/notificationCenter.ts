@@ -88,12 +88,15 @@ const MAX_POPUPS = 3;
 /** The list keeps this many; the oldest go first. */
 const MAX_HISTORY = 100;
 const DND_KEY = 'din.notifications.dnd';
+const OFF_KEY = 'din.notifications.off';
 
 interface State {
   notifications: DesktopNotification[];
   /** Ids currently popped up, newest first. */
   popups: string[];
   doNotDisturb: boolean;
+  /** Apps whose notifications are turned off, by app id (App Info's Notifications). */
+  appsOff: readonly string[];
 }
 
 function loadDoNotDisturb(): boolean {
@@ -104,7 +107,16 @@ function loadDoNotDisturb(): boolean {
   }
 }
 
-let state: State = { notifications: [], popups: [], doNotDisturb: loadDoNotDisturb() };
+function loadAppsOff(): string[] {
+  try {
+    const list: unknown = JSON.parse(localStorage.getItem(OFF_KEY) ?? '[]');
+    return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+let state: State = { notifications: [], popups: [], doNotDisturb: loadDoNotDisturb(), appsOff: loadAppsOff() };
 const listeners = new Set<() => void>();
 let nextId = 1;
 
@@ -121,6 +133,13 @@ function subscribe(listener: () => void): () => void {
 /** Show a notification; returns its id. An existing id or `replaceKey` is replaced. */
 export function notify(input: NotifyInput): string {
   const id = input.id ?? `n${nextId++}`;
+  // An app whose notifications are off is never heard from, critical or not,
+  // except what only the user can answer on screen (approving sudo).
+  const appId = input.source.appId;
+  if (appId && state.appsOff.includes(appId) && !input.onScreenOnly) {
+    input.onClose?.('closed');
+    return id;
+  }
   const notification: DesktopNotification = {
     urgency: 'normal',
     timeout: input.urgency === 'critical' ? 0 : DEFAULT_POPUP_MS,
@@ -238,6 +257,36 @@ export function setDoNotDisturb(on: boolean): void {
     // Best-effort: it still applies for this session.
   }
   setState({ ...state, doNotDisturb: on, popups: on ? state.popups.filter((id) => isCritical(id)) : state.popups });
+}
+
+/**
+ * Turn an app's notifications off, or back on: while off, nothing it sends
+ * reaches the list or pops up (websites and nsites are blocked by their
+ * notifications permission instead). Stays on this computer, as Do Not
+ * Disturb does. Turning them off clears what it already sent.
+ */
+export function setAppNotificationsOff(appId: string, off: boolean): void {
+  if (state.appsOff.includes(appId) === off) return;
+  const appsOff = off ? [...state.appsOff, appId] : state.appsOff.filter((id) => id !== appId);
+  try {
+    localStorage.setItem(OFF_KEY, JSON.stringify(appsOff));
+  } catch {
+    // Best-effort: it still applies for this session.
+  }
+  const gone = off ? state.notifications.filter((n) => n.source.appId === appId && !n.onScreenOnly) : [];
+  const ids = new Set(gone.map((n) => n.id));
+  setState({
+    ...state,
+    appsOff,
+    notifications: state.notifications.filter((n) => !ids.has(n.id)),
+    popups: state.popups.filter((p) => !ids.has(p)),
+  });
+  for (const n of gone) n.onClose?.('dismissed');
+}
+
+/** Whether an app's notifications are turned off. */
+export function appNotificationsOff(appId: string): boolean {
+  return state.appsOff.includes(appId);
 }
 
 function isCritical(id: string): boolean {

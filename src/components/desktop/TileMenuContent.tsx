@@ -138,9 +138,11 @@ export function TileMenuContent({
           <BellOff aria-hidden /> Hide badge
         </ContextMenuItem>
       )}
-      <ContextMenuItem onSelect={() => open(APP_INFO_APP_ID, appInfoParams(app.id))}>
-        <Info aria-hidden /> App Info
-      </ContextMenuItem>
+      {app.id !== APP_INFO_APP_ID && (
+        <ContextMenuItem onSelect={() => open(APP_INFO_APP_ID, appInfoParams(app.id))}>
+          <Info aria-hidden /> App Info
+        </ContextMenuItem>
+      )}
       {taskWindow ? (
         <>
           <ContextMenuSeparator />

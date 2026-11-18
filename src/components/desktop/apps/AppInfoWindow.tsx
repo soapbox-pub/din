@@ -1,44 +1,36 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Bell,
-  CalendarDays,
-  Copy,
-  FileType,
-  FolderOpen,
-  Hash,
-  Link2,
-  ListChecks,
-  MonitorUp,
-  Package,
-  Pin,
-  Play,
-  RefreshCw,
-  Share2,
-  Square,
-  Tag,
-  Trash2,
-  User,
-  Zap,
-} from 'lucide-react';
-import type { AppComponentProps } from '@/lib/apps';
+import { ChevronLeft, ChevronRight, FolderOpen, ListChecks, Package, Play, Square, Trash2 } from 'lucide-react';
+import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { appsDockedAs, windowTile } from '@/lib/apps';
-import { APP_KIND_LABELS, appFacts, nostrLinksLabel, type AppFacts } from '@/lib/appInfo';
+import {
+  APP_KIND_LABELS,
+  appFacts,
+  appNotificationsState,
+  nostrLinksLabel,
+  notifiesBySite,
+  setAppNotifications,
+  type AppFacts,
+} from '@/lib/appInfo';
+import { THEMED_APP_ICONS } from '@/lib/appIcons';
+import { badgedIcon } from '@/lib/badgedIcon';
 import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
-import { cleanFsError } from '@/lib/fs';
 import { hiddenBadges, withBadgeHidden } from '@/lib/hiddenBadges';
+import { PERMISSION_LABELS } from '@/lib/launchedApps';
 import { getNappHost, type NappStatus } from '@/lib/napp';
+import { useNotificationCenter } from '@/lib/notificationCenter';
 import { websiteLabel } from '@/lib/nsiteApps';
 import { getNsiteStore } from '@/lib/nsiteStore';
-import { getPeriodicSyncBridge, tagSummary, type BackgroundSite } from '@/lib/periodicSync';
-import { PERMISSION_LABELS } from '@/lib/launchedApps';
+import { getPeriodicSyncBridge, intervalLabel, tagSummary, type BackgroundSite, type BackgroundStatus } from '@/lib/periodicSync';
 import type { SiteCapability } from '@/lib/promptBridge';
+import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { cn } from '@/lib/utils';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
-import { useDesktopIcons } from '@/contexts/DesktopIconsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
+import { useWindowIcon } from '@/contexts/WindowIconContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
+import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { usePinnedApps } from '@/hooks/usePinnedApps';
@@ -46,8 +38,9 @@ import { useNsitePublisher } from '@/hooks/useSiteIdentity';
 import { useToast } from '@/hooks/useToast';
 import { AppIcon } from '@/shared/AppIcon';
 import { SettingsToken } from '@/shared/settingsChrome';
-import { settingsGroup } from '@/shared/settingsChromeStyles';
+import { settingsGroup, settingsRowButton } from '@/shared/settingsChromeStyles';
 import { SettingsFallback, SettingsSubHeading } from '@/shared/settingsSection';
+import { isGlyphIcon, themeIcon, useThemeIcons } from '@/shared/themeIcons';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -67,7 +60,37 @@ const WEB_CAPABILITIES: SiteCapability[] = ['camera', 'microphone', 'geolocation
 /** What an installed nsite asks the user for (as its title bar lists them). */
 const NSITE_CAPABILITIES: SiteCapability[] = ['notifications', 'background-sync'];
 
-/** One row of a group: its token, what it is, what it says, and a control at its end. */
+/** What the window wears in its title bar and Dock tile: the app's icon, with this in its corner. */
+const COG = '/icons/apps/settings.png';
+
+type Page = 'main' | 'notifications' | 'permissions' | 'storage' | 'background' | 'opens';
+
+const PAGE_TITLES: Record<Exclude<Page, 'main'>, string> = {
+  notifications: 'Notifications',
+  permissions: 'Permissions',
+  storage: 'Storage',
+  background: 'Background activity',
+  opens: 'Open by default',
+};
+
+function formatDate(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+/** A row on the first page that opens a page of its own: its name, how it stands, a chevron. */
+function NavRow({ label, value, onClick }: { label: string; value?: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={cn(settingsRowButton, 'min-h-14')}>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-foreground">{label}</span>
+        {value && <span className="block truncate text-xs text-muted-foreground">{value}</span>}
+      </span>
+      <ChevronRight className="size-4.5 shrink-0 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+    </button>
+  );
+}
+
+/** A row of a page: what it is, what it says, and a control at its end. */
 function Row({
   icon,
   label,
@@ -75,7 +98,7 @@ function Row({
   htmlFor,
   children,
 }: {
-  icon: Parameters<typeof SettingsToken>[0]['icon'];
+  icon?: Parameters<typeof SettingsToken>[0]['icon'];
   label: ReactNode;
   detail?: ReactNode;
   /** The control's id, so clicking the label works it. */
@@ -85,7 +108,7 @@ function Row({
   const Label = htmlFor ? 'label' : 'div';
   return (
     <div className="flex min-h-14 items-center gap-3 px-4 py-2.5">
-      <SettingsToken icon={icon} />
+      {icon && <SettingsToken icon={icon} />}
       <Label htmlFor={htmlFor} className="min-w-0 flex-1">
         <span className="block text-sm text-foreground">{label}</span>
         {detail && <span className="block break-words text-xs text-muted-foreground">{detail}</span>}
@@ -93,6 +116,11 @@ function Row({
       {children}
     </div>
   );
+}
+
+/** Words under a page's rows. */
+function Note({ children }: { children: ReactNode }) {
+  return <p className="px-1 text-xs text-muted-foreground">{children}</p>;
 }
 
 /** A big round action under the app's name, as Android's App info has them. */
@@ -123,10 +151,7 @@ function ActionButton({
     >
       <span
         aria-hidden
-        className={cn(
-          'grid size-10 place-items-center rounded-full clay',
-          destructive ? 'bg-destructive/15' : 'bg-foreground/10 text-ink-accent',
-        )}
+        className={cn('grid size-10 place-items-center rounded-full clay', destructive ? 'bg-destructive/15' : 'bg-foreground/10 text-ink-accent')}
       >
         <Icon className="size-4.5" strokeWidth={1.75} />
       </span>
@@ -135,172 +160,45 @@ function ActionButton({
   );
 }
 
-function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
 /**
  * App info, as Android has it for each app, from the right-click menus of
- * the Dock, the taskbar and the apps menu (`din apps info`): the app's icon,
- * name and kind; opening it, stopping it (closing its windows) and
- * uninstalling it; keeping it in the Dock, its badge, a shortcut on the
- * desktop; what it may do (a website's or nsite's answers, as its site info
- * has them; what a Din app's manifest asks for); what it does while it's
- * closed; the links, files and shares it opens; clearing what it stored;
- * and where it's from. Launch params `app`, the app's id, and `at`, which
- * starts it over.
+ * the Dock, the taskbar and the apps menu (`din apps info`). Its first page
+ * is the app's icon, name and kind, Open, Stop (its windows closed) and
+ * Uninstall, and a row for each of what it may change, each opening a page
+ * of its own with a back button in the title bar: its notifications (on or
+ * off, its badge, what it sent lately), its permissions, its storage, what
+ * it does while closed, and what it opens. A window per app (`instanceParam`),
+ * with a tile of its own in the Dock, wearing the app's icon with a cog.
+ * Launch params `app`, the app's id, and `at`, which starts it over.
  */
 export function AppInfoWindow({ params }: AppComponentProps) {
   const appId = typeof params?.app === 'string' ? params.app : '';
   return <AppInfo key={`${appId}:${String(params?.at)}`} appId={appId} />;
 }
 
-function AppInfo({ appId }: { appId: string }) {
-  const installed = useInstalledApps();
-  const { getApp } = installed;
-  const app = getApp(appId);
-  const { apps: nativeApps } = useNativeApps();
-  useWindowTitle(app ? `${app.name} – App Info` : 'App Info');
-
-  if (!app) {
-    return (
-      <div className="h-full overflow-y-auto bg-background">
-        <SettingsFallback icon={Package}>This app isn’t on this computer anymore.</SettingsFallback>
-      </div>
-    );
-  }
-
-  const facts = appFacts(app, installed, nativeApps.find((n) => n.id === app.id));
-  return (
-    <div className="h-full overflow-y-auto bg-background @container">
-      <div className="mx-auto flex max-w-2xl flex-col gap-4 p-4 [&>*]:shrink-0">
-        <Header facts={facts} />
-        <Actions facts={facts} />
-        <Desktop facts={facts} />
-        <Permissions facts={facts} />
-        <Background facts={facts} />
-        <Opens facts={facts} />
-        <Storage facts={facts} />
-        <Details facts={facts} />
-      </div>
-    </div>
-  );
+/** The app's icon with the cog on it, for the window to wear; null until it's drawn, or when it can't be. */
+function useBadgedIcon(app: AppDefinition | undefined): string | null {
+  const themeIcons = useThemeIcons();
+  const icon = typeof app?.icon === 'string' ? app.icon : null;
+  const isLocal = icon !== null && icon.startsWith('/') && !icon.startsWith('//');
+  const themed = isLocal && THEMED_APP_ICONS[icon] ? themeIcon(themeIcons, THEMED_APP_ICONS[icon]) : null;
+  const src = icon === null ? null : (themed ?? (isLocal ? icon : sanitizeImageUrl(icon)));
+  const [drawn, setDrawn] = useState<{ src: string; url: string | null } | null>(null);
+  useEffect(() => {
+    // A monochrome theme's glyph is a mask, drawn on a tile by AppIcon alone.
+    if (!src || isGlyphIcon(src)) return;
+    let cancelled = false;
+    void badgedIcon(src, COG).then((url) => {
+      if (!cancelled) setDrawn({ src, url });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+  return drawn && drawn.src === src ? drawn.url : null;
 }
 
-function Header({ facts }: { facts: AppFacts }) {
-  const { getApp } = useInstalledApps();
-  const { windows } = useWindowManager();
-  const app = getApp(facts.id)!;
-  const publisher = useNsitePublisher(facts.nsiteHost);
-  const running = windows.filter((w) => !w.closing && windowTile(w, getApp) === facts.id).length;
-  const kind = facts.kind === 'nsite' && publisher ? `nsite by ${publisher}` : APP_KIND_LABELS[facts.kind];
-  return (
-    <header className="flex flex-col items-center gap-2 px-4 pt-4 text-center">
-      <AppIcon icon={app.icon} web={app.web} className="size-20 text-foreground drop-shadow-md" />
-      <h1 className="max-w-full break-words font-[family-name:var(--font-title)] text-2xl font-semibold">{app.name}</h1>
-      <p className="text-sm text-muted-foreground">
-        {kind}
-        {running > 0 && ` · ${running === 1 ? 'Open' : `${running} windows open`}`}
-      </p>
-      {facts.description && <p className="max-w-prose text-sm text-muted-foreground">{facts.description}</p>}
-    </header>
-  );
-}
-
-function Actions({ facts }: { facts: AppFacts }) {
-  const { getApp, uninstallApp } = useInstalledApps();
-  const { windows } = useWindowManager();
-  const { open, closeApp } = useWindowActions();
-  const [, setPinned] = usePinnedApps();
-  const [confirming, setConfirming] = useState(false);
-  const running = windows.some((w) => !w.closing && windowTile(w, getApp) === facts.id);
-
-  // As the Dock's Close all windows: the app's own, and those under its tile.
-  const stop = () => {
-    for (const id of [facts.id, ...appsDockedAs(facts.id)]) closeApp(id);
-  };
-  // As the Dock's Uninstall.
-  const uninstall = () => {
-    closeApp(facts.id);
-    setPinned((prev) => prev.filter((id) => id !== facts.id));
-    uninstallApp(facts.id);
-  };
-
-  return (
-    <div className="flex justify-center gap-2 border-b border-border/60 pb-4">
-      <ActionButton icon={Play} label="Open" onClick={() => open(facts.id)} />
-      <ActionButton icon={Square} label="Stop" onClick={stop} disabled={!running} />
-      {facts.uninstallable && (
-        <ActionButton icon={Trash2} label="Uninstall" destructive onClick={() => setConfirming(true)} />
-      )}
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Uninstall {facts.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its windows close, and it leaves the Dock and the apps menu.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={uninstall}>
-              Uninstall
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-function Desktop({ facts }: { facts: AppFacts }) {
-  const [pinned, setPinned] = usePinnedApps();
-  const { config, updateConfig } = useAppContext();
-  const icons = useDesktopIcons();
-  const { toast } = useToast();
-  const isPinned = pinned.includes(facts.id);
-  const badgeShown = !hiddenBadges(config).includes(facts.id);
-  const dock = config.desktopLayout === 'taskbar' ? 'taskbar' : 'Dock';
-
-  return (
-    <section aria-labelledby="app-info-desktop" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-desktop">On the desktop</span>
-      </SettingsSubHeading>
-      <div className={settingsGroup}>
-        <Row icon={Pin} label={dock === 'Dock' ? 'Keep in Dock' : 'Pin to taskbar'} htmlFor="app-info-pin">
-          <Switch
-            id="app-info-pin"
-            checked={isPinned}
-            onCheckedChange={(on) => setPinned((prev) => (on ? [...prev.filter((id) => id !== facts.id), facts.id] : prev.filter((id) => id !== facts.id)))}
-          />
-        </Row>
-        <Row icon={Bell} label="Badge" detail="A count of what’s new on its icon" htmlFor="app-info-badge">
-          <Switch
-            id="app-info-badge"
-            checked={badgeShown}
-            onCheckedChange={(on) => updateConfig((c) => withBadgeHidden(c, facts.id, !on))}
-          />
-        </Row>
-        {icons.dir && (
-          <Row icon={MonitorUp} label="Shortcut on the desktop">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void icons.addApp(facts.id).catch((error: unknown) =>
-                  toast({ title: 'Couldn’t add the app to the desktop', description: cleanFsError(error), variant: 'destructive' }))}
-            >
-              Add
-            </Button>
-          </Row>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/** The answers the user gave a website or nsite, read again whenever they change. */
+/** A website's or nsite's answers, read again whenever they change, and answering one. */
 function useSiteInfo(origin: string | null): [SiteInfo | null, (capability: SiteCapability, allow: boolean | null) => void] {
   const browser = getBrowserBridge();
   const queryClient = useQueryClient();
@@ -328,22 +226,325 @@ function useSiteInfo(origin: string | null): [SiteInfo | null, (capability: Site
   return [data ?? null, set];
 }
 
-function Permissions({ facts }: { facts: AppFacts }) {
-  const site = facts.kind === 'web' || facts.kind === 'nsite' ? facts.origin : null;
-  const browser = getBrowserBridge();
-  const [info, setPermission] = useSiteInfo(site);
+/** What the app has scheduled to do while closed, and an nsite's Nostr subscriptions. */
+function useBackground(facts: AppFacts | null) {
+  const bridge = getPeriodicSyncBridge();
+  const napp = getNappHost();
+  const queryClient = useQueryClient();
+  const { data: status } = useQuery<BackgroundStatus>({
+    queryKey: ['periodic-sync'],
+    queryFn: () => bridge!.status(),
+    enabled: Boolean(bridge && facts?.origin),
+  });
+  useEffect(
+    () => bridge?.onChanged(() => void queryClient.invalidateQueries({ queryKey: ['periodic-sync'] })),
+    [bridge, queryClient],
+  );
+  const host = facts?.nsiteHost ?? null;
+  const { data: nappStatus } = useQuery<NappStatus>({
+    queryKey: ['app-info', 'napp', host],
+    queryFn: () => napp!.status(host!),
+    enabled: Boolean(napp && host),
+  });
+  const site: BackgroundSite | undefined = status?.sites.find((s) => s.origin === facts?.origin);
+  return { status, site, subscriptions: nappStatus?.subscriptions ?? 0 };
+}
+
+type Background = ReturnType<typeof useBackground>;
+
+function AppInfo({ appId }: { appId: string }) {
+  const installed = useInstalledApps();
+  const app = installed.getApp(appId);
+  const { apps: nativeApps } = useNativeApps();
+  const [page, setPage] = useState<Page>('main');
+  const facts = app ? appFacts(app, installed, nativeApps.find((n) => n.id === app.id)) : null;
+  const [site, setPermission] = useSiteInfo(facts && notifiesBySite(facts) ? facts.origin : null);
+  const background = useBackground(facts);
+
+  useWindowTitle(!app ? 'App Info' : page === 'main' ? `${app.name} – App Info` : `${PAGE_TITLES[page]} – ${app.name}`);
+  useWindowIcon(useBadgedIcon(app));
+
+  // A page's back button and its name, where the window's title is.
+  const setTitlebar = useWindowTitlebar();
+  useEffect(() => {
+    if (page === 'main') {
+      setTitlebar(null);
+      return;
+    }
+    setTitlebar(
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <button
+          type="button"
+          aria-label="Back"
+          title="Back"
+          onClick={() => setPage('main')}
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <ChevronLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
+        </button>
+        <span className="min-w-0 truncate text-sm font-semibold">{PAGE_TITLES[page]}</span>
+      </div>,
+    );
+  }, [page, setTitlebar]);
+  useEffect(() => () => setTitlebar(null), [setTitlebar]);
+
+  if (!app || !facts) {
+    return (
+      <div className="h-full overflow-y-auto bg-background">
+        <SettingsFallback icon={Package}>This app isn’t on this computer anymore.</SettingsFallback>
+      </div>
+    );
+  }
 
   let body: ReactNode;
-  if (site && browser) {
-    const answered = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter((c) => info?.permissions[c] !== undefined);
+  if (page === 'notifications') body = <NotificationsPage facts={facts} site={site} subscriptions={background.subscriptions} />;
+  else if (page === 'permissions') body = <PermissionsPage facts={facts} site={site} setPermission={setPermission} />;
+  else if (page === 'storage') body = <StoragePage facts={facts} />;
+  else if (page === 'background') body = <BackgroundPage background={background} />;
+  else if (page === 'opens') body = <OpensPage facts={facts} />;
+  else body = <MainPage app={app} facts={facts} site={site} background={background} onPage={setPage} />;
+
+  return (
+    <div
+      className="h-full overflow-y-auto bg-background"
+      // Backspace or Alt+Left goes back a page, as a browser's.
+      onKeyDown={(e) => {
+        if (page === 'main' || (e.target as HTMLElement).closest('input, textarea, [role=combobox], [role=listbox]')) return;
+        if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowLeft')) {
+          e.preventDefault();
+          setPage('main');
+        }
+      }}
+    >
+      <div key={page} className="mx-auto flex max-w-xl flex-col gap-4 p-4 [&>*]:shrink-0">
+        {body}
+      </div>
+    </div>
+  );
+}
+
+function MainPage({
+  app,
+  facts,
+  site,
+  background,
+  onPage,
+}: {
+  app: AppDefinition;
+  facts: AppFacts;
+  site: SiteInfo | null;
+  background: Background;
+  onPage: (page: Page) => void;
+}) {
+  const { getApp, uninstallApp, linkedWebsites } = useInstalledApps();
+  const { windows } = useWindowManager();
+  const { open, closeApp } = useWindowActions();
+  const [, setPinned] = usePinnedApps();
+  useNotificationCenter();
+  const publisher = useNsitePublisher(facts.nsiteHost);
+  const store = getNsiteStore();
+  const { data: summary } = useQuery({
+    queryKey: ['nsite-store', 'info', facts.nsiteHost],
+    queryFn: () => store!.info(facts.nsiteHost!),
+    enabled: Boolean(store && facts.nsiteHost),
+  });
+  const [confirming, setConfirming] = useState(false);
+  const running = windows.filter((w) => !w.closing && windowTile(w, getApp) === facts.id).length;
+
+  // As the Dock's Close all windows: the app's own, and those under its tile.
+  const stop = () => {
+    for (const id of [facts.id, ...appsDockedAs(facts.id)]) closeApp(id);
+  };
+  // As the Dock's Uninstall.
+  const uninstall = () => {
+    closeApp(facts.id);
+    setPinned((prev) => prev.filter((id) => id !== facts.id));
+    uninstallApp(facts.id);
+  };
+
+  const notifications = appNotificationsState(facts, site);
+  const bySite = notifiesBySite(facts);
+
+  let permissions: string;
+  if (bySite) {
+    const allowed = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter((c) => site?.permissions[c] === true);
+    permissions = allowed.length === 0 ? 'None allowed' : allowed.map((c) => SITE_CAPABILITIES[c].name).join(', ');
+  } else if (facts.kind === 'linux' || facts.kind === 'windows') {
+    permissions = 'Everything you can reach';
+  } else if (facts.kind === 'system') {
+    permissions = 'Part of Din';
+  } else {
+    const count = facts.permissions.length + (facts.folders.length > 0 ? 1 : 0);
+    permissions = count === 0 ? 'None requested' : `${count} permission${count === 1 ? '' : 's'}`;
+  }
+
+  const { status, site: scheduled, subscriptions } = background;
+  const backgroundValue = scheduled
+    ? !status?.enabled
+      ? 'Off for every app'
+      : scheduled.paused
+        ? 'Paused'
+        : scheduled.tags[0]
+          ? `Refreshes ${intervalLabel(scheduled.tags[0].minInterval)}`
+          : 'Nothing scheduled'
+    : subscriptions > 0
+      ? 'Watching for notifications'
+      : null;
+
+  const links = linkedWebsites.filter((w) => w.appId === facts.id);
+  const opens = [
+    links.length > 0 && links.every((l) => l.on) ? `Links to ${links.map(websiteLabel).join(', ')}` : null,
+    facts.nostrKinds !== undefined ? 'nostr: links' : null,
+    facts.fileTypes.length > 0 ? `${facts.fileTypes.length} file type${facts.fileTypes.length === 1 ? '' : 's'}` : null,
+    facts.takesShares ? 'Shares' : null,
+  ].filter((part): part is string => part !== null);
+
+  const canClear = (facts.kind === 'nsite' && getNappHost()) || (facts.kind === 'web' && getBrowserBridge());
+  const kind = facts.kind === 'nsite' && publisher ? `nsite by ${publisher}` : APP_KIND_LABELS[facts.kind];
+  // Where it's from, quietly at the foot, as Android puts the version.
+  const footer = [
+    summary ? `Published ${formatDate(summary.updatedAt * 1000)}` : null,
+    facts.installedAt !== null ? `${facts.kind === 'folder' ? 'Added' : 'Installed'} ${formatDate(facts.installedAt)}` : null,
+  ].filter((line): line is string => line !== null).join(' · ');
+
+  return (
+    <>
+      <header className="flex flex-col items-center gap-1.5 px-4 pt-4 text-center">
+        <AppIcon icon={app.icon} web={app.web} className="mb-1 size-20 text-foreground drop-shadow-md" />
+        <h1 className="max-w-full break-words font-[family-name:var(--font-title)] text-2xl font-semibold">{app.name}</h1>
+        <p className="text-sm text-muted-foreground">
+          {kind}
+          {running > 0 && ` · ${running === 1 ? 'Open' : `${running} windows open`}`}
+        </p>
+      </header>
+
+      <div className="flex justify-center gap-2">
+        <ActionButton icon={Play} label="Open" onClick={() => open(facts.id)} />
+        <ActionButton icon={Square} label="Stop" onClick={stop} disabled={running === 0} />
+        {facts.uninstallable && <ActionButton icon={Trash2} label="Uninstall" destructive onClick={() => setConfirming(true)} />}
+      </div>
+
+      <div className={settingsGroup}>
+        <NavRow
+          label="Notifications"
+          value={notifications === 'on' ? 'On' : notifications === 'off' ? 'Off' : 'Asks first'}
+          onClick={() => onPage('notifications')}
+        />
+        <NavRow label="Permissions" value={permissions} onClick={() => onPage('permissions')} />
+        {canClear && <NavRow label="Storage" value="What it saved on this computer" onClick={() => onPage('storage')} />}
+        {backgroundValue && <NavRow label="Background activity" value={backgroundValue} onClick={() => onPage('background')} />}
+        {(opens.length > 0 || links.length > 0) && (
+          <NavRow label="Open by default" value={opens.join(', ') || 'Nothing'} onClick={() => onPage('opens')} />
+        )}
+      </div>
+
+      {(facts.address || footer) && (
+        <div className="flex flex-col items-center gap-0.5 px-4 pt-2 text-center text-xs text-muted-foreground">
+          {footer && <p>{footer}</p>}
+          {facts.address && (
+            <p className="max-w-full truncate font-mono select-text" title={facts.address}>
+              {facts.address}
+            </p>
+          )}
+        </div>
+      )}
+
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uninstall {facts.name}?</AlertDialogTitle>
+            <AlertDialogDescription>Its windows close, and it leaves the Dock and the apps menu.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={uninstall}>
+              Uninstall
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function NotificationsPage({ facts, site, subscriptions }: { facts: AppFacts; site: SiteInfo | null; subscriptions: number }) {
+  const { config, updateConfig } = useAppContext();
+  const { notifications } = useNotificationCenter();
+  const { toast } = useToast();
+  const state = appNotificationsState(facts, site);
+  const bySite = notifiesBySite(facts);
+  const recent = notifications.filter((n) => n.source.appId === facts.id).slice(0, 10);
+
+  const set = (on: boolean) =>
+    void setAppNotifications(facts, on).catch((e: unknown) =>
+      toast({ title: 'Couldn’t change its notifications', description: e instanceof Error ? e.message : undefined, variant: 'destructive' }));
+
+  return (
+    <>
+      <div className={settingsGroup}>
+        <Row
+          label={`All ${facts.name} notifications`}
+          detail={
+            state === 'ask'
+              ? 'It asks before it shows any'
+              : state === 'off'
+                ? bySite ? 'Blocked: it can’t ask again' : 'Nothing it sends shows'
+                : subscriptions > 0
+                  ? 'On, and watching Nostr for them while it’s closed'
+                  : undefined
+          }
+          htmlFor="app-info-notifications"
+        >
+          <Switch id="app-info-notifications" checked={state === 'on'} onCheckedChange={set} />
+        </Row>
+        <Row label="App icon badge" detail="A count of what’s new on its Dock icon" htmlFor="app-info-badge">
+          <Switch
+            id="app-info-badge"
+            checked={!hiddenBadges(config).includes(facts.id)}
+            onCheckedChange={(on) => updateConfig((c) => withBadgeHidden(c, facts.id, !on))}
+          />
+        </Row>
+      </div>
+      {recent.length > 0 && (
+        <>
+          <SettingsSubHeading>Recent</SettingsSubHeading>
+          <ul className={settingsGroup}>
+            {recent.map((n) => (
+              <li key={n.id} className="flex flex-col px-4 py-2.5">
+                <span className="truncate text-sm text-foreground">{n.title}</span>
+                {n.body && <span className="line-clamp-2 text-xs text-muted-foreground">{n.body}</span>}
+                <span className="text-xs text-muted-foreground">
+                  {new Date(n.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </>
+  );
+}
+
+function PermissionsPage({
+  facts,
+  site,
+  setPermission,
+}: {
+  facts: AppFacts;
+  site: SiteInfo | null;
+  setPermission: (capability: SiteCapability, allow: boolean | null) => void;
+}) {
+  if (notifiesBySite(facts)) {
+    if (!getBrowserBridge()) return <Note>What it may do is kept by Din’s desktop app.</Note>;
+    const answered = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter((c) => site?.permissions[c] !== undefined);
     const always = facts.kind === 'nsite' ? NSITE_CAPABILITIES : WEB_CAPABILITIES;
     const shown = (Object.keys(SITE_CAPABILITIES) as SiteCapability[]).filter((c) => always.includes(c) || answered.includes(c));
-    body = (
+    return (
       <>
         <div className={settingsGroup}>
           {shown.map((capability) => {
             const { name, icon } = SITE_CAPABILITIES[capability];
-            const answer = info?.permissions[capability];
+            const answer = site?.permissions[capability];
             const id = `app-info-permission-${capability}`;
             return (
               <Row key={capability} icon={icon} label={name} htmlFor={id}>
@@ -378,158 +579,56 @@ function Permissions({ facts }: { facts: AppFacts }) {
         )}
       </>
     );
-  } else if (site) {
-    body = <p className="px-1 text-sm text-muted-foreground">What it may do is kept by Din’s desktop app.</p>;
-  } else if (facts.kind === 'linux' || facts.kind === 'windows') {
-    body = (
-      <p className="px-1 text-sm text-muted-foreground">
-        It runs as you, so it can open any of your files and reach the network, as programs on a computer do.
-      </p>
-    );
-  } else if (facts.kind === 'system') {
-    body = <p className="px-1 text-sm text-muted-foreground">It’s part of Din’s desktop itself.</p>;
-  } else if (facts.permissions.length === 0 && facts.folders.length === 0) {
-    body = <p className="px-1 text-sm text-muted-foreground">Nothing more than a web page: its manifest asks for no permissions.</p>;
-  } else {
-    body = (
-      <>
-        <ul className={settingsGroup}>
-          {facts.permissions.map((p) => (
-            <li key={p}>
-              <Row icon={ListChecks} label={PERMISSION_LABELS[p]} />
-            </li>
-          ))}
-          {facts.folders.length > 0 && (
-            <li>
-              <Row icon={FolderOpen} label="Read and change files in" detail={facts.folders.join(', ')} />
-            </li>
-          )}
-        </ul>
-        <p className="px-1 text-xs text-muted-foreground">
-          {facts.kind === 'builtin'
-            ? 'Its manifest asks for these, and they’re reviewed with Din’s code.'
-            : 'Its manifest asks for these, and you allowed them when you added it.'}
-        </p>
-      </>
-    );
   }
-
+  if (facts.kind === 'linux' || facts.kind === 'windows') {
+    return <Note>It runs as you, so it can open any of your files and reach the network, as programs on a computer do.</Note>;
+  }
+  if (facts.kind === 'system') return <Note>It’s part of Din’s desktop itself.</Note>;
+  if (facts.permissions.length === 0 && facts.folders.length === 0) {
+    return <Note>Nothing more than a web page: it asks for no permissions.</Note>;
+  }
   return (
-    <section aria-labelledby="app-info-permissions" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-permissions">Permissions</span>
-      </SettingsSubHeading>
-      {body}
-    </section>
+    <>
+      <ul className={settingsGroup}>
+        {facts.permissions.map((p) => (
+          <li key={p}>
+            <Row icon={ListChecks} label={PERMISSION_LABELS[p]} />
+          </li>
+        ))}
+        {facts.folders.length > 0 && (
+          <li>
+            <Row icon={FolderOpen} label="Read and change files in" detail={facts.folders.join(', ')} />
+          </li>
+        )}
+      </ul>
+      <Note>
+        {facts.kind === 'builtin'
+          ? 'It asks for these in its manifest, and they’re reviewed with Din’s code.'
+          : 'It asks for these in its manifest, and you allowed them when you added it.'}
+      </Note>
+    </>
   );
 }
 
-function Background({ facts }: { facts: AppFacts }) {
-  const bridge = getPeriodicSyncBridge();
-  const napp = getNappHost();
-  const queryClient = useQueryClient();
-  const { data: status } = useQuery({
-    queryKey: ['periodic-sync'],
-    queryFn: () => bridge!.status(),
-    enabled: Boolean(bridge && facts.origin),
-  });
-  useEffect(
-    () => bridge?.onChanged(() => void queryClient.invalidateQueries({ queryKey: ['periodic-sync'] })),
-    [bridge, queryClient],
-  );
-  const host = facts.nsiteHost;
-  const { data: nappStatus } = useQuery<NappStatus>({
-    queryKey: ['app-info', 'napp', host],
-    queryFn: () => napp!.status(host!),
-    enabled: Boolean(napp && host),
-  });
-
-  const site: BackgroundSite | undefined = status?.sites.find((s) => s.origin === facts.origin);
-  const watching = (nappStatus?.subscriptions ?? 0) > 0;
-  if (!site && !watching) return null;
-
-  const setPaused = (paused: boolean) =>
-    void bridge?.setPaused(site!.origin, paused).finally(() => void queryClient.invalidateQueries({ queryKey: ['periodic-sync'] }));
-
-  return (
-    <section aria-labelledby="app-info-background" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-background">While it’s closed</span>
-      </SettingsSubHeading>
-      <div className={settingsGroup}>
-        {watching && (
-          <Row
-            icon={Zap}
-            label="Watching Nostr for notifications"
-            detail={`${nappStatus!.subscriptions} subscription${nappStatus!.subscriptions === 1 ? '' : 's'}`}
-          />
-        )}
-        {site && status && (
-          <Row
-            icon={RefreshCw}
-            label="Refresh in the background"
-            detail={
-              !status.enabled
-                ? 'Background activity is off for every app'
-                : !site.allowed
-                  ? 'Not allowed anymore'
-                  : site.tags.map((tag) => tagSummary(tag, site, status.enabled)).join('; ') || 'Nothing scheduled'
-            }
-            htmlFor="app-info-background-switch"
-          >
-            <Switch id="app-info-background-switch" checked={!site.paused} onCheckedChange={(on) => setPaused(!on)} />
-          </Row>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function Opens({ facts }: { facts: AppFacts }) {
-  const { linkedWebsites, setOpensLinks } = useInstalledApps();
-  const links = linkedWebsites.filter((w) => w.appId === facts.id);
-  const nostr = nostrLinksLabel(facts.nostrKinds);
-  if (!nostr && facts.fileTypes.length === 0 && !facts.takesShares && links.length === 0 && facts.shortcuts.length === 0) return null;
-
-  return (
-    <section aria-labelledby="app-info-opens" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-opens">What it opens</span>
-      </SettingsSubHeading>
-      <div className={settingsGroup}>
-        {links.length > 0 && (
-          <Row
-            icon={Link2}
-            label="Open links to its website"
-            detail={links.map(websiteLabel).join(', ')}
-            htmlFor="app-info-links"
-          >
-            <Switch id="app-info-links" checked={links.every((l) => l.on)} onCheckedChange={(on) => setOpensLinks(facts.id, on)} />
-          </Row>
-        )}
-        {nostr && <Row icon={Hash} label="nostr: links" detail={nostr} />}
-        {facts.fileTypes.length > 0 && <Row icon={FileType} label="Files" detail={facts.fileTypes.join(', ')} />}
-        {facts.takesShares && <Row icon={Share2} label="Shares" detail="It’s offered when you share from another app" />}
-        {facts.shortcuts.length > 0 && <Row icon={Tag} label="Shortcuts" detail={facts.shortcuts.join(', ')} />}
-      </div>
-    </section>
-  );
-}
-
-function Storage({ facts }: { facts: AppFacts }) {
+function StoragePage({ facts }: { facts: AppFacts }) {
   const browser = getBrowserBridge();
   const napp = getNappHost();
+  const store = getNsiteStore();
   const { toast } = useToast();
   const { closeApp } = useWindowActions();
   const [confirming, setConfirming] = useState(false);
-  const canClear = (facts.kind === 'nsite' && napp) || (facts.kind === 'web' && browser && facts.origin);
-  if (!canClear) return null;
+  const { data: summary } = useQuery({
+    queryKey: ['nsite-store', 'info', facts.nsiteHost],
+    queryFn: () => store!.info(facts.nsiteHost!),
+    enabled: Boolean(store && facts.nsiteHost),
+  });
+  const nsite = facts.kind === 'nsite';
 
   const clear = async () => {
     try {
       // Its windows hold what they read; they start over without it.
       closeApp(facts.id);
-      if (facts.kind === 'nsite') await napp!.clearData(facts.nsiteHost!);
+      if (nsite) await napp!.clearData(facts.nsiteHost!);
       else await browser!.clearSiteData(facts.origin!, false);
       toast({ title: `Cleared ${facts.name}’s data` });
     } catch {
@@ -538,20 +637,23 @@ function Storage({ facts }: { facts: AppFacts }) {
   };
 
   return (
-    <section aria-labelledby="app-info-storage" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-storage">Storage</span>
-      </SettingsSubHeading>
+    <>
       <div className={settingsGroup}>
+        {summary && (
+          <Row
+            label="App"
+            detail={`${Object.keys(summary.paths).length} files, kept on this computer so it opens offline`}
+          />
+        )}
         <Row
-          icon={Trash2}
-          label="Clear data"
-          detail={facts.kind === 'nsite'
-            ? 'What it stored on this computer, its notifications and subscriptions, its environment and its permissions'
-            : 'Its cookies, and everything it saved on this computer'}
+          label="Data"
+          detail={nsite
+            ? 'What it saved here, its notifications and subscriptions, its environment and its permissions'
+            : 'Its cookies, and everything it saved here'}
         >
           <Button variant="outline" size="sm" onClick={() => setConfirming(true)}>
-            Clear
+            <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
+            Clear data
           </Button>
         </Row>
       </div>
@@ -560,8 +662,8 @@ function Storage({ facts }: { facts: AppFacts }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Clear {facts.name}’s data?</AlertDialogTitle>
             <AlertDialogDescription>
-              {facts.kind === 'nsite'
-                ? 'This deletes what it stored on this computer, in the Web Browser too, with its notifications and subscriptions, its environment and its permissions. It stays installed.'
+              {nsite
+                ? 'This deletes what it saved on this computer, in the Web Browser too, with its notifications and subscriptions, its environment and its permissions. It stays installed.'
                 : 'This signs you out of it and deletes everything it saved on this computer, in the Web Browser too. It stays installed.'}{' '}
               It can’t be undone.
             </AlertDialogDescription>
@@ -574,56 +676,61 @@ function Storage({ facts }: { facts: AppFacts }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </>
   );
 }
 
-function Details({ facts }: { facts: AppFacts }) {
-  const store = getNsiteStore();
-  const host = facts.nsiteHost;
-  const { toast } = useToast();
-  const { data: summary } = useQuery({
-    queryKey: ['nsite-store', 'info', host],
-    queryFn: () => store!.info(host!),
-    enabled: Boolean(store && host),
-  });
-  const publisher = useNsitePublisher(host);
-
-  const copy = (text: string) =>
-    void navigator.clipboard.writeText(text).then(() => toast({ title: 'Copied' }), () => {});
+function BackgroundPage({ background }: { background: Background }) {
+  const bridge = getPeriodicSyncBridge();
+  const queryClient = useQueryClient();
+  const { status, site, subscriptions } = background;
+  const setPaused = (paused: boolean) =>
+    void bridge?.setPaused(site!.origin, paused).finally(() => void queryClient.invalidateQueries({ queryKey: ['periodic-sync'] }));
 
   return (
-    <section aria-labelledby="app-info-details" className="flex flex-col gap-2">
-      <SettingsSubHeading>
-        <span id="app-info-details">Details</span>
-      </SettingsSubHeading>
+    <>
       <div className={settingsGroup}>
-        <Row icon={Package} label="Kind" detail={APP_KIND_LABELS[facts.kind]} />
-        {publisher && <Row icon={User} label="Published by" detail={publisher} />}
-        {facts.address && (
+        {site && status && (
           <Row
-            icon={facts.kind === 'folder' ? FolderOpen : Link2}
-            label={facts.kind === 'folder' || facts.kind === 'command' ? 'Folder' : facts.kind === 'linux' || facts.kind === 'windows' ? 'Desktop entry' : 'Address'}
-            detail={<span className="font-mono select-text">{facts.address}</span>}
+            label="Refresh in the background"
+            detail={
+              !status.enabled
+                ? 'Background activity is off for every app, in Settings'
+                : !site.allowed
+                  ? 'It isn’t allowed to anymore'
+                  : site.tags.map((tag) => tagSummary(tag, site, status.enabled)).join('; ') || 'Nothing scheduled'
+            }
+            htmlFor="app-info-background"
           >
-            <Button variant="ghost" size="icon" className="size-8 rounded-full" aria-label="Copy" onClick={() => copy(facts.address!)}>
-              <Copy className="size-4" strokeWidth={1.75} aria-hidden />
-            </Button>
+            <Switch id="app-info-background" checked={!site.paused} onCheckedChange={(on) => setPaused(!on)} />
           </Row>
         )}
-        {facts.categories.length > 0 && <Row icon={Tag} label="Categories" detail={facts.categories.join(', ')} />}
-        {facts.installedAt !== null && (
-          <Row icon={CalendarDays} label={facts.kind === 'folder' ? 'Added' : 'Installed'} detail={formatDate(facts.installedAt)} />
-        )}
-        {summary && (
+        {subscriptions > 0 && (
           <Row
-            icon={RefreshCw}
-            label="Version"
-            detail={`Published ${formatDate(summary.updatedAt * 1000)} · ${Object.keys(summary.paths).length} files`}
+            label="Watching Nostr for notifications"
+            detail={`${subscriptions} subscription${subscriptions === 1 ? '' : 's'}, kept while it’s closed. Turning its notifications off ends them.`}
           />
         )}
-        <Row icon={Hash} label="App id" detail={<span className="font-mono select-text break-all">{facts.id}</span>} />
       </div>
-    </section>
+      {site && <Note>It wakes up at most this often while no window of it is open, to fetch what’s new.</Note>}
+    </>
+  );
+}
+
+function OpensPage({ facts }: { facts: AppFacts }) {
+  const { linkedWebsites, setOpensLinks } = useInstalledApps();
+  const links = linkedWebsites.filter((w) => w.appId === facts.id);
+  const nostr = nostrLinksLabel(facts.nostrKinds);
+  return (
+    <div className={settingsGroup}>
+      {links.length > 0 && (
+        <Row label="Open links to its websites" detail={links.map(websiteLabel).join(', ')} htmlFor="app-info-links">
+          <Switch id="app-info-links" checked={links.every((l) => l.on)} onCheckedChange={(on) => setOpensLinks(facts.id, on)} />
+        </Row>
+      )}
+      {nostr && <Row label="nostr: links" detail={nostr} />}
+      {facts.fileTypes.length > 0 && <Row label="Files" detail={facts.fileTypes.join(', ')} />}
+      {facts.takesShares && <Row label="Shares" detail="It’s offered when you share from another app" />}
+    </div>
   );
 }

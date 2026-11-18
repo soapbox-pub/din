@@ -644,6 +644,17 @@ export function useWindows(
       }
     }
 
+    // An app with a window per something (App Info, a window per app)
+    // brings back the one already showing it.
+    const key = app.instanceParam;
+    if (key && params?.[key] !== undefined && !options?.newWindow) {
+      const existing = windowsRef.current.find((w) => w.appId === appId && !w.closing && w.params?.[key] === params[key]);
+      if (existing) {
+        launchIn(existing.id, params, options?.replaceParams === true);
+        return existing.id;
+      }
+    }
+
     // A native window opens at the size its app asked for; a frameless one
     // exactly so, with no frame to keep usable.
     const frameless = params?.frameless === true;

@@ -6,6 +6,8 @@
  * background work, a running app's windows) the window reads for itself.
  */
 import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
+import { getBrowserBridge, type SiteInfo } from '@/lib/browser';
+import { appNotificationsOff, setAppNotificationsOff } from '@/lib/notificationCenter';
 import type { AppDefinition } from '@/lib/apps';
 import { dinManifest, isFileAppId, manifestPermissions } from '@/lib/dinApps';
 import { launchedApp } from '@/lib/launchedApps';
@@ -165,4 +167,37 @@ export function nostrLinksLabel(kinds: number[] | null | undefined): string | nu
   if (kinds === undefined) return null;
   if (kinds === null || kinds.length === 0) return 'Every kind';
   return `Kind${kinds.length === 1 ? '' : 's'} ${kinds.join(', ')}`;
+}
+
+/** Whether a website or nsite, whose notifications are its permission's to allow. */
+export function notifiesBySite(facts: Pick<AppFacts, 'kind' | 'origin'>): boolean {
+  return (facts.kind === 'web' || facts.kind === 'nsite') && facts.origin !== null;
+}
+
+/**
+ * Whether an app's notifications are on: a website's or nsite's permission
+ * (`ask` until it's answered), anything else's switch in the notification
+ * center. `site` is the site's answers, for a website or nsite.
+ */
+export function appNotificationsState(facts: Pick<AppFacts, 'id' | 'kind' | 'origin'>, site: SiteInfo | null): 'on' | 'off' | 'ask' {
+  if (notifiesBySite(facts)) {
+    const answer = site?.permissions.notifications;
+    return answer === undefined ? 'ask' : answer ? 'on' : 'off';
+  }
+  return appNotificationsOff(facts.id) ? 'off' : 'on';
+}
+
+/**
+ * Turn an app's notifications on or off, as App Info's switch does: a
+ * website or nsite is allowed or blocked (blocking an nsite also ends the
+ * Nostr subscriptions it keeps while closed), anything else is heard or not.
+ */
+export async function setAppNotifications(facts: Pick<AppFacts, 'id' | 'kind' | 'origin'>, on: boolean): Promise<void> {
+  if (notifiesBySite(facts)) {
+    const browser = getBrowserBridge();
+    if (!browser) throw new Error('A website’s notifications are kept by Din’s desktop app');
+    await browser.setSitePermission(facts.origin!, 'notifications', on, false);
+    return;
+  }
+  setAppNotificationsOff(facts.id, !on);
 }
