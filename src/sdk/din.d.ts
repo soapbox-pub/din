@@ -33,6 +33,7 @@ import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
+import type { FlasherBridge } from '@/lib/flasher';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge } from '@/lib/features';
 import type { FlatpakProgress, InstalledFlatpak, LinuxAppsStatus, LinuxFormat } from '@/lib/nostrFlatpaks';
@@ -1170,6 +1171,12 @@ export type Permission =
   /** The games in ~/roms, and playing them full screen in emulators Din sets up (`din.system.games`). Games. */
   | 'games'
   /**
+   * Erasing USB drives and memory cards and writing disk images to them, or
+   * DinOS built from the commit running (`din.system.flasher`). Built-in
+   * apps only. USB Flasher.
+   */
+  | 'flasher'
+  /**
    * The camera, the microphone and the whole screen in the app's own page
    * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
    * projects of takes and clips in ~/Videos/Studio, the screen recorded with its pointer, live
@@ -1257,6 +1264,7 @@ export interface DinSystem {
   passwords?: PasswordsBridge;
   vms?: VmsBridge;
   games?: GamesBridge;
+  flasher?: FlasherBridge;
   capture?: CaptureBridge;
   /**
    * Optional features (Settings → Optional Features): what's installed, and

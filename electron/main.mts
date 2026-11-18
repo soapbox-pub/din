@@ -152,6 +152,7 @@ import { registerBluetoothLoginHandlers } from './bluetooth-login.mts';
 import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
+import { isWritingDrive, registerUsbFlasherHandlers } from './usb-flasher.mts';
 import { registerDriveHandlers } from './drive.mts';
 import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
@@ -2341,6 +2342,7 @@ function assertSafeToPowerOff(): void {
   if (isUpdating()) throw new Error('An update is being installed. Try again when it finishes.');
   if (isInstalling()) throw new Error('DinOS is being installed. Try again when it finishes.');
   if (isFlashing()) throw new Error('Firmware is being updated. Try again when it finishes.');
+  if (isWritingDrive()) throw new Error('A USB drive is being written. Try again when it finishes.');
 }
 
 function registerPowerHandlers(): void {
@@ -6514,7 +6516,9 @@ app.whenReady().then(() => {
   registerBluetoothLoginHandlers({ assertShellSender, sendToShell });
   registerBluetoothHandlers({ assertShellSender, sendToShell });
   registerFeaturesHandlers({ assertShellSender, sendToShell });
-  registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling });
+  // Nothing new is mounted while a disk is being written: the Installer's, or USB Flasher's.
+  registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling: () => isInstalling() || isWritingDrive() });
+  registerUsbFlasherHandlers({ assertShellSender, sendToShell });
   registerDriveHandlers({ assertShellSender });
   registerGrammarHandlers({ assertShellSender });
   registerPrintingHandlers({

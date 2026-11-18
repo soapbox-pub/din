@@ -303,6 +303,10 @@ export const APPS: readonly AppDefinition[] = [
   // Virtual machines in ~/VMs, run with QEMU and KVM by electron/vms.mts,
   // with their screens in the window.
   dinApp('virtual-machines'),
+  // Disk images (and DinOS, built from the commit running) written to USB
+  // drives and memory cards by electron/usb-flasher.mts. One window; the
+  // job runs in main, so it goes on with the window closed.
+  dinApp('usb-flasher'),
   // The games in ~/roms, played full screen in RetroArch by electron/games.mts.
   dinApp('games'),
   {

@@ -87,6 +87,8 @@ let
       # The cursor converter's sandboxed page, bundled above.
       install -m444 electron/cursor-converter.js $out/share/din/cursor-converter.js
       install -m555 electron/pty-host.py $out/share/din/pty-host.py
+      # USB Flasher's helper, run with `sudo -A` off DinOS (electron/usb-flasher.mts).
+      install -m555 electron/din-flash.sh $out/share/din/din-flash.sh
       install -m555 electron/quickshare-bt.py $out/share/din/quickshare-bt.py
       # Publisher's INDD reader (electron/indd.mts), committed prebuilt.
       install -m444 electron/indd.wasm $out/share/din/indd.wasm

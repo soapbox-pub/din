@@ -55,6 +55,8 @@
 //     and ejected from the Files sidebar
 //   - window.dinos.drive: Din Drive, the encrypted drive at ~/Drive, for
 //     Settings → Drive
+//   - window.dinos.flasher: writing disk images (and DinOS) to USB drives, for
+//     `din flasher`; USB Flasher has it through its bridge port
 //   - window.dinos.grammar: checking grammar as you type in every text field,
 //     for Settings → Keyboard
 //   - window.dinos.systemMonitor: running processes, CPU, memory and disks, and
@@ -2216,6 +2218,20 @@ expose('games', {
   ...games,
   /** @param {(change: unknown) => void} callback */
   onChanged: (callback) => listen('games:changed', callback),
+});
+
+// USB Flasher (window.dinos.flasher), backed by electron/usb-flasher.mts,
+// for the `din flasher` commands; the USB Flasher app has it through its
+// bridge port. Types in src/lib/flasher.ts.
+/** @type {Record<string, (...args: unknown[]) => unknown>} */
+const flasher = {};
+for (const method of ['status', 'inspect', 'flash', 'cancel', 'reset']) {
+  flasher[method] = (...args) => ipcRenderer.invoke(`flasher:${method}`, ...args);
+}
+expose('flasher', {
+  ...flasher,
+  /** @param {(change: unknown) => void} callback */
+  onChanged: (callback) => listen('flasher:changed', callback),
 });
 
 // System Monitor bridge (window.dinos.systemMonitor), backed by

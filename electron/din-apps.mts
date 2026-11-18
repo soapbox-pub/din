@@ -74,6 +74,9 @@ const SYSTEM_PERMISSIONS = {
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,
   games: /^games:(status|library|play|stop|setFavorite|setVersion|resumeImage|forgetResume)$/,
+  // Writing disk images to USB drives; usb-flasher.mts and its helper check
+  // the drive, and the image is read as the user.
+  flasher: /^flasher:(status|inspect|flash|cancel|reset)$/,
   // Installing the optional feature something of the app's needs (Studio's
   // transcripts, Files' archives), as Settings → Optional Features does.
   features: /^features:(state|install)$/,
@@ -100,6 +103,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   // A screen's bytes go to the sender that opened it.
   vms: /^vms:changed$/,
   games: /^games:changed$/,
+  flasher: /^flasher:changed$/,
   capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
   fetch: null,
   features: /^features:changed$/,

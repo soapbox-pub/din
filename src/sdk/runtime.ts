@@ -57,6 +57,7 @@ import type { PasswordsBridge } from '@/lib/passwords';
 import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
+import type { FlasherBridge } from '@/lib/flasher';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
 import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
@@ -1531,6 +1532,15 @@ export function installDin(transport: Transport): void {
         }
         g.onChanged = (cb: (change: unknown) => void) => sys.on('games', 'games:changed', (change) => cb(change));
         system.games = g as unknown as GamesBridge;
+      }
+      if (permissions.has('flasher')) {
+        await sys.ready('flasher');
+        const f: Record<string, unknown> = {};
+        for (const m of ['status', 'inspect', 'flash', 'cancel', 'reset']) {
+          f[m] = (...args: unknown[]) => sys.call('flasher', `flasher:${m}`, args);
+        }
+        f.onChanged = (cb: (change: unknown) => void) => sys.on('flasher', 'flasher:changed', (change) => cb(change));
+        system.flasher = f as unknown as FlasherBridge;
       }
       if (permissions.has('capture')) {
         await sys.ready('capture');

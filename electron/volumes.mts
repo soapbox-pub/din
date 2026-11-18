@@ -13,7 +13,8 @@
 //
 // Mounting: every filesystem on removable media (udisks' HintAuto, never
 // HintSystem) gets one decision, the first time it shows up mounted or not:
-// mount it, unless an install is writing to disks, or it's the EFI system
+// mount it, unless an install or USB Flasher is writing to disks
+// (`isInstalling`), or it's the EFI system
 // partition, or its drive holds a filesystem the system itself mounted (the
 // stick a live boot runs from). udisks mounts it under /run/media/<user>,
 // owned by Din's user; os/configuration.nix lets that user do so without a
@@ -254,11 +255,25 @@ function state(): VolumesState {
   return { available: udisksOwner !== null, volumes };
 }
 
+/** What wants to hear of any change to the disks, mounted or not (usb-flasher.mts). */
+const diskListeners = new Set<() => void>();
+
+/**
+ * Hear whenever udisks sees a disk change: plugged in, pulled out,
+ * partitioned. Unlike `volumes:changed`, also for disks with nothing on them
+ * Files would show.
+ */
+export function onDisksChanged(listener: () => void): () => void {
+  diskListeners.add(listener);
+  return () => diskListeners.delete(listener);
+}
+
 /** Tell the shell, soon: plugging a disk in sends a burst of changes. */
 function changed(): void {
   if (emitTimer) return;
   emitTimer = setTimeout(() => {
     emitTimer = null;
+    for (const listener of diskListeners) listener();
     const current = state();
     const json = JSON.stringify(current);
     if (json === lastSent) return;
@@ -568,8 +583,47 @@ async function eject(path: string): Promise<void> {
 }
 
 /**
+ * Power off the drive a whole disk is (by device node, e.g. /dev/sdb), or
+ * eject its media, so it can be pulled out: after USB Flasher has written
+ * it, with nothing on it mounted. Resolves to whether it did.
+ */
+export async function powerOffDisk(disk: string): Promise<boolean> {
+  if (!(await connection()) || !udisksOwner) return false;
+  let drive: string | null = null;
+  for (const ifaces of objects.values()) {
+    const block = ifaces.get(BLOCK);
+    if (!block || bytesToString(block.get('Device')) !== disk) continue;
+    const owner = block.get('Drive');
+    if (typeof owner === 'string' && owner !== '/') drive = owner;
+    break;
+  }
+  const props = drive ? objects.get(drive)?.get(DRIVE) : undefined;
+  if (!drive || !props) return false;
+  ejecting.add(drive);
+  try {
+    if (props.get('CanPowerOff') === true) {
+      await call('PowerOff', drive, DRIVE, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS);
+      return true;
+    }
+    if (props.get('Ejectable') === true && props.get('MediaRemovable') === true) {
+      await call('Eject', drive, DRIVE, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    const done = drive;
+    setTimeout(() => {
+      ejecting.delete(done);
+      changed();
+    }, PULLED_WINDOW_MS);
+  }
+}
+
+/**
  * Unmount whatever Din mounted from a disk (by device node, e.g. /dev/sdb),
- * so the Installer can write to it.
+ * so the Installer or USB Flasher can write to it.
  */
 export async function releaseDisk(disk: string): Promise<void> {
   if (!(await connection())) return;

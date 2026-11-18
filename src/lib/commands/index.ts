@@ -23,6 +23,7 @@ import { cameraArea } from './camera';
 import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { gamesArea } from './games';
+import { flasherArea } from './flasher';
 import { speakArea } from './speech';
 import { grammarArea } from './grammar';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
@@ -72,6 +73,7 @@ export const AREAS: readonly Area[] = [
   datetimeArea,
   vmsArea,
   gamesArea,
+  flasherArea,
   assistantArea,
   speakArea,
   nostrArea,

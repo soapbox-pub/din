@@ -124,6 +124,8 @@ const PEERCRED = [
   's.detach()',
 ].join('\n');
 const UPDATER = process.env.DIN_UPDATER;
+/** USB Flasher's helper, as Din runs it with `sudo -A` off DinOS (usb-flasher.mts). */
+const FLASHER = path.join(import.meta.dirname, 'din-flash.sh');
 /** Programs that only pass a command on: the one that asked is above them. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', 'nohup']);
 const ANSWERS: Record<Decision, string> = { once: 'allow', conversation: 'allow-session', reject: 'deny' };
@@ -303,19 +305,30 @@ function fullName(name: string, args: string[]): string {
   return base.length >= short.length && base.startsWith(short) ? base : name;
 }
 
+/** Whether a program sudo was asked to run is really `known`. */
+function isProgram(arg: string, known: string): boolean {
+  try {
+    return fs.realpathSync(arg) === fs.realpathSync(known);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A command of Din's own in words, where the program sudo runs is really
- * it: the running system's updater building the user's commits (`local`).
+ * it: the running system's updater building the user's commits (`local`),
+ * or USB Flasher writing a drive.
  */
 function describe(args: string[]): { action: string; detail: string } | null {
   const at = args.findIndex((arg, i) => i > 0 && !arg.startsWith('-'));
-  if (at < 0 || !UPDATER || args[at + 1] !== 'local' || args.length !== at + 3) return null;
-  try {
-    if (fs.realpathSync(args[at]) !== fs.realpathSync(UPDATER)) return null;
-  } catch {
-    return null;
+  if (at < 0) return null;
+  if (UPDATER && args[at + 1] === 'local' && args.length === at + 3 && isProgram(args[at], UPDATER)) {
+    return { action: 'update Din', detail: 'Your desktop session will restart. Applications will be closed.' };
   }
-  return { action: 'update Din', detail: 'Your desktop session will restart. Applications will be closed.' };
+  if (args[at + 1] === 'write' && args.length === at + 3 && /^\/dev\/[a-z][a-z0-9]*$/.test(args[at + 2]) && isProgram(args[at], FLASHER)) {
+    return { action: `erase ${args[at + 2]} and write to it`, detail: `USB Flasher is writing a disk image. Everything on the drive at ${args[at + 2]} is erased.` };
+  }
+  return null;
 }
 
 function quote(arg: string): string {

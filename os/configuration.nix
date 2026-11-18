@@ -287,6 +287,19 @@ let
     text = builtins.readFile ./din-pristine.sh + builtins.readFile ./din-install.sh;
   };
 
+  # The privileged half of USB Flasher, which writes disk images to USB
+  # drives and memory cards (see the script, and electron/usb-flasher.mts).
+  # It's Din's own copy, in electron/, which Din runs with `sudo -A` where
+  # this one isn't. It decides for itself which drives may be written
+  # (removable ones, with nothing on them in use, never the boot disk) and
+  # reads the image from stdin, opened by Din as the user, so sudo runs it
+  # without asking.
+  din-flasher = pkgs.writeShellApplication {
+    name = "din-flash";
+    runtimeInputs = with pkgs; [ coreutils util-linux gawk gnugrep gnused ];
+    text = builtins.readFile (din-root + "/electron/din-flash.sh");
+  };
+
   # The privileged half of system updates, which builds Din's source and
   # stages it for the next boot (see the script, din-update.service below,
   # and electron/updater.mts).
@@ -523,7 +536,7 @@ let
   # pdftoppm/pdfinfo for printing and its previews (electron/printing.mts),
   # jmtpfs, ifuse and libimobiledevice's tools for phones plugged in by USB
   # (electron/phone-usb.mts), and sudo (from /run/wrappers) for
-  # the Installer's, the updater's, the keyboard layout's, the time zone's,
+  # the Installer's, USB Flasher's, the updater's, the keyboard layout's, the time zone's,
   # Tor's, the WiFi reset's, Quick Share's hotspot's and the firewall's helpers, and for checking the password
   # Din takes for sudo (electron/askpass.mts). Last, the optional features'
   # programs (Wine's, for Windows programs' Start-menu entries).
@@ -533,6 +546,7 @@ let
     export DIN_COMPOSITOR=${din-compositor}/bin/din-compositor
     export DIN_FD_ADDON=${din-fd}/lib/libdin_fd.so
     export DIN_INSTALLER=${din-installer}/bin/din-install
+    export DIN_FLASHER=${din-flasher}/bin/din-flash
     # The running system's, not this Din's: after a switch, Din runs on
     # until it restarts, and sudo allows only the new system's updater
     # (electron/updater.mts resolves it on each call).
@@ -959,6 +973,8 @@ in
     users = [ "din" ];
     commands = map (command: { inherit command; options = [ "NOPASSWD" ]; }) [
       "${din-installer}/bin/din-install"
+      # Only removable drives, with nothing on them in use (it checks).
+      "${din-flasher}/bin/din-flash"
       # Not `source` or `local`: choosing what's built is choosing what runs
       # as root.
       "${din-updater}/bin/din-update status"

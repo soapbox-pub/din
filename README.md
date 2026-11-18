@@ -202,10 +202,32 @@ sudo dd if=result/nixos.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 The image is 6 GiB, to fit any 8 GB stick; any tool that writes images
-(Etcher, Rufus, `dd`) will do. Its root is Btrfs laid out as an installed
+(Etcher, Rufus, `dd`) will do, and so will Din's own **USB Flasher**. Its root is Btrfs laid out as an installed
 disk is (below), with everything compressed at zstd's strongest level, since
 a USB stick is slow to read, and about 1 GiB free for a live session; nothing
 grows it at boot (`os/make-stick-image.nix`).
+
+Din's **USB Flasher** app (`src/apps/usb-flasher/`, `electron/usb-flasher.mts`,
+`din flasher`) writes a disk image to a USB drive or memory card: an ISO or a
+`.img`, or one compressed with xz, gzip, zstd or bzip2, which it
+decompresses as it writes. It reads the drive back to check every byte, then
+powers it off so it can be pulled out. Only removable drives with nothing of
+the system's on them are offered, and the helper that writes them as root,
+`electron/din-flash.sh`, checks that again for itself: it's run through sudo
+without asking on DinOS (`DIN_FLASHER`), and with `sudo -A`, which asks for
+the password in Din, elsewhere. The image is opened by Din as the user and
+given to the helper on its stdin, so nothing the user can't read gets
+written out. ISOs that have no partition table (Windows' own, older Linux
+ones) are written as they are, with a note that computers may not start
+from them.
+
+On DinOS it can also make a **DinOS USB stick** of the system running: it
+builds `./os#image` at the commit in `/etc/din-revision`, fetched from the
+updater's checkout (or `~/DinOS`) into `~/.cache/din/usb-flasher/source.git`,
+since Nix won't read a repository root owns. The system in the image is the
+one already in the store, so only the image itself is made. It isn't
+offered on a live stick (no room), or on a system built from uncommitted
+changes, which can't be made again.
 
 Written to a USB stick instead, the same image is a live system: boot a laptop
 from it and Din opens the **Install DinOS** app, which copies the running

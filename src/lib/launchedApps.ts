@@ -92,6 +92,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   passwords: 'See and change all your saved passwords',
   vms: 'Run virtual machines, with any of your files as their disks',
   games: 'Play the games in your games folder',
+  flasher: 'Erase USB drives and memory cards, and write disk images to them',
   capture: 'Use the camera, the microphone and the screen, and go live',
   camera: 'Use the camera and the microphone',
   microphone: 'Use the microphone',
@@ -103,7 +104,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 /** Permissions only a built-in app's reviewed manifest gets, never one the user is asked about. */
-const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo', 'features', 'store']);
+const BUILT_IN_ONLY: ReadonlySet<Permission> = new Set(['assistant-sudo', 'flasher', 'features', 'store']);
 
 const FRAMES: readonly FrameMode[] = ['standard', 'custom', 'none'];
 

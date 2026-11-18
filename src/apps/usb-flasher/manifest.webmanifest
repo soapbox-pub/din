@@ -1,0 +1,21 @@
+{
+  "name": "USB Flasher",
+  "description": "Write a disk image (an ISO or a .img, compressed or not) to a USB drive or memory card to start a computer from, or make a DinOS USB stick from the system on this computer.",
+  "icons": [{ "src": "/icons/apps/usb-flasher.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "application/x-iso9660-image": [".iso"],
+        "application/x-raw-disk-image": [".img", ".raw"]
+      }
+    }
+  ],
+  "din": {
+    "permissions": ["flasher"],
+    "window": { "size": { "width": 720, "height": 640 }, "frame": "custom" },
+    "keywords": ["Etcher", "balenaEtcher", "Rufus", "dd", "Startup Disk Creator", "bootable", "live USB", "USB stick", "flash drive", "SD card", "ISO", "img", "disk image", "Raspberry Pi", "write", "burn", "DinOS"]
+  }
+}
