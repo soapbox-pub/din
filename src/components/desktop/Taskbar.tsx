@@ -49,7 +49,7 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useDragReorder } from '@/hooks/useDragReorder';
 import { useLoggedInAccounts } from '@/hooks/useLoggedInAccounts';
 import { usePinnedApps, useTileBadges } from '@/hooks/usePinnedApps';
-import { focusedWindow } from '@/hooks/useWindows';
+import { dockWindows, focusedWindow } from '@/hooks/useWindows';
 import { getAvatarShape } from '@/lib/avatarShape';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import type { AppBadge } from '@/lib/appBadges';
@@ -357,7 +357,11 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
   const [unpinnedOrder, setUnpinnedOrder] = useState<string[]>([]);
   const launching = useLaunchingApps();
   const tileOf = (appId: string) => getApp(appId)?.dockAs ?? appId;
-  const running = [...new Set([...windows.map((w) => windowTile(w, getApp)), ...launching])];
+  // As in the Dock: unless it shows every workspace's windows, one on a
+  // workspace its monitor isn't showing has no button until it's back.
+  const { config } = useAppContext();
+  const shownWindows = dockWindows(windows, config.dockAllWorkspaces);
+  const running = [...new Set([...shownWindows.map((w) => windowTile(w, getApp)), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -413,7 +417,7 @@ function TaskButtons({ sizes, separate }: { sizes: TaskbarSizes; separate: boole
           {entryIds.map((appId) => {
             const app = getApp(appId);
             if (!app) return null;
-            const appWindows: TaskWindow[] = windows
+            const appWindows: TaskWindow[] = shownWindows
               .filter((w) => windowTile(w, getApp) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon, maximized: w.maximized }));
             if (separate && appWindows.length > 0) {
@@ -784,6 +788,12 @@ function TaskbarMenuContent({ above }: { above: MenuAboveContentProps }) {
         }
       >
         Combine windows
+      </ContextMenuCheckboxItem>
+      <ContextMenuCheckboxItem
+        checked={config.dockAllWorkspaces}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockAllWorkspaces: checked }))}
+      >
+        Show all workspaces
       </ContextMenuCheckboxItem>
       <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => updateConfig((current) => ({ ...current, desktopLayout: 'dock' }))}>

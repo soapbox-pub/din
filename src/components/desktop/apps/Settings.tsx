@@ -4345,13 +4345,26 @@ function DesktopIconSizePreview({ size }: { size: DesktopIconSize }) {
  * level; the taskbar's offers its three and the way back to the Dock.
  */
 function DockSection() {
-  const { config } = useAppContext();
+  const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Dock & Taskbar">
       <SubHeading>Layout</SubHeading>
       <LayoutPicker />
       {config.desktopLayout === 'dock' ? <DockOptions /> : <TaskbarOptions />}
+      <SubHeading>Workspaces</SubHeading>
+      <SettingSwitchRow
+        id="dock-all-workspaces"
+        icon={Grid2x2}
+        label="Show windows from all workspaces"
+        description={
+          config.desktopLayout === 'dock'
+            ? 'Off, the Dock shows only the windows on the workspace each monitor is showing: an app with windows on another workspace has no dots, and leaves the Dock unless it’s pinned.'
+            : 'Off, the taskbar shows only the windows on the workspace each monitor is showing. Pinned apps keep their buttons.'
+        }
+        checked={config.dockAllWorkspaces}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockAllWorkspaces: checked }))}
+      />
     </SectionShell>
   );
 }

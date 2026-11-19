@@ -224,6 +224,15 @@ export function focusedWindow(windows: WindowState[]): WindowState | null {
   return windows.reduce<WindowState | null>((top, w) => (isShown(w) && (!top || w.z > top.z) ? w : top), null);
 }
 
+/**
+ * The windows the Dock and taskbar have tiles and buttons for: every one,
+ * or only those on the workspace their monitor is showing (AppConfig's
+ * dockAllWorkspaces).
+ */
+export function dockWindows(windows: WindowState[], allWorkspaces: boolean): WindowState[] {
+  return allWorkspaces ? windows : windows.filter((w) => !w.away);
+}
+
 /** How the tiling layout is set up (AppConfig's tiling settings). */
 export interface TilingSettings {
   enabled: boolean;

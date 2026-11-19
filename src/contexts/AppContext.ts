@@ -213,6 +213,11 @@ export interface AppConfig {
    * come.
    */
   hiddenBadges: string[];
+  /**
+   * Whether the Dock and taskbar show the windows on every workspace, or
+   * only those on the workspace each monitor is showing (the default).
+   */
+  dockAllWorkspaces: boolean;
   /** The taskbar's build: tall (Windows 7) or slim (Windows Vista). */
   taskbarStyle: TaskbarStyle;
   /** The screen edge the taskbar runs along: bottom, top, left, or right. */

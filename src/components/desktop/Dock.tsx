@@ -30,7 +30,7 @@ import type { AppDefinition } from '@/lib/apps';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
-import { focusedWindow, windowRect, type WindowState } from '@/hooks/useWindows';
+import { dockWindows, focusedWindow, windowRect, type WindowState } from '@/hooks/useWindows';
 import type { DockStyle } from '@/contexts/AppContext';
 import { DOCK_STYLES } from '@/lib/dockStyles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
@@ -179,7 +179,12 @@ export function Dock({
   const launching = useLaunchingApps();
   // The tile a window goes under: its app's, or the one its app docks as.
   const tileOf = (appId: string) => getApp(appId)?.dockAs ?? appId;
-  const running = [...new Set([...windows.map((w) => windowTile(w, getApp)), ...launching])];
+  // The windows with a place in the Dock: unless it shows every workspace's,
+  // one on a workspace its monitor isn't showing has no dot, and no tile if
+  // its app isn't pinned, until that workspace is back.
+  const { config } = useAppContext();
+  const shownWindows = dockWindows(windows, config.dockAllWorkspaces);
+  const running = [...new Set([...shownWindows.map((w) => windowTile(w, getApp)), ...launching])];
   const pinnedIds = pinned.filter((id) => getApp(id));
   const rank = (id: string) => {
     const i = unpinnedOrder.indexOf(id);
@@ -198,7 +203,6 @@ export function Dock({
   // Magnification is pointer-driven eye candy; skip it entirely for users
   // who prefer reduced motion (tiles then behave like plain buttons).
   const reduceMotion = useReducedMotion();
-  const { config } = useAppContext();
   const magnifies = config.dockMagnification && !reduceMotion;
   const size = config.dockSize;
   const maxScale = config.dockMagnificationScale;
@@ -721,7 +725,7 @@ export function Dock({
             if (!app) return null;
             // Launch order, so cycling visits windows in a fixed sequence.
             // Closing windows are on their way out and can't be focused.
-            const appWindows = windows
+            const appWindows = shownWindows
               .filter((w) => windowTile(w, getApp) === appId && !w.closing)
               .map((w) => ({ id: w.id, z: w.z, minimized: w.minimized, title: w.title, icon: w.icon }));
             return (
@@ -1102,6 +1106,12 @@ function DockMenuContent({ above }: { above: MenuAboveContentProps }) {
         onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockMagnification: checked }))}
       >
         Magnification
+      </ContextMenuCheckboxItem>
+      <ContextMenuCheckboxItem
+        checked={config.dockAllWorkspaces}
+        onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockAllWorkspaces: checked }))}
+      >
+        Show All Workspaces
       </ContextMenuCheckboxItem>
       <ContextMenuSub>
         <ContextMenuSubTrigger>Background</ContextMenuSubTrigger>

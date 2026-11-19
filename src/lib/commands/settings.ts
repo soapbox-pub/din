@@ -84,6 +84,7 @@ const SETTINGS: Setting[] = [
   { key: 'dock.magnification', field: 'dockMagnification', help: 'Dock icons grow under the pointer', param: bool },
   { key: 'dock.magnification-scale', field: 'dockMagnificationScale', help: 'How much they grow (1.5 is half again)', param: { type: 'number', min: 1, max: 3 } },
   { key: 'dock.style', field: 'dockStyle', help: 'What the Dock sits on', param: { type: 'string', choices: ['none', 'modern', 'classic'] } },
+  { key: 'dock.all-workspaces', field: 'dockAllWorkspaces', help: 'The Dock and taskbar show the windows on every workspace, not only the ones on screen', param: bool },
   { key: 'taskbar.style', field: 'taskbarStyle', help: 'A tall taskbar (Windows 7) or a slim one (Windows Vista)', param: { type: 'string', choices: ['tall', 'slim'] } },
   { key: 'taskbar.position', field: 'taskbarPosition', help: 'The screen edge the taskbar runs along', param: { type: 'string', choices: ['bottom', 'top', 'left', 'right'] } },
   { key: 'taskbar.buttons', field: 'taskbarButtons', help: 'A taskbar button per app, its windows combined, or one per window', param: { type: 'string', choices: ['combine', 'separate'] } },
