@@ -293,7 +293,7 @@ import { ThemeSettings } from '@/components/desktop/apps/ThemeSettings';
 import { DockPreview } from '@/components/desktop/Dock';
 import { DOCK_STYLES } from '@/lib/dockStyles';
 import { isTaskbarVertical, TASKBAR_BUTTONS, TASKBAR_POSITIONS, TASKBAR_STYLES } from '@/lib/taskbarStyles';
-import { WM_BINDING_HELP } from '@/lib/wmBindings';
+import { WindowShortcuts } from '@/components/desktop/apps/WindowShortcuts';
 import { SECTIONS, matchingSections } from '@/lib/settingsSections';
 import type { SectionId } from '@/lib/settingsSections';
 import {
@@ -4198,7 +4198,7 @@ function WindowsSection({ windowId }: { windowId: string }) {
           id="tiling-enabled"
           icon={LayoutDashboard}
           label="Tile windows"
-          description="Windows share the screen side by side instead of overlapping, like Hyprland. Super+T floats one. Super+Shift+T turns tiling on or off."
+          description="Windows share the screen side by side instead of overlapping, like Hyprland."
           checked={config.tilingEnabled}
           onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
         />
@@ -4239,28 +4239,7 @@ function WindowsSection({ windowId }: { windowId: string }) {
       <p className="mt-2 text-sm text-muted-foreground">
         Keyboard shortcuts work whether tiling is on or not. Each monitor has workspaces 1 to 10 of its own.
       </p>
-      {WM_BINDING_HELP.map((group) => (
-        <div key={group.group} className="flex flex-col gap-2">
-          <SubHeading>{group.group}</SubHeading>
-          <div className={settingsGroup}>
-            {group.bindings.map((b) => (
-              <div key={b.label} className="flex items-center justify-between gap-4 px-4 py-2">
-                <span className="text-sm text-foreground">{b.label}</span>
-                <span className="flex shrink-0 items-center gap-1">
-                  {b.keys.map((k) => (
-                    <kbd
-                      key={k}
-                      className="rounded-md bg-foreground/[0.07] px-1.5 py-0.5 font-sans text-xs text-foreground"
-                    >
-                      {k}
-                    </kbd>
-                  ))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+      <WindowShortcuts />
     </SectionShell>
   );
 }

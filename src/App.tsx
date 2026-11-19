@@ -82,6 +82,7 @@ const defaultConfig: AppConfig = {
   mouseSwipe: 'pages',
   tilingEnabled: false,
   tilingGap: 8,
+  wmBindings: {},
   restoreWindows: true,
   pauseMediaWhileRecording: true,
   volumeFeedback: true,

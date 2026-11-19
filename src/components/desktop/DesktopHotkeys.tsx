@@ -15,7 +15,7 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
-import { wmCommandFor, type WmCommand } from '@/lib/wmBindings';
+import { wmCommandFor, wmShortcuts, type WmCommand } from '@/lib/wmBindings';
 import { cursorEffects } from '@/lib/cursorEffects';
 import { currentArea, leaveArea, runFocusKey, type FocusKey } from '@/lib/desktopFocus';
 
@@ -150,6 +150,12 @@ export function DesktopHotkeys() {
   }, [actions]);
 
   const { config, updateConfig } = useAppContext();
+  const bindingsRef = useRef(config.wmBindings);
+  useEffect(() => {
+    bindingsRef.current = config.wmBindings;
+    getShellShortcuts()?.setWmShortcuts(wmShortcuts(config.wmBindings));
+  }, [config.wmBindings]);
+
   const tilingRef = useRef(config.tilingEnabled);
   useEffect(() => {
     tilingRef.current = config.tilingEnabled;
@@ -236,6 +242,8 @@ export function DesktopHotkeys() {
       // The screen has the keyboard while it's up.
       if (isSecurityOptionsActive()) return;
 
+      if (e.target instanceof Element && e.target.closest('[data-recording-wm-shortcut]')) return;
+
       // Print Screen: full-screen capture. Shift+Print Screen: select an
       // area (the same session the dedicated box-select key starts via the
       // Electron host's evdev watch). The session flag guards against a
@@ -281,7 +289,7 @@ export function DesktopHotkeys() {
 
       // Super+key: window management (after Super+Space/A/H above).
       if (e.metaKey) {
-        const cmd = wmCommandFor({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
+        const cmd = wmCommandFor({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey }, bindingsRef.current);
         if (cmd) {
           e.preventDefault();
           e.stopPropagation();
@@ -473,7 +481,8 @@ export function DesktopHotkeys() {
       } else if (shortcut.action === 'super-key' && !shortcut.down) {
         if (isAssistantKeyPressed()) assistantKeyUp();
       } else if (shortcut.action === 'wm') {
-        const cmd = wmCommandFor(shortcut);
+        if (isWindowSwitcherActive() || isSecurityOptionsActive()) return;
+        const cmd = wmCommandFor(shortcut, bindingsRef.current);
         if (cmd && (!shortcut.repeat || cmd.type === 'resize')) runWmRef.current(cmd);
       } else if (shortcut.action === 'dictation') {
         toggleDictation();

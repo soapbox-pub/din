@@ -6029,7 +6029,7 @@ function devtoolsHostFromId(wcId: unknown): Electron.WebContents | null {
 
 /** Whether a before-input-event input is the devtools toggle shortcut. */
 function isDevtoolsToggleInput(input: Electron.Input): boolean {
-  if (input.type !== 'keyDown') return false;
+  if (input.type !== 'keyDown' || input.meta) return false;
   if (input.key === 'F12') return true;
   return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
 }
@@ -6120,11 +6120,16 @@ type ShellShortcut =
   | { action: 'cycle-tab'; backward: boolean }
   | { action: 'goto-tab'; digit: number };
 
-/**
- * The physical keys Super may bind for window management, with any of
- * Shift, Ctrl and Alt. Keep in step with wmCommandFor in src/lib/wmBindings.ts.
- */
-const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMKC])$/;
+// The desktop supplies the active chords, not just their physical keys, so
+// unbound combinations still reach the focused app.
+let wmShortcuts = new Set<string>();
+
+function registerWmShortcutHandlers(): void {
+  ipcMain.on('shellShortcuts:setWmShortcuts', (event, chords: unknown) => {
+    if (!isShellSender(event) || !Array.isArray(chords) || chords.length > 256) return;
+    wmShortcuts = new Set(chords.filter((chord): chord is string => typeof chord === 'string' && chord.length <= 64));
+  });
+}
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.
@@ -6159,7 +6164,8 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   // Super plus a window-management key: the shell decides what it does
   // (src/lib/wmBindings.ts), so the page never sees Super+1 and the like.
-  if (input.meta && WM_KEY_CODES.test(input.code)) {
+  const wmChord = `${input.shift ? 'Shift+' : ''}${input.control ? 'Ctrl+' : ''}${input.alt ? 'Alt+' : ''}${input.code}`;
+  if (input.meta && wmShortcuts.has(wmChord)) {
     return {
       action: 'wm',
       code: input.code,
@@ -6503,6 +6509,7 @@ app.whenReady().then(() => {
   registerPageFullscreenHandlers();
   registerPointerLockReports();
   registerGuestVisibilityHandlers();
+  registerWmShortcutHandlers();
   // What a session needs running before its first page loads (GuestSurface waits for it).
   ipcMain.handle('guestSession:prepare', (event, partition: unknown) => {
     assertShellSender(event);

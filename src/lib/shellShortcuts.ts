@@ -17,8 +17,7 @@
  *   - Ctrl+F2 / F3 / F8, Ctrl+F6 (+Shift)
  *                             -> { action: 'focus-area', area }
  *   - Super down / up         -> { action: 'super-key', down }
- *   - Super+arrows, digits, Tab, -, =, Enter, W/Q/T/F/J/M/K (any of
- *     Shift/Ctrl/Alt)         -> { action: 'wm', code, shift, ctrl, alt, repeat }
+ *   - Active Super shortcuts -> { action: 'wm', code, shift, ctrl, alt, repeat }
  *   - Alt up                  -> { action: 'alt-released' }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
@@ -222,6 +221,8 @@ export type ShellShortcut =
     };
 
 export interface ShellShortcutsBridge {
+  /** Tell the host which Super shortcuts to claim from guests. */
+  setWmShortcuts(chords: string[]): void;
   /** Subscribe to forwarded shortcuts. Returns an unsubscribe fn. */
   onShortcut(callback: (shortcut: ShellShortcut) => void): () => void;
 }

@@ -52,6 +52,7 @@ export const AppConfigSchema = z.object({
   mouseSwipe: z.enum(['pages', 'workspaces', 'off']),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
+  wmBindings: z.record(z.string(), z.array(z.string())),
   restoreWindows: z.boolean(),
   pauseMediaWhileRecording: z.boolean(),
   volumeFeedback: z.boolean(),

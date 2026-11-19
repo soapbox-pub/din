@@ -14,6 +14,7 @@ din wifi                          # an area's commands
 din help wifi connect             # a command's arguments
 din settings list                 # every preference, with its value
 din settings set windows.tiling on
+din shortcuts bind focus-left Super+Shift+Y
 din sound volume 40
 din wifi connect "Home" --password hunter2
 din windows list --json           # structured output, for scripts
@@ -40,6 +41,7 @@ a missing or bad argument).
 | `cursors`, `icons`, `skins` | Cursor themes, icon themes and Media Player skins: list, use (a skin opens the Media Player wearing it), publish to Nostr (asks on screen first), find in the App Store (`store`), install one by its address, remove one Din installed |
 | `apps` | List, open, install (websites, nsites), remove; the App Store's Linux apps, NIP-82 apps on Nostr with a Flatpak or an AppImage for this computer: list (`linux`), install or update one (`install-linux`, asks on screen first; `--as appimage` or `--as flatpak` picks the way, as the App Store's Get as … does), remove one (`remove-linux`); `apps run` runs your own and `apps add-folder` puts its folder in the launcher (below) |
 | `windows`, `workspace` | List, focus, close, minimize, maximize, tile, move, resize, send to a workspace, reopen the ones a failed start left closed; show a workspace |
+| `shortcuts` | List, bind, clear, or reset Super shortcuts for tiling, windows, and workspaces |
 | `widgets` | List, add Din's own, remove, resize; `widgets add-folder` adds your own (below) |
 | `desktop-icons` | What's in ~/Desktop: list, open, add a shortcut to an app or copy files in, new folder, rename, move to the Trash, arrange ([desktop-icons.md](desktop-icons.md)) |
 | `notifications` | List, send, click, dismiss, clear; hide or show an app's Dock badge |

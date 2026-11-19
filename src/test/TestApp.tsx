@@ -64,6 +64,7 @@ export function TestApp({ children }: TestAppProps) {
     mouseSwipe: 'pages',
     tilingEnabled: false,
     tilingGap: 8,
+    wmBindings: {},
     restoreWindows: true,
     pauseMediaWhileRecording: true,
     volumeFeedback: true,

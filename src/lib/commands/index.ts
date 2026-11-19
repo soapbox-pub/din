@@ -17,6 +17,7 @@ import { areaHelp, checkArgs, commandHelp, formatData, overviewHelp, parseArgv, 
 import { mailArea } from './mail';
 import { phoneArea } from './phone';
 import { settingsArea } from './settings';
+import { shortcutsArea } from './shortcuts';
 import { shareArea } from './share';
 import { studioArea } from './studio';
 import { cameraArea } from './camera';
@@ -35,6 +36,7 @@ export type { CommandContext, CommandSpec } from './types';
 /** Every area of the `din` command, in the order help lists them. */
 export const AREAS: readonly Area[] = [
   settingsArea,
+  shortcutsArea,
   cursorsArea,
   iconsArea,
   skinsArea,
