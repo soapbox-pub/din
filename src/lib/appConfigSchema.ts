@@ -66,6 +66,7 @@ export const AppConfigSchema = z.object({
   taskbarPosition: z.enum(['bottom', 'top', 'left', 'right']),
   taskbarButtons: z.enum(['combine', 'separate']),
   desktopIcons: z.boolean(),
+  nostrLinkChooser: z.boolean(),
   desktopIconSize: z.enum(['small', 'medium', 'large']),
   zoomLevel: z.number(),
   displayZoom: z.record(z.string(), z.number().min(50).max(300)),

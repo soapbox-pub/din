@@ -79,6 +79,7 @@ export function TestApp({ children }: TestAppProps) {
     taskbarButtons: 'combine',
     desktopIcons: true,
     desktopIconSize: 'medium',
+    nostrLinkChooser: true,
     zoomLevel: 100,
     displayZoom: {},
     reduceMotion: false,

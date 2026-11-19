@@ -78,11 +78,17 @@ origin. `%s` becomes the whole link, percent-encoded
 kind 0.
 
 Clicking a `nostr:` link anywhere (a web page, an app, a native app's
-`xdg-open`) opens it in the app the user chose for its kind with "Always",
-or else as a preview in the Web Browser with **Open in…** and **Open
-with…** buttons. Native apps whose desktop entry lists
-`x-scheme-handler/nostr` and takes a `%u` are offered for every kind.
-Defaults are listed, and reset, in Settings > Nostr & Storage.
+`xdg-open`) opens it in the app the user chose for its kind with "Always".
+Without one, if any app opens it, Din asks which, as Android does: the
+**Open With** chooser (`src/components/desktop/apps/OpenWithWindow.tsx`)
+lists the apps for its kind, with **Just once**, **Always** and
+**Preview**. With no app for it, or the chooser turned off (Settings >
+Nostr & Storage > Ask which app to use, `din settings set
+nostr.links-chooser`), it shows as a preview in the Web Browser with
+**Open in…** and **Open with…** buttons. Native apps whose desktop entry
+lists `x-scheme-handler/nostr` and takes a `%u` are offered for every
+kind. Defaults are listed, changed and reset in Settings > Nostr &
+Storage, and with `din nostr links` and `din nostr link-default`.
 
 ## Opening a website's links
 

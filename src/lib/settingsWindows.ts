@@ -29,6 +29,18 @@ export const FOLDER_APP_WINDOW_ID = 'add-folder-app';
  */
 export const APP_INFO_APP_ID = 'app-info';
 
+/**
+ * The chooser a `nostr:` link with no default app opens, as Android's: the
+ * apps that open it, Just once or Always, or a preview in the Web Browser.
+ * One window; a new link starts it over.
+ */
+export const OPEN_WITH_APP_ID = 'open-with';
+
+/** The chooser's launch params, for this link. */
+export function openWithParams(uri: string): Record<string, unknown> {
+  return { uri, at: Date.now() };
+}
+
 /** App info's launch params, for the app with this id. `at` starts it over. */
 export function appInfoParams(appId: string): Record<string, unknown> {
   return { app: appId, at: Date.now() };

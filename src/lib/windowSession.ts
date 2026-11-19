@@ -5,7 +5,7 @@ import { USERSCRIPT_INSTALL_APP_ID, WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
-import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID } from '@/lib/settingsWindows';
+import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID, OPEN_WITH_APP_ID } from '@/lib/settingsWindows';
 
 /**
  * The windows Din had open, kept on this device so the next start reopens
@@ -38,7 +38,7 @@ export const MAX_WINDOW_STATE_BYTES = 512 * 1024;
  * with Din (a page's DevTools or pop-up, an unrecognized native window) or
  * are one-off tools.
  */
-const NOT_RESTORED = new Set(['devtools', WEB_POPUP_APP_ID, 'installer', 'customize', 'native-window', 'screenshot', PROVIDER_WINDOW_APP_ID, PRINT_WINDOW_APP_ID, FILE_PICKER_APP_ID, ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID, USERSCRIPT_INSTALL_APP_ID, FOLDER_APP_WINDOW_ID, APP_INFO_APP_ID]);
+const NOT_RESTORED = new Set(['devtools', WEB_POPUP_APP_ID, 'installer', 'customize', 'native-window', 'screenshot', PROVIDER_WINDOW_APP_ID, PRINT_WINDOW_APP_ID, FILE_PICKER_APP_ID, ADD_PRINTER_APP_ID, CONNECT_APP_APP_ID, USERSCRIPT_INSTALL_APP_ID, FOLDER_APP_WINDOW_ID, APP_INFO_APP_ID, OPEN_WITH_APP_ID]);
 
 /**
  * Launch params that only mean something to the run that set them: a native

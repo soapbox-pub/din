@@ -221,6 +221,11 @@ export interface AppConfig {
   taskbarButtons: TaskbarButtons;
   /** Whether what's in ~/Desktop shows as icons on the wallpaper (docs/desktop-icons.md). */
   desktopIcons: boolean;
+  /**
+   * Whether a `nostr:` link with no default app asks which app to open it
+   * in (the Open With chooser), rather than showing it in the Web Browser.
+   */
+  nostrLinkChooser: boolean;
   /** How large desktop icons are. */
   desktopIconSize: DesktopIconSize;
   /**

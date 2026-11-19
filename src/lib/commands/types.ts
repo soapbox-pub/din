@@ -4,6 +4,7 @@ import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import type { WidgetsContextValue } from '@/contexts/WidgetsContext';
 import type { DesktopIconsContextValue } from '@/contexts/DesktopIconsContext';
 import type { WindowActions, WindowState } from '@/hooks/useWindows';
+import type { AppDefinition } from '@/lib/apps';
 import type { ExtensionKeyStore } from '@/lib/themePackages';
 
 /**
@@ -94,6 +95,16 @@ export class CommandError extends Error {
   }
 }
 
+/** nostr: links' default apps, as Settings → Nostr & Storage has them (useNostrLinks). */
+export interface NostrLinksControl {
+  /** The app each kind opens in without asking, by kind. */
+  readonly defaults: Readonly<Record<string, string>>;
+  /** The apps that open a kind (null: any). */
+  handlersFor(kind: number | null): AppDefinition[];
+  /** Make an app the default for a kind, or (null) ask again. */
+  setDefault(kind: number, appId: string | null): void;
+}
+
 /** The desktop as commands see it, always as it is now. */
 export interface CommandContext {
   readonly config: AppConfig;
@@ -111,6 +122,8 @@ export interface CommandContext {
   readonly pubkey: string | undefined;
   /** The keys the user's own extensions are signed with, for publishing them (useExtensionKeys). */
   readonly extensionKeys?: ExtensionKeyStore;
+  /** Which apps open nostr: links, and the default for each kind (useNostrLinks). */
+  readonly nostrLinks?: NostrLinksControl;
   /** Sign and publish an event as the signed-in account. */
   publish(template: { kind: number; content: string; tags: string[][] }): Promise<unknown>;
   /** Upload a file to the account's Blossom servers; resolves with its NIP-94 tags. */

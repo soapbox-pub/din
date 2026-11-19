@@ -105,6 +105,7 @@ const SETTINGS: Setting[] = [
   { key: 'datetime.show-date', field: 'clockShowDate', help: 'The menu bar shows the date beside the time', param: bool },
   { key: 'datetime.show-seconds', field: 'clockShowSeconds', help: 'The menu bar shows seconds', param: bool },
   { key: 'nostr.sync', field: 'syncToNostr', help: 'Sync Din’s settings and apps to your relays, encrypted', param: bool },
+  { key: 'nostr.links-chooser', field: 'nostrLinkChooser', help: 'A nostr: link with no default app asks which app to open it in, rather than showing it in the Web Browser', param: bool },
   { key: 'nostr.app-blossom-servers', field: 'useAppBlossomServers', help: 'Upload to Din’s Blossom servers as well as yours', param: bool },
   { key: 'assistant.enabled', field: 'assistantEnabled', help: 'The Assistant is on', param: bool },
   { key: 'assistant.directory', field: 'assistantDirectory', help: 'The folder new conversations work in (empty for home)', param: { type: 'path' } },

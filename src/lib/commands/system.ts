@@ -7,7 +7,8 @@ import { blossomListTags, normalizeBlossomUrl, normalizeRelayUrl, relayListTags 
 import { getUpdaterBridge, shortRevision, UPDATE_STEP_LABELS } from '@/lib/updater';
 import { planDinRestart } from '@/lib/updateNotice';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
-import { bare, call, command, need } from './util';
+import { bare, call, command, need, pick } from './util';
+import { getKindLabel } from '@/lib/kindLabels';
 
 /** `din update`, `din firmware`, `din lock`, `din nostr`: Settings → About, Password and Nostr & Storage. */
 
@@ -205,6 +206,37 @@ export const nostrArea: Area = {
       const servers = ctx.config.blossomServerMetadata.servers;
       if (!url || !servers.includes(url)) throw new CommandError(`${args.string('url')} isn’t one of your servers`);
       await saveServers(ctx, servers.filter((s) => s !== url));
+    }),
+    // Settings → Nostr & Storage's Nostr links.
+    command('nostr', 'links', 'Where nostr: links open: the app each kind opens in without asking, and the apps that open them', [], (_args, ctx) => {
+      const links = need(ctx.nostrLinks, 'nostr: links');
+      const defaults = Object.entries(links.defaults)
+        .map(([kind, app]) => ({ kind: Number(kind), label: getKindLabel(Number(kind)), app }))
+        .sort((a, b) => a.kind - b.kind);
+      const apps = links.handlersFor(null).map((app) => ({ id: app.id, name: app.name, kinds: app.nostr?.kinds ?? null }));
+      return {
+        data: { chooser: ctx.config.nostrLinkChooser !== false, defaults, apps },
+        text: [
+          `no default: ${ctx.config.nostrLinkChooser !== false ? 'ask which app (din settings set nostr.links-chooser off to preview instead)' : 'show in the Web Browser'}`,
+          ...defaults.map((d) => `${d.label} (kind ${d.kind}): ${apps.find((a) => a.id === d.app)?.name ?? `${d.app}, not installed`}`),
+          `apps: ${apps.map((a) => a.name).join(', ') || 'none'}`,
+        ].join('\n'),
+      };
+    }),
+    command('nostr', 'link-default', 'Open a kind of nostr: link in an app without asking, as Always does; without an app, ask again', [
+      { name: 'kind', type: 'integer', positional: true, help: 'The event kind (0 for profiles, 1 for notes)' },
+      { name: 'app', type: 'string', positional: true, optional: true, help: 'Its id or name, from din nostr links' },
+    ], (args, ctx) => {
+      const links = need(ctx.nostrLinks, 'nostr: links');
+      const kind = args.number('kind');
+      const query = args.optString('app');
+      if (query === undefined) {
+        links.setDefault(kind, null);
+        return { text: `${getKindLabel(kind)} links ask again` };
+      }
+      const app = pick(links.handlersFor(kind), query, (a) => [a.id, a.name], `app that opens ${getKindLabel(kind).toLowerCase()} links`);
+      links.setDefault(kind, app.id);
+      return { text: `${getKindLabel(kind)} links open in ${app.name}` };
     }),
     // Files' Upload to Blossom…
     command('nostr', 'upload', 'Upload a file to your Blossom servers, and print its URL (anyone with it can get the file)', [

@@ -7,7 +7,7 @@ import { USERSCRIPT_INSTALL_APP_ID, WEB_POPUP_APP_ID } from '@/lib/webPopup';
 import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
-import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID } from '@/lib/settingsWindows';
+import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID, OPEN_WITH_APP_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
 
 const DinAppFrame = lazy(() =>
@@ -38,6 +38,9 @@ const UserscriptInstallWindow = lazy(() =>
 );
 const AddPrinterWindow = lazy(() =>
   import('@/components/desktop/apps/AddPrinterWindow').then((m) => ({ default: m.AddPrinterWindow })),
+);
+const OpenWithWindow = lazy(() =>
+  import('@/components/desktop/apps/OpenWithWindow').then((m) => ({ default: m.OpenWithWindow })),
 );
 const AppInfoWindow = lazy(() =>
   import('@/components/desktop/apps/AppInfoWindow').then((m) => ({ default: m.AppInfoWindow })),
@@ -384,6 +387,19 @@ export const APPS: readonly AppDefinition[] = [
     floating: true,
     hidden: true,
     instanceParam: 'app',
+  },
+  {
+    // Which app a nostr: link with no default opens in, as Android's
+    // chooser: Just once or Always. Hidden from the launcher; opened by
+    // useNostrLinks with openWithParams(uri).
+    id: OPEN_WITH_APP_ID,
+    name: 'Open With',
+    icon: '/icons/apps/settings.png',
+    component: OpenWithWindow,
+    defaultSize: { width: 400, height: 480 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
   },
   {
     // Connecting an app to the account (NIP-46), from Settings → Connected

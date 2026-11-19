@@ -2,7 +2,9 @@ import { useCallback, useMemo } from 'react';
 import { useNostr } from '@nostrify/react';
 import { z } from 'zod';
 
+import { useAppContext } from '@/hooks/useAppContext';
 import { useAppData } from '@/hooks/useAppData';
+import { OPEN_WITH_APP_ID, openWithParams } from '@/lib/settingsWindows';
 import { fetchNostrTarget } from '@/hooks/useNostrTarget';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -34,6 +36,7 @@ export function useNostrLinks() {
   const { nostr } = useNostr();
   const { apps, getApp } = useInstalledApps();
   const { open } = useWindowActions();
+  const { config } = useAppContext();
   const [defaults, setDefaults] = useAppData(DEFAULTS_KEY, NostrLinkDefaultsSchema, NO_DEFAULTS);
 
   const handlers = useMemo(() => apps.filter((app) => app.nostr), [apps]);
@@ -82,9 +85,11 @@ export function useNostrLinks() {
 
   /**
    * Open a link the way clicking it should: in the default app for its kind,
-   * when there is one, or else by `fallback` (the preview in the Web
-   * Browser). A link that doesn't say its kind (`note1…`) is looked up first,
-   * but only when there are defaults to look it up for.
+   * when there is one; else, when an app could open it and the chooser is on
+   * (Settings → Nostr & Storage), in the Open With chooser, as Android asks;
+   * or else by `fallback` (the preview in the Web Browser). A link that
+   * doesn't say its kind (`note1…`) is looked up first, but only when there
+   * are defaults to look it up for; the chooser looks it up itself.
    */
   const openNostrUri = useCallback(
     async (uri: string, fallback: (uri: string) => void) => {
@@ -99,9 +104,10 @@ export function useNostrLinks() {
       }
       const app = defaultFor(kind);
       if (app) openWith(app, parsed.uri);
+      else if (config.nostrLinkChooser !== false && handlersFor(kind).length > 0) open(OPEN_WITH_APP_ID, openWithParams(parsed.uri));
       else fallback(parsed.uri);
     },
-    [defaults, defaultFor, nostr, openWith],
+    [defaults, defaultFor, handlersFor, nostr, openWith, open, config.nostrLinkChooser],
   );
 
   return { handlers, handlersFor, defaults, defaultFor, setDefault, openWith, openNostrUri };

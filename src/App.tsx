@@ -97,6 +97,7 @@ const defaultConfig: AppConfig = {
   taskbarButtons: 'combine',
   desktopIcons: true,
   desktopIconSize: 'medium',
+  nostrLinkChooser: true,
   zoomLevel: 100,
   displayZoom: {},
   reduceMotion: false,
