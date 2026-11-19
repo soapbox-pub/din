@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useContext, useRef, type ComponentProps, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, FolderOpen, SquareArrowOutUpRight } from 'lucide-react';
+import { Copy, FolderOpen, Link as LinkIcon, SquareArrowOutUpRight } from 'lucide-react';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { FileLinkBaseContext, filePathOfHref } from '@/shared/assistant/fileLinks';
 import {
@@ -31,7 +31,7 @@ const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTra
  * terminal UI.
  */
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
-  const { openUrl, colorfulReplies: c } = useAssistantHost();
+  const { colorfulReplies: c } = useAssistantHost();
   const base = useContext(FileLinkBaseContext);
   const link = cn(
     'font-medium underline underline-offset-2',
@@ -46,18 +46,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
       if (file) return <FileLink path={file} className={link}>{children}</FileLink>;
       const url = href ? sanitizeNavigationUrl(href) : null;
       if (!url) return <span className="underline decoration-dotted">{children}</span>;
-      return (
-        <a
-          href={url}
-          onClick={(event) => {
-            event.preventDefault();
-            openUrl(url);
-          }}
-          className={link}
-        >
-          {children}
-        </a>
-      );
+      return <WebLink url={url} className={link}>{children}</WebLink>;
     },
     pre: ({ node }) => {
       const code = node?.children[0];
@@ -100,11 +89,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
       const file = typeof src === 'string' ? filePathOfHref(src, base) : null;
       if (file) return <FileLink path={file} className={link}>{alt || file.slice(file.lastIndexOf('/') + 1)}</FileLink>;
       const url = typeof src === 'string' ? sanitizeNavigationUrl(src) : null;
-      return url ? (
-        <a href={url} onClick={(e) => { e.preventDefault(); openUrl(url); }} className={link}>
-          {alt || url}
-        </a>
-      ) : null;
+      return url ? <WebLink url={url} className={link}>{alt || url}</WebLink> : null;
     },
   };
 
@@ -116,6 +101,40 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     </div>
   );
 });
+
+/**
+ * A link to a web page (or anything else Din's router opens): clicking opens
+ * it, and right-clicking can copy its address.
+ */
+function WebLink({ url, className, children }: { url: string; className: string; children: ReactNode }) {
+  const { openUrl } = useAssistantHost();
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <a
+          href={url}
+          title={url}
+          onClick={(event) => {
+            event.preventDefault();
+            openUrl(url);
+          }}
+          className={className}
+        >
+          {children}
+        </a>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => openUrl(url)}>
+          <SquareArrowOutUpRight aria-hidden /> Open Link
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(url).catch(() => {})}>
+          <LinkIcon aria-hidden /> Copy Link
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
 
 /**
  * A link to a file on this computer: clicking opens it in the app Files would
