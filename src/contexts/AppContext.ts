@@ -196,6 +196,7 @@ export interface AppConfig {
    * screen in their place, with the Start menu, open windows and status icons.
    */
   desktopLayout: DesktopLayout;
+  appLauncherPosition: 'anchored' | 'center';
   /** Whether Dock icons grow as the pointer sweeps across them. */
   dockMagnification: boolean;
   /** How large an icon under the pointer grows, as a multiple of its size (1.5 = half again). */

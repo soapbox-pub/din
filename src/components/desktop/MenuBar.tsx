@@ -2,6 +2,7 @@ import { Airplay, BellOff, Bluetooth, BluetoothConnected, BluetoothOff, Calendar
 import { WifiXIcon } from '@/components/icons/WifiXIcon';
 import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { nip19 } from 'nostr-tools';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarShape } from '@/lib/avatarShape';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/context-menu';
 import {
   Popover,
+  PopoverAnchor,
   PopoverClose,
   PopoverTrigger,
 } from '@/components/ui/popover';
@@ -32,7 +34,7 @@ import { RemoveAccountDialog } from '@/components/auth/RemoveAccountDialog';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { AppIcon } from '@/shared/AppIcon';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
-import { useTaskbarEdge } from '@/contexts/BarSideContext';
+import { useBarSide, useTaskbarEdge } from '@/contexts/BarSideContext';
 import { setMenuBarSlot } from '@/lib/menuBarSlot';
 import { getWindowChrome, TEAR_AWAY_PX } from '@/lib/windowChromes';
 import type { WindowChrome } from '@/contexts/WindowChromeContext';
@@ -85,7 +87,7 @@ import { trayFooterButton, trayHeader, trayRowClass, trayRuleBottom, trayRuleTop
 import { themeColorTokens } from '@/lib/themeColor';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
-import { useWorkAreas } from '@/contexts/MonitorsContext';
+import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { primaryArea } from '@/lib/monitors';
 import { menuBarWindow } from '@/lib/menuBarWindow';
 import { useWallpaperTone } from '@/hooks/useWallpaperTone';
@@ -96,6 +98,7 @@ import { KeyboardMenuItem } from '@/components/desktop/KeyboardIndicator';
 import { isTaskbarVertical } from '@/lib/taskbarStyles';
 import { AddToDesktopItem } from '@/components/desktop/icons/AddToDesktopItem';
 import { APP_MIME } from '@/components/desktop/icons/wallpaper';
+import { portalContainer } from '@/lib/portalContainer';
 
 /** How the bar's layers change: with the window that changes them (genie.ts's FLIP_DURATION_MS and its cubic ease-out). */
 const BAR_FADE = 'transition-opacity duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none';
@@ -327,15 +330,9 @@ const FocusedAppName = memo(function FocusedAppName({ appId }: { appId: string |
 
 /** Left menu: the full searchable apps launcher. */
 const AppsMenu = memo(function AppsMenu() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  // Super+Space (see DesktopHotkeys) toggles the menu.
-  useEffect(() => onToggleAppsMenu(() => setMenuOpen((open) => !open)), []);
-
   return (
-    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-      <PopoverTrigger asChild>
+    <AppLauncherPopover
+      trigger={
         <Button
           variant="ghost"
           size="sm"
@@ -345,20 +342,69 @@ const AppsMenu = memo(function AppsMenu() {
           <LayoutGrid className="size-4" aria-hidden />
           Apps
         </Button>
-      </PopoverTrigger>
+      }
+    />
+  );
+});
+
+/** The same launcher opens from Apps, Start, or the App Search shortcut. */
+export function AppLauncherPopover({ trigger, sidebar }: {
+  trigger: React.ReactElement;
+  sidebar?: ReactNode;
+}) {
+  const { config } = useAppContext();
+  const { primary } = useMonitors();
+  const edge = useTaskbarEdge();
+  const side = useBarSide();
+  const centered = config.appLauncherPosition === 'center';
+  const [open, setOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => onToggleAppsMenu(() => setOpen((open) => !open)), []);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      {/* Radix aligns to this point; the panel shifts up by half its own height. */}
+      {centered && createPortal(
+        <PopoverAnchor asChild>
+          <span
+            aria-hidden
+            className="pointer-events-none fixed top-1/2 left-1/2 size-0"
+          />
+        </PopoverAnchor>,
+        portalContainer(),
+      )}
       <BarPopoverContent
-        align="start"
-        className="w-96 rounded-2xl p-0"
+        aria-label="App launcher"
+        align={centered ? 'center' : 'start'}
+        side={centered ? 'bottom' : side}
+        sideOffset={centered ? 0 : edge ? 4 : 8}
+        avoidCollisions={!centered}
+        className={cn(
+          'p-0',
+          edge ? 'flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden' : 'w-96',
+          centered && '-translate-y-1/2 origin-center overflow-auto',
+        )}
+        style={centered ? { maxWidth: primary.width - 16, maxHeight: primary.height - 16 } : undefined}
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           searchRef.current?.focus();
         }}
       >
-        <AppLauncher searchRef={searchRef} onClose={() => setMenuOpen(false)} />
+        <div className="min-w-0 flex-1">
+          <AppLauncher
+            searchRef={searchRef}
+            onClose={() => setOpen(false)}
+            searchAtBottom={!centered && edge === 'bottom'}
+            listClassName={edge ? 'h-[28rem] max-h-[60vh]' : centered ? 'h-96' : undefined}
+          />
+        </div>
+        {sidebar}
       </BarPopoverContent>
     </Popover>
   );
-});
+}
 
 /** Apps' names from A to Z, ignoring case, with "Paint 2" before "Paint 10". */
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -367,9 +413,9 @@ const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base'
  * The apps launcher: a search over the apps and Settings' sections, and
  * their tiles. It lives in a popover (the apps menu, the Start menu), whose
  * tiles close it, and mounts afresh each time that opens, so it always opens
- * on a fresh search. The Start menu puts the search under the tiles.
+ * on a fresh search.
  */
-export function AppLauncher({
+function AppLauncher({
   searchRef,
   onClose,
   searchAtBottom = false,

@@ -4345,13 +4345,26 @@ function DesktopIconSizePreview({ size }: { size: DesktopIconSize }) {
  * level; the taskbar's offers its three and the way back to the Dock.
  */
 function DockSection() {
-  const { config } = useAppContext();
+  const { config, updateConfig } = useAppContext();
 
   return (
     <SectionShell title="Dock & Taskbar">
       <SubHeading>Layout</SubHeading>
       <LayoutPicker />
       {config.desktopLayout === 'dock' ? <DockOptions /> : <TaskbarOptions />}
+      <SubHeading>App launcher position</SubHeading>
+      <SegmentedControl
+        label="App launcher position"
+        value={config.appLauncherPosition}
+        options={[
+          { value: 'anchored', label: 'Beside the button' },
+          { value: 'center', label: 'Center of screen' },
+        ]}
+        onValueChange={(appLauncherPosition) => updateConfig((current) => ({ ...current, appLauncherPosition }))}
+      />
+      <p className="text-xs text-muted-foreground">
+        Applies when you click {config.desktopLayout === 'dock' ? 'Apps' : 'Start'} or use the App Search shortcut.
+      </p>
     </SectionShell>
   );
 }

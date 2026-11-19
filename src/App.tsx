@@ -87,6 +87,7 @@ const defaultConfig: AppConfig = {
   volumeFeedback: true,
   startupSound: true,
   desktopLayout: 'dock',
+  appLauncherPosition: 'anchored',
   dockMagnification: true,
   dockMagnificationScale: 1.5,
   dockSize: 80,
