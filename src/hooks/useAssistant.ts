@@ -40,7 +40,7 @@ import {
   sessionTitle,
   worktreeMainCheckout,
 } from '@/lib/assistant';
-import { getFsBridge, localFileUrl, type FsEntry } from '@/lib/fs';
+import { getFsBridge, isHiddenEntry, localFileUrl, type FsEntry } from '@/lib/fs';
 import { agentColor } from '@/lib/agentColors';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useIsDark } from '@/hooks/useIsDark';
@@ -821,6 +821,30 @@ export function useSessionFolders(enabled: boolean) {
       return folders.filter((_, i) => there[i]);
     },
     enabled: ready && enabled,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Every folder in ~/Projects (hidden ones aside), by name, once `enabled`:
+ * the projects a conversation could work in, whether or not one has yet.
+ * Empty when there's no ~/Projects.
+ */
+export function useProjectFolders(enabled: boolean) {
+  const fs = getFsBridge();
+  const home = useHomeDirectory();
+  return useQuery({
+    queryKey: ['fs', 'project-folders', home],
+    queryFn: async () => {
+      const root = `${home!.replace(/\/+$/, '')}/Projects`;
+      const listing = await fs!.readdir(root).catch(() => null);
+      if (!listing) return [];
+      return listing.entries
+        .filter((e) => e.kind === 'directory' && !isHiddenEntry(e))
+        .map((e) => `${root}/${e.name}`)
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    },
+    enabled: enabled && fs !== undefined && home !== undefined,
     staleTime: 60_000,
   });
 }

@@ -76,6 +76,7 @@ import {
   useMarkViewedSession,
   usePendingRequests,
   usePreferredModel,
+  useProjectFolders,
   useRedoMessages,
   useRenameSession,
   useSendPrompt,
@@ -1731,8 +1732,8 @@ function useAllFolders(enabled: boolean): { folders: string[]; loading: boolean 
 
 /**
  * The folder a new conversation works in: a recent one, any folder a
- * conversation has worked in found by searching, or another from the file
- * picker.
+ * conversation has worked in or any project in ~/Projects found by
+ * searching, or another from the file picker.
  */
 function FolderPicker({
   value,
@@ -1751,16 +1752,40 @@ function FolderPicker({
   const recent = useRecentFolders();
   // Loaded as it opens, so the search has them by the time anything's typed.
   const all = useAllFolders(open);
+  const { data: projectFolders } = useProjectFolders(open);
   const folders = useMemo(() => {
     const listed = value && !recent.includes(value) ? [value, ...recent] : recent;
     return searching ? [...new Set([...listed, ...all.folders])] : listed;
   }, [value, recent, searching, all.folders]);
+  // The projects in ~/Projects no conversation has worked in, found by searching too.
+  const projects = useMemo(() => {
+    if (!searching || !projectFolders) return [];
+    const listed = new Set(folders);
+    return projectFolders.filter((folder) => !listed.has(folder));
+  }, [searching, projectFolders, folders]);
 
   const pick = (folder: string) => {
     setOpen(false);
     setSearch('');
     onChange(folder);
   };
+
+  const item = (folder: string) => (
+    <CommandItem
+      key={folder}
+      value={folder}
+      keywords={[directoryName(folder, home)]}
+      onSelect={() => pick(folder)}
+      title={folder}
+      className="cursor-pointer gap-2"
+    >
+      <Check className={cn('size-4 shrink-0', folder === value ? 'opacity-100' : 'opacity-0')} aria-hidden />
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="max-w-full shrink-0 truncate font-medium">{directoryName(folder, home)}</span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
+      </span>
+    </CommandItem>
+  );
 
   return (
     <Popover
@@ -1789,28 +1814,14 @@ function FolderPicker({
           <CommandInput placeholder="Search folders…" value={search} onValueChange={setSearch} className="h-9" />
           <CommandList className="max-h-80">
             <CommandEmpty className="py-4 text-center text-sm text-muted-foreground">
-              {all.loading ? 'Looking through your conversations…' : 'No conversation has worked in a folder like that.'}
+              {all.loading ? 'Looking through your conversations…' : 'No project or conversation’s folder is like that.'}
             </CommandEmpty>
             {folders.length > 0 && (
               <CommandGroup heading={searching ? 'Folders conversations worked in' : 'Recent folders'}>
-                {folders.map((folder) => (
-                  <CommandItem
-                    key={folder}
-                    value={folder}
-                    keywords={[directoryName(folder, home)]}
-                    onSelect={() => pick(folder)}
-                    title={folder}
-                    className="cursor-pointer gap-2"
-                  >
-                    <Check className={cn('size-4 shrink-0', folder === value ? 'opacity-100' : 'opacity-0')} aria-hidden />
-                    <span className="flex min-w-0 items-baseline gap-2">
-                      <span className="max-w-full shrink-0 truncate font-medium">{directoryName(folder, home)}</span>
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>
-                    </span>
-                  </CommandItem>
-                ))}
+                {folders.map(item)}
               </CommandGroup>
             )}
+            {projects.length > 0 && <CommandGroup heading="Projects">{projects.map(item)}</CommandGroup>}
             {searching && all.loading && folders.length > 0 && (
               <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                 <Loader2 className="size-3 animate-spin" aria-hidden /> Looking through your conversations…
