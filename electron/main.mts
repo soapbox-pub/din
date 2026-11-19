@@ -4312,13 +4312,15 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     const content = shellWindow.getContentBounds();
     return { sx: mouse.globalX - content.x, sy: mouse.globalY - content.y };
   };
-  let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean } | null = null;
+  let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean; buttons: number } | null = null;
+  let lastMoveAt = -Infinity;
   let moveTimer: NodeJS.Timeout | null = null;
   let wheelAt = -Infinity;
   const flushMove = (): void => {
     if (moveTimer) clearTimeout(moveTimer);
     moveTimer = null;
     if (!pendingMove) return;
+    lastMoveAt = performance.now();
     sendToShell('guest:input', { wcId, type: 'move', ...pendingMove });
     pendingMove = null;
   };
@@ -4333,8 +4335,19 @@ function forwardGuestInput(contents: Electron.WebContents): void {
       // mouse's motion without bound: a player looking down would carry it
       // past the screen's bottom edge and bring up the Dock.
       if (holdsPointerLock(wcId)) return;
-      pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta };
-      moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
+      const mods = mouse.modifiers;
+      const buttons = (mods?.includes('leftbuttondown') ? 1 : 0) |
+        (mods?.includes('rightbuttondown') ? 2 : 0) | (mods?.includes('middlebuttondown') ? 4 : 0);
+      pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta, buttons };
+      const remaining = GUEST_MOVE_INTERVAL_MS - (performance.now() - lastMoveAt);
+      if (remaining <= 0) flushMove();
+      else moveTimer ??= setTimeout(flushMove, remaining);
+    } else if (mouse.type === 'mouseLeave') {
+      // Don't replay a buffered move over this tile after entering the next.
+      if (moveTimer) clearTimeout(moveTimer);
+      moveTimer = null;
+      pendingMove = null;
+      lastMoveAt = -Infinity;
     } else if (mouse.type === 'mouseDown') {
       // Keep the order the guest saw: the move that led here comes first.
       flushMove();

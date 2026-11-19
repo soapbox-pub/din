@@ -1,6 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { WINDOW_SURFACE } from '@/components/desktop/windowSurface';
 import { windowTile, type AppComponentProps } from '@/lib/apps';
@@ -1869,6 +1869,16 @@ export const Window = memo(function Window({
       data-snap-zone={snapped ? (win.snapped ?? undefined) : undefined}
       data-snap-split={snapped ? `${split.x},${split.left},${split.right}` : undefined}
       data-app-name={app?.name}
+      onPointerMoveCapture={(e) => {
+        if (isTop || !win.tiled || e.pointerType !== 'mouse' || e.buttons !== 0) return;
+        // Guest moves are replayed on their host after IPC. A tile may have
+        // been covered or moved to another workspace since the move occurred.
+        if (!e.currentTarget.contains(document.elementFromPoint(e.clientX, e.clientY))) return;
+        const target = e.target as Element;
+        if (isGuestElement(target)) target.focus({ preventScroll: true });
+        // Commit the new active tile before the next keyboard shortcut.
+        flushSync(() => focus(win.id));
+      }}
       onPointerDown={(e) => {
         raisedByGuestPress.current = !isTop && isGuestElement(e.target as Element);
         focus(win.id);

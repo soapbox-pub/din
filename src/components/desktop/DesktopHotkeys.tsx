@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { toggleAppsMenu } from '@/lib/appsMenu';
 import {
@@ -137,7 +137,7 @@ export function DesktopHotkeys() {
   // The keydown handler needs the current window list without re-binding
   // the listener on every desktop commit.
   const windowsRef = useRef<WindowState[]>(windows);
-  useEffect(() => {
+  useLayoutEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
 
