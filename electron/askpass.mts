@@ -323,7 +323,7 @@ function describe(args: string[]): { action: string; detail: string } | null {
   const at = args.findIndex((arg, i) => i > 0 && !arg.startsWith('-'));
   if (at < 0) return null;
   if (UPDATER && args[at + 1] === 'local' && args.length === at + 3 && isProgram(args[at], UPDATER)) {
-    return { action: 'update Din', detail: 'Your desktop session will restart. Applications will be closed.' };
+    return { action: 'update Din', detail: 'It builds your own commits in ~/DinOS and switches to them. Your apps stay open: Din restarts only if you ask it to.' };
   }
   if (args[at + 1] === 'write' && args.length === at + 3 && /^\/dev\/[a-z][a-z0-9]*$/.test(args[at + 2]) && isProgram(args[at], FLASHER)) {
     return { action: `erase ${args[at + 2]} and write to it`, detail: `USB Flasher is writing a disk image. Everything on the drive at ${args[at + 2]} is erased.` };
