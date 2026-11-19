@@ -208,6 +208,16 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// With more than one GPU, Din's launcher has Mesa show Chromium's GPU process
+// the screen's GPU alone (os/configuration.nix, makeDinLauncher). That
+// process is forked from a zygote that started before this ran and keeps
+// its environment, restarts included, so it's taken out of Din's here:
+// games and other apps Din starts choose their own GPU.
+if (process.env.DIN_VK_DEVICE_PINNED === '1') {
+  delete process.env.MESA_VK_DEVICE_SELECT;
+  delete process.env.DIN_VK_DEVICE_PINNED;
+}
+
 // Locate the built Vite app. Two supported layouts:
 //   - DinOS/Nix: main.mts and dist/ are installed side by side (dirname/dist)
 //   - the checkout: main.mts lives in electron/, dist/ sits at the repo
