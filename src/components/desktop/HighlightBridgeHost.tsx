@@ -49,12 +49,14 @@ function mentionedUrls(comment: string): string[] {
 }
 
 /**
- * The tags of a NIP-84 highlight of `request`. A comment travels on the
- * highlight itself (a "quote highlight"), which then marks the page's `r` tag
- * `source` and anything the comment mentions `mention`.
+ * The tags of a NIP-84 highlight of `request`. The page is its source twice:
+ * an `i` tag, which readers prefer, and the same URL in an `r` tag for readers
+ * that only know `r`. A comment travels on the highlight itself (a "quote
+ * highlight"), which then marks the page's `r` tag `source` and anything the
+ * comment mentions `mention`.
  */
 function highlightTags(request: HighlightBridgeRequest, text: string, comment: string): string[][] {
-  const tags: string[][] = [comment ? ['r', request.url, 'source'] : ['r', request.url]];
+  const tags: string[][] = [['i', request.url], comment ? ['r', request.url, 'source'] : ['r', request.url]];
   if (request.context && request.context.includes(text) && request.context !== text) {
     tags.push(['context', request.context]);
   }
