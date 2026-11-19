@@ -43,6 +43,24 @@ let
     if [ "''${DIN_ANGLE_GL:-0}" != 1 ] && ${pkgs.gnugrep}/bin/grep -qx 0x1002 /sys/class/drm/card*/device/vendor 2>/dev/null; then
       gpuFlags=(--use-angle=vulkan)
     fi
+    # With more than one GPU, on the screen's (boot_vga), which Din's
+    # buffers are on, as on DinOS (makeDinLauncher).
+    if [ "''${#gpuFlags[@]}" != 0 ] && [ -z "''${MESA_VK_DEVICE_SELECT:-}" ]; then
+      gpus=0
+      screenGpu=
+      for dev in /sys/class/drm/card*/device; do
+        [ -e "$dev/vendor" ] || continue
+        gpus=$((gpus + 1))
+        bootVga=0
+        read -r bootVga < "$dev/boot_vga" 2>/dev/null || true
+        if [ "$bootVga" = 1 ]; then screenGpu=$dev; fi
+      done
+      if [ "$gpus" -gt 1 ] && [ -n "$screenGpu" ] &&
+        read -r gpuVendor < "$screenGpu/vendor" && read -r gpuDevice < "$screenGpu/device"; then
+        export MESA_VK_DEVICE_SELECT="''${gpuVendor#0x}:''${gpuDevice#0x}!"
+        export DIN_VK_DEVICE_PINNED=1
+      fi
+    fi
     # WebGPU's compute on a queue of its own, as on DinOS (makeDinLauncher).
     export VK_ADD_IMPLICIT_LAYER_PATH=${din-gpu-priority}/share/vulkan/implicit_layer.d''${VK_ADD_IMPLICIT_LAYER_PATH:+:$VK_ADD_IMPLICIT_LAYER_PATH}
     export DIN_GPU_PRIORITY=1

@@ -650,6 +650,36 @@ let
     if [ "''${DIN_ANGLE_GL:-0}" != 1 ] && ${pkgs.gnugrep}/bin/grep -qx 0x1002 /sys/class/drm/card*/device/vendor 2>/dev/null; then
       gpuFlags=(--use-angle=vulkan)
     fi
+    # With two GPUs (a laptop's integrated one and a discrete one beside it),
+    # ANGLE takes the discrete one, whatever Mesa lists first, while the
+    # screen, din-shell and so Chromium's buffers are on the one the firmware
+    # started (boot_vga, as din-shell's primary_gpu has it). ANGLE can't
+    # import those buffers on another GPU (VK_ERROR_FEATURE_NOT_PRESENT in
+    # DmaBufImageSiblingVkLinux), the GPU process dies three times, and
+    # Chromium draws the whole desktop on one core from then on. So Mesa
+    # shows Chromium's GPU process the screen's GPU alone (the "!").
+    # ANGLE_PREFERRED_DEVICE would do it too, but wants the device's name
+    # in full, which only Vulkan knows. Din takes both variables out of its
+    # own environment once it's up (electron/main.mts): the GPU process is
+    # forked from a zygote that already has them, and games and other apps
+    # keep the discrete GPU. A MESA_VK_DEVICE_SELECT of the user's is left
+    # as it is.
+    if [ "''${#gpuFlags[@]}" != 0 ] && [ -z "''${MESA_VK_DEVICE_SELECT:-}" ]; then
+      gpus=0
+      screenGpu=
+      for dev in /sys/class/drm/card*/device; do
+        [ -e "$dev/vendor" ] || continue
+        gpus=$((gpus + 1))
+        bootVga=0
+        read -r bootVga < "$dev/boot_vga" 2>/dev/null || true
+        if [ "$bootVga" = 1 ]; then screenGpu=$dev; fi
+      done
+      if [ "$gpus" -gt 1 ] && [ -n "$screenGpu" ] &&
+        read -r gpuVendor < "$screenGpu/vendor" && read -r gpuDevice < "$screenGpu/device"; then
+        export MESA_VK_DEVICE_SELECT="''${gpuVendor#0x}:''${gpuDevice#0x}!"
+        export DIN_VK_DEVICE_PINNED=1
+      fi
+    fi
     # Web pages' WebGPU work runs on Dawn, which put it on the graphics queue
     # Din draws with, where a page's long compute job held every frame of the
     # desktop until it finished. This Vulkan layer moves Dawn's compute to a
