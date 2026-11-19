@@ -2,8 +2,8 @@
  * A page's video as a share (docs/din/sharing.md): the share sheet's "Send
  * as" Video and Audio for a page the Web Browser can Download Video from.
  * Picking an app fetches it with yt-dlp into the share cache
- * (electron/video-download.mts, `forShare`), its progress on the browser's
- * download shelf as well as the sheet, then hands the file on; Save to
+ * (electron/video-download.mts, `forShare`), its progress in the sheet
+ * (never on the browser's download shelf), then hands the file on; Save to
  * Downloads is Download Video as it always was.
  */
 import type { BrowserBridge, DownloadInfo, VideoDownloadFormat } from '@/lib/browser';
@@ -23,6 +23,12 @@ const VIDEO_QUALITIES: readonly { value: VideoDownloadFormat; label: string }[] 
   { value: '720p', label: '720p' },
   { value: '480p', label: '480p' },
 ];
+
+/** An error's message without Electron's "Error invoking remote method" prefix. */
+function bridgeMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
+}
 
 function isFormat(value: string | null): value is VideoDownloadFormat {
   return value === 'audio' || VIDEO_QUALITIES.some((q) => q.value === value);
@@ -79,7 +85,7 @@ export function fetchVideoForShare(
         early.clear();
         if (seen) take(seen);
       },
-      (error: unknown) => end(() => reject(error instanceof Error ? error : new Error(String(error)))),
+      (error: unknown) => end(() => reject(new Error(bridgeMessage(error)))),
     );
   });
 }

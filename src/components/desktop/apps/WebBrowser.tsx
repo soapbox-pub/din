@@ -1350,12 +1350,9 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
     if (!browserBridge) return;
     return browserBridge.onDownload((info) => {
       if (!tabsRef.current.some((t) => t.wcId === info.wcId)) return;
-      // A video fetched for a share shows while it comes, with its Cancel,
-      // and goes once it's handed on: it isn't in Downloads to open.
-      if (info.forShare && info.state === 'completed') {
-        setDownloads((prev) => prev.filter((d) => d.id !== info.id));
-        return;
-      }
+      // A video fetched for a share isn't a download: its progress and
+      // Cancel are the share sheet's, and it never lands in Downloads.
+      if (info.forShare) return;
       setDownloads((prev) => {
         const idx = prev.findIndex((d) => d.id === info.id);
         if (idx === -1) return [info, ...prev].slice(0, 20);

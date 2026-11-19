@@ -87,8 +87,9 @@ yt-dlp's module), so an Instagram reel, which starts muted, offers its video
 before it's heard; `din share --url` offers the same for such a page. Picked,
 yt-dlp fetches it as Download Video does, into
 `~/.cache/din/shared/<random>/` (`forShare` in
-`electron/video-download.mts`), its progress on the download shelf too, so
-an app like Armada is POSTed the MP4 itself. Save to Downloads there is
+`electron/video-download.mts`), its progress in the sheet alone (it isn't a
+download, so never on the browser's download shelf), so an app like Armada
+is POSTed the MP4 itself. Save to Downloads there is
 Download Video, which also stays in the browser's menu.
 
 ## Being shared to

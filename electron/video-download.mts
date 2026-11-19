@@ -22,7 +22,8 @@
 // For a share (`forShare`), the finished file goes to a folder of its own in
 // the share sheet's cache, ~/.cache/din/shared/<random>/ (src/lib/share.ts),
 // instead of ~/Downloads, for the app the user shared it to; the sheet's
-// cache clears it out after a day.
+// cache clears it out after a day. Its reports are marked `forShare`: the
+// share sheet follows them, and the download shelf leaves them out.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.

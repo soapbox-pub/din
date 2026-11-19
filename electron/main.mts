@@ -5752,8 +5752,10 @@ function registerBrowserDownloadHandlers(): void {
       if (!contents || contents.isDestroyed() || !isBrowserTabSession(contents.session)) {
         throw new Error('That tab is gone');
       }
-      // One that can't start says why on its chip, as one that fails does.
+      // One that can't start says why on its chip, as one that fails does;
+      // a share's says so in the share sheet, which has no chip.
       return downloadTabVideo(contents, format, forShare).catch((err: unknown) => {
+        if (forShare) throw err;
         sendToShell('browser:download', videoDownloadFailure(contents, err));
         return null;
       });
