@@ -212,7 +212,9 @@ function messageOf(error: unknown): string {
 // the screen's GPU alone (os/configuration.nix, makeDinLauncher). That
 // process is forked from a zygote that started before this ran and keeps
 // its environment, restarts included, so it's taken out of Din's here:
-// games and other apps Din starts choose their own GPU.
+// games and other apps Din starts choose their own GPU. This runs after every
+// imported module has loaded, so a module that copies process.env as it
+// loads would still hand the pin on: copy it when spawning instead.
 if (process.env.DIN_VK_DEVICE_PINNED === '1') {
   delete process.env.MESA_VK_DEVICE_SELECT;
   delete process.env.DIN_VK_DEVICE_PINNED;

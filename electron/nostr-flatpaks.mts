@@ -70,8 +70,6 @@ const MAX_BUNDLE_BYTES = 8 * 1024 ** 3;
 /** Importing and installing (runtimes included) can take a long while on a slow line. */
 const INSTALL_TIMEOUT_MS = 60 * 60_000;
 const QUICK_TIMEOUT_MS = 2 * 60_000;
-/** flatpak is translated; its errors reach the user, but nothing here parses another language's. */
-const ENV = { ...process.env, LC_ALL: 'C' };
 
 export class FlatpakError extends Error {}
 
@@ -144,7 +142,11 @@ function flatpak(
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn('flatpak', args, { env: ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+      // flatpak is translated; its errors reach the user, but nothing here
+      // parses another language's. The environment is read here, not when
+      // this module loads: main.mts takes the launcher's GPU pin out of it
+      // after every module has loaded.
+      child = spawn('flatpak', args, { env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
       reject(error);
       return;

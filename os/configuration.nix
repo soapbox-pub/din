@@ -662,8 +662,9 @@ let
     # in full, which only Vulkan knows. Din takes both variables out of its
     # own environment once it's up (electron/main.mts): the GPU process is
     # forked from a zygote that already has them, and games and other apps
-    # keep the discrete GPU. A MESA_VK_DEVICE_SELECT of the user's is left
-    # as it is.
+    # keep the discrete GPU. Web pages' WebGPU, which runs in the GPU
+    # process, is on the screen's GPU too, whatever power it asks for. A
+    # MESA_VK_DEVICE_SELECT of the user's is left as it is.
     if [ "''${#gpuFlags[@]}" != 0 ] && [ -z "''${MESA_VK_DEVICE_SELECT:-}" ]; then
       gpus=0
       screenGpu=
@@ -671,7 +672,7 @@ let
         [ -e "$dev/vendor" ] || continue
         gpus=$((gpus + 1))
         bootVga=0
-        read -r bootVga < "$dev/boot_vga" 2>/dev/null || true
+        read -r bootVga 2>/dev/null < "$dev/boot_vga" || true
         if [ "$bootVga" = 1 ]; then screenGpu=$dev; fi
       done
       if [ "$gpus" -gt 1 ] && [ -n "$screenGpu" ] &&

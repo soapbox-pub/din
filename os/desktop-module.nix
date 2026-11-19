@@ -52,7 +52,7 @@ let
         [ -e "$dev/vendor" ] || continue
         gpus=$((gpus + 1))
         bootVga=0
-        read -r bootVga < "$dev/boot_vga" 2>/dev/null || true
+        read -r bootVga 2>/dev/null < "$dev/boot_vga" || true
         if [ "$bootVga" = 1 ]; then screenGpu=$dev; fi
       done
       if [ "$gpus" -gt 1 ] && [ -n "$screenGpu" ] &&
