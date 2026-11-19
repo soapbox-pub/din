@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, FolderOpen, ListChecks, Package, Play, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Copy, FolderOpen, ListChecks, Package, Play, Square, Trash2 } from 'lucide-react';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { appsDockedAs, windowTile } from '@/lib/apps';
 import {
@@ -75,8 +75,46 @@ const PAGE_TITLES: Record<Exclude<Page, 'main'>, string> = {
   opens: 'Open by default',
 };
 
+/** "Nov 19", with the year only when it isn't this one: "Oct 26, 2025". */
 function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  const date = new Date(ms);
+  const thisYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: thisYear ? undefined : 'numeric' });
+}
+
+/** A long address cut in its middle, so both its scheme and its end show. */
+function middleTruncate(text: string, max = 36): string {
+  if (text.length <= max) return text;
+  const tail = 10;
+  return `${text.slice(0, max - tail - 1)}…${text.slice(-tail)}`;
+}
+
+/** Where the app lives, whole on hover, copied with a click. */
+function CopyAddress({ address }: { address: string }) {
+  const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+  const Icon = copied ? Check : Copy;
+  return (
+    <button
+      type="button"
+      title={address}
+      aria-label={`Copy address ${address}`}
+      onClick={() =>
+        void navigator.clipboard.writeText(address).then(
+          () => setCopied(true),
+          () => toast({ title: 'Couldn’t copy the address', variant: 'destructive' }),
+        )}
+      className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full px-3 font-mono text-xs text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <span className="min-w-0 truncate">{middleTruncate(address)}</span>
+      <Icon className={cn('size-3.5 shrink-0', copied && 'text-ink-accent')} strokeWidth={1.75} aria-hidden />
+    </button>
+  );
 }
 
 /** A row on the first page that opens a page of its own: its name, how it stands, a chevron. */
@@ -167,8 +205,8 @@ function ActionButton({
  * the Dock, the taskbar and the apps menu (`din apps info`). Its first page
  * is the app's icon, name and kind, Open, Stop (its windows closed) and
  * Uninstall, and a row for each of what it may change, each opening a page
- * of its own with a back button in the title bar, which keeps the app's icon
- * and name ("Armada – Notifications"): its notifications (on or
+ * of its own with its name and a back arrow at its top, as Android's (the
+ * title bar stays "Armada – App Info"): its notifications (on or
  * off, its badge, what it sent lately), its permissions, its storage, what
  * it does while closed, and what it opens. A window per app (`instanceParam`),
  * with a tile of its own in the Dock, wearing the app's icon with a cog.
@@ -264,9 +302,8 @@ function AppInfo({ appId }: { appId: string }) {
   const [site, setPermission] = useSiteInfo(facts && notifiesBySite(facts) ? facts.origin : null);
   const background = useBackground(facts);
 
-  // Which app, always, and where in its info: "Armada – Notifications", as
-  // an nsite's title bar keeps its name while it moves between pages.
-  const title = !app ? 'App Info' : `${app.name} – ${page === 'main' ? 'App Info' : PAGE_TITLES[page]}`;
+  // The same on every page: where in its info is said in the page itself.
+  const title = !app ? 'App Info' : `${app.name} – App Info`;
   useWindowTitle(title);
   const badged = useBadgedIcon(app);
   useWindowIcon(badged);
@@ -276,18 +313,7 @@ function AppInfo({ appId }: { appId: string }) {
   // sits in it on a solid, rounded pane.
   const frame = (content: ReactNode) => (
     <div className="flex h-full w-full flex-col text-foreground">
-      <WindowDragRegion className={cn('flex h-12 shrink-0 items-center gap-2 pr-3', page === 'main' ? 'pl-4' : 'pl-2')}>
-        {page !== 'main' && (
-          <button
-            type="button"
-            aria-label="Back"
-            title="Back"
-            onClick={() => setPage('main')}
-            className="-mr-1 grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <ChevronLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
-          </button>
-        )}
+      <WindowDragRegion className="flex h-12 shrink-0 items-center gap-2 pr-3 pl-4">
         <AppIcon icon={badged ?? app?.icon ?? COG} web={app?.web} className="size-5 shrink-0" />
         <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">{title}</h1>
         <WindowControls />
@@ -325,6 +351,23 @@ function AppInfo({ appId }: { appId: string }) {
       }}
     >
       <div key={page} className="mx-auto flex max-w-xl flex-col gap-4 p-4 [&>*]:shrink-0">
+        {/* A page's back arrow and its name at its top, as Android's
+            settings have them; the title bar stays put. */}
+        {page !== 'main' && (
+          <header className="-ml-2 flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Back"
+              title="Back"
+              autoFocus
+              onClick={() => setPage('main')}
+              className="grid size-9 shrink-0 place-items-center rounded-full text-foreground outline-none hover:bg-foreground/[0.07] focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <ArrowLeft className="size-5" strokeWidth={1.75} aria-hidden />
+            </button>
+            <h2 className="min-w-0 truncate font-[family-name:var(--font-title)] text-xl font-semibold">{PAGE_TITLES[page]}</h2>
+          </header>
+        )}
         {body}
       </div>
     </div>,
@@ -447,13 +490,9 @@ function MainPage({
       </div>
 
       {(facts.address || footer) && (
-        <div className="flex flex-col items-center gap-0.5 px-4 pt-2 text-center text-xs text-muted-foreground">
+        <div className="flex flex-col items-center gap-1 px-4 pt-2 text-center text-xs text-muted-foreground">
           {footer && <p>{footer}</p>}
-          {facts.address && (
-            <p className="max-w-full truncate font-mono select-text" title={facts.address}>
-              {facts.address}
-            </p>
-          )}
+          {facts.address && <CopyAddress address={facts.address} />}
         </div>
       )}
 
