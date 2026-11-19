@@ -17,7 +17,7 @@ function findAction(id: string) {
 
 export const shortcutsArea: Area = {
   name: 'shortcuts',
-  summary: 'Customize Super shortcuts for tiling, windows and workspaces',
+  summary: 'Customize Super shortcuts for tiling, windows, workspaces and App Search',
   commands: [
     command('shortcuts', 'list', 'List actions and their current shortcuts', [], (_args, ctx) => {
       const bindings = wmBindings(ctx.config.wmBindings);

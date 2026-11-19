@@ -8,7 +8,6 @@
  * `before-input-event` and forwards them to the shell:
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
- *   - Super+Space             -> { action: 'apps-menu' }
  *   - Super+A                 -> { action: 'assistant' }, and when the A
  *                                comes up -> { action: 'assistant-released' }
  *   - Super+H                 -> { action: 'dictation' }
@@ -63,10 +62,6 @@ export type ShellShortcut =
       /** Alt+Tab pressed inside a guest: cycle window focus. */
       action: 'cycle-windows';
       backward: boolean;
-    }
-  | {
-      /** Super+Space pressed inside a guest: toggle the apps menu. */
-      action: 'apps-menu';
     }
   | {
       /**

@@ -4208,7 +4208,6 @@ function forwardShellShortcuts(contents: Electron.WebContents): void {
     const shortcut = shellShortcutForInput(input);
     if (
       shortcut?.action === 'cycle-windows' ||
-      shortcut?.action === 'apps-menu' ||
       shortcut?.action === 'assistant' ||
       shortcut?.action === 'dictation' ||
       shortcut?.action === 'system-monitor' ||
@@ -6081,7 +6080,6 @@ type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | {
       action:
-        | 'apps-menu'
         | 'assistant'
         | 'assistant-released'
         | 'dictation'
@@ -6147,9 +6145,6 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   // watchShellHotkeys).
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
-  }
-  if (input.meta && !input.alt && !input.control && !input.shift && input.key === ' ') {
-    return { action: 'apps-menu' };
   }
   // Super+A: the assistant's prompt.
   if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
@@ -7408,7 +7403,6 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
-        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
@@ -7461,7 +7455,7 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed apps' windows aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling, apps-menu, assistant, System Monitor
+  // them, so the shell's window management, assistant, System Monitor
   // and screenshot shortcuts must be forwarded too.
   if (isAppWindow) {
     contents.on('before-input-event', (event, input) => {
@@ -7473,7 +7467,6 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
-        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||

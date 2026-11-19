@@ -33,6 +33,7 @@ export type WmCommand =
   | { type: 'minimize' }
   | { type: 'resize'; dx: number; dy: number }
   | { type: 'terminal' }
+  | { type: 'apps-menu' }
   | { type: 'help' }
   | { type: 'show-mouse' }
   | { type: 'clear-fire-paint' };
@@ -155,6 +156,12 @@ export const WM_GROUPS: WmGroup[] = [
       { id: 'workspace-last', label: 'Back to the last workspace', keys: ['Ctrl+Tab'], command: { type: 'workspace-previous' } },
     ],
   },
+  {
+    group: 'Desktop',
+    rows: [
+      { id: 'apps-menu', label: 'Search apps', keys: ['Space'], command: { type: 'apps-menu' } },
+    ],
+  },
 ];
 
 export function isWmFamily(row: WmAction | WmFamily): row is WmFamily {
@@ -181,10 +188,9 @@ export const WM_FIXED_HELP: { group: string; bindings: { keys: string[]; label: 
     ],
   },
   {
-    group: 'Desktop',
+    group: 'Other desktop shortcuts',
     bindings: [
       { keys: ['Super', 'Enter'], label: 'Open a terminal' },
-      { keys: ['Super', 'Space'], label: 'Search apps' },
       { keys: ['Super', 'K'], label: 'Show these shortcuts' },
       { keys: ['Super', 'A'], label: 'Ask the assistant (hold it to speak)' },
       { keys: ['Super', 'H'], label: 'Dictate, or finish dictating' },
@@ -292,7 +298,7 @@ const FIXED_COMMANDS = new Map<string, WmCommand>([
   ['Shift+KeyC', { type: 'clear-fire-paint' }],
 ]);
 
-const RESERVED = new Set(['KeyA', 'KeyH', 'Space', 'Alt+Digit8', 'Alt+Equal', 'Alt+Minus']);
+const RESERVED = new Set(['KeyA', 'KeyH', 'Alt+Digit8', 'Alt+Equal', 'Alt+Minus']);
 
 export function wmShortcutError(shortcut: string, id: string, overrides?: WmOverrides): string | null {
   if (!SHORTCUT.test(shortcut)) return 'That key cannot be used in a shortcut.';
