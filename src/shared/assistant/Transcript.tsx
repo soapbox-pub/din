@@ -32,6 +32,7 @@ import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFil
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { useAssistantHost } from '@/shared/assistant/host';
+import { locateExcerpt, MAX_HIGHLIGHT_CONTEXT_LENGTH } from '@/shared/highlightText';
 import { ReadAloudButton } from '@/shared/assistant/ReadAloudButton';
 import {
   backgroundNotice,
@@ -497,16 +498,20 @@ const PARAGRAPHS = new Set(['P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5
 const normalizeText = (value: string) => value.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
 
 /**
- * The text selected inside `root`, and the paragraph it's in (when that
- * holds it whole and is more than it), or null when nothing in it is.
+ * The text selected inside `root`, and its context: the whole reply as
+ * Markdown (`markdown`), where that's found to draw it and isn't too long,
+ * else the paragraph it's in (when that holds it whole and is more than it).
+ * Null when nothing in it is selected.
  */
-function selectionIn(root: HTMLElement | null): { text: string; context?: string } | null {
+function selectionIn(root: HTMLElement | null, markdown: string): { text: string; context?: string } | null {
   const selection = window.getSelection();
   if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
   if (!root.contains(range.commonAncestorContainer)) return null;
   const text = normalizeText(selection.toString());
   if (!text) return null;
+  const whole = normalizeText(markdown);
+  if (whole !== text && whole.length <= MAX_HIGHLIGHT_CONTEXT_LENGTH && locateExcerpt(whole, text)) return { text, context: whole };
   const elementOf = (node: Node) => (node instanceof Element ? node : node.parentElement);
   for (let el = elementOf(range.commonAncestorContainer); el && root.contains(el); el = el.parentElement) {
     if (!PARAGRAPHS.has(el.tagName)) continue;
@@ -519,7 +524,8 @@ function selectionIn(root: HTMLElement | null): { text: string; context?: string
 /**
  * A reply's right-click menu: what its buttons do (Copy reply, Read aloud),
  * with Copy and Highlight on Nostr for text selected in it. The highlight
- * names the model that wrote the reply as its source.
+ * names the model that wrote the reply as its source, with the reply's
+ * Markdown as its context.
  */
 function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; model?: ModelRef; children: ReactNode }) {
   const host = useAssistantHost();
@@ -534,7 +540,7 @@ function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={ref} className="flex min-w-0 flex-col gap-4" onContextMenu={() => setSelected(selectionIn(ref.current))}>
+        <div ref={ref} className="flex min-w-0 flex-col gap-4" onContextMenu={() => setSelected(selectionIn(ref.current, reply))}>
           {children}
         </div>
       </ContextMenuTrigger>

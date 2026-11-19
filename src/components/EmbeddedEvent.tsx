@@ -42,6 +42,7 @@ import {
   truncate,
 } from '@/lib/draftEvent';
 import { getKindLabel } from '@/lib/kindLabels';
+import { locateExcerpt } from '@/shared/highlightText';
 import { cn, middleEllipsis } from '@/lib/utils';
 
 /**
@@ -446,6 +447,9 @@ function NoteBody({ event }: { event: DraftEvent }) {
   );
 }
 
+/** How much of a highlight's context its card shows either side of the excerpt. */
+const HIGHLIGHT_CONTEXT_SIDE = 160;
+
 /** A URL a highlight names as its source, as one line: the address without its scheme. */
 function sourceLine(value: string): string | null {
   try {
@@ -480,9 +484,14 @@ function HighlightBody({ event }: { event: DraftEvent }) {
   const text = event.content.trim();
   const comment = tagValue(event, 'comment')?.trim();
   const rawContext = tagValue(event, 'context')?.trim();
-  // Only a paragraph short enough that the clamp can't cut the excerpt off.
-  const context = rawContext && text && rawContext !== text && rawContext.length <= 400 ? rawContext : undefined;
-  const at = context ? context.indexOf(text) : -1;
+  const at =
+    rawContext && text && rawContext !== text && text.length <= 400 && rawContext.length <= 50_000
+      ? locateExcerpt(rawContext, text)
+      : null;
+  // Only a little of the context either side, so the clamp can't cut the
+  // excerpt off: it can be an assistant's whole reply.
+  const before = rawContext && at ? rawContext.slice(Math.max(0, at[0] - HIGHLIGHT_CONTEXT_SIDE), at[0]) : '';
+  const after = rawContext && at ? rawContext.slice(at[1], at[1] + HIGHLIGHT_CONTEXT_SIDE) : '';
   const source = highlightSource(event);
   const url = source ? sourceLine(source) : null;
   const target = tagValues(event, 'e').find((id) => HEX64.test(id));
@@ -493,11 +502,17 @@ function HighlightBody({ event }: { event: DraftEvent }) {
       {text && (
         <blockquote className="border-l-2 border-ink-accent/60 pl-3">
           <p className="line-clamp-8 whitespace-pre-wrap break-words font-serif text-sm text-foreground">
-            {context && at >= 0 ? (
+            {rawContext && at ? (
               <>
-                <span className="text-muted-foreground">{context.slice(0, at)}</span>
-                <mark className="rounded bg-primary/25 px-0.5 text-foreground">{text}</mark>
-                <span className="text-muted-foreground">{context.slice(at + text.length)}</span>
+                <span className="text-muted-foreground">
+                  {at[0] > before.length && '…'}
+                  {before}
+                </span>
+                <mark className="rounded bg-primary/25 px-0.5 text-foreground">{rawContext.slice(at[0], at[1])}</mark>
+                <span className="text-muted-foreground">
+                  {after}
+                  {at[1] + after.length < rawContext.length && '…'}
+                </span>
               </>
             ) : (
               truncate(text, MAX_CONTENT)

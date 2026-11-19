@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Globe, Highlighter, Loader2, Sparkles } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -12,13 +12,18 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import type { NostrEvent } from '@nostrify/nostrify';
+import { nip19 } from 'nostr-tools';
+import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { toast } from '@/hooks/useToast';
 import { getAvatarShape } from '@/lib/avatarShape';
 import { getHighlightHostBridge } from '@/lib/highlightBridge';
 import { highlightTags, requestHighlight, setHighlightHandler, type HighlightRequest } from '@/lib/highlights';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
+import { locateExcerpt } from '@/shared/highlightText';
 
 function hostOf(url: string): string {
   try {
@@ -29,19 +34,28 @@ function hostOf(url: string): string {
 }
 
 /**
- * The excerpt as a pull quote, inside its surrounding paragraph when that's
- * published with it, the way Ditto shows a kind 9802.
+ * The excerpt as a pull quote, inside its context when that's published with
+ * it (a paragraph, or an assistant's whole reply as Markdown), the way Ditto
+ * shows a kind 9802, scrolled to the excerpt.
  */
-export function HighlightQuote({ text, context, className }: { text: string; context?: string; className?: string }) {
-  const at = context && context !== text ? context.indexOf(text) : -1;
+function HighlightQuote({ text, context }: { text: string; context?: string }) {
+  // Memoized: typing a comment draws the composer again, and Markdown is searched loosely.
+  const at = useMemo(() => (context && context !== text ? locateExcerpt(context, text) : null), [context, text]);
+  const ref = useRef<HTMLQuoteElement>(null);
+  const mark = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    const el = mark.current;
+    if (box && el) box.scrollTop = Math.max(0, el.offsetTop - box.clientHeight / 3);
+  }, [text, context]);
   return (
-    <blockquote className={className ?? 'max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-ink-accent/60 bg-selected px-4 py-3'}>
+    <blockquote ref={ref} className="relative max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-ink-accent/60 bg-selected px-4 py-3">
       <p className="font-serif text-base leading-relaxed break-words whitespace-pre-wrap">
-        {context && at >= 0 ? (
+        {context && at ? (
           <>
-            <span className="text-muted-foreground">{context.slice(0, at)}</span>
-            <mark className="rounded bg-primary/25 px-0.5 text-foreground">{text}</mark>
-            <span className="text-muted-foreground">{context.slice(at + text.length)}</span>
+            <span className="text-muted-foreground">{context.slice(0, at[0])}</span>
+            <mark ref={mark} className="rounded bg-primary/25 px-0.5 text-foreground">{context.slice(at[0], at[1])}</mark>
+            <span className="text-muted-foreground">{context.slice(at[1])}</span>
           </>
         ) : (
           text
@@ -82,7 +96,7 @@ function SourceLine({ request }: { request: HighlightRequest }) {
 interface HighlightComposerProps {
   request: HighlightRequest;
   /** Close the composer: the published event's id, or undefined when cancelled. */
-  onDone: (eventId?: string) => void;
+  onDone: (event?: NostrEvent) => void;
 }
 
 /**
@@ -106,7 +120,7 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
     setPosting(true);
     setError(null);
     publishEvent({ kind: 9802, content: request.text, tags: highlightTags(request, comment.trim()) })
-      .then((event) => onDone(event.id))
+      .then((event) => onDone(event))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setPosting(false);
@@ -202,6 +216,10 @@ export function HighlightBridgeHost() {
   const { user } = useCurrentUser();
   const signedIn = !!user;
   const [queue, setQueue] = useState<Pending[]>([]);
+  const openUrl = useOpenUrl();
+  const { config } = useAppContext();
+  // Where it was published, as hints for finding it.
+  const writeRelays = config.relayMetadata.relays.filter((r) => r.write).slice(0, 3).map((r) => r.url);
 
   useEffect(
     () =>
@@ -229,9 +247,15 @@ export function HighlightBridgeHost() {
     <HighlightComposer
       key={current.id}
       request={current.request}
-      onDone={(eventId) => {
-        if (eventId) toast({ title: 'Highlight posted' });
-        current.resolve(eventId ?? null);
+      onDone={(event) => {
+        if (event) {
+          // A click (or Open, which keeps it in the list to click later)
+          // opens it as any nostr: link opens: in the default app for
+          // highlights, or the Open With chooser.
+          const uri = `nostr:${nip19.neventEncode({ id: event.id, author: event.pubkey, kind: event.kind, relays: writeRelays })}`;
+          toast({ title: 'Highlight posted', actions: [{ id: 'open', label: 'Open' }], onAction: () => openUrl(uri) });
+        }
+        current.resolve(event?.id ?? null);
         setQueue((q) => q.filter((p) => p.id !== current.id));
       }}
     />

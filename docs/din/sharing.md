@@ -192,8 +192,11 @@ comment, and posts nothing until the user presses Post.
 const id = await din.app.highlight({ text, context, source: 'Claude Opus 5.5' });
 ```
 
-- `text` is what the user selected; `context` the paragraph around it, kept
-  only when it holds `text` word for word.
+- `text` is what the user selected; `context` what's around it, kept only
+  when it holds `text`: word for word, or as Markdown that draws it (its
+  emphasis, code and link marks, its lists' and quotes' markers between the
+  words; `src/shared/highlightText.ts`). The Assistant gives a reply's whole
+  Markdown, up to 20,000 characters, else the paragraph.
 - `source` is where it's from, by name, published as a plain-text `r` tag
   (NIP-84 allows text as well as URLs there, nostr-protocol/nips#2454). An
   app can't name a page as the source: only the Web Browser does that, from
@@ -201,6 +204,9 @@ const id = await din.app.highlight({ text, context, source: 'Claude Opus 5.5' })
 - It takes a click or a key press, as sharing does. It resolves with the
   posted event's id, or null when the user cancels, and rejects when nobody
   is signed in.
+- Once it's posted, the desktop's notification opens it as a `nostr:` link
+  (an nevent) when clicked, or with its Open: in the default app for
+  highlights, or the Open With chooser.
 
 | Where | What it highlights |
 |---|---|
