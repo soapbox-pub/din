@@ -2,6 +2,7 @@ import { nip19 } from 'nostr-tools';
 import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
 import { getEraseBridge } from '@/lib/erase';
 import { getFirmwareBridge } from '@/lib/firmware';
+import { requestHighlight } from '@/lib/highlights';
 import { getLockBridge } from '@/lib/lock';
 import { blossomListTags, normalizeBlossomUrl, normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
 import { getUpdaterBridge, shortRevision, UPDATE_STEP_LABELS } from '@/lib/updater';
@@ -170,7 +171,7 @@ function saveServers(ctx: CommandContext, servers: string[]) {
 
 export const nostrArea: Area = {
   name: 'nostr',
-  summary: 'Your Nostr account, relays and Blossom servers',
+  summary: 'Your Nostr account, relays and Blossom servers, and posting highlights',
   commands: [
     command('nostr', 'whoami', 'Who is signed in', [], (_args, ctx) => {
       const pubkey = requireUser(ctx);
@@ -206,6 +207,27 @@ export const nostrArea: Area = {
       const servers = ctx.config.blossomServerMetadata.servers;
       if (!url || !servers.includes(url)) throw new CommandError(`${args.string('url')} isn’t one of your servers`);
       await saveServers(ctx, servers.filter((s) => s !== url));
+    }),
+    // The Web Browser's and the Assistant's "Highlight on Nostr": the same
+    // composer, which posts nothing until the user presses Post.
+    command('nostr', 'highlight', 'Post a highlight (NIP-84) of a passage: the composer shows it, for a comment, and posts it when you press Post', [
+      { name: 'text', type: 'string', positional: true, help: 'The passage' },
+      { name: 'url', type: 'string', optional: true, help: 'The page it’s from' },
+      { name: 'title', type: 'string', optional: true, help: 'With --url, the page’s title' },
+      { name: 'source', type: 'string', optional: true, help: 'Where it’s from, by name, when it’s not a page (a book, a model that wrote it)' },
+      { name: 'context', type: 'string', optional: true, help: 'The paragraph around it, holding it word for word' },
+    ], async (args, ctx) => {
+      requireUser(ctx);
+      const url = args.optString('url');
+      const name = args.optString('source');
+      if ((url === undefined) === (name === undefined)) throw new CommandError('Give the page it’s from with --url, or name its source with --source', 'usage');
+      const title = args.optString('title');
+      const source = url !== undefined ? { url, ...(title ? { title } : {}) } : { name: name! };
+      const id = await requestHighlight({ text: args.string('text'), context: args.optString('context'), source }).catch((error: unknown) => {
+        throw new CommandError(error instanceof Error ? error.message : String(error));
+      });
+      if (id === null) return { data: { id: null }, text: 'Not posted' };
+      return { data: { id, nevent: nip19.neventEncode({ id }) }, text: `Posted ${nip19.neventEncode({ id })}` };
     }),
     // Settings → Nostr & Storage's Nostr links.
     command('nostr', 'links', 'Where nostr: links open: the app each kind opens in without asking, and the apps that open them', [], (_args, ctx) => {

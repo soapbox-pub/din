@@ -178,6 +178,10 @@ export function AppAssistantHost({ children }: { children: ReactNode }) {
         const handles = items.map((item) => item.getAsFileSystemHandle().catch(() => null));
         return Promise.all(handles).then((list) => list.flatMap((h) => (h ? [din.files.path(h)] : [])));
       },
+      highlight: (highlight) =>
+        void din.app.highlight(highlight).catch((error: unknown) =>
+          toast('Couldn’t highlight', { body: error instanceof Error ? error.message : String(error), destructive: true }),
+        ),
       notify: ({ title, description, destructive }) => toast(title, { body: description, destructive }),
       useDictation: (ref) => useAppDictation(ref),
       pauseMedia: () => din.desktop.pauseMedia(),

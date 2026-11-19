@@ -558,6 +558,14 @@ export function installDin(transport: Transport): void {
       return handle ? request('app.openWithApps', { handle }) : [];
     },
     share: (data, files) => share(data, files ?? []),
+    highlight: async ({ text, context, source }) => {
+      if (typeof text !== 'string' || !text.trim()) throw new TypeError('Nothing to highlight');
+      if (typeof source !== 'string' || !source.trim()) throw new TypeError('A highlight needs a source');
+      if (navigator.userActivation && !navigator.userActivation.isActive) {
+        throw new DOMException('Highlighting takes a click or a key press', 'NotAllowedError');
+      }
+      return request('app.highlight', { text, source, ...(typeof context === 'string' ? { context } : {}) });
+    },
   };
 
   // ---- sharing: the web's navigator.share, through the desktop's share sheet ----

@@ -223,6 +223,17 @@ export interface DinApp {
    * the user closes the share sheet. docs/din/sharing.md.
    */
   share(data: ShareData, files?: FileSystemHandle[]): Promise<void>;
+  /**
+   * Post a NIP-84 highlight (kind 9802) of text the user selected: the
+   * desktop's composer shows it, with `context` (the paragraph around it,
+   * kept only when it holds `text` word for word) and where it's from
+   * (`source`, a name such as the model that wrote it, published as a
+   * plain-text `r` tag), for the user to comment on and post as themselves.
+   * Takes a user gesture, as `share` does. Resolves with the posted event's
+   * id, or null when the user cancels; rejects when nobody is signed in.
+   * docs/din/sharing.md.
+   */
+  highlight(highlight: { text: string; context?: string; source: string }): Promise<string | null>;
 }
 
 /** An installed app that opens a file (`din.app.openWithApps`). */

@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/useToast';
 import { elementTarget, finishDictation, hasDictationBridge, startDictation } from '@/lib/dictation';
 import { appForFile } from '@/lib/fileTypes';
 import { getFileClipboard } from '@/lib/fileClipboard';
+import { requestHighlight } from '@/lib/highlights';
 import { holdMedia } from '@/lib/mediaPause';
 import { parentPath } from '@/lib/fs';
 import { cancelSpeech, getSpeechState, speak, subscribeSpeech } from '@/lib/speech';
@@ -73,6 +74,10 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
         const paths = kind === 'paste' ? getFileClipboard()?.paths : undefined;
         return paths?.length ? Promise.resolve(paths) : null;
       },
+      highlight: ({ text, context, source }) =>
+        void requestHighlight({ text, context, source: { name: source } }).catch((error: unknown) =>
+          toast({ title: 'Couldn’t highlight', description: error instanceof Error ? error.message : String(error), variant: 'destructive' }),
+        ),
       notify: ({ title, description, destructive }) =>
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,

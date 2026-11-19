@@ -65,6 +65,7 @@ import { getAssistantBridge } from '@/lib/assistant';
 import { cleanCursorError, getSystemCursorBridge } from '@/lib/systemCursor';
 import { askSignerForApp } from '@/lib/appSigner';
 import { mimeOf } from '@/lib/mime';
+import { requestHighlight } from '@/lib/highlights';
 import { anchorOf, clampInto, requestShare, stageSharedFiles, type ShareAnchor, type ShareData } from '@/lib/share';
 import { MAX_SHARE_FILES, shareableUrl } from '@/shared/shareLimits';
 import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
@@ -595,6 +596,27 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           error.name = 'AbortError';
           throw error;
         }
+      },
+      // din.app.highlight: the desktop's highlight composer, which posts
+      // nothing until the user presses Post. Only just after a key or click
+      // in the window, as with sharing, so an app can't put it up on its own.
+      'app.highlight': async ({ text, context, source }) => {
+        const s = session.current;
+        const apps = getAppsBridge();
+        if (apps && s?.webContentsId != null) {
+          const since = await apps.sinceInput(s.webContentsId).catch(() => null);
+          if (!live.current.isTop || ((since === null || since > GESTURE_MS) && Date.now() - s.menuPickedAt > GESTURE_MS)) {
+            const error = new Error('Highlighting takes a click or a key press');
+            error.name = 'NotAllowedError';
+            throw error;
+          }
+        }
+        if (typeof text !== 'string' || typeof source !== 'string') throw new TypeError('A highlight is text from a source');
+        return requestHighlight({
+          text,
+          ...(typeof context === 'string' ? { context } : {}),
+          source: { name: source },
+        });
       },
       'app.saveState': ({ state }) => {
         if (!saveWindowState(windowId, state)) console.warn(`din: ${appName}'s saved state is too big or isn't JSON; not kept`);

@@ -446,6 +446,76 @@ function NoteBody({ event }: { event: DraftEvent }) {
   );
 }
 
+/** A URL a highlight names as its source, as one line: the address without its scheme. */
+function sourceLine(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (!/^(https?|nsite):$/.test(url.protocol)) return null;
+    return truncate(`${url.host}${url.pathname === '/' ? '' : url.pathname}`, 80);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where a highlight is from (NIP-84): its `i` tag, which readers take first
+ * (a URL, or another NIP-73 id), else the `r` tag marked `source`, else the
+ * first `r` that isn't a comment's mention. An `r` may be plain text as well
+ * as a URL (nostr-protocol/nips#2454), such as the model that wrote an
+ * assistant's reply.
+ */
+function highlightSource(event: DraftEvent): string | undefined {
+  const external = tagValues(event, 'i').find(Boolean);
+  if (external) return external;
+  const rows = tagRows(event, 'r').filter(([, value]) => value);
+  return (rows.find((row) => row[2] === 'source') ?? rows.find((row) => row[2] !== 'mention'))?.[1];
+}
+
+/**
+ * Kind 9802: a highlight (NIP-84), as a pull quote of the excerpt inside the
+ * paragraph it came from, where that's given, then where it's from. A quote
+ * highlight's comment comes first, as a quote repost's words do.
+ */
+function HighlightBody({ event }: { event: DraftEvent }) {
+  const text = event.content.trim();
+  const comment = tagValue(event, 'comment')?.trim();
+  const rawContext = tagValue(event, 'context')?.trim();
+  // Only a paragraph short enough that the clamp can't cut the excerpt off.
+  const context = rawContext && text && rawContext !== text && rawContext.length <= 400 ? rawContext : undefined;
+  const at = context ? context.indexOf(text) : -1;
+  const source = highlightSource(event);
+  const url = source ? sourceLine(source) : null;
+  const target = tagValues(event, 'e').find((id) => HEX64.test(id));
+
+  return (
+    <>
+      {comment && <Prose text={comment} clamp={4} />}
+      {text && (
+        <blockquote className="border-l-2 border-ink-accent/60 pl-3">
+          <p className="line-clamp-8 whitespace-pre-wrap break-words font-serif text-sm text-foreground">
+            {context && at >= 0 ? (
+              <>
+                <span className="text-muted-foreground">{context.slice(0, at)}</span>
+                <mark className="rounded bg-primary/25 px-0.5 text-foreground">{text}</mark>
+                <span className="text-muted-foreground">{context.slice(at + text.length)}</span>
+              </>
+            ) : (
+              truncate(text, MAX_CONTENT)
+            )}
+          </p>
+        </blockquote>
+      )}
+      {target ? (
+        <ReferencedEvent id={target} label="Highlighting" />
+      ) : url ? (
+        <Meta icon={Globe}>{url}</Meta>
+      ) : source ? (
+        <Meta icon={Quote}>From {truncate(source, 120)}</Meta>
+      ) : null}
+    </>
+  );
+}
+
 /** Kinds 20, 21, 22, 1063: a post whose point is the file attached to it. */
 function MediaBody({ event }: { event: DraftEvent }) {
   const title = tagValue(event, 'title');
@@ -987,8 +1057,10 @@ function EventBody({ event }: { event: DraftEvent }) {
     case 1244:
     case 1311:
     case 1337:
-    case 9802:
       return <NoteBody event={event} />;
+
+    case 9802:
+      return <HighlightBody event={event} />;
 
     // Things whose point is the file attached.
     case 20:

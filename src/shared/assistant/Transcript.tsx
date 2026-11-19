@@ -1,4 +1,4 @@
-import { createContext, createElement, memo, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, createElement, memo, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AppWindow,
   Bot,
@@ -12,22 +12,26 @@ import {
   FolderSearch,
   GitFork,
   Globe,
+  Highlighter,
   Lightbulb,
   ListTodo,
   Loader2,
   MessageCircleQuestion,
   Search,
   Sparkles,
+  Square,
   SquareTerminal,
+  Volume2,
   Wrench,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
+import { useAssistantHost } from '@/shared/assistant/host';
 import { ReadAloudButton } from '@/shared/assistant/ReadAloudButton';
 import {
   backgroundNotice,
@@ -46,6 +50,7 @@ import {
 import { Markdown } from '@/shared/assistant/Markdown';
 import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
 import {
+  modelKey,
   tildify,
   toolTaskID,
   type PromptFile,
@@ -53,9 +58,10 @@ import {
   type SessionMessage,
   type ToolContent,
   type ToolState,
+  type ModelRef,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
-import { useAgentColor } from '@/hooks/useAssistant';
+import { useAgentColor, useAssistantModels } from '@/hooks/useAssistant';
 
 /** Tool output shown in full up to this many characters. */
 const MAX_OUTPUT_CHARS = 20_000;
@@ -453,7 +459,13 @@ function Turn({
         )
       )}
       {workErrors.map(render)}
-      {after.map(render)}
+      {reply ? (
+        <ReplyMenu reply={reply} id={turn.id} model={lastMessage?.model}>
+          {after.map(render)}
+        </ReplyMenu>
+      ) : (
+        after.map(render)
+      )}
       <TurnPreviews items={turn.items} />
       {turn.idle?.outcome === 'failed' && turn.idle.error && (
         <ErrorBanner message={turn.idle.error.message ?? 'The assistant stopped with an error'} />
@@ -475,6 +487,81 @@ function Turn({
         </div>
       )}
     </div>
+  );
+}
+
+/** Elements whose text is a paragraph, for a highlight's context. */
+const PARAGRAPHS = new Set(['P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'TD', 'TH', 'FIGCAPTION']);
+
+/** Line endings normalized and trimmed, keeping internal line breaks. */
+const normalizeText = (value: string) => value.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+
+/**
+ * The text selected inside `root`, and the paragraph it's in (when that
+ * holds it whole and is more than it), or null when nothing in it is.
+ */
+function selectionIn(root: HTMLElement | null): { text: string; context?: string } | null {
+  const selection = window.getSelection();
+  if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+  const text = normalizeText(selection.toString());
+  if (!text) return null;
+  const elementOf = (node: Node) => (node instanceof Element ? node : node.parentElement);
+  for (let el = elementOf(range.commonAncestorContainer); el && root.contains(el); el = el.parentElement) {
+    if (!PARAGRAPHS.has(el.tagName)) continue;
+    const paragraph = normalizeText(el.textContent ?? '');
+    return paragraph !== text && paragraph.includes(text) ? { text, context: paragraph } : { text };
+  }
+  return { text };
+}
+
+/**
+ * A reply's right-click menu: what its buttons do (Copy reply, Read aloud),
+ * with Copy and Highlight on Nostr for text selected in it. The highlight
+ * names the model that wrote the reply as its source.
+ */
+function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; model?: ModelRef; children: ReactNode }) {
+  const host = useAssistantHost();
+  const voice = host.useVoice();
+  const { data } = useAssistantModels();
+  const ref = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<{ text: string; context?: string } | null>(null);
+  const source = model ? (data?.models.find((m) => modelKey(m) === modelKey(model))?.name ?? model.id) : undefined;
+  const speaking = voice.speaking === id;
+  const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div ref={ref} className="flex min-w-0 flex-col gap-4" onContextMenu={() => setSelected(selectionIn(ref.current))}>
+          {children}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {selected ? (
+          <>
+            <ContextMenuItem onSelect={() => copy(selected.text)}>
+              <Copy aria-hidden /> Copy
+            </ContextMenuItem>
+            {host.highlight && source && (
+              <ContextMenuItem onSelect={() => host.highlight?.({ ...selected, source })}>
+                <Highlighter aria-hidden /> Highlight on Nostr
+              </ContextMenuItem>
+            )}
+            <ContextMenuSeparator />
+          </>
+        ) : null}
+        <ContextMenuItem onSelect={() => copy(reply)}>
+          <Copy aria-hidden /> Copy Reply
+        </ContextMenuItem>
+        {voice.available && (
+          <ContextMenuItem onSelect={() => (speaking ? voice.stop() : voice.speak(reply, id))}>
+            {speaking ? <Square aria-hidden /> : <Volume2 aria-hidden />} {speaking ? 'Stop Reading' : 'Read Aloud'}
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

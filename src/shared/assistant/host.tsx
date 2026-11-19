@@ -35,6 +35,12 @@ export interface AssistantHost {
    * event: a drop's items can only be read then.
    */
   transferredPaths(data: DataTransfer, kind: 'paste' | 'drop'): Promise<string[]> | null;
+  /**
+   * Post a NIP-84 highlight of part of a reply: the desktop's composer, for
+   * the user to comment on and post. `source` is who wrote it (the model's
+   * name). Failures are told as a toast. Absent where it can't be done.
+   */
+  highlight?: (highlight: { text: string; context?: string; source: string }) => void;
   /** A short-lived message (a toast). */
   notify(message: { title: string; description?: string; destructive?: boolean }): void;
   /**

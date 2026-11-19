@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Globe, Highlighter, Loader2 } from 'lucide-react';
-import { nip19 } from 'nostr-tools';
+import { Globe, Highlighter, Loader2, Sparkles } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,60 +16,9 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { toast } from '@/hooks/useToast';
 import { getAvatarShape } from '@/lib/avatarShape';
-import {
-  getHighlightHostBridge,
-  type HighlightBridgeRequest,
-} from '@/lib/highlightBridge';
+import { getHighlightHostBridge } from '@/lib/highlightBridge';
+import { highlightTags, requestHighlight, setHighlightHandler, type HighlightRequest } from '@/lib/highlights';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
-
-/** Hex pubkeys of the npubs and nprofiles a comment mentions with `nostr:`. */
-function mentionedPubkeys(comment: string): string[] {
-  const out = new Set<string>();
-  for (const [, bech32] of comment.matchAll(/nostr:([a-z0-9]+)/gi)) {
-    try {
-      const decoded = nip19.decode(bech32);
-      if (decoded.type === 'npub') out.add(decoded.data);
-      else if (decoded.type === 'nprofile') out.add(decoded.data.pubkey);
-    } catch {
-      // Not a valid identifier.
-    }
-  }
-  return [...out];
-}
-
-/** The http(s) URLs a comment mentions, without trailing sentence punctuation. */
-function mentionedUrls(comment: string): string[] {
-  const out = new Set<string>();
-  for (const [match] of comment.matchAll(/\bhttps?:\/\/[^\s<>"'`]+/gi)) {
-    const url = match.replace(/[),.;:!?\]]+$/, '');
-    if (URL.canParse(url)) out.add(url);
-  }
-  return [...out];
-}
-
-/**
- * The tags of a NIP-84 highlight of `request`. The page is its source twice:
- * an `i` tag, which readers prefer, and the same URL in an `r` tag for readers
- * that only know `r`. A comment travels on the highlight itself (a "quote
- * highlight"), which then marks the page's `r` tag `source` and anything the
- * comment mentions `mention`.
- */
-function highlightTags(request: HighlightBridgeRequest, text: string, comment: string): string[][] {
-  const tags: string[][] = [['i', request.url], comment ? ['r', request.url, 'source'] : ['r', request.url]];
-  if (request.context && request.context.includes(text) && request.context !== text) {
-    tags.push(['context', request.context]);
-  }
-  if (comment) {
-    for (const pubkey of mentionedPubkeys(comment)) tags.push(['p', pubkey, '', 'mention']);
-    for (const url of mentionedUrls(comment)) {
-      if (url !== request.url) tags.push(['r', url, 'mention']);
-    }
-    tags.push(['comment', comment]);
-  }
-  // NIP-31 alt for clients that don't understand kind 9802.
-  tags.push(['alt', 'Highlight']);
-  return tags;
-}
 
 function hostOf(url: string): string {
   try {
@@ -84,10 +32,10 @@ function hostOf(url: string): string {
  * The excerpt as a pull quote, inside its surrounding paragraph when that's
  * published with it, the way Ditto shows a kind 9802.
  */
-function HighlightQuote({ text, context }: { text: string; context?: string }) {
+export function HighlightQuote({ text, context, className }: { text: string; context?: string; className?: string }) {
   const at = context && context !== text ? context.indexOf(text) : -1;
   return (
-    <blockquote className="max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-ink-accent/60 bg-selected px-4 py-3">
+    <blockquote className={className ?? 'max-h-64 overflow-y-auto rounded-r-xl border-l-4 border-ink-accent/60 bg-selected px-4 py-3'}>
       <p className="font-serif text-base leading-relaxed break-words whitespace-pre-wrap">
         {context && at >= 0 ? (
           <>
@@ -103,8 +51,36 @@ function HighlightQuote({ text, context }: { text: string; context?: string }) {
   );
 }
 
+/** Where a highlight is from, for the composer's header: a page's title and host, or a source's name. */
+function SourceLine({ request }: { request: HighlightRequest }) {
+  const { source } = request;
+  if ('name' in source) {
+    return (
+      <>
+        <Sparkles className="size-3.5 shrink-0" aria-hidden />
+        <span className="truncate">{source.name}</span>
+      </>
+    );
+  }
+  const host = hostOf(source.url);
+  return (
+    <>
+      <Globe className="size-3.5 shrink-0" aria-hidden />
+      <span className="truncate">
+        {source.title ? (
+          <>
+            {source.title} <span className="font-mono">· {host}</span>
+          </>
+        ) : (
+          <span className="font-mono">{host}</span>
+        )}
+      </span>
+    </>
+  );
+}
+
 interface HighlightComposerProps {
-  request: HighlightBridgeRequest;
+  request: HighlightRequest;
   /** Close the composer: the published event's id, or undefined when cancelled. */
   onDone: (eventId?: string) => void;
 }
@@ -121,8 +97,6 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const text = request.text.trim();
-  const host = hostOf(request.url);
   const name = metadata?.display_name || metadata?.name || 'you';
   const picture = metadata?.picture ? sanitizeUrl(metadata.picture) ?? undefined : undefined;
 
@@ -131,8 +105,7 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
     if (posting) return;
     setPosting(true);
     setError(null);
-    const trimmed = comment.trim();
-    publishEvent({ kind: 9802, content: text, tags: highlightTags(request, text, trimmed) })
+    publishEvent({ kind: 9802, content: request.text, tags: highlightTags(request, comment.trim()) })
       .then((event) => onDone(event.id))
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
@@ -151,21 +124,12 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
             <div className="min-w-0 space-y-1">
               <DialogTitle>Post a highlight</DialogTitle>
               <DialogDescription className="flex min-w-0 items-center gap-1.5">
-                <Globe className="size-3.5 shrink-0" aria-hidden />
-                <span className="truncate">
-                  {request.title ? (
-                    <>
-                      {request.title} <span className="font-mono">· {host}</span>
-                    </>
-                  ) : (
-                    <span className="font-mono">{host}</span>
-                  )}
-                </span>
+                <SourceLine request={request} />
               </DialogDescription>
             </div>
           </DialogHeader>
 
-          <HighlightQuote text={text} context={request.context} />
+          <HighlightQuote text={request.text} context={request.context} />
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="highlight-comment">Comment (optional)</Label>
@@ -217,45 +181,58 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
   );
 }
 
+interface Pending {
+  id: number;
+  request: HighlightRequest;
+  resolve: (eventId: string | null) => void;
+}
+
+let nextPendingId = 1;
+
 /**
- * Desktop-lifetime host for NIP-84 highlight requests from the Web Browser's
- * tabs. When the user picks "Highlight on Nostr" in a page's right-click menu
- * on selected text, main sends the selection here, which opens the composer;
- * only when the user posts from it is a kind 9802 Highlight event published
- * with the signed-in account's signer, referencing the page URL (an `r`-tag
- * source, per NIP-84's website form).
- *
- * The source URL, title, selected text, and surrounding context are supplied
- * by main (the URL read authoritatively from the tab, not the page). One
- * request at a time. Does nothing outside the Electron shell.
+ * Desktop-lifetime host for NIP-84 highlights (src/lib/highlights.ts): from
+ * the Web Browser's tabs, where "Highlight on Nostr" in a page's right-click
+ * menu on selected text has main send the selection here (its URL read from
+ * the tab, not the page); from apps (`din.app.highlight`, the Assistant's
+ * replies); and from `din nostr highlight`. Each opens the composer, one at a
+ * time; only when the user posts from it is a kind 9802 Highlight event
+ * published with the signed-in account's signer.
  */
 export function HighlightBridgeHost() {
   const { user } = useCurrentUser();
   const signedIn = !!user;
-  const [queue, setQueue] = useState<HighlightBridgeRequest[]>([]);
+  const [queue, setQueue] = useState<Pending[]>([]);
+
+  useEffect(
+    () =>
+      setHighlightHandler((request) => {
+        if (!signedIn) return Promise.reject(new Error('No Nostr account is signed in to Din'));
+        return new Promise((resolve) => setQueue((q) => [...q, { id: nextPendingId++, request, resolve }]));
+      }),
+    [signedIn],
+  );
 
   useEffect(() => {
     const bridge = getHighlightHostBridge();
     if (!bridge) return;
-    return bridge.onRequest((request) => {
-      if (!signedIn) {
-        toast({ title: 'Couldn’t highlight', description: 'No Nostr account is signed in to Din', variant: 'destructive' });
-      } else if (request.text.trim()) {
-        setQueue((q) => [...q, request]);
-      }
+    return bridge.onRequest(({ url, title, text, context }) => {
+      requestHighlight({ text, context, source: { url, title } }).catch((error: unknown) =>
+        toast({ title: 'Couldn’t highlight', description: error instanceof Error ? error.message : String(error), variant: 'destructive' }),
+      );
     });
-  }, [signedIn]);
+  }, []);
 
   const current = queue[0];
   if (!current) return null;
 
   return (
     <HighlightComposer
-      key={current.requestId}
-      request={current}
+      key={current.id}
+      request={current.request}
       onDone={(eventId) => {
         if (eventId) toast({ title: 'Highlight posted' });
-        setQueue((q) => q.filter((r) => r.requestId !== current.requestId));
+        current.resolve(eventId ?? null);
+        setQueue((q) => q.filter((p) => p.id !== current.id));
       }}
     />
   );

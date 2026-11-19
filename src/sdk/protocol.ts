@@ -221,6 +221,12 @@ export interface Requests {
    * when the user closes the sheet.
    */
   'app.share': [{ title?: string; text?: string; url?: string; files: FileData[]; handles: string[]; anchor: Rect | null }, void];
+  /**
+   * `din.app.highlight`: the desktop's highlight composer, for a NIP-84
+   * highlight of `text` from a source by name. The posted event's id, or
+   * null when the user cancels.
+   */
+  'app.highlight': [{ text: string; context?: string; source: string }, string | null];
   /** The manifest's `related_applications` that can be opened now. */
   'app.relatedApps': [void, RelatedApplication[]];
   'app.saveState': [{ state: unknown }, void];
