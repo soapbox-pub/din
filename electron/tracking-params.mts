@@ -42,8 +42,23 @@ const GLOBAL = new Set([
 /** Prefixes whose every parameter tracks: Google Analytics' campaign tags, and Matomo's. */
 const GLOBAL_PREFIXES = ['utm_', 'mtm_'];
 
-/** A site's own tracking parameters, on it and its subdomains. */
-const SITES: { hosts: string[]; params: string[] }[] = [
+/**
+ * A site's own tracking parameters, on it and its subdomains: `params` on
+ * every page, `pageParams` only on the pages `pages` matches (where the name
+ * means something else elsewhere on the site), and `pathTail`, a last path
+ * segment that only says where the link came from.
+ */
+interface Site {
+  hosts: string[];
+  params: string[];
+  pages?: RegExp;
+  pageParams?: string[];
+  pathTail?: RegExp;
+}
+
+const AMAZON_HOSTS = ['amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr', 'amazon.it', 'amazon.es', 'amazon.ca', 'amazon.co.jp', 'amazon.in', 'amazon.com.au', 'amazon.com.br', 'amazon.com.mx', 'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.sg', 'amazon.ae', 'amazon.sa', 'amazon.com.tr', 'amazon.com.be'];
+
+const SITES: Site[] = [
   // Share links.
   { hosts: ['youtube.com', 'youtu.be'], params: ['si', 'pp', 'feature'] },
   { hosts: ['open.spotify.com'], params: ['si'] },
@@ -54,10 +69,17 @@ const SITES: { hosts: string[]; params: string[] }[] = [
   { hosts: ['instagram.com'], params: ['ig_rid'] },
   { hosts: ['linkedin.com'], params: ['trk', 'trkcampaign', 'trackingid', 'lipi'] },
   { hosts: ['threads.net', 'threads.com'], params: ['xmt', 'slof'] },
-  // Amazon's product links: the page they came from and how.
+  // Amazon's links: the page they came from and how (a search's signed
+  // session in `dib`, its rank in `sr` and the path's `/ref=sr_1_1`), and on
+  // a product's page the search that found it (`keywords`, and `s`, its
+  // department, which on a search page is the sort order and stays). `th`
+  // and `psc`, which pick the variant shown, stay too.
   {
-    hosts: ['amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr', 'amazon.it', 'amazon.es', 'amazon.ca', 'amazon.co.jp', 'amazon.in', 'amazon.com.au', 'amazon.com.br', 'amazon.com.mx', 'amazon.nl'],
-    params: ['_encoding', 'content-id', 'pd_rd_i', 'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'pf_rd_i', 'pf_rd_m', 'pf_rd_p', 'pf_rd_r', 'pf_rd_s', 'pf_rd_t', 'ref_', 'qid', 'sr', 'sprefix', 'crid'],
+    hosts: AMAZON_HOSTS,
+    params: ['_encoding', 'content-id', 'pd_rd_i', 'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'pf_rd_i', 'pf_rd_m', 'pf_rd_p', 'pf_rd_r', 'pf_rd_s', 'pf_rd_t', 'ref', 'ref_', 'qid', 'sr', 'sprefix', 'crid', 'dib', 'dib_tag', 'ufe', 'dchild', 'social_share', 'starsleft', 'skiptwisterog', 'linkid', 'ascsubtag'],
+    pages: /\/(?:dp|gp\/product|gp\/aw\/d)\//i,
+    pageParams: ['keywords', 's'],
+    pathTail: /\/ref=[^/]*$/i,
   },
 ];
 
@@ -65,12 +87,16 @@ function onHost(hostname: string, host: string): boolean {
   return hostname === host || hostname.endsWith(`.${host}`);
 }
 
-function siteParams(hostname: string): Set<string> | null {
-  let found: Set<string> | null = null;
-  for (const site of SITES) {
-    if (!site.hosts.some((host) => onHost(hostname, host))) continue;
-    found ??= new Set();
+function sitesOf(hostname: string): Site[] {
+  return SITES.filter((site) => site.hosts.some((host) => onHost(hostname, host)));
+}
+
+function siteParams(sites: Site[], pathname: string): Set<string> | null {
+  if (!sites.length) return null;
+  const found = new Set<string>();
+  for (const site of sites) {
     for (const param of site.params) found.add(param);
+    if (site.pages?.test(pathname)) for (const param of site.pageParams ?? []) found.add(param);
   }
   return found;
 }
@@ -93,34 +119,42 @@ function isTracking(key: string, site: Set<string> | null): boolean {
 }
 
 /**
- * An http(s) URL without its tracking parameters, or the very string given
- * when it has none (or isn't an http(s) URL), so a caller can tell by
- * identity whether anything was taken. Everything else is kept byte for
- * byte, in its order and encoding: only whole `name=value` pairs go.
+ * An http(s) URL without its tracking parameters (and a site's tracking path
+ * segment, as Amazon's `/ref=…`), or the very string given when it has none
+ * (or isn't an http(s) URL), so a caller can tell by identity whether
+ * anything was taken. Everything else is kept byte for byte, in its order and
+ * encoding: only whole `name=value` pairs go.
  */
 export function stripTrackingParams(url: string): string {
   if (!/^https?:\/\//i.test(url)) return url;
-  // A `?` after the `#` is the fragment's, which never leaves the page.
-  const hash = url.indexOf('#');
-  const query = url.indexOf('?');
-  if (query === -1 || (hash !== -1 && hash < query)) return url;
-  const search = url.slice(query + 1, hash === -1 ? undefined : hash);
-  if (!search) return url;
-
-  let hostname: string;
+  let parsed: URL;
   try {
-    hostname = new URL(url).hostname.toLowerCase();
+    parsed = new URL(url);
   } catch {
     return url;
   }
-  const site = siteParams(hostname);
-  const pairs = search.split('&');
+  const sites = sitesOf(parsed.hostname.toLowerCase());
+
+  // A `?` or `/` after the `#` is the fragment's, which never leaves the page.
+  const hash = url.indexOf('#');
+  const end = hash === -1 ? url.length : hash;
+  const queryAt = url.slice(0, end).indexOf('?');
+  const query = queryAt === -1 ? end : queryAt;
+  const authority = url.indexOf('/', url.indexOf('//') + 2);
+  let path = authority === -1 || authority > query ? '' : url.slice(authority, query);
+  const tail = path && sites.find((site) => site.pathTail?.test(path))?.pathTail;
+  if (tail) path = path.replace(tail, '') || '/';
+  const head = authority === -1 || authority > query ? url.slice(0, query) : url.slice(0, authority) + path;
+
+  const search = queryAt === -1 ? '' : url.slice(query + 1, end);
+  const pairs = search ? search.split('&') : [];
+  const site = siteParams(sites, parsed.pathname);
   const kept = pairs.filter((pair) => {
     const eq = pair.indexOf('=');
     return !isTracking(decodeKey(eq === -1 ? pair : pair.slice(0, eq)), site);
   });
-  if (kept.length === pairs.length) return url;
+  if (!tail && kept.length === pairs.length) return url;
 
   const rest = kept.filter((pair) => pair !== '').join('&');
-  return url.slice(0, query) + (rest ? `?${rest}` : '') + (hash === -1 ? '' : url.slice(hash));
+  return head + (rest ? `?${rest}` : queryAt !== -1 && !pairs.length ? '?' : '') + url.slice(end);
 }
