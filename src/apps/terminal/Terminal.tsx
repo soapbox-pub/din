@@ -1070,7 +1070,7 @@ function paneSession(
     cursorBlink: true,
     fontSize: currentFontSize,
     fontFamily:
-      "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace",
+      "ui-monospace, 'Noto Sans Mono', 'DejaVu Sans Mono', Menlo, Consolas, 'Symbols Nerd Font Mono', monospace",
     scrollback: 5000,
     theme: terminalTheme(currentDark),
     // Clear cells on glass (terminalTheme); the renderer needs to know first.

@@ -1852,6 +1852,7 @@ in
     noto-fonts-cjk-sans
     noto-fonts-cjk-serif
     noto-fonts-color-emoji
+    nerd-fonts.symbols-only
   ];
 
   # fontconfig always ships DejaVu Sans, and left as the default sans-serif

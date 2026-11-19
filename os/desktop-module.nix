@@ -171,7 +171,7 @@ in
       programs.dconf.enable = true;
       # Brightness for the user, without root (Settings, the menu bar).
       services.udev.packages = [ pkgs.brightnessctl ];
-      fonts.packages = with pkgs; [ noto-fonts noto-fonts-cjk-sans noto-fonts-color-emoji ];
+      fonts.packages = with pkgs; [ noto-fonts noto-fonts-cjk-sans noto-fonts-color-emoji nerd-fonts.symbols-only ];
       # The file chooser is Din's own (electron/file-chooser-portal.mts), as
       # on DinOS, but only in Din's session: another desktop keeps its own.
       xdg.portal = {
