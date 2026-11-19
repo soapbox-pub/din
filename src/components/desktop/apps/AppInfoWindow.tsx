@@ -37,6 +37,9 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { usePinnedApps } from '@/hooks/usePinnedApps';
 import { useNsitePublisher } from '@/hooks/useSiteIdentity';
+import { useOpenUrl } from '@/hooks/useOpenUrl';
+import { parseCanonicalNsiteHost } from '@/lib/nsite';
+import { nip19 } from 'nostr-tools';
 import { useToast } from '@/hooks/useToast';
 import { AppIcon } from '@/shared/AppIcon';
 import { SettingsToken } from '@/shared/settingsChrome';
@@ -393,6 +396,7 @@ function MainPage({
   const [, setPinned] = usePinnedApps();
   useNotificationCenter();
   const publisher = useNsitePublisher(facts.nsiteHost);
+  const openUrl = useOpenUrl();
   const store = getNsiteStore();
   const { data: summary } = useQuery({
     queryKey: ['nsite-store', 'info', facts.nsiteHost],
@@ -451,7 +455,23 @@ function MainPage({
   ].filter((part): part is string => part !== null);
 
   const canClear = (facts.kind === 'nsite' && getNappHost()) || (facts.kind === 'web' && getBrowserBridge());
-  const kind = facts.kind === 'nsite' && publisher ? `nsite by ${publisher}` : APP_KIND_LABELS[facts.kind];
+  // Who publishes an nsite opens as a nostr: link does: in the app for
+  // profiles, the Open With chooser, or the Web Browser.
+  const publisherKey = facts.nsiteHost ? parseCanonicalNsiteHost(facts.nsiteHost)?.pubkey : undefined;
+  const kind = facts.kind === 'nsite' && publisher ? (
+    <>
+      nsite by{' '}
+      {publisherKey ? (
+        <button
+          type="button"
+          onClick={() => openUrl(`nostr:${nip19.npubEncode(publisherKey)}`)}
+          className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          {publisher}
+        </button>
+      ) : publisher}
+    </>
+  ) : APP_KIND_LABELS[facts.kind];
   // Where it's from, quietly at the foot, as Android puts the version.
   const footer = [
     summary ? `Published ${formatDate(summary.updatedAt * 1000)}` : null,
