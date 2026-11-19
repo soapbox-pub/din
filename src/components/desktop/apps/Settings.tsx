@@ -111,15 +111,19 @@ import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
 import { AirPlayReceiverList } from '@/components/desktop/AirPlayIndicator';
 import {
+  chargeLimitPercent,
+  cleanPowerError,
   describePowerProfile,
   formatTimeRemaining,
   getPowerBridge,
   summarizePower,
 } from '@/lib/power';
-import type { BatteryInfo } from '@/lib/power';
+import type { BatteryInfo, ChargeLimitStatus } from '@/lib/power';
 import {
   useBatteryStatus,
+  useChargeLimit,
   usePowerProfiles,
+  useSetChargeLimit,
   useSetPowerProfile,
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
@@ -1489,6 +1493,7 @@ function PowerSection() {
   const bridge = getPowerBridge();
   const status = useBatteryStatus();
   const profiles = usePowerProfiles();
+  const chargeLimit = useChargeLimit();
 
   if (!bridge) {
     return (
@@ -1528,7 +1533,8 @@ function PowerSection() {
       {hasBattery && (
         <div className="space-y-3">
           <SubHeading>Battery</SubHeading>
-          <BatteryPanel status={status} />
+          <BatteryPanel status={status} limit={chargeLimit.data} />
+          {chargeLimit.data?.available && <ChargeLimitSwitch limit={chargeLimit.data} />}
         </div>
       )}
 
@@ -1563,7 +1569,47 @@ function GamePerformanceSwitch() {
   );
 }
 
-function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> }) {
+/**
+ * Stops charging short of full (UPower's charge threshold, usually 80%), as
+ * phones and laptops offer to keep a battery that's mostly plugged in healthy
+ * for longer. `din power limit` does the same.
+ */
+function ChargeLimitSwitch({ limit }: { limit: ChargeLimitStatus }) {
+  const set = useSetChargeLimit();
+  const checked = set.isPending ? set.variables : limit.enabled;
+  const end = chargeLimitPercent(limit);
+  return (
+    <div className={cn(settingsCard, 'px-4 py-3')}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <Label htmlFor="charge-limit" className="cursor-pointer text-sm">
+            Limit charging to {end}%
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Keeps the battery healthy for longer when the computer is mostly plugged in. Charging
+            stops at {end}%
+            {limit.start !== null && limit.start < end ? ` and starts again below ${limit.start}%` : ''}.
+          </p>
+        </div>
+        <Switch
+          id="charge-limit"
+          checked={checked}
+          disabled={set.isPending}
+          onCheckedChange={(on) => set.mutate(on)}
+        />
+      </div>
+      {set.isError && <p className="mt-2 text-sm text-destructive">{cleanPowerError(set.error)}</p>}
+    </div>
+  );
+}
+
+function BatteryPanel({
+  status,
+  limit,
+}: {
+  status: ReturnType<typeof useBatteryStatus>;
+  limit: ChargeLimitStatus | undefined;
+}) {
   const data = status.data;
   const summary = data ? summarizePower(data) : null;
   const critical =
@@ -1592,7 +1638,7 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
                   {summary.percent !== null ? `${summary.percent}%` : '—'}
                 </p>
                 <p className={cn('text-sm', critical ? 'text-destructive' : 'text-muted-foreground')}>
-                  {describeBattery(summary, data.acConnected)}
+                  {describeBattery(summary, data.acConnected, limit)}
                 </p>
               </div>
               {data.acConnected && (
@@ -1630,7 +1676,18 @@ function BatteryPanel({ status }: { status: ReturnType<typeof useBatteryStatus> 
 function describeBattery(
   summary: NonNullable<ReturnType<typeof summarizePower>>,
   acConnected: boolean,
+  limit?: ChargeLimitStatus,
 ): string {
+  // Plugged in and resting near the limit: say why it isn't charging.
+  if (
+    limit?.enabled &&
+    acConnected &&
+    !summary.charging &&
+    summary.percent !== null &&
+    summary.percent >= (limit.start ?? chargeLimitPercent(limit)) - 1
+  ) {
+    return `Charge limited to ${chargeLimitPercent(limit)}% to protect the battery`;
+  }
   if (summary.status === 'full' || summary.percent === 100) {
     return acConnected ? 'Fully charged' : 'Full';
   }

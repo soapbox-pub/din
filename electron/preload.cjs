@@ -1693,6 +1693,15 @@ expose('power', {
    */
   setProfile: (name) => ipcRenderer.invoke('power:setProfile', name),
 
+  /** The battery's charge limit (UPower). `available: false` where no battery has one. */
+  chargeLimit: () => ipcRenderer.invoke('power:chargeLimit'),
+
+  /**
+   * Turn the battery's charge limit on or off. Resolves to its new state.
+   * @param {boolean} on
+   */
+  setChargeLimit: (on) => ipcRenderer.invoke('power:setChargeLimit', on),
+
   /** Which of restart and shut down logind allows this session. */
   actions: () => ipcRenderer.invoke('power:actions'),
 

@@ -54,6 +54,17 @@ export interface PowerProfilesStatus {
   profiles: string[];
 }
 
+export interface ChargeLimitStatus {
+  /** False where no battery supports a charge limit (or UPower is too old). */
+  available: boolean;
+  /** Whether charging stops short of full to spare the battery. */
+  enabled: boolean;
+  /** Where charging stops while it's on, in percent (usually 80). */
+  end: number | null;
+  /** Where charging starts again, in percent (usually 75). */
+  start: number | null;
+}
+
 export interface PowerBridge {
   /** Battery/AC state. `available: false` when no battery is present. */
   status(): Promise<PowerStatus>;
@@ -61,6 +72,10 @@ export interface PowerBridge {
   profiles(): Promise<PowerProfilesStatus>;
   /** Switch the active power profile; resolves to the new profiles state. */
   setProfile(name: string): Promise<PowerProfilesStatus>;
+  /** The battery's charge limit, through UPower. */
+  chargeLimit(): Promise<ChargeLimitStatus>;
+  /** Turn the charge limit on or off; resolves to its new state. */
+  setChargeLimit(on: boolean): Promise<ChargeLimitStatus>;
   /** Which of restart and shut down this session may do without a password. */
   actions(): Promise<PowerActions>;
   /** Restart the computer. Rejects while an update or install is running. */
@@ -133,6 +148,18 @@ export function summarizePower(status: PowerStatus): PowerSummary | null {
     status.batteries.length === 1 ? status.batteries[0].secondsRemaining : null;
 
   return { percent, charging, status: overall, secondsRemaining };
+}
+
+/** Where the charge limit stops charging, in percent, for what's shown. */
+export function chargeLimitPercent(limit: ChargeLimitStatus | undefined): number {
+  return limit?.end ?? 80;
+}
+
+/** Turn the charge limit on or off: Settings' switch and `din power limit` alike. */
+export async function setChargeLimit(on: boolean): Promise<ChargeLimitStatus> {
+  const bridge = getPowerBridge();
+  if (!bridge) throw new Error('Power bridge unavailable');
+  return bridge.setChargeLimit(on);
 }
 
 /** Human-readable time estimate, e.g. "2 hr 15 min", "45 min". */

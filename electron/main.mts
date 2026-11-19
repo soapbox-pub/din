@@ -2318,6 +2318,74 @@ async function readPowerProfiles(): Promise<PowerProfilesState> {
   }
 }
 
+// The battery's charge limit, through UPower (org.freedesktop.UPower.Device's
+// EnableChargeThreshold, as GNOME's "Preserve battery health"). UPower writes
+// the kernel's charge_control_start/end_threshold (75% and 80% unless the
+// hwdb says otherwise for the machine), keeps it across restarts itself, and
+// polkit lets the active session switch it without a password. Where no
+// battery supports it (most desktops, older UPower) it's available:false.
+const UPOWER_BUS = 'org.freedesktop.UPower';
+const UPOWER_PATH = '/org/freedesktop/UPower';
+const UPOWER_DEVICE = 'org.freedesktop.UPower.Device';
+/** UPower's Device.Type for a battery. */
+const UPOWER_TYPE_BATTERY = 2;
+
+/** The charge limit's state as reported to the Settings panel. */
+interface ChargeLimitState {
+  available: boolean;
+  enabled: boolean;
+  /** Where charging stops while it's on, in percent, or null if unknown. */
+  end: number | null;
+  /** Where charging starts again, in percent, or null if unknown. */
+  start: number | null;
+}
+
+/** The UPower paths of the computer's own batteries that support a charge limit. */
+async function chargeLimitBatteries(): Promise<{ path: string; enabled: boolean; start: number; end: number }[]> {
+  const out = await busctl(['--json=short', 'call', UPOWER_BUS, UPOWER_PATH, UPOWER_BUS, 'EnumerateDevices']);
+  const reply: { data?: unknown[] } = JSON.parse(out);
+  const paths = Array.isArray(reply.data?.[0]) ? (reply.data[0] as unknown[]) : [];
+  const found = [];
+  for (const devicePath of paths) {
+    if (typeof devicePath !== 'string' || !devicePath.startsWith(`${UPOWER_PATH}/devices/battery_`)) continue;
+    try {
+      const props = (
+        await busctl([
+          '--json=short', 'get-property', UPOWER_BUS, devicePath, UPOWER_DEVICE,
+          'Type', 'PowerSupply', 'ChargeThresholdSupported', 'ChargeThresholdEnabled',
+          'ChargeStartThreshold', 'ChargeEndThreshold',
+        ])
+      )
+        .trim()
+        .split('\n')
+        .map((line) => (JSON.parse(line) as { data: unknown }).data);
+      const [type, powerSupply, supported, enabled, start, end] = props;
+      if (type !== UPOWER_TYPE_BATTERY || powerSupply !== true || supported !== true) continue;
+      found.push({ path: devicePath, enabled: enabled === true, start: Number(start), end: Number(end) });
+    } catch {
+      // An older UPower without the threshold properties: not supported.
+    }
+  }
+  return found;
+}
+
+async function readChargeLimit(): Promise<ChargeLimitState> {
+  try {
+    const batteries = await chargeLimitBatteries();
+    if (batteries.length === 0) return { available: false, enabled: false, end: null, start: null };
+    const first = batteries[0];
+    const valid = (n: number) => (Number.isFinite(n) && n > 0 && n <= 100 ? n : null);
+    return {
+      available: true,
+      enabled: batteries.every((b) => b.enabled),
+      end: valid(first.end),
+      start: valid(first.start),
+    };
+  } catch {
+    return { available: false, enabled: false, end: null, start: null };
+  }
+}
+
 // Restart and shut down, through logind. The menu offers each only where
 // logind answers a plain "yes" for this session: "challenge" would have
 // polkit's agent (electron/polkit-agent.mts) ask for the password, which a
@@ -2434,6 +2502,22 @@ function registerPowerHandlers(): void {
       'set-property', PPD_BUS, PPD_PATH, PPD_IFACE, 'ActiveProfile', 's', name,
     ]);
     return readPowerProfiles();
+  });
+
+  ipcMain.handle('power:chargeLimit', async (event) => {
+    assertShellSender(event);
+    return readChargeLimit();
+  });
+
+  ipcMain.handle('power:setChargeLimit', async (event, on) => {
+    assertShellSender(event);
+    if (typeof on !== 'boolean') throw new Error('On or off is required');
+    const batteries = await chargeLimitBatteries().catch(() => []);
+    if (batteries.length === 0) throw new Error('This computer’s battery has no charge limit');
+    for (const battery of batteries) {
+      await busctl(['call', UPOWER_BUS, battery.path, UPOWER_DEVICE, 'EnableChargeThreshold', 'b', on ? 'true' : 'false']);
+    }
+    return readChargeLimit();
   });
 
   // Log out: quit cleanly. As a login session (scripts/session.mjs) that

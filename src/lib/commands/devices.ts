@@ -12,7 +12,7 @@ import {
   type DisplayRotation,
 } from '@/lib/display';
 import { MAX_ZOOM, MIN_ZOOM, withDisplayZoom, zoomOf } from '@/lib/displayZoom';
-import { getPowerBridge, summarizePower, describePowerProfile } from '@/lib/power';
+import { chargeLimitPercent, getPowerBridge, setChargeLimit, summarizePower, describePowerProfile } from '@/lib/power';
 import {
   LAYOUT_SWITCH_KEYS,
   MAX_KEYBOARD_LAYOUTS,
@@ -267,12 +267,17 @@ export const powerArea: Area = {
   commands: [
     command('power', 'status', 'The battery, and the power mode', [], async () => {
       const bridge = need(getPowerBridge(), 'Power');
-      const [status, profiles] = await Promise.all([call(bridge.status()), call(bridge.profiles())]);
+      const [status, profiles, chargeLimit] = await Promise.all([
+        call(bridge.status()),
+        call(bridge.profiles()),
+        call(bridge.chargeLimit()),
+      ]);
       const summary = summarizePower(status);
       return {
-        data: { ...status, profiles },
+        data: { ...status, profiles, chargeLimit },
         text: [
           status.available && summary ? `battery: ${summary.percent}%${status.acConnected ? ', plugged in' : ''}` : 'battery: none',
+          chargeLimit.available ? `charge limit: ${chargeLimit.enabled ? `on, ${chargeLimitPercent(chargeLimit)}%` : 'off'}` : '',
           ...status.devices.map((d) => `${d.label}: ${d.percent ?? '?'}%`),
           profiles.available ? `power mode: ${profiles.active} (of ${profiles.profiles.join(', ')})` : '',
         ].filter(Boolean).join('\n'),
@@ -287,6 +292,11 @@ export const powerArea: Area = {
       if (!profiles.profiles.includes(wanted)) throw new CommandError(`Power modes here: ${profiles.profiles.join(', ')}`, 'usage');
       const next = await call(bridge.setProfile(wanted));
       return { text: describePowerProfile(next.active ?? wanted).label };
+    }),
+    command('power', 'limit', 'Stop charging the battery at 80% to keep it healthy, or charge it full', [ON], async (args) => {
+      need(getPowerBridge(), 'The charge limit');
+      const next = await call(setChargeLimit(args.bool('on')));
+      return { data: next, text: next.enabled ? `Charging stops at ${chargeLimitPercent(next)}%` : 'Charging to full' };
     }),
     command('power', 'restart', 'Restart the computer (asks on screen first)', [], async (_args, ctx) => {
       const bridge = need(getPowerBridge(), 'Restarting');

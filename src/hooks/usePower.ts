@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getPowerBridge } from '@/lib/power';
-import type { PowerProfilesStatus, PowerStatus } from '@/lib/power';
+import { getPowerBridge, setChargeLimit } from '@/lib/power';
+import type { ChargeLimitStatus, PowerProfilesStatus, PowerStatus } from '@/lib/power';
 
 /**
  * TanStack Query hook over the OS power bridge (window.dinos.power).
@@ -40,6 +40,34 @@ export function usePowerProfiles() {
     enabled: power !== undefined,
     refetchInterval: 15_000,
     retry: false,
+  });
+}
+
+/** The battery's charge limit (UPower), polled slowly: only Settings or `din` changes it. */
+export function useChargeLimit() {
+  const power = getPowerBridge();
+  return useQuery<ChargeLimitStatus>({
+    queryKey: ['power', 'chargeLimit'],
+    queryFn: () => {
+      const bridge = getPowerBridge();
+      if (!bridge) throw new Error('Power bridge unavailable');
+      return bridge.chargeLimit();
+    },
+    enabled: power !== undefined,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+}
+
+/** Turn the charge limit on or off, priming the cache with the new state. */
+export function useSetChargeLimit() {
+  const queryClient = useQueryClient();
+  return useMutation<ChargeLimitStatus, Error, boolean>({
+    mutationFn: setChargeLimit,
+    onSuccess: (limit) => {
+      queryClient.setQueryData(['power', 'chargeLimit'], limit);
+      void queryClient.invalidateQueries({ queryKey: ['power', 'status'] });
+    },
   });
 }
 
