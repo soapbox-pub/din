@@ -165,6 +165,12 @@ export interface AppConfig {
   /** Three fingers swiped sideways on a touchpad go to the workspace beside. */
   touchpadSwipe: boolean;
   /**
+   * How a monitor goes from one workspace to another: its windows slide
+   * across, fade into the new one's, or just change
+   * (src/lib/workspaceTransition.ts).
+   */
+  workspaceAnimation: 'slide' | 'fade' | 'none';
+  /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on
    * this device, like wobbly windows.

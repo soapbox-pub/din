@@ -96,7 +96,7 @@ impl State {
                 pointer.gesture_swipe_update(self, &SwipeUpdate { time: event.time_msec(), delta: event.delta() });
             }
             InputEvent::GestureSwipeEnd { event } => {
-                if self.touchpad_swipe_end() {
+                if self.touchpad_swipe_end(event.cancelled()) {
                     return;
                 }
                 let Some(pointer) = self.seat.get_pointer() else { return };

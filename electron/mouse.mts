@@ -8,8 +8,10 @@
 // what's Din's to act on, over $XDG_RUNTIME_DIR/din-shell-events, a line at
 // a time: `back` and `forward` (a mouse's side buttons, or a Magic Mouse's
 // swipe), which go Back and Forward in the Web Browser, and `workspace 1`
-// or `workspace -1` (the swipe, or a touchpad's with three fingers), which
-// show the workspace beside. They reach
+// or `workspace -1` (the swipe), which show the workspace beside, and a
+// touchpad's three-finger swipe as it goes, for the desktop to move the
+// workspaces with it: `swipe begin`, `swipe <travel so far>` and `swipe end`
+// or `swipe cancel`. They reach
 // the desktop as shell shortcuts (src/lib/shellShortcuts.ts).
 //
 // Elsewhere the settings do nothing: the desktop Din runs in has its own.
@@ -96,6 +98,13 @@ function listenToShell(sendToShell: (channel: string, payload?: unknown) => void
           sendToShell('shortcut', { action: 'history', back: line === 'back' });
         } else if (line === 'workspace 1' || line === 'workspace -1') {
           sendToShell('shortcut', { action: 'workspace-step', step: line === 'workspace 1' ? 1 : -1 });
+        } else if (line.startsWith('swipe ')) {
+          const what = line.slice('swipe '.length);
+          if (what === 'begin' || what === 'end' || what === 'cancel') {
+            sendToShell('shortcut', { action: 'workspace-swipe', phase: what, dx: 0 });
+          } else if (Number.isFinite(Number(what))) {
+            sendToShell('shortcut', { action: 'workspace-swipe', phase: 'update', dx: Number(what) });
+          }
         }
       }
     });

@@ -19,6 +19,13 @@ import { launchNativeApp } from '@/lib/nativeApps';
 import { closeNativeWindow, isNativeWindowOpen } from '@/lib/nativeDisplay';
 import { fullscreenMonitorIds } from '@/lib/pageFullscreen';
 import {
+  beginWorkspaceTransition,
+  finishWorkspaceTransition,
+  workspaceAnimates,
+  type WorkspaceTransition,
+  type WorkspaceTransitionSpec,
+} from '@/lib/workspaceTransition';
+import {
   insertLeaf,
   layoutTree,
   removeLeaf,
@@ -253,6 +260,22 @@ const treeKey = (areaId: string, workspace: number) => `${workspace}@${areaId}`;
 /** The workspace a monitor is showing. */
 export function activeWorkspace(active: Record<string, number>, areaId: string): number {
   return active[areaId] ?? 1;
+}
+
+/** How a monitor goes to another workspace. */
+export interface ShowWorkspaceOptions {
+  /** The side the new one comes from: 1 the right (the default for a higher number), -1 the left. */
+  dir?: 1 | -1;
+  /** Without the animation: something else has played it (a swipe). */
+  instant?: boolean;
+}
+
+/** A monitor's workspaces to step through: the ones with windows, and the one showing. */
+export interface WorkspaceSteps {
+  areaId: string;
+  current: number;
+  /** In order; stepping wraps around. */
+  list: number[];
 }
 
 /**
@@ -555,9 +578,17 @@ export function useWindows(
   // it is current before any input the commit could have prompted.
   const windowsRef = useRef(windows);
   const stateRef = useRef(state);
+  // The workspace each monitor was told to show since the last commit: two
+  // steps in a row, the second before the first has rendered, count on.
+  const shownSince = useRef<Record<string, number>>({});
+  const shownWorkspace = useCallback(
+    (areaId: string) => shownSince.current[areaId] ?? activeWorkspace(stateRef.current.active, areaId),
+    [],
+  );
   useLayoutEffect(() => {
     windowsRef.current = windows;
     stateRef.current = state;
+    shownSince.current = {};
   }, [windows, state]);
 
   // A native app's new window is the end of its launch. After the commit,
@@ -1106,34 +1137,90 @@ export function useWindows(
     return (focused && homeArea(areas, focused)) || primaryArea(areas);
   }, [getAreas]);
 
+  /** What moves when monitor `areaId` goes from workspace `from` to `to`. */
+  const workspaceTransitionSpec = useCallback(
+    (areaId: string, from: number, to: number | null, dir: 1 | -1): WorkspaceTransitionSpec | null => {
+      const areas = getAreas();
+      const area = areas.find((a) => a.id === areaId);
+      if (!area) return null;
+      return {
+        areaId,
+        from,
+        to,
+        dir,
+        bounds: area.bounds,
+        clip: areas.length > 1,
+        windows: windowsRef.current
+          .filter((w) => !w.minimized && (w.workspace === from || w.workspace === to) && homeArea(areas, w)?.id === areaId)
+          .map((w) => ({ id: w.id, workspace: w.workspace, rect: windowRect(w, areas) })),
+      };
+    },
+    [getAreas],
+  );
+
   /**
    * Show workspace `n` on a monitor (by default, the one keyboard commands
-   * act on), its top window taking focus.
+   * act on), its top window taking focus. It gets there with Settings →
+   * Windows' animation (src/lib/workspaceTransition.ts).
    */
-  const showWorkspaceOn = useCallback((n: number, areaId?: string) => {
+  const showWorkspaceOn = useCallback((n: number, areaId?: string, options?: ShowWorkspaceOptions) => {
     const id = areaId ?? commandArea()?.id;
     if (!id) return;
     currentMonitor.current = id;
-    update((s) => showWorkspace(s, getAreas(), id, n, true));
-  }, [commandArea, getAreas, update]);
+    const show = () => {
+      shownSince.current[id] = n;
+      update((s) => showWorkspace(s, getAreas(), id, n, true));
+    };
+    if (options?.instant || !workspaceAnimates()) return show();
+    // One still playing ends where it was going, and this starts from there.
+    finishWorkspaceTransition();
+    const current = shownWorkspace(id);
+    const spec = current === n ? null : workspaceTransitionSpec(id, current, n, options?.dir ?? (n > current ? 1 : -1));
+    if (!spec) return show();
+    beginWorkspaceTransition(spec).land(1, show);
+  }, [commandArea, getAreas, update, workspaceTransitionSpec, shownWorkspace]);
+
+  /** The workspaces the current monitor steps through. */
+  const workspaceSteps = useCallback((): WorkspaceSteps | null => {
+    const area = commandArea();
+    if (!area) return null;
+    const areas = getAreas();
+    const current = shownWorkspace(area.id);
+    const used = new Set([current]);
+    for (const w of windowsRef.current) {
+      if (!w.closing && homeArea(areas, w)?.id === area.id) used.add(w.workspace);
+    }
+    return { areaId: area.id, current, list: [...used].sort((a, b) => a - b) };
+  }, [commandArea, getAreas, shownWorkspace]);
 
   /**
    * Step through the workspaces with windows on the current monitor (and
    * the one it's showing), as Hyprland's `m+1` / `m-1`, wrapping around.
    */
   const stepWorkspace = useCallback((step: 1 | -1) => {
-    const area = commandArea();
-    if (!area) return;
-    const areas = getAreas();
-    const current = activeWorkspace(stateRef.current.active, area.id);
-    const used = new Set([current]);
-    for (const w of windowsRef.current) {
-      if (!w.closing && homeArea(areas, w)?.id === area.id) used.add(w.workspace);
-    }
-    const list = [...used].sort((a, b) => a - b);
+    // Counted from where an animation still playing is going.
+    finishWorkspaceTransition();
+    const steps = workspaceSteps();
+    if (!steps) return;
+    const { list, current, areaId } = steps;
     const next = list[(list.indexOf(current) + step + list.length) % list.length];
-    showWorkspaceOn(next, area.id);
-  }, [commandArea, getAreas, showWorkspaceOn]);
+    showWorkspaceOn(next, areaId, { dir: step });
+  }, [workspaceSteps, showWorkspaceOn]);
+
+  /**
+   * Start the animation from the workspace a monitor shows to workspace
+   * `to` (null: there's none that way), for a swipe to move by hand; the
+   * swipe shows the workspace itself once it's there (showWorkspace with
+   * `instant`). Null without a desktop to animate.
+   */
+  const beginWorkspaceSwipe = useCallback(
+    (areaId: string, to: number | null, dir: 1 | -1): WorkspaceTransition | null => {
+      finishWorkspaceTransition();
+      const spec = workspaceTransitionSpec(areaId, shownWorkspace(areaId), to, dir);
+      return spec && beginWorkspaceTransition(spec);
+    },
+    [workspaceTransitionSpec, shownWorkspace],
+  );
 
   /** Back to the workspace the current monitor showed before (Super+Ctrl+Tab). */
   const previousWorkspace = useCallback(() => {
@@ -1382,6 +1469,8 @@ export function useWindows(
       setCurrentMonitor,
       showWorkspace: showWorkspaceOn,
       stepWorkspace,
+      workspaceSteps,
+      beginWorkspaceSwipe,
       previousWorkspace,
       moveToWorkspace,
       focusDirection,
@@ -1395,7 +1484,7 @@ export function useWindows(
       adoptSession,
       getSession,
     }),
-    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, workspaceSteps, beginWorkspaceSwipe, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

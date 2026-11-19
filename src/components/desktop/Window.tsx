@@ -47,7 +47,8 @@ import { useAppContext } from '@/hooks/useAppContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
-import { MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
+import { homeArea, MIN_HEIGHT, MIN_WIDTH, windowRect, type WindowState } from '@/hooks/useWindows';
+import { useWorkspaceTransition } from '@/lib/workspaceTransition';
 import {
   areaFor,
   areaNear,
@@ -459,6 +460,14 @@ export const Window = memo(function Window({
   /** The Dock tile it minimizes into. */
   const dockId = windowTile(win, getApp);
   const areas = useWorkAreas();
+  // Its monitor is going to or from its workspace: it shows the whole way
+  // (src/lib/workspaceTransition.ts), whichever of the two the monitor has.
+  const transition = useWorkspaceTransition();
+  const inTransition =
+    transition !== null &&
+    (win.workspace === transition.from || win.workspace === transition.to) &&
+    homeArea(areas, win)?.id === transition.areaId;
+  const away = win.away && !inTransition;
   // A covered window hides once it has stayed covered a moment, and shows
   // again in the same render that it stops being covered.
   const [coverSettled, setCoverSettled] = useState(false);
@@ -1783,8 +1792,8 @@ export const Window = memo(function Window({
   // A covered window is hidden the same way: unlike a page's own
   // visibilityState, that is what stops Chromium painting it and running its
   // requestAnimationFrame loops.
-  // So is a window on a workspace its monitor isn't showing.
-  if (win.minimized || win.away || hiddenBehind) geometry.visibility = 'hidden';
+  // So is a window on a workspace its monitor isn't showing, or going to.
+  if (win.minimized || away || hiddenBehind) geometry.visibility = 'hidden';
   // Glass of the accent's color (accentLayer below) leaves the window clear.
   const frostedAccent = win.accent !== null && accentAlpha < 1 && !win.frameless;
   if (win.accent && !win.frameless && !frostedAccent) geometry.backgroundColor = win.accent;
@@ -2046,7 +2055,7 @@ export const Window = memo(function Window({
                     {/* Built-in apps are code-split (React.lazy); the fallback shows
                         while an app's chunk loads on its first launch. */}
                     <WindowAppContext.Provider value={app.id}>
-                      <WindowVisibleContext.Provider value={!win.minimized && !win.away && !hiddenBehind}>
+                      <WindowVisibleContext.Provider value={!win.minimized && !away && !hiddenBehind}>
                         <Suspense
                           fallback={<div className="size-full animate-pulse bg-muted/40" />}
                         >

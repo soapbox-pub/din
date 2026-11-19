@@ -2083,7 +2083,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'screenshot-area' ||
         shortcut.action === 'wm' ||
         shortcut.action === 'history' ||
-        shortcut.action === 'workspace-step'
+        shortcut.action === 'workspace-step' ||
+        shortcut.action === 'workspace-swipe'
       ) {
         return;
       }

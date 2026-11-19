@@ -63,6 +63,7 @@ export function TestApp({ children }: TestAppProps) {
     mouseMiddleClick: false,
     mouseSwipe: 'pages',
     touchpadSwipe: true,
+    workspaceAnimation: 'slide',
     tilingEnabled: false,
     tilingGap: 8,
     restoreWindows: true,

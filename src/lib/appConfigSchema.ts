@@ -51,6 +51,7 @@ export const AppConfigSchema = z.object({
   mouseMiddleClick: z.boolean(),
   mouseSwipe: z.enum(['pages', 'workspaces', 'off']),
   touchpadSwipe: z.boolean(),
+  workspaceAnimation: z.enum(['slide', 'fade', 'none']),
   tilingEnabled: z.boolean(),
   tilingGap: z.number().min(0).max(64),
   restoreWindows: z.boolean(),

@@ -81,6 +81,7 @@ const defaultConfig: AppConfig = {
   mouseMiddleClick: false,
   mouseSwipe: 'pages',
   touchpadSwipe: true,
+  workspaceAnimation: 'slide',
   tilingEnabled: false,
   tilingGap: 8,
   restoreWindows: true,

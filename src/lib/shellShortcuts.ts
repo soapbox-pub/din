@@ -26,6 +26,8 @@
  *   - a mouse's Back/Forward, or a Magic Mouse's swipe (from din-shell)
  *                             -> { action: 'history', back }
  *                                or { action: 'workspace-step', step }
+ *   - a touchpad's three-finger swipe (from din-shell)
+ *                              → { action: 'workspace-swipe', phase, dx }
  *   - Ctrl+T in a browser tab -> { action: 'new-tab', wcId }
  *   - Ctrl+W in a browser tab -> { action: 'close-tab', wcId }
  *   - Ctrl+L / Alt+D / F6     -> { action: 'focus-address', wcId }
@@ -147,6 +149,17 @@ export type ShellShortcut =
       /** A Magic Mouse's two-finger swipe, from din-shell: the workspace beside. */
       action: 'workspace-step';
       step: 1 | -1;
+    }
+  | {
+      /**
+       * A touchpad's three-finger swipe sideways, from din-shell, as it
+       * goes: it begins, its travel so far (`dx`, in libinput's pointer
+       * units, fingers going right counting up) each time it moves, and it
+       * ends, or is cancelled (WorkspaceSwipeHost.tsx).
+       */
+      action: 'workspace-swipe';
+      phase: 'begin' | 'update' | 'end' | 'cancel';
+      dx: number;
     }
   | {
       /** Ctrl+T pressed inside a browser tab: open a new tab. */
