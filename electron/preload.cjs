@@ -2798,6 +2798,16 @@ expose('assistant', {
   /** The models OpenCode's own interface used last. */
   recentModels: () => ipcRenderer.invoke('assistant:recentModels'),
 
+  /** The folders OpenCode finds skills in, their skills, and which are on (electron/assistant-skills.mts). */
+  skills: () => ipcRenderer.invoke('assistant:skills'),
+
+  /**
+   * Add or remove a folder of skills, or turn skills on or off, in OpenCode's
+   * config: resolves with how things stand after.
+   * @param {{ op: 'addFolder', path: string } | { op: 'removeFolder', entry: string } | { op: 'setEnabled', ids: string[], enabled: boolean }} change
+   */
+  changeSkills: (change) => ipcRenderer.invoke('assistant:skillsChange', change),
+
   /** Claude Code, for the Claude provider: where it is and who it's signed in as (electron/claude-code.mts). */
   claude: () => ipcRenderer.invoke('assistant:claude'),
 

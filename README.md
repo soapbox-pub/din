@@ -884,6 +884,16 @@ assistant is on, and offers it at the foot of the Assistant's list and in
 Settings → Assistant (`din assistant update`): `opencode upgrade`, then the
 server restarts on it.
 
+**Settings → Assistant → Skills** lists the skills OpenCode finds from your
+home directory. Add more folders with **Add folder**, or expand a folder to
+turn individual skills on or off. Removing a folder from the list leaves its
+files in place. Project-specific skill settings still apply in those projects.
+
+Din saves folder paths and skill permissions in OpenCode's global config
+(`~/.config/opencode/opencode.jsonc` or `opencode.json`). The same settings
+apply to `opencode` in a terminal without a server restart. Run
+`din assistant skills` to list them from a shell.
+
 ### Dictation
 
 Super+H types what you say into whatever has the keyboard: a text field, a

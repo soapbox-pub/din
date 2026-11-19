@@ -39,6 +39,7 @@ import { ipcMain } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
 import { revokeSudoGrant } from './askpass.mts';
 import { assistantGit } from './assistant-git.mts';
+import { changeSkills, skillSettings } from './assistant-skills.mts';
 import { cancelClaudeLogin, claudeStatus, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
 
 const INSTALL_DIR = path.join(os.homedir(), '.opencode/bin');
@@ -658,6 +659,20 @@ export function registerAssistantHandlers(options: {
   ipcMain.handle('assistant:git', async (event, op: unknown, directory: unknown, arg: unknown) => {
     assertShellSender(event);
     return assistantGit(await serverEnvironment(), op, directory, arg);
+  });
+
+  // Skills: the folders OpenCode finds them in and which are on, both in its
+  // config file (assistant-skills.mts). Settings' and `din assistant`'s; no
+  // app reaches these (din-apps.mts).
+  ipcMain.handle('assistant:skills', (event) => {
+    assertShellSender(event);
+    return skillSettings((apiPath) => request('GET', apiPath, undefined));
+  });
+
+  ipcMain.handle('assistant:skillsChange', (event, change: unknown) => {
+    assertShellSender(event);
+    // Settings hears of it, whoever made the change (`din assistant` too).
+    return changeSkills((apiPath) => request('GET', apiPath, undefined), change).finally(() => emitEvent({ type: 'din.skills' }));
   });
 
   ipcMain.handle('assistant:request', (event, method: unknown, apiPath: unknown, body: unknown) => {
