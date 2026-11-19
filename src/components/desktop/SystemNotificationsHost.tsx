@@ -31,7 +31,8 @@ const MIN_POPUP_MS = 2000;
  * a Linux app's window, the tab or web app a page's came from, or an
  * installed nsite's window - opened at the notification's `data.url` if it
  * wasn't open, and in either case its service worker's to move
- * (clients.openWindow, see electron/napp.mts).
+ * (clients.openWindow, see electron/napp.mts). One main sends for a built-in
+ * app (a finished torrent) opens that app with the params it carries.
  * A website's service worker decides for itself what a click on its
  * notification opens or focuses (electron/web-push.mts), as in Chrome, and so
  * does a Din app's (electron/din-app-workers.mts).
@@ -156,6 +157,12 @@ export function SystemNotificationsHost() {
           if (guest) {
             bridge.activate(n.id, action);
             if (action === 'default') raiseGuest(guest.webContentsId);
+            return;
+          }
+          // A built-in app's, from main: a click opens the app (or brings it
+          // forward, a single-instance app getting the params as a launch).
+          if (action === 'default' && n.launch && n.appId && getAppRef.current(n.appId)) {
+            open(n.appId, n.launch);
             return;
           }
           if (action !== 'default' || takesClick) bridge.activate(n.id, action);

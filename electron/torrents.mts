@@ -36,6 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, ipcMain } from 'electron';
 import { trash } from './files.mts';
+import type { SystemNotification } from './notifications.mts';
 import { runCommand, which } from './system.mts';
 
 const SYSTEM_BINARY = process.env.DIN_TRANSMISSION;
@@ -699,7 +700,7 @@ function notifyFinished(torrents: Torrent[]): void {
   if (finishedHashes) {
     for (const t of torrents) {
       if (t.finished && !finishedHashes.has(t.hash) && t.downloadedBytes > 0) {
-        sendToShell('notifications:show', {
+        const notification: SystemNotification = {
           id: `din:torrents:${t.hash}`,
           appName: 'Torrents',
           appId: 'torrents',
@@ -716,7 +717,10 @@ function notifyFinished(torrents: Torrent[]): void {
           tag: '',
           site: null,
           worker: null,
-        });
+          // A click opens Torrents (or brings it forward) with the transfer chosen.
+          launch: { show: t.hash },
+        };
+        sendToShell('notifications:show', notification);
       }
     }
   }

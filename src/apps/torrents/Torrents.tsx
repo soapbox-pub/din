@@ -219,11 +219,32 @@ function Transfers() {
     addFiles(files);
   }, [addFiles]);
 
-  // How Torrents was opened: with a magnet link, or .torrent files.
+  // A transfer to show (by its info hash): chosen once the list has it.
+  const [showHash, setShowHash] = useState<string | null>(null);
+  // A new object each time, so showing the same transfer again scrolls to it again.
+  const [reveal, setReveal] = useState<{ id: number } | null>(null);
+  if (showHash && torrents) {
+    const target = torrents.find((t) => t.hash === showHash);
+    setShowHash(null);
+    if (target) {
+      setSearch('');
+      const test = FILTERS.find((f) => f.id === filter)?.test;
+      if (test && !test(target)) setFilter('all');
+      setSelected(new Set([target.id]));
+      setReveal({ id: target.id });
+    }
+  }
+  useEffect(() => {
+    if (reveal) document.querySelector(`[data-id="${reveal.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [reveal]);
+
+  // How Torrents was opened: with a magnet link, .torrent files, or a
+  // transfer to show (a click on its "Download finished" notification).
   const handleLaunch = useCallback(
     (launch: Launch) => {
       if (typeof launch.params.magnet === 'string' && isMagnetUrl(launch.params.magnet)) addMagnet(launch.params.magnet);
       if (launch.files.length) addFiles(launch.files);
+      if (typeof launch.params.show === 'string') setShowHash(launch.params.show);
     },
     [addMagnet, addFiles],
   );

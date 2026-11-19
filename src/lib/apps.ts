@@ -326,7 +326,8 @@ export const APPS: readonly AppDefinition[] = [
   // BitTorrent, from .torrent files and magnet: links, by Din's own
   // Transmission (electron/torrents.mts), so transfers go on with the window
   // closed. One window; launch params `{ magnet }` (any magnet: link opened
-  // anywhere) or a .torrent file open the Add window.
+  // anywhere) or a .torrent file open the Add window; `{ show }` (an info
+  // hash, from a "Download finished" notification) chooses that transfer.
   dinApp('torrents'),
   // The games in ~/roms, played full screen in RetroArch by electron/games.mts.
   dinApp('games'),

@@ -82,6 +82,11 @@ export interface SystemNotification {
    * tabs and its installed app share the worker.
    */
   worker: { origin: string } | null;
+  /**
+   * For a built-in app's, sent by main for it (torrents.mts): the launch
+   * params a click opens the app with, open or not.
+   */
+  launch?: Record<string, string>;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
