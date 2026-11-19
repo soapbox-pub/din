@@ -31,7 +31,7 @@
     # nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/relay.ngit.dev/ngit;
     # pinned to a release tag, so bump the ref to update it.
     ngit = {
-      url = "git+https://relay.ngit.dev/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit.git?ref=refs/tags/v3.0.5";
+      url = "git+https://relay.ngit.dev/npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/ngit.git?ref=refs/tags/v3.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -58,17 +58,13 @@
       # version.
       electron = { _module.args.electron = pkgs.electron_43; };
 
-      # ngit, patched to sign through nostrd (ngit-signer-socket.patch): for
-      # any account nostrd holds, ngit asks it for signatures over its socket
-      # instead of reading a key or opening a bunker connection of its own,
-      # and with no account selected it signs as nostrd's active one, the
-      # account signed in to Din. Accounts nostrd doesn't hold, and keys or
-      # bunkers given on ngit's command line, sign as before;
-      # `git config --global nostr.signer-socket false` turns it off. Rebase
-      # the patch when the ngit input is bumped.
-      ngitPackage = ngit.packages.${system}.default.overrideAttrs (old: {
-        patches = (old.patches or [ ]) ++ [ ./ngit-signer-socket.patch ];
-      });
+      # ngit signs through nostrd (since v3.2.0, its NIP-5F socket support):
+      # for any account nostrd holds, ngit asks it for signatures over
+      # ~/.local/share/nostr/signer.sock instead of reading a key or opening
+      # a bunker connection of its own, and with no account selected it signs
+      # as nostrd's active one, the account signed in to Din.
+      # `git config --global nostr.signer-socket false` turns it off.
+      ngitPackage = ngit.packages.${system}.default;
 
       # The commit the system is built from, which system updates compare
       # with the tip they fetch (os/din-update.sh): `self.rev` for a clean
