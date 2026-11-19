@@ -64,6 +64,15 @@ name is missing. `FileIcon` (`src/shared/FileIcon.tsx`) already does.
 Who's signed in is NIP-07, as on any Nostr web page: `window.nostr` is a
 signer backed by Din's, with `getPublicKey`, `signEvent`, `nip04` and
 `nip44`, so Nostrify and other NIP-07 libraries work unchanged.
+`signPsbt(psbtHex)` spends the account's onchain bitcoin, as Ditto's
+BITCOIN-SIGNING.md has it (and Din gives web pages too): the account's
+pubkey is a Taproot internal key, so its address is that key's `bc1p…`
+P2TR output; build a PSBT whose inputs name it as `tapInternalKey`, with
+their `witnessUtxo`, and it comes back with those inputs signed, not
+finalized. The user is shown where the money goes and asked every time.
+`src/shared/bitcoin.ts` builds, reads and finalizes them, and
+`src/shared/esplora.ts` talks to the network (the Wallet app's
+`src/apps/wallet/`).
 `getPublicKey()` rejects while nobody is signed in. NIP-07 has no event for
 another account signing in, so ask again when the window comes back to the
 front (React Query's `refetchOnWindowFocus`). The user's relays and media

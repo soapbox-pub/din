@@ -1,0 +1,16 @@
+{
+  "name": "Wallet",
+  "description": "Your Nostr account’s onchain bitcoin: the balance and history of its address, a QR code to be paid at, and sending, signed by Din’s signer after it shows you where the money goes.",
+  "icons": [{ "src": "/icons/apps/wallet.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "shortcuts": [
+    { "name": "Send Bitcoin", "url": "/?section=send", "din": { "id": "send" } },
+    { "name": "Receive Bitcoin", "url": "/?section=receive", "din": { "id": "receive" } }
+  ],
+  "din": {
+    "permissions": ["nostr"],
+    "window": { "size": { "width": 920, "height": 680 }, "frame": "custom" },
+    "keywords": ["bitcoin", "btc", "money", "pay", "payments", "sats", "satoshis", "onchain", "taproot", "psbt", "send", "receive", "address"]
+  }
+}

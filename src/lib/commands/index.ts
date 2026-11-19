@@ -26,6 +26,7 @@ import { gamesArea } from './games';
 import { flasherArea } from './flasher';
 import { speakArea } from './speech';
 import { grammarArea } from './grammar';
+import { walletArea } from './wallet';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
 import { cleanError } from './util';
 
@@ -57,6 +58,7 @@ export const AREAS: readonly Area[] = [
   mailArea,
   calendarArea,
   contactsArea,
+  walletArea,
   vpnArea,
   torArea,
   firewallArea,
