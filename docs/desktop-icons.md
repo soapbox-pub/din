@@ -57,8 +57,7 @@ its place.
 - **Right-click the desktop:** New Folder, New Text File, Sort By (Name,
   Kind, Date Modified, Size), Clean Up (closing the gaps, in their order),
   Show Desktop in Files, and Show Desktop Icons.
-- **Add to Desktop** is in the apps menu's and the Dock's and taskbar's
-  right-click menus.
+- **Add to Desktop** is in the apps menu's right-click menu.
 
 ## Shortcuts
 

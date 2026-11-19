@@ -380,7 +380,7 @@ export const APPS: readonly AppDefinition[] = [
     name: 'App Info',
     icon: '/icons/apps/settings.png',
     component: AppInfoWindow,
-    defaultSize: { width: 520, height: 600 },
+    defaultSize: { width: 440, height: 720 },
     floating: true,
     hidden: true,
     instanceParam: 'app',

@@ -15,8 +15,8 @@ import { SettingsSubHeading } from '@/shared/settingsSection';
 import { SettingsToken } from '@/shared/settingsChrome';
 
 /**
- * The apps whose Dock or taskbar badge the user hid (a tile's right-click
- * "Hide badge"), each with Show to bring it back: the way back for an app no
+ * The apps whose Dock or taskbar badge the user hid (App Info →
+ * Notifications), each with Show to bring it back: the way back for an app no
  * longer in the Dock. Nothing while none is hidden.
  */
 export function HiddenBadgesList() {

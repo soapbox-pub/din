@@ -30,7 +30,9 @@ import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useWindowIcon } from '@/contexts/WindowIconContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
-import { useWindowTitlebar } from '@/contexts/WindowTitlebarContext';
+import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
+import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
+import { ContentPane } from '@/shared/appChrome';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNativeApps } from '@/hooks/useNativeApps';
 import { usePinnedApps } from '@/hooks/usePinnedApps';
@@ -165,7 +167,8 @@ function ActionButton({
  * the Dock, the taskbar and the apps menu (`din apps info`). Its first page
  * is the app's icon, name and kind, Open, Stop (its windows closed) and
  * Uninstall, and a row for each of what it may change, each opening a page
- * of its own with a back button in the title bar: its notifications (on or
+ * of its own with a back button in the title bar, which keeps the app's icon
+ * and name ("Armada – Notifications"): its notifications (on or
  * off, its badge, what it sent lately), its permissions, its storage, what
  * it does while closed, and what it opens. A window per app (`instanceParam`),
  * with a tile of its own in the Dock, wearing the app's icon with a cog.
@@ -261,38 +264,43 @@ function AppInfo({ appId }: { appId: string }) {
   const [site, setPermission] = useSiteInfo(facts && notifiesBySite(facts) ? facts.origin : null);
   const background = useBackground(facts);
 
-  useWindowTitle(!app ? 'App Info' : page === 'main' ? `${app.name} – App Info` : `${PAGE_TITLES[page]} – ${app.name}`);
-  useWindowIcon(useBadgedIcon(app));
+  // Which app, always, and where in its info: "Armada – Notifications", as
+  // an nsite's title bar keeps its name while it moves between pages.
+  const title = !app ? 'App Info' : `${app.name} – ${page === 'main' ? 'App Info' : PAGE_TITLES[page]}`;
+  useWindowTitle(title);
+  const badged = useBadgedIcon(app);
+  useWindowIcon(badged);
+  useOwnWindowHeader();
 
-  // A page's back button and its name, where the window's title is.
-  const setTitlebar = useWindowTitlebar();
-  useEffect(() => {
-    if (page === 'main') {
-      setTitlebar(null);
-      return;
-    }
-    setTitlebar(
-      <div className="flex min-w-0 flex-1 items-center gap-1">
-        <button
-          type="button"
-          aria-label="Back"
-          title="Back"
-          onClick={() => setPage('main')}
-          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
-          <ChevronLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
-        </button>
-        <span className="min-w-0 truncate text-sm font-semibold">{PAGE_TITLES[page]}</span>
-      </div>,
-    );
-  }, [page, setTitlebar]);
-  useEffect(() => () => setTitlebar(null), [setTitlebar]);
+  // As Settings: the title bar is the window's frosted frame, and the page
+  // sits in it on a solid, rounded pane.
+  const frame = (content: ReactNode) => (
+    <div className="flex h-full w-full flex-col text-foreground">
+      <WindowDragRegion className={cn('flex h-12 shrink-0 items-center gap-2 pr-3', page === 'main' ? 'pl-4' : 'pl-2')}>
+        {page !== 'main' && (
+          <button
+            type="button"
+            aria-label="Back"
+            title="Back"
+            onClick={() => setPage('main')}
+            className="-mr-1 grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground outline-none hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <ChevronLeft className="size-4.5" strokeWidth={1.75} aria-hidden />
+          </button>
+        )}
+        <AppIcon icon={badged ?? app?.icon ?? COG} web={app?.web} className="size-5 shrink-0" />
+        <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-sm font-medium text-foreground/90">{title}</h1>
+        <WindowControls />
+      </WindowDragRegion>
+      <ContentPane className="ml-2">{content}</ContentPane>
+    </div>
+  );
 
   if (!app || !facts) {
-    return (
-      <div className="h-full overflow-y-auto bg-background">
+    return frame(
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <SettingsFallback icon={Package}>This app isn’t on this computer anymore.</SettingsFallback>
-      </div>
+      </div>,
     );
   }
 
@@ -304,9 +312,9 @@ function AppInfo({ appId }: { appId: string }) {
   else if (page === 'opens') body = <OpensPage facts={facts} />;
   else body = <MainPage app={app} facts={facts} site={site} background={background} onPage={setPage} />;
 
-  return (
+  return frame(
     <div
-      className="h-full overflow-y-auto bg-background"
+      className="min-h-0 flex-1 overflow-y-auto"
       // Backspace or Alt+Left goes back a page, as a browser's.
       onKeyDown={(e) => {
         if (page === 'main' || (e.target as HTMLElement).closest('input, textarea, [role=combobox], [role=listbox]')) return;
@@ -319,7 +327,7 @@ function AppInfo({ appId }: { appId: string }) {
       <div key={page} className="mx-auto flex max-w-xl flex-col gap-4 p-4 [&>*]:shrink-0">
         {body}
       </div>
-    </div>
+    </div>,
   );
 }
 
