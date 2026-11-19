@@ -126,11 +126,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792733683,
-        "narHash": "sha256-vhKiUHKgcBPU/Ydhs7Tc6+BFfaIxp33rsndQGp2HiKU=",
+        "lastModified": 1795049646,
+        "narHash": "sha256-zNn2j3uRgn34rhDcqvxMpZA7+pDeURjU/pTdke8wK20=",
         "ref": "refs/heads/main",
-        "rev": "a9746f72527912c08c5c4b6df956d8b7bc44f7ec",
-        "revCount": 4,
+        "rev": "ba7509af0e2ebce4ae5e90842b94ab8f5e387afa",
+        "revCount": 5,
         "type": "git",
         "url": "https://git.shakespeare.diy/npub1q3sle0kvfsehgsuexttt3ugjd8xdklxfwwkh559wxckmzddywnws6cd26p/nostrd.git"
       },

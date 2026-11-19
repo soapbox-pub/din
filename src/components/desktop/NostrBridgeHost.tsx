@@ -26,6 +26,8 @@ import {
 import { originLabel, questionTitle } from '@/lib/signerLabels';
 import { APP_DATA_KIND, MAX_CLOCK_SKEW_SECONDS, isAppDataDTag } from '@/lib/appData';
 import { serveAppSignerRequests } from '@/lib/appSigner';
+import { canSignBitcoin } from '@/lib/bitcoinSigners';
+import type { PsbtSummary } from '@/shared/bitcoin';
 import { SignerPrompt, type PromptAnswer, type SignerPromptItem } from '@/components/desktop/SignerPrompt';
 import { CONNECT_APP_APP_ID, connectAppParams } from '@/lib/settingsWindows';
 
@@ -79,6 +81,20 @@ function stringParam(params: Record<string, unknown>, name: string): string {
   return value;
 }
 
+/** Loaded when something first asks to sign a Bitcoin transaction. */
+const loadBitcoin = () => import('@/shared/bitcoin');
+
+/**
+ * What a signPsbt request would do with `account`'s bitcoin, for its prompt.
+ * Throws, before anything is asked, for a PSBT that isn't one or has nothing
+ * of the account's to sign.
+ */
+async function readPsbt(params: Record<string, unknown>, account: string): Promise<PsbtSummary> {
+  const psbt = stringParam(params, 'psbt');
+  if (psbt.length > 400_000) throw new Error('That transaction is too big');
+  return (await loadBitcoin()).summarizePsbt(psbt, account);
+}
+
 /**
  * Desktop-lifetime host for Din's signer as other software sees it: NIP-07
  * window.nostr in browser tabs and installed web apps (electron/nostr-preload.cjs),
@@ -94,6 +110,8 @@ function stringParam(params: Record<string, unknown>, name: string): string {
  * - Signing (per kind) and encrypting or decrypting (per method) are asked
  *   about, unless the user remembered an answer for that site. NIP-42 relay
  *   AUTH is signed without asking once a site is connected.
+ * - Signing a Bitcoin transaction (signPsbt) is asked about every time, with
+ *   where the money goes and the fee, as the PSBT itself says.
  * - Closing the prompt is a no, never remembered, and that tab can't ask again
  *   until it navigates or the user clicks in it.
  * - One question at a time; queued ones that a remembered answer has since
@@ -261,6 +279,17 @@ export function NostrBridgeHost() {
             ? impl.encrypt(peer, stringParam(params, 'plaintext'))
             : impl.decrypt(peer, stringParam(params, 'ciphertext'));
         }
+        case 'signPsbt': {
+          const psbt = stringParam(params, 'psbt');
+          if (!canSignBitcoin(signer)) throw new Error('This account can’t sign Bitcoin transactions');
+          const signed: unknown = await signer.signPsbt(psbt);
+          // Check what the signer gave back rather than trusting it.
+          const { psbtTxid } = await loadBitcoin();
+          if (typeof signed !== 'string' || psbtTxid(signed) !== psbtTxid(psbt)) {
+            throw new Error('The signer returned a different transaction');
+          }
+          return signed;
+        }
       }
     }
 
@@ -314,6 +343,7 @@ export function NostrBridgeHost() {
       }
 
       const kind = method === 'signEvent' ? parseTemplate(params.event).kind : undefined;
+      const psbt = method === 'signPsbt' ? await readPsbt(params, user.pubkey) : undefined;
       let preview: string | undefined;
       const decision = decide(latest.current.grants[origin] ?? grant, method, kind);
       if (decision === 'deny') throw new Error(REJECTED);
@@ -324,6 +354,7 @@ export function NostrBridgeHost() {
           request,
           question: method,
           kind,
+          psbt,
           name,
           account: user.pubkey,
           signer: user.signer,
@@ -357,6 +388,7 @@ export function NostrBridgeHost() {
       if (!signerUser) throw new Error("Din isn't signed in to the account this app is connected to");
 
       const kind = method === 'signEvent' ? parseTemplate(params.event).kind : undefined;
+      const psbt = method === 'signPsbt' ? await readPsbt(params, account) : undefined;
       if (method === 'signEvent') {
         const claimed = (params.event as { pubkey?: unknown } | undefined)?.pubkey;
         if (claimed !== undefined && claimed !== account) throw new Error('That event is for a different account');
@@ -380,6 +412,7 @@ export function NostrBridgeHost() {
           request,
           question: method,
           kind,
+          psbt,
           name: client.name || 'An app',
           account,
           signer: signerUser.signer,

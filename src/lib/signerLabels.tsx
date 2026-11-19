@@ -17,6 +17,8 @@ export function questionTitle(question: SignerQuestion, kind?: number): string {
       return 'Encrypt a message (NIP-44)';
     case 'nip44.decrypt':
       return 'Decrypt a message (NIP-44)';
+    case 'signPsbt':
+      return 'Send bitcoin';
     case 'getPublicKey':
     case 'getRelays':
       return 'See who you are';

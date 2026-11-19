@@ -129,4 +129,17 @@ export class NostrdSigner implements NostrSigner {
     decrypt: (pubkey: string, ciphertext: string) =>
       nostrdCall<string>('nip44_decrypt', [pubkey, ciphertext, this.pubkey]),
   };
+
+  /** Sign the account's Taproot inputs of a hex PSBT (src/lib/bitcoinSigners.ts). */
+  async signPsbt(psbt: string): Promise<string> {
+    try {
+      return await nostrdCall<string>('sign_psbt', [psbt, this.pubkey]);
+    } catch (error) {
+      // An nostrd from before it could.
+      if (error instanceof NostrdError && error.code === 2) {
+        throw new Error('This computer’s signer can’t sign Bitcoin transactions yet; update it', { cause: error });
+      }
+      throw error;
+    }
+  }
 }

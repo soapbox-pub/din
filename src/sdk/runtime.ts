@@ -1048,6 +1048,7 @@ export function installDin(transport: Transport): void {
       encrypt: (pubkey, text) => request('nostr.encrypt', { version: 'nip44', pubkey, text }),
       decrypt: (pubkey, text) => request('nostr.decrypt', { version: 'nip44', pubkey, text }),
     },
+    signPsbt: (psbt) => request('nostr.signPsbt', { psbt }),
   };
 
   // ---- notifications and permissions (the web's own APIs) ----

@@ -304,6 +304,9 @@ function toBridgeCall(method: string, params: unknown[]): { method: string; para
       return { method: 'nip44.encrypt', params: { pubkey: str(0), plaintext: str(1) } };
     case 'nip44_decrypt':
       return { method: 'nip44.decrypt', params: { pubkey: str(0), ciphertext: str(1) } };
+    // Ditto's BITCOIN-SIGNING.md: a hex PSBT in, signed and unfinalized out.
+    case 'sign_psbt':
+      return { method: 'signPsbt', params: { psbt: str(0) } };
     default:
       return null;
   }

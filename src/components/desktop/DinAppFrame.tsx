@@ -1157,6 +1157,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
           wcId: session.current?.webContentsId ?? null,
         }));
       },
+      // Asked about every time (signerPermissions' alwaysAsks).
+      'nostr.signPsbt': async ({ psbt }) => {
+        need('nostr');
+        return String(await askSignerForApp({ method: 'signPsbt', params: { psbt }, origin: appOrigin(appId), wcId: session.current?.webContentsId ?? null }));
+      },
       'nostr.decrypt': async ({ version, pubkey, text }) => {
         need('nostr');
         return String(await askSignerForApp({

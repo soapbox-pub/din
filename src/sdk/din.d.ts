@@ -697,6 +697,14 @@ export interface Nip07 {
   signEvent(event: NostrEventTemplate): Promise<SignedNostrEvent>;
   nip04: { encrypt(pubkey: string, text: string): Promise<string>; decrypt(pubkey: string, text: string): Promise<string> };
   nip44: { encrypt(pubkey: string, text: string): Promise<string>; decrypt(pubkey: string, text: string): Promise<string> };
+  /**
+   * Sign a Bitcoin transaction spending the account's onchain bitcoin (its
+   * pubkey's Taproot address, `bc1p…`): a hex PSBT in, the same PSBT with
+   * the account's inputs signed, not finalized, out (Ditto's
+   * BITCOIN-SIGNING.md). Din shows the user where the money goes and asks,
+   * every time.
+   */
+  signPsbt(psbt: string): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------

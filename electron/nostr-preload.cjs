@@ -74,6 +74,10 @@ function installNostr(bridge) {
       /** @param {string} pubkey @param {string} ciphertext */
       decrypt: (pubkey, ciphertext) => call('nip44.decrypt', { pubkey: text(pubkey), ciphertext: text(ciphertext) }),
     }),
+    // Spending the account's bitcoin, as Ditto's BITCOIN-SIGNING.md has it:
+    // a hex PSBT in, the account's Taproot inputs signed (not finalized) out.
+    /** @param {string} psbtHex */
+    signPsbt: (psbtHex) => call('signPsbt', { psbt: text(psbtHex) }),
   });
 
   Object.defineProperty(window, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });

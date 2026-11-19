@@ -22,8 +22,10 @@ import { getKindLabel } from '@/lib/kindLabels';
 import { formatEventJson, parseDraftEvent } from '@/lib/draftEvent';
 import type { NostrBridgeRequest } from '@/lib/nostrBridge';
 import type { SignerQuestion } from '@/lib/signerLabels';
-import type { Decision } from '@/lib/signerPermissions';
+import { alwaysAsks, type Decision } from '@/lib/signerPermissions';
 import { middleEllipsis } from '@/lib/utils';
+import type { PsbtSummary } from '@/shared/bitcoin';
+import { formatBtc, formatSats } from '@/shared/bitcoinAmounts';
 
 /** One question for the user, queued by NostrBridgeHost. */
 export interface SignerPromptItem {
@@ -32,6 +34,8 @@ export interface SignerPromptItem {
   question: SignerQuestion;
   /** The event kind, for signEvent. */
   kind?: number;
+  /** What the transaction does, for signPsbt. */
+  psbt?: PsbtSummary;
   /** What to call the asker in a notice; the prompt names a page or app itself (useSiteIdentity). */
   name: string;
   /** The account that would sign. */
@@ -102,6 +106,13 @@ function headline(item: SignerPromptItem, name: string, isConnect: boolean): { t
     case 'nip04.encrypt':
     case 'nip44.encrypt':
       return { title: `${who} wants to encrypt a message as you` };
+    case 'signPsbt': {
+      const spent = item.psbt?.spent;
+      return {
+        title: spent !== undefined && spent > 0 ? `${who} wants to send ${formatBtc(spent)} BTC` : `${who} wants to sign a Bitcoin transaction`,
+        detail: 'Once it’s sent, it can’t be taken back.',
+      };
+    }
     default:
       return { title: `${who} wants to read a message sent to you` };
   }
@@ -129,6 +140,53 @@ function Message({ children }: { children: ReactNode }) {
     <p className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/50 px-3 py-2.5 text-sm">
       {children}
     </p>
+  );
+}
+
+function Amount({ sats }: { sats: number }) {
+  return (
+    <span className="shrink-0 text-right tabular-nums">
+      <span className="font-medium text-foreground">{formatBtc(sats)} BTC</span>
+      <span className="block text-xs text-muted-foreground">{formatSats(sats)}</span>
+    </span>
+  );
+}
+
+/** Where a transaction's money goes, as its PSBT says: each payment, what comes back, the fee. */
+function Transaction({ summary }: { summary: PsbtSummary }) {
+  const payments = summary.outputs.filter((o) => !o.change);
+  const back = summary.outputs.filter((o) => o.change).reduce((n, o) => n + o.value, 0);
+  const row = 'flex items-start justify-between gap-3 px-3 py-2.5 text-sm';
+  return (
+    <div className="divide-y divide-border/60 overflow-hidden rounded-xl bg-muted/50">
+      {payments.map((output, i) => (
+        <div key={i} className={row}>
+          <span className="min-w-0">
+            <span className="block text-muted-foreground">To</span>
+            <span className="block font-mono text-xs break-all text-foreground">{output.address ?? 'A script with no address'}</span>
+          </span>
+          <Amount sats={output.value} />
+        </div>
+      ))}
+      {back > 0 && (
+        <div className={row}>
+          <span className="text-muted-foreground">Back to you</span>
+          <Amount sats={back} />
+        </div>
+      )}
+      <div className={row}>
+        <span className="text-muted-foreground">
+          Network fee
+          {summary.feeRate !== undefined && <span className="block text-xs">{summary.feeRate} sat/vB</span>}
+        </span>
+        {summary.fee !== undefined ? <Amount sats={summary.fee} /> : <span className="text-muted-foreground">Unknown</span>}
+      </div>
+      {summary.otherInputs > 0 && (
+        <p className="px-3 py-2.5 text-xs text-muted-foreground">
+          {summary.otherInputs === 1 ? 'One input is' : `${summary.otherInputs} inputs are`} someone else’s, for them to sign.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -197,7 +255,7 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
   // A signed event names its author in its own card; otherwise the account is
   // worth a line only when there is more than one it could be.
   const showAccount = item.question !== 'signEvent' && users.length > 1;
-  const hasBody = item.question === 'signEvent' || isEncrypt || isDecrypt || showAccount;
+  const hasBody = item.question === 'signEvent' || isEncrypt || isDecrypt || Boolean(item.psbt) || showAccount;
 
   return (
     <Dialog open onOpenChange={(open) => !open && answer('dismiss')}>
@@ -254,6 +312,8 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
               </>
             )}
 
+            {item.psbt && <Transaction summary={item.psbt} />}
+
             {showAccount && <Person label="As" pubkey={item.account} />}
           </div>
         )}
@@ -275,10 +335,12 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
             </>
           ) : (
             <>
-              <Button onClick={() => answer('allow')}>Allow</Button>
-              <Button variant="secondary" onClick={() => answer('allow', true)}>
-                Always allow
-              </Button>
+              <Button onClick={() => answer('allow')}>{item.question === 'signPsbt' ? 'Sign' : 'Allow'}</Button>
+              {!alwaysAsks(item.question) && (
+                <Button variant="secondary" onClick={() => answer('allow', true)}>
+                  Always allow
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => answer('deny')}>
                 Don’t allow
               </Button>

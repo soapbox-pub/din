@@ -343,6 +343,7 @@ export interface Requests {
   'nostr.signEvent': [{ event: unknown }, unknown];
   'nostr.encrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
   'nostr.decrypt': [{ version: 'nip04' | 'nip44'; pubkey: string; text: string }, string];
+  'nostr.signPsbt': [{ psbt: string }, string];
 
   /** The App Store's (`store`): docs/din/permissions.md. */
   'store.state': [void, StoreState];

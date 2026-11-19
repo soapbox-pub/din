@@ -1,9 +1,12 @@
 import { type NLoginType, NUser, useNostrLogin } from '@nostrify/react/login';
 import { useNostr } from '@nostrify/react';
+import { NSecSigner } from '@nostrify/nostrify';
+import { nip19 } from 'nostr-tools';
 import { useCallback, useMemo } from 'react';
 
 import { useAuthor } from './useAuthor.ts';
 import { NOSTRD_LOGIN, NostrdSigner } from '@/lib/nostrd';
+import { NBrowserBitcoinSigner, NConnectBitcoinSigner, NSecBitcoinSigner } from '@/lib/bitcoinSigners';
 
 export function useCurrentUser() {
   const { nostr } = useNostr();
@@ -11,12 +14,24 @@ export function useCurrentUser() {
 
   const loginToUser = useCallback((login: NLoginType): NUser  => {
     switch (login.type) {
-      case 'nsec': // Nostr login with secret key
-        return NUser.fromNsecLogin(login);
-      case 'bunker': // Nostr login with NIP-46 "bunker://" URI
-        return NUser.fromBunkerLogin(login, nostr);
+      // Each signer can sign Bitcoin transactions too (src/lib/bitcoinSigners.ts).
+      case 'nsec': { // Nostr login with secret key
+        const sk = nip19.decode(login.data.nsec);
+        if (sk.type !== 'nsec') throw new Error('Not a secret key');
+        return new NUser(login.type, login.pubkey, new NSecBitcoinSigner(sk.data));
+      }
+      case 'bunker': { // Nostr login with NIP-46 "bunker://" URI
+        const clientSk = nip19.decode(login.data.clientNsec);
+        if (clientSk.type !== 'nsec') throw new Error('Not a secret key');
+        return new NUser(login.type, login.pubkey, new NConnectBitcoinSigner({
+          relay: nostr.group(login.data.relays),
+          pubkey: login.data.bunkerPubkey,
+          signer: new NSecSigner(clientSk.data),
+          timeout: 60_000,
+        }));
+      }
       case 'extension': // Nostr login with NIP-07 browser extension
-        return NUser.fromExtensionLogin(login);
+        return new NUser(login.type, login.pubkey, new NBrowserBitcoinSigner());
       case NOSTRD_LOGIN: // An account kept in nostrd, the system's signer
         return new NUser(NOSTRD_LOGIN, login.pubkey, new NostrdSigner(login.pubkey));
       // Other login types can be defined here

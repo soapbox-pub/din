@@ -17,6 +17,8 @@ import { z } from 'zod';
  *   is honored like a remembered "yes".
  * - Nothing expires, as in Tenna: a permission that lapses is asked about
  *   again at a moment the user has no context for.
+ * - signPsbt (spending the account's bitcoin) is asked every time: each one
+ *   moves different money, so a "yes" is never remembered. A "no" is.
  */
 
 export type SignerMethod =
@@ -26,7 +28,8 @@ export type SignerMethod =
   | 'nip04.encrypt'
   | 'nip04.decrypt'
   | 'nip44.encrypt'
-  | 'nip44.decrypt';
+  | 'nip44.decrypt'
+  | 'signPsbt';
 
 /** Methods that are asked about one at a time (all but the identity ones). */
 export type GuardedMethod = Exclude<SignerMethod, 'getPublicKey' | 'getRelays'>;
@@ -39,7 +42,13 @@ export const SIGNER_METHODS: readonly SignerMethod[] = [
   'nip04.decrypt',
   'nip44.encrypt',
   'nip44.decrypt',
+  'signPsbt',
 ];
+
+/** Methods whose "yes" is never remembered: each request is asked about. */
+export function alwaysAsks(method: string): boolean {
+  return method === 'signPsbt';
+}
 
 export function isSignerMethod(method: string): method is SignerMethod {
   return (SIGNER_METHODS as readonly string[]).includes(method);
@@ -89,7 +98,9 @@ export function decide(
   if (method === 'signEvent') {
     return kind === undefined ? 'ask' : (grant.kinds[String(kind)] ?? 'ask');
   }
-  return grant.methods[method] ?? 'ask';
+  const remembered = grant.methods[method];
+  if (remembered === 'allow' && alwaysAsks(method)) return 'ask';
+  return remembered ?? 'ask';
 }
 
 /** A copy of `grant` with one decision written into it. */
@@ -106,6 +117,7 @@ export function withDecision<G extends Pick<SiteGrant, 'methods' | 'kinds'>>(
     else delete kinds[String(kind)];
     return { ...grant, kinds };
   }
+  if (decision === 'allow' && alwaysAsks(method)) return grant;
   const methods = { ...grant.methods };
   if (decision) methods[method] = decision;
   else delete methods[method];
