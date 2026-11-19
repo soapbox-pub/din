@@ -59,8 +59,11 @@ interface Site {
 const AMAZON_HOSTS = ['amazon.com', 'amazon.co.uk', 'amazon.de', 'amazon.fr', 'amazon.it', 'amazon.es', 'amazon.ca', 'amazon.co.jp', 'amazon.in', 'amazon.com.au', 'amazon.com.br', 'amazon.com.mx', 'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.sg', 'amazon.ae', 'amazon.sa', 'amazon.com.tr', 'amazon.com.be'];
 
 const SITES: Site[] = [
-  // Share links.
-  { hosts: ['youtube.com', 'youtu.be'], params: ['si', 'pp', 'feature'] },
+  // Share links. YouTube's push notifications open a video with the
+  // notification's attribution (`attr_tag`, `parentCsn`,
+  // `parentTrackingParams`), which its page takes off the address bar only
+  // once it has loaded.
+  { hosts: ['youtube.com', 'youtu.be'], params: ['si', 'pp', 'feature', 'attr_tag', 'parentcsn', 'parenttrackingparams'] },
   { hosts: ['open.spotify.com'], params: ['si'] },
   { hosts: ['x.com', 'twitter.com'], params: ['s', 't', 'ref_src', 'ref_url'] },
   { hosts: ['tiktok.com'], params: ['_r', '_t', 'is_from_webapp', 'sender_device', 'share_app_id', 'share_link_id'] },

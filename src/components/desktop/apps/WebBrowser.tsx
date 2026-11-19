@@ -1258,18 +1258,22 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         case 'themeColor':
           updateTab(id, { themeColor: event.value });
           break;
-        case 'navigate':
+        case 'navigate': {
+          // A page can put tracking tokens back with pushState or
+          // replaceState, which sends nothing; the address bar, and so what's
+          // copied, bookmarked or kept in history, never shows them.
+          const url = stripTrackingParams(event.url);
           updateTab(id, (tab) => {
             // The surface under an internal page is parked at about:blank, and
             // its own commit must not overwrite the URL the chrome navigated
             // to. Any *other* commit does supersede it - that's how going back
             // out of about:preferences lands on the real page again.
-            if (event.url === NEW_TAB_URL && isInternalUrl(tab.url)) {
+            if (url === NEW_TAB_URL && isInternalUrl(tab.url)) {
               return { canBack: event.canBack, canForward: event.canForward };
             }
             return {
-              url: event.url === NEW_TAB_URL ? '' : event.url,
-              address: event.url === NEW_TAB_URL ? '' : event.url,
+              url: url === NEW_TAB_URL ? '' : url,
+              address: url === NEW_TAB_URL ? '' : url,
               canBack: event.canBack,
               canForward: event.canForward,
             };
@@ -1292,10 +1296,11 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           if (!isPrivate && !tabsRef.current.find((t) => t.id === id)?.tor) {
             const sent = typedUrls.current.get(id);
             typedUrls.current.delete(id);
-            if (sent && sent.url !== event.url) recordVisit(sent.url, sent.typed);
-            recordVisit(event.url, sent?.typed);
+            if (sent && sent.url !== url) recordVisit(sent.url, sent.typed);
+            recordVisit(url, sent?.typed);
           }
           break;
+        }
         case 'loadError':
           typedUrls.current.delete(id);
           // Ignore the error for a URL the tab has already navigated past
