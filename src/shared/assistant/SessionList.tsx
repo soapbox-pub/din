@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from 'react';
-import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, MessageSquare, Pencil, Plus, SquarePen, SquarePlus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, Pencil, Plus, SquarePen, Trash2 } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -32,7 +32,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { SearchField, SidebarTitle, SidebarTitleIcon, ToolButton } from '@/shared/appChrome';
-import { focusRing, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
+import { focusRing, roomyMenu, searchRow, sidebarHeadingClass, sidebarRowClass, sidebarWidthClass, toolIcon } from '@/shared/appChromeStyles';
 import { bundledIconProps } from '@/shared/iconSizes';
 
 /** How many conversations a project shows before "Show more". */
@@ -280,20 +280,12 @@ export function SessionList({
             />
           </ContextMenuTrigger>
           <ContextMenuContent
+            className={cn('w-60', roomyMenu)}
             onCloseAutoFocus={(e) => {
               if (keepFocus.current) e.preventDefault();
               keepFocus.current = false;
             }}
           >
-            <ContextMenuItem onSelect={() => onSelect(session.id)}>
-              <MessageSquare aria-hidden /> Open
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onOpenInNewTab(session.id)}>
-              <SquarePlus aria-hidden /> Open in New Tab
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onNew(session.location.directory)}>
-              <SquarePen aria-hidden /> New Conversation in This Folder
-            </ContextMenuItem>
             <ContextMenuItem onSelect={() => onFork(session.id)}>
               <GitFork aria-hidden /> Fork
             </ContextMenuItem>
@@ -482,7 +474,7 @@ export function SessionList({
                           />
                         </button>
                       </ContextMenuTrigger>
-                      <ContextMenuContent>
+                      <ContextMenuContent className={cn('w-60', roomyMenu)}>
                         <ContextMenuItem onSelect={() => onNew(project.root)}>
                           <SquarePen aria-hidden /> New Conversation
                         </ContextMenuItem>

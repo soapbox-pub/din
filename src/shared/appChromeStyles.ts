@@ -75,6 +75,13 @@ export const flushPane = cn(
  */
 export const glassPanel = 'rounded-2xl glass-surface';
 
+/**
+ * A roomy right-click menu, as the Dock's is: 8px around its rows, 32px rows,
+ * and room around the rules between them. Give it a width (`w-60`).
+ */
+export const roomyMenu =
+  'p-2 [&_[data-slot=context-menu-item]]:py-1.5 [&_[data-slot=context-menu-sub-trigger]]:py-1.5 [&_[data-slot=context-menu-separator]]:my-1.5';
+
 /** What's chosen among cards, chips or tiles in an app's content: tinted with the theme, never outlined in it. */
 export const chosenClass = 'bg-selected text-foreground';
 

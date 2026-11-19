@@ -9,6 +9,7 @@ import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
 import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { cn } from '@/lib/utils';
+import { roomyMenu } from '@/shared/appChromeStyles';
 
 /**
  * A Dock or taskbar tile's right-click menu: its app's windows by what
@@ -53,11 +54,7 @@ export function TileMenuContent({
   const { open, focus, minimize, closeAll } = controls;
   return (
     <ContextMenuContent
-      className={cn(
-        'z-[10000] w-60 p-2',
-        // 32px rows, and room around the rules between them.
-        '[&_[data-slot=context-menu-item]]:py-1.5 [&_[data-slot=context-menu-separator]]:my-1.5',
-      )}
+      className={cn('z-[10000] w-60', roomyMenu)}
       {...above}
     >
       {taskWindow && (
