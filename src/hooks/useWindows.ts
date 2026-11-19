@@ -1277,23 +1277,33 @@ export function useWindows(
     }
   }, [getAreas, maximize, minimize, moveToMonitor, swapTiles, tile, unmaximize]);
 
-  /**
-   * End a drag of a tiled window: dropped on another tiled window, the two
-   * trade places; dropped on another monitor, it tiles there.
-   */
-  const dropTile = useCallback((id: string, target: string | null, x: number, y: number) => {
-    if (target) {
-      swapTiles(id, target);
-      return;
-    }
+  const planDrop = useCallback((s: WmState, id: string, x: number, y: number) => {
     const areas = getAreas();
-    const w = windowsRef.current.find((x) => x.id === id);
+    const w = s.windows.find((w) => w.id === id);
     const from = w ? homeArea(areas, w) : null;
     const to = areaAt(areas, x, y);
-    if (!from || !to || from.id === to.id) return;
-    currentMonitor.current = to.id;
-    setWindows((ws) => ws.map((x) => (x.id === id ? carryTo(x, from, to) : x)));
-  }, [getAreas, setWindows, swapTiles]);
+    if (!w?.tiled || !from || !to) return null;
+    const key = treeKey(to.id, activeWorkspace(s.active, to.id));
+    const { gap } = getTiling();
+    const rect = tilingRect(to, gap);
+    const remaining = removeLeaf(s.trees[key] ?? null, id);
+    const tree = insertLeaf(remaining, id, null, rect, gap, { x, y });
+    return { from, to, key, tree, rect: layoutTree(tree, rect, gap).get(id)! };
+  }, [getAreas, getTiling]);
+
+  const previewDrop = useCallback((id: string, x: number, y: number) =>
+    planDrop(stateRef.current, id, x, y)?.rect ?? null, [planDrop]);
+
+  const dropTile = useCallback((id: string, x: number, y: number) => {
+    update((s) => {
+      const plan = planDrop(s, id, x, y);
+      if (!plan) return s;
+      const { from, to, key, tree } = plan;
+      currentMonitor.current = to.id;
+      const windows = from.id === to.id ? s.windows : s.windows.map((w) => w.id === id ? carryTo(w, from, to) : w);
+      return { ...s, windows, trees: { ...s.trees, [key]: tree } };
+    });
+  }, [planDrop, update]);
 
   /** Float a tiled window, or tile a floating one (Super+T). */
   const toggleFloating = useCallback((id: string) => {
@@ -1388,6 +1398,7 @@ export function useWindows(
       swapDirection,
       moveToMonitor,
       dropTile,
+      previewDrop,
       toggleFloating,
       toggleSplit,
       resizeBy,
@@ -1395,7 +1406,7 @@ export function useWindows(
       adoptSession,
       getSession,
     }),
-    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, previewDrop, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

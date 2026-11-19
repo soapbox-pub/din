@@ -113,20 +113,6 @@ function pointerOn(areas: WorkArea[], px: number, py: number): { area: WorkArea;
 }
 
 /** The snap zone under a pointer (workspace coordinates), if any. */
-/**
- * The tiled window (other than `self`) under a viewport point, and where it
- * sits in workspace coordinates.
- */
-function tileUnder(clientX: number, clientY: number, self: string): { id: string; rect: Rect } | null {
-  for (const el of document.elementsFromPoint(clientX, clientY)) {
-    if (!(el instanceof HTMLElement) || el.dataset.tiled === undefined) continue;
-    const id = el.dataset.windowId;
-    if (!id || id === self) continue;
-    return { id, rect: { x: el.offsetLeft, y: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } };
-  }
-  return null;
-}
-
 function snapTargetAt(areas: WorkArea[], px: number, py: number): SnapTarget | null {
   const { area, x, y } = pointerOn(areas, px, py);
   const side =
@@ -441,7 +427,7 @@ export const Window = memo(function Window({
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
   // solely when its own `window` object, `isTop`, `covered` or `onBar` changes.
-  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
+  const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, setTitle, setIcon, setAccent, dropTile, previewDrop } =
     useWindowActions();
   const { config } = useAppContext();
   // The Dock always sits along the bottom; the taskbar along any edge.
@@ -519,11 +505,7 @@ export const Window = memo(function Window({
     snap: SnapTarget | null;
     /** The shared top edge the pointer is resting under, and whether it's armed yet. */
     dwell?: { areaId: string; timer: number; armed: boolean };
-    /**
-     * Dragging a tiled window: the tiled window under the pointer it would
-     * trade places with, and the pointer, in workspace coordinates.
-     */
-    tile?: { target: string | null; key: string; px: number; py: number };
+    tile?: { key: string; px: number; py: number; started: boolean };
   } | null>(null);
   const resizeState = useRef<{
     dir: ResizeDir;
@@ -1225,8 +1207,6 @@ export const Window = memo(function Window({
       const wsLeft = ws?.left ?? 0;
       const wsTop = ws?.top ?? 0;
       if (win.tiled && !win.maximized) {
-        // A tiled window drags rigidly, and on release trades places with
-        // the tile it's dropped on (see onPointerMove and endDrag).
         stopWobble(false);
         dragState.current = {
           px: e.clientX,
@@ -1239,7 +1219,7 @@ export const Window = memo(function Window({
           wsTop,
           tearAway: null,
           snap: null,
-          tile: { target: null, key: '', px: e.clientX - wsLeft, py: e.clientY - wsTop },
+          tile: { key: '', px: e.clientX - wsLeft, py: e.clientY - wsTop, started: false },
         };
         beginGesture();
         return;
@@ -1354,22 +1334,18 @@ export const Window = memo(function Window({
       const py = e.clientY - s.wsTop;
 
       if (s.tile) {
+        if (!s.tile.started && Math.hypot(e.clientX - s.px, e.clientY - s.py) < TEAR_AWAY_PX) return;
+        s.tile.started = true;
         s.x = s.wx + (e.clientX - s.px);
         s.y = s.wy + (e.clientY - s.py);
         s.tile.px = px;
         s.tile.py = py;
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
-        // Outline where it would go: the tile under the pointer, or a whole
-        // other monitor to tile on.
-        const under = tileUnder(e.clientX, e.clientY, win.id);
-        const area = under ? null : areaNear(areas, px, py);
-        const home = areaFor(areas, { x: win.x, y: win.y, width: win.width, height: win.height });
-        const elsewhere = area && area.id !== home.id ? area : null;
-        const key = under ? `tile:${under.id}` : elsewhere ? `area:${elsewhere.id}` : '';
+        const hint = previewDrop(win.id, px, py);
+        const key = hint ? `${hint.x}:${hint.y}:${hint.width}:${hint.height}` : '';
         if (key !== s.tile.key) {
           s.tile.key = key;
-          s.tile.target = under?.id ?? null;
-          setSnapHint(under?.rect ?? elsewhere);
+          setSnapHint(hint);
         }
         return;
       }
@@ -1507,7 +1483,7 @@ export const Window = memo(function Window({
         el.style.transform = `translate3d(${s.x - s.wx}px, ${s.y - s.wy}px, 0)`;
       }
     },
-    [beginGesture, unmaximize, win.id, win.x, win.y, win.width, win.height, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
+    [beginGesture, unmaximize, win.id, previewDrop, config.wobblyWindows, stopWobble, wobbleFrame, renderWobble],
   );
 
   const endDrag = useCallback(
@@ -1530,7 +1506,7 @@ export const Window = memo(function Window({
         if (s.x === s.wx && s.y === s.wy) return;
         // The FLIP into the new tile starts from where it was let go.
         if (el) paintedRect.current = { x: s.x, y: s.y, width: el.offsetWidth, height: el.offsetHeight };
-        dropTile(win.id, s.tile.target, s.tile.px, s.tile.py);
+        dropTile(win.id, s.tile.px, s.tile.py);
         return;
       }
 
