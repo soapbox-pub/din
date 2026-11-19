@@ -76,6 +76,10 @@ impl State {
             }
             InputEvent::PointerAxis { event } => self.on_axis(event),
             InputEvent::GestureSwipeBegin { event } => {
+                // Three fingers on a touchpad go between workspaces (mouse.rs).
+                if self.touchpad_swipe_begin(event.fingers()) {
+                    return;
+                }
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 let serial = SERIAL_COUNTER.next_serial();
                 pointer.gesture_swipe_begin(
@@ -84,10 +88,17 @@ impl State {
                 );
             }
             InputEvent::GestureSwipeUpdate { event } => {
+                let delta = event.delta();
+                if self.touchpad_swipe_update(delta.x, delta.y) {
+                    return;
+                }
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 pointer.gesture_swipe_update(self, &SwipeUpdate { time: event.time_msec(), delta: event.delta() });
             }
             InputEvent::GestureSwipeEnd { event } => {
+                if self.touchpad_swipe_end() {
+                    return;
+                }
                 let Some(pointer) = self.seat.get_pointer() else { return };
                 let serial = SERIAL_COUNTER.next_serial();
                 pointer.gesture_swipe_end(

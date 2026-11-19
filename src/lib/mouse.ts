@@ -15,6 +15,7 @@ export interface MouseSettings {
   secondaryClick: AppConfig['mouseSecondaryClick'];
   middleClick: boolean;
   swipe: AppConfig['mouseSwipe'];
+  touchpadSwipe: boolean;
 }
 
 export interface MouseBridge {
@@ -44,5 +45,6 @@ export function mouseSettings(config: AppConfig): MouseSettings {
     secondaryClick: config.mouseSecondaryClick,
     middleClick: config.mouseMiddleClick,
     swipe: config.mouseSwipe,
+    touchpadSwipe: config.touchpadSwipe,
   };
 }

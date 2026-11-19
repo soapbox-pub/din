@@ -910,6 +910,9 @@ The window manager (`src/hooks/useWindows.ts`) keeps the tiling trees, and
 While tiling is on, or a workspace other than 1 is in use, the menu bar shows
 the workspaces and a switch to turn tiling off. Keys pressed inside web pages
 reach the shell through the host's `wm` shortcut (`electron/main.mts`).
+On DinOS, three fingers swiped sideways on a touchpad go to the workspace
+beside, and on to the next as they keep going (Settings → Mouse; din-shell
+takes the swipe, `native/din-compositor/src/session/mouse.rs`).
 
 ### Optional features
 

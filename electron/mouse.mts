@@ -1,6 +1,6 @@
 // The mouse: Settings → Mouse's scrolling direction and speed, tracking
-// speed, secondary click, and a Magic Mouse's middle click and two-finger
-// swipe (window.dinos.mouse).
+// speed, secondary click, a Magic Mouse's middle click and two-finger
+// swipe, and a touchpad's three-finger swipe (window.dinos.mouse).
 //
 // Under din-shell, which owns the mice, Din tells it the settings in
 // $XDG_RUNTIME_DIR/din-shell-mouse, which it watches
@@ -8,7 +8,8 @@
 // what's Din's to act on, over $XDG_RUNTIME_DIR/din-shell-events, a line at
 // a time: `back` and `forward` (a mouse's side buttons, or a Magic Mouse's
 // swipe), which go Back and Forward in the Web Browser, and `workspace 1`
-// or `workspace -1` (the swipe), which show the workspace beside. They reach
+// or `workspace -1` (the swipe, or a touchpad's with three fingers), which
+// show the workspace beside. They reach
 // the desktop as shell shortcuts (src/lib/shellShortcuts.ts).
 //
 // Elsewhere the settings do nothing: the desktop Din runs in has its own.
@@ -30,6 +31,8 @@ export interface MouseSettings {
   secondaryClick: 'right' | 'left' | 'off';
   middleClick: boolean;
   swipe: 'pages' | 'workspaces' | 'off';
+  /** Three fingers swiped sideways on a touchpad go between workspaces. */
+  touchpadSwipe: boolean;
 }
 
 /** Whether Din is on din-shell, which names its Wayland socket so (session/mod.rs). */
@@ -50,6 +53,7 @@ function between(value: unknown, min: number, max: number): number {
 function parse(raw: unknown): MouseSettings {
   const s = (raw ?? {}) as Record<string, unknown>;
   if (typeof s.middleClick !== 'boolean') throw new Error('middleClick is not a boolean');
+  if (typeof s.touchpadSwipe !== 'boolean') throw new Error('touchpadSwipe is not a boolean');
   return {
     scrollDirection: oneOf(s.scrollDirection, ['auto', 'natural', 'traditional']),
     trackingSpeed: between(s.trackingSpeed, -1, 1),
@@ -57,6 +61,7 @@ function parse(raw: unknown): MouseSettings {
     secondaryClick: oneOf(s.secondaryClick, ['right', 'left', 'off']),
     middleClick: s.middleClick,
     swipe: oneOf(s.swipe, ['pages', 'workspaces', 'off']),
+    touchpadSwipe: s.touchpadSwipe,
   };
 }
 
@@ -70,6 +75,7 @@ async function tellShell(settings: MouseSettings): Promise<void> {
     `secondary-click=${settings.secondaryClick}`,
     `middle-click=${settings.middleClick ? 1 : 0}`,
     `swipe=${settings.swipe}`,
+    `touchpad-swipe=${settings.touchpadSwipe ? 1 : 0}`,
   ].join('\n');
   // Renamed into place, so din-shell never reads half of it.
   await fs.writeFile(temp, `${text}\n`);

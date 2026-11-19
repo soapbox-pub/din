@@ -2848,6 +2848,17 @@ function MouseSection() {
         />
       </SettingsGroup>
 
+      <SubHeading>Touchpad</SubHeading>
+      <SettingsGroup>
+        <SettingSwitchRow
+          id="touchpad-swipe"
+          label="Swipe between workspaces"
+          description="Swiping three fingers sideways goes to the workspace beside, and on to the next as they keep going."
+          checked={config.touchpadSwipe}
+          onCheckedChange={(touchpadSwipe) => set({ touchpadSwipe })}
+        />
+      </SettingsGroup>
+
       <SubHeading>Magic Mouse</SubHeading>
       <SettingsGroup>
         <ChoiceRow

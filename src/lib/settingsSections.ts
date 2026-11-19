@@ -201,7 +201,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Mouse',
     icon: Mouse,
-    search: ['Tracking speed', 'Scrolling speed', 'Scroll direction', 'Natural', 'Traditional', 'Secondary click', 'Middle click', 'Swipe with two fingers', 'Between pages', 'Between workspaces', 'Magic Mouse', 'pointer speed', 'right click', 'left-handed', 'gestures', 'back', 'forward', 'trackpad', 'touchpad', 'scroll wheel'],
+    search: ['Tracking speed', 'Scrolling speed', 'Scroll direction', 'Natural', 'Traditional', 'Secondary click', 'Middle click', 'Swipe with two fingers', 'Touchpad', 'Swipe between workspaces', 'Swipe with three fingers', 'three-finger swipe', 'Between pages', 'Between workspaces', 'Magic Mouse', 'pointer speed', 'right click', 'left-handed', 'gestures', 'back', 'forward', 'trackpad', 'touchpad', 'scroll wheel'],
   },
   {
     id: 'printers',

@@ -1,6 +1,6 @@
 //! Settings → Mouse: what scrolling does, how fast the pointer goes, which
 //! side is the secondary click, and the Magic Mouse's middle click and
-//! two-finger swipe. Din says them in $XDG_RUNTIME_DIR/din-shell-mouse
+//! two-finger swipe, and a touchpad's three-finger one. Din says them in $XDG_RUNTIME_DIR/din-shell-mouse
 //! (electron/mouse.mts), which is watched with the pointer's (cursor.rs), and
 //! each mouse and touchpad is set up from them as it's plugged in and again
 //! when they change.
@@ -10,6 +10,10 @@
 //! Forward, from a swipe or a mouse's own side buttons, are told to Din too,
 //! over $XDG_RUNTIME_DIR/din-shell-events, since its pages are its to go
 //! back in; a workspace is only Din's.
+//!
+//! Three fingers swiped sideways on a touchpad go to the workspace beside,
+//! and on to the next as they keep going. libinput says the swipe; while
+//! the setting's on it's din-shell's, and no app hears of it.
 
 use std::{
     io::Write,
@@ -32,6 +36,11 @@ pub const BTN_RIGHT: u32 = 0x111;
 pub const BTN_MIDDLE: u32 = 0x112;
 pub const BTN_SIDE: u32 = 0x113;
 pub const BTN_EXTRA: u32 = 0x114;
+
+/// How far three fingers go sideways on a touchpad, in libinput's pointer
+/// units, to show the workspace beside, and how much further for each after.
+const TOUCHPAD_SWIPE_START: f64 = 80.0;
+const TOUCHPAD_SWIPE_NEXT: f64 = 320.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ScrollDirection {
@@ -66,6 +75,8 @@ pub struct Settings {
     /// A Magic Mouse's middle third clicks the middle button.
     pub middle_click: bool,
     pub swipe: Swipe,
+    /// Three fingers swiped sideways on a touchpad go to the workspace beside.
+    pub touchpad_swipe: bool,
 }
 
 impl Default for Settings {
@@ -77,6 +88,7 @@ impl Default for Settings {
             secondary_click: SecondaryClick::Right,
             middle_click: false,
             swipe: Swipe::Pages,
+            touchpad_swipe: true,
         }
     }
 }
@@ -115,6 +127,7 @@ impl Settings {
                         _ => Swipe::Pages,
                     }
                 }
+                "touchpad-swipe" => settings.touchpad_swipe = value != "0",
                 _ => {}
             }
         }
@@ -137,6 +150,18 @@ pub struct Mouse {
     devices: Vec<Device>,
     pub magic: Vec<magic_mouse::Reader>,
     events: Option<UnixStream>,
+    /// A touchpad's three-finger swipe under way.
+    touchpad_swipe: Option<TouchpadSwipe>,
+}
+
+/// How far a touchpad's swipe has gone, and where it shows the next workspace.
+struct TouchpadSwipe {
+    dx: f64,
+    dy: f64,
+    /// It began up or down: not a swipe between workspaces, to its end.
+    upright: bool,
+    /// The dx it last showed a workspace at.
+    stepped: Option<f64>,
 }
 
 /// A touchpad: the device that can tap.
@@ -225,6 +250,46 @@ impl State {
             self.tell_din(if button == BTN_SIDE { "back" } else { "forward" });
         }
         button
+    }
+
+    /// FINGERS began a swipe on a touchpad. Whether it's din-shell's, between
+    /// workspaces, and so no app's.
+    pub fn touchpad_swipe_begin(&mut self, fingers: u32) -> bool {
+        let ours = fingers == 3 && self.mouse.settings.touchpad_swipe && !self.direct_takes_pointer();
+        self.mouse.touchpad_swipe = ours.then_some(TouchpadSwipe { dx: 0.0, dy: 0.0, upright: false, stepped: None });
+        ours
+    }
+
+    /// The swipe went on by (DX, DY). Whether it's din-shell's.
+    pub fn touchpad_swipe_update(&mut self, dx: f64, dy: f64) -> bool {
+        let Some(swipe) = self.mouse.touchpad_swipe.as_mut() else { return false };
+        swipe.dx += dx;
+        swipe.dy += dy;
+        if swipe.upright {
+            return true;
+        }
+        let step = match swipe.stepped {
+            None => {
+                if swipe.dy.abs() > TOUCHPAD_SWIPE_START && swipe.dy.abs() > swipe.dx.abs() {
+                    swipe.upright = true;
+                    return true;
+                }
+                (swipe.dx.abs() > TOUCHPAD_SWIPE_START && swipe.dx.abs() > 2.0 * swipe.dy.abs()).then_some(swipe.dx)
+            }
+            // Further the same way goes on to the next; back the other way, back.
+            Some(at) => ((swipe.dx - at).abs() > TOUCHPAD_SWIPE_NEXT).then_some(swipe.dx - at),
+        };
+        if let Some(by) = step {
+            swipe.stepped = Some(swipe.dx);
+            // Fingers going right show the workspace to the left, as a Magic Mouse's do.
+            self.tell_din(if by > 0.0 { "workspace -1" } else { "workspace 1" });
+        }
+        true
+    }
+
+    /// The swipe ended. Whether it was din-shell's.
+    pub fn touchpad_swipe_end(&mut self) -> bool {
+        self.mouse.touchpad_swipe.take().is_some()
     }
 
     /// Tells Din MESSAGE, if it's listening.

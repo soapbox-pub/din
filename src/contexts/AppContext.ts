@@ -162,6 +162,8 @@ export interface AppConfig {
   mouseMiddleClick: boolean;
   /** What two fingers swiped sideways on a Magic Mouse do. */
   mouseSwipe: 'pages' | 'workspaces' | 'off';
+  /** Three fingers swiped sideways on a touchpad go to the workspace beside. */
+  touchpadSwipe: boolean;
   /**
    * Whether windows tile, Hyprland style, instead of floating: they share
    * each monitor's workspace between them (see src/lib/tiling.ts). Kept on

@@ -71,6 +71,7 @@ const SETTINGS: Setting[] = [
   { key: 'mouse.secondary-click', field: 'mouseSecondaryClick', help: 'The secondary click is the right button, the left one, or off', param: { type: 'string', choices: ['right', 'left', 'off'] } },
   { key: 'mouse.middle-click', field: 'mouseMiddleClick', help: 'A Magic Mouse’s middle clicks the middle button', param: bool },
   { key: 'mouse.swipe', field: 'mouseSwipe', help: 'Two fingers swiped sideways on a Magic Mouse go between pages, workspaces, or do nothing', param: { type: 'string', choices: ['pages', 'workspaces', 'off'] } },
+  { key: 'mouse.touchpad-swipe', field: 'touchpadSwipe', help: 'Three fingers swiped sideways on a touchpad go to the workspace beside', param: bool },
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'sound.volume-feedback', field: 'volumeFeedback', help: 'The volume keys play a short tick at the new level as they turn it up or down', param: bool },

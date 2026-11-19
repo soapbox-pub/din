@@ -1287,7 +1287,7 @@ expose('mouse', {
   /** { available }: whether the settings do anything here (under din-shell). */
   status: () => ipcRenderer.invoke('mouse:status'),
   /**
-   * @param {{ scrollDirection: string, trackingSpeed: number, scrollSpeed: number, secondaryClick: string, middleClick: boolean, swipe: string }} settings
+   * @param {{ scrollDirection: string, trackingSpeed: number, scrollSpeed: number, secondaryClick: string, middleClick: boolean, swipe: string, touchpadSwipe: boolean }} settings
    */
   set: (settings) => ipcRenderer.invoke('mouse:set', settings),
 });

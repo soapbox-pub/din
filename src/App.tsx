@@ -80,6 +80,7 @@ const defaultConfig: AppConfig = {
   mouseSecondaryClick: 'right',
   mouseMiddleClick: false,
   mouseSwipe: 'pages',
+  touchpadSwipe: true,
   tilingEnabled: false,
   tilingGap: 8,
   restoreWindows: true,
