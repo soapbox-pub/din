@@ -90,8 +90,8 @@
 //     nostr-preload.cjs)
 //   - window.dinos.bunkerHost: Din's NIP-46 remote-signer connections (see
 //     electron/bunker.mts)
-//   - window.dinos.highlightHost: relays NIP-84 highlight clicks from browser tabs to
-//     the signer (see HighlightBridgeHost / browser-highlight-preload.cjs)
+//   - window.dinos.highlightHost: relays a browser tab's "Highlight on Nostr"
+//     (its right-click menu) to the composer (see HighlightBridgeHost)
 //   - window.dinos.filePickerHost: relays <input type=file> clicks from guests, and
 //     native apps' file dialogs, to the in-Din file picker (see
 //     FilePickerBridgeHost)
@@ -3938,18 +3938,18 @@ expose('bunkerHost', {
   },
 });
 
-// Highlight bridge host (window.dinos.highlightHost), backed by the din-highlight:*
-// handlers in main.mts. A browser tab's NIP-84 highlight click (see
-// browser-highlight-preload.cjs) is relayed here, to the shell renderer, where
-// HighlightBridgeHost shows it to the user to review and comment on, then
-// publishes a kind 9802 event with the signed-in account's signer. Unlike
-// nostrHost this carries no arbitrary signing surface - only
-// { url, title, text, context } for a fixed highlight kind.
+// Highlight bridge host (window.dinos.highlightHost), fed by main.mts. A
+// browser tab's "Highlight on Nostr" (its right-click menu on selected text)
+// is relayed here, to the shell renderer, where HighlightBridgeHost shows it
+// to the user to review and comment on, then publishes a kind 9802 event with
+// the signed-in account's signer. Unlike nostrHost this carries no arbitrary
+// signing surface - only { url, title, text, context } for a fixed highlight
+// kind.
 expose('highlightHost', {
   /**
-   * Subscribe to highlight-publish requests relayed from browser tabs. The
-   * callback receives { requestId, url, title, text, context }. Returns an
-   * unsubscribe fn.
+   * Subscribe to highlight requests relayed from browser tabs. The callback
+   * receives { requestId, url, title, text, context }. Returns an unsubscribe
+   * fn.
    * @param {(request: { requestId: number, url: string, title?: string, text: string, context?: string }) => void} callback
    */
   onRequest: (callback) => {
@@ -3961,13 +3961,6 @@ expose('highlightHost', {
     ipcRenderer.on('din-highlight:request', listener);
     return () => ipcRenderer.removeListener('din-highlight:request', listener);
   },
-
-  /**
-   * Answer a relayed highlight request: { requestId, ok, result?, error? }.
-   * A cancelled highlight is ok with no result.
-   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string }} response
-   */
-  respond: (response) => ipcRenderer.send('din-highlight:response', response),
 });
 
 // nsite resolution host (window.dinos.nsiteHost), backed by the nsite:* handlers in

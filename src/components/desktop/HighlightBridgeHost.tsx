@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { toast } from '@/hooks/useToast';
 import { getAvatarShape } from '@/lib/avatarShape';
 import {
   getHighlightHostBridge,
@@ -102,7 +103,7 @@ function HighlightQuote({ text, context }: { text: string; context?: string }) {
 
 interface HighlightComposerProps {
   request: HighlightBridgeRequest;
-  /** Answer the tab: the published event's id, or undefined when cancelled. */
+  /** Close the composer: the published event's id, or undefined when cancelled. */
   onDone: (eventId?: string) => void;
 }
 
@@ -215,17 +216,16 @@ function HighlightComposer({ request, onDone }: HighlightComposerProps) {
 }
 
 /**
- * Desktop-lifetime host for NIP-84 highlight requests relayed from the ad-hoc
- * Web Browser's tabs (see electron/browser-highlight-preload.cjs). When the
- * user selects text on a web page and clicks the floating "Highlight" button,
- * the click is proxied through the main process to here, which opens the
- * composer; only when the user posts from it is a kind 9802 Highlight event
- * published with the signed-in account's signer, referencing the page URL (an
- * `r`-tag source, per NIP-84's website form).
+ * Desktop-lifetime host for NIP-84 highlight requests from the Web Browser's
+ * tabs. When the user picks "Highlight on Nostr" in a page's right-click menu
+ * on selected text, main sends the selection here, which opens the composer;
+ * only when the user posts from it is a kind 9802 Highlight event published
+ * with the signed-in account's signer, referencing the page URL (an `r`-tag
+ * source, per NIP-84's website form).
  *
  * The source URL, title, selected text, and surrounding context are supplied
- * by the bridge (the URL read authoritatively from the tab in main, not the
- * page). One request at a time. Does nothing outside the Electron shell.
+ * by main (the URL read authoritatively from the tab, not the page). One
+ * request at a time. Does nothing outside the Electron shell.
  */
 export function HighlightBridgeHost() {
   const { user } = useCurrentUser();
@@ -237,10 +237,8 @@ export function HighlightBridgeHost() {
     if (!bridge) return;
     return bridge.onRequest((request) => {
       if (!signedIn) {
-        bridge.respond({ requestId: request.requestId, ok: false, error: 'No Nostr account is signed in to Din' });
-      } else if (!request.text.trim()) {
-        bridge.respond({ requestId: request.requestId, ok: false, error: 'Nothing selected to highlight' });
-      } else {
+        toast({ title: 'Couldn’t highlight', description: 'No Nostr account is signed in to Din', variant: 'destructive' });
+      } else if (request.text.trim()) {
         setQueue((q) => [...q, request]);
       }
     });
@@ -254,7 +252,7 @@ export function HighlightBridgeHost() {
       key={current.requestId}
       request={current}
       onDone={(eventId) => {
-        getHighlightHostBridge()?.respond({ requestId: current.requestId, ok: true, result: eventId });
+        if (eventId) toast({ title: 'Highlight posted' });
         setQueue((q) => q.filter((r) => r.requestId !== current.requestId));
       }}
     />

@@ -2,13 +2,11 @@
  * Typed access to the highlight bridge host exposed by the Electron preload
  * (`window.dinos.highlightHost`, see electron/preload.cjs + electron/main.mts).
  *
- * The ad-hoc Web Browser's tabs get a NIP-84 "Highlight" affordance
- * (electron/browser-highlight-preload.cjs): selecting text on any page shows a
- * floating button whose click is relayed to the main process, forwarded here,
- * to the shell renderer, which shows the highlight for the user to review and
- * comment on before the signed-in account's signer publishes a kind 9802
- * Highlight referencing the page URL. The renderer subscribes with
- * `onRequest` and answers each request with `respond`.
+ * The Web Browser's tabs offer NIP-84 highlights in their right-click menu:
+ * "Highlight on Nostr" on selected text is sent from the main process to the
+ * shell renderer, which shows the highlight for the user to review and comment
+ * on before the signed-in account's signer publishes a kind 9802 Highlight
+ * referencing the page URL. The renderer subscribes with `onRequest`.
  *
  * Unlike the Nostr identity bridge (`window.dinos.nostrHost`), this carries no general
  * signing surface: a request is only ever `{ url, title, text, context }` for a fixed
@@ -17,9 +15,9 @@
  * `getHighlightHostBridge()`.
  */
 
-/** A highlight-publish request relayed from a browser tab. */
+/** A highlight request relayed from a browser tab. */
 export interface HighlightBridgeRequest {
-  /** Correlates the eventual response back to the waiting tab. */
+  /** Tells requests apart. */
   requestId: number;
   /** The tab's cleaned source URL (authoritative; read in main, not the page). */
   url: string;
@@ -31,21 +29,9 @@ export interface HighlightBridgeRequest {
   context?: string;
 }
 
-/** The shell renderer's answer to a relayed highlight request. */
-export interface HighlightBridgeResponse {
-  requestId: number;
-  ok: boolean;
-  /** Present when `ok` - the published event id, or absent if the user cancelled. */
-  result?: unknown;
-  /** Present when not `ok` - a human-readable failure message. */
-  error?: string;
-}
-
 export interface HighlightHostBridge {
   /** Subscribe to relayed highlight requests. Returns an unsubscribe fn. */
   onRequest(callback: (request: HighlightBridgeRequest) => void): () => void;
-  /** Answer a relayed request. */
-  respond(response: HighlightBridgeResponse): void;
 }
 
 declare global {

@@ -3968,7 +3968,7 @@ const WEBBROWSER_PARTITION = 'persist:webbrowser';
 // Deliberately NOT prefixed with `persist:`, so Electron keeps it in memory
 // only - cookies/storage/cache are discarded once the last private tab closes.
 // Guests here are hardened like every other <webview> (see will-attach-webview)
-// but get no extension system, NIP-07, highlight, or userscript wiring, which
+// but get no extension system, NIP-07, highlights, or userscript wiring, which
 // is bound to the persistent browser session. Must match
 // WEBBROWSER_PRIVATE_PARTITION in src/components/desktop/apps/BrowserView.tsx.
 const WEBBROWSER_PRIVATE_PARTITION = 'din-webbrowser-private';
@@ -3989,14 +3989,6 @@ const WEBBROWSER_TOR_PARTITION = 'din-webbrowser-tor';
 const NOSTR_PRELOAD = path.join(import.meta.dirname, 'nostr-preload.cjs');
 /** The Chrome Web Store's chrome.webstorePrivate, on its own pages only (chrome-web-store.mts). */
 const WEB_STORE_PRELOAD = path.join(import.meta.dirname, 'chrome-web-store-preload.cjs');
-
-/**
- * Absolute path to the preload injected into the ad-hoc Web Browser's tabs.
- * Adds the NIP-84 "Highlight" affordance (text selection -> kind 9802). It
- * only relays an explicit highlight click to the shell (see din-highlight:*);
- * window.nostr comes from NOSTR_PRELOAD.
- */
-const HIGHLIGHT_PRELOAD = path.join(import.meta.dirname, 'browser-highlight-preload.cjs');
 
 /**
  * Absolute path to the session preload that puts web pages' notifications
@@ -4585,21 +4577,21 @@ function registerNostrBridge(): void {
   registerBunkerHandlers({ assertShellSender, sendToShell, relay: relayNostrRequest });
 }
 
-// NIP-84 highlight bridge (browser-highlight-preload.cjs). A browser tab's
-// highlight click carries only the selected text + surrounding context; the
-// source URL is read here from the guest's own WebContents (never the page's
-// report) so a page can't forge a highlight for a URL it doesn't serve. The
-// event is built and signed in the shell with the signed-in account's signer -
-// this bridge deliberately exposes no general signing surface to browsed sites.
+// NIP-84 highlights: a browser tab's right-click menu offers "Highlight on
+// Nostr" on selected text, which opens the desktop's composer
+// (HighlightBridgeHost). Nothing is injected into pages: the text is
+// Chromium's own context-menu selection, the source URL is read from the tab's
+// WebContents (never the page's report), and the surrounding paragraph is read
+// once, on the click, in an isolated world the page can't see. The event is
+// built and signed in the shell with the signed-in account's signer, after the
+// user reviews it - no signing surface is exposed to browsed sites.
 let nextHighlightRequestId = 1;
-const pendingHighlightRequests = new Map<number, {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
-}>();
-// The shell asks the user to review the highlight (and maybe write a comment)
-// before it's posted, so this only guards against a shell that never answers.
-const HIGHLIGHT_REQUEST_TIMEOUT_MS = 30 * 60_000;
+/** Longest selection offered as a highlight (guards "Select All" of an article). */
+const MAX_HIGHLIGHT_LENGTH = 5000;
+/** Longest surrounding context attached to a highlight. */
+const MAX_HIGHLIGHT_CONTEXT_LENGTH = 8000;
+/** The isolated world the highlight's context is read in. */
+const HIGHLIGHT_WORLD_ID = 1_340;
 
 /** Query params dropped when cleaning a URL for a highlight source (NIP-84). */
 const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|dclid$|msclkid$|mc_|ref$|ref_src$|igshid$|yclid$|_hsenc$|_hsmi$|vero_|oly_|wickedid$)/i;
@@ -4630,51 +4622,83 @@ function cleanHighlightUrl(raw: string): string {
   }
 }
 
-function registerHighlightBridge(): void {
-  ipcMain.handle('din-highlight:publish', (event, payload) => {
-    // Only browser-tab guests may reach this; the URL comes from the tab, not
-    // the payload, and only text/context are honored from the page.
-    const contents = browserTabFromId(event.sender.id);
-    if (!contents || contents !== event.sender) {
-      throw new Error('Highlighting is not available here');
+/** Normalize line endings and trim, keeping internal line breaks. */
+function normalizeHighlightText(value: string): string {
+  return value.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+}
+
+/**
+ * Reads the selection and the paragraph around it in the page: the nearest
+ * block-level ancestor's text, else the blank-line-delimited paragraph of the
+ * common ancestor's. Run in HIGHLIGHT_WORLD_ID only when the user picks
+ * "Highlight on Nostr".
+ */
+const READ_HIGHLIGHT_SELECTION = `(() => {
+  const BLOCKS = new Set(['P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'TD', 'FIGCAPTION']);
+  const norm = (v) => v.replace(/\\r\\n?/g, '\\n').replace(/[ \\t]+\\n/g, '\\n').trim();
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const text = norm(sel.toString());
+  if (!text) return null;
+  const range = sel.getRangeAt(0);
+  const el = (node) => (node instanceof Element ? node : node.parentElement);
+  const ok = (c) => !!c && c !== text && c.includes(text);
+  for (let block = el(range.startContainer); block; block = block.parentElement) {
+    if (BLOCKS.has(block.tagName)) {
+      const para = norm(block.textContent || '');
+      if (ok(para)) return { text, context: para };
+      break;
     }
-    if (!shellWindow || shellWindow.webContents.isDestroyed()) {
-      throw new Error('Din shell is unavailable');
-    }
-    const url = cleanHighlightUrl(event.sender.getURL());
-    if (!url) throw new Error('This page cannot be highlighted');
+  }
+  const root = el(range.commonAncestorContainer);
+  const full = norm(root ? root.textContent || '' : '');
+  const para = full.split(/\\n{2,}/).map((p) => p.trim()).find((p) => p.includes(text));
+  if (ok(para)) return { text, context: para };
+  if (ok(full)) return { text, context: full };
+  return { text };
+})()`;
 
-    const text = payload && typeof payload.text === 'string' ? payload.text.trim() : '';
-    if (!text) throw new Error('Nothing selected to highlight');
-    if (text.length > 5000) throw new Error('Selection is too long to highlight');
-
-    let context: string | undefined;
-    if (payload && typeof payload.context === 'string' && payload.context.length <= 8000) {
-      context = payload.context;
-    }
-
-    return new Promise((resolve, reject) => {
-      const requestId = nextHighlightRequestId++;
-      const timer = setTimeout(() => {
-        pendingHighlightRequests.delete(requestId);
-        reject(new Error('The highlight was never posted'));
-      }, HIGHLIGHT_REQUEST_TIMEOUT_MS);
-      pendingHighlightRequests.set(requestId, { resolve, reject, timer });
-      const title = event.sender.getTitle().slice(0, 300) || undefined;
-      sendToShell('din-highlight:request', { requestId, url, title, text, context });
-    });
-  });
-
-  // The shell's answer to a relayed highlight publish. Only the shell may
-  // resolve these.
-  ipcMain.on('din-highlight:response', (event, response) => {
-    if (!isShellSender(event)) return;
-    const pending = response && pendingHighlightRequests.get(response.requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    pendingHighlightRequests.delete(response.requestId);
-    if (response.ok) pending.resolve(response.result);
-    else pending.reject(new Error(response.error || 'Failed to publish highlight'));
+/**
+ * "Highlight on Nostr" for a browser tab's right-click menu, or null when the
+ * selection can't be highlighted (none, too long, in a field, or a page that
+ * isn't http(s) or nsite).
+ */
+function highlightMenuItem(
+  contents: Electron.WebContents,
+  params: Electron.ContextMenuParams,
+): Electron.MenuItem | null {
+  const selected = normalizeHighlightText(params.selectionText);
+  if (!selected || selected.length > MAX_HIGHLIGHT_LENGTH || params.isEditable) return null;
+  if (!cleanHighlightUrl(contents.getURL())) return null;
+  return new MenuItem({
+    label: 'Highlight on Nostr',
+    click: () => {
+      const pageUrl = contents.getURL();
+      contents
+        .executeJavaScriptInIsolatedWorld(HIGHLIGHT_WORLD_ID, [{ code: READ_HIGHLIGHT_SELECTION }])
+        .catch(() => null)
+        .then((read: unknown) => {
+          if (contents.isDestroyed() || contents.getURL() !== pageUrl) return;
+          const url = cleanHighlightUrl(pageUrl);
+          if (!url) return;
+          // The page's own reading of the selection keeps its line breaks,
+          // which Chromium's collapses; it's used only when it's the same text.
+          const found = read && typeof read === 'object' ? read as { text?: unknown; context?: unknown } : {};
+          const pageText = typeof found.text === 'string' ? found.text : '';
+          const same = pageText.replace(/\s+/g, ' ') === selected.replace(/\s+/g, ' ');
+          const text = same && pageText.length <= MAX_HIGHLIGHT_LENGTH ? pageText : selected;
+          const context =
+            same &&
+            typeof found.context === 'string' &&
+            found.context.length <= MAX_HIGHLIGHT_CONTEXT_LENGTH &&
+            found.context !== text &&
+            found.context.includes(text)
+              ? found.context
+              : undefined;
+          const title = contents.getTitle().slice(0, 300) || undefined;
+          sendToShell('din-highlight:request', { requestId: nextHighlightRequestId++, url, title, text, context });
+        });
+    },
   });
 }
 
@@ -6538,7 +6562,6 @@ app.whenReady().then(() => {
   registerUserscriptHandlers({ assertShellSender, sendToShell });
   registerDevtoolsHandlers();
   registerNostrBridge();
-  registerHighlightBridge();
   registerFilePickerBridge();
   registerNativeAppHandlers({
     assertShellSender,
@@ -6956,15 +6979,6 @@ app.whenReady().then(() => {
       // The NIP-07 preload (NOSTR_PRELOAD) stays inert in iframes, and main
       // refuses calls from anything but a top document either way.
       webPreferences.nodeIntegrationInSubFrames = true;
-      if (!isApp && !attachingGuestSrc.startsWith('chrome-extension://')) {
-        // Ad-hoc browser tabs get the highlight preload (no signer surface,
-        // just the NIP-84 highlight affordance; see HIGHLIGHT_PRELOAD).
-        // Extension pages in this session (the action popup) and installed
-        // apps' windows don't. The preload now loads in sub-frames too, but
-        // guards itself to the top frame (it would otherwise duplicate in
-        // every iframe).
-        webPreferences.preload = HIGHLIGHT_PRELOAD;
-      }
     }
   });
 
@@ -7589,6 +7603,10 @@ app.on('web-contents-created', (_event, contents) => {
           },
         }),
       );
+      // "Highlight on Nostr" after it, in the browser's own tabs (not private
+      // or Tor ones, nor installed apps' windows).
+      const highlight = isBrowserTab ? highlightMenuItem(contents, params) : null;
+      if (highlight) menu.insert(copyIndex + 2, highlight);
     }
     // buildChromeContextMenu always appends an "Inspect" item last, wired
     // straight to inspectElement() - which opens devtools in a detached
