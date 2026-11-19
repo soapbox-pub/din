@@ -1,5 +1,5 @@
 import { nip19 } from 'nostr-tools';
-import { locateExcerpt, MAX_HIGHLIGHT_CONTEXT_LENGTH, MAX_HIGHLIGHT_LENGTH } from '@/shared/highlightText';
+import { MAX_HIGHLIGHT_CONTEXT_LENGTH, MAX_HIGHLIGHT_LENGTH } from '@/shared/highlightText';
 
 /**
  * NIP-84 highlights (kind 9802), as the desktop posts them: from a page in the
@@ -20,8 +20,8 @@ export interface HighlightRequest {
   /** The highlighted excerpt (the event's `content`). */
   text: string;
   /**
-   * Surrounding prose containing the excerpt (NIP-84 `context`): word for
-   * word, or Markdown that draws it, as an assistant's whole reply.
+   * Surrounding prose containing the excerpt word for word (NIP-84
+   * `context`): a paragraph, or an assistant's whole reply as Markdown.
    */
   context?: string;
   source: HighlightSource;
@@ -43,8 +43,8 @@ function normalize(value: string): string {
 /**
  * The request as the composer takes it, or an Error saying what's wrong with
  * it: the excerpt trimmed and not too long, a context kept only when it holds
- * the excerpt (word for word, or as Markdown that draws it: locateExcerpt),
- * a page only by an http(s) or nsite URL.
+ * the excerpt word for word (NIP-84), a page only by an http(s) or nsite
+ * URL.
  */
 export function normalizeHighlight(request: HighlightRequest): HighlightRequest | Error {
   const text = typeof request.text === 'string' ? normalize(request.text) : '';
@@ -52,7 +52,7 @@ export function normalizeHighlight(request: HighlightRequest): HighlightRequest 
   if (text.length > MAX_HIGHLIGHT_LENGTH) return new Error('That’s too long to highlight');
   const rawContext = typeof request.context === 'string' ? normalize(request.context) : '';
   const context =
-    rawContext && rawContext !== text && rawContext.length <= MAX_HIGHLIGHT_CONTEXT_LENGTH && locateExcerpt(rawContext, text)
+    rawContext && rawContext !== text && rawContext.length <= MAX_HIGHLIGHT_CONTEXT_LENGTH && rawContext.includes(text)
       ? rawContext
       : undefined;
   const raw = request.source as Partial<{ url: unknown; title: unknown; name: unknown }> | undefined;

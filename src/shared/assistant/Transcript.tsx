@@ -32,7 +32,7 @@ import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFil
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { CopyButton } from '@/shared/assistant/CopyButton';
 import { useAssistantHost } from '@/shared/assistant/host';
-import { locateExcerpt, MAX_HIGHLIGHT_CONTEXT_LENGTH } from '@/shared/highlightText';
+import { markdownHighlight } from '@/shared/highlightText';
 import { ReadAloudButton } from '@/shared/assistant/ReadAloudButton';
 import {
   backgroundNotice,
@@ -497,42 +497,54 @@ const PARAGRAPHS = new Set(['P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5
 /** Line endings normalized and trimmed, keeping internal line breaks. */
 const normalizeText = (value: string) => value.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
 
-/**
- * The text selected inside `root`, and its context: the whole reply as
- * Markdown (`markdown`), where that's found to draw it and isn't too long,
- * else the paragraph it's in (when that holds it whole and is more than it).
- * Null when nothing in it is selected.
- */
-function selectionIn(root: HTMLElement | null, markdown: string): { text: string; context?: string } | null {
+/** Text selected in a reply, as drawn, with the paragraph it's in (when that holds it whole and is more than it). */
+interface ReplySelection {
+  text: string;
+  paragraph?: string;
+}
+
+/** The text selected inside `root`, or null when nothing in it is. */
+function selectionIn(root: HTMLElement | null): ReplySelection | null {
   const selection = window.getSelection();
   if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
   if (!root.contains(range.commonAncestorContainer)) return null;
   const text = normalizeText(selection.toString());
   if (!text) return null;
-  const whole = normalizeText(markdown);
-  if (whole !== text && whole.length <= MAX_HIGHLIGHT_CONTEXT_LENGTH && locateExcerpt(whole, text)) return { text, context: whole };
   const elementOf = (node: Node) => (node instanceof Element ? node : node.parentElement);
   for (let el = elementOf(range.commonAncestorContainer); el && root.contains(el); el = el.parentElement) {
     if (!PARAGRAPHS.has(el.tagName)) continue;
     const paragraph = normalizeText(el.textContent ?? '');
-    return paragraph !== text && paragraph.includes(text) ? { text, context: paragraph } : { text };
+    return paragraph !== text && paragraph.includes(text) ? { text, paragraph } : { text };
   }
   return { text };
 }
 
 /**
+ * The highlight of a selection in a reply: as Markdown, where it's found in
+ * the reply's (`markdown`), the slice of it that draws the selection with the
+ * whole reply (or the paragraphs around it) as its context
+ * (markdownHighlight); else the text as drawn, with its paragraph. The
+ * excerpt is in its context word for word either way, as NIP-84 has it.
+ */
+function replyHighlight(selected: ReplySelection, markdown: string): { text: string; context?: string } {
+  const asMarkdown = markdownHighlight(normalizeText(markdown), selected.text);
+  if (asMarkdown) return { text: asMarkdown.content, context: asMarkdown.context };
+  return { text: selected.text, context: selected.paragraph };
+}
+
+/**
  * A reply's right-click menu: what its buttons do (Copy reply, Read aloud),
  * with Copy and Highlight on Nostr for text selected in it. The highlight
- * names the model that wrote the reply as its source, with the reply's
- * Markdown as its context.
+ * names the model that wrote the reply as its source, and is the reply's
+ * Markdown: the excerpt as written, in the whole reply.
  */
 function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; model?: ModelRef; children: ReactNode }) {
   const host = useAssistantHost();
   const voice = host.useVoice();
   const { data } = useAssistantModels();
   const ref = useRef<HTMLDivElement>(null);
-  const [selected, setSelected] = useState<{ text: string; context?: string } | null>(null);
+  const [selected, setSelected] = useState<ReplySelection | null>(null);
   const source = model ? (data?.models.find((m) => modelKey(m) === modelKey(model))?.name ?? model.id) : undefined;
   const speaking = voice.speaking === id;
   const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
@@ -540,7 +552,7 @@ function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={ref} className="flex min-w-0 flex-col gap-4" onContextMenu={() => setSelected(selectionIn(ref.current, reply))}>
+        <div ref={ref} className="flex min-w-0 flex-col gap-4" onContextMenu={() => setSelected(selectionIn(ref.current))}>
           {children}
         </div>
       </ContextMenuTrigger>
@@ -551,7 +563,7 @@ function ReplyMenu({ reply, id, model, children }: { reply: string; id: string; 
               <Copy aria-hidden /> Copy
             </ContextMenuItem>
             {host.highlight && source && (
-              <ContextMenuItem onSelect={() => host.highlight?.({ ...selected, source })}>
+              <ContextMenuItem onSelect={() => host.highlight?.({ ...replyHighlight(selected, reply), source })}>
                 <Highlighter aria-hidden /> Highlight on Nostr
               </ContextMenuItem>
             )}

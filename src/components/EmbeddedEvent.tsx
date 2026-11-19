@@ -42,7 +42,6 @@ import {
   truncate,
 } from '@/lib/draftEvent';
 import { getKindLabel } from '@/lib/kindLabels';
-import { locateExcerpt } from '@/shared/highlightText';
 import { cn, middleEllipsis } from '@/lib/utils';
 
 /**
@@ -484,10 +483,8 @@ function HighlightBody({ event }: { event: DraftEvent }) {
   const text = event.content.trim();
   const comment = tagValue(event, 'comment')?.trim();
   const rawContext = tagValue(event, 'context')?.trim();
-  const at =
-    rawContext && text && rawContext !== text && text.length <= 400 && rawContext.length <= 50_000
-      ? locateExcerpt(rawContext, text)
-      : null;
+  const found = rawContext && text && rawContext !== text && text.length <= 400 ? rawContext.indexOf(text) : -1;
+  const at: [number, number] | null = found >= 0 ? [found, found + text.length] : null;
   // Only a little of the context either side, so the clamp can't cut the
   // excerpt off: it can be an assistant's whole reply.
   const before = rawContext && at ? rawContext.slice(Math.max(0, at[0] - HIGHLIGHT_CONTEXT_SIDE), at[0]) : '';

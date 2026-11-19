@@ -192,11 +192,13 @@ comment, and posts nothing until the user presses Post.
 const id = await din.app.highlight({ text, context, source: 'Claude Opus 5.5' });
 ```
 
-- `text` is what the user selected; `context` what's around it, kept only
-  when it holds `text`: word for word, or as Markdown that draws it (its
-  emphasis, code and link marks, its lists' and quotes' markers between the
-  words; `src/shared/highlightText.ts`). The Assistant gives a reply's whole
-  Markdown, up to 20,000 characters, else the paragraph.
+- `text` is the passage; `context` what's around it, kept only when it holds
+  `text` word for word, as NIP-84 has it. The Assistant highlights a reply as
+  its Markdown: text selected as drawn is found in the reply's Markdown
+  (`src/shared/highlightText.ts`, its emphasis, code and link marks and its
+  lists' and quotes' markers allowed between the words), and `text` is the
+  slice that draws it, widened to whole marks and links, with the whole reply
+  (up to 20,000 characters, else the paragraphs around it) as `context`.
 - `source` is where it's from, by name, published as a plain-text `r` tag
   (NIP-84 allows text as well as URLs there, nostr-protocol/nips#2454). An
   app can't name a page as the source: only the Web Browser does that, from
@@ -211,5 +213,5 @@ const id = await din.app.highlight({ text, context, source: 'Claude Opus 5.5' })
 | Where | What it highlights |
 |---|---|
 | The Web Browser's right-click menu on selected text | The selection, from the page (its URL and title) |
-| The Assistant's right-click menu on text selected in a reply | The selection, from the model that wrote the reply |
+| The Assistant's right-click menu on text selected in a reply | The selection as the reply's Markdown, in the whole reply, from the model that wrote it |
 | `din nostr highlight "…" --url … \| --source …` | Anything |

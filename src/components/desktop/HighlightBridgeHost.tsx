@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { Globe, Highlighter, Loader2, Sparkles } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,6 @@ import { getAvatarShape } from '@/lib/avatarShape';
 import { getHighlightHostBridge } from '@/lib/highlightBridge';
 import { highlightTags, requestHighlight, setHighlightHandler, type HighlightRequest } from '@/lib/highlights';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
-import { locateExcerpt } from '@/shared/highlightText';
 
 function hostOf(url: string): string {
   try {
@@ -39,8 +38,8 @@ function hostOf(url: string): string {
  * shows a kind 9802, scrolled to the excerpt.
  */
 function HighlightQuote({ text, context }: { text: string; context?: string }) {
-  // Memoized: typing a comment draws the composer again, and Markdown is searched loosely.
-  const at = useMemo(() => (context && context !== text ? locateExcerpt(context, text) : null), [context, text]);
+  const start = context && context !== text ? context.indexOf(text) : -1;
+  const at: [number, number] | null = start >= 0 ? [start, start + text.length] : null;
   const ref = useRef<HTMLQuoteElement>(null);
   const mark = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
