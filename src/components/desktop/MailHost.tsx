@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { setDinBadge } from '@/lib/appBadges';
 import { getMailDesktopBridge } from '@/lib/mail';
+import { setMailUnseen } from '@/lib/mailInbox';
 import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
 
 /**
@@ -10,7 +11,8 @@ import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
  * for all of it), as a notification per message, which a click opens in
  * Mail, on its tab. None shows while Mail is the window in front, and one
  * goes once its message is read, moved or deleted, here or anywhere else.
- * Mail's Dock tile shows the inboxes' unread count (Primary's, likewise).
+ * Mail's Dock tile shows the inboxes' unread count (Primary's, likewise),
+ * and offers Mark All as Read while there is some (src/lib/mailInbox.ts).
  */
 export function MailHost() {
   const { windows, open, launchIn } = useWindowManager();
@@ -27,6 +29,7 @@ export function MailHost() {
     const badge = (unseen: Record<string, number>) => {
       const total = Object.values(unseen).reduce((n, x) => n + x, 0);
       setDinBadge('mail:unseen', 'mail', total || null);
+      setMailUnseen(total);
     };
     let live = true;
     void mail.unseen().then((u) => live && badge(u)).catch(() => {});
@@ -64,6 +67,7 @@ export function MailHost() {
       offArrived();
       offRead();
       setDinBadge('mail:unseen', 'mail', null);
+      setMailUnseen(0);
     };
   }, []);
 

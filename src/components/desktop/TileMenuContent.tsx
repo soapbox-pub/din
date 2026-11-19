@@ -1,4 +1,4 @@
-import { Info, Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
+import { Info, MailCheck, Maximize2, Minimize2, Minus, Pin, PinOff, Plus, SquareArrowOutUpRight, Trash2, X } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -7,13 +7,16 @@ import {
 import type { MenuAboveContentProps } from '@/hooks/useMenuAbove';
 import type { AppDefinition } from '@/lib/apps';
 import type { DockControls, DockWindow } from '@/lib/dockTileActions';
+import { markInboxesRead, useMailUnseen } from '@/lib/mailInbox';
+import { notify } from '@/lib/notificationCenter';
 import { APP_INFO_APP_ID, appInfoParams } from '@/lib/settingsWindows';
 import { cn } from '@/lib/utils';
 import { roomyMenu } from '@/shared/appChromeStyles';
 
 /**
  * A Dock or taskbar tile's right-click menu: its app's windows by what
- * they're showing, the app's own actions, a new window, pin or unpin, App
+ * they're showing, the app's own actions (and, for Mail, Mark All as Read
+ * while it has unread mail), a new window, pin or unpin, App
  * Info (where its badge is hidden or shown), close, and uninstall. `bar`
  * names the bar in the pin item ("Keep in Dock"). Given `taskWindow`, it's
  * the menu of that one window's taskbar button, which leads with what can be
@@ -107,6 +110,7 @@ export function TileMenuContent({
           <ContextMenuSeparator />
         </>
       )}
+      {app.id === 'mail' && !taskWindow && <MailTileItems />}
       {!app.singleInstance && (
         <ContextMenuItem onSelect={() => open(app.id)}>
           {/* Native apps decide for themselves whether a second launch opens
@@ -155,5 +159,32 @@ export function TileMenuContent({
         </>
       )}
     </ContextMenuContent>
+  );
+}
+
+/**
+ * Mail's own: Mark All as Read, while its tile counts unread mail, which marks
+ * every account's inbox read (on the server too) without opening Mail, as
+ * `din mail mark-read` does for the inbox.
+ */
+function MailTileItems() {
+  const unseen = useMailUnseen();
+  if (!unseen) return null;
+  const markAll = () => {
+    markInboxesRead().catch((e: unknown) => {
+      notify({
+        source: { appId: 'mail', name: 'Mail' },
+        title: 'Couldn’t mark your mail read',
+        body: e instanceof Error ? e.message : String(e),
+      });
+    });
+  };
+  return (
+    <>
+      <ContextMenuItem onSelect={markAll}>
+        <MailCheck aria-hidden /> Mark All as Read
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+    </>
   );
 }

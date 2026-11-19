@@ -1,4 +1,5 @@
 import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailLabel, type MailSubscription } from '@/lib/mail';
+import { markRead, markReadTargets } from '@/lib/mailInbox';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
@@ -93,12 +94,7 @@ export const mailArea: Area = {
     ], async (args, ctx) => {
       const accounts = await accountsFor(args.optString('account'));
       const query = args.optString('mailbox');
-      const targets = [];
-      for (const a of accounts) {
-        const boxes = (await call(mail().mailboxes(a.id))).filter((b) => b.selectable);
-        const box = query ? pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox') : boxes.find((b) => b.special === 'inbox');
-        if (box) targets.push({ account: a, box });
-      }
+      const targets = await call(markReadTargets(accounts, query ? (boxes) => pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox') : undefined));
       const unseen = targets.reduce((n, t) => n + t.box.unseen, 0);
       if (!unseen) return { data: { marked: 0 }, text: 'Nothing unread there' };
       const where = targets.map((t) => (accounts.length > 1 ? `${t.box.name} (${t.account.name})` : t.box.name)).join(', ');
@@ -108,8 +104,7 @@ export const mailArea: Area = {
         action: 'Mark as Read',
       });
       if (!ok) throw new CommandError('You didn’t allow it');
-      let marked = 0;
-      for (const t of targets) marked += await call(mail().markAllRead(t.account.id, t.box.path));
+      const marked = await call(markRead(targets));
       return { data: { marked }, text: `Marked ${marked.toLocaleString()} ${marked === 1 ? 'message' : 'messages'} read` };
     }),
     command('mail', 'pictures', 'Whether Mail looks up senders’ pictures from their domain (NIP-05 profile or BIMI logo), as its Settings switch does; with on or off, turn it on or off', [
