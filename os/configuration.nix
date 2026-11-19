@@ -44,6 +44,11 @@ let
   # LocalSend's port, TCP and UDP, which the firewall lets in (below).
   localSendPort = 53317;
 
+  # The port BitTorrent peers reach Torrents' Transmission on (PEER_PORT in
+  # electron/torrents.mts), TCP and UDP (uTP, DHT), which the firewall lets
+  # in (below).
+  torrentPeerPort = 51413;
+
   # pkexec inside appimage-run's sandbox, where the real one can't work (see
   # programs.appimage, below): the user's systemd runs the real one outside.
   # In here /run/wrappers/bin/pkexec is this script; out there it's pkexec.
@@ -583,6 +588,10 @@ let
     # The same yt-dlp's Python module, which tells from a page's address
     # whether it's a video's, for Share's Send as Video.
     export DIN_YTDLP_PYTHON=${pkgs.python3.withPackages (ps: [ (ps.yt-dlp.override { ffmpegSupport = false; }) ])}/bin/python3
+    # Torrents (electron/torrents.mts): Transmission's daemon, which Din runs
+    # as the user while there are transfers, peers reaching it on
+    # torrentPeerPort.
+    export DIN_TRANSMISSION=${pkgs.transmission_4}/bin/transmission-daemon
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
@@ -900,7 +909,10 @@ in
   # this computer, and mostly can't see it. Nothing listens unless the user
   # runs it, and it asks before it takes a file unless the user has turned
   # on its Quick Save.
-  networking.firewall.allowedTCPPorts = [ 47331 localSendPort ];
+  #
+  # Torrents' peer port (torrentPeerPort), on which nothing listens unless
+  # Din's Transmission is running for transfers the user added.
+  networking.firewall.allowedTCPPorts = [ 47331 localSendPort torrentPeerPort ];
   # The ports the user lets in in Settings → Firewall (os/din-firewall.sh):
   # a chain of their own, ahead of the refusal that ends nixos-fw, filled
   # from what's saved each time the firewall starts or reloads. They stay
@@ -1687,7 +1699,7 @@ in
         Type=Application
         Name=Din
         Exec=din-open %U
-        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;x-scheme-handler/blossom;inode/directory;
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;x-scheme-handler/blossom;x-scheme-handler/magnet;inode/directory;
         NoDisplay=true
       '')
       # The defaults' mimeapps.list in the system profile's etc/xdg too, which
@@ -1759,7 +1771,8 @@ in
 
   # Links native apps open go to Din's Web Browser (electron/open-uri.mts),
   # nostr: links too, which Din opens in the app chosen for them, and
-  # blossom: links (BUD-10), files Din fetches by their hash.
+  # blossom: links (BUD-10), files Din fetches by their hash, and magnet:
+  # links, which Torrents adds.
   # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
   # portal's OpenURI; both start the default handler, din-open, which hands
   # the links to Din over the session bus. Folders too, which open in Files:
@@ -1772,6 +1785,7 @@ in
     "x-scheme-handler/nsite" = "din-open.desktop";
     "x-scheme-handler/nostr" = "din-open.desktop";
     "x-scheme-handler/blossom" = "din-open.desktop";
+    "x-scheme-handler/magnet" = "din-open.desktop";
   };
 
   systemd.services.flathub = {
@@ -2589,8 +2603,8 @@ in
   # network would otherwise stop together, and Wi-Fi was gone before deckmon
   # got to say goodbye. Ordering it after network.target stops it first.
   systemd.services."user@".after = [ "network.target" ];
-  # mDNS, for finding receivers, and LocalSend's discovery (above).
-  networking.firewall.allowedUDPPorts = [ 5353 localSendPort ];
+  # mDNS, for finding receivers, LocalSend's discovery, and Torrents' peers (uTP, DHT) (above).
+  networking.firewall.allowedUDPPorts = [ 5353 localSendPort torrentPeerPort ];
   networking.firewall.allowedUDPPortRanges = [ airplayPorts ];
 
   # Man and info pages, like any Unix. Skip /share/doc and the NixOS manual to

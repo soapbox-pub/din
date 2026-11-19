@@ -841,6 +841,31 @@ On DinOS RetroArch and its cores are the Games optional feature, found through
 elsewhere Din runs `retroarch` from PATH with the cores it finds in the usual
 places.
 
+### Torrents
+
+The Torrents app (`src/apps/torrents/`, `din torrents`) downloads and shares
+with BitTorrent, laid out as Transmission's Mac app would be if Apple had
+made it: transfers by what they're doing down the side, a list with a bar
+each, an inspector beside it (info, a map of the pieces, the files to tick,
+peers, trackers), and the speeds and Turtle along the foot. A `magnet:`
+link clicked anywhere (a web page, an app, a native app's `xdg-open`, `din
+open`) and a `.torrent` file opened in Files open its Add window, where the
+files to download, the folder and whether to start are chosen.
+
+The engine is Transmission's own daemon, run by Din as the user
+(`electron/torrents.mts`, the `torrents` permission), so transfers go on with
+the window closed and finish with a notification. Its settings, resume files
+and torrents are in `~/.local/share/din/torrents`; it answers RPC on a Unix
+socket in `$XDG_RUNTIME_DIR` that only the user can reach, not a port, and
+the bridge offers a handful of checked operations rather than RPC, so
+nothing sets the daemon's scripts or watch folder. It starts the first time
+it's wanted, and with Din when there are transfers to go on with, and it
+stops with Din (setpriv's pdeathsig, even if Din crashes). Removing a
+transfer with its data moves the data to the Trash. DinOS passes the daemon
+as `DIN_TRANSMISSION` and lets peers in on port 51413 (TCP and UDP);
+elsewhere Din runs `transmission-daemon` 4 or later from PATH, the Torrents
+optional feature.
+
 ### Printing
 
 Printers need no setup on DinOS. CUPS runs with Avahi and ipp-usb, so a

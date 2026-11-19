@@ -170,6 +170,20 @@ export const CATALOG: Record<string, SystemFeature> = {
       apk: ['libarchive-tools', 'unar', '7zip'],
     },
   },
+  torrents: {
+    title: 'Torrents',
+    description: 'Download and share with BitTorrent in Torrents (Transmission).',
+    size: 5 * MB,
+    needs: ['transmission-daemon'],
+    packages: {
+      apt: ['transmission-daemon'],
+      dnf: ['transmission-daemon'],
+      pacman: ['transmission-cli'],
+      zypper: ['transmission-daemon'],
+      xbps: ['transmission'],
+      apk: ['transmission-daemon'],
+    },
+  },
   phones: {
     title: 'Phones over USB',
     description: 'See your Android phone or iPhone in Files when it’s plugged in.',

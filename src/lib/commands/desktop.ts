@@ -795,7 +795,7 @@ export const openArea: Area = {
   name: 'open',
   summary: 'Open a file, folder or link in the app that opens it',
   commands: [
-    bare(command('open', 'open', 'Open files, folders, URLs, nostr:, blossom: and mailto: links', [
+    bare(command('open', 'open', 'Open files, folders, URLs, nostr:, blossom:, mailto: and magnet: links', [
       { name: 'targets', type: 'string', positional: true, rest: true, help: 'What to open' },
     ], async (args, ctx) => {
       const targets = args.list('targets');

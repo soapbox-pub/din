@@ -24,6 +24,7 @@ import { firmwareArea, lockArea, nostrArea, updateArea } from './system';
 import { vmsArea } from './vms';
 import { gamesArea } from './games';
 import { flasherArea } from './flasher';
+import { torrentsArea } from './torrents';
 import { speakArea } from './speech';
 import { grammarArea } from './grammar';
 import { walletArea } from './wallet';
@@ -76,6 +77,7 @@ export const AREAS: readonly Area[] = [
   vmsArea,
   gamesArea,
   flasherArea,
+  torrentsArea,
   assistantArea,
   speakArea,
   nostrArea,

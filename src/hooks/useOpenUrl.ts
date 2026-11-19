@@ -7,6 +7,7 @@ import { isNsiteUrl } from '@/lib/nsite';
 import { isNostrUri } from '@/lib/nostrUri';
 import { isBlossomUri } from '@/lib/blossomUri';
 import { isMailtoUrl } from '@/lib/mailto';
+import { isMagnetUrl } from '@/lib/torrents';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
 import { isWebviewAvailable } from '@/lib/isElectron';
 
@@ -18,7 +19,8 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  * names) - deep-link into that app's window; otherwise open it as a tab in
  * the Web Browser app, launching a browser window first when none is open.
  *
- * A `mailto:` link opens a new message in Mail.
+ * A `mailto:` link opens a new message in Mail, and a `magnet:` link the Add
+ * window in Torrents.
  *
  * A `nostr:` link opens in the default app for its kind, or else as a
  * preview in the Web Browser, with buttons to open it in an app. A `blossom:`
@@ -40,6 +42,10 @@ export function useOpenUrl(): (url: string) => void {
     (rawUrl: string) => {
       if (isMailtoUrl(rawUrl)) {
         open('mail', { mailto: rawUrl });
+        return;
+      }
+      if (isMagnetUrl(rawUrl)) {
+        open('torrents', { magnet: rawUrl.trim() });
         return;
       }
 

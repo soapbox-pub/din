@@ -77,6 +77,8 @@ const SYSTEM_PERMISSIONS = {
   // Writing disk images to USB drives; usb-flasher.mts and its helper check
   // the drive, and the image is read as the user.
   flasher: /^flasher:(status|inspect|flash|cancel|reset)$/,
+  // BitTorrent transfers, by Din's own Transmission (torrents.mts).
+  torrents: /^torrents:(status|list|detail|inspect|add|start|stop|verify|reannounce|remove|setFiles|setLocation|setSettings|testPort|reveal|open)$/,
   // Installing the optional feature something of the app's needs (Studio's
   // transcripts, Files' archives), as Settings → Optional Features does.
   features: /^features:(state|install)$/,
@@ -104,6 +106,7 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
   vms: /^vms:changed$/,
   games: /^games:changed$/,
   flasher: /^flasher:changed$/,
+  torrents: /^torrents:changed$/,
   capture: /^capture:(state|changed|projectChanged|streamEnded)$/,
   fetch: null,
   features: /^features:changed$/,
@@ -431,13 +434,13 @@ export function attachAppGuest(contents: Electron.WebContents, src: string, send
   contents.on('will-frame-navigate', (event) => {
     if (home(event.url) || previewed(event.url, event.isMainFrame)) return;
     event.preventDefault();
-    if (event.isMainFrame && (/^(https?|nsite):\/\//i.test(event.url) || /^blossom:/i.test(event.url))) send('crx:openTab', { url: event.url });
+    if (event.isMainFrame && (/^(https?|nsite):\/\//i.test(event.url) || /^(blossom|magnet):/i.test(event.url))) send('crx:openTab', { url: event.url });
   });
   contents.on('will-redirect', (event) => {
     if (!home(event.url) && !previewed(event.url, event.isMainFrame)) event.preventDefault();
   });
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?|nsite):\/\//i.test(url) || /^blossom:/i.test(url)) send('crx:openTab', { url });
+    if (/^(https?|nsite):\/\//i.test(url) || /^(blossom|magnet):/i.test(url)) send('crx:openTab', { url });
     return { action: 'deny' };
   });
   contents.on('unresponsive', () => send('dinos-apps:responsive', { webContentsId: contents.id, responsive: false }));

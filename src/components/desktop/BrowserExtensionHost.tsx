@@ -7,6 +7,7 @@ import { WEB_POPUP_APP_ID, popupWindowSize } from '@/lib/webPopup';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { isNostrUri } from '@/lib/nostrUri';
 import { isMailtoUrl } from '@/lib/mailto';
+import { isMagnetUrl } from '@/lib/torrents';
 
 /**
  * Desktop-lifetime listener for Chrome-extension tab commands (window.dinos.crx).
@@ -55,6 +56,10 @@ export function BrowserExtensionHost() {
       // or else as a preview tab beside the page.
       if (command.type === 'open' && isMailtoUrl(command.url)) {
         open('mail', { mailto: command.url });
+        return;
+      }
+      if (command.type === 'open' && isMagnetUrl(command.url)) {
+        open('torrents', { magnet: command.url.trim() });
         return;
       }
       if (command.type === 'open' && isNostrUri(command.url)) {

@@ -323,6 +323,11 @@ export const APPS: readonly AppDefinition[] = [
   // drives and memory cards by electron/usb-flasher.mts. One window; the
   // job runs in main, so it goes on with the window closed.
   dinApp('usb-flasher'),
+  // BitTorrent, from .torrent files and magnet: links, by Din's own
+  // Transmission (electron/torrents.mts), so transfers go on with the window
+  // closed. One window; launch params `{ magnet }` (any magnet: link opened
+  // anywhere) or a .torrent file open the Add window.
+  dinApp('torrents'),
   // The games in ~/roms, played full screen in RetroArch by electron/games.mts.
   dinApp('games'),
   {

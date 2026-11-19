@@ -1,0 +1,20 @@
+{
+  "name": "Torrents",
+  "description": "Download and share with BitTorrent: torrent files and magnet links, paused and resumed, with the files you want, at the speeds you set.",
+  "icons": [{ "src": "/icons/apps/torrents.png", "sizes": "512x512", "type": "image/png" }],
+  "start_url": "/",
+  "launch_handler": { "client_mode": "focus-existing" },
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "application/x-bittorrent": [".torrent"]
+      }
+    }
+  ],
+  "din": {
+    "permissions": ["torrents", "features"],
+    "window": { "size": { "width": 1040, "height": 680 }, "frame": "custom" },
+    "keywords": ["BitTorrent", "torrent", "magnet", "Transmission", "qBittorrent", "uTorrent", "Deluge", "download", "seed", "peer to peer", "P2P"]
+  }
+}

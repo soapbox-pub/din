@@ -155,13 +155,19 @@ export function isVCard(name: string): boolean {
  * files in it), else in Preview.
  */
 export function dinOpens(name: string): boolean {
-  return fileCategory(name, 'file') !== 'other';
+  return fileCategory(name, 'file') !== 'other' || isTorrentFile(name);
+}
+
+/** A BitTorrent metainfo file, which opens in Torrents' Add window. */
+export function isTorrentFile(name: string): boolean {
+  return extensionOf(name) === 'torrent';
 }
 
 /** The built-in app that opening a file starts, as Files does on double-click. */
 export function appForFile(name: string): string {
   if (isMediaPlayerFile(name)) return 'media-player';
   if (isVCard(name)) return 'contacts';
+  if (isTorrentFile(name)) return 'torrents';
   if (isTextFile(name)) return 'text-editor';
   if (isLayeredImage(name)) return 'photo-editor';
   if (isCadFile(name)) return 'cad';

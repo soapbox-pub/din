@@ -8,7 +8,8 @@
 // own links open (useOpenUrl): in an installed web app that owns the
 // origin, or as a tab in the Web Browser. A nostr: link opens in the app
 // chosen for its kind, or as a preview with an "Open with" choice; a
-// blossom: link (BUD-10) as a tab showing the file (electron/blossom.mts).
+// blossom: link (BUD-10) as a tab showing the file (electron/blossom.mts); a
+// magnet: link in Torrents.
 //
 // Folders come the same way (din-open is the handler for inode/directory
 // too) and open in Files, as do the files apps ask to show: Electron and
@@ -180,7 +181,7 @@ function answer(call: MethodCall): [string, unknown[]] | void {
   }
   const [uris] = call.body as [unknown[]];
   for (const uri of uris.slice(0, MAX_URIS)) {
-    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && /^(https?|nsite|nostr|blossom):/i.test(uri)) {
+    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && /^(https?|nsite|nostr|blossom|magnet):/i.test(uri)) {
       sendToShell('open-uri:open', uri);
       continue;
     }

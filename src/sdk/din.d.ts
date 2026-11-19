@@ -34,6 +34,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { FlasherBridge } from '@/lib/flasher';
+import type { TorrentsBridge } from '@/lib/torrents';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge } from '@/lib/features';
 import type { FlatpakProgress, InstalledFlatpak, LinuxAppsStatus, LinuxFormat } from '@/lib/nostrFlatpaks';
@@ -1196,6 +1197,12 @@ export type Permission =
    */
   | 'flasher'
   /**
+   * BitTorrent transfers, from .torrent files and magnet: links, by Din's
+   * own Transmission (`din.system.torrents`): adding them to any folder,
+   * and moving what they downloaded to the Trash. Torrents.
+   */
+  | 'torrents'
+  /**
    * The camera, the microphone and the whole screen in the app's own page
    * (getUserMedia, getDisplayMedia with no picker), and `din.system.capture`:
    * projects of takes and clips in ~/Videos/Studio, the screen recorded with its pointer, live
@@ -1284,6 +1291,7 @@ export interface DinSystem {
   vms?: VmsBridge;
   games?: GamesBridge;
   flasher?: FlasherBridge;
+  torrents?: TorrentsBridge;
   capture?: CaptureBridge;
   /**
    * Optional features (Settings → Optional Features): what's installed, and

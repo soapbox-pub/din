@@ -58,6 +58,7 @@ import type { PhoneAppBridge } from '@/lib/phone';
 import type { VmsBridge } from '@/lib/vms';
 import type { GamesBridge } from '@/lib/games';
 import type { FlasherBridge } from '@/lib/flasher';
+import type { TorrentsBridge } from '@/lib/torrents';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
 import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
@@ -1550,6 +1551,15 @@ export function installDin(transport: Transport): void {
         }
         f.onChanged = (cb: (change: unknown) => void) => sys.on('flasher', 'flasher:changed', (change) => cb(change));
         system.flasher = f as unknown as FlasherBridge;
+      }
+      if (permissions.has('torrents')) {
+        await sys.ready('torrents');
+        const t: Record<string, unknown> = {};
+        for (const m of ['status', 'list', 'detail', 'inspect', 'add', 'start', 'stop', 'verify', 'reannounce', 'remove', 'setFiles', 'setLocation', 'setSettings', 'testPort', 'reveal', 'open']) {
+          t[m] = (...args: unknown[]) => sys.call('torrents', `torrents:${m}`, args);
+        }
+        t.onChanged = (cb: (change: unknown) => void) => sys.on('torrents', 'torrents:changed', (change) => cb(change));
+        system.torrents = t as unknown as TorrentsBridge;
       }
       if (permissions.has('capture')) {
         await sys.ready('capture');

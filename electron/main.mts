@@ -153,6 +153,7 @@ import { registerBluetoothHandlers } from './bluetooth.mts';
 import { registerFeaturesHandlers } from './features.mts';
 import { registerVolumesHandlers } from './volumes.mts';
 import { isWritingDrive, registerUsbFlasherHandlers } from './usb-flasher.mts';
+import { registerTorrentsHandlers } from './torrents.mts';
 import { registerDriveHandlers } from './drive.mts';
 import { cleanUpPrinting, printingNetworkChanged, registerPrintingHandlers, requestPagePrint } from './printing.mts';
 import { registerSystemMonitorHandlers } from './system-monitor.mts';
@@ -5275,8 +5276,9 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     }
     // A nostr: link (NIP-21) opens in the app the user chose for its kind,
     // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts);
-    // a mailto: link opens a new message in Mail. Not from Tor's session: the
-    // preview reaches relays directly.
+    // a mailto: link opens a new message in Mail, and a magnet: link the Add
+    // window in Torrents. Not from Tor's session: the preview reaches relays
+    // directly, and a torrent's peers would be reached without Tor.
     if (
       permission === 'openExternal' &&
       prompts &&
@@ -5284,7 +5286,7 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       'externalURL' in details &&
       typeof details.externalURL === 'string' &&
       details.externalURL.length <= 8192 &&
-      /^(nostr|mailto):/i.test(details.externalURL)
+      /^(nostr|mailto|magnet):/i.test(details.externalURL)
     ) {
       sendToShell('crx:openTab', { url: details.externalURL, openerWcId: _contents.id });
       callback(false);
@@ -6641,6 +6643,7 @@ app.whenReady().then(() => {
   // Nothing new is mounted while a disk is being written: the Installer's, or USB Flasher's.
   registerVolumesHandlers({ assertShellSender, sendToShell, isInstalling: () => isInstalling() || isWritingDrive() });
   registerUsbFlasherHandlers({ assertShellSender, sendToShell });
+  registerTorrentsHandlers({ assertShellSender, sendToShell });
   registerDriveHandlers({ assertShellSender });
   registerGrammarHandlers({ assertShellSender });
   registerPrintingHandlers({
