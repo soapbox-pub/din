@@ -1163,7 +1163,8 @@ export type Permission =
   /**
    * Work while no window is open: `registration.periodicSync` wakes the app's
    * service worker on a schedule (every 15 minutes at most), which with
-   * `notifications` may also notify. docs/din/background.md.
+   * `notifications` may also notify, and an `ongoing` notification keeps it
+   * running a task for as long as it shows. docs/din/background.md.
    */
   | 'background'
   /** Set the desktop wallpaper (`din.desktop`). */
@@ -1269,6 +1270,32 @@ declare global {
      * it and the desktop granted it, else `denied`, never `prompt`.
      */
     query(permissionDesc: { name: Permission }): Promise<PermissionStatus>;
+  }
+
+  /**
+   * Din's additions to `registration.showNotification()`'s options
+   * (docs/din/background.md, "Running a task"). Check for them with
+   * `'ongoing' in Notification.prototype`.
+   */
+  interface NotificationOptions {
+    /**
+     * A running task: while it shows, the app's service worker keeps running
+     * with its windows closed. Needs `background` and `notifications`, and the
+     * user to have just acted (a key or click in one of the app's windows, or
+     * a click on one of its notifications), or it replaces the app's own
+     * running one with its tag; otherwise it's an ordinary notification. Din
+     * adds Stop, which closes it and raises `notificationclose`.
+     */
+    ongoing?: boolean;
+    /** A progress bar, from 0 to 1. */
+    progress?: number;
+  }
+
+  interface Notification {
+    /** Whether it's a running task: false where it asked to be one and wasn't allowed. */
+    readonly ongoing: boolean;
+    /** Its progress bar, from 0 to 1, or null for none. */
+    readonly progress: number | null;
   }
 }
 

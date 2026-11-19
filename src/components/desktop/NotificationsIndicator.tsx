@@ -9,7 +9,7 @@ import {
   useNotificationCenter,
 } from '@/lib/notificationCenter';
 import { cn } from '@/lib/utils';
-import { trayHeader, trayTitle } from './trayPanel';
+import { trayHeader, trayRuleBottom, trayTitle } from './trayPanel';
 
 /**
  * The notification center, shown in the menu-bar clock's panel.
@@ -28,7 +28,9 @@ export function NotificationsPanel({
   className?: string;
 }) {
   const { notifications, doNotDisturb } = useNotificationCenter();
-  const appNotifications = notifications.filter((n) => n.history);
+  // Running tasks first, under their own heading: they stay until stopped.
+  const running = notifications.filter((n) => n.history && n.ongoing);
+  const appNotifications = notifications.filter((n) => n.history && !n.ongoing);
 
   // Dismiss-on-view: unread rows stay highlighted while the panel is open, and
   // count as read once it closes. The panel only mounts while the popover is
@@ -69,6 +71,20 @@ export function NotificationsPanel({
 
       {/* Not sideways: a row swiped away slides out past its edge. */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        {running.length > 0 && (
+          <section aria-labelledby="notifications-running" className={cn(appNotifications.length > 0 && trayRuleBottom)}>
+            <h3 id="notifications-running" className="px-4 pt-1 text-xs font-semibold text-muted-foreground">
+              Running
+            </h3>
+            <ul className="flex flex-col gap-1 p-2">
+              {running.map((notification) => (
+                <li key={notification.id}>
+                  <NotificationCard notification={notification} variant="list" onActivated={onNavigate} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {appNotifications.length > 0 ? (
           <ul className="flex flex-col gap-1 p-2" aria-label="Notifications">
             {appNotifications.map((notification) => (
@@ -77,7 +93,7 @@ export function NotificationsPanel({
               </li>
             ))}
           </ul>
-        ) : (
+        ) : running.length > 0 ? null : (
           <div className="px-6 py-12 text-center">
             <Bell className="mx-auto mb-3 size-8 text-muted-foreground/50" aria-hidden />
             <p className="text-sm text-muted-foreground">No notifications</p>

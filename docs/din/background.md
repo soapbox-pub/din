@@ -90,9 +90,79 @@ code like any module; type its global with
 lib="webworker" />` file of its own. An app from a folder ships its
 `sw.js` as it is.
 
+## Running a task
+
+> **Status: in place** for apps on `din://` and `din+file://`.
+
+A schedule is for short runs. Work the user starts and waits on (a sync, an
+upload, an export) runs in the worker for as long as it takes, with its
+windows closed, while a notification says so. That's Android's foreground
+service, in the web's own terms: a notification with Din's `ongoing` option.
+
+```ts
+// The page, when the user asks for it:
+navigator.serviceWorker.controller?.postMessage({ type: 'sync' });
+
+// sw.ts
+let stop = new AbortController();
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'sync') return;
+  stop = new AbortController();
+  event.waitUntil(sync(stop.signal));
+});
+
+async function sync(signal: AbortSignal) {
+  const show = (body: string, progress: number) =>
+    self.registration.showNotification('Syncing notes', { tag: 'sync', body, progress, ongoing: true, silent: true });
+  await show('Starting…', 0);
+  for (const [i, batch] of batches.entries()) {
+    if (signal.aborted) return;
+    await upload(batch, { signal });
+    await show(`${i + 1} of ${batches.length}`, (i + 1) / batches.length);
+  }
+  // The same tag without `ongoing`: the task is over, and this is news.
+  await self.registration.showNotification('Notes synced', { tag: 'sync' });
+}
+
+// Its Stop: the notification is gone, and the worker has 10 seconds.
+self.addEventListener('notificationclose', (event) => {
+  if (event.notification.tag === 'sync') stop.abort();
+});
+```
+
+- **While an `ongoing` notification shows,** the app's worker is kept
+  running, past Chromium's limits on how long a worker lives and how long an
+  event may take. When it goes, the usual limits apply again. Chromium stops
+  a worker whose event's `waitUntil()` passes five minutes, so once a task is
+  granted (and each time it's updated), what an event handed `waitUntil()`
+  counts as done to Chromium, and the work goes on: hand it over as usual.
+- **Who may:** an app with `background` and `notifications`, within a
+  minute of the user pressing a key or clicking in one of its windows or
+  clicking one of its notifications (`notificationclick` may start one), or
+  to update its own running one (the same tag). Otherwise it's shown as an
+  ordinary notification.
+- **Telling:** `'ongoing' in Notification.prototype` says Din's options are
+  here; a notification's `ongoing` (`getNotifications({ tag })`) says
+  whether it got it. Elsewhere the same code runs, under the usual limits.
+- **The same tag** updates the notification in place, without popping up
+  again (`renotify: true` pops it up). `progress`, 0 to 1, draws a bar, on
+  any notification.
+- **Ending it:** close it (`notification.close()`), or show one with its tag
+  without `ongoing`, which pops up as news.
+- **Stop:** it can't be dismissed. Din adds Stop (in the notification, the
+  notification center's Running, Settings → Background Activity's Running
+  now, `din background stop`), which closes it, raises
+  `notificationclose`, and lets the worker go 10 seconds later. Clicking
+  it raises `notificationclick` and leaves it up.
+- **If the worker stops** (it crashed, or an update replaced it), its
+  running notifications go with it.
+- Up to two actions of its own, beside Stop.
+
 ## Seeing and stopping it
 
-Settings → Background Activity lists every app with a schedule, its tags,
+`din background running` lists the tasks running now and `din background
+stop` stops one. Settings → Background Activity lists every app with a schedule, its tags,
 how often they run and how the last run went. One switch turns all of it
 off; each app can be paused (it keeps its schedule), run now, or removed
 (a site has to ask again; a Din app can schedule itself again the next time

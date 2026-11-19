@@ -301,6 +301,7 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     if (!appId) throw new Error('Not an app');
     const notifications = (grantOptions as { notifications?: unknown } | null)?.notifications === true;
     backgroundGrants.set(contents.id, { appId, notifications });
+    appBackgroundGrants.set(appId, { notifications });
   });
 
   // `nostr`: the app's service worker gets self.nostr, the signer its windows
@@ -678,6 +679,29 @@ const microphoneGrants = new Set<number>();
 /** What the desktop granted an app window for its worker, or null without `background`. */
 export function backgroundGrant(wcId: number): { appId: string; notifications: boolean } | null {
   return backgroundGrants.get(wcId) ?? null;
+}
+
+/**
+ * Apps the desktop granted `background` this session, by app id, with or
+ * without `notifications`: what the app's worker may do once its windows
+ * are closed.
+ */
+const appBackgroundGrants = new Map<string, { notifications: boolean }>();
+
+/** What the desktop granted an app for its worker this session, or null without `background`. */
+export function appBackgroundGrant(appId: string): { notifications: boolean } | null {
+  return appBackgroundGrants.get(appId) ?? null;
+}
+
+/** How long ago the user last pressed a key or clicked in any window of an app, or Infinity. */
+export function sinceAppInput(appId: string): number {
+  let latest = -Infinity;
+  for (const [wcId, at] of lastInput) {
+    if (at <= latest) continue;
+    const contents = webContents.fromId(wcId);
+    if (contents && !contents.isDestroyed() && appIdOf(contents.getURL()) === appId) latest = at;
+  }
+  return Date.now() - latest;
 }
 
 function grant(

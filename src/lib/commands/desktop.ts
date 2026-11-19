@@ -521,7 +521,11 @@ export const notificationsArea: Area = {
     command('notifications', 'dismiss', 'Dismiss a notification', [
       { name: 'id', type: 'string', positional: true, help: 'Its id' },
     ], (args) => {
-      closeNotification(args.string('id'));
+      const id = args.string('id');
+      if (getNotificationState().notifications.find((n) => n.id === id)?.ongoing) {
+        throw new CommandError('That’s an app’s running task: stop it with din background stop');
+      }
+      closeNotification(id);
     }),
     command('notifications', 'clear', 'Dismiss them all', [], () => {
       clearNotifications();

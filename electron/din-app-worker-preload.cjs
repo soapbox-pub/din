@@ -8,7 +8,9 @@
 // In the page and the worker:
 //   - registration.periodicSync: register, unregister, getTags
 //   - registration.showNotification / getNotifications, into Din's
-//     notification center (Electron shows none from a registration)
+//     notification center (Electron shows none from a registration), with
+//     Din's `ongoing` and `progress` options (a running task, which holds
+//     the worker running), and those as Notification attributes
 //   - navigator.permissions.query for 'periodic-background-sync'
 // In the service worker:
 //   - self.nostr, for an app with the nostr permission: the NIP-07 signer its
@@ -141,13 +143,28 @@ function installAppWorkers(bridge) {
     return notification;
   };
 
+  // Din's additions, as attributes a notification has, so an app can tell
+  // they're here: `'ongoing' in Notification.prototype`. A notification's own
+  // say whether it got them.
+  const notificationProto = protoOf('Notification');
+  if (notificationProto) {
+    Object.defineProperty(notificationProto, 'ongoing', { get: () => false, configurable: true, enumerable: true });
+    Object.defineProperty(notificationProto, 'progress', { get: () => null, configurable: true, enumerable: true });
+  }
+
+  /**
+   * Din's events being raised now, which a running task lets go of: see raise().
+   * @type {Set<() => void>}
+   */
+  const raising = new Set();
+
   /**
    * @param {string} title
-   * @param {NotificationOptions & { actions?: { action: string, title: string }[], image?: string, renotify?: boolean, timestamp?: number }} [options]
+   * @param {NotificationOptions & { actions?: { action: string, title: string }[], image?: string, renotify?: boolean, timestamp?: number, ongoing?: boolean, progress?: number }} [options]
    */
   async function showNotification(title, options = {}) {
     if (arguments.length === 0) throw new TypeError("Failed to execute 'showNotification': 1 argument required.");
-    await call('notification.show', {
+    const shown = /** @type {{ ongoing?: boolean } | null} */ (await call('notification.show', {
       title: String(title),
       options: {
         body: options.body,
@@ -163,9 +180,23 @@ function installAppWorkers(bridge) {
         timestamp: options.timestamp,
         dir: options.dir,
         lang: options.lang,
+        ongoing: options.ongoing === true,
+        progress: typeof options.progress === 'number' ? options.progress : undefined,
       },
-    });
+    }));
+    // A running task holds the worker itself: the events it started from are
+    // done as far as Din is concerned, so the next ones (its Stop) aren't
+    // queued behind its work, and as far as Chromium is concerned, which
+    // otherwise stops a worker whose event waits past five minutes.
+    if (shown?.ongoing) for (const release of [...raising, ...nativeWaits]) release();
   }
+
+  /**
+   * Chromium's own events' (a page's `message`, `fetch`) waitUntil()s still
+   * waiting, each settled early by a running task: see below.
+   * @type {Set<() => void>}
+   */
+  const nativeWaits = new Set();
 
   /** @param {GetNotificationOptions} [filter] */
   async function getNotifications(filter = {}) {
@@ -246,6 +277,35 @@ function installAppWorkers(bridge) {
     return this;
   }
 
+  // What a native event hands waitUntil() is what Chromium waits on, and it
+  // stops the worker if that takes more than five minutes, held or not. So
+  // Chromium is given the promise raced with a release that a running task
+  // (an `ongoing` notification granted, or updated) settles: the work goes
+  // on, and the task's hold keeps the worker running. Din's own events
+  // (raise() below) have a waitUntil of their own.
+  const ExtendableEventProto = protoOf('ExtendableEvent');
+  if (ExtendableEventProto) {
+    const nativeWaitUntil = ExtendableEventProto.waitUntil;
+    define(ExtendableEventProto, 'waitUntil', /** @this {Event} */ function (/** @type {unknown} */ promise) {
+      /** @type {() => void} */
+      let release = () => {};
+      const released = new Promise((resolve) => {
+        release = () => resolve(undefined);
+      });
+      const work = Promise.resolve(promise);
+      nativeWaits.add(release);
+      const settle = () => nativeWaits.delete(release);
+      work.then(settle, settle);
+      // Throws as the native one does (an event that's over): nothing is left waiting then.
+      try {
+        return nativeWaitUntil.call(this, Promise.race([work, released]));
+      } catch (error) {
+        settle();
+        throw error;
+      }
+    });
+  }
+
   if (typeof scope.Clients === 'function') define(scope.Clients.prototype, 'openWindow', openWindow);
   if (typeof scope.WindowClient === 'function') define(scope.WindowClient.prototype, 'focus', focus);
 
@@ -288,9 +348,19 @@ function installAppWorkers(bridge) {
   };
 
   bridge.listen((id, type, init) => {
+    let reported = false;
+    /** @param {boolean} ok */
+    const report = (ok) => {
+      if (reported) return;
+      reported = true;
+      raising.delete(release);
+      bridge.done(id, ok);
+    };
+    const release = () => report(true);
+    raising.add(release);
     raise(type, init).then(
-      () => bridge.done(id, true),
-      () => bridge.done(id, false),
+      () => report(true),
+      () => report(false),
     );
   });
 }

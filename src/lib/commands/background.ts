@@ -1,3 +1,4 @@
+import { getNotificationState, stopNotificationTask } from '@/lib/notificationCenter';
 import { backgroundApp, getPeriodicSyncBridge, OUTCOME_LABELS, tagSummary, type BackgroundSite } from '@/lib/periodicSync';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { call, command, need, pick } from './util';
@@ -24,10 +25,41 @@ async function find(ctx: CommandContext, query: string): Promise<{ site: Backgro
   return pick(list, query, (s) => [s.site.origin, s.name], 'app');
 }
 
+/** Apps' running tasks: their ongoing notifications, as the notification center lists them under Running. */
+function runningTasks(ctx: CommandContext) {
+  return getNotificationState()
+    .notifications.filter((n) => n.ongoing)
+    .map((n) => ({ notification: n, name: (n.source.appId && ctx.apps.getApp(n.source.appId)?.name) || n.source.name }));
+}
+
 export const backgroundArea: Area = {
   name: 'background',
-  summary: 'What apps do on a schedule while they’re closed: list it, turn it all on or off, pause, resume, run now, remove',
+  summary: 'What apps do while they’re closed: tasks running now (list, stop), and schedules (list, turn it all on or off, pause, resume, run now, remove)',
   commands: [
+    command('background', 'running', 'Tasks apps are running now, each kept going by its notification', [], (_args, ctx) => {
+      const tasks = runningTasks(ctx);
+      return {
+        data: tasks.map(({ notification: n, name }) => ({
+          id: n.id, app: name, appId: n.source.appId ?? null, title: n.title, body: n.body, progress: n.progress ?? null, since: n.createdAt,
+        })),
+        text: tasks.length
+          ? tasks
+              .map(({ notification: n, name }) =>
+                `${name}: ${n.title}${n.body ? ` · ${n.body}` : ''}${typeof n.progress === 'number' ? ` (${Math.round(n.progress * 100)}%)` : ''}  [${n.id}]`,
+              )
+              .join('\n')
+          : 'No app is running a task',
+      };
+    }),
+    command('background', 'stop', 'Stop a running task, as its Stop button does', [
+      { name: 'task', type: 'string', positional: true, help: 'Which one, by its app’s name or the id din background running shows' },
+    ], (args, ctx) => {
+      const tasks = runningTasks(ctx);
+      if (!tasks.length) throw new CommandError('No app is running a task');
+      const { notification, name } = pick(tasks, args.string('task'), (t) => [t.notification.id, t.name, t.notification.source.appId ?? ''], 'task');
+      stopNotificationTask(notification.id);
+      return { data: { id: notification.id, stopped: true }, text: `Stopped ${name}’s ${notification.title}` };
+    }),
     command('background', 'list', 'Every app with a schedule, its tags, and how their last runs went', [], async (_args, ctx) => {
       const { status, sites: list } = await sites(ctx);
       const head = status.enabled ? 'Apps may refresh in the background' : 'Background refresh is off for every app';

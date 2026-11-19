@@ -13,6 +13,19 @@
 //     `notificationclose`; for a minute after a click, clients.openWindow
 //     opens a window of the app (its URL in the launch params, as `url`) and
 //     WindowClient.focus brings one forward.
+//   - `ongoing: true` on showNotification, Din's addition (and `progress`,
+//     0-1, for a bar): a running task. While one shows, the app's worker is
+//     held running (a Chromium external request that doesn't time out), so
+//     its work outlives its windows and Chromium's limits. Granted only to an
+//     app with `background` and `notifications`, within a minute of the user
+//     pressing a key or clicking in one of its windows or clicking one of its
+//     notifications, or to replace its own running one; otherwise it's an
+//     ordinary notification, and the notification's `ongoing` reads false.
+//     It can't be dismissed: Din adds Stop, which closes it, raises
+//     `notificationclose`, and lets the worker go STOP_GRACE_MS later. The
+//     app ends it itself by closing it, or by showing one with its tag
+//     without `ongoing` (a "done" notification). Showing one with a tag
+//     that's showing updates it in place, without popping up again.
 //
 // An app runs in the background only while Din still has it: a built-in
 // app, a folder the desktop opened since it started, an app the `din`
@@ -25,10 +38,10 @@
 
 import { ipcMain } from 'electron';
 import v8 from 'node:v8';
-import { appIdOf, appOrigin, appsSession, hasNostrGrant, isAppGuest, isBuiltInApp, isFileAppId } from './din-apps.mts';
+import { appBackgroundGrant, appIdOf, appOrigin, appsSession, hasNostrGrant, isAppGuest, isBuiltInApp, isFileAppId, sinceAppInput } from './din-apps.mts';
 import { isServedFolder } from './din-file-apps.mts';
 import { isLaunchedApp } from './din-launch.mts';
-import { closeAppNotification, setAppNotificationHandlers, showAppNotification } from './notifications.mts';
+import { APP_STOP_ACTION, closeAppNotification, setAppNotificationHandlers, showAppNotification } from './notifications.mts';
 import { appMayNotify, PeriodicSyncError, registerSyncRunner, registerTag, tagsOf, unregisterTag } from './periodic-sync.mts';
 import { WorkerEvents } from './worker-events.mts';
 
@@ -44,6 +57,10 @@ interface Options {
 const INTERACTION_WINDOW_MS = 60_000;
 const MAX_NOTIFICATIONS_PER_APP = 32;
 const MAX_NOTIFICATION_BYTES = 64 * 1024;
+/** How soon after the user acts (a key or click in the app, a click on its notification) a task may start. */
+const TASK_START_WINDOW_MS = 60_000;
+/** How long a stopped task's worker is still held, to finish up. */
+const STOP_GRACE_MS = 10_000;
 
 let options: Options;
 
@@ -109,6 +126,7 @@ function attach(worker: Electron.ServiceWorkerMain): void {
 
 function watchWorkers(s: Electron.Session): void {
   s.serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+    if (runningStatus === 'stopped') workerStopped(versionId);
     if (runningStatus !== 'starting' && runningStatus !== 'running') return;
     const worker = s.serviceWorkers.getWorkerFromVersionID(versionId);
     if (worker) attach(worker);
@@ -151,10 +169,127 @@ function snapshot(n: LiveNotification): Record<string, unknown> {
 }
 
 function mayNotify(caller: Caller): boolean {
-  return caller.worker ? appMayNotify(caller.origin) : caller.grant?.notifications === true;
+  if (!caller.worker) return caller.grant?.notifications === true;
+  return appMayNotify(caller.origin) || appBackgroundGrant(caller.appId)?.notifications === true;
 }
 
-async function showNotification(caller: Caller, params: unknown): Promise<void> {
+/** Whether the app has `background`: a page's window was granted it, or for a worker, one of its windows this session. */
+function hasBackground(caller: Caller): boolean {
+  return caller.worker ? appBackgroundGrant(caller.appId) !== null : caller.grant !== null;
+}
+
+function isOngoing(n: LiveNotification): boolean {
+  return n.options.ongoing === true;
+}
+
+/** Whether a notification may be a running task: see the top of the file. */
+function mayRunTask(caller: Caller, tag: string): boolean {
+  if (!hasBackground(caller)) return false;
+  if (tag && [...live.values()].some((n) => n.appId === caller.appId && isOngoing(n) && n.options.tag === tag)) return true;
+  const sinceClick = Date.now() - (lastInteraction.get(caller.appId) ?? 0);
+  return Math.min(sinceClick, sinceAppInput(caller.appId)) <= TASK_START_WINDOW_MS;
+}
+
+/** A progress bar's value, 0-1, or null for none. */
+function progressOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Running tasks: the worker held while an app's ongoing notification shows
+// ---------------------------------------------------------------------------
+
+interface Lease {
+  versionId: number;
+  task: { end: () => void };
+}
+
+const leases = new Map<string, Lease>();
+/** Leases being taken (the worker starting), so one isn't taken twice. */
+const leasing = new Map<string, Promise<void>>();
+/** Apps whose stopped task is finishing up, held until the timer fires. */
+const graces = new Map<string, NodeJS.Timeout>();
+
+function wantsLease(appId: string): boolean {
+  return graces.has(appId) || [...live.values()].some((n) => n.appId === appId && isOngoing(n));
+}
+
+/** Hold the app's worker while it has a running task (or one finishing up), and let it go after. */
+function syncLease(appId: string): void {
+  if (wantsLease(appId)) {
+    if (leases.has(appId) || leasing.has(appId)) return;
+    const taking = (async () => {
+      try {
+        const worker = await appsSession().serviceWorkers.startWorkerForScope(`${appOrigin(appId)}/`);
+        if (!wantsLease(appId) || leases.has(appId)) return;
+        leases.set(appId, { versionId: worker.versionId, task: worker.startTask() });
+        log(`${appId}: holding its worker for a running task`);
+      } catch (error) {
+        log(`${appId}: couldn't hold its worker: ${error instanceof Error ? error.message : error}`);
+        endTasks(appId);
+      } finally {
+        leasing.delete(appId);
+      }
+    })();
+    leasing.set(appId, taking);
+    return;
+  }
+  const lease = leases.get(appId);
+  if (!lease) return;
+  leases.delete(appId);
+  try {
+    lease.task.end();
+  } catch {
+    // The worker is already gone.
+  }
+  log(`${appId}: let its worker go`);
+}
+
+/** A held worker stopped (it crashed, or was replaced by an update): its tasks are over. */
+function workerStopped(versionId: number): void {
+  for (const [appId, lease] of leases) {
+    if (lease.versionId !== versionId) continue;
+    leases.delete(appId);
+    log(`${appId}: its worker stopped while running a task`);
+    endTasks(appId);
+  }
+}
+
+/** Take down an app's running tasks without telling its worker (it's gone). */
+function endTasks(appId: string): void {
+  for (const n of [...live.values()]) {
+    if (n.appId !== appId || !isOngoing(n)) continue;
+    live.delete(n.id);
+    closeAppNotification(n.id);
+  }
+  clearTimeout(graces.get(appId));
+  graces.delete(appId);
+  syncLease(appId);
+}
+
+/**
+ * The user stopped a task (its Stop, the notification center, `din
+ * background stop`): it goes, its worker hears `notificationclose`, and is
+ * held STOP_GRACE_MS more to finish up.
+ */
+function stopTask(n: LiveNotification): void {
+  live.delete(n.id);
+  closeAppNotification(n.id);
+  clearTimeout(graces.get(n.appId));
+  graces.set(
+    n.appId,
+    setTimeout(() => {
+      graces.delete(n.appId);
+      syncLease(n.appId);
+    }, STOP_GRACE_MS),
+  );
+  syncLease(n.appId);
+  log(`${n.appId}: task ${n.options.tag || n.id} stopped by the user`);
+  const origin = appOrigin(n.appId);
+  events.enqueue(origin, () => dispatch(origin, 'notificationclose', { notification: snapshot(n) }));
+}
+
+async function showNotification(caller: Caller, params: unknown): Promise<{ ongoing: boolean }> {
   if (!mayNotify(caller)) throw new DinAppWorkerError('No notification permission has been granted for this origin.', 'TypeError');
   const { title, options: raw } = (params ?? {}) as { title?: unknown; options?: unknown };
   if (typeof title !== 'string') throw new DinAppWorkerError('A notification needs a title', 'TypeError');
@@ -170,8 +305,13 @@ async function showNotification(caller: Caller, params: unknown): Promise<void> 
         .slice(0, 3)
     : [];
   const tag = text(opts.tag, 256);
+  const ongoing = opts.ongoing === true && mayRunTask(caller, tag);
+  const renotify = opts.renotify === true;
+  const mine = [...live.values()].filter((n) => n.appId === caller.appId);
+  // One with its tag showing is replaced in place, as the web has it, unless it asks to notify again.
+  const sameTag = tag && !renotify ? mine.find((n) => n.options.tag === tag) : undefined;
   const notification: LiveNotification = {
-    id: nextNotificationId++,
+    id: sameTag?.id ?? nextNotificationId++,
     appId: caller.appId,
     title: title.slice(0, 256),
     options: {
@@ -183,22 +323,24 @@ async function showNotification(caller: Caller, params: unknown): Promise<void> 
       data: opts.data ?? null,
       actions,
       silent: opts.silent === true,
-      renotify: opts.renotify === true,
+      renotify,
       requireInteraction: opts.requireInteraction === true,
       timestamp: typeof opts.timestamp === 'number' ? opts.timestamp : Date.now(),
       dir: text(opts.dir, 8) || 'auto',
       lang: text(opts.lang, 64),
+      ongoing,
+      progress: progressOf(opts.progress),
     },
   };
-  // A tag replaces its namesake; past the cap, the oldest goes.
-  const mine = [...live.values()].filter((n) => n.appId === caller.appId);
-  const replaced = mine.filter((n) => tag && n.options.tag === tag);
-  const rest = mine.filter((n) => !replaced.includes(n));
+  // A tag replaces its namesake; past the cap, the oldest goes (never a running task).
+  const replaced = mine.filter((n) => n !== sameTag && tag && n.options.tag === tag);
+  const rest = mine.filter((n) => n !== sameTag && !replaced.includes(n) && !isOngoing(n));
   for (const old of [...replaced, ...rest.slice(0, Math.max(0, rest.length - MAX_NOTIFICATIONS_PER_APP + 1))]) {
     live.delete(old.id);
     closeAppNotification(old.id);
   }
   live.set(notification.id, notification);
+  syncLease(caller.appId);
   await showAppNotification(appsSession(), {
     id: notification.id,
     appId: caller.appId,
@@ -208,7 +350,12 @@ async function showNotification(caller: Caller, params: unknown): Promise<void> 
     actions,
     requireInteraction: notification.options.requireInteraction as boolean,
     silent: notification.options.silent as boolean,
+    ongoing,
+    progress: notification.options.progress as number | null,
+    // A task's "done" in its place pops up as news; anything else with its tag updates quietly.
+    update: !!sameTag && (ongoing || !isOngoing(sameTag)),
   });
+  return { ongoing };
 }
 
 function listNotifications(caller: Caller, params: unknown): Record<string, unknown>[] {
@@ -223,6 +370,7 @@ function closeNotification(caller: Caller, id: unknown): void {
   if (!notification || notification.appId !== caller.appId) return;
   live.delete(notification.id);
   closeAppNotification(notification.id);
+  syncLease(notification.appId);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +412,7 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
         result = caller.grant || (caller.worker && tagsOf(caller.origin).length > 0) ? 'granted' : 'denied';
         break;
       case 'notification.show':
-        await showNotification(caller, args);
+        result = await showNotification(caller, args);
         break;
       case 'notification.list':
         result = listNotifications(caller, args);
@@ -336,7 +484,12 @@ export function registerDinAppWorkers(opts: Options): void {
     activate: (id, action) => {
       const notification = live.get(id);
       if (!notification) return;
-      live.delete(id);
+      if (isOngoing(notification) && action === APP_STOP_ACTION) {
+        stopTask(notification);
+        return;
+      }
+      // A running task stays up when it's clicked; the app closes it if it wants.
+      if (!isOngoing(notification)) live.delete(id);
       lastInteraction.set(notification.appId, Date.now());
       const origin = appOrigin(notification.appId);
       events.enqueue(origin, () =>
@@ -349,6 +502,12 @@ export function registerDinAppWorkers(opts: Options): void {
     closed: (id, reason) => {
       const notification = live.get(id);
       if (!notification) return;
+      // A running task the desktop took down (its app's notifications are
+      // turned off, or were when it came): stopped, as with its Stop.
+      if (isOngoing(notification)) {
+        stopTask(notification);
+        return;
+      }
       live.delete(id);
       if (reason !== 'dismissed') return;
       const origin = appOrigin(notification.appId);

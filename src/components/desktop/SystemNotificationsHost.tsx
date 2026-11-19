@@ -12,11 +12,12 @@ import {
   closeNotificationsFrom,
   DEFAULT_POPUP_MS,
   notify,
+  updateNotification,
   useNotificationCenter,
   type NotificationSource,
 } from '@/lib/notificationCenter';
 import { nsiteAppId } from '@/lib/nsiteApps';
-import { getSystemNotificationsBridge, type BadgeSource, type SystemNotification } from '@/lib/systemNotifications';
+import { APP_STOP_ACTION, getSystemNotificationsBridge, type BadgeSource, type SystemNotification } from '@/lib/systemNotifications';
 import { getWebPushHost } from '@/lib/webPush';
 import { guestWindowId } from '@/platform/guest';
 
@@ -114,6 +115,23 @@ export function SystemNotificationsHost() {
       // A page's and its worker's notifications replace each other by tag.
       const webOrigin = guest?.origin ?? worker?.origin;
       const siteApp = site ? getAppRef.current(nsiteAppId(site.host)) : undefined;
+      const actions = n.actions.filter((a) => a.id !== 'default');
+      // A Din app's running task, or one with its tag: changed in place, no popup again.
+      if (
+        n.update &&
+        updateNotification(n.id, {
+          title: n.title,
+          body: n.body,
+          image: n.image,
+          actions,
+          progress: n.progress,
+          ongoing: n.ongoing,
+          stopAction: n.ongoing ? APP_STOP_ACTION : undefined,
+          resident: n.resident,
+        })
+      ) {
+        return;
+      }
       notify({
         id: n.id,
         source: guest
@@ -126,7 +144,10 @@ export function SystemNotificationsHost() {
         title: n.title,
         body: n.body,
         image: n.image,
-        actions: n.actions.filter((a) => a.id !== 'default'),
+        actions,
+        progress: n.progress,
+        ongoing: n.ongoing,
+        stopAction: n.ongoing ? APP_STOP_ACTION : undefined,
         urgency: n.urgency,
         timeout:
           n.timeout < 0

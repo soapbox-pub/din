@@ -60,7 +60,8 @@ export function NotificationCard({
     onReplyingChange?.(on);
   };
 
-  // Swiped right, or up off a popup (a list scrolls up and down), it's dismissed.
+  // Swiped right, or up off a popup (a list scrolls up and down), it's
+  // dismissed; a running task isn't, only stopped.
   const { style: swipeStyle, ...swipe } = useSwipeToDismiss({
     onDismiss: () => closeNotification(notification.id),
     up: variant === 'popup',
@@ -77,8 +78,8 @@ export function NotificationCard({
       <ContextMenuTrigger asChild>
         <div
           role={variant === 'popup' ? 'status' : undefined}
-          {...swipe}
-          style={replying ? undefined : swipeStyle}
+          {...(notification.ongoing ? {} : swipe)}
+          style={replying || notification.ongoing ? undefined : swipeStyle}
           className={cn(
             'group relative flex flex-col gap-1.5 p-3',
             variant === 'popup' &&
@@ -87,7 +88,7 @@ export function NotificationCard({
             variant === 'list' && !notification.read && 'bg-selected',
           )}
         >
-          <div className="flex items-center gap-1.5 pr-6 text-xs text-muted-foreground">
+          <div className={cn('flex items-center gap-1.5 text-xs text-muted-foreground', !notification.ongoing && 'pr-6')}>
             <AppIcon icon={sourceIcon} className="size-3.5 shrink-0 object-contain" />
             <span className="truncate">{sourceName}</span>
             <span aria-hidden>·</span>
@@ -96,14 +97,17 @@ export function NotificationCard({
             </time>
           </div>
 
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => closeNotification(notification.id)}
-            className="absolute right-2 top-2 rounded-md p-1 before:absolute before:-inset-2 before:content-[''] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <X className="size-3.5" />
-          </button>
+          {/* A running task isn't dismissed, only stopped (its Stop, among its actions). */}
+          {!notification.ongoing && (
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => closeNotification(notification.id)}
+              className="absolute right-2 top-2 rounded-md p-1 before:absolute before:-inset-2 before:content-[''] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
 
           <button
             type="button"
@@ -186,7 +190,7 @@ export function NotificationCard({
             <span className="truncate">{action.label}</span>
           </ContextMenuItem>
         ))}
-        <ContextMenuItem onSelect={() => closeNotification(notification.id)}>Dismiss</ContextMenuItem>
+        {!notification.ongoing && <ContextMenuItem onSelect={() => closeNotification(notification.id)}>Dismiss</ContextMenuItem>}
         <ContextMenuSeparator />
         {blockable && (
           <ContextMenuItem

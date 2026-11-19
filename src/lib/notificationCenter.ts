@@ -71,6 +71,14 @@ export interface DesktopNotification {
   replaceKey?: string;
   /** Only the user, clicking it on screen, can act on it: the din command can't (approving sudo). */
   onScreenOnly?: boolean;
+  /**
+   * A running task (a Din app's ongoing notification): it's listed under
+   * Running, can't be dismissed or cleared, and ends with its `stopAction`
+   * or when its sender closes it.
+   */
+  ongoing?: boolean;
+  /** The action that stops a running task. */
+  stopAction?: string;
   createdAt: number;
   read: boolean;
   /** Clicked (`'default'`) or one of its actions picked. */
@@ -198,6 +206,25 @@ export function updateNotificationByKey(
   setState({ ...state, notifications: state.notifications.map((n) => (n.replaceKey === replaceKey ? { ...n, ...patch } : n)) });
 }
 
+/**
+ * Change the notification with this id in place, if it's still there: it
+ * doesn't pop up again or restart its popup's clock. Returns whether it was.
+ */
+export function updateNotification(
+  id: string,
+  patch: Partial<Pick<DesktopNotification, 'title' | 'body' | 'image' | 'progress' | 'actions' | 'ongoing' | 'stopAction' | 'resident' | 'onActivate' | 'onClose'>>,
+): boolean {
+  if (!state.notifications.some((n) => n.id === id)) return false;
+  setState({ ...state, notifications: state.notifications.map((n) => (n.id === id ? { ...n, ...patch } : n)) });
+  return true;
+}
+
+/** The user stopped a running task: its stop action, as if clicked. */
+export function stopNotificationTask(id: string): void {
+  const notification = state.notifications.find((n) => n.id === id);
+  if (notification?.ongoing && notification.stopAction) activateNotification(id, notification.stopAction);
+}
+
 /** Remove a notification: the user dismissed it, or its sender closed it. */
 export function closeNotification(id: string, reason: NotificationCloseReason = 'dismissed'): void {
   remove(id, reason);
@@ -239,9 +266,9 @@ export function closeNotificationByKey(replaceKey: string): void {
   for (const n of [...state.notifications]) if (n.replaceKey === replaceKey) remove(n.id, 'closed');
 }
 
-/** Dismiss everything in the list. */
+/** Dismiss everything in the list but running tasks, which only Stop ends. */
 export function clearNotifications(): void {
-  for (const n of [...state.notifications]) remove(n.id, 'dismissed');
+  for (const n of [...state.notifications]) if (!n.ongoing) remove(n.id, 'dismissed');
 }
 
 export function markNotificationsRead(): void {

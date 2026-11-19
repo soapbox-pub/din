@@ -87,6 +87,15 @@ export interface SystemNotification {
    * params a click opens the app with, open or not.
    */
   launch?: Record<string, string>;
+  /**
+   * A Din app's running task (din-app-workers.mts): it can't be dismissed,
+   * only stopped with its `din:stop` action, and acting on it doesn't remove it.
+   */
+  ongoing?: boolean;
+  /** A progress bar, from 0 to 1. */
+  progress?: number;
+  /** It replaces the one with its id in place, without popping up again. */
+  update?: boolean;
 }
 
 type CloseReason = 'expired' | 'dismissed' | 'closed';
@@ -546,6 +555,9 @@ export function closeWorkerNotification(id: number): void {
 
 let appHandlers: SiteNotificationHandlers | null = null;
 
+/** The action Din adds to a Din app's running task: the user stopping it. */
+export const APP_STOP_ACTION = 'din:stop';
+
 export function setAppNotificationHandlers(handlers: SiteNotificationHandlers): void {
   appHandlers = handlers;
 }
@@ -566,9 +578,15 @@ export async function showAppNotification(
     actions: { action: string; title: string }[];
     requireInteraction: boolean;
     silent: boolean;
+    /** A running task's: Stop is added to its actions. */
+    ongoing: boolean;
+    progress: number | null;
+    /** It replaces the one shown with this id, in place. */
+    update: boolean;
   },
 ): Promise<void> {
   const image = notification.icon ? await fetchIcon(s, notification.icon, 'omit') : null;
+  const actions = notification.actions.slice(0, notification.ongoing ? 2 : 3).map((a) => ({ id: a.action, label: a.title }));
   const shown: SystemNotification = {
     id: `app:${notification.id}`,
     appName: notification.appId,
@@ -577,10 +595,17 @@ export async function showAppNotification(
     image,
     title: notification.title.slice(0, MAX_WEB_TITLE),
     body: notification.body.slice(0, MAX_WEB_BODY),
-    actions: [{ id: 'default', label: '' }, ...notification.actions.slice(0, 3).map((a) => ({ id: a.action, label: a.title }))],
+    actions: [
+      { id: 'default', label: '' },
+      ...actions,
+      ...(notification.ongoing ? [{ id: APP_STOP_ACTION, label: 'Stop' }] : []),
+    ],
     urgency: notification.silent ? 'low' : 'normal',
     timeout: notification.requireInteraction ? 0 : -1,
-    resident: false,
+    resident: notification.ongoing,
+    ongoing: notification.ongoing || undefined,
+    progress: notification.progress ?? undefined,
+    update: notification.update || undefined,
     transient: false,
     guest: null,
     tag: '',

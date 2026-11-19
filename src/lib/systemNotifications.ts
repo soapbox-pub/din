@@ -52,7 +52,20 @@ export interface SystemNotification {
    * launch params a click opens the app with, open or not.
    */
   launch?: Record<string, string>;
+  /**
+   * A Din app's running task (electron/din-app-workers.mts): it can't be
+   * dismissed, only stopped with its `din:stop` action, and acting on it
+   * doesn't remove it.
+   */
+  ongoing?: boolean;
+  /** A progress bar, from 0 to 1. */
+  progress?: number;
+  /** It replaces the one with its id in place, without popping up again. */
+  update?: boolean;
 }
+
+/** The action Din adds to a Din app's running task: the user stopping it. */
+export const APP_STOP_ACTION = 'din:stop';
 
 /** Who set a Dock badge outside Din's own apps (electron/notifications.mts). */
 export type BadgeSource =

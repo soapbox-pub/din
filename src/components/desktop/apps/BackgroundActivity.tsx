@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Globe, MoreHorizontal, Pause, Play, RefreshCw, Trash2, type LucideIcon } from 'lucide-react';
+import { Globe, MoreHorizontal, Pause, Play, RefreshCw, Square, Trash2, type LucideIcon } from 'lucide-react';
 import { AppIcon } from '@/shared/AppIcon';
 import {
   AlertDialog,
@@ -33,6 +33,7 @@ import { Switch } from '@/components/ui/switch';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import type { AppDefinition } from '@/lib/apps';
+import { stopNotificationTask, useNotificationCenter, type DesktopNotification } from '@/lib/notificationCenter';
 import {
   backgroundApp,
   getPeriodicSyncBridge,
@@ -63,7 +64,8 @@ function stateLabel(site: BackgroundSite, enabled: boolean): string | null {
 
 /**
  * What apps, installed nsites and installed web apps do while they're
- * closed: each one's periodic sync tags (registration.periodicSync, kept by
+ * closed: the tasks Din apps are running now (their ongoing notifications),
+ * each with Stop, and each one's periodic sync tags (registration.periodicSync, kept by
  * electron/periodic-sync.mts), how often they run and how the last run went,
  * with a switch for all of them, and each one paused, run now, or removed.
  * `din background` does the same. Nothing outside the Electron shell.
@@ -120,6 +122,8 @@ export function BackgroundActivity() {
         <Switch id="background-enabled" checked={data?.enabled ?? true} disabled={!data} onCheckedChange={setEnabled} />
       </div>
 
+      <RunningTasks />
+
       <div>
         <SettingsSubHeading>Scheduled</SettingsSubHeading>
         <p className="mb-3 px-1 text-xs text-muted-foreground">
@@ -147,6 +151,84 @@ export function BackgroundActivity() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Tasks apps are running now: their ongoing notifications (the notification
+ * center's Running), each with Stop. Shown only while there are any.
+ */
+function RunningTasks() {
+  const { notifications } = useNotificationCenter();
+  const running = notifications.filter((n) => n.ongoing);
+  if (running.length === 0) return null;
+  return (
+    <div>
+      <SettingsSubHeading>Running now</SettingsSubHeading>
+      <p className="mb-3 px-1 text-xs text-muted-foreground">
+        Tasks apps keep going with their windows closed, for as long as their notification shows.
+      </p>
+      <ul className={settingsGroup}>
+        {running.map((n) => (
+          <RunningTaskRow key={n.id} notification={n} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RunningTaskRow({ notification }: { notification: DesktopNotification }) {
+  const { getApp } = useInstalledApps();
+  const { open } = useWindowActions();
+  const app = notification.source.appId ? getApp(notification.source.appId) : undefined;
+  const name = app?.name ?? notification.source.name;
+  const stop = () => stopNotificationTask(notification.id);
+  const progress = typeof notification.progress === 'number' ? notification.progress : null;
+
+  // Its right-click menu: the row's Stop, and opening the app.
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li className="flex items-center gap-3 px-4 py-3">
+          {app ? <AppIcon icon={app.icon} className="size-8 shrink-0 rounded-md" /> : <SettingsToken icon={Globe} />}
+          <div className="min-w-0 flex-1">
+            <span className="block truncate text-sm">{name}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {notification.title}
+              {notification.body && ` · ${notification.body}`}
+            </span>
+            {progress !== null && (
+              <div
+                role="progressbar"
+                aria-label={`${name}: ${notification.title}`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progress * 100)}
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-foreground/10"
+              >
+                <div className="h-full rounded-full bg-primary motion-safe:transition-[width]" style={{ width: `${progress * 100}%` }} />
+              </div>
+            )}
+          </div>
+          <Button type="button" variant="outline" size="sm" className="shrink-0 rounded-full" onClick={stop}>
+            <Square className="size-3.5" aria-hidden />
+            Stop
+          </Button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        {app && (
+          <ContextMenuItem onSelect={() => open(app.id)}>
+            <Play />
+            Open {name}
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem onSelect={stop}>
+          <Square />
+          Stop
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
