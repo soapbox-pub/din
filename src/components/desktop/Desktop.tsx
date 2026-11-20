@@ -74,17 +74,21 @@ import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
 import { DesktopIconLayer } from './icons/DesktopIconLayer';
-import { isShown, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
+import { isShown, SCRATCHPAD, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowManagerContext';
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
-import { contains, primaryArea, workAreas, type WorkArea } from '@/lib/monitors';
+import { contains, primaryArea, rectStyle, workAreas, type WorkArea } from '@/lib/monitors';
 import { restoreCursorTryOn } from '@/lib/cursorTryOn';
 
 /** How long after a click a window it opens still counts as opened by it. */
 const LAUNCH_POINTER_MS = 2000;
+
+// Inside the workspace's stacking context, between regular and scratchpad windows.
+const SCRATCHPAD_BACKDROP_Z = 500_000;
+const windowStackZ = (w: WindowState) => w.z + (w.workspace === SCRATCHPAD ? SCRATCHPAD_BACKDROP_Z : 0);
 
 /**
  * The windows another one wholly covers: one above it, at rest, whose rect
@@ -103,14 +107,15 @@ function coveredWindows(
   const shown = windows.filter(isShown);
   const covers = shown
     .filter((w) => !w.frameless && !moving.has(w.id))
-    .map((w) => ({ z: w.z, rect: windowRect(w, areas) }));
+    .map((w) => ({ z: windowStackZ(w), rect: windowRect(w, areas) }));
   const covered = new Set<string>();
   for (const w of shown) {
     if (moving.has(w.id)) continue;
     const r = windowRect(w, areas);
+    const z = windowStackZ(w);
     const hidden = covers.some(
       (c) =>
-        c.z > w.z &&
+        c.z > z &&
         c.rect.x <= r.x &&
         c.rect.y <= r.y &&
         c.rect.x + c.rect.width >= r.x + r.width &&
@@ -322,6 +327,7 @@ function DesktopSession() {
   const moving = useMovingWindows();
   const covered = coveredWindows(manager.windows, areas, moving);
   const barWindowId = taskbar ? null : menuBarWindow(manager.windows, primaryArea(areas))?.id;
+  const scratchpadArea = areas.find((area) => area.id === manager.scratchpad);
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -360,10 +366,24 @@ function DesktopSession() {
                         {/* ~/Desktop's icons and the widgets: over the wallpaper, under every window. */}
                         <DesktopIconLayer />
                         <WidgetLayer />
+                        {scratchpadArea && (
+                          <button
+                            type="button"
+                            aria-label="Hide scratchpad"
+                            className="flex justify-center bg-black/55 pt-3 text-white backdrop-blur-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+                            style={{ ...rectStyle(scratchpadArea), zIndex: SCRATCHPAD_BACKDROP_Z }}
+                            onClick={() => manager.toggleScratchpad(scratchpadArea.id)}
+                          >
+                            <span aria-hidden="true" className="h-fit rounded-full bg-black/60 px-3 py-1 text-xs font-medium">
+                              Scratchpad
+                            </span>
+                          </button>
+                        )}
                         {manager.windows.map((win) => (
                           <Window
                             key={win.id}
                             window={win}
+                            stackZ={windowStackZ(win)}
                             isTop={isShown(win) && win.z === topZ}
                             covered={covered.has(win.id)}
                             onBar={win.id === barWindowId}

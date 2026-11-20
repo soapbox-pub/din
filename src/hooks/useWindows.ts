@@ -608,14 +608,14 @@ export function useWindows(
     if (knownArea) currentMonitor.current = knownArea.id;
     update((s) => {
       const target = s.windows.find((w) => w.id === id);
-      if (!target) return s;
+      if (!target || target.closing) return s;
       const areas = getAreas();
       const area = homeArea(areas, target);
       const shown = !area
         ? s
         : target.workspace === SCRATCHPAD
           ? (s.scratchpad === area.id ? s : revealScratchpad(s, areas, area))
-          : showWorkspace(s, areas, area.id, target.workspace, false);
+          : showWorkspace(s.scratchpad === area.id ? { ...s, scratchpad: null } : s, areas, area.id, target.workspace, false);
       const ws = raise(shown.windows, id);
       return ws === shown.windows ? shown : { ...shown, windows: ws };
     });
