@@ -654,24 +654,27 @@ export interface DinClipboard {
 }
 
 // ---------------------------------------------------------------------------
-// din.theme: the desktop's look, applied to the app
+// din.theme: the desktop's look, for the app to style itself from
 // ---------------------------------------------------------------------------
 
 /**
- * Light or dark is the web's `prefers-color-scheme`, which follows Din's
- * (a profile theme's too); the runtime also sets the `dark` class on
- * `:root`, and `color-scheme` on `body` (the root's stays normal, so the
- * page's canvas is transparent and the window's glass shows through it).
+ * The desktop's look, reported, never applied: the runtime doesn't touch
+ * the app's styles, classes or fonts. Each app styles itself from it, under
+ * whatever names it likes (`applyTheme` / `followTheme` in `@/sdk/theme`
+ * write it as Din's own stylesheet expects, and `startApp` calls them).
+ * Light or dark is also the web's `prefers-color-scheme`, which follows
+ * Din's (a profile theme's too).
  */
 export interface ThemeSnapshot {
+  /** Light or dark, the desktop's scheme. */
+  scheme: 'light' | 'dark';
   /**
-   * Din's design tokens as CSS custom properties without the `--`
-   * (`background`, `foreground`, `primary`, `radius`, …), as the desktop
-   * computes them, profile theme included. The SDK sets them on `:root`, so
-   * Tailwind classes match the desktop's out of the box.
+   * Din's design tokens as CSS custom properties would name them, without
+   * the `--` (`background`, `foreground`, `primary`, `radius`, …), as the
+   * desktop computes them, profile theme included.
    */
   tokens: Record<string, string>;
-  /** A profile theme's web fonts, which the SDK loads. */
+  /** A profile theme's web fonts, for the app to load if it uses them. */
   fontFaces: { family: string; url: string }[];
   /**
    * File-type icons from the system's icon theme, as data URLs keyed by

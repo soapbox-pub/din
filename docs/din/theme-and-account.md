@@ -7,28 +7,40 @@
 
 ## `din.theme`
 
-An app should look like part of the desktop. `window.din` takes care of it:
-on the hello and on every change it writes the desktop's design tokens onto
-the app's `:root` as the same CSS custom properties Din uses
-(`--background`, `--foreground`, `--primary`, `--radius`, …), sets
-`color-scheme` and the `dark` class, and loads the fonts. Tailwind classes
-and shadcn/ui components then match without any code.
-
-Light or dark is the web's `prefers-color-scheme`, which follows Din's
-setting and a profile theme's background alike (Din sets Chromium's own
-mode, `electron/main.mts`), in stylesheets and `matchMedia` as on any page;
-`useMediaQuery('(prefers-color-scheme: dark)')` re-renders on a change.
-For anything else drawn by hand (canvases, terminals, charts):
+An app should look like part of the desktop, but how is the app's own
+business. `window.din` only reports the desktop's look: it never writes to
+the app's page, so no custom property, class or font of the app's is ever
+overwritten. `din.theme.current` is the theme now, and `din.theme.onChange`
+hears each change:
 
 ```ts
-const { tokens, fontFaces } = din.theme.current;
+const { scheme, tokens, fontFaces } = din.theme.current;
 din.theme.onChange((t) => terminal.setTheme(xtermThemeFrom(t.tokens)));
 ```
 
+An app on Din's stylesheet (Tailwind and shadcn/ui, as every built-in app
+is) has it applied for it: `startApp` calls `followTheme(din)` from
+`@/sdk/theme`, which writes every token onto `:root` as the custom
+property Din's stylesheet uses (`--background`, `--foreground`,
+`--primary`, `--radius`, …), sets the `light` or `dark` class and
+`--din-color-scheme` (`app.css` gives it to `body`, so the root's canvas
+stays transparent and the window's glass shows through it), the theme's
+sans font, loads a profile theme's fonts, and marks the accessibility
+settings (below). `applyTheme(theme, element)` writes one theme onto any
+element, for an app that wants Din's look in only part of its page. An
+app with styles of its own skips both and maps the tokens to its own
+names.
+
+Light or dark is also the web's `prefers-color-scheme`, which follows Din's
+setting and a profile theme's background alike (Din sets Chromium's own
+mode, `electron/main.mts`), in stylesheets and `matchMedia` as on any page;
+`useMediaQuery('(prefers-color-scheme: dark)')` re-renders on a change.
+
 | Field | |
 |---|---|
+| `scheme` | `'light'` or `'dark'` |
 | `tokens` | Every design token, without the `--` |
-| `fontFaces` | A profile theme's web fonts, which the runtime loads |
+| `fontFaces` | A profile theme's web fonts, for the app to load (`applyTheme` does) |
 | `icons` | The icon theme's file-type icons by name, or `{}` |
 
 The interface zoom is the page's own `devicePixelRatio`: the desktop
@@ -39,8 +51,7 @@ does every web page, in stylesheets and `matchMedia` alike: Reduce motion
 is `prefers-reduced-motion: reduce`, Reduce transparency (or Increase
 contrast) `prefers-reduced-transparency: reduce`, and Increase contrast
 `prefers-contrast: more` (`electron/accessibility.mts`). With Increase
-contrast the tokens already carry the stronger borders and text. The
-runtime also marks the app's `:root` with them (`data-reduce-motion`,
+contrast the tokens already carry the stronger borders and text. `followTheme` also marks the app's `:root` with them (`data-reduce-motion`,
 `data-reduce-transparency`, `data-increase-contrast`), as the desktop's
 own root is, which Din's stylesheet and `prefersReducedMotion()`
 (`src/shared/reducedMotion.ts`) follow, and Tailwind's `motion-safe:` and

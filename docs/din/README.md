@@ -66,9 +66,9 @@ runtime:
   window's state, the theme, the permissions) reads as empty
   until `din.ready` resolves, and calls made before then queue;
 - keeps a copy of pushed state and calls `onChange` listeners;
-- applies the theme's tokens to `:root` and keeps them current, so
-  Tailwind classes and shadcn/ui components look as they do on the
-  desktop;
+- reports the theme (`din.theme`) without ever writing to the page: the
+  app styles itself, as `startApp` does with `followTheme` from
+  `@/sdk/theme` ([theme-and-account.md](theme-and-account.md#dintheme));
 - installs `window.nostr` if the app has the `nostr` permission;
 - wraps `din.system` bridges, which talk to Electron main over ports of
   their own ([permissions.md](permissions.md#dinsystem)), including their

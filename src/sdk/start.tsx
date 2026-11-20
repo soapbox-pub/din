@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { connect } from '@/sdk';
 import { DinProvider } from '@/sdk/react';
+import { followTheme } from '@/sdk/theme';
 import { launchedFiles } from '@/shared/fileHandles';
 import { Toaster } from '@/shared/Toaster';
 import { installLiquidGlass } from '@/shared/liquidGlass';
@@ -24,6 +25,8 @@ installLiquidGlass();
 /** Connect to the desktop, then render the app into #root. */
 export async function startApp(render: () => ReactNode): Promise<void> {
   const din = await connect();
+  // window.din only reports the theme; Din's apps style themselves from it.
+  followTheme(din);
   // The window's launch files, so apps' first render can open them.
   await launchedFiles();
   const queryClient = new QueryClient({

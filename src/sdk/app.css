@@ -1,6 +1,6 @@
 /*
- * A built-in app's base styles: Din's Tailwind setup and design tokens (the
- * SDK keeps the tokens current with the desktop's theme), on a transparent
+ * A built-in app's base styles: Din's Tailwind setup and design tokens (which
+ * followTheme in @/sdk/theme keeps current with the desktop's theme), on a transparent
  * page. A standard or custom window paints its own background behind the
  * app, frosted like every Din window; an app that wants a solid one paints
  * it, and an app in a frameless window draws only what it means to.
@@ -12,7 +12,7 @@ body {
   background: transparent;
 }
 
-/* The scheme the desktop sends (runtime.ts) is the body's, so controls and
+/* The scheme the desktop sends (applied by @/sdk/theme) is the body's, so controls and
    scrollbars follow it, while the root stays normal: a dark root's canvas is
    painted opaque, and the window's glass wouldn't show through the app. */
 html {

@@ -125,10 +125,8 @@ export interface WindowState {
   workArea: Rect;
 }
 
-/** The theme as the desktop sends it: the snapshot, and its scheme for the runtime's `dark` class. */
-export interface ThemeData extends ThemeSnapshot {
-  scheme: 'light' | 'dark';
-}
+/** The theme as the desktop sends it: the snapshot apps read as `din.theme.current`. */
+export type ThemeData = ThemeSnapshot;
 
 /** A launch, as the runtime gives it to `launchQueue`'s consumer and the Navigation API. */
 export interface LaunchData {

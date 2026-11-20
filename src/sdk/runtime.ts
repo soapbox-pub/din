@@ -61,7 +61,7 @@ import type { FlasherBridge } from '@/lib/flasher';
 import type { TorrentsBridge } from '@/lib/torrents';
 import type { CaptureBridge } from '@/lib/capture';
 import type { AppFeaturesBridge, FeaturesState } from '@/lib/features';
-import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, ThemeData, WindowState, LaunchData } from '@/sdk/protocol';
+import type { FromDesktop, InputEdit, MediaAction, FileData, HandleData, Hello, Method, NotificationData, Push, Requests, WindowState, LaunchData } from '@/sdk/protocol';
 import { acceleratorMatches } from '@/sdk/accelerators';
 import { caretSpot, typesText } from '@/shared/caret';
 import { MAX_SHARE_BYTES, MAX_SHARE_FILES, shareableUrl } from '@/shared/shareLimits';
@@ -251,45 +251,6 @@ function rename(error: { name: string; message: string }): Error {
   const e = error.name === 'DinPermissionError' ? new DinPermissionError('', error.message) : new Error(error.message);
   e.name = error.name;
   return e;
-}
-
-/**
- * Settings → Accessibility reach the app as the web's media features (set
- * on each app by electron/accessibility.mts); Din's stylesheet keys its
- * rules for them to root attributes, as the desktop's own root has them.
- */
-function markAccessibility(): void {
-  const root = document.documentElement;
-  for (const [query, attribute] of [
-    ['(prefers-reduced-motion: reduce)', 'data-reduce-motion'],
-    ['(prefers-reduced-transparency: reduce)', 'data-reduce-transparency'],
-    ['(prefers-contrast: more)', 'data-increase-contrast'],
-  ]) {
-    const media = matchMedia(query);
-    const mark = () => root.toggleAttribute(attribute, media.matches);
-    mark();
-    media.addEventListener('change', mark);
-  }
-}
-
-/** Apply the desktop's theme to this document. */
-function applyTheme(theme: ThemeData, loadedFaces: Set<string>): void {
-  const root = document.documentElement;
-  root.classList.remove('light', 'dark');
-  root.classList.add(theme.scheme);
-  // On the body, not the root: a dark root makes Chromium paint the page's
-  // canvas opaque dark, hiding the window's glass behind the app (app.css).
-  root.style.setProperty('--din-color-scheme', theme.scheme);
-  for (const [name, value] of Object.entries(theme.tokens)) root.style.setProperty(`--${name}`, value);
-  for (const face of theme.fontFaces) {
-    const key = `${face.family}\u0000${face.url}`;
-    if (loadedFaces.has(key) || !/^https:\/\//.test(face.url)) continue;
-    loadedFaces.add(key);
-    const font = new FontFace(face.family, `url("${face.url}")`);
-    document.fonts.add(font);
-    void font.load().catch(() => {});
-  }
-  if (theme.tokens['font-sans']) root.style.fontFamily = theme.tokens['font-sans'];
 }
 
 /** Bridges' invoke and send channels and their events, mirroring electron/preload.cjs. */
@@ -1029,14 +990,13 @@ export function installDin(transport: Transport): void {
   };
 
   // ---- theme ----
-  const loadedFaces = new Set<string>();
-  let themeSnapshot: ThemeSnapshot = { tokens: {}, fontFaces: [], icons: {} };
+  // Reported, never applied: the app styles itself from it (@/sdk/theme).
+  let themeSnapshot: ThemeSnapshot = { scheme: 'light', tokens: {}, fontFaces: [], icons: {} };
   const themes = new Emitter<ThemeSnapshot>();
-  const takeTheme = ({ scheme: _, ...snapshot }: ThemeData) => (themeSnapshot = snapshot);
   pushes.on((p) => {
     if (p.type !== 'theme') return;
-    applyTheme(p.theme, loadedFaces);
-    themes.emit(takeTheme(p.theme));
+    themeSnapshot = p.theme;
+    themes.emit(themeSnapshot);
   });
   const theme: DinTheme = {
     get current() {
@@ -1436,9 +1396,7 @@ export function installDin(transport: Transport): void {
     states.emit();
     frameStyle = hello.frameStyle;
     if (hello.formFactor === 'phone') installMobile();
-    takeTheme(hello.theme);
-    applyTheme(hello.theme, loadedFaces);
-    markAccessibility();
+    themeSnapshot = hello.theme;
     currentDrag = hello.drag;
     clipboardFiles = hello.clipboardFiles?.count ?? 0;
     reportDragOver(hello.drag !== null);
