@@ -1197,11 +1197,11 @@ export const Window = memo(function Window({
             const strip = stripHeightOf(stripRef.current);
             const snapshot = withStrip(shot, strip, winRect.width);
             const rect = withStripRect(winRect, strip);
-             current = runWindowEffect(parent, snapshot, effect, rect, target, 'out', stackZ, seed, () => {
+            current = runWindowEffect(parent, snapshot, effect, rect, target, 'out', stackZ, seed, () => {
               // Gone for a beat, then back.
               const timer = window.setTimeout(() => {
                 if (cancelled) return;
-                 current = runWindowEffect(parent, snapshot, effect, rect, target, 'in', stackZ, seed, done);
+                current = runWindowEffect(parent, snapshot, effect, rect, target, 'in', stackZ, seed, done);
                 if (!current) done();
               }, 300);
               current = () => window.clearTimeout(timer);
