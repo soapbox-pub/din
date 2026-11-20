@@ -70,7 +70,7 @@ export function WorkspacesMenuItem() {
   const { config } = useAppContext();
   const { workspaces: monitors, hasScratchpad, scratchpad } = useWorkspaces();
   const inUse = monitors.some((m) => m.active !== 1 || m.used.some((n) => n !== 1));
-  if (!config.tilingEnabled && !inUse && !hasScratchpad) return null;
+  if (!config.tilingEnabled && !inUse && !hasScratchpad && !scratchpad) return null;
   return <WorkspacesButton tiling={config.tilingEnabled} monitorsKey={JSON.stringify(monitors)} hasScratchpad={hasScratchpad} scratchpad={scratchpad} />;
 }
 
@@ -101,7 +101,7 @@ const WorkspacesButton = memo(function WorkspacesButton({
           className="h-7 gap-1 rounded-md px-1.5 text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
         >
           {tiling && <LayoutDashboard className="size-4" aria-hidden />}
-          {hasScratchpad && <Layers className={cn('size-4', scratchpad ? 'text-ink-accent' : 'text-foreground/70')} aria-hidden />}
+          {(hasScratchpad || scratchpad) && <Layers className={cn('size-4', scratchpad ? 'text-ink-accent' : 'text-foreground/70')} aria-hidden />}
           <span className="flex items-center gap-0.5" aria-hidden>
             {shown.map((n) => (
               <span
@@ -118,16 +118,15 @@ const WorkspacesButton = memo(function WorkspacesButton({
         </Button>
       </PopoverTrigger>
       <BarPopoverContent align="end" className="w-80 p-0">
-        <WorkspacesPopoverBody tiling={tiling} monitors={monitors} hasScratchpad={hasScratchpad} scratchpad={scratchpad} />
+        <WorkspacesPopoverBody tiling={tiling} monitors={monitors} scratchpad={scratchpad} />
       </BarPopoverContent>
     </Popover>
   );
 });
 
-function WorkspacesPopoverBody({ tiling, monitors, hasScratchpad, scratchpad }: {
+function WorkspacesPopoverBody({ tiling, monitors, scratchpad }: {
   tiling: boolean;
   monitors: MonitorWorkspaces[];
-  hasScratchpad: boolean;
   scratchpad: string | null;
 }) {
   const { updateConfig } = useAppContext();
@@ -184,20 +183,18 @@ function WorkspacesPopoverBody({ tiling, monitors, hasScratchpad, scratchpad }: 
                 );
               })}
             </div>
-            {hasScratchpad && (
-              <PopoverClose asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => toggleScratchpad(m.id)}
-                >
-                  <Layers aria-hidden />
-                  {scratchpad === m.id ? 'Hide scratchpad' : 'Show scratchpad'}
-                </Button>
-              </PopoverClose>
-            )}
+            <PopoverClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={() => toggleScratchpad(m.id)}
+              >
+                <Layers aria-hidden />
+                {scratchpad === m.id ? 'Hide scratchpad' : 'Show scratchpad'}
+              </Button>
+            </PopoverClose>
           </div>
         ))}
       </div>

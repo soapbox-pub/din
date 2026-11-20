@@ -363,20 +363,19 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
       layoutTree(trees[key] ?? null, workspaceTileRect(area, tiling.gap, workspace), tiling.gap, rects);
     }
   }
-  const scratchpad = next.scratchpad && windows.some((w) => w.workspace === SCRATCHPAD && !w.closing) ? next.scratchpad : null;
   let windowsChanged = windows.some((w, i) => w !== next.windows[i]);
   windows = windows.map((w) => {
     const areaId = homes.get(w.id)!.id;
     const away = w.workspace === SCRATCHPAD
-      ? scratchpad !== areaId && !(w.closing && !w.away)
+      ? next.scratchpad !== areaId
       : w.workspace !== activeWorkspace(next.active, areaId);
     const tiled = rects.get(w.id) ?? null;
     if (away === w.away && sameRect(tiled, w.tiled)) return w;
     windowsChanged = true;
     return { ...w, away, tiled };
   });
-  if (!windowsChanged && trees === next.trees && scratchpad === next.scratchpad) return next;
-  return { ...next, windows: windowsChanged ? windows : next.windows, trees, scratchpad };
+  if (!windowsChanged && trees === next.trees) return next;
+  return { ...next, windows: windowsChanged ? windows : next.windows, trees };
 }
 
 /**
@@ -405,7 +404,7 @@ function carryTo(w: WindowState, from: WorkArea, to: WorkArea): WindowState {
 /** Show the shared scratchpad here, carrying its windows and raising them in order. */
 function revealScratchpad(s: WmState, areas: WorkArea[], area: WorkArea): WmState {
   const members = s.windows.filter((w) => w.workspace === SCRATCHPAD && !w.closing);
-  if (members.length === 0) return s;
+  if (members.length === 0) return { ...s, scratchpad: area.id };
   let windows = s.windows.map((w) => {
     if (w.workspace !== SCRATCHPAD) return w;
     const from = homeArea(areas, w);
@@ -726,11 +725,7 @@ export function useWindows(
             areas.find((a) => !covered.includes(a.id)) ??
             picked)
           : picked;
-      const workspace = !area
-        ? 1
-        : s.scratchpad === area.id && focused?.workspace === SCRATCHPAD
-          ? SCRATCHPAD
-          : activeWorkspace(s.active, area.id);
+      const workspace = !area ? 1 : s.scratchpad === area.id ? SCRATCHPAD : activeWorkspace(s.active, area.id);
       const offset =
         (area
           ? ws.filter((w) => w.workspace === workspace && areaOf(areas, w) === area).length

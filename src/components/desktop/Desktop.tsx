@@ -74,7 +74,7 @@ import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
 import { DesktopIconLayer } from './icons/DesktopIconLayer';
-import { isShown, SCRATCHPAD, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
+import { homeArea, isShown, SCRATCHPAD, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -318,8 +318,13 @@ function DesktopSession() {
   useEffect(() => {
     fitToAreas(areas);
   }, [areas, fitToAreas]);
-  // Focus ring goes to the highest visible window; minimized and closing
-  // ones don't count.
+  const scratchpadArea = areas.find((area) => area.id === manager.scratchpad);
+  const scratchpadEmpty = scratchpadArea !== undefined && !manager.windows.some((w) => w.workspace === SCRATCHPAD && isShown(w));
+  const scratchpadBackdrop = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (scratchpadEmpty) scratchpadBackdrop.current?.focus({ preventScroll: true });
+  }, [scratchpadEmpty, scratchpadArea?.id]);
+  // The backdrop takes focus when there are no scratchpad windows to focus.
   const topZ = manager.windows.reduce(
     (max, w) => (isShown(w) ? Math.max(max, w.z) : max),
     0,
@@ -327,7 +332,6 @@ function DesktopSession() {
   const moving = useMovingWindows();
   const covered = coveredWindows(manager.windows, areas, moving);
   const barWindowId = taskbar ? null : menuBarWindow(manager.windows, primaryArea(areas))?.id;
-  const scratchpadArea = areas.find((area) => area.id === manager.scratchpad);
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -368,14 +372,23 @@ function DesktopSession() {
                         <WidgetLayer />
                         {scratchpadArea && (
                           <button
+                            ref={scratchpadBackdrop}
                             type="button"
                             aria-label="Hide scratchpad"
                             className="flex justify-center bg-black/55 pt-3 text-white backdrop-blur-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
                             style={{ ...rectStyle(scratchpadArea), zIndex: SCRATCHPAD_BACKDROP_Z }}
                             onClick={() => manager.toggleScratchpad(scratchpadArea.id)}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Escape') return;
+                              event.stopPropagation();
+                              manager.toggleScratchpad(scratchpadArea.id);
+                            }}
                           >
-                            <span aria-hidden="true" className="h-fit rounded-full bg-black/60 px-3 py-1 text-xs font-medium">
-                              Scratchpad
+                            <span className="flex h-fit flex-col items-center gap-2">
+                              <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium">
+                                Scratchpad
+                              </span>
+                              {scratchpadEmpty && <span className="text-sm">Open an app to add a window here</span>}
                             </span>
                           </button>
                         )}
@@ -384,7 +397,8 @@ function DesktopSession() {
                             key={win.id}
                             window={win}
                             stackZ={windowStackZ(win)}
-                            isTop={isShown(win) && win.z === topZ}
+                            isTop={isShown(win) && win.z === topZ &&
+                              !(scratchpadEmpty && homeArea(areas, win)?.id === scratchpadArea?.id)}
                             covered={covered.has(win.id)}
                             onBar={win.id === barWindowId}
                           />
