@@ -1,7 +1,5 @@
 /**
- * Requests to open or close the menu bar's apps menu from elsewhere in the
- * shell (the Super+Space hotkey in DesktopHotkeys), kept in its own module so
- * neither component imports a non-component export from the other.
+ * Toggle requests from the App Search shortcut in DesktopHotkeys.
  */
 const listeners = new Set<() => void>();
 

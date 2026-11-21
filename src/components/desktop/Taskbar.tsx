@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { nip19 } from 'nostr-tools';
 import { Home, Settings2, Store } from 'lucide-react';
@@ -16,13 +16,13 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { PopoverClose } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { AppIcon } from '@/shared/AppIcon';
 import {
   AccountMenuItem,
   AirPlayMenuItem,
-  AppLauncher,
+  AppLauncherPopover,
   BatteryMenuItem,
   BluetoothMenuItem,
   BrightnessMenuItem,
@@ -42,7 +42,7 @@ import { StudioMenuItem } from '@/components/desktop/StudioMenuItem';
 import { WorkspacesMenuItem } from '@/components/desktop/WorkspacesIndicator';
 import { KeyboardMenuItem } from '@/components/desktop/KeyboardIndicator';
 import type { TaskbarStyle } from '@/contexts/AppContext';
-import { BarSideContext, useBarSide, useTaskbarEdge } from '@/contexts/BarSideContext';
+import { BarSideContext } from '@/contexts/BarSideContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -54,7 +54,6 @@ import { getAvatarShape } from '@/lib/avatarShape';
 import { useLaunching, useLaunchingApps } from '@/lib/appLaunches';
 import type { AppBadge } from '@/lib/appBadges';
 import { appsDockedAs, windowTile, type AppDefinition } from '@/lib/apps';
-import { onToggleAppsMenu } from '@/lib/appsMenu';
 import { registerDockTile } from '@/lib/dockTiles';
 import { clickTile, cycleTile, type DockControls, type DockWindow } from '@/lib/dockTileActions';
 import { getFsBridge } from '@/lib/fs';
@@ -185,23 +184,16 @@ export function Taskbar() {
 }
 
 /**
- * The Start button and its menu: the apps launcher, searched from its foot,
- * beside the user, their folders, Settings and the power buttons. Super+Space
- * opens it, as it does the apps menu. The button is Din's logo on its own.
+ * The Start button opens the app launcher with shortcuts to folders,
+ * Settings, and power controls.
  */
 const StartMenu = memo(function StartMenu({ sizes }: { sizes: TaskbarSizes }) {
-  const side = useBarSide();
-  const edge = useTaskbarEdge();
-  const [open, setOpen] = useState(false);
   const [powerAction, setPowerAction] = useState<PowerAction | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => onToggleAppsMenu(() => setOpen((o) => !o)), []);
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
+      <AppLauncherPopover
+        trigger={
           <button
             type="button"
             aria-label="Start"
@@ -222,28 +214,9 @@ const StartMenu = memo(function StartMenu({ sizes }: { sizes: TaskbarSizes }) {
               draggable={false}
             />
           </button>
-        </PopoverTrigger>
-        <PopoverContent
-          side={side}
-          align="start"
-          sideOffset={4}
-          className="flex w-[min(36rem,calc(100vw-1rem))] overflow-hidden rounded-2xl p-0"
-          onOpenAutoFocus={(e) => {
-            e.preventDefault();
-            searchRef.current?.focus();
-          }}
-        >
-          <div className="flex min-w-0 flex-1 flex-col">
-            <AppLauncher
-              searchRef={searchRef}
-              onClose={() => setOpen(false)}
-              searchAtBottom={edge === 'bottom'}
-              listClassName="h-[28rem] max-h-[60vh]"
-            />
-          </div>
-          <StartSidebar onPower={setPowerAction} />
-        </PopoverContent>
-      </Popover>
+        }
+        sidebar={<StartSidebar onPower={setPowerAction} />}
+      />
       <PowerDialog action={powerAction} onClose={() => setPowerAction(null)} />
     </>
   );

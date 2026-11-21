@@ -152,7 +152,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Personal',
     name: 'Dock & Taskbar',
     icon: Dock,
-    search: ['Layout', 'Menu bar and Dock', 'Taskbar', 'Start menu', 'Size', 'Magnification', 'Magnification level', 'Background', 'None', 'Modern', 'Classic', 'magnify', 'zoom', 'launcher', 'shelf', 'macOS', 'Windows', 'Windows 7', 'Windows Vista', 'Windows XP', 'Slim', 'Tall', 'Combine buttons', 'Separate windows', 'Workspaces', 'Show windows from all workspaces', 'Start orb', 'top bar', 'panel'],
+    search: ['Layout', 'Menu bar and Dock', 'Taskbar', 'Start menu', 'Size', 'Magnification', 'Magnification level', 'Background', 'None', 'Modern', 'Classic', 'magnify', 'zoom', 'launcher', 'App launcher position', 'Center of screen', 'shelf', 'macOS', 'Windows', 'Windows 7', 'Windows Vista', 'Windows XP', 'Slim', 'Tall', 'Combine buttons', 'Separate windows', 'Workspaces', 'Show windows from all workspaces', 'Start orb', 'top bar', 'panel'],
   },
   {
     id: 'notifications',

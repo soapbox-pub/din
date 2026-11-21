@@ -78,6 +78,7 @@ const SETTINGS: Setting[] = [
   { key: 'sound.pause-media', field: 'pauseMediaWhileRecording', help: 'What’s playing pauses while dictation or Record Audio listens, and plays again after', param: bool },
   { key: 'windows.reopen', field: 'restoreWindows', help: 'Din reopens your windows when it starts again', param: bool },
   { key: 'desktop.layout', field: 'desktopLayout', help: 'The menu bar and Dock, or a taskbar', param: { type: 'string', choices: ['dock', 'taskbar'] } },
+  { key: 'desktop.app-launcher-position', field: 'appLauncherPosition', help: 'Open the app launcher by its button or in the center of the primary display', param: { type: 'string', choices: ['anchored', 'center'] } },
   { key: 'desktop.icons', field: 'desktopIcons', help: 'What’s in ~/Desktop shows as icons on the wallpaper', param: bool },
   { key: 'desktop.icon-size', field: 'desktopIconSize', help: 'How large desktop icons are', param: { type: 'string', choices: ['small', 'medium', 'large'] } },
   { key: 'dock.size', field: 'dockSize', help: 'The size of a Dock icon, in pixels', param: { type: 'integer', min: 32, max: 160 } },
