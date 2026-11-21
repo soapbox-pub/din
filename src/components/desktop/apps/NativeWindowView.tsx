@@ -175,10 +175,9 @@ export function NativeWindowView({ windowId, params }: AppComponentProps) {
     const surface = getNativeSurface(xid);
     if (!host || !surface) return;
     host.appendChild(surface.canvas);
-    // An app that draws its own title bar opens where it put itself (the
-    // Din window comes to it); everything else is placed by Din (the app
-    // goes to it). The observer's first callback reports the result.
-    if (surface.csd) {
+    // A floating app with its own title bar opens where it put itself.
+    // Otherwise Din places the app. The observer reports the final position.
+    if (surface.csd && current && !current.tiled && !current.snapped && !current.maximized) {
       const place = placeFor(surface);
       move(windowId, place.x, place.y);
     } else {

@@ -269,9 +269,14 @@ export function homeArea(areas: WorkArea[], w: WindowState): WorkArea | null {
   return areaFor(areas, w);
 }
 
+/** Din windows without a frame can have a fixed shape, like a player skin. */
+function hasCustomShape(w: WindowState): boolean {
+  return w.frameless && typeof w.params?.xid !== 'number';
+}
+
 /** Whether a window takes part in the tiling layout. */
 function tileable(w: WindowState, tiling: TilingSettings): boolean {
-  return tiling.enabled && !w.floating && !w.frameless && !w.closing && !w.minimized && w.snapped === null;
+  return tiling.enabled && !w.floating && !hasCustomShape(w) && !w.closing && !w.minimized && w.snapped === null;
 }
 
 function sameRect(a: Rect | null, b: Rect | null): boolean {
@@ -1324,7 +1329,7 @@ export function useWindows(
    */
   const resizeBy = useCallback((id: string, dx: number, dy: number) => {
     const w = windowsRef.current.find((x) => x.id === id);
-    if (!w || w.maximized || w.snapped || w.frameless) return;
+    if (!w || w.maximized || w.snapped || hasCustomShape(w)) return;
     if (!w.tiled) {
       resize(id, {
         x: Math.round(w.x - dx / 2),
