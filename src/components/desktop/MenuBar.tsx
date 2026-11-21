@@ -347,30 +347,51 @@ const AppsMenu = memo(function AppsMenu() {
   );
 });
 
-/** The same launcher opens from Apps, Start, or the App Search shortcut. */
+/**
+ * The app launcher, as Apps (the menu bar's) or Start (the taskbar's) opens
+ * it. Clicked, it opens beside its button; opened from the keyboard (Super+
+ * Space, see DesktopHotkeys), where the pointer may be anywhere, it opens in
+ * the middle of the primary monitor.
+ */
 export function AppLauncherPopover({ trigger, sidebar }: {
   trigger: React.ReactElement;
   sidebar?: ReactNode;
 }) {
-  const { config } = useAppContext();
   const { primary } = useMonitors();
   const edge = useTaskbarEdge();
   const side = useBarSide();
-  const centered = config.appLauncherPosition === 'center';
   const [open, setOpen] = useState(false);
+  // How it last opened, kept while it closes so it fades where it was.
+  const [centered, setCentered] = useState(false);
+  const openRef = useRef(open);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => onToggleAppsMenu(() => setOpen((open) => !open)), []);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => onToggleAppsMenu(() => {
+    if (!openRef.current) setCentered(true);
+    setOpen((open) => !open);
+  }), []);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        // Only the trigger opens it this way: a click.
+        if (next) setCentered(false);
+        setOpen(next);
+      }}
+    >
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      {/* Radix aligns to this point; the panel shifts up by half its own height. */}
+      {/* Radix aligns to this point, the primary monitor's middle (the viewport spans every monitor); the panel shifts up by half its own height. */}
       {centered && createPortal(
         <PopoverAnchor asChild>
           <span
             aria-hidden
-            className="pointer-events-none fixed top-1/2 left-1/2 size-0"
+            className="pointer-events-none fixed size-0"
+            style={{ left: primary.x + primary.width / 2, top: primary.y + primary.height / 2 }}
           />
         </PopoverAnchor>,
         portalContainer(),

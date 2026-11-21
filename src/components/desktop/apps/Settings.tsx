@@ -4365,19 +4365,6 @@ function DockSection() {
         checked={config.dockAllWorkspaces}
         onCheckedChange={(checked) => updateConfig((current) => ({ ...current, dockAllWorkspaces: checked }))}
       />
-      <SubHeading>App launcher position</SubHeading>
-      <SegmentedControl
-        label="App launcher position"
-        value={config.appLauncherPosition}
-        options={[
-          { value: 'anchored', label: 'Beside the button' },
-          { value: 'center', label: 'Center of screen' },
-        ]}
-        onValueChange={(appLauncherPosition) => updateConfig((current) => ({ ...current, appLauncherPosition }))}
-      />
-      <p className="text-xs text-muted-foreground">
-        Applies when you click {config.desktopLayout === 'dock' ? 'Apps' : 'Start'} or use the App Search shortcut.
-      </p>
     </SectionShell>
   );
 }

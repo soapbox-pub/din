@@ -57,7 +57,6 @@ export const AppConfigSchema = z.object({
   volumeFeedback: z.boolean(),
   startupSound: z.boolean(),
   desktopLayout: z.enum(['dock', 'taskbar']),
-  appLauncherPosition: z.enum(['anchored', 'center']),
   dockMagnification: z.boolean(),
   dockMagnificationScale: z.number().min(1).max(3),
   dockSize: z.number().min(32).max(160),

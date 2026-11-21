@@ -14,7 +14,6 @@ din wifi                          # an area's commands
 din help wifi connect             # a command's arguments
 din settings list                 # every preference, with its value
 din settings set windows.tiling on
-din settings set desktop.app-launcher-position center
 din sound volume 40
 din wifi connect "Home" --password hunter2
 din windows list --json           # structured output, for scripts
