@@ -355,7 +355,9 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
   let windowsChanged = windows.some((w, i) => w !== next.windows[i]);
   windows = windows.map((w) => {
     const away = w.workspace !== activeWorkspace(next.active, homes.get(w.id)!.id);
-    const tiled = rects.get(w.id) ?? null;
+    // Neighbors can fill the vacated tile immediately, but the departing
+    // window still needs its last tile rect for the close effect.
+    const tiled = w.closing ? w.tiled : (rects.get(w.id) ?? null);
     if (away === w.away && sameRect(tiled, w.tiled)) return w;
     windowsChanged = true;
     return { ...w, away, tiled };
