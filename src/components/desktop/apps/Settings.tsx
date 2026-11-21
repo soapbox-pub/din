@@ -2848,6 +2848,17 @@ function MouseSection() {
         />
       </SettingsGroup>
 
+      <SubHeading>Touchpad</SubHeading>
+      <SettingsGroup>
+        <SettingSwitchRow
+          id="touchpad-swipe"
+          label="Swipe between workspaces"
+          description="Swiping three fingers sideways slides to the workspace beside, following your fingers, and on to the next as they keep going."
+          checked={config.touchpadSwipe}
+          onCheckedChange={(touchpadSwipe) => set({ touchpadSwipe })}
+        />
+      </SettingsGroup>
+
       <SubHeading>Magic Mouse</SubHeading>
       <SettingsGroup>
         <ChoiceRow
@@ -4233,6 +4244,17 @@ function WindowsSection({ windowId }: { windowId: string }) {
       <MotionGate>
         <WobblyWindowsRow />
         <WindowEffectPickers windowId={windowId} />
+        <ChoiceRow
+          label="Workspace animation"
+          description="How the screen goes from one workspace to another. With three fingers on a touchpad, the windows follow your fingers."
+          value={config.workspaceAnimation}
+          choices={[
+            { value: 'slide', name: 'Slide' },
+            { value: 'fade', name: 'Fade' },
+            { value: 'none', name: 'None' },
+          ]}
+          onChange={(workspaceAnimation) => updateConfig((current) => ({ ...current, workspaceAnimation }))}
+        />
       </MotionGate>
       <MotionHeldNote />
 

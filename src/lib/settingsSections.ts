@@ -138,7 +138,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Personal',
     name: 'Windows',
     icon: LayoutDashboard,
-    search: ['Tiling', 'Tile windows', 'Gaps', 'Window effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
+    search: ['Tiling', 'Tile windows', 'Gaps', 'Window effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Workspace animation', 'Slide', 'Fade', 'switching workspaces', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
   },
   {
     id: 'desktop',
@@ -201,7 +201,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Mouse',
     icon: Mouse,
-    search: ['Tracking speed', 'Scrolling speed', 'Scroll direction', 'Natural', 'Traditional', 'Secondary click', 'Middle click', 'Swipe with two fingers', 'Between pages', 'Between workspaces', 'Magic Mouse', 'pointer speed', 'right click', 'left-handed', 'gestures', 'back', 'forward', 'trackpad', 'touchpad', 'scroll wheel'],
+    search: ['Tracking speed', 'Scrolling speed', 'Scroll direction', 'Natural', 'Traditional', 'Secondary click', 'Middle click', 'Swipe with two fingers', 'Touchpad', 'Swipe between workspaces', 'Swipe with three fingers', 'three-finger swipe', 'Between pages', 'Between workspaces', 'Magic Mouse', 'pointer speed', 'right click', 'left-handed', 'gestures', 'back', 'forward', 'trackpad', 'touchpad', 'scroll wheel'],
   },
   {
     id: 'printers',

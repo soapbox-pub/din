@@ -4,6 +4,7 @@ import { BootScreenSync } from './BootScreenSync';
 import { Dock } from './Dock';
 import { DesktopHotkeys } from './DesktopHotkeys';
 import { MouseHost } from './MouseHost';
+import { WorkspaceSwipeHost } from './WorkspaceSwipeHost';
 import { DeviceBatteryHost } from './DeviceBatteryHost';
 import { BatteryWarningHost } from './BatteryWarningHost';
 import { ResourceAlertsHost } from './ResourceAlertsHost';
@@ -146,6 +147,7 @@ const SessionHosts = memo(function SessionHosts() {
       <EyeDropperHost />
       <DesktopHotkeys />
       <MouseHost />
+      <WorkspaceSwipeHost />
       <BatteryWarningHost />
       <DeviceBatteryHost />
       <ResourceAlertsHost />

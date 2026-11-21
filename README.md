@@ -935,6 +935,14 @@ The window manager (`src/hooks/useWindows.ts`) keeps the tiling trees, and
 While tiling is on, or a workspace other than 1 is in use, the menu bar shows
 the workspaces and a switch to turn tiling off. Keys pressed inside web pages
 reach the shell through the host's `wm` shortcut (`electron/main.mts`).
+Going to another workspace, both workspaces' windows slide across their
+monitor, or fade, as Settings → Windows says
+(`src/lib/workspaceTransition.ts`). On DinOS, three fingers swiped sideways
+on a touchpad move them by hand: din-shell takes the swipe
+(`native/din-compositor/src/session/mouse.rs`) and tells the desktop its
+travel as it goes, and the workspaces follow the fingers, on to the new one
+when they let go past halfway or with a flick, and to the one after if they
+keep going (`WorkspaceSwipeHost.tsx`; Settings → Mouse turns it off).
 
 ### Optional features
 
