@@ -372,12 +372,13 @@ function DesktopSession() {
                         {/* ~/Desktop's icons and the widgets: over the wallpaper, under every window. */}
                         <DesktopIconLayer />
                         <WidgetLayer />
+                        {/* A dim, not a blur: one over the whole monitor redraws whatever moves behind it. */}
                         {scratchpadArea && (
                           <button
                             ref={scratchpadBackdrop}
                             type="button"
                             aria-label="Hide scratchpad"
-                            className="flex justify-center bg-black/55 pt-3 text-white backdrop-blur-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+                            className="flex justify-center bg-black/55 pt-3 text-white focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
                             style={{ ...rectStyle(scratchpadArea), zIndex: SCRATCHPAD_BACKDROP_Z }}
                             onClick={() => manager.toggleScratchpad(scratchpadArea.id)}
                             onKeyDown={(event) => {

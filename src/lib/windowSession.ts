@@ -75,14 +75,24 @@ const savedWindowSchema = z.object({
   restore: rectSchema.nullable(),
   frameless: z.boolean(),
   floating: z.boolean(),
-  workspace: z.number().int().min(0),
+  workspace: z.number().int().min(1),
+  /**
+   * It's in the scratchpad. Saved as this rather than as the scratchpad's
+   * workspace number (0, useWindows' SCRATCHPAD), which older builds would
+   * refuse the whole session for: they drop this and put it on `workspace`.
+   */
+  scratchpad: z.boolean().optional(),
   /** A native Linux app's window: its app is started again, not opened. */
   native: z.boolean(),
   /** What the window's app saved of itself, if anything. */
   state: z.unknown().optional(),
 });
 
-export type SavedWindow = z.infer<typeof savedWindowSchema>;
+/** useWindows' SCRATCHPAD, which can't be imported here: useWindows imports this. */
+const SCRATCHPAD = 0;
+
+/** A saved window, as read back: a scratchpad window on the scratchpad's workspace. */
+export type SavedWindow = Omit<z.infer<typeof savedWindowSchema>, 'scratchpad'>;
 
 const sessionSchema = z.object({
   windows: z.array(savedWindowSchema),
@@ -244,7 +254,8 @@ export function snapshotSession(
         restore: w.restore,
         frameless: w.frameless,
         floating: w.floating,
-        workspace: w.workspace,
+        workspace: w.workspace === SCRATCHPAD ? 1 : w.workspace,
+        ...(w.workspace === SCRATCHPAD ? { scratchpad: true } : {}),
         native: typeof w.params?.xid === 'number',
         ...(state !== undefined ? { state } : {}),
       };
@@ -261,7 +272,9 @@ export function readSession(): SavedSession | null {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = sessionSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
+    if (!parsed.success) return null;
+    const windows = parsed.data.windows.map(({ scratchpad, ...w }) => (scratchpad ? { ...w, workspace: SCRATCHPAD } : w));
+    return { ...parsed.data, windows };
   } catch {
     return null;
   }
