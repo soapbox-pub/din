@@ -1349,6 +1349,8 @@ in
     ACTION=="add", SUBSYSTEM=="hidraw", SUBSYSTEMS=="usb", ATTRS{idVendor}=="05ac", TAG+="systemd", ENV{SYSTEMD_WANTS}+="din-apple-pair@%k.service"
     ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{id/vendor}=="004c|05ac", ATTRS{id/product}=="030d|0269|0323", RUN+="${pkgs.acl}/bin/setfacl -m u:din:r $devnode"
     ACTION=="add", SUBSYSTEM=="leds", KERNEL=="*::micmute", RUN+="${pkgs.coreutils}/bin/chgrp video /sys/class/leds/%k/brightness"
+    # Framework's LED Matrix modules (Framework Laptop 16): the user may drive them over USB serial, at /dev/din-led-matrix-<port>.
+    ACTION=="add|change", SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0020", ENV{ID_PATH}=="?*", SYMLINK+="din-led-matrix-$env{ID_PATH}", RUN+="${pkgs.acl}/bin/setfacl -m u:din:rw $devnode"
   '';
 
   # Pairs the Apple accessory on /dev/%I over Bluetooth (os/din-apple-pair.py)
