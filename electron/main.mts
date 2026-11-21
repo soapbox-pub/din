@@ -6152,7 +6152,7 @@ type ShellShortcut =
  * The physical keys Super may bind for window management, with any of
  * Shift, Ctrl and Alt. Keep in step with wmCommandFor in src/lib/wmBindings.ts.
  */
-const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMKC])$/;
+const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMKCS])$/;
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.

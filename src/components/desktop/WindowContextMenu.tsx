@@ -15,7 +15,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { useAppContext } from '@/hooks/useAppContext';
-import { homeArea, inDirection, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
+import { homeArea, inDirection, SCRATCHPAD, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import type { SnapZone } from '@/lib/monitors';
@@ -73,7 +73,7 @@ export function WindowMenuItems({
   onMinimize: () => void;
   onToggleMaximize: () => void;
 }) {
-  const { close, tile, unmaximize, moveToWorkspace, moveToMonitor, toggleFloating } = useWindowActions();
+  const { close, tile, unmaximize, moveToWorkspace, moveToScratchpad, moveToMonitor, toggleFloating } = useWindowActions();
   const { config } = useAppContext();
   const areas = useWorkAreas();
   const { monitors } = useMonitors();
@@ -156,13 +156,14 @@ export function WindowMenuItems({
         <ContextMenuSubContent className="w-40">
           <ContextMenuRadioGroup
             value={String(win.workspace)}
-            onValueChange={(n) => moveToWorkspace(win.id, Number(n), false)}
+            onValueChange={(n) => Number(n) === SCRATCHPAD ? moveToScratchpad(win.id) : moveToWorkspace(win.id, Number(n), false)}
           >
             {Array.from({ length: WORKSPACE_COUNT }, (_, i) => i + 1).map((n) => (
               <ContextMenuRadioItem key={n} value={String(n)}>
                 Workspace {n}
               </ContextMenuRadioItem>
             ))}
+            <ContextMenuRadioItem value={String(SCRATCHPAD)}>Scratchpad</ContextMenuRadioItem>
           </ContextMenuRadioGroup>
         </ContextMenuSubContent>
       </ContextMenuSub>

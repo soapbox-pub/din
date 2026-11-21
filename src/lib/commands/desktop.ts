@@ -1,4 +1,4 @@
-import { activeWorkspace, isShown, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
+import { activeWorkspace, isShown, SCRATCHPAD, WORKSPACE_COUNT, type WindowState } from '@/hooks/useWindows';
 import {
   getBrowserBridge, siteOriginOf, VIDEO_DOWNLOAD_FORMATS, type DownloadInfo, type SiteCapability, type VideoDownloadFormat,
 } from '@/lib/browser';
@@ -50,7 +50,7 @@ function windowRow(ctx: CommandContext, w: WindowState) {
     id: w.id,
     app: w.appId,
     title: w.title ?? appRow(ctx, w.appId),
-    workspace: w.workspace,
+    workspace: w.workspace === SCRATCHPAD ? 'scratchpad' : w.workspace,
     state: w.minimized ? 'minimized' : w.maximized ? 'maximized' : w.snapped ? `tiled ${w.snapped}` : w.away ? 'other workspace' : 'shown',
     focused: false,
     x: Math.round(w.x), y: Math.round(w.y), width: Math.round(w.width), height: Math.round(w.height),
@@ -325,6 +325,9 @@ export const windowsArea: Area = {
     ], (args, ctx) => {
       ctx.actions.moveToWorkspace(findWindow(ctx, args.string('window')).id, args.number('n'), args.optBool('follow') ?? false);
     }),
+    command('windows', 'scratchpad', 'Move a window to the scratchpad', [WINDOW], (args, ctx) => {
+      ctx.actions.moveToScratchpad(findWindow(ctx, args.string('window')).id);
+    }),
     command('windows', 'reopen', 'Reopen the windows from before Din started, when it left them closed after a failed start', [], () => {
       if (!reopenSkippedSession()) throw new CommandError('There are no windows to reopen');
     }),
@@ -342,6 +345,9 @@ export const workspaceArea: Area = {
       { name: 'n', type: 'integer', positional: true, min: 1, max: WORKSPACE_COUNT, help: 'The workspace' },
     ], (args, ctx) => {
       ctx.actions.showWorkspace(args.number('n'));
+    }),
+    command('workspace', 'scratchpad', 'Show or hide the scratchpad', [], (_args, ctx) => {
+      ctx.actions.toggleScratchpad();
     }),
   ],
 };

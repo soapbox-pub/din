@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Keyboard, LayoutDashboard } from 'lucide-react';
+import { Keyboard, LayoutDashboard, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverClose, PopoverTrigger } from '@/components/ui/popover';
 import { BarPopoverContent } from '@/components/desktop/BarPopoverContent';
 import { Switch } from '@/components/ui/switch';
 import { useAppContext } from '@/hooks/useAppContext';
-import { activeWorkspace, homeArea, WORKSPACE_COUNT } from '@/hooks/useWindows';
+import { activeWorkspace, homeArea, SCRATCHPAD, WORKSPACE_COUNT } from '@/hooks/useWindows';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useMonitors, useWorkAreas } from '@/contexts/MonitorsContext';
 import { rectStyle } from '@/lib/monitors';
@@ -25,20 +25,25 @@ interface MonitorWorkspaces {
 }
 
 /** Every monitor's workspaces, primary first. */
-function useWorkspaces(): MonitorWorkspaces[] {
-  const { windows, active } = useWindowManager();
+function useWorkspaces() {
+  const { windows, active, scratchpad } = useWindowManager();
   const areas = useWorkAreas();
   const { monitors } = useMonitors();
   const used = new Map<string, Set<number>>();
+  let hasScratchpad = false;
   for (const w of windows) {
     if (w.closing) continue;
+    if (w.workspace === SCRATCHPAD) {
+      hasScratchpad = true;
+      continue;
+    }
     const area = homeArea(areas, w);
     if (!area) continue;
     const set = used.get(area.id) ?? new Set<number>();
     set.add(w.workspace);
     used.set(area.id, set);
   }
-  return areas
+  const workspaces: MonitorWorkspaces[] = areas
     .map((a) => ({
       id: a.id,
       name: monitors.find((m) => m.id === a.id)?.name ?? 'Display',
@@ -47,6 +52,7 @@ function useWorkspaces(): MonitorWorkspaces[] {
       used: [...(used.get(a.id) ?? [])].sort((x, y) => x - y),
     }))
     .sort((a, b) => Number(b.primary) - Number(a.primary));
+  return { workspaces, hasScratchpad, scratchpad };
 }
 
 /** A workspace's key, as on the keyboard: 10 is 0. */
@@ -62,24 +68,28 @@ const workspaceLabel = (n: number) => (n === 10 ? '0' : String(n));
  */
 export function WorkspacesMenuItem() {
   const { config } = useAppContext();
-  const monitors = useWorkspaces();
+  const { workspaces: monitors, hasScratchpad, scratchpad } = useWorkspaces();
   const inUse = monitors.some((m) => m.active !== 1 || m.used.some((n) => n !== 1));
-  if (!config.tilingEnabled && !inUse) return null;
-  return <WorkspacesButton tiling={config.tilingEnabled} monitorsKey={JSON.stringify(monitors)} />;
+  if (!config.tilingEnabled && !inUse && !hasScratchpad && !scratchpad) return null;
+  return <WorkspacesButton tiling={config.tilingEnabled} monitorsKey={JSON.stringify(monitors)} hasScratchpad={hasScratchpad} scratchpad={scratchpad} />;
 }
 
 const WorkspacesButton = memo(function WorkspacesButton({
   tiling,
   monitorsKey,
+  hasScratchpad,
+  scratchpad,
 }: {
   tiling: boolean;
   /** The monitors' workspaces, serialized so the memo compares by value. */
   monitorsKey: string;
+  hasScratchpad: boolean;
+  scratchpad: string | null;
 }) {
   const monitors = JSON.parse(monitorsKey) as MonitorWorkspaces[];
   const primary = monitors[0];
   const shown = primary ? [...new Set([...primary.used, primary.active])].sort((a, b) => a - b) : [];
-  const label = `Workspace ${primary?.active ?? 1}${tiling ? ', tiling' : ''}`;
+  const label = `Workspace ${primary?.active ?? 1}${tiling ? ', tiling' : ''}${scratchpad ? ', scratchpad open' : ''}`;
 
   return (
     <Popover>
@@ -91,6 +101,7 @@ const WorkspacesButton = memo(function WorkspacesButton({
           className="h-7 gap-1 rounded-md px-1.5 text-foreground/90 hover:bg-foreground/10 hover:text-foreground"
         >
           {tiling && <LayoutDashboard className="size-4" aria-hidden />}
+          {(hasScratchpad || scratchpad) && <Layers className={cn('size-4', scratchpad ? 'text-ink-accent' : 'text-foreground/70')} aria-hidden />}
           <span className="flex items-center gap-0.5" aria-hidden>
             {shown.map((n) => (
               <span
@@ -107,15 +118,19 @@ const WorkspacesButton = memo(function WorkspacesButton({
         </Button>
       </PopoverTrigger>
       <BarPopoverContent align="end" className="w-80 p-0">
-        <WorkspacesPopoverBody tiling={tiling} monitors={monitors} />
+        <WorkspacesPopoverBody tiling={tiling} monitors={monitors} scratchpad={scratchpad} />
       </BarPopoverContent>
     </Popover>
   );
 });
 
-function WorkspacesPopoverBody({ tiling, monitors }: { tiling: boolean; monitors: MonitorWorkspaces[] }) {
+function WorkspacesPopoverBody({ tiling, monitors, scratchpad }: {
+  tiling: boolean;
+  monitors: MonitorWorkspaces[];
+  scratchpad: string | null;
+}) {
   const { updateConfig } = useAppContext();
-  const { open, showWorkspace } = useWindowActions();
+  const { open, showWorkspace, toggleScratchpad } = useWindowActions();
 
   return (
     <div className="flex flex-col">
@@ -168,6 +183,18 @@ function WorkspacesPopoverBody({ tiling, monitors }: { tiling: boolean; monitors
                 );
               })}
             </div>
+            <PopoverClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={() => toggleScratchpad(m.id)}
+              >
+                <Layers aria-hidden />
+                {scratchpad === m.id ? 'Hide scratchpad' : 'Show scratchpad'}
+              </Button>
+            </PopoverClose>
           </div>
         ))}
       </div>

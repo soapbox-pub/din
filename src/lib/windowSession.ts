@@ -75,7 +75,7 @@ const savedWindowSchema = z.object({
   restore: rectSchema.nullable(),
   frameless: z.boolean(),
   floating: z.boolean(),
-  workspace: z.number().int().min(1),
+  workspace: z.number().int().min(0),
   /** A native Linux app's window: its app is started again, not opened. */
   native: z.boolean(),
   /** What the window's app saved of itself, if anything. */

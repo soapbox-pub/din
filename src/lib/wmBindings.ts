@@ -20,6 +20,8 @@ export type WmCommand =
   | { type: 'move-to-workspace'; n: number; follow: boolean }
   | { type: 'workspace-step'; step: 1 | -1 }
   | { type: 'workspace-previous' }
+  | { type: 'toggle-scratchpad' }
+  | { type: 'move-to-scratchpad' }
   | { type: 'close' }
   | { type: 'toggle-float' }
   | { type: 'toggle-tiling' }
@@ -71,6 +73,9 @@ export function wmCommandFor({ code, shift, ctrl, alt }: WmKey): WmCommand | nul
     if (ctrl && !shift) return { type: 'workspace-previous' };
     if (!ctrl) return { type: 'workspace-step', step: shift ? -1 : 1 };
     return null;
+  }
+  if (code === 'KeyS' && !ctrl && !shift) {
+    return { type: alt ? 'move-to-scratchpad' : 'toggle-scratchpad' };
   }
   if (code === 'Minus' || code === 'Equal') {
     if (ctrl || alt) return null;
@@ -138,6 +143,8 @@ export const WM_BINDING_HELP: { group: string; bindings: { keys: string[]; label
       { keys: ['Super', 'Shift', 'Alt', '1 … 0'], label: 'Move the window to a workspace, staying here' },
       { keys: ['Super', 'Tab'], label: 'Next workspace (Shift: previous)' },
       { keys: ['Super', 'Ctrl', 'Tab'], label: 'Back to the last workspace' },
+      { keys: ['Super', 'S'], label: 'Show or hide the scratchpad' },
+      { keys: ['Super', 'Alt', 'S'], label: 'Move the window to the scratchpad' },
     ],
   },
   {

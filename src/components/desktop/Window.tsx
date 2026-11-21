@@ -236,11 +236,11 @@ interface PlayedEffect {
 }
 
 /**
- * What a window closing or minimizing paints at, over `win.z`. The window
+ * What a window closing or minimizing paints at, over its stack position. The window
  * under it is raised (and focused) the moment it starts leaving, which is
  * right for focus and input but would cover the animation; leaving windows
  * paint above every live one (which `raise` keeps under 5000) until they're
- * gone, without their place in the stack changing. Adding `win.z` keeps
+ * gone, without their place in the stack changing. Adding its stack position keeps
  * several leaving at once in their order.
  */
 const DEPARTING_Z = 1_000_000;
@@ -427,11 +427,13 @@ interface WobblyDrag {
  */
 export const Window = memo(function Window({
   window: win,
+  stackZ,
   isTop,
   covered,
   onBar,
 }: {
   window: WindowState;
+  stackZ: number;
   isTop: boolean;
   /** Whether a window above this one, at rest, covers all of it. */
   covered: boolean;
@@ -441,7 +443,7 @@ export const Window = memo(function Window({
   // Actions only (stable identity): subscribing to the full manager would
   // re-render every window's chrome on every commit anywhere on the desktop,
   // defeating the memo() above. With actions only, this component re-renders
-  // solely when its own `window` object, `isTop`, `covered` or `onBar` changes.
+  // only when a prop changes.
   const { close, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, setTitle, setIcon, setAccent, dropTile } =
     useWindowActions();
   const { config } = useAppContext();
@@ -454,7 +456,7 @@ export const Window = memo(function Window({
     (config.closeEffect === 'random' || effectsFor('close').some((e) => e.id === config.closeEffect));
   // A closing window keeps painting over the one raised in its place while
   // its exit plays (DEPARTING_Z).
-  const renderedZ = win.closing ? DEPARTING_Z + win.z : win.z;
+  const renderedZ = win.closing ? DEPARTING_Z + stackZ : stackZ;
   const { getApp } = useInstalledApps();
   const app = getApp(win.appId);
   /** The Dock tile it minimizes into. */
@@ -834,7 +836,7 @@ export const Window = memo(function Window({
 
     const parent = el.parentElement;
     const target = dockTarget(parent, dockId, dockEdge);
-    const effectZ = minimizing ? DEPARTING_Z + win.z : win.z;
+    const effectZ = minimizing ? DEPARTING_Z + stackZ : stackZ;
 
     // Warp the live element directly (the pre-snapshot behaviour). Used
     // outside the shell and as a fallback when a capture fails.
@@ -973,7 +975,7 @@ export const Window = memo(function Window({
     runLiveGenie();
     // config.minimizeEffect and dockEdge are read when the flag flips, and
     // a change to them alone returns at the guard above.
-  }, [win.minimized, dockId, win.z, config.minimizeEffect, dockEdge, beginGesture, endGesture, stopWobble]);
+  }, [win.minimized, dockId, stackZ, config.minimizeEffect, dockEdge, beginGesture, endGesture, stopWobble]);
 
   // Maximize/restore/tile transitions FLIP from the previous committed rect
   // to the new one: React swaps the geometry instantly (CSS percentages or
@@ -1139,7 +1141,7 @@ export const Window = memo(function Window({
           withStripRect(winRect, strip),
           null,
           'out',
-          DEPARTING_Z + win.z,
+          DEPARTING_Z + stackZ,
           newSeed(),
           () => destroy(win.id),
         );
@@ -1149,7 +1151,7 @@ export const Window = memo(function Window({
       .catch(() => {
         if (!cancelled) destroy(win.id);
       });
-  }, [win.closing, win.minimized, win.id, win.z, config.closeEffect, closeWithEngine, destroy, stopWobble]);
+  }, [win.closing, win.minimized, win.id, stackZ, config.closeEffect, closeWithEngine, destroy, stopWobble]);
   useEffect(() => () => closeRun.current?.(), []);
 
   // Settings' effect tiles: play an effect out and back in on this window,
@@ -1204,11 +1206,11 @@ export const Window = memo(function Window({
             const strip = stripHeightOf(stripRef.current);
             const snapshot = withStrip(shot, strip, winRect.width);
             const rect = withStripRect(winRect, strip);
-            current = runWindowEffect(parent, snapshot, effect, rect, target, 'out', win.z, seed, () => {
+            current = runWindowEffect(parent, snapshot, effect, rect, target, 'out', stackZ, seed, () => {
               // Gone for a beat, then back.
               const timer = window.setTimeout(() => {
                 if (cancelled) return;
-                current = runWindowEffect(parent, snapshot, effect, rect, target, 'in', win.z, seed, done);
+                current = runWindowEffect(parent, snapshot, effect, rect, target, 'in', stackZ, seed, done);
                 if (!current) done();
               }, 300);
               current = () => window.clearTimeout(timer);
@@ -1220,7 +1222,7 @@ export const Window = memo(function Window({
             if (!cancelled) done();
           });
       }),
-    [win.id, win.minimized, win.closing, win.z, dockId, dockEdge, stopWobble],
+    [win.id, win.minimized, win.closing, stackZ, dockId, dockEdge, stopWobble],
   );
 
   /**

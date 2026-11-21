@@ -175,8 +175,7 @@ export interface WindowState {
    */
   accent: string | null;
   /**
-   * The workspace (1-10) the window is on, of its monitor's. Each monitor
-   * shows one of its workspaces at a time; see `away`.
+   * The workspace the window is on: 1–10 on its monitor, or the shared scratchpad.
    */
   workspace: number;
   /**
@@ -256,6 +255,8 @@ interface WmState {
   active: Record<string, number>;
   /** The workspace each monitor showed before, for Super+Ctrl+Tab. */
   previous: Record<string, number>;
+  /** The monitor showing the scratchpad overlay, or null when hidden. */
+  scratchpad: string | null;
 }
 
 /** The window manager's state, as the saved session sees it. */
@@ -263,8 +264,17 @@ export type WindowSession = WmState;
 
 /** Workspaces per monitor, Super+1 to Super+0. */
 export const WORKSPACE_COUNT = 10;
+export const SCRATCHPAD = 0;
 
-const treeKey = (areaId: string, workspace: number) => `${workspace}@${areaId}`;
+const treeKey = (areaId: string, workspace: number) => workspace === SCRATCHPAD ? 'scratchpad' : `${workspace}@${areaId}`;
+
+function workspaceTileRect(area: WorkArea, gap: number, workspace: number): Rect {
+  const rect = tilingRect(area, gap);
+  if (workspace !== SCRATCHPAD) return rect;
+  const x = Math.round(rect.width * 0.1);
+  const y = Math.round(rect.height * 0.1);
+  return { x: rect.x + x, y: rect.y + y, width: rect.width - 2 * x, height: rect.height - 2 * y };
+}
 
 /** The workspace a monitor is showing. */
 export function activeWorkspace(active: Record<string, number>, areaId: string): number {
@@ -332,12 +342,13 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
     if (!old || old === w) return w;
     const to = homeArea(areas, w)!;
     if (homeArea(areas, old)!.id === to.id) return w;
+    if (w.workspace === SCRATCHPAD && (old.workspace !== SCRATCHPAD || !next.scratchpad || next.scratchpad === to.id)) return w;
     const workspace = activeWorkspace(next.active, to.id);
     return w.workspace === workspace ? w : { ...w, workspace };
   });
 
   // Who tiles where.
-  const groups = new Map<string, { area: WorkArea; members: WindowState[] }>();
+  const groups = new Map<string, { area: WorkArea; workspace: number; members: WindowState[] }>();
   const homes = new Map<string, WorkArea>();
   for (const w of windows) {
     const area = homeArea(areas, w)!;
@@ -346,7 +357,7 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
     const key = treeKey(area.id, w.workspace);
     const group = groups.get(key);
     if (group) group.members.push(w);
-    else groups.set(key, { area, members: [w] });
+    else groups.set(key, { area, workspace: w.workspace, members: [w] });
   }
 
   let trees = next.trees;
@@ -362,12 +373,12 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
       if (t) updated[key] = t;
       else delete updated[key];
     }
-    for (const [key, { area, members }] of groups) {
+    for (const [key, { area, workspace, members }] of groups) {
       let t: TileNode | null = updated[key] ?? null;
       const present = new Set(treeLeaves(t));
       const added = members.filter((w) => !present.has(w.id)).sort((a, b) => a.z - b.z);
       if (added.length === 0) continue;
-      const rect = tilingRect(area, tiling.gap);
+      const rect = workspaceTileRect(area, tiling.gap, workspace);
       for (const w of added) {
         // A new window splits the focused tile: the highest one already in.
         const target = members.reduce<WindowState | null>(
@@ -385,13 +396,16 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
 
   const rects = new Map<string, Rect>();
   if (tiling.enabled) {
-    for (const [key, { area }] of groups) {
-      layoutTree(trees[key] ?? null, tilingRect(area, tiling.gap), tiling.gap, rects);
+    for (const [key, { area, workspace }] of groups) {
+      layoutTree(trees[key] ?? null, workspaceTileRect(area, tiling.gap, workspace), tiling.gap, rects);
     }
   }
   let windowsChanged = windows.some((w, i) => w !== next.windows[i]);
   windows = windows.map((w) => {
-    const away = w.workspace !== activeWorkspace(next.active, homes.get(w.id)!.id);
+    const areaId = homes.get(w.id)!.id;
+    const away = w.workspace === SCRATCHPAD
+      ? next.scratchpad !== areaId
+      : w.workspace !== activeWorkspace(next.active, areaId);
     // Neighbors can fill the vacated tile immediately, but the departing
     // window still needs its last tile rect for the close effect.
     const tiled = w.closing ? w.tiled : (rects.get(w.id) ?? null);
@@ -424,6 +438,21 @@ function carryTo(w: WindowState, from: WorkArea, to: WorkArea): WindowState {
     restore: w.restore ? carry(w.restore) : null,
     monitor: w.monitor !== null ? to.id : null,
   };
+}
+
+/** Show the shared scratchpad here, carrying its windows and raising them in order. */
+function revealScratchpad(s: WmState, areas: WorkArea[], area: WorkArea): WmState {
+  const members = s.windows.filter((w) => w.workspace === SCRATCHPAD && !w.closing);
+  if (members.length === 0) return { ...s, scratchpad: area.id };
+  let windows = s.windows.map((w) => {
+    if (w.workspace !== SCRATCHPAD) return w;
+    const from = homeArea(areas, w);
+    return from && from.id !== area.id ? carryTo(w, from, area) : w;
+  });
+  for (const w of members.sort((a, b) => a.z - b.z)) {
+    if (!w.minimized) windows = raise(windows, w.id);
+  }
+  return { ...s, windows, scratchpad: area.id };
 }
 
 /**
@@ -524,9 +553,9 @@ function fitWindows(s: WmState, areas: WorkArea[]): WmState {
       : { x: primary.x + 80 + i * CASCADE_PX, y: primary.y + 60 + i * CASCADE_PX };
   let changed = false;
   let lost = 0;
-  const workspace = activeWorkspace(s.active, primary.id);
   const next = s.windows.map((w) => {
     let out = w;
+    const workspace = w.workspace === SCRATCHPAD ? SCRATCHPAD : activeWorkspace(s.active, primary.id);
     if (w.monitor !== null && !ids.has(w.monitor)) out = { ...out, monitor: primary.id, workspace };
     const moved = rehome(w, lost);
     if (moved) out = { ...out, ...moved, workspace };
@@ -538,7 +567,8 @@ function fitWindows(s: WmState, areas: WorkArea[]): WmState {
     }
     return out;
   });
-  return changed ? { ...s, windows: next } : s;
+  const scratchpad = s.scratchpad && ids.has(s.scratchpad) ? s.scratchpad : null;
+  return changed || scratchpad !== s.scratchpad ? { ...s, windows: next, scratchpad } : s;
 }
 
 /**
@@ -559,8 +589,8 @@ export function useWindows(
   getLaunchMonitor: () => string | null,
   getTiling: () => TilingSettings,
 ) {
-  const [state, setState] = useState<WmState>({ windows: [], trees: {}, active: {}, previous: {} });
-  const { windows, active } = state;
+  const [state, setState] = useState<WmState>({ windows: [], trees: {}, active: {}, previous: {}, scratchpad: null });
+  const { windows, active, scratchpad } = state;
 
   /** Change the state; settle() then brings the derived parts in line. */
   const update = useCallback(
@@ -624,9 +654,14 @@ export function useWindows(
     if (knownArea) currentMonitor.current = knownArea.id;
     update((s) => {
       const target = s.windows.find((w) => w.id === id);
-      if (!target) return s;
-      const area = homeArea(getAreas(), target);
-      const shown = area ? showWorkspace(s, getAreas(), area.id, target.workspace, false) : s;
+      if (!target || target.closing) return s;
+      const areas = getAreas();
+      const area = homeArea(areas, target);
+      const shown = !area
+        ? s
+        : target.workspace === SCRATCHPAD
+          ? (s.scratchpad === area.id ? s : revealScratchpad(s, areas, area))
+          : showWorkspace(s.scratchpad === area.id ? { ...s, scratchpad: null } : s, areas, area.id, target.workspace, false);
       const ws = raise(shown.windows, id);
       return ws === shown.windows ? shown : { ...shown, windows: ws };
     });
@@ -737,7 +772,7 @@ export function useWindows(
             areas.find((a) => !covered.includes(a.id)) ??
             picked)
           : picked;
-      const workspace = area ? activeWorkspace(s.active, area.id) : 1;
+      const workspace = !area ? 1 : s.scratchpad === area.id ? SCRATCHPAD : activeWorkspace(s.active, area.id);
       const offset =
         (area
           ? ws.filter((w) => w.workspace === workspace && areaOf(areas, w) === area).length
@@ -1193,7 +1228,7 @@ export function useWindows(
       if (current !== n) spec = workspaceTransitionSpec(id, current, n, options?.dir ?? (n > current ? 1 : -1));
     }
     shownSince.current[id] = n;
-    update((s) => showWorkspace(s, getAreas(), id, n, true));
+    update((s) => showWorkspace(s.scratchpad === id ? { ...s, scratchpad: null } : s, getAreas(), id, n, true));
     if (spec) beginWorkspaceTransition(spec).land(1);
   }, [commandArea, getAreas, update, workspaceTransitionSpec, shownWorkspace]);
 
@@ -1205,10 +1240,34 @@ export function useWindows(
     const current = shownWorkspace(area.id);
     const used = new Set([current]);
     for (const w of windowsRef.current) {
-      if (!w.closing && homeArea(areas, w)?.id === area.id) used.add(w.workspace);
+      if (!w.closing && w.workspace !== SCRATCHPAD && homeArea(areas, w)?.id === area.id) used.add(w.workspace);
     }
     return { areaId: area.id, current, list: [...used].sort((a, b) => a - b) };
   }, [commandArea, getAreas, shownWorkspace]);
+
+  const toggleScratchpad = useCallback((areaId?: string) => {
+    const areas = getAreas();
+    const area = areaId ? areas.find((a) => a.id === areaId) : commandArea();
+    if (!area) return;
+    currentMonitor.current = area.id;
+    update((s) => s.scratchpad === area.id ? { ...s, scratchpad: null } : revealScratchpad(s, areas, area));
+  }, [commandArea, getAreas, update]);
+
+  const moveToScratchpad = useCallback((id: string) => {
+    update((s) => {
+      const target = s.windows.find((w) => w.id === id);
+      if (!target || target.closing || target.workspace === SCRATCHPAD) return s;
+      const areas = getAreas();
+      const from = homeArea(areas, target);
+      const member = s.windows.find((w) => w.workspace === SCRATCHPAD && !w.closing);
+      const to = areas.find((a) => a.id === s.scratchpad) ?? (member ? homeArea(areas, member) : from);
+      const moved = from && to && from.id !== to.id ? carryTo(target, from, to) : target;
+      const split = moved.snapped && moved.monitor !== null
+        ? (snapGroup(s.windows, moved.monitor, SCRATCHPAD)[0]?.split ?? null)
+        : moved.split;
+      return { ...s, windows: s.windows.map((w) => w === target ? { ...moved, workspace: SCRATCHPAD, split } : w) };
+    });
+  }, [getAreas, update]);
 
   /**
    * Step through the workspaces with windows on the current monitor (and
@@ -1259,7 +1318,7 @@ export function useWindows(
       const moved = { ...s, windows: s.windows.map((w) => (w.id === id ? { ...w, workspace: n, split } : w)) };
       const area = homeArea(getAreas(), target);
       if (!follow || !area) return moved;
-      const shown = showWorkspace(moved, getAreas(), area.id, n, false);
+      const shown = showWorkspace(moved.scratchpad === area.id ? { ...moved, scratchpad: null } : moved, getAreas(), area.id, n, false);
       return { ...shown, windows: raise(shown.windows, id) };
     });
   }, [getAreas, update]);
@@ -1317,6 +1376,7 @@ export function useWindows(
       const wa = s.windows.find((w) => w.id === a);
       const wb = s.windows.find((w) => w.id === b);
       if (!wa || !wb || a === b) return s;
+      if ((wa.workspace === SCRATCHPAD) !== (wb.workspace === SCRATCHPAD)) return s;
       const names = new Map([[a, b], [b, a]]);
       const trees: Record<string, TileNode> = {};
       for (const [key, tree] of Object.entries(s.trees)) trees[key] = renameLeaves(tree, names)!;
@@ -1445,7 +1505,7 @@ export function useWindows(
       const tree = key ? s.trees[key] : undefined;
       if (!area || !key || !tree) return s;
       const { gap } = getTiling();
-      const next = resizeLeaf(tree, id, dx, dy, tilingRect(area, gap), gap);
+      const next = resizeLeaf(tree, id, dx, dy, workspaceTileRect(area, gap, w.workspace), gap);
       return next === tree ? s : { ...s, trees: { ...s.trees, [key]: next! } };
     });
   }, [getAreas, getTiling, resize, update]);
@@ -1490,6 +1550,8 @@ export function useWindows(
       beginWorkspaceSwipe,
       previousWorkspace,
       moveToWorkspace,
+      toggleScratchpad,
+      moveToScratchpad,
       focusDirection,
       swapDirection,
       moveToMonitor,
@@ -1501,14 +1563,14 @@ export function useWindows(
       adoptSession,
       getSession,
     }),
-    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, workspaceSteps, beginWorkspaceSwipe, previousWorkspace, moveToWorkspace, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, workspaceSteps, beginWorkspaceSwipe, previousWorkspace, moveToWorkspace, toggleScratchpad, moveToScratchpad, focusDirection, swapDirection, moveToMonitor, dropTile, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity
   // changes on every window mutation, so only components that genuinely
   // need `windows` should consume it. `active` is the workspace each
   // monitor shows (see activeWorkspace).
-  return useMemo(() => ({ windows, active, actions, ...actions }), [windows, active, actions]);
+  return useMemo(() => ({ windows, active, scratchpad, actions, ...actions }), [windows, active, scratchpad, actions]);
 }
 
 export type WindowManager = ReturnType<typeof useWindows>;

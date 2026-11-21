@@ -180,6 +180,10 @@ export function DesktopHotkeys() {
           return a.stepWorkspace(cmd.step);
         case 'workspace-previous':
           return a.previousWorkspace();
+        case 'toggle-scratchpad':
+          return a.toggleScratchpad();
+        case 'move-to-scratchpad':
+          return top && a.moveToScratchpad(top.id);
         case 'close':
           return top && a.close(top.id);
         case 'toggle-float':
