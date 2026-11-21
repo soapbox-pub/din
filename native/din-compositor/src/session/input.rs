@@ -38,6 +38,7 @@ use super::{
     accessibility::{self, ZoomKey},
     keys::KeyAction,
     magic_mouse,
+    mouse::TouchpadSwipeUpdate,
     state::State,
 };
 
@@ -77,7 +78,7 @@ impl State {
             InputEvent::PointerAxis { event } => self.on_axis(event),
             InputEvent::GestureSwipeBegin { event } => {
                 // Three fingers on a touchpad go between workspaces (mouse.rs).
-                if self.touchpad_swipe_begin(event.fingers()) {
+                if self.touchpad_swipe_begin(event.fingers(), event.time_msec()) {
                     return;
                 }
                 let Some(pointer) = self.seat.get_pointer() else { return };
@@ -89,11 +90,19 @@ impl State {
             }
             InputEvent::GestureSwipeUpdate { event } => {
                 let delta = event.delta();
-                if self.touchpad_swipe_update(delta.x, delta.y) {
-                    return;
-                }
+                let delta = match self.touchpad_swipe_update(delta.x, delta.y) {
+                    TouchpadSwipeUpdate::Taken => return,
+                    TouchpadSwipeUpdate::NotOurs => delta,
+                    TouchpadSwipeUpdate::Released { time, fingers, dx, dy } => {
+                        // It went up or down: the app hears it began, then all of it so far.
+                        let Some(pointer) = self.seat.get_pointer() else { return };
+                        let serial = SERIAL_COUNTER.next_serial();
+                        pointer.gesture_swipe_begin(self, &GestureSwipeBeginEvent { serial, time, fingers });
+                        (dx, dy).into()
+                    }
+                };
                 let Some(pointer) = self.seat.get_pointer() else { return };
-                pointer.gesture_swipe_update(self, &SwipeUpdate { time: event.time_msec(), delta: event.delta() });
+                pointer.gesture_swipe_update(self, &SwipeUpdate { time: event.time_msec(), delta });
             }
             InputEvent::GestureSwipeEnd { event } => {
                 if self.touchpad_swipe_end(event.cancelled()) {

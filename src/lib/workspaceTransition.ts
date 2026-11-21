@@ -14,9 +14,10 @@ import type { Rect } from '@/lib/monitors';
  * While one plays, both workspaces' windows show (Window reads
  * useWorkspaceTransition), moved by inline `translate`, `opacity` and
  * `clip-path`, which React's styles don't touch and which sit on top of a
- * drag's or an effect's `transform`. The monitor shows the new workspace
- * only once the animation gets there, so what the window manager says is on
- * screen is what's in front of the user, and one cut short just ends there.
+ * drag's or an effect's `transform`. A switch (a shortcut, the Workspaces
+ * menu, `din workspace`) shows the new workspace at once and plays over it,
+ * so the next command acts on where the user is going; a swipe, which may
+ * yet go back, shows it only once the fingers have taken it there.
  */
 
 export type WorkspaceAnimation = AppConfig['workspaceAnimation'];

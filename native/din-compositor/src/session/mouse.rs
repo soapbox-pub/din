@@ -13,7 +13,9 @@
 //!
 //! Three fingers swiped sideways on a touchpad go to the workspace beside,
 //! which slides in with them. libinput says the swipe; while the setting's
-//! on it's din-shell's, and no app hears of it. Din is told it as it goes
+//! on, din-shell holds three fingers until they've gone far enough to tell
+//! which way: sideways is its own, and no app hears of it; up or down is
+//! the app's, told from where it began. Din is told it as it goes
 //! (`swipe begin`, `swipe <travel so far>`, `swipe end` or `swipe cancel`),
 //! and moves the workspaces by it (WorkspaceSwipeHost.tsx).
 
@@ -157,17 +159,26 @@ pub struct Mouse {
 
 /// How far a touchpad's swipe has gone, and which way it set off.
 struct TouchpadSwipe {
+    /// When it began, and with how many fingers, for an app to be told of it
+    /// after all if it goes up or down.
+    time: u32,
+    fingers: u32,
     dx: f64,
     dy: f64,
-    way: SwipeWay,
+    /// Sideways, between workspaces: Din is told its travel from the dx it
+    /// began at. None while it's not yet known which way it's going.
+    sideways_from: Option<f64>,
 }
 
-enum SwipeWay {
-    Unknown,
-    /// Sideways, between workspaces: Din is told its travel from the dx it began at.
-    Sideways(f64),
-    /// Up or down: not a swipe between workspaces, to its end.
-    Upright,
+/// What became of a touchpad swipe's movement.
+pub enum TouchpadSwipeUpdate {
+    /// din-shell's: no app hears of it.
+    Taken,
+    /// Not din-shell's, so the app under the pointer gets it as usual.
+    NotOurs,
+    /// It went up or down, so it was never din-shell's: the app is told it
+    /// began (at TIME, with FINGERS), then all of its travel so far (DX, DY).
+    Released { time: u32, fingers: u32, dx: f64, dy: f64 },
 }
 
 /// A touchpad: the device that can tap.
@@ -258,40 +269,47 @@ impl State {
         button
     }
 
-    /// FINGERS began a swipe on a touchpad. Whether it's din-shell's, between
-    /// workspaces, and so no app's.
-    pub fn touchpad_swipe_begin(&mut self, fingers: u32) -> bool {
+    /// FINGERS began a swipe on a touchpad at TIME. Whether din-shell holds
+    /// it: three fingers might be going between workspaces, which no app
+    /// hears of, and that's known once they've gone far enough to tell which
+    /// way (touchpad_swipe_update).
+    pub fn touchpad_swipe_begin(&mut self, fingers: u32, time: u32) -> bool {
         let ours = fingers == 3 && self.mouse.settings.touchpad_swipe && !self.direct_takes_pointer();
-        self.mouse.touchpad_swipe = ours.then_some(TouchpadSwipe { dx: 0.0, dy: 0.0, way: SwipeWay::Unknown });
+        self.mouse.touchpad_swipe =
+            ours.then_some(TouchpadSwipe { time, fingers, dx: 0.0, dy: 0.0, sideways_from: None });
         ours
     }
 
-    /// The swipe went on by (DX, DY). Whether it's din-shell's.
-    pub fn touchpad_swipe_update(&mut self, dx: f64, dy: f64) -> bool {
-        let Some(swipe) = self.mouse.touchpad_swipe.as_mut() else { return false };
+    /// The swipe went on by (DX, DY).
+    pub fn touchpad_swipe_update(&mut self, dx: f64, dy: f64) -> TouchpadSwipeUpdate {
+        let Some(swipe) = self.mouse.touchpad_swipe.as_mut() else { return TouchpadSwipeUpdate::NotOurs };
         swipe.dx += dx;
         swipe.dy += dy;
-        let mut began = false;
-        if let SwipeWay::Unknown = swipe.way {
+        let began = swipe.sideways_from.is_none();
+        if began {
             if swipe.dx.hypot(swipe.dy) < TOUCHPAD_SWIPE_START {
-                return true;
+                return TouchpadSwipeUpdate::Taken;
             }
-            began = swipe.dx.abs() > swipe.dy.abs();
-            swipe.way = if began { SwipeWay::Sideways(swipe.dx) } else { SwipeWay::Upright };
+            if swipe.dx.abs() <= swipe.dy.abs() {
+                // Up or down: the app's after all, from where it began.
+                let TouchpadSwipe { time, fingers, dx, dy, .. } = *swipe;
+                self.mouse.touchpad_swipe = None;
+                return TouchpadSwipeUpdate::Released { time, fingers, dx, dy };
+            }
+            swipe.sideways_from = Some(swipe.dx);
         }
-        let SwipeWay::Sideways(from) = swipe.way else { return true };
-        let travel = swipe.dx - from;
+        let travel = swipe.dx - swipe.sideways_from.unwrap_or(swipe.dx);
         if began {
             self.tell_din("swipe begin");
         }
         self.tell_din(&format!("swipe {travel:.1}"));
-        true
+        TouchpadSwipeUpdate::Taken
     }
 
-    /// The swipe ended, or was CANCELLED. Whether it was din-shell's.
+    /// The swipe ended, or was CANCELLED. Whether din-shell held it.
     pub fn touchpad_swipe_end(&mut self, cancelled: bool) -> bool {
         let Some(swipe) = self.mouse.touchpad_swipe.take() else { return false };
-        if let SwipeWay::Sideways(_) = swipe.way {
+        if swipe.sideways_from.is_some() {
             self.tell_din(if cancelled { "swipe cancel" } else { "swipe end" });
         }
         true

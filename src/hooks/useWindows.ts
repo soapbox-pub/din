@@ -1176,24 +1176,25 @@ export function useWindows(
 
   /**
    * Show workspace `n` on a monitor (by default, the one keyboard commands
-   * act on), its top window taking focus. It gets there with Settings →
-   * Windows' animation (src/lib/workspaceTransition.ts).
+   * act on), its top window taking focus. It's shown at once, so the next
+   * command (closing a window, listing them) acts on it; Settings → Windows'
+   * animation then plays over it (src/lib/workspaceTransition.ts), the two
+   * workspaces' windows showing until it's done.
    */
   const showWorkspaceOn = useCallback((n: number, areaId?: string, options?: ShowWorkspaceOptions) => {
     const id = areaId ?? commandArea()?.id;
     if (!id) return;
     currentMonitor.current = id;
-    const show = () => {
-      shownSince.current[id] = n;
-      update((s) => showWorkspace(s, getAreas(), id, n, true));
-    };
-    if (options?.instant || !workspaceAnimates()) return show();
-    // One still playing ends where it was going, and this starts from there.
-    finishWorkspaceTransition();
-    const current = shownWorkspace(id);
-    const spec = current === n ? null : workspaceTransitionSpec(id, current, n, options?.dir ?? (n > current ? 1 : -1));
-    if (!spec) return show();
-    beginWorkspaceTransition(spec).land(1, show);
+    let spec: WorkspaceTransitionSpec | null = null;
+    if (!options?.instant && workspaceAnimates()) {
+      // One still playing ends where it was going, and this starts from there.
+      finishWorkspaceTransition();
+      const current = shownWorkspace(id);
+      if (current !== n) spec = workspaceTransitionSpec(id, current, n, options?.dir ?? (n > current ? 1 : -1));
+    }
+    shownSince.current[id] = n;
+    update((s) => showWorkspace(s, getAreas(), id, n, true));
+    if (spec) beginWorkspaceTransition(spec).land(1);
   }, [commandArea, getAreas, update, workspaceTransitionSpec, shownWorkspace]);
 
   /** The workspaces the current monitor steps through. */
