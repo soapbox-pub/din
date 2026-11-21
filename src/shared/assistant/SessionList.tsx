@@ -19,6 +19,7 @@ import { useAssistantHost } from '@/shared/assistant/host';
 import {
   useAssistantSessions,
   useAssistantWork,
+  useGitCheckouts,
   useHomeDirectory,
   useMainCheckouts,
   useMoveSession,
@@ -49,17 +50,56 @@ interface Project {
   sessions: SessionInfo[];
 }
 
+/** What's known of the folders conversations ran in, to tell their projects apart. */
+interface Checkouts {
+  /** A worktree's main checkout. */
+  mains: Map<string, string>;
+  /** The folders that are a repository's main checkout. */
+  checkouts: Set<string>;
+}
+
+/** The main checkouts each OpenCode project ID was seen in. */
+function checkoutsByProject(sessions: SessionInfo[], { mains, checkouts }: Checkouts): Map<string, Set<string>> {
+  const found = new Map<string, Set<string>>();
+  for (const session of sessions) {
+    const directory = session.location.directory;
+    const root = mains.get(directory) ?? (checkouts.has(directory) ? directory : undefined);
+    if (!session.projectID || !root) continue;
+    found.set(session.projectID, (found.get(session.projectID) ?? new Set()).add(root));
+  }
+  return found;
+}
+
 /**
- * Conversations by project, the project used most recently first. Every
- * worktree of a repository counts as the repository: OpenCode gives them
- * the same project ID, and their `.git` files lead back to the main
- * checkout, whose folder names the project.
+ * Which project a conversation goes under. Every worktree of a repository
+ * counts as the repository: its `.git` file leads back to the main checkout,
+ * whose folder is the project. OpenCode's project ID (the root commit) only
+ * stands in for a folder that's gone, such as a removed worktree, when it
+ * leads to one checkout: repositories made from one template share it.
  */
-function groupByProject(sessions: SessionInfo[], mains: Map<string, string>, home: string | undefined): Project[] {
+function projectKey(session: SessionInfo, { mains, checkouts }: Checkouts, byProject: Map<string, Set<string>>): string {
+  const directory = session.location.directory;
+  const root = mains.get(directory);
+  if (root) return root;
+  if (checkouts.has(directory)) return directory;
+  // Outside git OpenCode calls everything "global".
+  const id = session.projectID === 'global' ? undefined : session.projectID;
+  const known = id ? byProject.get(id) : undefined;
+  if (known?.size === 1) return [...known][0];
+  if (id && !known) return id;
+  return directory;
+}
+
+/**
+ * Conversations by project, the project used most recently first (see
+ * `projectKey`).
+ */
+function groupByProject(sessions: SessionInfo[], folders: Checkouts, home: string | undefined): Project[] {
+  const byProject = checkoutsByProject(sessions, folders);
   const byKey = new Map<string, { roots: Set<string>; sessions: SessionInfo[] }>();
   for (const session of sessions) {
-    const root = mains.get(session.location.directory) ?? session.location.directory;
-    const key = session.projectID ?? root;
+    const root = folders.mains.get(session.location.directory) ?? session.location.directory;
+    const key = projectKey(session, folders, byProject);
     const group = byKey.get(key) ?? { roots: new Set<string>(), sessions: [] };
     group.roots.add(root);
     group.sessions.push(session);
@@ -67,7 +107,8 @@ function groupByProject(sessions: SessionInfo[], mains: Map<string, string>, hom
   }
 
   const projects = [...byKey].map(([key, { roots, sessions }]) => {
-    const root = [...roots].reduce((a, b) => (b.length < a.length ? b : a));
+    // A key that's a folder is the checkout; a bare project ID has only the folders it was seen in.
+    const root = key.startsWith('/') ? key : [...roots].reduce((a, b) => (b.length < a.length ? b : a));
     return {
       key,
       root,
@@ -160,6 +201,8 @@ export function SessionList({
   const listed = useMemo(() => (sessions ?? []).filter((s) => !s.time.archived), [sessions]);
   const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
   const mains = useMainCheckouts(directories);
+  const checkouts = useGitCheckouts(directories);
+  const folders: Checkouts = { mains, checkouts };
   const waitingNow = useMemo(
     () => new Set([...pending.permissions, ...pending.forms, ...pending.passwords].map((request) => request.sessionID)),
     [pending],
@@ -169,7 +212,7 @@ export function SessionList({
   // pointer that moves rows between press and release, and the click is
   // lost or lands on another project, so the order holds while it's there.
   const [held, setHeld] = useState<HeldOrder | null>(null);
-  const grouped = groupByProject(listed, mains, home);
+  const grouped = groupByProject(listed, folders, home);
   const waiting = held ? new Set(held.needsYou) : waitingNow;
   const projects = held
     ? inOrder(grouped, held.projects, (p) => p.key).map((p) => ({
@@ -496,6 +539,8 @@ export function SessionList({
                   {open && (
                     <ProjectSessions
                       projectID={project.sessions[0].projectID}
+                      projectKey={project.key}
+                      folders={folders}
                       sessions={sessions}
                       shown={shown}
                       expanded={all}
@@ -544,6 +589,8 @@ export function SessionList({
  */
 function ProjectSessions({
   projectID,
+  projectKey: key,
+  folders,
   sessions,
   shown,
   expanded,
@@ -553,6 +600,10 @@ function ProjectSessions({
   row,
 }: {
   projectID: string | undefined;
+  /** The project's own key: other repositories can share its project ID. */
+  projectKey: string;
+  /** What the list knows of its conversations' folders. */
+  folders: Checkouts;
   /** The ones the list has loaded. */
   sessions: SessionInfo[];
   /** Those of them shown while it's not expanded. */
@@ -565,12 +616,21 @@ function ProjectSessions({
   row: (session: SessionInfo) => ReactNode;
 }) {
   const own = useProjectSessions(projectID ?? '', expanded && projectID !== undefined);
+  // Its project ID's pages hold other repositories made from the same template too.
+  const ownDirectories = useMemo(() => [...new Set((own.data ?? []).map((s) => s.location.directory))], [own.data]);
+  const ownMains = useMainCheckouts(ownDirectories);
+  const ownCheckouts = useGitCheckouts(ownDirectories);
   const all = useMemo(() => {
     if (!expanded) return shown;
     const known = new Set(sessions.map((s) => s.id));
+    const everything = { mains: new Map([...folders.mains, ...ownMains]), checkouts: new Set([...folders.checkouts, ...ownCheckouts]) };
+    const byProject = checkoutsByProject([...sessions, ...(own.data ?? [])], everything);
+    const older = (own.data ?? []).filter(
+      (s) => !known.has(s.id) && !s.time.archived && !waiting.has(s.id) && projectKey(s, everything, byProject) === key,
+    );
     // Older than any the list has loaded, so they go after them.
-    return [...sessions, ...(own.data ?? []).filter((s) => !known.has(s.id) && !s.time.archived && !waiting.has(s.id))];
-  }, [expanded, shown, sessions, own.data, waiting]);
+    return [...sessions, ...older];
+  }, [expanded, shown, sessions, own.data, waiting, folders, ownMains, ownCheckouts, key]);
   const hidden = sessions.length - shown.length;
   const more = 'w-full rounded-md px-2.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 

@@ -777,6 +777,27 @@ export function useMainCheckouts(directories: string[]): Map<string, string> {
 }
 
 /**
+ * Of `directories`, those that are a repository's main checkout (their
+ * `.git` is a folder). Repositories made from one template share its root
+ * commit, so OpenCode gives them one project ID; this tells them apart.
+ */
+export function useGitCheckouts(directories: string[]): Set<string> {
+  const fs = getFsBridge();
+  return useQueries({
+    queries: directories.map((directory) => ({
+      queryKey: ['fs', 'git-checkout', directory],
+      queryFn: async () => {
+        const stat = await fs!.stat(`${directory.replace(/\/+$/, '')}/.git`).catch(() => null);
+        return stat?.kind === 'directory';
+      },
+      enabled: fs !== undefined,
+      staleTime: Infinity,
+    })),
+    combine: (results) => new Set(directories.filter((_, i) => results[i].data)),
+  });
+}
+
+/**
  * Every folder a conversation has worked in that's still there, most
  * recently used first, once `enabled`: it reads through all the sessions'
  * pages. A folder counts as there when its parent's listing has it, so the
