@@ -74,6 +74,7 @@ export function TestApp({ children }: TestAppProps) {
     dockSize: 80,
     dockStyle: 'none',
     hiddenBadges: [],
+    dockAllWorkspaces: false,
     taskbarStyle: 'tall',
     taskbarPosition: 'bottom',
     taskbarButtons: 'combine',

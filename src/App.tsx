@@ -92,6 +92,7 @@ const defaultConfig: AppConfig = {
   dockSize: 80,
   dockStyle: 'none',
   hiddenBadges: [],
+  dockAllWorkspaces: false,
   taskbarStyle: 'tall',
   taskbarPosition: 'bottom',
   taskbarButtons: 'combine',
