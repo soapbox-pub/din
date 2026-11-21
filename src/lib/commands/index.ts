@@ -113,7 +113,7 @@ export const SECTION_AREAS: Record<string, string | { not: string }> = {
   mouse: 'settings',
   printers: 'printers',
   power: 'power',
-  password: { not: 'the password and what sudo asks for are only changed by hand' },
+  password: 'lock',
   nostr: 'nostr',
   drive: 'drive',
   connected: { not: 'giving apps the signer is only done by hand' },

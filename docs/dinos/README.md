@@ -164,6 +164,19 @@ Pages per namespace are added here as each one's types are tidied up;
 until then the TSDoc on its bridge interface in `src/lib/` is the
 reference.
 
+### Fingerprint unlock
+
+The `lock` bridge uses DinOS's root-owned lock screen. `fingerprintStatus`
+returns the reader name, enrolled finger IDs, and whether fingerprint unlock
+is on. `enrollFingerprint` and turning on `setFingerprintUnlock` require the
+computer password. Enrollment reports scan progress through
+`onFingerprintProgress` and stops when setup closes. The bridge never reads
+fingerprint images or templates.
+
+The lock screen checks fingerprints through `fprintd` and always accepts the
+computer password. Fingerprints do not unlock the disk at startup or approve
+administrator commands.
+
 ## New for the app platform
 
 One namespace is new: `dinos.apps`, the desktop's side of hosting apps

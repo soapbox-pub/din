@@ -6,6 +6,12 @@
 export interface LockBridge {
   available(): Promise<boolean>;
   lock(): Promise<void>;
+  fingerprintStatus(): Promise<FingerprintStatus>;
+  setFingerprintUnlock(enabled: boolean, password?: string): Promise<void>;
+  removeFingerprint(finger: string): Promise<void>;
+  enrollFingerprint(id: string, finger: string, password: string): Promise<void>;
+  cancelFingerprint(id: string): Promise<void>;
+  onFingerprintProgress(listener: (id: string, progress: FingerprintProgress) => void): () => void;
   changePassword(oldPassword: string, newPassword: string): Promise<void>;
   /** What sudo asks for. */
   sudoMode(): Promise<SudoMode>;
@@ -15,6 +21,28 @@ export interface LockBridge {
    */
   setSudoMode(mode: SudoMode, password?: string): Promise<void>;
 }
+
+export interface FingerprintStatus {
+  reader: string | null;
+  fingers: string[];
+  enabled: boolean;
+}
+
+export interface FingerprintProgress {
+  status: string;
+  passed: number;
+  stages: number;
+  swipe: boolean;
+}
+
+export const FINGERPRINT_STATUS_KEY = ['lock', 'fingerprints'] as const;
+export const FINGERPRINT_SETUP_APP_ID = 'fingerprint-setup';
+export const FINGERS = ['right', 'left'].flatMap((side) =>
+  ['thumb', 'index-finger', 'middle-finger', 'ring-finger', 'little-finger'].map((finger) => ({
+    id: `${side}-${finger}`,
+    label: `${side === 'right' ? 'Right' : 'Left'} ${finger.replace('-finger', ' finger')}`,
+  })),
+);
 
 /**
  * What sudo asks for before it runs something as administrator: approval

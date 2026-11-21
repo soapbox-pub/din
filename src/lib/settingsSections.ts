@@ -222,7 +222,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Account',
     name: 'Password',
     icon: KeyRound,
-    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase', 'Running as administrator', 'Ask me to approve', 'Ask for the password', 'sudo', 'administrator', 'admin', 'root'],
+    search: ['Current password', 'New password', 'Changing it here changes it everywhere.', 'lock screen', 'login', 'security', 'disk encryption', 'passphrase', 'Fingerprint unlock', 'Add fingerprint', 'biometrics', 'Running as administrator', 'Ask me to approve', 'Ask for the password', 'sudo', 'administrator', 'admin', 'root'],
   },
   {
     id: 'nostr',

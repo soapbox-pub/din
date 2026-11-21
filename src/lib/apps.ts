@@ -9,6 +9,7 @@ import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID, OPEN_WITH_APP_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
+import { FINGERPRINT_SETUP_APP_ID } from '@/lib/lock';
 
 const DinAppFrame = lazy(() =>
   import('@/components/desktop/DinAppFrame').then((m) => ({ default: m.DinAppFrame })),
@@ -41,6 +42,9 @@ const AddPrinterWindow = lazy(() =>
 );
 const OpenWithWindow = lazy(() =>
   import('@/components/desktop/apps/OpenWithWindow').then((m) => ({ default: m.OpenWithWindow })),
+);
+const FingerprintSetupWindow = lazy(() =>
+  import('@/components/desktop/apps/FingerprintSetupWindow').then((m) => ({ default: m.FingerprintSetupWindow })),
 );
 const AppInfoWindow = lazy(() =>
   import('@/components/desktop/apps/AppInfoWindow').then((m) => ({ default: m.AppInfoWindow })),
@@ -339,6 +343,17 @@ export const APPS: readonly AppDefinition[] = [
     defaultSize: { width: 960, height: 680 },
     keywords: ['preferences', 'control panel', 'system settings', 'options'],
     singleInstance: true,
+  },
+  {
+    id: FINGERPRINT_SETUP_APP_ID,
+    name: 'Fingerprint Setup',
+    icon: '/icons/apps/settings.png',
+    component: FingerprintSetupWindow,
+    defaultSize: { width: 440, height: 520 },
+    floating: true,
+    hidden: true,
+    singleInstance: true,
+    dockAs: 'settings',
   },
   {
     // A few choices to make Din one's own, a step at a time: theme, layout,

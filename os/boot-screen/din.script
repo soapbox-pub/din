@@ -134,6 +134,7 @@ date = fader(Sprite(), 10);
 field = fader(Sprite(), 10);
 entry = fader(Sprite(), 11);
 caption = fader(Sprite(), 10);
+fingerprint = fader(Sprite(), 10);
 footer = fader(Sprite(), 10);
 
 field_image = Image("field.png");
@@ -264,6 +265,16 @@ fun display_normal()
 fun display_message(message)
 {
   message = String(message);
+  if (message == "din-fingerprint-on")
+  {
+    fingerprint.target = 1;
+    return;
+  }
+  if (message == "din-fingerprint-off")
+  {
+    fingerprint.target = 0;
+    return;
+  }
   # The whole screen drawn again, as the lock screen asks after the computer
   # wakes (os/din-lock.py): setting a sprite's image redraws all it covers,
   # at any opacity, and the dimming covers the screen.
@@ -321,6 +332,7 @@ fun layout()
   global.date_y = clock_y + px(124);
   global.field_y = date_y + px(104);
   global.caption_y = field_y + px(64);
+  center(fingerprint.sprite, text("Or use your fingerprint reader.", 0.7, "Regular", 13), caption_y + px(24));
   if (field_image)
     center(field.sprite, field_image.Scale(px(320), px(48)), field_y);
 
@@ -374,6 +386,7 @@ fun root_mounted()
   field.target = 0;
   entry.target = 0;
   caption.target = 0;
+  fingerprint.target = 0;
   dim.target = 0;
   wallpaper.target = 0;
 }
@@ -437,6 +450,7 @@ fun refresh()
   global.field = ease(field);
   global.entry = ease(entry);
   global.caption = ease(caption);
+  global.fingerprint = ease(fingerprint);
   global.footer = ease(footer);
   global.track = ease(track);
   global.fill = ease(fill);
