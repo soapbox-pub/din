@@ -1176,7 +1176,7 @@ export type Permission =
   | 'assistant-sudo'
   /** InDesign conversion (`din.system.indd`). Publisher. */
   | 'indd'
-  /** Removable disks: list, mount, unlock, eject (`din.system.volumes`). Files. */
+  /** Disks and USB phones: list, mount, unlock, eject (`din.system.volumes`). Files. */
   | 'volumes'
   /** Din Drive, the encrypted drive at ~/Drive: whether it's on, and turning it on (`din.system.drive`). Files. */
   | 'drive'

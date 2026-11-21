@@ -3,10 +3,9 @@
  * (`window.dinos.volumes`, see electron/preload.cjs + electron/volumes.mts).
  *
  * Backed by UDisks2 over the system bus: removable disks are mounted as
- * they're plugged in (encrypted ones once they're unlocked), as are phones
- * plugged in by USB (electron/phone-usb.mts), and the main process pushes
- * the whole state whenever it changes. Absent in a plain browser; callers feature-detect via
- * `getVolumesBridge()`.
+ * they're plugged in, while fixed disks mount on request. USB phones use
+ * electron/phone-usb.mts. The main process pushes state changes. The bridge
+ * is absent in a plain browser; callers feature-detect via `getVolumesBridge()`.
  */
 
 export type VolumeBusy = 'mounting' | 'unlocking' | 'ejecting';
@@ -25,6 +24,8 @@ export interface Volume {
   /** Encrypted and not unlocked yet: unlock it with its passphrase to open it. */
   locked: boolean;
   readOnly: boolean;
+  /** False for volumes that mount on request and unmount individually. */
+  removable: boolean;
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
   busy: VolumeBusy | null;
@@ -56,7 +57,7 @@ export interface VolumesBridge {
   mount(id: string): Promise<string>;
   /** Unlock an encrypted volume and mount what's in it; resolves to where. */
   unlock(id: string, passphrase: string): Promise<string>;
-  /** Unmount everything on a volume's disk and power it off. */
+  /** Eject a removable device, or unmount just the selected volume on a fixed disk. */
   eject(id: string): Promise<void>;
   onChanged(callback: (state: VolumesState) => void): () => void;
   onEvent(callback: (event: VolumeEvent) => void): () => void;

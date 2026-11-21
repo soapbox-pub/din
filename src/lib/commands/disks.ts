@@ -5,13 +5,11 @@ import { type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
- * `din disks`: the USB sticks, SD cards and other removable disks in Files'
- * sidebar (electron/volumes.mts), and phones plugged in by USB
- * (electron/phone-usb.mts): opening, unlocking and ejecting them; and
+ * `din disks`: the disks and USB phones in Files' sidebar, and
  * how full the computer's own disks are, as System Monitor's Disk tile shows.
  */
 
-const volumes = () => need(getVolumesBridge(), 'Removable disks');
+const volumes = () => need(getVolumesBridge(), 'Disks');
 const DISK: Param = { name: 'disk', type: 'string', positional: true, help: 'The disk, by name or device (e.g. /dev/sdb1)' };
 
 async function disk(query: string): Promise<Volume> {
@@ -28,7 +26,7 @@ function describe(v: Volume): string {
 
 export const disksArea: Area = {
   name: 'disks',
-  summary: 'Disks: free space, and removable ones and phones plugged in by USB to list, open, unlock and eject',
+  summary: 'Disk space and the devices listed in Files',
   commands: [
     command('disks', 'space', 'How full the home disk is, and whether it is low', [], async () => {
       const list = await call(need(getSystemMonitorBridge(), 'Disk space').filesystems());
@@ -43,13 +41,13 @@ export const disksArea: Area = {
           .join('\n'),
       };
     }),
-    command('disks', 'list', 'The removable disks and phones plugged in, and where each is mounted', [], async () => {
+    command('disks', 'list', 'List disks and USB phones in Files, and where each is mounted', [], async () => {
       const { volumes: list } = await call(volumes().state());
       return {
         data: list,
         text: list.length
           ? list.map((v) => `${v.name}\t${v.phone ? `${v.phone === 'iphone' ? 'iPhone' : 'Android'} phone` : v.device}\t${describe(v)}`).join('\n')
-          : 'No removable disks or phones',
+          : 'No disks or phones to mount',
       };
     }),
     command('disks', 'mount', 'Mount a disk or phone that isn’t; prints where', [DISK], async (args) => {
@@ -68,10 +66,10 @@ export const disksArea: Area = {
         return { data: { mountPoint }, text: mountPoint };
       },
     ),
-    command('disks', 'eject', 'Unmount a disk or phone, lock it if it was unlocked, and power it off to unplug', [DISK], async (args) => {
+    command('disks', 'eject', 'Eject a removable device or unmount a volume on a fixed disk', [DISK], async (args) => {
       const v = await disk(args.string('disk'));
       await call(volumes().eject(v.id));
-      return { text: `“${v.name}” can be removed` };
+      return { text: v.removable ? `“${v.name}” can be removed` : `Unmounted “${v.name}”` };
     }),
   ],
 };

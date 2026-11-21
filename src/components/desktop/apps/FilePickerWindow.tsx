@@ -279,7 +279,7 @@ function FilePicker({ options, onConfirm, onCancel }: FilePickerProps) {
     const devices: Place[] = [
       { name: 'Computer', path: '/', icon: HardDrive },
       ...(volumes.data?.volumes ?? []).flatMap((v) =>
-        v.mountPoint ? [{ name: v.name, path: v.mountPoint, icon: v.phone ? Smartphone : Usb }] : [],
+        v.mountPoint ? [{ name: v.name, path: v.mountPoint, icon: v.phone ? Smartphone : v.removable ? Usb : HardDrive }] : [],
       ),
     ];
     return [
