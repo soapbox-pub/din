@@ -3,7 +3,7 @@ import { cleanUploadError, uploadLocalFile } from '@/lib/blossomUpload';
 import { getEraseBridge } from '@/lib/erase';
 import { getFirmwareBridge } from '@/lib/firmware';
 import { requestHighlight } from '@/lib/highlights';
-import { getLockBridge } from '@/lib/lock';
+import { FINGERPRINT_SETUP_APP_ID, getLockBridge } from '@/lib/lock';
 import { blossomListTags, normalizeBlossomUrl, normalizeRelayUrl, relayListTags } from '@/lib/relayLists';
 import { getUpdaterBridge, shortRevision, UPDATE_STEP_LABELS } from '@/lib/updater';
 import { planDinRestart } from '@/lib/updateNotice';
@@ -142,13 +142,46 @@ export const firmwareArea: Area = {
 
 export const lockArea: Area = {
   name: 'lock',
-  summary: 'Lock the screen',
+  summary: 'Lock the screen and manage fingerprint unlock',
   commands: [
     bare(command('lock', 'now', 'Lock the screen', [], async () => {
       const bridge = need(getLockBridge(), 'Locking');
       if (!(await call(bridge.available()))) throw new CommandError('The screen can’t lock here');
       await call(bridge.lock());
     })),
+    command('lock', 'fingerprints', 'Show the reader, enrolled fingers and whether fingerprint unlock is on', [], async () => ({
+      data: await call(need(getLockBridge(), 'Fingerprint unlock').fingerprintStatus()),
+    })),
+    command('lock', 'fingerprint-add', 'Open fingerprint setup to enter your password and scan a finger', [], async (_args, ctx) => {
+      const status = await call(need(getLockBridge(), 'Fingerprint unlock').fingerprintStatus());
+      if (!status.reader) throw new CommandError('No supported fingerprint reader detected');
+      ctx.actions.open(FINGERPRINT_SETUP_APP_ID);
+    }),
+    command('lock', 'fingerprint-unlock', 'Turn fingerprint unlock on or off (turning it on asks for your password in Settings)', [ON], async (args, ctx) => {
+      const bridge = need(getLockBridge(), 'Fingerprint unlock');
+      if (!args.bool('on')) {
+        await call(bridge.setFingerprintUnlock(false));
+        return;
+      }
+      const status = await call(bridge.fingerprintStatus());
+      if (!status.fingers.length) throw new CommandError('Add a fingerprint first (din lock fingerprint-add)');
+      if (!status.enabled) {
+        ctx.actions.open('settings', { section: 'password', fingerprintEnable: Date.now() });
+        return { text: 'Settings asks for your computer password.' };
+      }
+    }),
+    command('lock', 'fingerprint-remove', 'Remove a saved finger by ID from din lock fingerprints (asks on screen first)', [
+      { name: 'finger', type: 'string', positional: true, help: 'Finger ID, such as right-index-finger' },
+    ], async (args, ctx) => {
+      const bridge = need(getLockBridge(), 'Fingerprint unlock');
+      const finger = args.string('finger');
+      const status = await call(bridge.fingerprintStatus());
+      if (!status.fingers.includes(finger)) throw new CommandError('That fingerprint is not set up');
+      if (!(await ctx.confirm({ title: 'Remove a fingerprint?', description: `Remove ${finger.replaceAll('-', ' ')} from fingerprint unlock?`, action: 'Remove', destructive: true }))) {
+        throw new CommandError('You didn’t allow it');
+      }
+      await call(bridge.removeFingerprint(finger));
+    }),
   ],
 };
 

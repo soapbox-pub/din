@@ -18,12 +18,28 @@
 // syntax only, like the rest of electron/.
 
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { ipcMain } from 'electron';
 import { computerPasswordChanged } from './passwords.mts';
 import { runCommand } from './system.mts';
 
 const HELPER = process.env.DIN_LOCK;
 const PASSWORD_HELPER = process.env.DIN_PASSWORD;
+const FINGER = /^(left|right)-(thumb|(index|middle|ring|little)-finger)$/;
+let fingerprintOperation: { id?: string; cancel?: () => void } | undefined;
+
+function fingerprintChange(operation: NonNullable<typeof fingerprintOperation>, run: () => Promise<void>) {
+  if (fingerprintOperation) throw new Error('Another fingerprint change is in progress.');
+  fingerprintOperation = operation;
+  return Promise.resolve().then(run).finally(() => { fingerprintOperation = undefined; });
+}
+
+function fingerprintPassword(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 512 || /[\n\0]/.test(value)) {
+    throw new Error('Enter your computer password.');
+  }
+  return `${value}\n`;
+}
 
 /** What the Installer accepts: printable ASCII, since it's typed at boot. */
 function isUsablePassword(value: unknown): value is string {
@@ -71,6 +87,67 @@ export function registerLockHandlers(options: {
     assertShellSender(event);
     if (!HELPER) throw new Error('Locking is not available here');
     await runCommand('sudo', ['-n', HELPER, 'start'], { timeout: 10_000 });
+  });
+
+  ipcMain.handle('lock:fingerprint-status', async (event) => {
+    assertShellSender(event);
+    if (!HELPER) return { reader: null, fingers: [], enabled: false };
+    const { stdout } = await runCommand('sudo', ['-n', HELPER, 'fingerprint-status'], { timeout: 10_000 });
+    return JSON.parse(stdout);
+  });
+
+  ipcMain.handle('lock:fingerprint-enable', async (event, enabled: unknown, password: unknown) => {
+    assertShellSender(event);
+    if (!HELPER || typeof enabled !== 'boolean') throw new Error('Fingerprint unlock is not available here.');
+    const input = enabled ? fingerprintPassword(password) : '';
+    return fingerprintChange({}, () => runPasswordHelper(HELPER, [enabled ? 'fingerprint-enable' : 'fingerprint-disable'], input));
+  });
+
+  ipcMain.handle('lock:fingerprint-remove', async (event, finger: unknown) => {
+    assertShellSender(event);
+    if (!HELPER || typeof finger !== 'string' || !FINGER.test(finger)) throw new Error('Choose a valid finger.');
+    return fingerprintChange({}, () => runPasswordHelper(HELPER, ['fingerprint-remove', finger], ''));
+  });
+
+  ipcMain.handle('lock:fingerprint-enroll', async (event, id: unknown, finger: unknown, password: unknown) => {
+    assertShellSender(event);
+    if (!HELPER || typeof id !== 'string' || id.length > 80 || typeof finger !== 'string' || !FINGER.test(finger)) {
+      throw new Error('Invalid fingerprint setup request.');
+    }
+    const input = fingerprintPassword(password);
+    const helper = HELPER;
+    const operation: NonNullable<typeof fingerprintOperation> = { id };
+    return fingerprintChange(operation, () => new Promise<void>((resolve, reject) => {
+      const child = spawn('sudo', ['-n', helper, 'fingerprint-enroll', finger], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const cancel = () => child.stdin.end();
+      operation.cancel = cancel;
+      event.sender.once('destroyed', cancel);
+      child.stdin.on('error', () => { /* The helper's stderr has the error. */ });
+      child.stdin.write(input);
+      const lines = createInterface({ input: child.stdout });
+      lines.on('line', (line) => {
+        if (event.sender.isDestroyed()) return;
+        try {
+          event.sender.send('lock:fingerprint-progress', id, JSON.parse(line));
+        } catch {
+          // The desktop may have gone away.
+        }
+      });
+      let stderr = '';
+      child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+      child.once('error', reject);
+      child.once('close', (code) => {
+        event.sender.removeListener('destroyed', cancel);
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim().split('\n').pop() || 'The fingerprint couldn’t be saved.'));
+      });
+    }));
+  });
+
+  ipcMain.handle('lock:fingerprint-cancel', (event, id: unknown) => {
+    assertShellSender(event);
+    const operation = fingerprintOperation;
+    if (operation && operation.id === id) operation.cancel?.();
   });
 
   ipcMain.handle('lock:change-password', async (event, old: unknown, next: unknown) => {

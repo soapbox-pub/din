@@ -2432,6 +2432,23 @@ expose('lock', {
   /** Lock now. */
   lock: () => ipcRenderer.invoke('lock:lock'),
 
+  fingerprintStatus: () => ipcRenderer.invoke('lock:fingerprint-status'),
+  /** @param {boolean} enabled @param {string} [password] */
+  setFingerprintUnlock: (enabled, password) => ipcRenderer.invoke('lock:fingerprint-enable', enabled, password),
+  /** @param {string} finger */
+  removeFingerprint: (finger) => ipcRenderer.invoke('lock:fingerprint-remove', finger),
+  /** @param {string} id @param {string} finger @param {string} password */
+  enrollFingerprint: (id, finger, password) => ipcRenderer.invoke('lock:fingerprint-enroll', id, finger, password),
+  /** @param {string} id */
+  cancelFingerprint: (id) => ipcRenderer.invoke('lock:fingerprint-cancel', id),
+  /** @param {(id: string, data: object) => void} listener */
+  onFingerprintProgress: (listener) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {string} id @param {object} data */
+    const relay = (_event, id, data) => listener(id, data);
+    ipcRenderer.on('lock:fingerprint-progress', relay);
+    return () => { ipcRenderer.removeListener('lock:fingerprint-progress', relay); };
+  },
+
   /**
    * Change the computer's password: the disk's, the lock screen's, and the
    * Nostr keys'.

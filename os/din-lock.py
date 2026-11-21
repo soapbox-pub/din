@@ -4,7 +4,7 @@ The lock screen is the boot screen (os/boot-screen/din.script), drawn by a
 Plymouth of its own on another virtual terminal, run as root. Nothing Din or
 its apps do can get past it: they run as `din`, can't touch this process,
 and can't switch back to Din's terminal, since switching terminals is turned
-off (VT_LOCKSWITCH) until the password is typed. While Din's terminal isn't
+off (VT_LOCKSWITCH) until authentication succeeds. While Din's terminal isn't
 the active one its session has no keyboard or screen, so nothing typed here
 reaches it.
 
@@ -23,7 +23,9 @@ encryption) there's nothing to lock with, and nothing locks.
 import ctypes
 import fcntl
 import glob
+import hmac
 import os
+from pathlib import Path
 import shutil
 import signal
 import socket
@@ -38,6 +40,7 @@ UNIT = "din-lock.service"
 BOOT_DIR = "/run/din-boot"
 ESP_DIR = "/boot/din"
 THEME_DIR = "/etc/plymouth/themes/din"
+FINGERPRINT_ENABLED = Path("/var/lib/din-fingerprint-unlock")
 
 VT_ACTIVATE = 0x5606
 VT_LOCKSWITCH = 0x560B
@@ -62,7 +65,7 @@ def password_matches(password, hashed):
     libcrypt.crypt.restype = ctypes.c_char_p
     libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     result = libcrypt.crypt(password.encode(), hashed.encode())
-    return result is not None and result.decode() == hashed
+    return result is not None and hmac.compare_digest(result, hashed.encode())
 
 
 def console_ioctl(request, arg=0):
@@ -309,6 +312,8 @@ class Locker:
         self.resumed = False
         self.asking = None
         self.clock = None
+        self.woke = False
+        self.fingerprint = None
 
     def on_resumed(self, _signum, _frame):
         self.resumed = True
@@ -316,6 +321,7 @@ class Locker:
             self.asking.terminate()
 
     def on_woke(self, _signum, _frame):
+        self.woke = True
         if self.clock:
             self.clock.woke()
 
@@ -348,23 +354,76 @@ class Locker:
         )
         plymouth("show-splash", check=True)
 
-    def ask(self, hashed):
-        """Ask until the right password comes, or the machine wakes from hibernation."""
-        while not self.resumed:
-            if plymouth("--ping").returncode != 0:
-                self.restart_plymouth()
-                continue
-            self.asking = subprocess.Popen(
-                ["plymouth", "ask-for-password", "--prompt=Password"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+    def start_fingerprint(self):
+        try:
+            self.fingerprint = subprocess.Popen(
+                [sys.executable, "-E", "-s", __file__, "fingerprint-verify"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             )
-            answer, _ = self.asking.communicate()
+            os.set_blocking(self.fingerprint.stdout.fileno(), False)
+        except OSError:
+            # A reader or helper failure never replaces the password prompt.
+            self.stop_fingerprint()
+
+    def stop_fingerprint(self):
+        if self.fingerprint:
+            if self.fingerprint.poll() is None:
+                self.fingerprint.terminate()
+            self.fingerprint.wait()
+            self.fingerprint.stdout.close()
+            self.fingerprint = None
+
+    def fingerprint_hint(self, show):
+        try:
+            plymouth("display-message", f"--text=din-fingerprint-{'on' if show else 'off'}",
+                     timeout=1, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    def ask(self, hashed):
+        """Take the password and up to three fingerprint attempts in parallel."""
+        hint = False
+        if FINGERPRINT_ENABLED.is_file():
+            self.start_fingerprint()
+        while not self.resumed:
+            if self.woke:
+                self.woke = False
+                self.stop_fingerprint()
+                if FINGERPRINT_ENABLED.is_file():
+                    self.start_fingerprint()
+            if self.fingerprint:
+                result = self.fingerprint.poll()
+                if result == 0:
+                    return
+                if result is not None:
+                    self.stop_fingerprint()
+                elif self.fingerprint.stdout.read() and not hint:
+                    self.fingerprint_hint(True)
+                    hint = True
+            if not self.fingerprint and hint:
+                self.fingerprint_hint(False)
+                hint = False
+
+            if not self.asking:
+                if plymouth("--ping").returncode != 0:
+                    self.restart_plymouth()
+                    hint = False
+                    continue
+                self.asking = subprocess.Popen(
+                    ["plymouth", "ask-for-password", "--prompt=Password"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+            try:
+                answer, _ = self.asking.communicate(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                continue
+            answered = self.asking.returncode == 0
             self.asking = None
             if self.resumed:
                 return
             password = answer.decode(errors="replace").rstrip("\n")
-            if password and password_matches(password, hashed):
+            if answered and password and "\0" not in password and password_matches(password, hashed):
                 return
 
     def run(self):
@@ -390,7 +449,11 @@ class Locker:
             notify("READY=1")
             self.ask(hashed)
         finally:
+            self.stop_fingerprint()
             plymouth("quit", stderr=subprocess.DEVNULL)
+            if self.asking:
+                self.asking.terminate()
+                self.asking.communicate()
             console_ioctl(VT_UNLOCKSWITCH)
             switch_to(previous)
 
@@ -413,6 +476,24 @@ def main():
                 ["systemctl", "kill", "--kill-whom=main", f"--signal={sig}", UNIT],
                 stderr=subprocess.DEVNULL,
             )
+    elif len(sys.argv) >= 2 and sys.argv[1].startswith("fingerprint-"):
+        if os.geteuid() != 0:
+            sys.exit("Fingerprint setup requires the system helper.")
+        action = sys.argv[1].removeprefix("fingerprint-")
+        if action not in ("status", "verify", "disable", "enable", "enroll", "remove"):
+            sys.exit("Unknown fingerprint action.")
+        if len(sys.argv) != (3 if action in ("enroll", "remove") else 2):
+            sys.exit("Invalid fingerprint request.")
+        hashed = password_hash()
+        if not hashed:
+            sys.exit("Set a computer password before using fingerprint unlock.")
+        if action in ("enroll", "enable"):
+            password = sys.stdin.readline(514)
+            if not password.endswith("\n") or "\0" in password or not password_matches(password[:-1], hashed):
+                sys.exit("That password didn’t work.")
+        from din_fingerprint import run
+
+        run(action, USER, sys.argv[2] if len(sys.argv) == 3 else None, FINGERPRINT_ENABLED, LOCK_VT)
     else:
         sys.exit("usage: din-lock run | start | status | resumed | woke")
 

@@ -153,6 +153,7 @@ import {
 } from '@/lib/keyboard';
 import { getMouseBridge } from '@/lib/mouse';
 import { cleanLockError, getLockBridge, type SudoMode } from '@/lib/lock';
+import { FingerprintSettings } from '@/components/desktop/apps/FingerprintSettings';
 import { AdminPasswordDialog } from '@/components/desktop/AdminPrompt';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { GRAMMAR_DIALECTS, getGrammarBridge, ruleDescription, ruleName, type GrammarDialect, type GrammarRule, type GrammarState } from '@/lib/grammar';
@@ -475,7 +476,7 @@ export function Settings({ params, windowId }: AppComponentProps) {
     ) : id === 'accessibility' ? (
       <AccessibilitySection />
     ) : id === 'password' ? (
-      <PasswordSection />
+      <PasswordSection fingerprintEnable={!searching && typeof params?.fingerprintEnable === 'number' ? params.fingerprintEnable : undefined} />
     ) : id === 'notifications' ? (
       <NotificationsSection />
     ) : id === 'background' ? (
@@ -4998,7 +4999,7 @@ function DevelopersSection() {
  * everywhere at once. Only a computer that has one (an encrypted DinOS
  * install) shows the form.
  */
-function PasswordSection() {
+function PasswordSection({ fingerprintEnable }: { fingerprintEnable?: number }) {
   const bridge = getLockBridge();
   const { data: available, isLoading } = useQuery({
     queryKey: ['lock', 'available'],
@@ -5052,6 +5053,7 @@ function PasswordSection() {
         One password unlocks this computer: the disk when it starts, the lock screen, and the
         Nostr accounts kept on it. Changing it here changes it everywhere.
       </p>
+      {available && <FingerprintSettings key={fingerprintEnable} bridge={bridge} requestEnable={fingerprintEnable !== undefined} />}
       <form
         className={cn(settingsCard, 'flex flex-col gap-4 p-4')}
         onSubmit={(e) => {

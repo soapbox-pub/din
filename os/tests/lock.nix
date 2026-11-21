@@ -47,6 +47,15 @@ pkgs.testers.runNixOSTest {
 
     machine.succeed("echo 'din:hunter22' | chpasswd")
 
+    with subtest("no reader leaves fingerprint unlock off"):
+        import json
+        assert json.loads(as_din(f"sudo -n {lock} fingerprint-status")) == {
+            "reader": None, "fingers": [], "enabled": False,
+        }
+        machine.fail(f"printf 'wrong\\n' | sudo -u din sudo -n {lock} fingerprint-enable")
+        machine.fail(f"printf 'hunter22\\n' | sudo -u din sudo -n {lock} fingerprint-enable")
+        machine.fail("test -e /var/lib/din-fingerprint-unlock")
+
     with subtest("locking takes the screen, and keeps it"):
         assert as_din(f"sudo -n {lock} status").strip() == "available"
         as_din(f"sudo -n {lock} start")

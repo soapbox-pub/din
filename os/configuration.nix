@@ -378,15 +378,21 @@ let
     text = builtins.readFile ./din-boot-screen.sh;
   };
 
-  # The lock screen (see the script): the boot screen again, on its own
-  # terminal, until the computer's password is typed.
+  lockPython = pkgs.python3.withPackages (ps: [ ps.dbus-next ]);
+  lockSources = pkgs.runCommand "din-lock-sources" {} ''
+    mkdir -p "$out"
+    cp ${./din-lock.py} "$out/din-lock.py"
+    cp ${./din-fingerprint.py} "$out/din_fingerprint.py"
+  '';
+
+  # The lock screen: the boot screen again, on its own terminal.
   din-lock = pkgs.writeShellApplication {
     name = "din-lock";
-    runtimeInputs = [ pkgs.python3 config.boot.plymouth.package config.systemd.package ];
+    runtimeInputs = [ config.boot.plymouth.package config.systemd.package ];
     text = ''
       export DIN_LIBCRYPT=${pkgs.libxcrypt}/lib/libcrypt.so.2
       export DIN_LIBDRM=${pkgs.libdrm}/lib/libdrm.so.2
-      exec python3 ${./din-lock.py} "$@"
+      exec ${lockPython}/bin/python3 -E -s ${lockSources}/din-lock.py "$@"
     '';
   };
 
@@ -827,7 +833,15 @@ in
   # which libmtp's udev rules recognize (ID_MTP_DEVICE) and the rule in
   # extraRules below gives Din's user.
   services.usbmuxd.enable = true;
+  # Activate fprintd over D-Bus without enabling fingerprint auth in PAM.
+  # Only the root lock helper may use it; enrollment checks the password there.
+  services.dbus.packages = [ pkgs.fprintd ];
   security.polkit.extraConfig = ''
+    polkit.addRule(function (action, subject) {
+      if (action.id.indexOf("net.reactivated.fprint.device.") === 0)
+        return subject.user === "root" ? polkit.Result.YES : polkit.Result.NO;
+    });
+
     polkit.addRule(function (action, subject) {
       if (subject.user != "din") return;
       var allowed = [
@@ -1041,6 +1055,11 @@ in
       "${din-firewall}/bin/din-firewall"
       "${din-lock}/bin/din-lock start"
       "${din-lock}/bin/din-lock status"
+      "${din-lock}/bin/din-lock fingerprint-status"
+      "${din-lock}/bin/din-lock fingerprint-enroll *"
+      "${din-lock}/bin/din-lock fingerprint-remove *"
+      "${din-lock}/bin/din-lock fingerprint-enable"
+      "${din-lock}/bin/din-lock fingerprint-disable"
       # It checks the old password itself.
       "${din-password}/bin/din-password change"
       # Only on an erased computer with no password yet.
@@ -1239,7 +1258,7 @@ in
   # directory, and ~/.config/user-dirs.dirs naming them for other apps.
   # xdg-user-dirs' unit waits for a graphical session target that din-shell never
   # reaches, so it runs at login instead.
-  systemd.packages = [ pkgs.xdg-user-dirs ];
+  systemd.packages = [ pkgs.xdg-user-dirs pkgs.fprintd ];
   systemd.user.services.xdg-user-dirs.wantedBy = [ "default.target" ];
 
   # brightnessctl ships udev rules that grant the `video` group write access to
@@ -1260,6 +1279,7 @@ in
   # `:=` makes the list just `true`, finally, so the later rule can't add to
   # it.
   services.udev.packages = [
+    pkgs.libfprint
     pkgs.brightnessctl
     # Game controllers' raw HID nodes (below).
     pkgs.game-devices-udev-rules
@@ -1649,7 +1669,7 @@ in
   # din-update is there for DIN_UPDATER, above. FFmpeg is how the Assistant
   # edits Studio's takes (os/opencode/skills/studio). `docker` is Podman's,
   # once Linux containers are installed (above).
-  environment.systemPackages = with pkgs; [ git ngit unzip din-keyring din-cli din-updater ffmpeg docker ]
+  environment.systemPackages = with pkgs; [ git ngit unzip din-keyring din-cli din-updater ffmpeg docker fprintd ]
     # The command-line userland a Mac ships with, so nobody who sits down at a
     # terminal finds their usual tools missing.
     ++ [
