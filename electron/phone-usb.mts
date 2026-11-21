@@ -493,6 +493,7 @@ export function phoneVolumes(): Volume[] {
     fsType: phone.kind === 'iphone' ? 'afc' : 'mtp',
     locked: false,
     readOnly: false,
+    removable: true,
     bus: 'usb',
     busy: phone.busy,
     phone: phone.kind,

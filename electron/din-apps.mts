@@ -26,6 +26,7 @@ import { invokeHandlers, sendHandlers } from './ipc-registry.mts';
 import { argsForDin, argsFromDin, valueForDin } from './windows-paths.mts';
 import { fetchAbort, fetchAbortAll, fetchRead, fetchStart, type NappFetchRequest } from './napp-fetch.mts';
 import { ptyRoutes } from './pty-routes.mts';
+import type { VolumesState } from './volumes.mts';
 import type { MessagePortMain } from 'electron';
 
 export const DIN_SCHEME = 'din';
@@ -117,11 +118,21 @@ const SYSTEM_PUSHES: Record<SystemPermission, RegExp | null> = {
  * sender check accepts them (isBridgeEvent), which is safe because only
  * channels the port's permission covers are ever dispatched with one.
  */
-const bridgeEvents = new WeakSet<object>();
+const bridgeEvents = new WeakMap<object, string>();
 
 /** Whether an IPC event stands for a call on a granted bridge port. */
 export function isBridgeEvent(event: unknown): boolean {
   return typeof event === 'object' && event !== null && bridgeEvents.has(event);
+}
+
+/** Fixed volumes are for the desktop and Files, not other apps with a volumes grant. */
+export function canManageFixedVolumes(event: Electron.IpcMainInvokeEvent): boolean {
+  const appId = bridgeEvents.get(event);
+  return appId === undefined || appId === 'file-browser';
+}
+
+export function removableVolumes(state: VolumesState): VolumesState {
+  return { ...state, volumes: state.volumes.filter((volume) => volume.removable) };
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +727,7 @@ function grant(
       return;
     }
     const event = { sender, senderFrame: null, ports: [], returnValue: undefined, reply: () => {} };
-    bridgeEvents.add(event);
+    bridgeEvents.set(event, entry.appId);
     const invoke = invokeHandlers.get(channel);
     const fire = sendHandlers.get(channel);
     if (invoke) {
@@ -933,7 +944,7 @@ function releasePty(entry: Grant, id: number, appId: string): string {
     releasedPtys.delete(token);
     ptyRoutes.delete(id);
     const event = { sender: { id: -1, isDestroyed: () => true, send: () => {} } };
-    bridgeEvents.add(event);
+    bridgeEvents.set(event, appId);
     try {
       sendHandlers.get('pty:kill')?.(event as unknown as Electron.IpcMainEvent, id);
     } catch {
@@ -997,7 +1008,7 @@ function revoke(wcId: number, permission: SystemPermission): void {
   for (const id of entry.ptys) {
     ptyRoutes.delete(id);
     const event = { sender: { id: wcId, isDestroyed: () => true, send: () => {} } };
-    bridgeEvents.add(event);
+    bridgeEvents.set(event, entry.appId);
     try {
       kill?.(event as unknown as Electron.IpcMainEvent, id);
     } catch {
@@ -1038,7 +1049,10 @@ export function forwardPushToGrants(channel: string, args: unknown[]): void {
       }
       // A scoped grant hears only of its own folders.
       if (entry.roots && !(typeof args[0] === 'string' && withinRoots(entry.roots, args[0]))) continue;
-      entry.port.postMessage({ push: channel, args });
+      const payload = channel === 'volumes:changed' && entry.appId !== 'file-browser'
+        ? [removableVolumes(args[0] as VolumesState)]
+        : args;
+      entry.port.postMessage({ push: channel, args: payload });
     }
   }
 }

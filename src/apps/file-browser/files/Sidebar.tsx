@@ -41,7 +41,7 @@ interface Place {
   icon: LucideIcon;
   bookmark?: boolean;
   trash?: boolean;
-  /** A removable disk; its path is empty until it's mounted (and unlocked). */
+  /** A disk or phone. Its path is empty until it's mounted. */
   volume?: Volume;
 }
 
@@ -63,7 +63,7 @@ export interface SidebarProps {
 /**
  * Places (home and its standard folders, the Trash), Favorites (GTK
  * bookmarks: right-click a folder, or drag one here), and Devices: the
- * computer, removable disks, and phones plugged in by USB.
+ * computer, other disks, and phones plugged in by USB.
  * Every place is also a drop target that moves (Ctrl: copies) into it.
  */
 export function Sidebar({
@@ -143,7 +143,7 @@ export function Sidebar({
       ? (volumes.data?.volumes ?? []).map((v) => ({
           path: v.mountPoint ?? '',
           name: v.name,
-          icon: v.phone ? Smartphone : v.bus === 'sdio' ? MemoryStick : Usb,
+          icon: v.phone ? Smartphone : !v.removable ? HardDrive : v.bus === 'sdio' ? MemoryStick : Usb,
           volume: v,
         }))
       : (media.data?.entries ?? [])
@@ -174,7 +174,7 @@ export function Sidebar({
 
   const eject = (volume: Volume) =>
     volumeActions.eject.mutate(volume.id, {
-      onError: (error) => failed(`Can’t eject “${volume.name}”`, error),
+      onError: (error) => failed(`Can’t ${volume.removable ? 'eject' : 'unmount'} “${volume.name}”`, error),
     });
 
   const bookmarked = new Set(bookmarks.map((b) => b.path));
@@ -333,6 +333,10 @@ function SidebarItem({
 }) {
   const volume = place.volume;
   const busy = volume?.busy ?? null;
+  const detach = volume?.removable ? 'Eject' : 'Unmount';
+  const detachLabel = `${detach} “${place.name}”`;
+  const detachableVolume = volume && (volume.removable || volume.mountPoint) ? volume : null;
+  const openLabel = volume?.locked ? 'Unlock…' : volume && !volume.removable && !volume.mountPoint ? 'Mount and Open' : 'Open';
   // A phone waiting on an optional feature: the button that installs it.
   const needsFeature = useInstallableFeature(volume?.needsFeature);
   return (
@@ -378,25 +382,25 @@ function SidebarItem({
             {volume && (busy ? (
               <span className="flex size-6 shrink-0 items-center justify-center" role="status">
                 <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
-                <span className="sr-only">{busy === 'ejecting' ? `Ejecting ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
+                <span className="sr-only">{busy === 'ejecting' ? `${detach}ing ${place.name}` : busy === 'unlocking' ? `Unlocking ${place.name}` : `Opening ${place.name}`}</span>
               </span>
-            ) : (
-              <ToolButton size="xs" label={`Eject ${place.name}`} title={`Eject “${place.name}”`} onClick={() => onEject(volume)} className="mr-0.5">
+            ) : detachableVolume && (
+              <ToolButton size="xs" label={detachLabel} onClick={() => onEject(detachableVolume)} className="mr-0.5">
                 <EjectIcon className="size-3.5" />
               </ToolButton>
             ))}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onSelect={() => onNavigate(place.path)}>{volume?.locked ? 'Unlock…' : 'Open'}</ContextMenuItem>
+          <ContextMenuItem onSelect={() => onNavigate(place.path)}>{openLabel}</ContextMenuItem>
           <ContextMenuItem onSelect={() => onOpenInNewTab(place.path)}>Open in New Tab</ContextMenuItem>
           <ContextMenuItem onSelect={() => onOpenInNewWindow(place.path)}>Open in New Window</ContextMenuItem>
-          <ContextMenuSeparator />
-          {volume ? (
-            <ContextMenuItem disabled={busy !== null} onSelect={() => onEject(volume)}>
-              Eject “{place.name}”
+          {(detachableVolume || !volume || place.path) && <ContextMenuSeparator />}
+          {detachableVolume ? (
+            <ContextMenuItem disabled={busy !== null} onSelect={() => onEject(detachableVolume)}>
+              {detachLabel}
             </ContextMenuItem>
-          ) : place.trash ? (
+          ) : volume ? null : place.trash ? (
             <ContextMenuItem variant="destructive" onSelect={onEmptyTrash}>
               Empty Trash…
             </ContextMenuItem>

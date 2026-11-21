@@ -1,7 +1,6 @@
 // The volumes bridge (window.dinos.volumes, for the Files sidebar and the desktop's
-// notifications): USB sticks, SD cards and other removable disks, mounted
-// the moment they're plugged in and ejected with one click, the way a Mac
-// does it.
+// notifications): removable disks mount on arrival. Other drives appear in
+// Files but mount only on request, with polkit authentication if required.
 //
 // UDisks2 is driven over the system bus with dbus.mts, on one connection kept
 // for as long as Din runs, like the Bluetooth bridge: udisksd's
@@ -20,15 +19,15 @@
 // owned by Din's user; os/configuration.nix lets that user do so without a
 // polkit prompt.
 //
-// Encrypted volumes (LUKS) on removable media are listed locked, and their
-// decision is to tell the user (`locked`), who unlocks one with its
-// passphrase from the notification or Files. Unlocking mounts what's inside;
+// Encrypted volumes are listed locked. Removable ones also send a
+// notification. Unlocking with a passphrase mounts what's inside;
 // that filesystem then stands in for its container, which udisks keeps as
 // its CryptoBackingDevice, and takes its drive and hints from it.
 //
 // Ejecting unmounts everything on the drive, locks what was unlocked, then
 // ejects the media or powers the drive off, whichever it can, so the light
-// goes out before it's pulled.
+// goes out before it's pulled. On a fixed drive, only the chosen volume
+// is unmounted and locked.
 //
 // Phones plugged in by USB are listed here too, with what they're waiting
 // on (Trust, File transfer, unlocking); electron/phone-usb.mts mounts and
@@ -40,6 +39,7 @@
 import { ipcMain } from 'electron';
 import { DBusConnection, DBusError, unwrap, Variant, type Message } from './dbus.mts';
 import { ejectPhone, isPhoneVolume, mountPhone, phoneVolumes, startPhones } from './phone-usb.mts';
+import { canManageFixedVolumes, removableVolumes } from './din-apps.mts';
 
 const UDISKS = 'org.freedesktop.UDisks2';
 const UDISKS_PATH = '/org/freedesktop/UDisks2';
@@ -86,6 +86,8 @@ export interface Volume {
   /** Encrypted and not unlocked yet: unlock it with its passphrase to open it. */
   locked: boolean;
   readOnly: boolean;
+  /** False for volumes that mount on request and unmount individually. */
+  removable: boolean;
   /** "usb", "sdio" (an SD card), or "" when udisks doesn't say. */
   bus: string;
   busy: VolumeBusy | null;
@@ -184,23 +186,9 @@ function driveOf(path: string): string | null {
   return typeof drive === 'string' && drive !== '/' ? drive : null;
 }
 
-/** Whether a block is on removable media the user would plug in and out. */
-function onRemovableMedia(path: string): boolean {
-  const ifaces = objects.get(backingOf(path));
-  const block = ifaces?.get(BLOCK);
-  if (!block) return false;
-  if (block.get('HintIgnore') === true || block.get('HintSystem') === true || block.get('HintAuto') !== true) {
-    return false;
-  }
-  const type = String(ifaces?.get(PARTITION)?.get('Type') ?? '').toLowerCase();
-  return !ESP_TYPES.has(type);
-}
-
-/** Whether a path is a filesystem on removable media. */
-function isRemovable(path: string): boolean {
+function isFilesystem(path: string): boolean {
   const ifaces = objects.get(path);
-  if (!ifaces?.has(FILESYSTEM) || ifaces.get(BLOCK)?.get('IdUsage') !== 'filesystem') return false;
-  return onRemovableMedia(path);
+  return ifaces?.has(FILESYSTEM) === true && ifaces.get(BLOCK)?.get('IdUsage') === 'filesystem';
 }
 
 /** The block unlocked from an encrypted one, or null while it's locked. */
@@ -211,32 +199,45 @@ function cleartextOf(path: string): string | null {
   return null;
 }
 
-/** Whether a path is a locked encrypted volume on removable media. */
 function isLocked(path: string): boolean {
   const ifaces = objects.get(path);
   if (!ifaces?.has(ENCRYPTED) || ifaces.get(BLOCK)?.get('IdUsage') !== 'crypto') return false;
-  return onRemovableMedia(path) && cleartextOf(path) === null;
+  return cleartextOf(path) === null;
 }
 
-/** Whether something on a drive is mounted by the system, not for the user. */
+function hasSystemMount(path: string): boolean {
+  return mountPoints(path).some((point) => !point.startsWith('/run/media/') && !point.startsWith('/media/'));
+}
+
 function holdsSystemMount(drive: string): boolean {
-  for (const [path, ifaces] of objects) {
-    if (ifaces.get(BLOCK)?.get('Drive') !== drive) continue;
-    if (mountPoints(path).some((point) => !point.startsWith('/run/media/') && !point.startsWith('/media/'))) {
-      return true;
-    }
+  for (const path of objects.keys()) {
+    if (hasSystemMount(path) && driveOf(path) === drive) return true;
   }
   return false;
+}
+
+/** The same policy controls listing, automatic mounting, and manual actions. */
+function volumeKind(path: string): 'removable' | 'fixed' | null {
+  if (!isFilesystem(path) && !isLocked(path)) return null;
+  const backing = objects.get(backingOf(path));
+  const block = backing?.get(BLOCK);
+  if (!block || block.get('HintIgnore') === true) return null;
+  const type = String(backing?.get(PARTITION)?.get('Type') ?? '').toLowerCase();
+  if (ESP_TYPES.has(type)) return null;
+  const drive = driveOf(path);
+  if (hasSystemMount(path) || (drive && holdsSystemMount(drive))) return null;
+  if (block.get('HintAuto') === true && block.get('HintSystem') !== true) return 'removable';
+  // Do not offer loop devices or device mappings without a backing drive.
+  return drive && objects.get(drive)?.has(DRIVE) ? 'fixed' : null;
 }
 
 function state(): VolumesState {
   const volumes: Volume[] = [];
   for (const [path, ifaces] of objects) {
-    const locked = isLocked(path);
-    if (!locked && !isRemovable(path)) continue;
+    const kind = volumeKind(path);
+    if (!kind) continue;
     const block = ifaces.get(BLOCK)!;
     const drive = driveOf(path);
-    if (drive && holdsSystemMount(drive)) continue;
     volumes.push({
       id: path,
       name: volumeName(block),
@@ -244,8 +245,9 @@ function state(): VolumesState {
       device: bytesToString(block.get('PreferredDevice')) || bytesToString(block.get('Device')),
       sizeBytes: Number(block.get('Size') ?? 0),
       fsType: String(block.get('IdType') ?? ''),
-      locked,
+      locked: isLocked(path),
       readOnly: block.get('ReadOnly') === true,
+      removable: kind === 'removable',
       bus: String((drive && objects.get(drive)?.get(DRIVE)?.get('ConnectionBus')) ?? ''),
       busy: busy.get(path) ?? (drive && ejecting.has(drive) ? 'ejecting' : null),
     });
@@ -293,13 +295,10 @@ function announce(event: VolumeEvent): void {
 /** Give every new removable filesystem, or locked volume, its one decision. */
 function autoMount(): void {
   for (const path of objects.keys()) {
-    if (decided.has(path)) continue;
-    const locked = isLocked(path);
-    if (!locked && !isRemovable(path)) continue;
+    if (decided.has(path) || volumeKind(path) !== 'removable') continue;
     decided.add(path);
-    const drive = driveOf(path);
-    if (isInstalling() || (drive && holdsSystemMount(drive))) continue;
-    if (locked) {
+    if (isInstalling()) continue;
+    if (isLocked(path)) {
       announce({ type: 'locked', id: path, name: names.get(path) ?? 'Untitled' });
       continue;
     }
@@ -326,11 +325,11 @@ function track(path: string, before: string[]): void {
 }
 
 /** A filesystem's object went away: was its disk pulled out while in use? */
-function forget(path: string, before: string[], drive: string | null): void {
+function forget(path: string, before: string[], drive: string | null, removable: boolean): void {
   const name = names.get(path);
   const gone = unmountedAt.get(path);
   const wasMounted = before.length > 0 || (gone !== undefined && Date.now() - gone < PULLED_WINDOW_MS);
-  if (wasMounted && name && !(drive && ejecting.has(drive)) && busy.get(path) !== 'ejecting') {
+  if (removable && wasMounted && name && !(drive && ejecting.has(drive)) && busy.get(path) !== 'ejecting') {
     announce({ type: 'pulled', name });
   }
   decided.delete(path);
@@ -406,8 +405,9 @@ async function load(b: DBusConnection): Promise<void> {
       if (!entry) return;
       const before = mountPoints(path);
       const drive = driveOf(path);
+      const removable = volumeKind(path) === 'removable';
       for (const iface of ifaces) entry.delete(iface);
-      if (!entry.has(BLOCK) || !(entry.has(FILESYSTEM) || entry.has(ENCRYPTED))) forget(path, before, drive);
+      if (!entry.has(BLOCK) || !(entry.has(FILESYSTEM) || entry.has(ENCRYPTED))) forget(path, before, drive, removable);
       if (entry.size === 0) objects.delete(path);
       if (ifaces.includes(DRIVE)) ejecting.delete(path);
       changed();
@@ -445,8 +445,9 @@ function call(member: string, path: string, iface: string, signature = '', body:
   return bus.call({ destination: UDISKS, path, interface: iface, member, signature, body, timeout });
 }
 
-/** Never let udisks wait on a polkit prompt nobody will see. */
 const NO_PROMPT = { 'auth.no_user_interaction': new Variant('b', true) };
+/** Allow the desktop's polkit prompt time to be answered. */
+const AUTH_WAIT_MS = 10 * 60_000;
 
 /** Words for udisks' errors that a person can act on. */
 function explain(error: unknown): Error {
@@ -458,10 +459,11 @@ function explain(error: unknown): Error {
   if (error.type === 'org.freedesktop.UDisks2.Error.NotAuthorized' || error.type.endsWith('NotAuthorizedCanObtain')) {
     return new Error('This computer doesn’t allow it.');
   }
+  if (error.type.endsWith('NotAuthorizedDismissed')) return new Error('Authentication was canceled.');
   if (/unknown filesystem type/i.test(message)) {
     return new Error('This computer can’t read its format.');
   }
-  if (/operation not permitted|no key available|incorrect passphrase|wrong passphrase/i.test(message)) {
+  if (/no key available|incorrect passphrase|wrong passphrase/i.test(message)) {
     return new Error('That passphrase isn’t right.');
   }
   return new Error(message || error.type);
@@ -480,12 +482,15 @@ async function withBusy<T>(path: string, kind: VolumeBusy, action: () => Promise
 }
 
 /** Mount a filesystem; resolves to where. */
-async function mount(path: string): Promise<string> {
+async function mount(path: string, interactive = false): Promise<string> {
   const existing = mountPoints(path)[0];
   if (existing) return existing;
   return withBusy(path, 'mounting', async () => {
     try {
-      const [mountPoint] = await call('Mount', path, FILESYSTEM, 'a{sv}', [NO_PROMPT], MOUNT_TIMEOUT_MS);
+      const [mountPoint] = await call(
+        'Mount', path, FILESYSTEM, 'a{sv}', [interactive ? {} : NO_PROMPT],
+        MOUNT_TIMEOUT_MS + (interactive ? AUTH_WAIT_MS : 0),
+      );
       return String(mountPoint);
     } catch (error) {
       if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.AlreadyMounted') {
@@ -501,7 +506,7 @@ function filesystemShowsUp(path: string): Promise<boolean> {
   const start = Date.now();
   return new Promise((resolve) => {
     const check = () => {
-      if (isRemovable(path)) resolve(true);
+      if (isFilesystem(path)) resolve(true);
       else if (Date.now() - start > CLEARTEXT_WAIT_MS || !bus) resolve(false);
       else setTimeout(check, 100);
     };
@@ -510,28 +515,58 @@ function filesystemShowsUp(path: string): Promise<boolean> {
 }
 
 /** Unlock an encrypted volume with its passphrase and mount what's in it; resolves to where. */
-async function unlock(path: string, passphrase: string): Promise<string> {
-  const cleartext = await withBusy(path, 'unlocking', async () => {
+async function unlock(path: string, passphrase: string, interactive: boolean): Promise<string> {
+  return withBusy(path, 'unlocking', async () => {
     unlocking.add(path);
     try {
-      const [opened] = await call('Unlock', path, ENCRYPTED, 'sa{sv}', [passphrase, NO_PROMPT], UNLOCK_TIMEOUT_MS).catch((error) => {
-        throw explain(error);
-      });
+      const [opened] = await call(
+        'Unlock', path, ENCRYPTED, 'sa{sv}', [passphrase, interactive ? {} : NO_PROMPT],
+        UNLOCK_TIMEOUT_MS + (interactive ? AUTH_WAIT_MS : 0),
+      ).catch((error) => { throw explain(error); });
       const cleartext = String(opened);
-      if (!(await filesystemShowsUp(cleartext))) {
-        await call('Lock', path, ENCRYPTED, 'a{sv}', [NO_PROMPT]).catch(() => {});
-        throw new Error('It unlocked, but there’s nothing on it this computer can open.');
+      try {
+        if (!(await filesystemShowsUp(cleartext)) || !volumeKind(cleartext)) {
+          throw new Error('It unlocked, but there’s nothing on it this computer can open.');
+        }
+        return await mount(cleartext, interactive);
+      } catch (error) {
+        await lock(path).catch(() => {});
+        throw error;
       }
-      return cleartext;
     } finally {
       unlocking.delete(path);
     }
   });
-  return mount(cleartext);
 }
 
-/** Unmount everything on a filesystem's drive, then let the drive go. */
+async function unmount(path: string): Promise<void> {
+  if (mountPoints(path).length === 0) return;
+  if (hasSystemMount(path)) throw new Error('The system is using this disk.');
+  await call('Unmount', path, FILESYSTEM, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
+    if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotMounted') return;
+    throw explain(error);
+  });
+}
+
+async function lock(path: string): Promise<void> {
+  const cleartext = cleartextOf(path);
+  if (!cleartext) return;
+  if (hasSystemMount(cleartext)) throw new Error('The system is using this disk.');
+  await call('Lock', path, ENCRYPTED, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
+    if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotUnlocked') return;
+    throw explain(error);
+  });
+}
+
+/** Unmount a fixed volume or eject a removable drive. */
 async function eject(path: string): Promise<void> {
+  if (volumeKind(path) === 'fixed') {
+    return withBusy(path, 'ejecting', async () => {
+      await unmount(path);
+      const backing = backingOf(path);
+      if (backing !== path) await lock(backing);
+    });
+  }
   const drive = driveOf(path);
   const name = names.get(path) ?? 'Untitled';
   const filesystems = drive
@@ -544,20 +579,9 @@ async function eject(path: string): Promise<void> {
   if (drive) ejecting.add(drive);
   changed();
   try {
-    for (const filesystem of filesystems) {
-      if (mountPoints(filesystem).length === 0) continue;
-      await call('Unmount', filesystem, FILESYSTEM, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
-        if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotMounted') return;
-        throw explain(error);
-      });
-    }
-    for (const container of encrypted) {
-      if (!cleartextOf(container)) continue;
-      await call('Lock', container, ENCRYPTED, 'a{sv}', [NO_PROMPT], EJECT_TIMEOUT_MS).catch((error) => {
-        if (error instanceof DBusError && error.type === 'org.freedesktop.UDisks2.Error.NotUnlocked') return;
-        throw explain(error);
-      });
-    }
+    for (const filesystem of filesystems) await unmount(filesystem);
+    for (const container of encrypted) await lock(container);
+    if (drive && holdsSystemMount(drive)) throw new Error('The system is using this disk.');
     const props = drive ? objects.get(drive)?.get(DRIVE) : undefined;
     if (drive && props) {
       // Media that comes out (an SD card, a disc) is ejected; a stick or a
@@ -645,8 +669,12 @@ export async function releaseDisk(disk: string): Promise<void> {
   }
 }
 
-function requireVolume(path: unknown): string {
-  if (typeof path !== 'string' || !(isRemovable(path) || isLocked(path))) throw new Error('No such disk.');
+function requireVolume(event: Electron.IpcMainInvokeEvent, path: unknown): string {
+  const kind = typeof path === 'string' ? volumeKind(path) : null;
+  if (typeof path !== 'string' || !kind || (kind === 'fixed' && !canManageFixedVolumes(event))) {
+    throw new Error('No such disk.');
+  }
+  if (isInstalling()) throw new Error('Wait for the installer or USB Flasher to finish.');
   return path;
 }
 
@@ -668,31 +696,32 @@ export function registerVolumesHandlers(options: {
     assertShellSender(event);
     await connection();
     lastSent = '';
-    return state();
+    const current = state();
+    return canManageFixedVolumes(event) ? current : removableVolumes(current);
   });
 
   ipcMain.handle('volumes:mount', async (event, path: unknown) => {
     assertShellSender(event);
     if (isPhoneVolume(path)) return mountPhone(path);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
-    const volume = requireVolume(path);
+    const volume = requireVolume(event, path);
     if (isLocked(volume)) throw new Error('It’s locked. Unlock it with its passphrase first.');
-    return mount(volume);
+    return mount(volume, volumeKind(volume) === 'fixed');
   });
 
   ipcMain.handle('volumes:unlock', async (event, path: unknown, passphrase: unknown) => {
     assertShellSender(event);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
-    const volume = requireVolume(path);
+    const volume = requireVolume(event, path);
     if (!isLocked(volume)) throw new Error('It isn’t locked.');
     if (typeof passphrase !== 'string' || !passphrase) throw new Error('Enter its passphrase.');
-    return unlock(volume, passphrase);
+    return unlock(volume, passphrase, volumeKind(volume) === 'fixed');
   });
 
   ipcMain.handle('volumes:eject', async (event, path: unknown) => {
     assertShellSender(event);
     if (isPhoneVolume(path)) return ejectPhone(path);
     if (!(await connection()) || !udisksOwner) throw new Error("Can't reach the disk service.");
-    await eject(requireVolume(path));
+    await eject(requireVolume(event, path));
   });
 }
