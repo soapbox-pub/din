@@ -6067,7 +6067,12 @@ function devtoolsHostFromId(wcId: unknown): Electron.WebContents | null {
   return contents;
 }
 
-/** Whether a before-input-event input is the devtools toggle shortcut. */
+/**
+ * Whether a before-input-event input is the devtools toggle shortcut. Not
+ * with Super held: Super chords are the window manager's, and users can
+ * bind Super+F12 or Super+Ctrl+Shift+I there (src/lib/wmBindings.ts), which
+ * this is checked before.
+ */
 function isDevtoolsToggleInput(input: Electron.Input): boolean {
   if (input.type !== 'keyDown' || input.meta) return false;
   if (input.key === 'F12') return true;
