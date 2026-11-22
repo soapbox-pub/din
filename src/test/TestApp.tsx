@@ -66,6 +66,7 @@ export function TestApp({ children }: TestAppProps) {
     workspaceAnimation: 'slide',
     tilingEnabled: false,
     tilingGap: 8,
+    focusFollowsPointer: true,
     wmBindings: {},
     restoreWindows: true,
     pauseMediaWhileRecording: true,

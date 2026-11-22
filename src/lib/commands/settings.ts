@@ -74,6 +74,7 @@ const SETTINGS: Setting[] = [
   { key: 'mouse.touchpad-swipe', field: 'touchpadSwipe', help: 'Three fingers swiped sideways on a touchpad go to the workspace beside', param: bool },
   { key: 'windows.workspace-animation', field: 'workspaceAnimation', help: 'Going to another workspace, the windows slide across, fade, or just change', param: { type: 'string', choices: ['slide', 'fade', 'none'] } },
   { key: 'windows.tiling', field: 'tilingEnabled', help: 'Windows tile instead of floating', param: bool },
+  { key: 'windows.focus-follows-pointer', field: 'focusFollowsPointer', help: 'While tiling, the tile under the pointer takes the keyboard without a click', param: bool },
   { key: 'windows.gaps', field: 'tilingGap', help: 'Pixels between tiled windows', param: { type: 'integer', min: 0, max: 32 } },
   { key: 'sound.volume-feedback', field: 'volumeFeedback', help: 'The volume keys play a short tick at the new level as they turn it up or down', param: bool },
   { key: 'sound.startup-sound', field: 'startupSound', help: 'Din plays a chime as the desktop fades in when it starts', param: bool },

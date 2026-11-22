@@ -37,6 +37,7 @@ import {
   Monitor,
   Moon,
   Mouse,
+  MousePointer2,
   MoreHorizontal,
   Music,
   Play,
@@ -4213,6 +4214,15 @@ function WindowsSection({ windowId }: { windowId: string }) {
           description="Windows share the screen side by side instead of overlapping, like Hyprland."
           checked={config.tilingEnabled}
           onCheckedChange={(checked) => updateConfig((current) => ({ ...current, tilingEnabled: checked }))}
+        />
+        <SettingSwitchRow
+          id="focus-follows-pointer"
+          icon={MousePointer2}
+          label="Focus follows the pointer"
+          description="While tiling, moving the pointer onto a tile gives it the keyboard, without a click. Floating windows still take a click."
+          checked={config.focusFollowsPointer}
+          disabled={!config.tilingEnabled}
+          onCheckedChange={(checked) => updateConfig((current) => ({ ...current, focusFollowsPointer: checked }))}
         />
         <SettingSwitchRow
           id="restore-windows"

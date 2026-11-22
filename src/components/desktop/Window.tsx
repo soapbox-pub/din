@@ -1871,7 +1871,10 @@ export const Window = memo(function Window({
       data-snap-split={snapped ? `${split.x},${split.left},${split.right}` : undefined}
       data-app-name={app?.name}
       onPointerMoveCapture={(e) => {
-        if (isTop || !win.tiled || e.pointerType !== 'mouse' || e.buttons !== 0) return;
+        // Focus follows the pointer between tiles (Settings → Windows). It
+        // raises the tile only among tiles: floating windows are a layer
+        // above them (windowStackZ), so hovering never buries one.
+        if (!config.focusFollowsPointer || isTop || !win.tiled || win.maximized || e.pointerType !== 'mouse' || e.buttons !== 0) return;
         // Guest moves are replayed on their host after IPC. A tile may have
         // been covered or moved to another workspace since the move occurred.
         if (!e.currentTarget.contains(document.elementFromPoint(e.clientX, e.clientY))) return;

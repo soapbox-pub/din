@@ -179,6 +179,12 @@ export interface AppConfig {
   /** Pixels between tiled windows, and between them and the screen's edges. */
   tilingGap: number;
   /**
+   * While tiling is on, whether the tile under the pointer takes the
+   * keyboard as the pointer moves onto it, without a click (Hyprland's
+   * follows_mouse). Floating windows still need a click.
+   */
+  focusFollowsPointer: boolean;
+  /**
    * The Super-key shortcuts that aren't as they came: each changed action's
    * keys, by action id (src/lib/wmBindings.ts). Kept on this device.
    */
