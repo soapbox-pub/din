@@ -4201,7 +4201,6 @@ function forwardShellShortcuts(contents: Electron.WebContents): void {
     const shortcut = shellShortcutForInput(input);
     if (
       shortcut?.action === 'cycle-windows' ||
-      shortcut?.action === 'apps-menu' ||
       shortcut?.action === 'assistant' ||
       shortcut?.action === 'dictation' ||
       shortcut?.action === 'system-monitor' ||
@@ -4306,13 +4305,15 @@ function forwardGuestInput(contents: Electron.WebContents): void {
     const content = shellWindow.getContentBounds();
     return { sx: mouse.globalX - content.x, sy: mouse.globalY - content.y };
   };
-  let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean } | null = null;
+  let pendingMove: { x: number; y: number; sx?: number; sy?: number; meta: boolean; buttons: number } | null = null;
+  let lastMoveAt = -Infinity;
   let moveTimer: NodeJS.Timeout | null = null;
   let wheelAt = -Infinity;
   const flushMove = (): void => {
     if (moveTimer) clearTimeout(moveTimer);
     moveTimer = null;
     if (!pendingMove) return;
+    lastMoveAt = performance.now();
     sendToShell('guest:input', { wcId, type: 'move', ...pendingMove });
     pendingMove = null;
   };
@@ -4327,8 +4328,19 @@ function forwardGuestInput(contents: Electron.WebContents): void {
       // mouse's motion without bound: a player looking down would carry it
       // past the screen's bottom edge and bring up the Dock.
       if (holdsPointerLock(wcId)) return;
-      pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta };
-      moveTimer ??= setTimeout(flushMove, GUEST_MOVE_INTERVAL_MS);
+      const mods = mouse.modifiers;
+      const buttons = (mods?.includes('leftbuttondown') ? 1 : 0) |
+        (mods?.includes('rightbuttondown') ? 2 : 0) | (mods?.includes('middlebuttondown') ? 4 : 0);
+      pendingMove = { x: mouse.x, y: mouse.y, ...inShell(mouse), meta, buttons };
+      const remaining = GUEST_MOVE_INTERVAL_MS - (performance.now() - lastMoveAt);
+      if (remaining <= 0) flushMove();
+      else moveTimer ??= setTimeout(flushMove, remaining);
+    } else if (mouse.type === 'mouseLeave') {
+      // Don't replay a buffered move over this tile after entering the next.
+      if (moveTimer) clearTimeout(moveTimer);
+      moveTimer = null;
+      pendingMove = null;
+      lastMoveAt = -Infinity;
     } else if (mouse.type === 'mouseDown') {
       // Keep the order the guest saw: the move that led here comes first.
       flushMove();
@@ -6057,7 +6069,7 @@ function devtoolsHostFromId(wcId: unknown): Electron.WebContents | null {
 
 /** Whether a before-input-event input is the devtools toggle shortcut. */
 function isDevtoolsToggleInput(input: Electron.Input): boolean {
-  if (input.type !== 'keyDown') return false;
+  if (input.type !== 'keyDown' || input.meta) return false;
   if (input.key === 'F12') return true;
   return Boolean(input.control && input.shift && input.key.toLowerCase() === 'i');
 }
@@ -6109,7 +6121,6 @@ type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
   | {
       action:
-        | 'apps-menu'
         | 'assistant'
         | 'assistant-released'
         | 'dictation'
@@ -6148,11 +6159,16 @@ type ShellShortcut =
   | { action: 'cycle-tab'; backward: boolean }
   | { action: 'goto-tab'; digit: number };
 
-/**
- * The physical keys Super may bind for window management, with any of
- * Shift, Ctrl and Alt. Keep in step with wmCommandFor in src/lib/wmBindings.ts.
- */
-const WM_KEY_CODES = /^(?:Arrow(?:Left|Right|Up|Down)|Digit\d|Tab|Minus|Equal|Enter|Key[WQTFJMKCS])$/;
+// The desktop supplies the active chords, not just their physical keys, so
+// unbound combinations still reach the focused app.
+let wmShortcuts = new Set<string>();
+
+function registerWmShortcutHandlers(): void {
+  ipcMain.on('shellShortcuts:setWmShortcuts', (event, chords: unknown) => {
+    if (!isShellSender(event) || !Array.isArray(chords) || chords.length > 256) return;
+    wmShortcuts = new Set(chords.filter((chord): chord is string => typeof chord === 'string' && chord.length <= 64));
+  });
+}
 
 /**
  * Map a guest before-input-event to a shell shortcut payload, or null.
@@ -6171,9 +6187,6 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
-  if (input.meta && !input.alt && !input.control && !input.shift && input.key === ' ') {
-    return { action: 'apps-menu' };
-  }
   // Super+A: the assistant's prompt.
   if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
     return { action: 'assistant' };
@@ -6187,7 +6200,8 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   // Super plus a window-management key: the shell decides what it does
   // (src/lib/wmBindings.ts), so the page never sees Super+1 and the like.
-  if (input.meta && WM_KEY_CODES.test(input.code)) {
+  const wmChord = `${input.shift ? 'Shift+' : ''}${input.control ? 'Ctrl+' : ''}${input.alt ? 'Alt+' : ''}${input.code}`;
+  if (input.meta && wmShortcuts.has(wmChord)) {
     return {
       action: 'wm',
       code: input.code,
@@ -6531,6 +6545,7 @@ app.whenReady().then(() => {
   registerPageFullscreenHandlers();
   registerPointerLockReports();
   registerGuestVisibilityHandlers();
+  registerWmShortcutHandlers();
   // What a session needs running before its first page loads (GuestSurface waits for it).
   ipcMain.handle('guestSession:prepare', (event, partition: unknown) => {
     assertShellSender(event);
@@ -7420,7 +7435,6 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
-        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||
@@ -7473,7 +7487,7 @@ app.on('web-contents-created', (_event, contents) => {
   }
 
   // Installed apps' windows aren't browser tabs, but focus still lands inside
-  // them, so the shell's window-cycling, apps-menu, assistant, System Monitor
+  // them, so the shell's window management, assistant, System Monitor
   // and screenshot shortcuts must be forwarded too.
   if (isAppWindow) {
     contents.on('before-input-event', (event, input) => {
@@ -7485,7 +7499,6 @@ app.on('web-contents-created', (_event, contents) => {
       const shortcut = shellShortcutForInput(input);
       if (
         shortcut?.action === 'cycle-windows' ||
-        shortcut?.action === 'apps-menu' ||
         shortcut?.action === 'assistant' ||
         shortcut?.action === 'dictation' ||
         shortcut?.action === 'system-monitor' ||

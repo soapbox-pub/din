@@ -2072,7 +2072,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
       // WindowSwitcher own them.
       if (
         shortcut.action === 'cycle-windows' ||
-        shortcut.action === 'apps-menu' ||
         shortcut.action === 'assistant' ||
         shortcut.action === 'assistant-released' ||
         shortcut.action === 'dictation' ||

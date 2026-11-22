@@ -8,7 +8,6 @@
  * `before-input-event` and forwards them to the shell:
  *
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
- *   - Super+Space             -> { action: 'apps-menu' }
  *   - Super+A                 -> { action: 'assistant' }, and when the A
  *                                comes up -> { action: 'assistant-released' }
  *   - Super+H                 -> { action: 'dictation' }
@@ -17,8 +16,7 @@
  *   - Ctrl+F2 / F3 / F8, Ctrl+F6 (+Shift)
  *                             -> { action: 'focus-area', area }
  *   - Super down / up         -> { action: 'super-key', down }
- *   - Super+arrows, digits, Tab, -, =, Enter, W/Q/T/F/J/M/K/S (any of
- *     Shift/Ctrl/Alt)         -> { action: 'wm', code, shift, ctrl, alt, repeat }
+ *   - Active Super shortcuts -> { action: 'wm', code, shift, ctrl, alt, repeat }
  *   - Alt up                  -> { action: 'alt-released' }
  *   - Print Screen            -> { action: 'screenshot' }
  *   - Shift+Print Screen, or the laptop box-select key
@@ -66,10 +64,6 @@ export type ShellShortcut =
       /** Alt+Tab pressed inside a guest: cycle window focus. */
       action: 'cycle-windows';
       backward: boolean;
-    }
-  | {
-      /** Super+Space pressed inside a guest: toggle the apps menu. */
-      action: 'apps-menu';
     }
   | {
       /**
@@ -235,6 +229,8 @@ export type ShellShortcut =
     };
 
 export interface ShellShortcutsBridge {
+  /** Tell the host which Super shortcuts to claim from guests. */
+  setWmShortcuts(chords: string[]): void;
   /** Subscribe to forwarded shortcuts. Returns an unsubscribe fn. */
   onShortcut(callback: (shortcut: ShellShortcut) => void): () => void;
 }

@@ -179,6 +179,11 @@ export interface AppConfig {
   /** Pixels between tiled windows, and between them and the screen's edges. */
   tilingGap: number;
   /**
+   * The Super-key shortcuts that aren't as they came: each changed action's
+   * keys, by action id (src/lib/wmBindings.ts). Kept on this device.
+   */
+  wmBindings: Record<string, string[]>;
+  /**
    * Whether Din reopens the windows it had open when it starts again, each
    * where it was (src/lib/windowSession.ts). Kept on this device.
    */

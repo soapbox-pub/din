@@ -68,7 +68,7 @@ export function GuestInputHost() {
         metaKey: input.meta,
       };
       if (input.type === 'move') {
-        el.dispatchEvent(new PointerEvent('pointermove', init));
+        el.dispatchEvent(new PointerEvent('pointermove', { ...init, buttons: input.buttons }));
         return;
       }
       if (input.type === 'wheel') {

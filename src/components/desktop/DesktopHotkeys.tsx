@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useWindowManager } from '@/contexts/WindowManagerContext';
 import { toggleAppsMenu } from '@/lib/appsMenu';
 import {
@@ -15,7 +15,7 @@ import { isWebviewAvailable } from '@/lib/isElectron';
 import { isWindowSwitcherActive } from '@/lib/windowSwitcherState';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
-import { wmCommandFor, type WmCommand } from '@/lib/wmBindings';
+import { wmCommandFor, wmShortcuts, type WmCommand } from '@/lib/wmBindings';
 import { cursorEffects } from '@/lib/cursorEffects';
 import { currentArea, leaveArea, runFocusKey, type FocusKey } from '@/lib/desktopFocus';
 
@@ -81,8 +81,6 @@ function isAssistantKeyPressed(): boolean {
  *   laptops reaches the shell as the 'screenshot-area' bridge shortcut
  *   instead - see electron/main.mts). ScreenshotHost does the capturing.
  *   Both are ignored while a capture session is already running.
- * - Super+Space opens the menu bar's apps menu with its search focused (or
- *   closes it again).
  * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
  *   Held, it opens the prompt listening, and what was said is typed into it
  *   (unsent) when the key comes up.
@@ -100,7 +98,8 @@ function isAssistantKeyPressed(): boolean {
  *   restart and shut down. Everything else stands down while it's up.
  * - Super plus a key manages windows and workspaces, Hyprland style (the
  *   bindings are in src/lib/wmBindings.ts): Super+arrows focus, Super+1..0
- *   switch workspace, Super+Shift+T turns tiling on or off, and so on.
+ *   switch workspace, Super+Shift+T turns tiling on or off, and Super+Space
+ *   opens App Search by default.
  * - Ctrl+T / Ctrl+W act on the focused window's tabs when it's the Web
  *   Browser (open / close a tab), and Ctrl+L focuses its address bar.
  *   Deliberately scoped: other apps keep these keys (e.g. Ctrl+W is
@@ -138,7 +137,7 @@ export function DesktopHotkeys() {
   // The keydown handler needs the current window list without re-binding
   // the listener on every desktop commit.
   const windowsRef = useRef<WindowState[]>(windows);
-  useEffect(() => {
+  useLayoutEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
 
@@ -150,6 +149,12 @@ export function DesktopHotkeys() {
   }, [actions]);
 
   const { config, updateConfig } = useAppContext();
+  const bindingsRef = useRef(config.wmBindings);
+  useEffect(() => {
+    bindingsRef.current = config.wmBindings;
+    getShellShortcuts()?.setWmShortcuts(wmShortcuts(config.wmBindings));
+  }, [config.wmBindings]);
+
   const tilingRef = useRef(config.tilingEnabled);
   useEffect(() => {
     tilingRef.current = config.tilingEnabled;
@@ -204,6 +209,9 @@ export function DesktopHotkeys() {
         case 'terminal':
           a.open(TERMINAL_APP_ID);
           return;
+        case 'apps-menu':
+          toggleAppsMenu();
+          return;
         case 'help':
           a.open(SETTINGS_APP_ID, { section: 'windows' });
           return;
@@ -240,6 +248,8 @@ export function DesktopHotkeys() {
       // The screen has the keyboard while it's up.
       if (isSecurityOptionsActive()) return;
 
+      if (e.target instanceof Element && e.target.closest('[data-recording-wm-shortcut]')) return;
+
       // Print Screen: full-screen capture. Shift+Print Screen: select an
       // area (the same session the dedicated box-select key starts via the
       // Electron host's evdev watch). The session flag guards against a
@@ -249,14 +259,6 @@ export function DesktopHotkeys() {
           e.preventDefault();
           requestScreenshot(e.shiftKey ? 'area' : 'screen');
         }
-        return;
-      }
-
-      // Super+Space: open the apps menu, search focused.
-      if (e.key === ' ' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleAppsMenu();
         return;
       }
 
@@ -283,9 +285,9 @@ export function DesktopHotkeys() {
         return;
       }
 
-      // Super+key: window management (after Super+Space/A/H above).
+      // Super+key: configurable shortcuts (after Super+A/H above).
       if (e.metaKey) {
-        const cmd = wmCommandFor({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey });
+        const cmd = wmCommandFor({ code: e.code, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey }, bindingsRef.current);
         if (cmd) {
           e.preventDefault();
           e.stopPropagation();
@@ -467,17 +469,16 @@ export function DesktopHotkeys() {
     if (!bridge) return;
     return bridge.onShortcut((shortcut) => {
       // Alt+Tab from a guest is handled by the WindowSwitcher's own bridge
-      // subscription; here we only service the apps menu and screenshots.
-      if (shortcut.action === 'apps-menu') {
-        toggleAppsMenu();
-      } else if (shortcut.action === 'assistant') {
+      // subscription.
+      if (shortcut.action === 'assistant') {
         assistantKeyDown();
       } else if (shortcut.action === 'assistant-released') {
         assistantKeyUp();
       } else if (shortcut.action === 'super-key' && !shortcut.down) {
         if (isAssistantKeyPressed()) assistantKeyUp();
       } else if (shortcut.action === 'wm') {
-        const cmd = wmCommandFor(shortcut);
+        if (isWindowSwitcherActive() || isSecurityOptionsActive()) return;
+        const cmd = wmCommandFor(shortcut, bindingsRef.current);
         if (cmd && (!shortcut.repeat || cmd.type === 'resize')) runWmRef.current(cmd);
       } else if (shortcut.action === 'dictation') {
         toggleDictation();

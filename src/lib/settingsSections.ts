@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { matchesAll } from '@/lib/settingsSearch';
-import { WM_BINDING_HELP } from '@/lib/wmBindings';
+import { WM_ACTIONS, WM_FIXED_HELP } from '@/lib/wmBindings';
 
 export type SectionId =
   | 'wifi'
@@ -138,7 +138,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Personal',
     name: 'Windows',
     icon: LayoutDashboard,
-    search: ['Tiling', 'Tile windows', 'Gaps', 'Window effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Workspace animation', 'Slide', 'Fade', 'switching workspaces', 'Keyboard shortcuts', 'Workspaces', ...WM_BINDING_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
+    search: ['Tiling', 'Tile windows', 'Gaps', 'Window effects', 'Wobbly windows', 'Minimize effect', 'Close effect', 'Workspace animation', 'Slide', 'Fade', 'switching workspaces', 'Keyboard shortcuts', 'Workspaces', ...WM_ACTIONS.map((a) => a.label), ...WM_FIXED_HELP.flatMap((g) => g.bindings.map((b) => b.label)), 'Hyprland', 'Omarchy', 'i3', 'sway', 'tiling window manager', 'virtual desktops', 'spaces', 'hotkeys', 'keybindings'],
   },
   {
     id: 'desktop',

@@ -30,6 +30,7 @@ export type GuestInput =
   | (GuestPoint & {
       /** The pointer moved over the guest (at most once per frame). */
       type: 'move';
+      buttons: number;
       wcId: number;
       /** Whether Super (Meta) was held. */
       meta: boolean;

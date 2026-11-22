@@ -84,6 +84,7 @@ const defaultConfig: AppConfig = {
   workspaceAnimation: 'slide',
   tilingEnabled: false,
   tilingGap: 8,
+  wmBindings: {},
   restoreWindows: true,
   pauseMediaWhileRecording: true,
   volumeFeedback: true,

@@ -3828,10 +3828,12 @@ expose('devtools', {
 // shortcuts there via before-input-event and forwards them here. See
 // src/lib/shellShortcuts.ts for the typed renderer-side accessor.
 expose('shellShortcuts', {
+  /** @param {string[]} chords */
+  setWmShortcuts: (chords) => ipcRenderer.send('shellShortcuts:setWmShortcuts', chords),
   /**
    * Subscribe to forwarded shortcuts. Returns an unsubscribe fn. Payloads:
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
-   *   { action: 'apps-menu' }                 (Super+Space)
+   *   { action: 'wm', code, shift, ctrl, alt, repeat } (active Super shortcuts)
    *   { action: 'assistant' }                 (Super+A)
    *   { action: 'system-monitor' }            (Ctrl+Shift+Escape)
    *   { action: 'security-options' }          (Ctrl+Alt+Delete)

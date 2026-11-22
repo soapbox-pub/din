@@ -77,16 +77,30 @@ export function layoutTree(node: TileNode | null, rect: Rect, gap: number, out =
 /**
  * Add a window to a tree, splitting `target`'s tile (or, without one in the
  * tree, the last tile) in two, the new window taking the right or bottom half.
+ * On a drop, split the tile nearest the pointer and give it the pointer's half.
  */
-export function insertLeaf(node: TileNode | null, id: string, target: string | null, rect: Rect, gap: number): TileNode {
+export function insertLeaf(node: TileNode | null, id: string, target: string | null, rect: Rect, gap: number, drop?: { x: number; y: number }): TileNode {
   const leaf: TileNode = { leaf: id };
   if (!node) return leaf;
-  const leaves = treeLeaves(node);
-  const victim = target !== null && leaves.includes(target) ? target : leaves[leaves.length - 1];
-  const at = layoutTree(node, rect, gap).get(victim) ?? rect;
-  const split = at.width >= at.height ? 'h' : 'v';
+  const tiles = layoutTree(node, rect, gap);
+  let victim = target && tiles.has(target) ? target : treeLeaves(node).at(-1)!;
+  if (drop) {
+    let best = Infinity;
+    for (const [candidate, r] of tiles) {
+      const dx = Math.max(r.x - drop.x, drop.x - r.x - r.width, 0);
+      const dy = Math.max(r.y - drop.y, drop.y - r.y - r.height, 0);
+      const distance = dx * dx + dy * dy;
+      if (distance < best) {
+        best = distance;
+        victim = candidate;
+      }
+    }
+  }
+  const at = tiles.get(victim)!;
+  const split = at.width > at.height ? 'h' : 'v';
+  const first = drop && (split === 'h' ? drop.x < at.x + at.width / 2 : drop.y < at.y + at.height / 2);
   const replace = (n: TileNode): TileNode => {
-    if ('leaf' in n) return n.leaf === victim ? { split, ratio: 0.5, a: n, b: leaf } : n;
+    if ('leaf' in n) return n.leaf === victim ? { split, ratio: 0.5, a: first ? leaf : n, b: first ? n : leaf } : n;
     const a = replace(n.a);
     const b = a === n.a ? replace(n.b) : n.b;
     return a === n.a && b === n.b ? n : { ...n, a, b };
