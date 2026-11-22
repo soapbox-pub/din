@@ -47,11 +47,54 @@ export interface ClaudeCodeStatus {
   error: string | null;
 }
 
+/** A skill: instructions the agent loads when a task calls for them. */
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  /** Its SKILL.md, or `skill://…` for one built into OpenCode. */
+  path: string;
+  /** Off, it's hidden from the agent and can't be loaded. */
+  enabled: boolean;
+}
+
+/** Somewhere skills come from, and the ones found there. */
+export interface SkillSource {
+  /**
+   * `folder` and `catalog` (a URL) are the user's, from OpenCode's config;
+   * `default` is a folder OpenCode looks in anyway; `din` and `opencode`
+   * come with them; `other` is anything found elsewhere.
+   */
+  kind: 'folder' | 'catalog' | 'default' | 'din' | 'opencode' | 'other';
+  /** As the config has it ("~/Documents/skills"), for the user's. */
+  entry: string | null;
+  /** The folder, where it is one. */
+  path: string | null;
+  /** The folder isn't there. */
+  missing: boolean;
+  skills: SkillInfo[];
+}
+
+/** The assistant's skills, as OpenCode's config and server have them (electron/assistant-skills.mts). */
+export interface SkillSettings {
+  /** The config file changes are written to. */
+  file: string;
+  /** Why the config can't be read, when it can't; nothing can be changed until it's mended. */
+  error: string | null;
+  sources: SkillSource[];
+}
+
+export type SkillChange =
+  | { op: 'addFolder'; path: string }
+  | { op: 'removeFolder'; entry: string }
+  | { op: 'setEnabled'; ids: string[]; enabled: boolean };
+
 /**
  * One server event, slimmed by the main process: its type, the session it's
  * about, and its data for the kinds the shell reads (permission requests,
  * forms, sessions starting and ending). `din.connected` and
- * `din.disconnected` are the stream's own.
+ * `din.disconnected` are the stream's own, and `din.skills` says the skills
+ * or their folders were changed.
  */
 export interface AssistantEvent {
   type: string;
@@ -101,6 +144,10 @@ export interface AssistantBridge {
   claudeCode(code: string): Promise<void>;
   /** Stop a sign-in under way. */
   claudeCancel(): Promise<void>;
+  /** The folders OpenCode finds skills in, their skills, and which are on. The desktop's only. */
+  skills(): Promise<SkillSettings>;
+  /** Change them, in OpenCode's config: how things stand after. The desktop's only. */
+  changeSkills(change: SkillChange): Promise<SkillSettings>;
   request(method: string, path: string, body?: unknown): Promise<Reply>;
   /**
    * Git for the Assistant's side panel (electron/assistant-git.mts, typed in
