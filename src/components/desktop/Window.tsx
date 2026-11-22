@@ -633,9 +633,23 @@ export const Window = memo(function Window({
     raisedByGuestPress.current = false;
     if (pressed) return;
     const section = sectionRef.current;
+    if (!section || section.contains(document.activeElement)) return;
     const el = lastFocused.current;
-    if (!section || !el?.isConnected || section.contains(document.activeElement)) return;
-    el.focus({ preventScroll: true });
+    if (el?.isConnected) el.focus({ preventScroll: true });
+    if (section.contains(document.activeElement)) return;
+    // What last had focus is gone (a closed tab's page), hidden (a tab
+    // behind another) or was never set, so it can't take focus, and the
+    // keyboard would stay in the window that was on top before: typing and
+    // Ctrl+T in the browser just raised would go to the Assistant behind it.
+    // Give it to the window's visible page instead, or failing that to no
+    // other window's, where the desktop's hotkeys act on the window on top.
+    const page = guestElements().find(
+      (node) => section.contains(node) && node.checkVisibility({ visibilityProperty: true }),
+    );
+    page?.focus({ preventScroll: true });
+    if (section.contains(document.activeElement)) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest('[data-window-id]')) active.blur();
   }, [isTop]);
 
   // A click into an <iframe> (the browser's plain-web fallback) goes to the
