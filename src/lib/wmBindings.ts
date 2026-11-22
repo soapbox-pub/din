@@ -304,6 +304,16 @@ const FIXED_COMMANDS = new Map<string, WmCommand>([
 
 const RESERVED = new Set(['KeyA', 'KeyH', 'Alt+Digit8', 'Alt+Equal', 'Alt+Minus']);
 
+/** The other action a shortcut already does, if it's another's. */
+export function wmShortcutOwner(shortcut: string, id: string, overrides?: WmOverrides): WmAction | null {
+  const owner = resolve(overrides).owners.get(shortcut);
+  return owner && owner.id !== id ? owner : null;
+}
+
+/**
+ * Why an action can't have a shortcut: one it can't be on, one Din keeps, or
+ * one another action has (which `replaceWmShortcut` can take from it).
+ */
 export function wmShortcutError(shortcut: string, id: string, overrides?: WmOverrides): string | null {
   if (!SHORTCUT.test(shortcut)) return 'That key cannot be used in a shortcut.';
   const key = formatWmShortcut(shortcut);
@@ -395,6 +405,17 @@ function tidy(overrides: WmOverrides): WmOverrides {
  */
 export function bindWmShortcut(overrides: WmOverrides | undefined, id: string, shortcut: string): WmOverrides {
   return tidy({ ...overrides, [id]: [shortcut] });
+}
+
+/**
+ * Give an action a shortcut another action has, which keeps the rest of its
+ * own (Close keeps Super+W when Super+Q goes elsewhere).
+ */
+export function replaceWmShortcut(overrides: WmOverrides | undefined, id: string, shortcut: string): WmOverrides {
+  const owner = wmShortcutOwner(shortcut, id, overrides);
+  const next: WmOverrides = { ...overrides };
+  if (owner) next[owner.id] = wmBindings(overrides)[owner.id].filter((key) => key !== shortcut);
+  return bindWmShortcut(next, id, shortcut);
 }
 
 /** Leave an action with no shortcut. */

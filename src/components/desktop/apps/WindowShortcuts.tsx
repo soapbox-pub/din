@@ -1,11 +1,11 @@
 import { useState, type KeyboardEvent } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Eraser, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
-  bindWmShortcut, formatWmShortcut, isWmFamily, resetWmAction, unbindWmAction,
-  wmBindings, wmResetError, wmShortcutError, wmShortcutKeys, wmShortcutOf, WM_FIXED_HELP, WM_GROUPS,
+  bindWmShortcut, formatWmShortcut, isWmFamily, replaceWmShortcut, resetWmAction, unbindWmAction,
+  wmBindings, wmResetError, wmShortcutError, wmShortcutKeys, wmShortcutOf, wmShortcutOwner, WM_FIXED_HELP, WM_GROUPS,
   type WmAction, type WmOverrides,
 } from '@/lib/wmBindings';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
@@ -33,7 +33,19 @@ function ShortcutRow({
 }) {
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A shortcut pressed that another action has, offered to take from it. */
+  const [conflict, setConflict] = useState<{ chord: string; owner: WmAction } | null>(null);
   const customized = Object.hasOwn(overrides, action.id);
+
+  function show(problem: string | null) {
+    setError(problem);
+    setConflict(null);
+  }
+
+  function clear() {
+    show(null);
+    change((current) => unbindWmAction(current, action.id));
+  }
 
   function capture(event: KeyboardEvent<HTMLButtonElement>) {
     if (!recording || (event.key === 'Tab' && !event.metaKey)) return;
@@ -42,26 +54,42 @@ function ShortcutRow({
     if (event.repeat) return;
     if (event.key === 'Escape' && !event.metaKey) {
       setRecording(false);
-      setError(null);
+      show(null);
+      return;
+    }
+    if ((event.key === 'Backspace' || event.key === 'Delete') && !event.metaKey) {
+      clear();
+      setRecording(false);
       return;
     }
     if (['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) return;
     const chord = wmShortcutOf({ code: event.code, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey });
-    const problem = !event.metaKey ? 'Hold Super and press another key.'
-      : !chord ? 'That key cannot be used in a shortcut.'
-      : wmShortcutError(chord, action.id, overrides);
-    if (!chord || problem) {
+    if (!event.metaKey) return show('Hold Super and press another key.');
+    if (!chord) return show('That key cannot be used in a shortcut.');
+    const owner = wmShortcutOwner(chord, action.id, overrides);
+    const problem = wmShortcutError(chord, action.id, overrides);
+    if (owner) {
       setError(problem);
+      setConflict({ chord, owner });
       return;
     }
+    if (problem) return show(problem);
     change((current) => bindWmShortcut(current, action.id, chord));
-    setError(null);
+    show(null);
+    setRecording(false);
+  }
+
+  function replace() {
+    if (!conflict) return;
+    const { chord } = conflict;
+    change((current) => replaceWmShortcut(current, action.id, chord));
+    show(null);
     setRecording(false);
   }
 
   function reset() {
     const problem = wmResetError(action, overrides);
-    setError(problem);
+    show(problem);
     if (!problem) change((current) => resetWmAction(current, action.id));
   }
 
@@ -80,7 +108,7 @@ function ShortcutRow({
                 data-recording-wm-shortcut={recording ? '' : undefined}
                 onClick={(event) => {
                   event.currentTarget.focus();
-                  setError(null);
+                  show(null);
                   setRecording(!recording);
                 }}
                 onBlur={() => setRecording(false)}
@@ -96,16 +124,32 @@ function ShortcutRow({
               {customized && <Button variant="ghost" size="sm" aria-label={`Reset shortcut for ${action.label}`} onClick={reset}>Reset</Button>}
             </div>
           </div>
-          {recording && !error && <p role="status" className="text-xs text-muted-foreground">Hold Super and press a key. Esc cancels.</p>}
-          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+          {recording && !error && (
+            <p role="status" className="text-xs text-muted-foreground">
+              Hold Super and press a key. Backspace clears the shortcut; Esc cancels.
+            </p>
+          )}
+          {error && (
+            <div role="alert" className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <p className="text-xs text-destructive">{error}</p>
+              {conflict && (
+                <Button variant="outline" size="sm" onMouseDown={(event) => event.preventDefault()} onClick={replace}>
+                  Use {formatWmShortcut(conflict.chord)} here instead
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem disabled={!keys.length} onSelect={() => {
-          setError(null);
-          change((current) => unbindWmAction(current, action.id));
-        }}>Clear shortcut</ContextMenuItem>
-        <ContextMenuItem disabled={!customized} onSelect={reset}>Restore default</ContextMenuItem>
+        <ContextMenuItem disabled={!keys.length} onSelect={clear}>
+          <Eraser />
+          Clear shortcut
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!customized} onSelect={reset}>
+          <RotateCcw />
+          Restore default
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -128,7 +172,7 @@ export function WindowShortcuts() {
       </div>
       <p className="text-sm text-muted-foreground">
         Select a shortcut to change it. Use Super (the Windows or Command key), with Shift, Ctrl, or Alt if you like.
-        Right-click a row to clear its shortcut.
+        Backspace clears it while it’s waiting for keys, or right-click a row.
       </p>
       {WM_GROUPS.map(({ group, rows }) => (
         <div key={group} className="flex flex-col gap-2">
