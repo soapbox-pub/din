@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { Copy, ImageOff, RotateCcw } from 'lucide-react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Copy, ExternalLink, ImageOff, Link, RotateCcw } from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,6 +12,7 @@ import type { PhoneMessage } from '@/lib/phone';
 import { formatAddress } from '@/shared/phone';
 import { cn } from '@/lib/utils';
 import { Avatar } from './Avatar';
+import { linkify, openLink } from './links';
 import { colorsFor, separatorTime, type PersonColor } from './format';
 import { QUICK_REACTIONS, threadReactions, type Reaction } from '@/shared/phoneReactions';
 
@@ -240,10 +241,15 @@ function Bubble({
   const toggle = (emoji: string) => react?.(emoji, myReactions.has(emoji));
   const failedSend = failed(message);
   const time = new Date(message.time).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const body = useMemo(() => linkify(message.body), [message.body]);
+  // The link right-clicked, if it was one, for the menu to open or copy.
+  const [link, setLink] = useState<string | null>(null);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className={cn('flex flex-col gap-1', mine ? 'items-end' : 'items-start', startsRun ? 'mt-2' : 'mt-0.5')}>
+        <div
+          onContextMenu={(e) => setLink((e.target as Element).closest?.('a[href]')?.getAttribute('href') ?? null)}
+          className={cn('flex flex-col gap-1', mine ? 'items-end' : 'items-start', startsRun ? 'mt-2' : 'mt-0.5')}>
           {message.images.length > 0 && (
             <div className={cn('flex max-w-[70%] flex-wrap gap-1', mine && 'justify-end')}>
               {message.images.map((src, i) => (
@@ -264,7 +270,7 @@ function Bubble({
                 failedSend && 'bg-destructive/15 text-foreground ring-1 ring-destructive/40',
               )}
             >
-              {message.body}
+              {body}
             </div>
           )}
           {message.unfetched && !message.body && message.images.length === 0 && (
@@ -297,6 +303,19 @@ function Bubble({
                 </ContextMenuItem>
               ))}
             </div>
+            <ContextMenuSeparator />
+          </>
+        )}
+        {link && (
+          <>
+            <ContextMenuItem onSelect={() => openLink(link)}>
+              <ExternalLink aria-hidden />
+              Open Link
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(link)}>
+              <Link aria-hidden />
+              Copy Link
+            </ContextMenuItem>
             <ContextMenuSeparator />
           </>
         )}
