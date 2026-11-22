@@ -74,31 +74,45 @@ export function layoutTree(node: TileNode | null, rect: Rect, gap: number, out =
   return out;
 }
 
+/** The side of a tile a dropped window takes. */
+export type DropSide = 'left' | 'right' | 'top' | 'bottom';
+
+/**
+ * The side of `r` a point is nearest, measured as a share of its width and
+ * height, so each side gets the triangle between its edge and the tile's
+ * center, whatever the tile's shape.
+ */
+export function dropSide(r: Rect, x: number, y: number): DropSide {
+  const u = r.width > 0 ? (x - r.x) / r.width : 0.5;
+  const v = r.height > 0 ? (y - r.y) / r.height : 0.5;
+  const sides: [DropSide, number][] = [['left', u], ['right', 1 - u], ['top', v], ['bottom', 1 - v]];
+  return sides.reduce((best, side) => (side[1] < best[1] ? side : best))[0];
+}
+
+/** The half of `r` a window dropped on its `side` takes. */
+export function dropRect(r: Rect, side: DropSide, gap: number): Rect {
+  const [a, b] = splitRects(r, side === 'left' || side === 'right' ? 'h' : 'v', 0.5, gap);
+  return side === 'left' || side === 'top' ? a : b;
+}
+
 /**
  * Add a window to a tree, splitting `target`'s tile (or, without one in the
  * tree, the last tile) in two, the new window taking the right or bottom half.
- * On a drop, split the tile nearest the pointer and give it the pointer's half.
+ * Dropped on a side of the tile (`side`), it takes that half instead.
  */
-export function insertLeaf(node: TileNode | null, id: string, target: string | null, rect: Rect, gap: number, drop?: { x: number; y: number }): TileNode {
+export function insertLeaf(node: TileNode | null, id: string, target: string | null, rect: Rect, gap: number, side?: DropSide): TileNode {
   const leaf: TileNode = { leaf: id };
   if (!node) return leaf;
-  const tiles = layoutTree(node, rect, gap);
-  let victim = target && tiles.has(target) ? target : treeLeaves(node).at(-1)!;
-  if (drop) {
-    let best = Infinity;
-    for (const [candidate, r] of tiles) {
-      const dx = Math.max(r.x - drop.x, drop.x - r.x - r.width, 0);
-      const dy = Math.max(r.y - drop.y, drop.y - r.y - r.height, 0);
-      const distance = dx * dx + dy * dy;
-      if (distance < best) {
-        best = distance;
-        victim = candidate;
-      }
-    }
+  const leaves = treeLeaves(node);
+  const victim = target !== null && leaves.includes(target) ? target : leaves[leaves.length - 1];
+  let split: 'h' | 'v';
+  if (side) {
+    split = side === 'left' || side === 'right' ? 'h' : 'v';
+  } else {
+    const at = layoutTree(node, rect, gap).get(victim) ?? rect;
+    split = at.width >= at.height ? 'h' : 'v';
   }
-  const at = tiles.get(victim)!;
-  const split = at.width > at.height ? 'h' : 'v';
-  const first = drop && (split === 'h' ? drop.x < at.x + at.width / 2 : drop.y < at.y + at.height / 2);
+  const first = side === 'left' || side === 'top';
   const replace = (n: TileNode): TileNode => {
     if ('leaf' in n) return n.leaf === victim ? { split, ratio: 0.5, a: first ? leaf : n, b: first ? n : leaf } : n;
     const a = replace(n.a);

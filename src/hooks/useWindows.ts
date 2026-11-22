@@ -5,6 +5,7 @@ import { closeIntercepted } from '@/lib/closeGuards';
 import {
   areaAt,
   areaFor,
+  contains,
   EVEN_SPLIT,
   primaryArea,
   snapRect,
@@ -26,6 +27,8 @@ import {
   type WorkspaceTransitionSpec,
 } from '@/lib/workspaceTransition';
 import {
+  dropRect,
+  dropSide,
   insertLeaf,
   layoutTree,
   removeLeaf,
@@ -1458,6 +1461,14 @@ export function useWindows(
     }
   }, [getAreas, maximize, minimize, moveToMonitor, swapTiles, tile, unmaximize]);
 
+  /**
+   * Where a tiled window dragged to (x, y) would go: onto the side of the
+   * tile under the pointer, as the tiles are on screen now (the dragged one
+   * aside), that the pointer is nearest; or, onto a monitor with no tiles,
+   * the whole of it. Null when the drop would change nothing (back on its
+   * own tile). `preview` is the half of the target it shows, and `tree` the
+   * layout after the drop.
+   */
   const planDrop = useCallback((s: WmState, id: string, x: number, y: number) => {
     const areas = getAreas();
     const w = s.windows.find((w) => w.id === id);
@@ -1468,13 +1479,33 @@ export function useWindows(
     const key = treeKey(to.id, workspace);
     const { gap } = getTiling();
     const rect = workspaceTileRect(to, gap, workspace);
-    const remaining = removeLeaf(s.trees[key] ?? null, id);
-    const tree = insertLeaf(remaining, id, null, rect, gap, { x, y });
-    return { from, to, key, tree, rect: layoutTree(tree, rect, gap).get(id)! };
+    const before = s.trees[key] ?? null;
+    const shown = layoutTree(before, rect, gap);
+    const own = shown.get(id);
+    if (own && contains(own, x, y)) return null;
+    shown.delete(id);
+    if (shown.size === 0) {
+      const tree: TileNode = { leaf: id };
+      return from.id === to.id ? null : { from, to, key, tree, preview: rect };
+    }
+    let target = '';
+    let best = Infinity;
+    for (const [candidate, r] of shown) {
+      const dx = Math.max(r.x - x, x - r.x - r.width, 0);
+      const dy = Math.max(r.y - y, y - r.y - r.height, 0);
+      if (dx * dx + dy * dy < best) {
+        best = dx * dx + dy * dy;
+        target = candidate;
+      }
+    }
+    const at = shown.get(target)!;
+    const side = dropSide(at, x, y);
+    const tree = insertLeaf(removeLeaf(before, id), id, target, rect, gap, side);
+    return { from, to, key, tree, preview: dropRect(at, side, gap) };
   }, [getAreas, getTiling]);
 
   const previewDrop = useCallback((id: string, x: number, y: number) =>
-    planDrop(stateRef.current, id, x, y)?.rect ?? null, [planDrop]);
+    planDrop(stateRef.current, id, x, y)?.preview ?? null, [planDrop]);
 
   const dropTile = useCallback((id: string, x: number, y: number) => {
     update((s) => {
