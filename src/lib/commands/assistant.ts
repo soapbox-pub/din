@@ -1,5 +1,5 @@
 import { getAssistantBridge, type SkillInfo, type SkillSettings } from '@/lib/assistant';
-import { isRemovableSource, skillSourceDetail, skillSourceName } from '@/lib/assistantSkills';
+import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceName } from '@/lib/assistantSkills';
 import { connectClaudeProvider } from '@/lib/claudeProvider';
 import { getFsBridge } from '@/lib/fs';
 import { CommandError, type Area } from './types';
@@ -146,14 +146,17 @@ export const assistantArea: Area = {
     command(
       'assistant',
       'remove-skill-folder',
-      'Stop OpenCode looking for skills in a folder that was added; the folder and its skills stay where they are',
+      'Stop OpenCode looking for skills in a folder that was added, as Stop Using This Folder does in Settings → Assistant (asks on screen first); the folder and its skills stay where they are',
       [{ name: 'folder', type: 'string', positional: true, help: 'The folder, as din assistant skills names it or by its path' }],
-      async (args) => {
+      async (args, ctx) => {
         const bridge = assistant();
         const home = await getFsBridge()?.homedir().catch(() => undefined);
         const sources = (await call(bridge.skills())).sources.filter(isRemovableSource);
         const query = args.string('folder').replace(/(.)\/+$/, '$1');
         const source = pick(sources, query, (s) => [s.entry, s.path, skillSourceName(s, home)], 'added folder');
+        const wording = removeSourceWording(source, home);
+        const ok = await ctx.confirm({ title: wording.title, description: wording.description, action: wording.action, destructive: true });
+        if (!ok) throw new CommandError('You didn’t allow it');
         const settings = await call(bridge.changeSkills({ op: 'removeFolder', entry: source.entry! }));
         return { data: settings };
       },

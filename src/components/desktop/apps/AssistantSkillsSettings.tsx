@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronRight,
@@ -11,10 +11,21 @@ import {
   MoreHorizontal,
   Package,
   Plus,
-  ToggleLeft,
-  ToggleRight,
+  Power,
+  PowerOff,
+  RotateCw,
   type LucideIcon,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -25,13 +36,14 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { subscribeAssistantEvents, useAssistantStatus, useHomeDirectory } from '@/hooks/useAssistant';
 import { useToast } from '@/hooks/useToast';
 import { cleanAssistantError, getAssistantBridge, tildify, type SkillChange, type SkillInfo, type SkillSettings, type SkillSource } from '@/lib/assistant';
-import { isRemovableSource, skillLocation, skillSourceDetail, skillSourceName, SKILLS_QUERY_KEY } from '@/lib/assistantSkills';
+import { isRemovableSource, removeSourceWording, skillLocation, skillSourceBadge, skillSourceDetail, skillSourceName, SKILLS_QUERY_KEY } from '@/lib/assistantSkills';
 import { cn } from '@/lib/utils';
+import { StatusPill } from '@/shared/appChrome';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
 import { SettingsToken } from '@/shared/settingsChrome';
 
 /** One thing a row's ⋯ menu and its right-click menu both offer. */
-type Action = { key: string; label: string; icon: LucideIcon; run: () => void; disabled?: boolean } | 'separator';
+type Action = { key: string; label: string; icon: LucideIcon; run: () => void; disabled?: boolean; destructive?: boolean } | 'separator';
 
 const SOURCE_ICONS: Record<SkillSource['kind'], LucideIcon> = {
   folder: Folder,
@@ -74,8 +86,11 @@ export function SkillsSettings() {
   const { pickFile } = useFilePicker();
   const { open } = useWindowActions();
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  /** The folder whose removal is being asked about. */
+  const [removing, setRemoving] = useState<SkillSource | null>(null);
+  const switchIds = useId();
 
-  const { data: settings, error } = useQuery({
+  const { data: settings, error, isFetching, refetch } = useQuery({
     queryKey: SKILLS_QUERY_KEY,
     queryFn: () => bridge!.skills(),
     enabled: ready && bridge !== undefined,
@@ -138,18 +153,20 @@ export function SkillsSettings() {
       if (actions.length > 0) actions.push('separator');
       const ids = source.skills.map((skill) => skill.id);
       actions.push(
-        { key: 'on', label: 'Turn All On', icon: ToggleRight, disabled: locked || busy || source.skills.every((s) => s.enabled), run: () => setEnabled(ids, true) },
-        { key: 'off', label: 'Turn All Off', icon: ToggleLeft, disabled: locked || busy || source.skills.every((s) => !s.enabled), run: () => setEnabled(ids, false) },
+        { key: 'on', label: 'Turn All On', icon: Power, disabled: locked || busy || source.skills.every((s) => s.enabled), run: () => setEnabled(ids, true) },
+        { key: 'off', label: 'Turn All Off', icon: PowerOff, disabled: locked || busy || source.skills.every((s) => !s.enabled), run: () => setEnabled(ids, false) },
       );
     }
     if (isRemovableSource(source)) {
       if (actions.length > 0) actions.push('separator');
       actions.push({
         key: 'remove',
-        label: source.kind === 'catalog' ? 'Stop Using This Catalog' : 'Stop Using This Folder',
+        label: removeSourceWording(source).menu,
         icon: FolderMinus,
         disabled: locked || busy,
-        run: () => change.mutate({ op: 'removeFolder', entry: source.entry! }),
+        destructive: true,
+        // Asks first, from either menu.
+        run: () => setRemoving(source),
       });
     }
     return actions;
@@ -162,7 +179,7 @@ export function SkillsSettings() {
       {
         key: 'toggle',
         label: skill.enabled ? 'Turn Off' : 'Turn On',
-        icon: skill.enabled ? ToggleLeft : ToggleRight,
+        icon: skill.enabled ? PowerOff : Power,
         disabled: locked || busy,
         run: () => setEnabled([skill.id], !skill.enabled),
       },
@@ -178,7 +195,7 @@ export function SkillsSettings() {
             Instructions the assistant picks up when a task calls for them, kept in folders. One that’s off is hidden from it.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="shrink-0" disabled={!settings || locked || busy} onClick={() => void addFolder()}>
+        <Button variant="outline" size="sm" disabled={!settings || locked || busy} onClick={() => void addFolder()}>
           <Plus className="size-4.5" strokeWidth={1.75} aria-hidden /> Add folder
         </Button>
       </div>
@@ -188,6 +205,17 @@ export function SkillsSettings() {
           <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
           <span className="break-words">{settings.error}. Skills can be changed once it’s mended.</span>
         </p>
+      )}
+
+      {settings && error && !settings.error && (
+        // The list below is what was last read; say the refresh failed.
+        <div role="alert" className="flex items-center gap-2 px-1 text-xs text-destructive">
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 break-words">Couldn’t refresh the skills: {cleanAssistantError(error)}</span>
+          <Button variant="ghost" size="xs" className="shrink-0 text-foreground" disabled={isFetching} onClick={() => void refetch()}>
+            <RotateCw className={cn(isFetching && 'motion-safe:animate-spin')} aria-hidden /> Try again
+          </Button>
+        </div>
       )}
 
       {status && !ready ? (
@@ -204,10 +232,11 @@ export function SkillsSettings() {
       ) : settings.sources.length === 0 ? (
         <p className="px-6 py-8 text-center text-sm text-muted-foreground">No skills yet. Add a folder that has some.</p>
       ) : (
-        settings.sources.map((source) => {
+        settings.sources.map((source, sourceIndex) => {
           const key = sourceKey(source);
           const isOpen = opened.has(key);
           const name = skillSourceName(source, home);
+          const badge = skillSourceBadge(source);
           const actions = sourceActions(source);
           return (
             <ul key={key} className={settingsGroup} aria-label={name}>
@@ -236,8 +265,11 @@ export function SkillsSettings() {
                       />
                       <SettingsToken icon={SOURCE_ICONS[source.kind]} />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium" title={source.path ?? source.entry ?? undefined}>
-                          {name}
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-medium" title={source.path ?? source.entry ?? undefined}>
+                            {name}
+                          </span>
+                          {badge && <StatusPill title={badge.title}>{badge.label}</StatusPill>}
                         </span>
                         <span className={cn('block truncate text-xs', source.missing ? 'text-warning' : 'text-muted-foreground')}>
                           {skillSourceDetail(source)}
@@ -256,7 +288,7 @@ export function SkillsSettings() {
                             a === 'separator' ? (
                               <DropdownMenuSeparator key={`separator-${i}`} />
                             ) : (
-                              <DropdownMenuItem key={a.key} disabled={a.disabled} onSelect={a.run}>
+                              <DropdownMenuItem key={a.key} disabled={a.disabled} variant={a.destructive ? 'destructive' : 'default'} onSelect={a.run}>
                                 <a.icon />
                                 {a.label}
                               </DropdownMenuItem>
@@ -272,39 +304,64 @@ export function SkillsSettings() {
                 </ContextMenuContent>
               </ContextMenu>
               {isOpen &&
-                source.skills.map((skill) => (
-                  <ContextMenu key={skill.id}>
-                    <ContextMenuTrigger asChild>
-                      <li className="flex items-center justify-between gap-4 py-2.5 pr-4 pl-12">
-                          <div className="min-w-0">
-                          <label htmlFor={`skill-${skill.id}`} className="flex min-w-0 cursor-pointer items-baseline gap-2 text-sm">
-                            <span className="truncate">{skill.name}</span>
-                              {skill.name !== skill.id && <code className="truncate font-mono text-xs text-muted-foreground">{skill.id}</code>}
-                          </label>
-                          {skill.description && (
-                            <p className="line-clamp-2 text-xs text-muted-foreground" title={skill.description}>
-                              {skill.description}
-                            </p>
-                          )}
-                        </div>
-                        <Switch
-                          id={`skill-${skill.id}`}
-                          className="shrink-0"
-                          checked={skill.enabled}
-                          disabled={locked || busy}
-                          onCheckedChange={(enabled) => setEnabled([skill.id], enabled)}
-                        />
-                      </li>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">
-                      <MenuItems actions={skillActions(skill)} />
-                    </ContextMenuContent>
-                  </ContextMenu>
-                ))}
+                source.skills.map((skill, skillIndex) => {
+                  // Unique even where two sources list the same id.
+                  const switchId = `${switchIds}-${sourceIndex}-${skillIndex}`;
+                  return (
+                    <ContextMenu key={skill.id}>
+                      <ContextMenuTrigger asChild>
+                        <li className="flex items-center gap-3 py-2.5 pr-4 pl-3" data-skill={skill.id}>
+                          {/* As wide as the folder's chevron and icon, so the name lines up with the folder's. */}
+                          <span aria-hidden className="size-4.5 shrink-0" />
+                          <span aria-hidden className="size-8 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <label htmlFor={switchId} className="block cursor-pointer truncate text-sm" title={skill.name !== skill.id ? skill.id : undefined}>
+                              {skill.name}
+                            </label>
+                            {skill.description && (
+                              <p className="line-clamp-2 text-xs text-muted-foreground" title={skill.description}>
+                                {skill.description}
+                              </p>
+                            )}
+                          </div>
+                          <Switch
+                            id={switchId}
+                            className="ml-1 shrink-0"
+                            checked={skill.enabled}
+                            disabled={locked || busy}
+                            onCheckedChange={(enabled) => setEnabled([skill.id], enabled)}
+                          />
+                        </li>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48">
+                        <MenuItems actions={skillActions(skill)} />
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })}
             </ul>
           );
         })
       )}
+
+      <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
+        <AlertDialogContent>
+          {removing && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{removeSourceWording(removing).title}</AlertDialogTitle>
+                <AlertDialogDescription>{removeSourceWording(removing, home).description}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={() => change.mutate({ op: 'removeFolder', entry: removing.entry! })}>
+                  {removeSourceWording(removing).action}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -314,7 +371,7 @@ function MenuItems({ actions }: { actions: Action[] }) {
     a === 'separator' ? (
       <ContextMenuSeparator key={`separator-${i}`} />
     ) : (
-      <ContextMenuItem key={a.key} disabled={a.disabled} onSelect={a.run}>
+      <ContextMenuItem key={a.key} disabled={a.disabled} variant={a.destructive ? 'destructive' : 'default'} onSelect={a.run}>
         <a.icon aria-hidden />
         {a.label}
       </ContextMenuItem>

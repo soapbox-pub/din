@@ -32,6 +32,30 @@ export function isRemovableSource(source: SkillSource): boolean {
 }
 
 /**
+ * The tag beside a source that can't be taken away, saying why: a folder
+ * OpenCode always looks in, or skills that came with Din or OpenCode.
+ */
+export function skillSourceBadge(source: SkillSource): { label: string; title: string } | null {
+  if (source.kind === 'default') return { label: 'Default', title: 'OpenCode always looks for skills here' };
+  if (source.kind === 'din' || source.kind === 'opencode') return { label: 'Built in', title: 'These come with it and can’t be removed, only turned off' };
+  return null;
+}
+
+/** How taking a folder or catalog away is put, in its menus, the question before it, and `din assistant`. */
+export function removeSourceWording(source: SkillSource, home?: string): { menu: string; title: string; description: string; action: string } {
+  const catalog = source.kind === 'catalog';
+  const name = skillSourceName(source, home);
+  return {
+    menu: catalog ? 'Stop Using This Catalog' : 'Stop Using This Folder',
+    title: catalog ? 'Stop using this catalog?' : 'Stop using this folder?',
+    description: catalog
+      ? `The assistant won’t get skills from ${name} any more, here or in a Terminal’s opencode, until you add it again.`
+      : `The assistant won’t find the skills in ${name} any more, here or in a Terminal’s opencode, until you add the folder again. The folder and its files stay where they are.`,
+    action: catalog ? 'Stop Using It' : 'Stop Using Folder',
+  };
+}
+
+/**
  * What to show in Files for a skill: the folder it's in and its name there
  * (a skill's own folder, or its lone Markdown file). Null for one built
  * into OpenCode, which isn't a file.
