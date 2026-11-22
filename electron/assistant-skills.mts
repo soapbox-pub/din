@@ -7,9 +7,11 @@
 // shows here. Folders are its `skills` list. A skill that's off is a
 // `permissions` rule denying it by its id, which hides it from the model and
 // refuses loading it; the files stay where they are. OpenCode's API reads
-// the config but changes none of this, so the file is edited in place
-// (jsonc.mts), its comments and layout kept. OpenCode watches it and takes
-// the change without restarting.
+// the config but changes none of this, so the file is edited in place with
+// Microsoft's jsonc-parser (VS Code's), its comments and layout kept, and
+// replaced whole (written beside it, then renamed over it) so a crash never
+// leaves half a config. OpenCode watches it and takes the change without
+// restarting.
 //
 // The skills themselves are asked of OpenCode's server (/api/skill), which
 // knows what it found and which of two with the same id it took.
@@ -18,9 +20,12 @@
 // syntax only, like the rest of electron/.
 
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { appendJsoncItem, jsoncProp, jsoncValue, parseJsonc, removeJsoncItem, setJsoncProp, type JsoncNode } from './jsonc.mts';
+import type { FormattingOptions, JSONPath, ParseError } from 'jsonc-parser';
+
+const require = createRequire(import.meta.url);
 
 const HOME = os.homedir();
 const CONFIG_DIR = path.join(process.env.XDG_CONFIG_HOME || path.join(HOME, '.config'), 'opencode');
@@ -78,13 +83,13 @@ type Reply = { ok: true; status: number; data: unknown } | { ok: false; status: 
 /** A GET of OpenCode's API (assistant.mts). */
 type Get = (apiPath: string) => Promise<Reply>;
 
-type ObjectNode = JsoncNode & { type: 'object' };
-type ArrayNode = JsoncNode & { type: 'array' };
+type Config = Record<string, unknown>;
 
+/** A config file: its text, and what it says. */
 interface Doc {
   file: string;
   text: string;
-  root: ObjectNode;
+  config: Config;
 }
 
 interface Rule {
@@ -92,19 +97,36 @@ interface Rule {
   effect: string;
 }
 
+let jsoncModule: typeof import('jsonc-parser') | null = null;
+
+/**
+ * The JSONC library, loaded the first time the skills are asked for: a
+ * computer that never opens Settings → Assistant doesn't hold it.
+ */
+function jsonc(): typeof import('jsonc-parser') {
+  jsoncModule ??= require('jsonc-parser') as typeof import('jsonc-parser');
+  return jsoncModule;
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isObject(value: unknown): value is Config {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function parseDoc(file: string, text: string): Doc {
-  let root: JsoncNode;
-  try {
-    root = parseJsonc(text);
-  } catch (error) {
-    throw new Error(`${tildify(file)} can’t be read: ${messageOf(error)}`, { cause: error });
+  const { parse, printParseErrorCode } = jsonc();
+  const errors: ParseError[] = [];
+  const config: unknown = parse(text, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length > 0) {
+    const [first] = errors;
+    const line = text.slice(0, first.offset).split('\n').length;
+    throw new Error(`${tildify(file)} can’t be read: ${printParseErrorCode(first.error)} on line ${line}`);
   }
-  if (root.type !== 'object') throw new Error(`${tildify(file)} isn’t a config`);
-  return { file, text, root };
+  if (!isObject(config)) throw new Error(`${tildify(file)} isn’t a config`);
+  return { file, text, config };
 }
 
 /** The global config files there are, the one that wins last. */
@@ -145,20 +167,27 @@ function resolveEntry(entry: string): string {
   return path.resolve(HOME, entry);
 }
 
-/** The lists of a config's `skills`: the list itself, or an older config's `paths` and `urls`. */
-function folderLists(root: ObjectNode): ArrayNode[] {
-  const skills = jsoncProp(root, 'skills');
-  if (skills?.type === 'array') return [skills];
-  if (skills?.type !== 'object') return [];
-  return ['paths', 'urls'].map((key) => jsoncProp(skills, key)).filter((node): node is ArrayNode => node?.type === 'array');
+/** Where a config's `skills` lists are: the list itself, or an older config's `paths` and `urls`. */
+function folderLists(config: Config): JSONPath[] {
+  const skills = config.skills;
+  if (Array.isArray(skills)) return [['skills']];
+  if (!isObject(skills)) return [];
+  return ['paths', 'urls'].filter((key) => Array.isArray(skills[key])).map((key) => ['skills', key]);
+}
+
+/** The value at a path of a config. */
+function at(config: Config, where: JSONPath): unknown {
+  let value: unknown = config;
+  for (const key of where) value = (value as Record<string | number, unknown> | undefined)?.[key];
+  return value;
 }
 
 function folderEntries(docs: Doc[]): string[] {
   const entries: string[] = [];
   for (const doc of docs) {
-    for (const list of folderLists(doc.root)) {
-      for (const item of list.items) {
-        if (item.type === 'value' && typeof item.value === 'string' && item.value && !entries.includes(item.value)) entries.push(item.value);
+    for (const list of folderLists(doc.config)) {
+      for (const item of at(doc.config, list) as unknown[]) {
+        if (typeof item === 'string' && item && !entries.includes(item)) entries.push(item);
       }
     }
   }
@@ -166,9 +195,9 @@ function folderEntries(docs: Doc[]): string[] {
 }
 
 /** A `permissions` entry that's about one skill, or skills by a pattern. */
-function skillRule(node: JsoncNode): Rule | null {
-  if (node.type !== 'object') return null;
-  const { action, resource, effect } = jsoncValue(node) as Record<string, unknown>;
+function skillRule(item: unknown): Rule | null {
+  if (!isObject(item)) return null;
+  const { action, resource, effect } = item;
   if (typeof action !== 'string' || !matches(action, 'skill')) return null;
   if (typeof resource !== 'string' || (effect !== 'allow' && effect !== 'ask' && effect !== 'deny')) return null;
   return { resource, effect };
@@ -182,17 +211,17 @@ function skillRule(node: JsoncNode): Rule | null {
 function skillRules(docs: Doc[]): Rule[] {
   const rules: Rule[] = [];
   for (const doc of docs) {
-    const legacy = jsoncProp(doc.root, 'permission');
-    const skill = legacy ? jsoncProp(legacy, 'skill') : null;
-    if (skill?.type === 'value' && typeof skill.value === 'string') rules.push({ resource: '*', effect: skill.value });
-    else if (skill?.type === 'object') {
-      for (const prop of skill.props) {
-        if (prop.value.type === 'value' && typeof prop.value.value === 'string') rules.push({ resource: prop.key, effect: prop.value.value });
+    const legacy = doc.config.permission;
+    const skill = isObject(legacy) ? legacy.skill : undefined;
+    if (typeof skill === 'string') rules.push({ resource: '*', effect: skill });
+    else if (isObject(skill)) {
+      for (const [resource, effect] of Object.entries(skill)) {
+        if (typeof effect === 'string') rules.push({ resource, effect });
       }
     }
-    const list = jsoncProp(doc.root, 'permissions');
-    if (list?.type === 'array') {
-      for (const item of list.items) {
+    const list = doc.config.permissions;
+    if (Array.isArray(list)) {
+      for (const item of list) {
         const rule = skillRule(item);
         if (rule) rules.push(rule);
       }
@@ -213,92 +242,241 @@ function isDenied(rules: Rule[], id: string): boolean {
   return rules.findLast((rule) => matches(rule.resource, id))?.effect === 'deny';
 }
 
-/** The indent a file's properties have, two spaces where it doesn't say. */
-function indentUnit(text: string): string {
-  return /\n([ \t]+)"/.exec(text)?.[1] ?? '  ';
+/** How a file is laid out, for what's added to it: its indent (two spaces where it doesn't say) and line ends. */
+function formatting(text: string): FormattingOptions {
+  const indent = /\n([ \t]+)"/.exec(text)?.[1] ?? '  ';
+  const tabs = indent.startsWith('\t');
+  return { insertSpaces: !tabs, tabSize: tabs ? 1 : indent.length, eol: text.includes('\r\n') ? '\r\n' : '\n' };
 }
 
+/**
+ * Where a path really is, following links (to a file in the user's
+ * dotfiles, say), even to one that isn't there yet.
+ */
+function realFile(file: string): string {
+  let target = file;
+  for (let hops = 0; hops < 40; hops++) {
+    let link: string;
+    try {
+      link = fs.readlinkSync(target);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EINVAL' || code === 'ENOENT') {
+        // Not a link: its folder may be one, though.
+        try {
+          return path.join(fs.realpathSync(path.dirname(target)), path.basename(target));
+        } catch {
+          return target;
+        }
+      }
+      throw error;
+    }
+    target = path.resolve(path.dirname(target), link);
+  }
+  throw new Error(`${tildify(file)} links in a circle`);
+}
+
+/**
+ * Replace a config file whole: written beside where it really is (through
+ * any link), then renamed over it, so a crash leaves the old one or the
+ * new, never half of either, and a link stays a link. It keeps its mode.
+ */
 function write(file: string, text: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  // Written through, not renamed over: the file may be a link into the
-  // user's dotfiles.
-  fs.writeFileSync(file, text);
-}
-
-/** A file's text and what it parses to, a new config where there's no file. */
-function open(file: string): Doc {
-  let text: string;
+  const target = realFile(file);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  let mode: number | undefined;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    mode = fs.statSync(target).mode & 0o7777;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    text = `{\n  "$schema": ${JSON.stringify(SCHEMA)}\n}\n`;
   }
-  return parseDoc(file, text);
-}
-
-/** Add `json` to the list at `key` of a file's config, making the list where there's none. */
-function appendTo(file: string, key: string, json: string, into?: (root: ObjectNode) => { object: ObjectNode; key: string } | null): void {
-  const doc = open(file);
-  const target = into?.(doc.root) ?? { object: doc.root, key };
-  const list = jsoncProp(target.object, target.key);
-  if (list && list.type !== 'array') throw new Error(`“${target.key}” in ${tildify(file)} isn’t a list`);
-  const unit = indentUnit(doc.text);
-  const depth = target.object === doc.root ? 1 : 2;
-  const text = list
-    ? appendJsoncItem(doc.text, list, json)
-    : setJsoncProp(doc.text, target.object, target.key, `[\n${unit.repeat(depth + 1)}${json}\n${unit.repeat(depth)}]`);
-  parseDoc(file, text);
-  write(file, text);
-}
-
-/** Take out of a file's lists every item `match` picks, one at a time since each moves the rest. */
-function removeFrom(file: string, lists: (root: ObjectNode) => ArrayNode[], match: (node: JsoncNode) => boolean): void {
-  let doc = open(file);
-  let changed = false;
-  for (;;) {
-    let next: string | null = null;
-    for (const list of lists(doc.root)) {
-      const index = list.items.findIndex(match);
-      if (index >= 0) {
-        next = removeJsoncItem(doc.text, list, index);
-        break;
-      }
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    const fd = fs.openSync(temp, 'wx', mode ?? 0o644);
+    try {
+      fs.writeFileSync(fd, text);
+      if (mode !== undefined) fs.fchmodSync(fd, mode);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
     }
-    if (next === null) break;
-    doc = parseDoc(file, next);
-    changed = true;
+    fs.renameSync(temp, target);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
   }
-  if (changed) write(file, doc.text);
 }
 
-function permissionLists(root: ObjectNode): ArrayNode[] {
-  const list = jsoncProp(root, 'permissions');
-  return list?.type === 'array' ? [list] : [];
+/**
+ * The changes to make to config files, each file read once and written
+ * once whatever is changed in it: so turning 22 skills off is one write,
+ * and one reload of OpenCode's, not 22.
+ */
+class Edits {
+  readonly docs = new Map<string, Doc>();
+  private readonly changed = new Set<string>();
+
+  constructor(docs: Doc[]) {
+    for (const doc of docs) this.docs.set(doc.file, doc);
+  }
+
+  /** A file as it stands with the changes so far, a new config where there's no file. */
+  doc(file: string): Doc {
+    let doc = this.docs.get(file);
+    if (!doc) {
+      let text: string;
+      try {
+        text = fs.readFileSync(file, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        text = `{\n  "$schema": ${JSON.stringify(SCHEMA)}\n}\n`;
+      }
+      doc = parseDoc(file, text);
+      this.docs.set(file, doc);
+    }
+    return doc;
+  }
+
+  /** Set (or with `undefined`, take out) what's at a path, or with `insert` add it to a list there. */
+  private modify(file: string, where: JSONPath, value: unknown, insert = false): void {
+    const { applyEdits, modify } = jsonc();
+    const doc = this.doc(file);
+    const text = applyEdits(doc.text, modify(doc.text, where, value, { formattingOptions: formatting(doc.text), isArrayInsertion: insert }));
+    this.docs.set(file, parseDoc(file, text));
+    this.changed.add(file);
+  }
+
+  /** Put text in a file, then check it still reads. */
+  private splice(file: string, offset: number, length: number, content: string): void {
+    const { text } = this.doc(file);
+    this.docs.set(file, parseDoc(file, text.slice(0, offset) + content + text.slice(offset + length)));
+    this.changed.add(file);
+  }
+
+  /**
+   * Add an entry after the last in the list or object at `where`: on a line
+   * of its own, indented as the last is, after the last's comma and any
+   * comment on its line (which stays with it), and no other line touched.
+   * False where the last shares its line with something else; jsonc-parser
+   * lays that one out.
+   */
+  private appendAfterLast(file: string, where: JSONPath, entry: (indent: string, unit: string) => string): boolean {
+    const { findNodeAtLocation, parseTree } = jsonc();
+    const { text } = this.doc(file);
+    const root = parseTree(text, [], { allowTrailingComma: true });
+    const container = root && (where.length ? findNodeAtLocation(root, where) : root);
+    const last = container?.children?.at(-1);
+    if (!last) return false;
+    const lineStart = text.lastIndexOf('\n', last.offset - 1) + 1;
+    const indent = text.slice(lineStart, last.offset);
+    if (!/^[ \t]*$/.test(indent)) return false;
+    const end = last.offset + last.length;
+    const rest = /^[ \t]*(,?)[ \t]*(?:\/\/[^\r\n]*)?(?=\r?\n)/.exec(text.slice(end));
+    if (!rest) return false;
+    const { eol, insertSpaces, tabSize } = formatting(text);
+    const unit = insertSpaces ? ' '.repeat(tabSize ?? 2) : '\t';
+    const comma = rest[1] === ',';
+    // A comma after the last where it had none, then the new line, ending in
+    // a comma where the last's did (a trailing one).
+    if (!comma) this.splice(file, end, 0, ',');
+    const lineEnd = end + rest[0].length + (comma ? 0 : 1);
+    this.splice(file, lineEnd, 0, `${eol}${indent}${entry(indent, unit)}${comma ? ',' : ''}`);
+    return true;
+  }
+
+  /** Add `value` to the end of the list at `where`, making the list where there's none. */
+  append(file: string, where: JSONPath, value: unknown): void {
+    const list = at(this.doc(file).config, where);
+    if (list !== undefined && !Array.isArray(list)) throw new Error(`“${where.join('.')}” in ${tildify(file)} isn’t a list`);
+    if (list === undefined) {
+      const key = where.at(-1)!;
+      const { eol } = formatting(this.doc(file).text);
+      const made = this.appendAfterLast(file, where.slice(0, -1), (indent, unit) =>
+        `${JSON.stringify(key)}: [${eol}${indent}${unit}${oneLine(value)}${eol}${indent}]`,
+      );
+      if (!made) this.modify(file, where, [value]);
+    } else if (!this.appendAfterLast(file, where, () => oneLine(value))) {
+      this.modify(file, [...where, -1], value, true);
+    }
+  }
+
+  /**
+   * Take out a list's item that has a line of its own, with the line (and a
+   * comment on it, which was about it), no other line touched: the comma
+   * before it goes too where it was the last and had none. False where it
+   * shares its line; jsonc-parser takes that one out.
+   */
+  private removeLine(file: string, where: JSONPath, index: number): boolean {
+    const { findNodeAtLocation, parseTree } = jsonc();
+    const { text } = this.doc(file);
+    const root = parseTree(text, [], { allowTrailingComma: true });
+    const items = root && findNodeAtLocation(root, where)?.children;
+    const item = items?.[index];
+    if (!items || !item) return false;
+    const lineStart = text.lastIndexOf('\n', item.offset - 1) + 1;
+    if (!/^[ \t]*$/.test(text.slice(lineStart, item.offset))) return false;
+    const end = item.offset + item.length;
+    const rest = /^[ \t]*(,?)[ \t]*(?:\/\/[^\r\n]*)?\r?\n/.exec(text.slice(end));
+    if (!rest) return false;
+    this.splice(file, lineStart, end + rest[0].length - lineStart, '');
+    const previous = items[index - 1];
+    if (index === items.length - 1 && !rest[1] && previous) {
+      const after = previous.offset + previous.length;
+      const comma = /^[ \t]*,/.exec(text.slice(after, lineStart));
+      if (comma) this.splice(file, after + comma[0].length - 1, 1, '');
+    }
+    return true;
+  }
+
+  /** Take out of the list at `where` every item `match` picks. */
+  remove(file: string, where: JSONPath, match: (item: unknown) => boolean): void {
+    const list = at(this.doc(file).config, where);
+    if (!Array.isArray(list)) return;
+    // The last first, so taking one out doesn't move the rest.
+    for (let index = list.length - 1; index >= 0; index--) {
+      if (match(list[index]) && !this.removeLine(file, where, index)) this.modify(file, [...where, index], undefined);
+    }
+  }
+
+  /** Write every file that was changed. */
+  save(): void {
+    for (const file of this.changed) write(file, this.docs.get(file)!.text);
+    this.changed.clear();
+  }
+}
+
+/** A value as JSON on one line, an object's properties spaced as people write them: `{ "a": 1, "b": 2 }`. */
+function oneLine(value: unknown): string {
+  if (!isObject(value)) return JSON.stringify(value);
+  return `{ ${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${JSON.stringify(item)}`).join(', ')} }`;
 }
 
 function setEnabled(ids: string[], enabled: boolean): void {
-  for (const id of ids) {
-    const docs = readDocs();
-    const primary = primaryFile(docs);
-    const exactDeny = (node: JsoncNode) => {
-      if (node.type !== 'object') return false;
-      const rule = jsoncValue(node) as Record<string, unknown>;
-      return rule.action === 'skill' && rule.resource === id && rule.effect === 'deny';
-    };
-    if (enabled) {
-      for (const doc of docs) removeFrom(doc.file, permissionLists, exactDeny);
-      // Still off by a rule for more than this one skill (or an older
-      // config's): ask before loading this one.
-      if (isDenied(skillRules(readDocs()), id)) appendTo(primary, 'permissions', ruleJson(id, 'ask'));
-    } else if (!isDenied(skillRules(docs), id)) {
-      appendTo(primary, 'permissions', ruleJson(id, 'deny'));
+  const docs = readDocs();
+  const edits = new Edits(docs);
+  const primary = primaryFile(docs);
+  if (enabled) {
+    const wanted = new Set(ids);
+    const exactDeny = (item: unknown) =>
+      isObject(item) && item.action === 'skill' && typeof item.resource === 'string' && wanted.has(item.resource) && item.effect === 'deny';
+    for (const doc of docs) edits.remove(doc.file, ['permissions'], exactDeny);
+    // Still off by a rule for more than these (or an older config's): ask
+    // before loading them.
+    const rules = skillRules([...edits.docs.values()]);
+    for (const id of ids) {
+      if (isDenied(rules, id)) edits.append(primary, ['permissions'], rule(id, 'ask'));
+    }
+  } else {
+    const rules = skillRules(docs);
+    for (const id of ids) {
+      if (!isDenied(rules, id)) edits.append(primary, ['permissions'], rule(id, 'deny'));
     }
   }
+  edits.save();
 }
 
-function ruleJson(id: string, effect: 'ask' | 'deny'): string {
-  return `{ "action": "skill", "resource": ${JSON.stringify(id)}, "effect": "${effect}" }`;
+function rule(id: string, effect: 'ask' | 'deny'): Rule & { action: 'skill' } {
+  return { action: 'skill', resource: id, effect };
 }
 
 function sameFolder(a: string, b: string): boolean {
@@ -322,17 +500,21 @@ function addFolder(folder: string): void {
   if (folderEntries(docs).some((entry) => !isUrl(entry) && sameFolder(resolveEntry(entry), target))) {
     throw new Error(`${tildify(target)} is one of the folders already`);
   }
-  appendTo(primaryFile(docs), 'skills', JSON.stringify(tildify(target)), (root) => {
-    // An older config's `skills` is an object, its folders under `paths`.
-    const skills = jsoncProp(root, 'skills');
-    return skills?.type === 'object' ? { object: skills, key: 'paths' } : null;
-  });
+  const edits = new Edits(docs);
+  const file = primaryFile(docs);
+  // An older config's `skills` is an object, its folders under `paths`.
+  edits.append(file, isObject(edits.doc(file).config.skills) ? ['skills', 'paths'] : ['skills'], tildify(target));
+  edits.save();
 }
 
 function removeFolder(entry: string): void {
   const docs = readDocs();
   if (!folderEntries(docs).includes(entry)) throw new Error(`${entry} isn’t one of the folders`);
-  for (const doc of docs) removeFrom(doc.file, folderLists, (node) => node.type === 'value' && node.value === entry);
+  const edits = new Edits(docs);
+  for (const doc of docs) {
+    for (const list of folderLists(doc.config)) edits.remove(doc.file, list, (item) => item === entry);
+  }
+  edits.save();
 }
 
 interface ServerSkill {
