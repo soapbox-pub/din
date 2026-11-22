@@ -75,7 +75,7 @@ import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
 import { DesktopIconLayer } from './icons/DesktopIconLayer';
-import { homeArea, isShown, SCRATCHPAD, useWindows, windowRect, type TilingSettings, type WindowState } from '@/hooks/useWindows';
+import { homeArea, isShown, SCRATCHPAD, SCRATCHPAD_BACKDROP_Z, useWindows, windowRect, windowStackZ, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
@@ -87,9 +87,6 @@ import { restoreCursorTryOn } from '@/lib/cursorTryOn';
 /** How long after a click a window it opens still counts as opened by it. */
 const LAUNCH_POINTER_MS = 2000;
 
-// Inside the workspace's stacking context, between regular and scratchpad windows.
-const SCRATCHPAD_BACKDROP_Z = 500_000;
-const windowStackZ = (w: WindowState) => w.z + (w.workspace === SCRATCHPAD ? SCRATCHPAD_BACKDROP_Z : 0);
 
 /**
  * The windows another one wholly covers: one above it, at rest, whose rect

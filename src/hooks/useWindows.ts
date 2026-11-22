@@ -225,6 +225,23 @@ export function isShown(w: WindowState): boolean {
   return !w.minimized && !w.closing && !w.away;
 }
 
+/** Where windows that aren't tiles stack, inside the workspace: above every tile. */
+const FLOATING_LAYER_Z = 250_000;
+/** Where the scratchpad's backdrop sits: above the workspace's windows, below the scratchpad's. */
+export const SCRATCHPAD_BACKDROP_Z = 500_000;
+
+/**
+ * The z-index a window paints at. `z` is the focus order; the layers keep
+ * floating windows (and dialogs, and a window maximized or snapped while
+ * tiling is on) above every tile, as Hyprland does, so focusing a tile, by
+ * hovering it or otherwise, never buries one; and the scratchpad's above
+ * them all. With tiling off nothing is a tile, so it's `z` alone.
+ */
+export function windowStackZ(w: WindowState): number {
+  if (w.workspace === SCRATCHPAD) return w.z + SCRATCHPAD_BACKDROP_Z;
+  return w.z + (w.tiled && !w.maximized ? 0 : FLOATING_LAYER_Z);
+}
+
 /** The focused window: the highest one on screen, or null. */
 export function focusedWindow(windows: WindowState[]): WindowState | null {
   return windows.reduce<WindowState | null>((top, w) => (isShown(w) && (!top || w.z > top.z) ? w : top), null);
