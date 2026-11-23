@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import {
   useInfiniteQuery,
   useMutation,
@@ -1114,6 +1114,33 @@ export function useMarkViewedSession(sessionID: string): void {
 }
 
 const NO_SESSIONS: readonly string[] = [];
+
+/**
+ * For the window showing a conversation: call what this returns as the user
+ * scrolls the conversation or moves the pointer over it. While the
+ * conversation is unread and its latest message is on screen in `scroller`
+ * (the last item of its list), the desktop hears it's been seen, and its
+ * "finished" notification goes.
+ */
+export function useMarkSeenSession(sessionID: string, scroller: RefObject<HTMLElement | null>): () => void {
+  const unread = useUnreadSessions().has(sessionID);
+  // Told once per unread spell, not on every pointer move.
+  const told = useRef(false);
+  useEffect(() => {
+    told.current = false;
+  }, [unread, sessionID]);
+  return useCallback(() => {
+    if (!unread || told.current) return;
+    const el = scroller.current;
+    const last = el?.querySelector('ol[aria-label="Conversation"] > li:last-child');
+    if (!el || !last) return;
+    const view = el.getBoundingClientRect();
+    const box = last.getBoundingClientRect();
+    if (box.bottom <= view.top || box.top >= view.bottom) return;
+    told.current = true;
+    window.din?.assistant.seen(sessionID);
+  }, [unread, sessionID, scroller]);
+}
 
 /** The conversations with unread notifications (an app's side: din.assistant). */
 export function useUnreadSessions(): ReadonlySet<string> {

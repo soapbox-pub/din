@@ -237,6 +237,7 @@ export interface Requests {
   'assistant.setSettings': [Partial<Pick<AssistantSettings, 'enabled' | 'model'>>, void];
   'assistant.follow': [{ sessionID: string }, void];
   'assistant.viewing': [{ sessionID: string | null }, void];
+  'assistant.seen': [{ sessionID: string }, void];
 
   'window.setTitle': [{ title: string | null }, void];
   'window.setIcon': [{ url: string | null }, void];

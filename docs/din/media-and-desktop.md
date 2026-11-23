@@ -179,6 +179,7 @@ din.assistant.onSettingsChange(apply);
 din.assistant.setSettings({ model });     // or { enabled: true }
 din.assistant.follow(sessionID);          // started or written in here: Din says when it finishes
 din.assistant.setViewing(sessionID);      // this window shows it (null: none)
+din.assistant.seen(sessionID);            // its latest message was on screen as the user scrolled or pointed at it
 din.assistant.unread;                     // conversations with unread notifications
 din.assistant.onUnreadChange(mark);
 ```
@@ -186,6 +187,10 @@ din.assistant.onUnreadChange(mark);
 `unread` lists the conversations behind the app's Dock badge: their
 notifications are still in the notification center, unread. The
 Assistant puts a dot by each in its list and tabs (`useUnreadSessions`).
+A conversation's "finished" notification goes once a window in front
+starts showing it, or, when it was already showing it, once the user
+scrolls it or moves the pointer over it with its latest message on screen
+(`seen`, `useMarkSeenSession`).
 
 A conversation Din follows is announced when it finishes, unless the
 window in front shows it; requests and questions likewise. The shared

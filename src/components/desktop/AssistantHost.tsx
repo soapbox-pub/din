@@ -42,7 +42,7 @@ import {
   onToggleAssistantPrompt,
 } from '@/lib/assistantPrompt';
 import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
-import { ASSISTANT_APP_ID, assistantNotificationKey } from '@/lib/assistantNotifications';
+import { ASSISTANT_APP_ID, assistantDoneKey, assistantNotificationKey } from '@/lib/assistantNotifications';
 import { closeNotification, closeNotificationByKey, notify } from '@/lib/notificationCenter';
 import { focusedWindow, type WindowState } from '@/hooks/useWindows';
 import { bundledIconProps } from '@/shared/iconSizes';
@@ -103,10 +103,7 @@ function useDismissWhenViewed() {
   }, [viewed]);
 }
 
-/** The `replaceKey` of a conversation's "done" notification. */
-function doneKey(sessionID: string): string {
-  return assistantNotificationKey(sessionID, 'done');
-}
+const doneKey = assistantDoneKey;
 
 /**
  * Whether the user is looking at this conversation right now: the window

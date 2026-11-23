@@ -11,6 +11,11 @@ export function assistantNotificationKey(sessionID: string, about: string): stri
   return `assistant:${sessionID}:${about}`;
 }
 
+/** The `replaceKey` of a conversation's "finished" notification. */
+export function assistantDoneKey(sessionID: string): string {
+  return assistantNotificationKey(sessionID, 'done');
+}
+
 /**
  * The conversations with unread notifications in the notification center:
  * the ones that make up the Assistant's Dock badge, for its window to mark.

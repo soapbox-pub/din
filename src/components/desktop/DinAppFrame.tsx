@@ -39,8 +39,8 @@ import { useSlowLaunch } from '@/hooks/useSlowLaunch';
 import { setCloseGuard } from '@/lib/closeGuards';
 import { appForFile, dinOpens } from '@/lib/fileTypes';
 import { getFsBridge } from '@/lib/fs';
-import { unreadAssistantSessions } from '@/lib/assistantNotifications';
-import { closeNotification, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
+import { assistantDoneKey, unreadAssistantSessions } from '@/lib/assistantNotifications';
+import { closeNotification, closeNotificationByKey, getNotificationState, notify, subscribeNotifications } from '@/lib/notificationCenter';
 import { setWindowBadge } from '@/lib/appBadges';
 import { powerModeOn, subscribePowerMode, typed } from '@/lib/powerMode';
 import { areaFor } from '@/lib/monitors';
@@ -93,7 +93,7 @@ import {
 } from '@/lib/dinApps';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { decodeLaunchParams } from '@/shared/launch';
-import { readStoredModel, setStoredModel, setViewedSession, subscribeStoredModel, followDinSession } from '@/hooks/useAssistant';
+import { isViewedIn, readStoredModel, setStoredModel, setViewedSession, subscribeStoredModel, followDinSession } from '@/hooks/useAssistant';
 import { setTabDragLabel } from '@/lib/dinDrag';
 import { acceptDrag, dragInfo, finishDrag, registerDrag, setDragPoint, subscribeDrag, currentDrag } from '@/lib/dinDrag';
 import { guestElements, guestsAvailable, isGuestFullscreen } from '@/platform/guest';
@@ -1157,6 +1157,11 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       'assistant.viewing': ({ sessionID }) => {
         need('assistant');
         setViewedSession(windowId, typeof sessionID === 'string' ? sessionID : null);
+      },
+      'assistant.seen': ({ sessionID }) => {
+        need('assistant');
+        // Only for the conversation this window says it shows.
+        if (typeof sessionID === 'string' && isViewedIn(windowId, sessionID)) closeNotificationByKey(assistantDoneKey(sessionID));
       },
 
       'nostr.getPublicKey': async () => {

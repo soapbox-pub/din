@@ -1006,6 +1006,13 @@ export interface DinAssistant {
   /** The conversation this window shows now, or null. */
   setViewing(sessionID: string | null): void;
   /**
+   * The user has seen how this conversation, the one this window shows,
+   * ended (its latest message was on screen as they scrolled it or moved
+   * the pointer over it): its "finished" notification goes, and with it
+   * its unread mark.
+   */
+  seen(sessionID: string): void;
+  /**
    * The conversations with unread notifications in the notification center
    * (the ones behind the app's Dock badge), so the app can mark them.
    */

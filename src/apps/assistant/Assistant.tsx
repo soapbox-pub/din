@@ -73,6 +73,7 @@ import {
   useInterruptSession,
   useMainCheckouts,
   followDinSession,
+  useMarkSeenSession,
   useMarkViewedSession,
   usePendingRequests,
   usePreferredModel,
@@ -1098,6 +1099,7 @@ function Conversation({
   // Set during a smooth jump to the bottom, so the scrolls on the way don't
   // bring the button back.
   const jumping = useRef(false);
+  const markSeen = useMarkSeenSession(sessionID, scrollRef);
   const jumpToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1228,6 +1230,9 @@ function Conversation({
     <div
       tabIndex={-1}
       className="flex min-h-0 flex-1 flex-col outline-none"
+      // Seeing how it ended, with the window already on this tab.
+      onPointerMove={markSeen}
+      onWheel={markSeen}
       onKeyDown={(event) => {
         if (event.key.toLowerCase() !== 'b' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
         if (!running) return;
@@ -1242,6 +1247,7 @@ function Conversation({
           ref={scrollRef}
           tabIndex={-1}
           onKeyDown={(e) => {
+            markSeen();
             // Home goes to the start of the conversation, not of what's loaded.
             if (e.key !== 'Home' || e.altKey || e.metaKey || e.shiftKey || !transcript?.more) return;
             toTop.current = true;

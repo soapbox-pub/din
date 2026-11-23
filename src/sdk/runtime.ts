@@ -1179,6 +1179,9 @@ export function installDin(transport: Transport): void {
     setViewing: (sessionID) => {
       if (permissions.has('assistant')) tell('assistant.viewing', { sessionID });
     },
+    seen: (sessionID) => {
+      if (permissions.has('assistant')) tell('assistant.seen', { sessionID });
+    },
   };
 
   // ---- the App Store's (store) ----
