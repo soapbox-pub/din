@@ -138,7 +138,7 @@ async function readPsbt(params: Record<string, unknown>, account: string): Promi
  * the user when it has to, and signs with the account's signer.
  *
  * - window.nostr's own methods act as the account signed in to Din, as they
- *   always have, and pages hear when it changes. A client that holds its
+ *   always have. A client that holds its
  *   accounts itself asks for one with requestPublicKey() (the user picks
  *   which) and acts as it through getSigner(pubkey), which switching Din's
  *   account doesn't change. A site holds an account when that account's
@@ -251,9 +251,9 @@ export function NostrBridgeHost() {
     if (decision !== 'ask') settle(head, { choice: decision, remember: false });
   }, [head, settle]);
 
-  // Pages hear about account switches, and questions asked as the previous
-  // account are dropped, except those from a signer pinned to its own
-  // (getSigner) or a site asking for an account (requestPublicKey).
+  // Questions asked as the previous account are dropped on a switch, except
+  // those from a signer pinned to its own (getSigner) or a site asking for
+  // an account (requestPublicKey).
   const pubkey = user?.pubkey;
   const previousPubkey = useRef(pubkey);
   useEffect(() => {
@@ -264,7 +264,6 @@ export function NostrBridgeHost() {
       if ((item.request.params as { account?: unknown } | undefined)?.account !== undefined) continue;
       settle(item, { choice: 'dismiss', remember: false });
     }
-    getNostrHostBridge()?.accountChanged();
   }, [pubkey, settle]);
 
   useEffect(() => {

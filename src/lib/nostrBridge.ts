@@ -95,8 +95,6 @@ export interface NostrHostBridge {
   onPageChanged(callback: (wcId: number) => void): () => void;
   /** Answer a relayed request. */
   respond(response: NostrBridgeResponse): void;
-  /** Tell every page with window.nostr that the account changed. */
-  accountChanged(): void;
 }
 
 declare global {

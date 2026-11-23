@@ -4006,9 +4006,6 @@ expose('nostrHost', {
    * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string, errorName?: string, remember?: unknown }} response
    */
   respond: (response) => ipcRenderer.send('nostr-bridge:response', response),
-
-  /** Tell every page with window.nostr that the account changed. */
-  accountChanged: () => ipcRenderer.send('nostr-bridge:account-changed'),
 });
 
 // Din as a remote signer (window.dinos.bunkerHost), backed by electron/bunker.mts:

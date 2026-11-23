@@ -11,8 +11,10 @@ desktop's account.
 ## Din's account, and the accounts a site holds
 
 `window.nostr`'s own methods act as the account signed in to Din, as they
-always have: switching Din's account switches them, and pages hear about it
-(the `nlAuth` event with `{ type: 'accountChanged' }` that nostr-login uses).
+always have: switching Din's account switches them. Pages aren't told: no
+account-change event is widely used (nostr-login's `nlAuth` is about its own
+logins, and Alby's `window.nostr.on('accountChanged')` is in few live
+clients).
 A client that wants to hold its accounts itself, and keep acting as one
 while the user switches Din, feature-detects `getSigner` and uses the two
 additions.

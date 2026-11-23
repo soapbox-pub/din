@@ -4587,18 +4587,6 @@ function registerNostrBridge(): void {
     );
   });
 
-  // The shell switched accounts: every page with window.nostr hears about it.
-  // window.nostr's own methods act as Din's account; a signer from getSigner
-  // stays with its own.
-  ipcMain.on('nostr-bridge:account-changed', (event) => {
-    if (!isShellSender(event)) return;
-    for (const contents of webContents.getAllWebContents()) {
-      if (contents.isDestroyed() || contents.getType() !== 'webview') continue;
-      if (contents.session !== browserSession()) continue;
-      contents.send('nostr-bridge:account-changed');
-    }
-  });
-
   registerBunkerHandlers({ assertShellSender, sendToShell, relay: relayNostrRequest });
 }
 

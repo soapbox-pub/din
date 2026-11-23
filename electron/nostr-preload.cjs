@@ -25,8 +25,8 @@ const { contextBridge, ipcRenderer } = require('electron');
  * Runs in the page's world: everything it needs comes in through `bridge`.
  *
  * window.nostr is NIP-07's signer, acting as the account signed in to Din,
- * as it always has (pages hear when that changes), plus Din's two additions
- * for clients that hold their accounts themselves:
+ * as it always has, plus Din's two additions for clients that hold their
+ * accounts themselves:
  *
  * - requestPublicKey(): asks the user to give the site an account (always a
  *   question, and only after a click), resolving with its key.
@@ -40,7 +40,6 @@ const { contextBridge, ipcRenderer } = require('electron');
  *
  * @param {{
  *   call: (method: string, params: Record<string, unknown> | undefined, userActivated: boolean) => Promise<{ ok: boolean, result?: unknown, error?: string, errorName?: string }>,
- *   onAccountChanged: (callback: () => void) => void,
  * }} bridge
  */
 function installNostr(bridge) {
@@ -120,12 +119,6 @@ function installNostr(bridge) {
   });
 
   Object.defineProperty(window, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });
-
-  // The convention nostr-login and the Ditto extension use: the page should
-  // ask for the public key again.
-  bridge.onAccountChanged(() => {
-    window.dispatchEvent(new CustomEvent('nlAuth', { detail: { type: 'accountChanged' } }));
-  });
 }
 
 const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
@@ -134,10 +127,6 @@ const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\
 // preloads into iframes too (for extensions), and an embedded frame gets no
 // signer: main refuses its calls anyway.
 if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) || isLocalhost)) {
-  /** @type {(() => void) | null} */
-  let accountListener = null;
-  ipcRenderer.on('nostr-bridge:account-changed', () => accountListener?.());
-
   contextBridge.executeInMainWorld({
     func: installNostr,
     args: [
@@ -149,10 +138,6 @@ if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) ||
          */
         call: (method, params, userActivated) =>
           ipcRenderer.invoke('nostr-bridge:call', { method, params, userActivated }),
-        /** @param {() => void} callback */
-        onAccountChanged: (callback) => {
-          accountListener = callback;
-        },
       },
     ],
   });
