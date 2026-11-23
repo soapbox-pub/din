@@ -4,9 +4,12 @@
 //
 // BlueZ's obexd does the protocol, on the session bus (D-Bus starts it on the
 // first call). A MAP session to the paired phone lists its inbox (and sent
-// folder, where there is one) every POLL_MS while it's up; obexd also hears
-// the phone's own new-message events and turns them into listing changes, so
-// polling is only the floor. A message's text is the listing's subject when
+// folder, where there is one) every POLL_MS while it's up. That's only the
+// floor: obexd registers for the phone's event reports, and each NewMessage
+// it hears becomes a message object on the bus with no listing's details
+// (InterfacesAdded with a Folder and no Timestamp), which lists that folder's
+// newest few at once, so a text shows up as soon as the phone has it. A
+// message's text is the listing's subject when
 // that's all of it; a longer one is fetched whole only once it's read, since
 // fetching reads it on an iPhone (which ignores setting it back to unread),
 // so an unread one shows its first lines until it's opened. Sending
@@ -65,6 +68,10 @@ const CONTACTS_RETRY_MS = 5 * 60_000;
 const CONTACTS_WAIT_MS = 20_000;
 /** How many of each folder's newest messages a listing asks for. */
 const LIST_COUNT = 60;
+/** A listing for the phone's new-message event: only the newest few, so it's quick. */
+const PUSH_COUNT = 10;
+/** Events that come together (a long text in parts, a message and its read state) wait this long to be one listing. */
+const PUSH_DELAY_MS = 150;
 /** Catching up on older MMS: a page of the listing, and at most this many pages and fetches a sync. */
 const CATCH_UP_PAGE = 100;
 const CATCH_UP_PAGES = 5;
@@ -84,6 +91,22 @@ const finished = new Map<string, string>();
 const waiters = new Map<string, (status: string) => void>();
 /** Sessions that went away, to their connection. */
 const sessionGone = new Map<string, () => void>();
+/** Sessions the phone told of a change in a folder ('inbox' or 'sent'), to their connection. */
+const sessionPushed = new Map<string, (folder: 'inbox' | 'sent') => void>();
+
+/** The folder a phone's event names, as sync() lists it: "telecom/msg/INBOX", "/telecom/msg/sent", an outbox sending; one with none, the inbox. */
+function eventFolder(folder: unknown): 'inbox' | 'sent' | null {
+  const f = String(folder ?? '').toLowerCase();
+  if (/sent|outbox/.test(f)) return 'sent';
+  if (/deleted|draft/.test(f)) return null;
+  return 'inbox';
+}
+
+/** The session a message object (…/session3/message123) is under. */
+function sessionOf(objectPath: string): string | null {
+  const at = objectPath.lastIndexOf('/message');
+  return at > 0 ? objectPath.slice(0, at) : null;
+}
 
 /** Hear obexd come and go (phone-receive.mts registers its agent each time it comes). */
 const obexdListeners = new Set<(bus: DBusConnection, owner: string | null) => void>();
@@ -140,9 +163,26 @@ function follow(b: DBusConnection, owner: string | null): void {
   if (!owner) return;
   const subscriptions = [
     b.subscribe({ sender: owner, interface: PROPERTIES, member: 'PropertiesChanged' }, (message: Message) => {
-      if (message.body[0] !== TRANSFER || !message.path) return;
+      if (!message.path) return;
       const status = unwrap((message.body[1] as Map<string, unknown>).get('Status'));
-      if (status === 'complete' || status === 'error') transferEnded(message.path, status);
+      if (message.body[0] === TRANSFER) {
+        if (status === 'complete' || status === 'error') transferEnded(message.path, status);
+      } else if (message.body[0] === MESSAGE && (status === 'notification' || status === 'read-status-changed')) {
+        // The phone's event about a message obexd already had: a new one in its place, or read on the phone.
+        const session = sessionOf(message.path);
+        if (session) sessionPushed.get(session)?.('inbox');
+      }
+    }),
+    b.subscribe({ sender: owner, interface: OBJECT_MANAGER, member: 'InterfacesAdded' }, (message: Message) => {
+      // A message obexd heard of from the phone's NewMessage event, not from a
+      // listing of ours: those come with their listing's Timestamp, these with
+      // only the folder the event named.
+      const [objectPath, ifaces] = message.body as [string, Map<string, Map<string, unknown>>];
+      const props = ifaces.get(MESSAGE);
+      if (!props || props.has('Timestamp')) return;
+      const session = sessionOf(objectPath);
+      const folder = eventFolder(unwrap(props.get('Folder')));
+      if (session && folder) sessionPushed.get(session)?.(folder);
     }),
     b.subscribe({ sender: owner, interface: OBJECT_MANAGER, member: 'InterfacesRemoved' }, (message: Message) => {
       const [objectPath, ifaces] = message.body as [string, string[]];
@@ -255,6 +295,9 @@ export class MapConnection implements PhoneConnection {
   private syncing: Promise<void> | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
+  /** Folders the phone said changed, listed once PUSH_DELAY_MS has passed and no sync is running. */
+  private pushed = new Set<'inbox' | 'sent'>();
+  private pushTimer: NodeJS.Timeout | null = null;
   private retryMs = RETRY_MIN_MS;
   private lastTry = 0;
   private contactsAt = 0;
@@ -282,6 +325,31 @@ export class MapConnection implements PhoneConnection {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.close();
+  }
+
+  /** The phone's event: something changed in `folder`. */
+  private heard(folder: 'inbox' | 'sent'): void {
+    this.pushed.add(folder);
+    if (!this.pushTimer) this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      this.syncPushed();
+    }, PUSH_DELAY_MS);
+  }
+
+  /** List what the phone said changed, unless a sync is running: its end does it then. */
+  private syncPushed(): void {
+    if (this.syncing || this.pushTimer || !this.pushed.size || !this.session) return;
+    const folders = [...this.pushed];
+    this.pushed.clear();
+    void this.sync(folders);
+  }
+
+  private forgetSession(session: string): void {
+    sessionGone.delete(session);
+    sessionPushed.delete(session);
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = null;
+    this.pushed.clear();
   }
 
   refresh(): void {
@@ -349,14 +417,14 @@ export class MapConnection implements PhoneConnection {
     const session = this.session;
     this.session = null;
     if (!session) return;
-    sessionGone.delete(session);
+    this.forgetSession(session);
     void call('RemoveSession', '/org/bluez/obex', CLIENT, 'o', [session]).catch(() => {});
   }
 
   private lost(): void {
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
-    if (this.session) sessionGone.delete(this.session);
+    if (this.session) this.forgetSession(this.session);
     this.session = null;
     if (this.stopped) return;
     this.hooks.status({ status: 'offline', error: null });
@@ -389,6 +457,7 @@ export class MapConnection implements PhoneConnection {
       }
       this.session = session as string;
       sessionGone.set(this.session, () => this.lost());
+      sessionPushed.set(this.session, (folder) => this.heard(folder));
       await this.enterMessages();
       this.mms = await this.supportsMms();
       // Picture messages the phone wouldn't give last time are asked for again.
@@ -436,12 +505,17 @@ export class MapConnection implements PhoneConnection {
     }
   }
 
-  private sync(): Promise<void> {
+  /**
+   * List the folders for what's new or changed: both, deep enough to catch
+   * up, on connecting and every POLL_MS; only what the phone's event named,
+   * and only its newest few, when it tells of one.
+   */
+  private sync(pushed?: ('inbox' | 'sent')[]): Promise<void> {
     this.syncing ??= (async () => {
       try {
         const found: BackendMessage[] = [];
-        for (const folder of ['inbox', 'sent']) {
-          const listed = await this.list(folder).catch((error) => {
+        for (const folder of pushed ?? ['inbox', 'sent']) {
+          const listed = await this.list(folder, pushed ? PUSH_COUNT : LIST_COUNT).catch((error) => {
             // A phone without a sent folder (an iPhone) says so; anything else is the session.
             if (folder === 'inbox') throw error;
             return [];
@@ -449,21 +523,23 @@ export class MapConnection implements PhoneConnection {
           found.push(...listed);
         }
         if (found.length) this.hooks.messages(found);
-        if (this.mms && this.catchUpAt.folder < 2 && this.hooks.olderMmsPending()) await this.catchUp();
+        if (!pushed && this.mms && this.catchUpAt.folder < 2 && this.hooks.olderMmsPending()) await this.catchUp();
       } catch (error) {
         if (this.session && /not connected|disconnected|closed|reset|NotConnected|No such/i.test(String(error))) this.lost();
       } finally {
         this.syncing = null;
+        // What the phone told of while this ran.
+        this.syncPushed();
       }
     })();
     return this.syncing;
   }
 
-  private async list(folder: string): Promise<BackendMessage[]> {
+  private async list(folder: string, count = LIST_COUNT): Promise<BackendMessage[]> {
     const session = this.session;
     if (!session) return [];
     const filter = new Map([
-      ['MaxCount', new Variant('q', LIST_COUNT)],
+      ['MaxCount', new Variant('q', count)],
       ['SubjectLength', new Variant('y', 255)],
     ]);
     const [listing] = await call('ListMessages', session, MAP, 'sa{sv}', [folder, filter], SESSION_TIMEOUT_MS);
