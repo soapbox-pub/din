@@ -118,7 +118,7 @@ function headline(item: SignerPromptItem, name: string, isConnect: boolean): { t
   }
 }
 
-function Person({ label, pubkey }: { label: string; pubkey: unknown }) {
+export function Person({ label, pubkey }: { label: string; pubkey: unknown }) {
   const author = useAuthor(typeof pubkey === 'string' ? pubkey : undefined);
   if (typeof pubkey !== 'string') return null;
   const metadata = author.data?.metadata;
@@ -135,7 +135,7 @@ function Person({ label, pubkey }: { label: string; pubkey: unknown }) {
   );
 }
 
-function Message({ children }: { children: ReactNode }) {
+export function Message({ children }: { children: ReactNode }) {
   return (
     <p className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/50 px-3 py-2.5 text-sm">
       {children}
@@ -153,7 +153,7 @@ function Amount({ sats }: { sats: number }) {
 }
 
 /** Where a transaction's money goes, as its PSBT says: each payment, what comes back, the fee. */
-function Transaction({ summary }: { summary: PsbtSummary }) {
+export function Transaction({ summary }: { summary: PsbtSummary }) {
   const payments = summary.outputs.filter((o) => !o.change);
   const back = summary.outputs.filter((o) => o.change).reduce((n, o) => n + o.value, 0);
   const row = 'flex items-start justify-between gap-3 px-3 py-2.5 text-sm';

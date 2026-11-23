@@ -2412,6 +2412,70 @@ expose('nostrd', {
   },
 });
 
+// Program signer bridge (window.dinos.programSigner), backed by
+// electron/nostrd-approval.mts: programs of the user's asking nostrd to sign
+// as them, which Din approves.
+expose('programSigner', {
+  /** What's waiting to be answered now. */
+  pending: () => ipcRenderer.invoke('programSigner:pending'),
+
+  /**
+   * Subscribe to requests. Returns an unsubscribe fn.
+   * @param {(request: unknown) => void} callback
+   */
+  onRequest: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} request
+     */
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('programSigner:request', listener);
+    return () => ipcRenderer.removeListener('programSigner:request', listener);
+  },
+
+  /**
+   * Subscribe to requests that were settled or went away. Returns an unsubscribe fn.
+   * @param {(requestId: number) => void} callback
+   */
+  onCancel: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {{ requestId: number }} d
+     */
+    const listener = (_event, d) => callback(d.requestId);
+    ipcRenderer.on('programSigner:cancel', listener);
+    return () => ipcRenderer.removeListener('programSigner:cancel', listener);
+  },
+
+  /**
+   * Answer a request: once, process, conversation, always, or deny.
+   * @param {number} requestId
+   * @param {string} decision
+   */
+  answer: (requestId, decision) => ipcRenderer.invoke('programSigner:answer', requestId, decision),
+
+  /** The programs allowed always ({ available, programs }). */
+  grants: () => ipcRenderer.invoke('programSigner:grants'),
+
+  /**
+   * Forget a program, or one thing it may do.
+   * @param {string} key
+   * @param {string | null} [method]
+   * @param {number | null} [kind]
+   */
+  revoke: (key, method, kind) => ipcRenderer.invoke('programSigner:revoke', key, method ?? null, kind ?? null),
+
+  /**
+   * Subscribe to changes to the programs allowed always. Returns an unsubscribe fn.
+   * @param {() => void} callback
+   */
+  onGrantsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('programSigner:grants', listener);
+    return () => ipcRenderer.removeListener('programSigner:grants', listener);
+  },
+});
+
 // Boot screen bridge (window.dinos.bootScreen), backed by electron/boot-screen.mts:
 // copies the wallpaper to the boot partition, for DinOS's unlock screen.
 expose('bootScreen', {

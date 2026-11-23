@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Ban, ChevronDown, Copy, Globe, Link2, Loader2, Plus, Smartphone, Unplug, X } from 'lucide-react';
+import { Ban, ChevronDown, Copy, Globe, Link2, Loader2, Plus, Smartphone, SquareTerminal, Unplug, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -38,6 +38,8 @@ import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import type { AppComponentProps } from '@/lib/apps';
 import { CONNECT_APP_APP_ID, connectAppParams } from '@/lib/settingsWindows';
+import { useProgramGrants } from '@/hooks/useProgramGrants';
+import { getProgramSignerBridge, programRules, signerMethodOf, type ProgramGrant } from '@/lib/programSigner';
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
@@ -202,6 +204,44 @@ function SiteRow({
       {!blocked && <RuleList rules={rules} onRevoke={(r) => onRevoke(origin, r.method, r.kind)} />}
       <Button variant="outline" size="sm" onClick={() => onDisconnect(origin)}>
         {blocked ? 'Unblock' : 'Disconnect'}
+      </Button>
+    </Row>
+  );
+}
+
+/**
+ * A program on this computer allowed always to sign as the user through
+ * nostrd (electron/nostrd-approval.mts): its rules, each forgettable.
+ */
+function ProgramRow({ id, grant }: { id: string; grant: ProgramGrant }) {
+  const bridge = getProgramSignerBridge();
+  const rules: Rule[] = programRules(grant).flatMap(({ method, kind }) => {
+    const signer = signerMethodOf(method);
+    return signer && signer !== 'signPsbt' ? [{ method: signer, kind, decision: 'allow' as const }] : [];
+  });
+  const forget = () => void bridge?.revoke(id).catch(() => {});
+  return (
+    <Row
+      icon={<Tile><SquareTerminal className="size-4.5" strokeWidth={1.75} /></Tile>}
+      title={grant.name}
+      subtitle={`${summary(rules)} · ${ago(grant.lastUsed)}`}
+      menu={
+        <ContextMenuItem variant="destructive" onSelect={forget}>
+          <Unplug aria-hidden />
+          Forget
+        </ContextMenuItem>
+      }
+    >
+      <p className="break-all text-xs text-muted-foreground">{grant.path}</p>
+      <RuleList
+        rules={rules}
+        onRevoke={(r) => {
+          const method = r.method === 'signEvent' ? 'sign_event' : r.method.replace('.', '_');
+          void bridge?.revoke(id, method, r.kind ?? null).catch(() => {});
+        }}
+      />
+      <Button variant="outline" size="sm" onClick={forget}>
+        Forget
       </Button>
     </Row>
   );
@@ -424,6 +464,8 @@ export function ConnectedAppsSection() {
   const bridge = getBunkerBridge();
   const copyLink = useCopyLink();
   const { open } = useWindowActions();
+  const programGrants = useProgramGrants();
+  const programs = Object.entries(programGrants?.programs ?? {}).sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
 
   const sites = Object.entries(grants).sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
   const remote = (connections ?? [])
@@ -532,6 +574,26 @@ export function ConnectedAppsSection() {
                       </Row>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {programGrants?.available && (
+            <div className="space-y-2">
+              <SettingsSubHeading>Programs on this computer</SettingsSubHeading>
+              <p className="text-sm text-muted-foreground">
+                Programs you run, like ngit in the Terminal or a script the Assistant runs, ask too. These are the ones you told to always be allowed.
+              </p>
+              {programs.length === 0 ? (
+                <div className="px-8 py-8 text-center">
+                  <p className="mx-auto max-w-sm text-sm text-muted-foreground">No program is always allowed.</p>
+                </div>
+              ) : (
+                <div className={settingsGroup}>
+                  {programs.map(([id, grant]) => (
+                    <ProgramRow key={id} id={id} grant={grant} />
+                  ))}
                 </div>
               )}
             </div>

@@ -54,6 +54,7 @@ import { NsiteBridgeHost } from './NsiteBridgeHost';
 import { BlossomBridgeHost } from './BlossomBridgeHost';
 import { PromptHost } from './PromptHost';
 import { AdminPromptHost, PolkitPromptHost } from './AdminPrompt';
+import { ProgramSignerHost } from './ProgramSignerPrompt';
 import { ScreenSharePicker } from './ScreenShareHost';
 import { EyeDropperHost } from './EyeDropperHost';
 import { NativeDisplayHost } from './NativeDisplayHost';
@@ -145,6 +146,7 @@ const SessionHosts = memo(function SessionHosts() {
       <PromptHost />
       <AdminPromptHost />
       <PolkitPromptHost />
+      <ProgramSignerHost />
       <ScreenSharePicker />
       <EyeDropperHost />
       <DesktopHotkeys />

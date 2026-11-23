@@ -10,6 +10,7 @@ import { planDinRestart } from '@/lib/updateNotice';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
 import { getKindLabel } from '@/lib/kindLabels';
+import { getProgramSignerBridge, programRules, type ProgramGrants } from '@/lib/programSigner';
 
 /** `din update`, `din firmware`, `din lock`, `din nostr`: Settings → About, Password and Nostr & Storage. */
 
@@ -202,6 +203,21 @@ function saveServers(ctx: CommandContext, servers: string[]) {
   if (ctx.pubkey) return ctx.publish({ kind: 10063, content: '', tags: blossomListTags(servers) });
 }
 
+const programSigner = () => need(getProgramSignerBridge(), 'Programs asking to sign');
+
+/** A program allowed always, by its name or key. */
+function findProgram(grants: ProgramGrants, name: string): string {
+  if (grants.programs[name]) return name;
+  const matches = Object.entries(grants.programs).filter(([, g]) => g.name === name);
+  if (matches.length === 1) return matches[0][0];
+  if (matches.length > 1) throw new CommandError(`More than one program is called ${name}; give its key from din nostr programs --json`);
+  throw new CommandError(`${name} isn’t always allowed; din nostr programs lists the ones that are`);
+}
+
+function ruleText(method: string, kind?: number): string {
+  return method === 'sign_event' && kind !== undefined ? `sign ${getKindLabel(kind)} (kind ${kind})` : method.replace('_', ' ');
+}
+
 export const nostrArea: Area = {
   name: 'nostr',
   summary: 'Your Nostr account, relays and Blossom servers, and posting highlights',
@@ -210,6 +226,31 @@ export const nostrArea: Area = {
       const pubkey = requireUser(ctx);
       const npub = nip19.npubEncode(pubkey);
       return { data: { pubkey, npub }, text: npub };
+    }),
+    // Settings → Connected apps → Programs on this computer. Allowing one is
+    // only done in its prompt, on screen.
+    command('nostr', 'programs', 'Programs on this computer always allowed to sign as you through nostrd, and what each may do', [], async () => {
+      const grants = await call(programSigner().grants());
+      if (!grants.available) return { data: grants, text: 'Programs don’t ask here: nostrd isn’t asking Din' };
+      const entries = Object.entries(grants.programs);
+      return {
+        data: grants.programs,
+        text: entries.length
+          ? entries.map(([, g]) => `${g.name}  ${g.path}\n${programRules(g).map((r) => `  ${ruleText(r.method, r.kind)}`).join('\n')}`).join('\n')
+          : 'No program is always allowed',
+      };
+    }),
+    command('nostr', 'program-forget', 'Stop always allowing a program, or one thing it may do, so it asks again', [
+      { name: 'program', type: 'string', positional: true, help: 'Its name, as din nostr programs lists it, or its key' },
+      { name: 'kind', type: 'number', optional: true, help: 'Only signing this kind of event' },
+      { name: 'method', type: 'string', optional: true, help: 'Only this: nip44_encrypt, nip44_decrypt, nip04_encrypt or nip04_decrypt' },
+    ], async (args) => {
+      const bridge = programSigner();
+      const key = findProgram(await call(bridge.grants()), args.string('program'));
+      const kind = args.optNumber('kind');
+      const method = kind !== undefined ? 'sign_event' : args.optString('method');
+      await call(bridge.revoke(key, method ?? null, kind ?? null));
+      return { data: { key }, text: method ? `${args.string('program')} asks again to ${ruleText(method, kind)}` : `${args.string('program')} asks again` };
     }),
     command('nostr', 'relays', 'Your relays (NIP-65)', [], (_args, ctx) => ({ data: ctx.config.relayMetadata.relays })),
     command('nostr', 'relay-add', 'Add a relay, and publish the list', [

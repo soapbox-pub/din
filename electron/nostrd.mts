@@ -12,6 +12,11 @@
 // active_changed) and passes them on to the shell, along with `connected` and
 // `disconnected`, so the shell can resync.
 //
+// Where nostrd has Din as its approver (DinOS), this connection registers
+// as it, and the requests of other programs to sign go to
+// electron/nostrd-approval.mts instead of the shell. On DinOS it connects at
+// startup, so programs can be asked before anything in Din has signed.
+//
 // DinOS names the socket in DIN_NOSTRD_SOCKET and Din always signs through
 // it there. Elsewhere Din looks where NIP-5F clients do, and uses what it
 // finds only if it manages accounts (Amber's socket signs but doesn't).
@@ -23,6 +28,13 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { ipcMain } from 'electron';
+import {
+  onApprovalCancelled,
+  onApprovalRequest,
+  onApproverGone,
+  onApproverRegistered,
+  registerProgramSigner,
+} from './nostrd-approval.mts';
 
 const CONFIGURED = process.env.DIN_NOSTRD_SOCKET;
 const SOCKET = CONFIGURED || path.join(os.homedir(), '.local/share/nostr/signer.sock');
@@ -33,6 +45,9 @@ const RECONNECT_MS = 2_000;
 
 /** Methods the shell may call: nostrd's own, minus `subscribe`, which this side does. */
 const METHOD = /^[a-z0-9_]+$/;
+/** The approver's, which only electron/nostrd-approval.mts uses. */
+const APPROVER_METHODS = new Set(['register_approver', 'approve', 'approver_get_state', 'approver_set_state']);
+const REGISTER_ID = 'register-approver';
 
 type Reply = { result: unknown } | { error: { code: number; message: string } };
 
@@ -82,14 +97,29 @@ function connect(): Promise<net.Socket> {
           if (supported.includes('subscribe')) {
             conn.write(`${JSON.stringify({ id: 'subscribe', method: 'subscribe', params: [] })}\n`);
           }
+          if (supported.includes('register_approver')) {
+            conn.write(`${JSON.stringify({ id: REGISTER_ID, method: 'register_approver', params: [] })}\n`);
+          }
           socket = conn;
           connecting = null;
           resolve(conn);
           emit({ event: 'connected' });
           continue;
         }
+        if (message.event === 'approval_request') {
+          onApprovalRequest(message.request);
+          continue;
+        }
+        if (message.event === 'approval_cancelled') {
+          onApprovalCancelled(message.id);
+          continue;
+        }
         if (typeof message.event === 'string') {
           emit({ event: message.event });
+          continue;
+        }
+        if (message.id === REGISTER_ID) {
+          if (message.result === true) onApproverRegistered();
           continue;
         }
         const id = typeof message.id === 'string' ? message.id : null;
@@ -114,6 +144,7 @@ function connect(): Promise<net.Socket> {
     conn.on('close', () => {
       const wasOpen = socket === conn;
       if (wasOpen) socket = null;
+      onApproverGone();
       for (const [id, waiter] of pending) {
         clearTimeout(waiter.timer);
         waiter.resolve(fail(10, 'the signer went away'));
@@ -161,6 +192,9 @@ export function registerNostrdHandlers(options: {
 }): void {
   const { assertShellSender, sendToShell } = options;
   emit = (event) => sendToShell('nostrd:event', event);
+  registerProgramSigner({ call, sendToShell, assertShellSender });
+  // On DinOS, be there to ask from the start.
+  if (CONFIGURED) connect().catch(() => scheduleReconnect());
 
   /**
    * Whether Din should keep its accounts in nostrd: always on DinOS, and
@@ -181,7 +215,7 @@ export function registerNostrdHandlers(options: {
 
   ipcMain.handle('nostrd:call', (event, method: unknown, params: unknown) => {
     assertShellSender(event);
-    if (typeof method !== 'string' || !METHOD.test(method) || method === 'subscribe') {
+    if (typeof method !== 'string' || !METHOD.test(method) || method === 'subscribe' || APPROVER_METHODS.has(method)) {
       return fail(2, 'method not supported');
     }
     if (params !== undefined && !Array.isArray(params)) return fail(3, 'params must be an array');

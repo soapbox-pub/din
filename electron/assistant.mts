@@ -38,6 +38,7 @@ import path from 'node:path';
 import { ipcMain } from 'electron';
 import { sessionBusAddress } from './native-display.mts';
 import { revokeSudoGrant } from './askpass.mts';
+import { revokeSignerSession } from './nostrd-approval.mts';
 import { assistantGit } from './assistant-git.mts';
 import { changeSkills, skillSettings } from './assistant-skills.mts';
 import { cancelClaudeLogin, claudeStatus, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
@@ -500,7 +501,10 @@ async function watch(controller: AbortController): Promise<void> {
           if (!data) continue;
           try {
             const event = slim(JSON.parse(data) as Record<string, unknown>) as { type: string; sessionID?: string };
-            if (event.type === 'session.deleted' && event.sessionID) revokeSudoGrant(event.sessionID);
+            if (event.type === 'session.deleted' && event.sessionID) {
+              revokeSudoGrant(event.sessionID);
+              revokeSignerSession(event.sessionID);
+            }
             emitEvent(event);
           } catch {
             // Not JSON: nothing to pass on.
