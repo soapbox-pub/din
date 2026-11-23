@@ -639,13 +639,18 @@ export class MapConnection implements PhoneConnection {
     if (known && known.read === read && !(read && known.partial)) return null;
     const subject = String(props.get('Subject') ?? '');
     const size = Number(props.get('Size') ?? 0);
-    // The listing's subject is the text, cut short (an iPhone's at 128 characters).
-    const cut = !known?.message.body && (size > Buffer.byteLength(subject, 'utf8') + 2);
+    // The listing's subject is the text, cut short (an iPhone's at 128
+    // characters). Android's also leaves out its line breaks and emoji (its
+    // listing drops control characters and surrogates) and gives the size in
+    // UTF-16 units, so a subject one unit short of it is missing something:
+    // taken for the text, a link before a line break ran into the next line.
+    const cut = !known?.message.body && (this.mms ? size > subject.length : size > Buffer.byteLength(subject, 'utf8') + 2);
     let partial = known ? known.partial : cut;
     let body = known?.message.body ?? subject;
-    // A whole text is fetched only once it's read: fetching reads it, on an
-    // iPhone, and it can't be set back to unread.
-    if (partial && read) {
+    // On an iPhone a whole text is fetched only once it's read: fetching
+    // reads it there, and it can't be set back to unread. Android leaves it
+    // unread.
+    if (partial && (read || this.mms)) {
       const whole = await this.fetch(objectPath).catch(() => '');
       if (whole) {
         body = whole;
