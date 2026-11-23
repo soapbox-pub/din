@@ -8,15 +8,18 @@ signs. Din's own apps get theirs from `window.din` instead
 ([din/theme-and-account.md](din/theme-and-account.md)) and act as the
 desktop's account.
 
-## A site holds the identities it was given
+## Din's account, and the accounts a site holds
 
-A site acts only as accounts the user gave it, one at a time, and none of
-them changes underneath it. Switching Din's account changes nothing a site
-holds.
+`window.nostr`'s own methods act as the account signed in to Din, as they
+always have: switching Din's account switches them, and pages hear about it
+(the `nlAuth` event with `{ type: 'accountChanged' }` that nostr-login uses).
+A client that wants to hold its accounts itself, and keep acting as one
+while the user switches Din, feature-detects `getSigner` and uses the two
+additions.
 
 ```ts
 interface NostrProvider extends NostrSigner {
-  // NIP-07, as the first account the site was given
+  // NIP-07, as Din's account
   getPublicKey(): Promise<string>
   signEvent(event): Promise<NostrEvent>
   getRelays(): Promise<Record<string, { read: boolean; write: boolean }>>
@@ -25,25 +28,32 @@ interface NostrProvider extends NostrSigner {
   signPsbt(psbtHex: string): Promise<string>
 
   // Din's additions
-  requestPublicKey(): Promise<string>             // the user gives the site one more account
+  requestPublicKey(): Promise<string>             // the user gives the site an account
   getSigner(pubkey: string): Promise<NostrSigner> // pinned to an account the site holds
 }
 ```
 
-- **`getPublicKey()`** asks the first time (after a click on the page), with
-  a choice of account when more than one is signed in to Din, and after
-  that answers with the same key unasked. That account is the one the
-  provider's own methods act as, recorded per site on this device
-  (`src/lib/siteIdentities.ts`).
+- **`getPublicKey()`** asks the first time a site wants Din's account (after
+  a click on the page), and after that answers unasked.
+- A site **holds** an account once that account is connected to it: by
+  `getPublicKey()` while it was Din's, or by `requestPublicKey()`.
 - **`requestPublicKey()`** always asks, and only after a click: the user
-  picks a signed-in account to give the site, and it resolves with its key.
+  picks one of the accounts signed in to Din, and it resolves with its key.
   Picking one the site already holds just returns it.
 - **`getSigner(pubkey)`** never asks. It resolves with a plain NIP-07 signer
-  that always acts as `pubkey`, whose `getPublicKey()` answers at once, or
-  rejects with `NotFoundError` if the site doesn't hold it. A client keeps
-  the keys it was given and calls this for each on load.
+  that always acts as `pubkey`, whatever Din's account is, and whose
+  `getPublicKey()` answers at once; or it rejects with `NotFoundError` if the
+  site doesn't hold it. A client keeps the keys it was given and calls this
+  for each on load.
 - What a site may do without asking is remembered per site **and per
   account** (`src/lib/signerPermissions.ts`, kept with each account).
+
+```ts
+if ('getSigner' in window.nostr) {
+  const pubkey = await window.nostr.requestPublicKey() // "Add account"
+  const signer = await window.nostr.getSigner(pubkey)  // later, and on load
+}
+```
 
 ## Errors
 
@@ -51,10 +61,6 @@ Rejections are `DOMException`s, so a client can tell them apart by `name`:
 
 | `name` | Means | The client should |
 |---|---|---|
-| `NotFoundError` | The site doesn't hold that account: never given, disconnected, or signed out of Din | Drop the account |
+| `NotFoundError` | The site doesn't hold that account (`getSigner`): never given, disconnected, or signed out of Din | Drop the account |
 | `NotAllowedError` | The user (or what they remembered) said no, or Din won't ask now | Keep the account; only this failed |
 | `TypeError` | A malformed call: a bad key, an event whose `pubkey` isn't the signer's | Fix the call |
-
-When the site's first account goes, the provider's own methods reject with
-`NotFoundError` rather than act as another, and the next `getPublicKey()`
-asks again, which to an old client looks like being signed out.

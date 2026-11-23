@@ -7,9 +7,9 @@
 // The provider holds no keys and decides nothing. Every call goes over IPC to
 // the main process, which checks that it came from a tab's or app's top
 // document and reads the origin from the frame itself (never from the page),
-// then relays it to the Din shell. There NostrBridgeHost decides which of the
-// site's accounts acts, asks the user, keeps what they decided per account
-// and per site, and signs with the account's signer. The page only ever sees
+// then relays it to the Din shell. There NostrBridgeHost asks the user, keeps
+// what they decided per account and per site, and signs with the account's
+// signer. The page only ever sees
 // results.
 //
 // Din owns window.nostr: it is defined before any page script runs, and can't
@@ -24,14 +24,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 /**
  * Runs in the page's world: everything it needs comes in through `bridge`.
  *
- * window.nostr is NIP-07's signer, acting as the account the site was given
- * first, which never changes underneath it, plus Din's two additions for
- * sites that hold more than one:
+ * window.nostr is NIP-07's signer, acting as the account signed in to Din,
+ * as it always has (pages hear when that changes), plus Din's two additions
+ * for clients that hold their accounts themselves:
  *
- * - requestPublicKey(): asks the user to give the site one more account
- *   (always a question, and only after a click), resolving with its key.
- * - getSigner(pubkey): a NIP-07 signer pinned to one of the site's accounts;
- *   never asks. Rejects with NotFoundError if the site doesn't hold it.
+ * - requestPublicKey(): asks the user to give the site an account (always a
+ *   question, and only after a click), resolving with its key.
+ * - getSigner(pubkey): a NIP-07 signer pinned to an account the site was
+ *   given, which switching Din's account doesn't change; never asks. Rejects
+ *   with NotFoundError if the site doesn't hold it.
  *
  * Calls reject with a DOMException: NotFoundError when the site doesn't hold
  * the account (any more), NotAllowedError when the answer was no; or with a
@@ -39,6 +40,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  *
  * @param {{
  *   call: (method: string, params: Record<string, unknown> | undefined, userActivated: boolean) => Promise<{ ok: boolean, result?: unknown, error?: string, errorName?: string }>,
+ *   onAccountChanged: (callback: () => void) => void,
  * }} bridge
  */
 function installNostr(bridge) {
@@ -76,8 +78,8 @@ function installNostr(bridge) {
   const text = (value) => String(value);
 
   /**
-   * NIP-07's methods, as `account` (a hex key the site holds), or as the
-   * site's own account when there's none.
+   * NIP-07's methods, as `account` (a hex key the site holds), or as Din's
+   * account when there's none.
    * @param {string} [account]
    */
   const signerMethods = (account) => {
@@ -118,6 +120,12 @@ function installNostr(bridge) {
   });
 
   Object.defineProperty(window, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });
+
+  // The convention nostr-login and the Ditto extension use: the page should
+  // ask for the public key again.
+  bridge.onAccountChanged(() => {
+    window.dispatchEvent(new CustomEvent('nlAuth', { detail: { type: 'accountChanged' } }));
+  });
 }
 
 const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
@@ -126,6 +134,10 @@ const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\
 // preloads into iframes too (for extensions), and an embedded frame gets no
 // signer: main refuses its calls anyway.
 if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) || isLocalhost)) {
+  /** @type {(() => void) | null} */
+  let accountListener = null;
+  ipcRenderer.on('nostr-bridge:account-changed', () => accountListener?.());
+
   contextBridge.executeInMainWorld({
     func: installNostr,
     args: [
@@ -137,6 +149,10 @@ if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) ||
          */
         call: (method, params, userActivated) =>
           ipcRenderer.invoke('nostr-bridge:call', { method, params, userActivated }),
+        /** @param {() => void} callback */
+        onAccountChanged: (callback) => {
+          accountListener = callback;
+        },
       },
     ],
   });

@@ -62,7 +62,7 @@ So Din is splitting into three layers, each trusting only the one below it:
 | [din/media-and-desktop.md](din/media-and-desktop.md) | What's playing and the media keys, the wallpaper, dictation |
 | [din/permissions.md](din/permissions.md) | What each permission grants, and `din.system` |
 | [din/background.md](din/background.md) | Service workers, and `registration.periodicSync` for apps, nsites and web apps |
-| [window-nostr.md](window-nostr.md) | Web pages' `window.nostr`: the accounts a site holds, `requestPublicKey`, `getSigner`, its errors |
+| [window-nostr.md](window-nostr.md) | Web pages' `window.nostr`: Din's account, and with `requestPublicKey` and `getSigner` the accounts a site holds; its errors |
 | [guest-surfaces.md](guest-surfaces.md) | The `GuestSurface` abstraction over `<webview>` |
 | [building-an-app.md](building-an-app.md) | A built-in app from scratch |
 | [migrating-builtin-apps.md](migrating-builtin-apps.md) | Old desktop hooks and their `window.din` replacements, app by app |

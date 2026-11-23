@@ -26,7 +26,6 @@ import {
   type SignerGrants,
   type SiteGrant,
 } from '@/lib/signerPermissions';
-import { isDinAppOrigin, setSiteIdentity, siteIdentity } from '@/lib/siteIdentities';
 import { originLabel, questionTitle } from '@/lib/signerLabels';
 import { APP_DATA_KIND, MAX_CLOCK_SKEW_SECONDS, isAppDataDTag } from '@/lib/appData';
 import { serveAppSignerRequests } from '@/lib/appSigner';
@@ -138,18 +137,16 @@ async function readPsbt(params: Record<string, unknown>, account: string): Promi
  * Main, or the app's window, establishes who is asking; this decides, asks
  * the user when it has to, and signs with the account's signer.
  *
- * - A site holds the identities the user gave it, one at a time, and acts
- *   as no other: window.nostr as the first (src/lib/siteIdentities.ts),
- *   which never changes underneath it, and window.nostr.getSigner(pubkey)
- *   as any other it holds. requestPublicKey() asks the user to give it one
- *   more. Switching Din's account changes none of them; Din's own apps act
- *   as the desktop's account.
+ * - window.nostr's own methods act as the account signed in to Din, as they
+ *   always have, and pages hear when it changes. A client that holds its
+ *   accounts itself asks for one with requestPublicKey() (the user picks
+ *   which) and acts as it through getSigner(pubkey), which switching Din's
+ *   account doesn't change. A site holds an account when that account's
+ *   grant for it is connected.
  * - A browser tab has to be **connected** before it learns who the user is,
  *   and asking to connect needs a click on the page, so sites can't pop the
- *   question on load. With more than one account signed in, connecting is
- *   choosing which. Installed apps are connected by being installed (asked
- *   which account, when there's more than one), and Din's apps by holding
- *   the nostr permission.
+ *   question on load. Installed apps are connected by being installed, and
+ *   Din's apps by holding the nostr permission.
  * - Signing (per kind) and encrypting or decrypting (per method) are asked
  *   about, unless the user remembered an answer for that site and that
  *   account. NIP-42 relay AUTH is signed without asking once a site is
@@ -254,19 +251,20 @@ export function NostrBridgeHost() {
     if (decision !== 'ask') settle(head, { choice: decision, remember: false });
   }, [head, settle]);
 
-  // Din's own apps act as the desktop's account: their questions asked for
-  // the previous one are dropped. Sites keep theirs, which switching doesn't
-  // touch.
+  // Pages hear about account switches, and questions asked as the previous
+  // account are dropped, except those from a signer pinned to its own
+  // (getSigner) or a site asking for an account (requestPublicKey).
   const pubkey = user?.pubkey;
   const previousPubkey = useRef(pubkey);
   useEffect(() => {
     if (previousPubkey.current === pubkey) return;
     previousPubkey.current = pubkey;
     for (const item of queueRef.current) {
-      if (item.request.source !== 'bunker' && isDinAppOrigin(item.request.origin)) {
-        settle(item, { choice: 'dismiss', remember: false });
-      }
+      if (item.request.source === 'bunker' || item.choices) continue;
+      if ((item.request.params as { account?: unknown } | undefined)?.account !== undefined) continue;
+      settle(item, { choice: 'dismiss', remember: false });
     }
+    getNostrHostBridge()?.accountChanged();
   }, [pubkey, settle]);
 
   useEffect(() => {
@@ -277,10 +275,6 @@ export function NostrBridgeHost() {
     /** Whether a site holds a signed-in account. */
     const holds = (origin: string, account: string | undefined) =>
       account !== undefined && Boolean(userOf(account)) && grantOf(account, origin)?.status === 'connected';
-    /** Whether a site is refused everything (by any signed-in account's grant). */
-    const blockedFor = (origin: string) =>
-      [...accounts.current.values()].some((entry) => entry.grants[origin]?.status === 'blocked');
-
     /** Change one account's grant for a site; what's read next sees it at once. */
     const updateGrant = (
       account: string,
@@ -298,20 +292,6 @@ export function NostrBridgeHost() {
       };
       entry.grants = apply(entry.grants);
       entry.setGrants(apply);
-    };
-
-    /**
-     * The account a site's window.nostr acts as: the one it was given first.
-     * A site connected before Din kept that gets the first signed-in account
-     * that holds it. undefined: it has none yet. null: it had one, and no
-     * longer holds it (disconnected, or signed out of Din).
-     */
-    const primaryOf = (origin: string): string | null | undefined => {
-      const recorded = siteIdentity(origin);
-      if (recorded) return holds(origin, recorded) ? recorded : null;
-      const found = latest.current.users.find((u) => holds(origin, u.pubkey));
-      if (found) setSiteIdentity(origin, found.pubkey);
-      return found?.pubkey;
     };
 
     const rateLimited = (origin: string): boolean => {
@@ -381,70 +361,86 @@ export function NostrBridgeHost() {
     }
 
     /**
-     * Give a site one of the signed-in accounts (asking which, and whether,
-     * when there's a question to ask), and resolve with it. `another`: the
-     * site asked for one more (requestPublicKey), so the user is always asked.
+     * Give a site an account (requestPublicKey): the user always picks which
+     * of the signed-in accounts, after a click, and it resolves with the one
+     * they gave.
      */
-    async function connect(request: NostrBridgeRequest, name: string, tabKey: string, another: boolean): Promise<string> {
+    async function connectAnother(request: NostrBridgeRequest, name: string, tabKey: string): Promise<string> {
       const { origin } = request;
       const { users } = latest.current;
-      if (blockedFor(origin)) throw rejected();
-      if (another && request.wcId === null) throw new SignerError('NotAllowedError', 'Only a page can ask for another account');
+      if (request.wcId === null) throw new SignerError('NotAllowedError', 'Only a page can ask for an account');
+      if (suppressed.current.has(tabKey)) throw rejected();
+      if (!request.userActivated) {
+        throw new SignerError('NotAllowedError', 'Din asks to connect a site only after a click on the page');
+      }
       const choices = users
         .filter((u) => grantOf(u.pubkey, origin)?.status !== 'blocked')
         .map((u) => ({ pubkey: u.pubkey, held: holds(origin, u.pubkey) }));
+      // Din's account first, unless the site has it already.
       const first = choices.find((c) => !c.held) ?? choices[0];
       if (!first) throw rejected();
+      const answer = await ask({
+        request,
+        question: request.source === 'tab' ? 'connect' : 'getPublicKey',
+        name,
+        account: first.pubkey,
+        signer: userOf(first.pubkey)?.signer ?? users[0].signer,
+        choices,
+        another: choices.some((c) => c.held),
+        recheck: () => 'ask',
+      });
+      if (answer.choice !== 'allow' || !answer.account) {
+        if (answer.choice === 'dismiss') suppressed.current.add(tabKey);
+        throw rejected();
+      }
+      const chosen = answer.account;
+      if (!userOf(chosen) || grantOf(chosen, origin)?.status === 'blocked') throw rejected();
+      const now = Date.now();
+      updateGrant(chosen, origin, (g) =>
+        g?.status === 'connected' ? g : { status: 'connected', name, methods: {}, kinds: {}, createdAt: now, lastUsed: now },
+      );
+      return chosen;
+    }
 
-      let chosen = first.pubkey;
-      // An installed app is connected by being installed, when there's only
-      // one account it could be.
-      if (request.source === 'tab' || another || choices.length > 1) {
+    /**
+     * Connect a site to Din's account, as window.nostr always has: a tab is
+     * asked about (after a click), and an installed app or Din's own app is
+     * connected by being installed or holding the nostr permission.
+     */
+    async function connectDesktop(request: NostrBridgeRequest, account: string, name: string, tabKey: string): Promise<void> {
+      const { origin } = request;
+      const grant = grantOf(account, origin);
+      if (grant?.status === 'blocked') throw rejected();
+      if (grant) return;
+      if (request.source === 'tab') {
         if (suppressed.current.has(tabKey)) throw rejected();
-        if ((request.source === 'tab' || another) && !request.userActivated) {
+        if (!request.userActivated) {
           throw new SignerError('NotAllowedError', 'Din asks to connect a site only after a click on the page');
         }
         const answer = await ask({
           request,
-          question: request.source === 'tab' ? 'connect' : 'getPublicKey',
+          question: 'connect',
           name,
-          account: first.pubkey,
-          signer: userOf(first.pubkey)?.signer ?? users[0].signer,
-          choices,
-          another,
-          recheck: () => (blockedFor(origin) ? 'deny' : !another && primaryOf(origin) ? 'allow' : 'ask'),
+          account,
+          signer: userOf(account)!.signer,
+          recheck: () => {
+            const g = grantOf(account, origin);
+            return g ? (g.status === 'blocked' ? 'deny' : 'allow') : 'ask';
+          },
         });
+        if (latest.current.user?.pubkey !== account) throw rejected();
         if (answer.choice === 'block') {
-          // Kept with the desktop's account, where Settings shows it.
-          const desktop = latest.current.user?.pubkey;
-          if (desktop) {
-            updateGrant(desktop, origin, () => ({ status: 'blocked', name, methods: {}, kinds: {}, createdAt: Date.now(), lastUsed: Date.now() }));
-          }
+          updateGrant(account, origin, () => ({ status: 'blocked', name, methods: {}, kinds: {}, createdAt: Date.now(), lastUsed: Date.now() }));
           throw rejected();
         }
         if (answer.choice !== 'allow') {
           if (answer.choice === 'dismiss') suppressed.current.add(tabKey);
           throw rejected();
         }
-        if (!answer.account) {
-          // Settled unasked: the site was given an account meanwhile.
-          const primary = primaryOf(origin);
-          if (primary) return primary;
-          throw rejected();
-        }
-        chosen = answer.account;
-        if (!userOf(chosen)) throw rejected();
       }
-
       // Connecting a site (or installing an app) lets it see who you are.
       const now = Date.now();
-      updateGrant(chosen, origin, (g) =>
-        g?.status === 'connected' ? g : { status: 'connected', name, methods: {}, kinds: {}, createdAt: now, lastUsed: now },
-      );
-      // The first account a site holds is window.nostr's, until it no longer
-      // holds it.
-      if (!holds(origin, siteIdentity(origin))) setSiteIdentity(origin, chosen);
-      return chosen;
+      updateGrant(account, origin, (g) => g ?? { status: 'connected', name, methods: {}, kinds: {}, createdAt: now, lastUsed: now });
     }
 
     /** Decide on a request as `account`, which the asker holds, asking if need be, and fulfil it. */
@@ -502,55 +498,38 @@ export function NostrBridgeHost() {
       return fulfill(signerUser.signer, account, method, params, preview);
     }
 
-    /** A request from one of Din's own apps: it acts as the desktop's account. */
-    async function handleDinApp(request: NostrBridgeRequest, method: string): Promise<unknown> {
-      const { user } = latest.current;
-      if (!user) throw new SignerError('NotAllowedError', 'Not signed in to Din');
-      if (!isSignerMethod(method)) throw invalid(`Unsupported method: ${method}`);
-      const { origin } = request;
-      const name = originLabel(origin);
-      if (grantOf(user.pubkey, origin)?.status === 'blocked') throw rejected();
-      // Holding the nostr permission connects an app.
-      const now = Date.now();
-      updateGrant(user.pubkey, origin, (g) => g ?? { status: 'connected', name, methods: {}, kinds: {}, createdAt: now, lastUsed: now });
-      return decideAndFulfill(request, method, user.pubkey, name, `${request.wcId}|${origin}`);
-    }
-
-    /** A web page's or installed app's request. */
+    /** A web page's, installed app's or Din app's request. */
     async function handlePage(request: NostrBridgeRequest): Promise<unknown> {
       const { origin, method } = request;
-      if (isDinAppOrigin(origin)) return handleDinApp(request, method);
-      if (latest.current.users.length === 0) throw new SignerError('NotAllowedError', 'Not signed in to Din');
       if (!isSignerMethod(method) && !IDENTITY_METHODS.has(method)) throw invalid(`Unsupported method: ${method}`);
+      if (latest.current.users.length === 0) throw new SignerError('NotAllowedError', 'Not signed in to Din');
       const params = (request.params ?? {}) as Record<string, unknown>;
       const tabKey = `${request.wcId}|${origin}`;
       if (request.userActivated) suppressed.current.delete(tabKey);
       const name = originLabel(origin);
-      if (blockedFor(origin)) throw rejected();
 
-      if (method === 'requestPublicKey') return connect(request, name, tabKey, true);
+      if (method === 'requestPublicKey') return connectAnother(request, name, tabKey);
 
-      // Pinned to one of the site's accounts (getSigner), or the site's own.
-      let account: string;
+      // Pinned to an account the site was given (getSigner), which switching
+      // Din's account doesn't change.
       if (params.account !== undefined) {
         const pinned = params.account;
         if (typeof pinned !== 'string' || !/^[0-9a-f]{64}$/.test(pinned)) throw invalid('Invalid public key');
         if (!holds(origin, pinned)) throw notHeld();
-        account = pinned;
-      } else {
-        if (method === 'getSigner') throw invalid('Invalid public key');
-        const primary = primaryOf(origin);
-        if (primary) account = primary;
-        // The site's own account is gone: only asking who the user is gives
-        // it another, so nothing it does is done as an account it didn't ask for.
-        else if (primary === null && method !== 'getPublicKey') throw notHeld();
-        else account = await connect(request, name, tabKey, false);
+        if (method === 'getSigner') return pinned;
+        if (!isSignerMethod(method)) throw invalid(`Unsupported method: ${method}`);
+        return decideAndFulfill(request, method, pinned, name, tabKey);
       }
-
-      if (method === 'getSigner') return account;
+      if (method === 'getSigner') throw invalid('Invalid public key');
       if (!isSignerMethod(method)) throw invalid(`Unsupported method: ${method}`);
-      return decideAndFulfill(request, method, account, name, tabKey);
+
+      // window.nostr's own methods act as Din's account, as they always have.
+      const { user } = latest.current;
+      if (!user) throw new SignerError('NotAllowedError', 'Not signed in to Din');
+      await connectDesktop(request, user.pubkey, name, tabKey);
+      return decideAndFulfill(request, method, user.pubkey, name, tabKey);
     }
+
     /** An app connected over NIP-46. Its grants live with the connection, in main. */
     async function handleBunker(
       request: NostrBridgeRequest,
@@ -612,7 +591,7 @@ export function NostrBridgeHost() {
     }
 
     // Din's own app windows, with the nostr permission (DinAppFrame).
-    const offApps = serveAppSignerRequests((request) => handleDinApp(request, request.method));
+    const offApps = serveAppSignerRequests(handlePage);
     if (!bridge) return offApps;
 
     const offRequest = bridge.onRequest(async (request) => {

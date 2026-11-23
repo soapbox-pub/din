@@ -90,6 +90,7 @@ const bridge: NostrHostBridge = {
   onCancel: () => () => {},
   onPageChanged: () => () => {},
   respond: (response) => responses.set(response.requestId, response),
+  accountChanged: () => {},
 };
 
 let probe: ReturnType<typeof useSignerGrants> | null = null;

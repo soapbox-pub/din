@@ -1,25 +1,18 @@
-import { useSyncExternalStore } from 'react';
-import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSignerGrants } from '@/hooks/useSignerGrants';
 import { grantRules, signerOriginOf, type GuardedMethod } from '@/lib/signerPermissions';
-import { siteIdentitiesSnapshot, subscribeSiteIdentities } from '@/lib/siteIdentities';
 
 /**
- * A site's standing with the account its window.nostr acts as (or, for one
- * that hasn't been given one, the desktop's): connected (and what it may do
- * without asking), blocked, or neither (null). Null too with no one signed in.
+ * A site's standing with the user's Nostr account: connected (and what it
+ * may do without asking), blocked, or neither (null). Null too with no one
+ * signed in.
  */
 export function useSignerSite(url: string) {
-  const { user, users } = useCurrentUser();
+  const { user, metadata } = useCurrentUser();
+  const { grants, disconnect, revoke } = useSignerGrants();
   const origin = signerOriginOf(url);
-  const identities = useSyncExternalStore(subscribeSiteIdentities, siteIdentitiesSnapshot);
-  const recorded = origin ? identities[origin] : undefined;
-  const account = users.find((u) => u.pubkey === recorded) ?? user;
-  const { grants, disconnect, revoke } = useSignerGrants(account);
-  const metadata = useAuthor(account?.pubkey).data?.metadata;
   const grant = origin ? grants[origin] : undefined;
-  if (!account || !origin || !grant) return null;
+  if (!user || !origin || !grant) return null;
   return {
     origin,
     blocked: grant.status === 'blocked',
@@ -29,3 +22,4 @@ export function useSignerSite(url: string) {
     revoke: (method: GuardedMethod, kind?: number) => revoke(origin, method, kind),
   };
 }
+

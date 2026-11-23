@@ -36,8 +36,8 @@ export interface NostrBridgeRequest {
    * The NIP-07 method: 'getPublicKey' | 'signEvent' | 'getRelays' |
    * 'nip04.encrypt' | 'nip04.decrypt' | 'nip44.encrypt' | 'nip44.decrypt' |
    * 'signPsbt', or window.nostr's 'requestPublicKey' | 'getSigner'. A page's
-   * may carry `account` in its params: the identity it's pinned to
-   * (getSigner), instead of the site's own.
+   * may carry `account` in its params: the account it's pinned to
+   * (getSigner), instead of Din's.
    */
   method: string;
   /** Method arguments (shape depends on `method`). */
@@ -95,6 +95,8 @@ export interface NostrHostBridge {
   onPageChanged(callback: (wcId: number) => void): () => void;
   /** Answer a relayed request. */
   respond(response: NostrBridgeResponse): void;
+  /** Tell every page with window.nostr that the account changed. */
+  accountChanged(): void;
 }
 
 declare global {
