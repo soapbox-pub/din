@@ -26,18 +26,25 @@ export interface ProgramSignerRequest {
   account: string | null;
   /** sign_event's kind. */
   kind: number | null;
+  /** Whether "Always allow" this kind (or method) is offered. */
   canAlways: boolean;
+  /** Whether "Always allow" the program is offered: signing, encrypting and decrypting anything. */
+  canAlwaysProgram: boolean;
   canProcess: boolean;
   canConversation: boolean;
 }
 
-export type ProgramSignerDecision = 'once' | 'process' | 'conversation' | 'always' | 'deny';
+/** `always` is the request's kind (or method); `program` is everything the program signs, encrypts or decrypts. */
+export type ProgramSignerDecision = 'once' | 'process' | 'conversation' | 'always' | 'program' | 'deny';
+
+/** In a grant's methods: everything it signs, encrypts or decrypts, of any kind. */
+export const ANY_METHOD = '*';
 
 /** A program allowed always. */
 export interface ProgramGrant {
   name: string;
   path: string;
-  /** nostrd methods allowed, other than sign_event. */
+  /** nostrd methods allowed, other than sign_event; ANY_METHOD for all of them and every kind. */
   methods: string[];
   /** sign_event, by kind. */
   kinds: number[];

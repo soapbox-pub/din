@@ -121,7 +121,12 @@ the accounts. nostrd sends each request to its approver, the one direct
 child of din-shell's compositor (Din's main process, which nothing else the
 user runs can become, the same check sudo's approvals make), which decides
 (`electron/nostrd-approval.mts`) and asks the user from a notification
-(`ProgramSignerHost`). What's allowed always is kept in nostrd, where only
+(`ProgramSignerHost`), which opens a window showing what would be signed.
+It knows who's asking: nostrd gives it the caller's pid (from the socket's
+peer credentials) and start time, and it reads the program from `/proc`, so
+a program can be allowed always, for one kind of event or for everything it
+signs, encrypts and decrypts (never spending or changing the accounts,
+which are asked every time). What's allowed always is kept in nostrd, where only
 the approver can read or write it; Settings → Connected apps lists it, and
 `din nostr programs` and `program-forget` do the same. Din's own helpers,
 and Din Drive's mount doing what a drive does, aren't asked. With no Din

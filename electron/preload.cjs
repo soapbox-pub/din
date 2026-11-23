@@ -2448,7 +2448,8 @@ expose('programSigner', {
   },
 
   /**
-   * Answer a request: once, process, conversation, always, or deny.
+   * Answer a request: once, process, conversation, always (its kind or
+   * method), program (everything it signs, encrypts or decrypts), or deny.
    * @param {number} requestId
    * @param {string} decision
    */

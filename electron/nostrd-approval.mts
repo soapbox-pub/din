@@ -24,7 +24,8 @@
 //   time), "for this conversation" (an Assistant conversation, while its
 //   OpenCode server runs, as sudo's grants are), or "always" (a program and
 //   what it may do, as sites' grants are kept: signing per kind, encrypting
-//   and decrypting per method).
+//   and decrypting per method, or all of that at once, ANY: "Always allow
+//   ngit").
 // - Everything else is asked, from a notification that opens the desktop's
 //   prompt (ProgramSignerHost). Spending bitcoin and changing the accounts
 //   are asked every time.
@@ -82,15 +83,17 @@ export interface ProgramSignerRequest {
   account: string | null;
   /** sign_event's kind. */
   kind: number | null;
-  /** Whether "Always allow" is offered. */
+  /** Whether "Always allow" this kind (or method) is offered. */
   canAlways: boolean;
+  /** Whether "Always allow" the program is offered: signing, encrypting and decrypting anything. */
+  canAlwaysProgram: boolean;
   /** Whether "Until it quits" is offered. */
   canProcess: boolean;
   /** Whether "For this conversation" is offered: an Assistant conversation's. */
   canConversation: boolean;
 }
 
-export type ProgramSignerAnswer = 'once' | 'process' | 'conversation' | 'always' | 'deny';
+export type ProgramSignerAnswer = 'once' | 'process' | 'conversation' | 'always' | 'program' | 'deny';
 
 /** A program allowed always (Settings → Connected apps). */
 export interface ProgramGrant {
@@ -98,7 +101,7 @@ export interface ProgramGrant {
   name: string;
   /** Where it was running from when allowed. */
   path: string;
-  /** nostrd methods allowed, other than sign_event. */
+  /** nostrd methods allowed, other than sign_event; ANY for everything in SIGNING. */
   methods: string[];
   /** sign_event, by kind. */
   kinds: number[];
@@ -149,6 +152,8 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'env', 'timeout', '
 /** What Din Drive signs (din-drive's src/model.rs): nodes, keys, info, versions, Blossom auth. */
 const DRIVE_KINDS = new Set([30440, 30441, 30442, 1440, 24242]);
 const SIGNING = new Set(['sign_event', 'nip04_encrypt', 'nip04_decrypt', 'nip44_encrypt', 'nip44_decrypt']);
+/** In a grant's methods: everything in SIGNING, of any kind ("Always allow ngit"). */
+const ANY = '*';
 /** Each one is asked: different money, or a different account, each time. */
 const EVERY_TIME = new Set(['sign_psbt', 'generate_account', 'import_account', 'set_active', 'set_password']);
 const CHECK_GONE_MS = 3000;
@@ -329,6 +334,7 @@ function driveMayDo(request: NostrdApprovalRequest, kind: number | null): boolea
 
 function ruleCovers(grant: ProgramGrant | undefined, method: string, kind: number | null): boolean {
   if (!grant || EVERY_TIME.has(method)) return false;
+  if (grant.methods.includes(ANY) && SIGNING.has(method)) return true;
   return method === 'sign_event' ? kind !== null && grant.kinds.includes(kind) : grant.methods.includes(method);
 }
 
@@ -467,6 +473,7 @@ export function onApprovalRequest(raw: unknown): void {
     account: request.account,
     kind,
     canAlways: client.key !== null && !EVERY_TIME.has(request.method) && (request.method !== 'sign_event' || kind !== null),
+    canAlwaysProgram: client.key !== null && SIGNING.has(request.method),
     canProcess: SIGNING.has(request.method),
     canConversation: SIGNING.has(request.method) && client.sessionID !== null,
   };
@@ -537,11 +544,16 @@ function answer(requestId: unknown, decision: unknown): void {
       if (!request.canConversation || !client.sessionID || !client.server) return;
       sessionGrants.set(client.sessionID, client.server);
       break;
-    case 'always': {
-      if (!request.canAlways || !client.key) return;
+    case 'always':
+    case 'program': {
+      if (!client.key || !(decision === 'program' ? request.canAlwaysProgram : request.canAlways)) return;
       const now = Date.now();
       const grant = state.programs[client.key] ?? { name: client.name, path: client.exe, methods: [], kinds: [], createdAt: now, lastUsed: now };
-      if (request.method === 'sign_event' && request.kind !== null) {
+      if (decision === 'program') {
+        // Everything it signs, encrypts and decrypts: the narrower rules ANY covers go.
+        grant.methods = [ANY, ...grant.methods.filter((m) => !SIGNING.has(m) && m !== ANY)];
+        grant.kinds = [];
+      } else if (request.method === 'sign_event' && request.kind !== null) {
         if (!grant.kinds.includes(request.kind)) grant.kinds.push(request.kind);
       } else if (!grant.methods.includes(request.method)) {
         grant.methods.push(request.method);

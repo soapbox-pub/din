@@ -10,7 +10,7 @@ import { planDinRestart } from '@/lib/updateNotice';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
 import { getKindLabel } from '@/lib/kindLabels';
-import { getProgramSignerBridge, programRules, type ProgramGrants } from '@/lib/programSigner';
+import { ANY_METHOD, getProgramSignerBridge, programRules, type ProgramGrants } from '@/lib/programSigner';
 
 /** `din update`, `din firmware`, `din lock`, `din nostr`: Settings → About, Password and Nostr & Storage. */
 
@@ -215,6 +215,7 @@ function findProgram(grants: ProgramGrants, name: string): string {
 }
 
 function ruleText(method: string, kind?: number): string {
+  if (method === ANY_METHOD) return 'sign, encrypt and decrypt anything';
   return method === 'sign_event' && kind !== undefined ? `sign ${getKindLabel(kind)} (kind ${kind})` : method.replace('_', ' ');
 }
 
@@ -243,7 +244,7 @@ export const nostrArea: Area = {
     command('nostr', 'program-forget', 'Stop always allowing a program, or one thing it may do, so it asks again', [
       { name: 'program', type: 'string', positional: true, help: 'Its name, as din nostr programs lists it, or its key' },
       { name: 'kind', type: 'number', optional: true, help: 'Only signing this kind of event' },
-      { name: 'method', type: 'string', optional: true, help: 'Only this: nip44_encrypt, nip44_decrypt, nip04_encrypt or nip04_decrypt' },
+      { name: 'method', type: 'string', optional: true, help: 'Only this: nip44_encrypt, nip44_decrypt, nip04_encrypt, nip04_decrypt, or * for everything it was allowed at once' },
     ], async (args) => {
       const bridge = programSigner();
       const key = findProgram(await call(bridge.grants()), args.string('program'));

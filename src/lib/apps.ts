@@ -10,6 +10,7 @@ import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID, OPEN_WITH_APP_ID } from '@/lib/settingsWindows';
 import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
 import { FINGERPRINT_SETUP_APP_ID } from '@/lib/lock';
+import { PROGRAM_SIGNER_APP_ID } from '@/lib/programSignerWindows';
 
 const DinAppFrame = lazy(() =>
   import('@/components/desktop/DinAppFrame').then((m) => ({ default: m.DinAppFrame })),
@@ -42,6 +43,9 @@ const AddPrinterWindow = lazy(() =>
 );
 const OpenWithWindow = lazy(() =>
   import('@/components/desktop/apps/OpenWithWindow').then((m) => ({ default: m.OpenWithWindow })),
+);
+const ProgramSignerWindow = lazy(() =>
+  import('@/components/desktop/apps/ProgramSignerWindow').then((m) => ({ default: m.ProgramSignerWindow })),
 );
 const FingerprintSetupWindow = lazy(() =>
   import('@/components/desktop/apps/FingerprintSetupWindow').then((m) => ({ default: m.FingerprintSetupWindow })),
@@ -434,6 +438,21 @@ export const APPS: readonly AppDefinition[] = [
     floating: true,
     hidden: true,
     singleInstance: true,
+    dockAs: 'settings',
+  },
+  {
+    // A program (ngit, a script the Assistant runs) asking to sign as the
+    // user through nostrd: a window per request, under Settings, whose
+    // Connected apps lists what's allowed always. Hidden from the launcher;
+    // ProgramSignerHost opens it from the request's notification.
+    id: PROGRAM_SIGNER_APP_ID,
+    name: 'Signing Request',
+    icon: '/icons/apps/settings.png',
+    component: ProgramSignerWindow,
+    defaultSize: { width: 420, height: 680 },
+    floating: true,
+    hidden: true,
+    instanceParam: 'request',
     dockAs: 'settings',
   },
   {

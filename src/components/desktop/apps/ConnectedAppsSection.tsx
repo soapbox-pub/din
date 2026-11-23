@@ -39,7 +39,7 @@ import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import type { AppComponentProps } from '@/lib/apps';
 import { CONNECT_APP_APP_ID, connectAppParams } from '@/lib/settingsWindows';
 import { useProgramGrants } from '@/hooks/useProgramGrants';
-import { getProgramSignerBridge, programRules, signerMethodOf, type ProgramGrant } from '@/lib/programSigner';
+import { ANY_METHOD, getProgramSignerBridge, programRules, signerMethodOf, type ProgramGrant } from '@/lib/programSigner';
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
@@ -64,6 +64,8 @@ interface Rule {
   method: GuardedMethod;
   kind?: number;
   decision: Decision;
+  /** Said instead of the method's own label (a program allowed everything). */
+  label?: string;
 }
 
 function summary(rules: Rule[]): string {
@@ -91,10 +93,10 @@ function RuleList({ rules, onRevoke }: { rules: Rule[]; onRevoke: (rule: Rule) =
               >
                 {rule.decision === 'allow' ? 'Allow' : 'Deny'}
               </span>
-              <span className="min-w-0 flex-1 truncate">{ruleLabel(rule.method, rule.kind)}</span>
+              <span className="min-w-0 flex-1 truncate">{rule.label ?? ruleLabel(rule.method, rule.kind)}</span>
               <button
                 type="button"
-                aria-label={`Forget: ${ruleLabel(rule.method, rule.kind)}`}
+                aria-label={`Forget: ${rule.label ?? ruleLabel(rule.method, rule.kind)}`}
                 onClick={() => onRevoke(rule)}
                 className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
@@ -215,7 +217,11 @@ function SiteRow({
  */
 function ProgramRow({ id, grant }: { id: string; grant: ProgramGrant }) {
   const bridge = getProgramSignerBridge();
-  const rules: Rule[] = programRules(grant).flatMap(({ method, kind }) => {
+  const everything = grant.methods.includes(ANY_METHOD);
+  const rules: Rule[] = programRules(grant).flatMap(({ method, kind }): Rule[] => {
+    if (method === ANY_METHOD) {
+      return [{ method: 'signEvent' as const, decision: 'allow' as const, label: 'Sign, encrypt and decrypt anything' }];
+    }
     const signer = signerMethodOf(method);
     return signer && signer !== 'signPsbt' ? [{ method: signer, kind, decision: 'allow' as const }] : [];
   });
@@ -224,7 +230,7 @@ function ProgramRow({ id, grant }: { id: string; grant: ProgramGrant }) {
     <Row
       icon={<Tile><SquareTerminal className="size-4.5" strokeWidth={1.75} /></Tile>}
       title={grant.name}
-      subtitle={`${summary(rules)} · ${ago(grant.lastUsed)}`}
+      subtitle={`${everything ? 'Allowed everything but spending and accounts' : summary(rules)} · ${ago(grant.lastUsed)}`}
       menu={
         <ContextMenuItem variant="destructive" onSelect={forget}>
           <Unplug aria-hidden />
@@ -236,7 +242,7 @@ function ProgramRow({ id, grant }: { id: string; grant: ProgramGrant }) {
       <RuleList
         rules={rules}
         onRevoke={(r) => {
-          const method = r.method === 'signEvent' ? 'sign_event' : r.method.replace('.', '_');
+          const method = r.label ? ANY_METHOD : r.method === 'signEvent' ? 'sign_event' : r.method.replace('.', '_');
           void bridge?.revoke(id, method, r.kind ?? null).catch(() => {});
         }}
       />
