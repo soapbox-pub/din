@@ -8,7 +8,7 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         renderer::{ImportDma, ImportMemWl},
     },
-    delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_fractional_scale, delegate_output,
+    delegate_data_control, delegate_dmabuf, delegate_fractional_scale, delegate_output,
     delegate_pointer_constraints, delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
     delegate_relative_pointer, delegate_seat, delegate_virtual_keyboard_manager, delegate_shm, delegate_single_pixel_buffer, delegate_viewporter,
     desktop::{PopupManager, Space, Window},
@@ -20,12 +20,17 @@ use smithay::{
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_server::{
-            Display, DisplayHandle, Resource,
+            Client, DataInit, Dispatch, Display, DisplayHandle, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
-            protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
+            protocol::{
+                wl_data_device::{self, WlDataDevice},
+                wl_data_device_manager::WlDataDeviceManager,
+                wl_data_source::WlDataSource,
+                wl_surface::WlSurface,
+            },
         },
     },
-    utils::{Clock, Logical, Monotonic, Point, Rectangle},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, Serial},
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorState, with_states},
@@ -39,8 +44,8 @@ use smithay::{
         selection::{
             SelectionHandler,
             data_device::{
-                ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
-                set_data_device_focus,
+                ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, DataDeviceUserData, DataSourceUserData,
+                ServerDndGrabHandler, set_data_device_focus,
             },
             primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus},
             wlr_data_control::{DataControlHandler, DataControlState},
@@ -437,7 +442,52 @@ delegate_shm!(State);
 delegate_dmabuf!(State);
 delegate_output!(State);
 delegate_seat!(State);
-delegate_data_device!(State);
+// wl_data_device by hand, below; the manager and sources as delegate_data_device! has them.
+smithay::reexports::wayland_server::delegate_global_dispatch!(State: [WlDataDeviceManager: ()] => DataDeviceState);
+smithay::reexports::wayland_server::delegate_dispatch!(State: [WlDataDeviceManager: ()] => DataDeviceState);
+smithay::reexports::wayland_server::delegate_dispatch!(State: [WlDataSource: DataSourceUserData] => DataDeviceState);
+
+/// Smithay's wl_data_device, except that a drag it refuses is cancelled.
+/// It refuses a start_drag whose serial isn't a button or touch still held,
+/// which Chromium sends when the button came up before its drag got going (a
+/// quick click with a twitch on a draggable row, say), and only logs it: the
+/// source never hears `cancelled`, so Chromium waits on the drag for good, and
+/// the page it began in ignores the pointer's moves (no hover, only clicks)
+/// until it's reloaded. wlroots cancels the source there, as the protocol has it.
+impl Dispatch<WlDataDevice, DataDeviceUserData> for State {
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &WlDataDevice,
+        request: wl_data_device::Request,
+        data: &DataDeviceUserData,
+        dh: &DisplayHandle,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        let refused = match &request {
+            wl_data_device::Request::StartDrag { source: Some(source), serial, .. } => {
+                let serial = Serial::from(*serial);
+                let held = state.seat.get_pointer().is_some_and(|p| p.has_grab(serial))
+                    || state.seat.get_touch().is_some_and(|t| t.has_grab(serial));
+                (!held).then(|| source.clone())
+            }
+            _ => None,
+        };
+        <DataDeviceState as Dispatch<WlDataDevice, DataDeviceUserData, Self>>::request(
+            state, client, resource, request, data, dh, data_init,
+        );
+        if let Some(source) = refused {
+            if source.is_alive() {
+                source.cancelled();
+            }
+        }
+    }
+
+    fn destroyed(state: &mut Self, client: ClientId, resource: &WlDataDevice, data: &DataDeviceUserData) {
+        <DataDeviceState as Dispatch<WlDataDevice, DataDeviceUserData, Self>>::destroyed(state, client, resource, data);
+    }
+}
+
 delegate_primary_selection!(State);
 delegate_data_control!(State);
 delegate_presentation!(State);
