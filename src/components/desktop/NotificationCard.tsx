@@ -20,6 +20,7 @@ import { getBrowserBridge } from '@/lib/browser';
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { glassPanel } from '@/shared/appChromeStyles';
+import { useSwipeToDismiss } from './useSwipeToDismiss';
 
 /**
  * One notification, as a popup or a row of the notification center's list: who sent it,
@@ -59,6 +60,12 @@ export function NotificationCard({
     onReplyingChange?.(on);
   };
 
+  // Swiped right, or up off a popup (a list scrolls up and down), it's dismissed.
+  const { style: swipeStyle, ...swipe } = useSwipeToDismiss({
+    onDismiss: () => closeNotification(notification.id),
+    up: variant === 'popup',
+  });
+
   /** The body opens what it's about, so the list closes; an action is done in place. */
   const activate = (action?: string) => {
     activateNotification(notification.id, action);
@@ -70,6 +77,8 @@ export function NotificationCard({
       <ContextMenuTrigger asChild>
         <div
           role={variant === 'popup' ? 'status' : undefined}
+          {...swipe}
+          style={replying ? undefined : swipeStyle}
           className={cn(
             'group relative flex flex-col gap-1.5 p-3',
             variant === 'popup' &&
@@ -91,7 +100,7 @@ export function NotificationCard({
             type="button"
             aria-label="Dismiss"
             onClick={() => closeNotification(notification.id)}
-            className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute right-2 top-2 rounded-md p-1 before:absolute before:-inset-2 before:content-[''] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="size-3.5" />
           </button>
