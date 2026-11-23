@@ -128,16 +128,17 @@ export interface MessageSummary {
   sorted?: number;
 }
 
-/** Gmail's inbox tabs, Primary first. */
-export const MAIL_CATEGORIES = ['primary', 'promotions', 'social', 'updates', 'forums'] as const;
+/**
+ * The inbox's tabs, Primary first: three of Gmail's five, its Updates and
+ * Forums being Primary's.
+ */
+export const MAIL_CATEGORIES = ['primary', 'promotions', 'social'] as const;
 export type MailCategory = (typeof MAIL_CATEGORIES)[number];
 
 export const CATEGORY_NAMES: Record<MailCategory, string> = {
   primary: 'Primary',
   promotions: 'Promotions',
   social: 'Social',
-  updates: 'Updates',
-  forums: 'Forums',
 };
 
 export function isMailCategory(v: unknown): v is MailCategory {

@@ -1,6 +1,6 @@
-// Gmail's inbox tabs (Primary, Promotions, Social, Updates, Forums) for
-// mail that isn't on Gmail (electron/mail.mts): a guess from a few headers
-// of each message, its sender and its subject, never its body. Gmail sorts
+// The inbox's tabs (Primary, Promotions, Social: three of Gmail's, its
+// Updates and Forums being Primary's) for mail that isn't on Gmail
+// (electron/mail.mts): a guess from a few headers of each message, its sender and its subject, never its body. Gmail sorts
 // its own mail, and Mail asks it; the user's rules for a sender win over
 // both, and mail from someone the user has written to stays in Primary
 // (mail.mts's tabOf).
@@ -13,27 +13,30 @@
 // mention@noreply.github.com; GitLab in X-GitLab-NotificationReason),
 // though not one the user only watches. Mail from a social network is Social; from a service about the
 // user's own work and accounts (GitHub's and the like, whose notifications
-// are sent as mailing lists) is Updates; a mailing list people write to
-// (List-Post) is Forums. Other mail is automated when it says so (bulk
+// are sent as mailing lists) is Primary, as is a mailing list people
+// write to (List-Post). Other mail is automated when it says so (bulk
 // headers, Auto-Submitted, a no-reply sender), when its sender is named
 // for what machines send (receipts@, notifications@, hello@…), or when it
 // comes from a sending host (mail.example.com, em123.example.com). Of the
 // automated mail, what reads like a sale is Promotions; what reads like a
-// receipt, a shipment or an account's security is Updates, as is what comes
+// receipt, a shipment or an account's security is Primary, as is what comes
 // from a sender named for those; and what's left is Promotions when it's
-// marketing (sent in bulk, or by a marketing sender) and else Updates.
+// marketing (sent in bulk, or by a marketing sender) and else Primary.
 
 import type { MailAddress, MailCategory } from '../src/lib/mail.ts';
 
-/** Gmail's tabs, in its order (src/lib/mail.ts's MAIL_CATEGORIES, which main can't import). */
-export const CATEGORIES: readonly MailCategory[] = ['primary', 'promotions', 'social', 'updates', 'forums'];
+/** The tabs, in Gmail's order (src/lib/mail.ts's MAIL_CATEGORIES, which main can't import). */
+export const CATEGORIES: readonly MailCategory[] = ['primary', 'promotions', 'social'];
+
+/** Gmail's own tabs whose mail is Primary's here, for its `category:` search. */
+export const GMAIL_PRIMARY = ['updates', 'forums'];
 
 /**
  * Which version of these rules a kept message's tab was guessed by
  * (MessageSummary.sorted): raised when they change, so the inbox's mail is
  * sorted again.
  */
-export const SORTER_VERSION = 3;
+export const SORTER_VERSION = 4;
 
 export function isCategory(v: unknown): v is MailCategory {
   return typeof v === 'string' && (CATEGORIES as readonly string[]).includes(v);
@@ -48,8 +51,8 @@ const SOCIAL = [
   'youtube.com', 'meetup.com', 'strava.com', 'goodreads.com', 'bsky.app', 'mastodon.social',
 ];
 
-/** Services whose mail is about the user's own work and accounts, mailing-list headers or not. */
-const UPDATES = [
+/** Services whose mail is about the user's own work and accounts, mailing-list headers or not: Primary, though sent in bulk. */
+const SERVICES = [
   'github.com', 'gitlab.com', 'bitbucket.org', 'atlassian.net', 'linear.app', 'sentry.io', 'slack.com', 'opencollective.com',
   'notion.so', 'notion.com', 'figma.com', 'vercel.com', 'netlify.com', 'notify.cloudflare.com',
 ];
@@ -126,9 +129,9 @@ export function categorize(fields: Map<string, string[]> | null, from: MailAddre
   if (reasons.some((r) => PARTICIPATING.has(r.toLowerCase()))) return 'primary';
 
   if (within(domain, SOCIAL)) return 'social';
-  if (within(domain, UPDATES)) return 'updates';
+  if (within(domain, SERVICES)) return 'primary';
   const listPost = first('list-post');
-  if (first('list-id') && listPost && !/^NO\b/i.test(listPost)) return 'forums';
+  if (first('list-id') && listPost && !/^NO\b/i.test(listPost)) return 'primary';
 
   const w = words(local);
   const labels = domain.split('.');
@@ -143,8 +146,8 @@ export function categorize(fields: Map<string, string[]> | null, from: MailAddre
     bulk || (!!auto && auto !== 'no') || !!first('x-auto-response-suppress') || isAutomatedAddress(address) || transactional || notice || marketing || sendingHost;
   if (!automated) return 'primary';
   if (PROMO_SUBJECT.test(subject)) return 'promotions';
-  if (TRANSACTIONAL_SUBJECT.test(subject) || transactional) return 'updates';
-  if (notice) return bulk ? 'promotions' : 'updates';
+  if (TRANSACTIONAL_SUBJECT.test(subject) || transactional) return 'primary';
+  if (notice) return bulk ? 'promotions' : 'primary';
   // Marketing is sent with List-Unsubscribe nearly always; what's sent without it is about the user's account.
-  return bulk || marketing ? 'promotions' : 'updates';
+  return bulk || marketing ? 'promotions' : 'primary';
 }

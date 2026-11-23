@@ -17,10 +17,10 @@ describe('categorize', () => {
     expect(tab('sam@gmail.com', 'Fwd: the invoice you asked about')).toBe('primary');
   });
 
-  it('puts a service’s notifications in Updates, even sent as a mailing list', () => {
+  it('keeps a service’s notifications in Primary, even sent as a mailing list', () => {
     const list = new Map([['list-id', ['<repo.example>']], ['list-post', ['<mailto:reply@example>']]]);
-    expect(tab('notifications@github.com', 'Re: [org/repo] Fix the build (PR #12)', list)).toBe('updates');
-    expect(tab('noreply@github.com', '[GitHub] A workflow will be disabled')).toBe('updates');
+    expect(tab('notifications@github.com', 'Re: [org/repo] Fix the build (PR #12)', list)).toBe('primary');
+    expect(tab('noreply@github.com', '[GitHub] A workflow will be disabled')).toBe('primary');
   });
 
   it('keeps threads the user is part of in Primary, not ones they only watch', () => {
@@ -28,11 +28,11 @@ describe('categorize', () => {
     const subject = 'Re: [org/repo] Fix the build (PR #12)';
     expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('mention'))).toBe('primary');
     expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('author'))).toBe('primary');
-    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('subscribed'))).toBe('updates');
-    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('push'))).toBe('updates');
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('subscribed'))).toBe('primary');
+    expect(categorize(BULK, { name: 'jane', address: 'notifications@github.com' }, subject, cc('push'))).toBe('primary');
     const gitlab = (reason: string) => new Map([...BULK, ['x-gitlab-notificationreason', [reason]]]);
     expect(tab('gitlab@mg.gitlab.com', 'Re: Project | Uploads fail (#338)', gitlab('mentioned'))).toBe('primary');
-    expect(tab('gitlab@mg.gitlab.com', 'Re: Project | Uploads fail (#338)', gitlab(''))).toBe('updates');
+    expect(tab('gitlab@mg.gitlab.com', 'Re: Project | Uploads fail (#338)', gitlab(''))).toBe('primary');
   });
 
   it('keeps sign-ins in Primary, from any sender', () => {
@@ -43,28 +43,28 @@ describe('categorize', () => {
     expect(tab('info@opencollective.com', 'Open Collective: Sign In')).toBe('primary');
     expect(tab('gitlab@mg.gitlab.com', 'Verify your identity')).toBe('primary');
     expect(tab('noreply@uber.com', 'New device sign-in')).toBe('primary');
-    expect(tab('noreply@patient-message.com', 'Confirm your upcoming appointment')).toBe('updates');
-    expect(tab('bot@notifications.heroku.com', 'Remember to Register a Backup MFA Verification Method')).toBe('updates');
+    expect(tab('noreply@patient-message.com', 'Confirm your upcoming appointment')).toBe('primary');
+    expect(tab('bot@notifications.heroku.com', 'Remember to Register a Backup MFA Verification Method')).toBe('primary');
     expect(tab('news@email.store.example', 'Sign in to save 20% off today', BULK)).toBe('promotions');
   });
 
-  it('puts a mailing list people write to in Forums', () => {
+  it('keeps a mailing list people write to in Primary', () => {
     const list = new Map([['list-id', ['<dev.lists.example.org>']], ['list-post', ['<mailto:dev@lists.example.org>']]]);
-    expect(tab('someone@example.org', 'Re: [dev] Release plans', list)).toBe('forums');
+    expect(tab('someone@example.org', 'Re: [dev] Release plans', list)).toBe('primary');
   });
 
-  it('puts receipts, orders and account notices in Updates without bulk headers', () => {
-    expect(tab('notifications@stripe.com', 'Payment of $22.00 from a customer')).toBe('updates');
-    expect(tab('hello@bank.example', 'A vendor has charged your account $115.54')).toBe('updates');
-    expect(tab('hello@bank.example', 'Your company received $20.44 from a client')).toBe('updates');
-    expect(tab('shipment-tracking@amazon.com', 'Shipped 1 item: Computers')).toBe('updates');
-    expect(tab('digitalorder-update@amazon.com', 'Your recent purchase')).toBe('updates');
-    expect(tab('auto-confirm@amazon.com', 'Ordered 1 item')).toBe('updates');
-    expect(tab('renewals@registrar.example', 'example.com will expire in 15 days')).toBe('updates');
-    expect(tab('wordpress@site.example', '[Site] Please moderate: "Hello world!"')).toBe('updates');
-    expect(tab('googleplay-noreply@google.com', 'Developer Program Policy Update')).toBe('updates');
-    expect(tab('no-reply@mail.exchange.example', 'Price Alert: Bitcoin is down 5%')).toBe('updates');
-    expect(tab('no_reply@email.apple.com', 'Your App Review Feedback')).toBe('updates');
+  it('keeps receipts, orders and account notices in Primary without bulk headers', () => {
+    expect(tab('notifications@stripe.com', 'Payment of $22.00 from a customer')).toBe('primary');
+    expect(tab('hello@bank.example', 'A vendor has charged your account $115.54')).toBe('primary');
+    expect(tab('hello@bank.example', 'Your company received $20.44 from a client')).toBe('primary');
+    expect(tab('shipment-tracking@amazon.com', 'Shipped 1 item: Computers')).toBe('primary');
+    expect(tab('digitalorder-update@amazon.com', 'Your recent purchase')).toBe('primary');
+    expect(tab('auto-confirm@amazon.com', 'Ordered 1 item')).toBe('primary');
+    expect(tab('renewals@registrar.example', 'example.com will expire in 15 days')).toBe('primary');
+    expect(tab('wordpress@site.example', '[Site] Please moderate: "Hello world!"')).toBe('primary');
+    expect(tab('googleplay-noreply@google.com', 'Developer Program Policy Update')).toBe('primary');
+    expect(tab('no-reply@mail.exchange.example', 'Price Alert: Bitcoin is down 5%')).toBe('primary');
+    expect(tab('no_reply@email.apple.com', 'Your App Review Feedback')).toBe('primary');
   });
 
   it('puts marketing in Promotions, whoever it says it’s from', () => {
@@ -76,8 +76,8 @@ describe('categorize', () => {
     expect(tab('news@email.store.example', 'Save Big on Booster Bundles!', BULK)).toBe('promotions');
   });
 
-  it('keeps bulk receipts in Updates', () => {
-    expect(tab('orders@grocer.example', 'Your order is confirmed for October 31', BULK)).toBe('updates');
+  it('keeps bulk receipts in Primary', () => {
+    expect(tab('orders@grocer.example', 'Your order is confirmed for October 31', BULK)).toBe('primary');
   });
 
   it('puts social networks in Social', () => {

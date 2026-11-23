@@ -49,9 +49,9 @@
 // mail with the stored copy. A keyword label's name can change without
 // rewriting it on every message: the keyword stays, as Thunderbird's do.
 //
-// The inbox is split into Gmail's tabs (Primary, Promotions, Social,
-// Updates, Forums). On Gmail each message's tab is Gmail's own, which IMAP
-// gives only to a search (X-GM-RAW category:…), so it's asked for as
+// The inbox is split into three of Gmail's tabs (Primary, Promotions,
+// Social; Gmail's Updates and Forums are Primary's). On Gmail each
+// message's tab is Gmail's own, which IMAP gives only to a search (X-GM-RAW category:…), so it's asked for as
 // summaries are fetched, and again for the newest mail at each sync, and
 // a tab's pages are Gmail's search; elsewhere it's guessed from a few
 // headers (electron/mail-categories.mts), and a tab's pages are read from
@@ -79,7 +79,7 @@ import type { simpleParser, AddressObject, ParsedMail } from 'mailparser';
 import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
-import { CATEGORIES, CATEGORY_HEADERS, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
+import { CATEGORIES, CATEGORY_HEADERS, GMAIL_PRIMARY, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
 import type {
   ConversationMessage,
   InboxTabs,
@@ -123,8 +123,7 @@ interface StoredAccount extends MailAccount {
   tabRules?: Record<string, MailCategory>;
 }
 
-/** Gmail's own three, and Updates, so receipts and notifications aren't in Primary. */
-const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social', 'updates'], notify: 'primary' };
+const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social'], notify: 'primary' };
 let inboxTabs: InboxTabs = DEFAULT_TABS;
 
 function isInboxTabs(v: unknown): v is InboxTabs {
@@ -140,7 +139,12 @@ function tabList(v: unknown[]): InboxTabs['tabs'] {
 function tabRulesOf(v: unknown): Record<string, MailCategory> | undefined {
   if (typeof v !== 'object' || v === null) return undefined;
   const out: Record<string, MailCategory> = {};
-  for (const [address, c] of Object.entries(v)) if (RULE_ADDRESS.test(address) && isCategory(c)) out[address] = c;
+  for (const [address, c] of Object.entries(v)) {
+    if (!RULE_ADDRESS.test(address)) continue;
+    // Updates and Forums were tabs once; a sender moved to one is Primary's now.
+    if (isCategory(c)) out[address] = c;
+    else if (c === 'updates' || c === 'forums') out[address] = 'primary';
+  }
   return out;
 }
 
@@ -1410,7 +1414,7 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
  */
 function gmailTabSearch(a: StoredAccount, tab: MailCategory): string {
   const shown = new Set<MailCategory>(['primary', ...inboxTabs.tabs]);
-  const categories = tab === 'primary' ? CATEGORIES.filter((c) => c === 'primary' || !shown.has(c)) : [tab];
+  const categories = tab === 'primary' ? [...CATEGORIES.filter((c) => c === 'primary' || !shown.has(c)), ...GMAIL_PRIMARY] : [tab];
   const into: string[] = [];
   const away: string[] = [];
   for (const [address, c] of Object.entries(a.tabRules ?? {})) ((shown.has(c) ? c : 'primary') === tab ? into : away).push(address);

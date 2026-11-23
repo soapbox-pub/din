@@ -16,8 +16,6 @@ import { TAB_ICONS } from './tabs';
 const TAB_HINTS: Record<InboxTabs['tabs'][number], string> = {
   promotions: 'Deals, offers and newsletters',
   social: 'Social networks and media sites',
-  updates: 'Receipts, bills, notifications and accounts',
-  forums: 'Mailing lists and discussion groups',
 };
 
 /** Which inbox tabs are shown, and which new mail notifies (Settings → General). */
@@ -39,7 +37,7 @@ function InboxTabsSettings() {
           <Checkbox checked disabled aria-label="Primary" className="mt-0.5" />
           <span>
             <span className="flex items-center gap-1.5 font-medium text-foreground"><TAB_ICONS.primary className="size-3.5" /> Primary</span>
-            <span className="block text-xs">Mail from people, and anything else</span>
+            <span className="block text-xs">Mail from people, receipts, notifications, mailing lists, and anything else</span>
           </span>
         </label>
         {others.map((c) => {
