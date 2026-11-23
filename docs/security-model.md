@@ -111,6 +111,24 @@ same way, and a folder holding them to calls that take a folder whole
 Unscoped `fs` and `pty` are the user's whole account: an app with either can
 write the shell's startup files. Only apps that need it hold them.
 
+**nostrd trusts Din's main process, and asks it about everything else.** On
+DinOS the account keys are in nostrd, running as its own user
+(`services.nostrd`, `os/configuration.nix`), so nothing the user runs can
+read them. With `approverUnit = "din-shell.service"`, a program of the
+user's that isn't Din (ngit in the Terminal, a script the Assistant runs) has
+to be allowed before nostrd signs, encrypts or decrypts for it, or changes
+the accounts. nostrd sends each request to its approver, the one direct
+child of din-shell's compositor (Din's main process, which nothing else the
+user runs can become, the same check sudo's approvals make), which decides
+(`electron/nostrd-approval.mts`) and asks the user from a notification
+(`ProgramSignerHost`). What's allowed always is kept in nostrd, where only
+the approver can read or write it; Settings → Connected apps lists it, and
+`din nostr programs` and `program-forget` do the same. Din's own helpers,
+and Din Drive's mount doing what a drive does, aren't asked. With no Din
+running (a text console, SSH), every such request is declined. It doesn't
+stop a program of the user's that starts one that's allowed and traces it,
+which is why the prompt shows the whole command.
+
 ### How a port is made
 
 1. The webview starts loading `din://paint/`. Its preload asks main for a

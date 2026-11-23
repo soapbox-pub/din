@@ -1151,10 +1151,17 @@ in
   # user, out of reach of everything `din` runs, and Din signs through it
   # (electron/nostrd.mts). Its password is the disk's (os/din-install.sh), so
   # the passphrase that unlocks the disk at boot unlocks it too.
+  #
+  # Din is its approver: any other program of `din`'s (ngit, nak, a script
+  # the Assistant runs) has to be allowed in Din before nostrd signs,
+  # encrypts or decrypts for it. nostrd takes only Din's main process, the
+  # one child of din-shell's compositor, as the approver
+  # (electron/nostrd-approval.mts).
   services.nostrd = {
     enable = true;
     users = [ "din" ];
     unlockWithDiskPassword = true;
+    approverUnit = "din-shell.service";
   };
 
   # Din Drive: the encrypted drive on Nostr and Blossom, mounted at ~/Drive
