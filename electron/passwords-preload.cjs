@@ -63,13 +63,33 @@ if (/^https?:$/.test(location.protocol)) {
       (i) => !i.disabled && visible(i),
     );
 
-  /** @param {HTMLInputElement} input */
-  const isNewPassword = (input) => {
+  /**
+   * Whether a password field says what it's for: a new password (true), the
+   * current one (false), or nothing (null).
+   * @param {HTMLInputElement} input
+   * @returns {boolean | null}
+   */
+  const saysNewPassword = (input) => {
     const autocomplete = (input.getAttribute('autocomplete') ?? '').toLowerCase();
     if (autocomplete.includes('current-password')) return false;
     if (autocomplete.includes('new-password')) return true;
-    if (/new|confirm|repeat|signup|sign-up|register|create/i.test(hints(input))) return true;
-    return input.form ? passwordFields(input.form).length >= 2 : false;
+    if (/new|confirm|repeat|again|re-?type|re-?enter|signup|sign-up|register|create/i.test(hints(input))) return true;
+    return null;
+  };
+
+  /**
+   * Whether a password field takes a new password. One that doesn't say is
+   * new when it shares its form with others that don't say either (a new
+   * password and its confirmation) or with the current one (changing it);
+   * beside only fields that say they're new, it's the login's own: pages
+   * wrapped whole in one form (ASP.NET's) sign in and sign up in the same one.
+   * @param {HTMLInputElement} input
+   */
+  const isNewPassword = (input) => {
+    const says = saysNewPassword(input);
+    if (says !== null) return says;
+    if (!input.form) return false;
+    return passwordFields(input.form).some((other) => other !== input && saysNewPassword(other) !== true);
   };
 
   /**
@@ -345,9 +365,11 @@ if (/^https?:$/.test(location.protocol)) {
         return;
       }
       const anchorKind = loginKind(anchor);
+      // From the username, its login's password: the first after it, in a form that holds more than one login.
+      const logins = passwordFields(scopeOf(anchor)).filter((f) => !isNewPassword(f));
       const password = anchorKind === 'password' || anchorKind === 'new-password'
         ? anchor
-        : passwordFields(scopeOf(anchor)).find((f) => !isNewPassword(f)) ?? null;
+        : logins.find((f) => anchor.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) ?? logins[0] ?? null;
       const username = anchorKind === 'username' ? anchor : password ? usernameFor(password) : null;
       if (login.username && username) type(username, login.username);
       if (password) type(password, login.password);
