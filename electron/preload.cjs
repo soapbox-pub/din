@@ -3964,7 +3964,7 @@ expose('guestInput', {
 // a NIP-07 window.nostr (see nostr-preload.cjs), and apps connected over
 // NIP-46 (electron/bunker.mts) ask the same questions; their calls are relayed
 // here, to the shell renderer, which decides on them and signs with the
-// signed-in account's signer. This is the ONLY bridge that serves the user's
+// account each one acts as. This is the ONLY bridge that serves the user's
 // signer, so it must never be attached to a <webview> - only the shell (see
 // the header note above).
 expose('nostrHost', {
@@ -4002,13 +4002,10 @@ expose('nostrHost', {
   },
 
   /**
-   * Answer a relayed request: { requestId, ok, result?, error?, remember? }.
-   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string, remember?: unknown }} response
+   * Answer a relayed request: { requestId, ok, result?, error?, errorName?, remember? }.
+   * @param {{ requestId: number, ok: boolean, result?: unknown, error?: string, errorName?: string, remember?: unknown }} response
    */
   respond: (response) => ipcRenderer.send('nostr-bridge:response', response),
-
-  /** Tell every page with window.nostr that the account changed. */
-  accountChanged: () => ipcRenderer.send('nostr-bridge:account-changed'),
 });
 
 // Din as a remote signer (window.dinos.bunkerHost), backed by electron/bunker.mts:

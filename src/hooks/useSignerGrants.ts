@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import type { NUser } from '@nostrify/react/login';
 import { useAppData } from '@/hooks/useAppData';
 import {
   DEFAULT_SIGNER_GRANTS,
@@ -10,15 +11,16 @@ import {
 } from '@/lib/signerPermissions';
 
 /**
- * The signed-in account's site grants (see signerPermissions.ts), stored
- * encrypted with the account so they roam with it. Every mounted instance
- * shares one value.
+ * An account's site grants (see signerPermissions.ts): the signed-in
+ * account's, or `account`'s. Stored encrypted with the account so they roam
+ * with it. Every mounted instance for one account shares one value.
  */
-export function useSignerGrants() {
+export function useSignerGrants(account?: NUser) {
   const [grants, setGrants] = useAppData<SignerGrants>(
     SIGNER_GRANTS_KEY,
     SignerGrantsSchema,
     DEFAULT_SIGNER_GRANTS,
+    { account },
   );
 
   /** Forget everything about a site: it has to ask to connect again. */

@@ -4462,6 +4462,9 @@ const pendingNostrRequests = new Map<number, {
   wcId: number | null;
 }>();
 
+/** What a failure may be named to the page (NostrBridgeResponse.errorName). */
+const NOSTR_ERROR_NAMES = new Set(['NotAllowedError', 'NotFoundError', 'TypeError']);
+
 /** Long enough for a prompt to wait in a background tab or window. */
 const NOSTR_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
@@ -4470,6 +4473,8 @@ interface NostrReply {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** window.nostr: the DOMException (or TypeError) the page's promise rejects with. */
+  errorName?: string;
   /** Bunker connections only: a decision the user asked Din to remember. */
   remember?: unknown;
 }
@@ -4573,18 +4578,13 @@ function registerNostrBridge(): void {
     pending.resolve(
       response.ok
         ? { ok: true, result: response.result, remember: response.remember }
-        : { ok: false, error: typeof response.error === 'string' ? response.error : 'Request failed', remember: response.remember },
+        : {
+            ok: false,
+            error: typeof response.error === 'string' ? response.error : 'Request failed',
+            errorName: NOSTR_ERROR_NAMES.has(response.errorName) ? response.errorName : undefined,
+            remember: response.remember,
+          },
     );
-  });
-
-  // The shell switched accounts: every page with window.nostr hears about it.
-  ipcMain.on('nostr-bridge:account-changed', (event) => {
-    if (!isShellSender(event)) return;
-    for (const contents of webContents.getAllWebContents()) {
-      if (contents.isDestroyed() || contents.getType() !== 'webview') continue;
-      if (contents.session !== browserSession()) continue;
-      contents.send('nostr-bridge:account-changed');
-    }
   });
 
   registerBunkerHandlers({ assertShellSender, sendToShell, relay: relayNostrRequest });

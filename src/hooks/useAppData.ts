@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useQuery } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 import type { z } from 'zod';
+import type { NUser } from '@nostrify/react/login';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAppContext } from '@/hooks/useAppContext';
 import {
@@ -34,6 +35,12 @@ interface UseAppDataOptions {
    * dock) or too private to roam (browser history).
    */
   localOnly?: boolean;
+  /**
+   * Another signed-in account's data instead of the current one's (Din's
+   * signer reads every account's site grants). Its sync status isn't
+   * reported to the menu bar's indicator, which is about the current account.
+   */
+  account?: NUser;
 }
 
 export interface AppDataMeta {
@@ -158,7 +165,9 @@ export function useAppData<T>(
   options: UseAppDataOptions = {},
 ): [T, (value: T | ((prev: T) => T)) => void, AppDataMeta] {
   const { nostr } = useNostr();
-  const { user } = useCurrentUser();
+  const { user: currentUser } = useCurrentUser();
+  const user = options.account ?? currentUser;
+  const reportsSync = !options.account || options.account.pubkey === currentUser?.pubkey;
   const { config } = useAppContext();
 
   const dTag = appDataDTag(key);
@@ -349,8 +358,8 @@ export function useAppData<T>(
   }, [canSync, remote, syncState]);
 
   useEffect(() => {
-    reportSyncState(key, effectiveSyncState);
-  }, [key, effectiveSyncState]);
+    if (reportsSync) reportSyncState(key, effectiveSyncState);
+  }, [key, effectiveSyncState, reportsSync]);
 
   const meta = useMemo<AppDataMeta>(
     () => ({

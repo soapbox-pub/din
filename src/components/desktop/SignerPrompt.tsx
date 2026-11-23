@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { NostrSigner } from '@nostrify/nostrify';
-import { AppWindow, ChevronRight, Globe, Loader2, Smartphone } from 'lucide-react';
+import { AppWindow, Check, ChevronRight, Globe, Loader2, Smartphone } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { AppIcon } from '@/shared/AppIcon';
 import { EmbeddedEvent, UnreadableEvent } from '@/components/EmbeddedEvent';
@@ -23,7 +23,8 @@ import { formatEventJson, parseDraftEvent } from '@/lib/draftEvent';
 import type { NostrBridgeRequest } from '@/lib/nostrBridge';
 import type { SignerQuestion } from '@/lib/signerLabels';
 import { alwaysAsks, type Decision } from '@/lib/signerPermissions';
-import { middleEllipsis } from '@/lib/utils';
+import { cn, middleEllipsis } from '@/lib/utils';
+import { chosenClass, focusRing } from '@/shared/appChromeStyles';
 import type { PsbtSummary } from '@/shared/bitcoin';
 import { formatBtc, formatSats } from '@/shared/bitcoinAmounts';
 
@@ -38,9 +39,16 @@ export interface SignerPromptItem {
   psbt?: PsbtSummary;
   /** What to call the asker in a notice; the prompt names a page or app itself (useSiteIdentity). */
   name: string;
-  /** The account that would sign. */
+  /** The account that would sign (for a connect question, the one chosen at first). */
   account: string;
   signer: NostrSigner;
+  /**
+   * Connect questions: the signed-in accounts the user may give the site,
+   * one of which they pick. `held`: the site has it already.
+   */
+  choices?: { pubkey: string; held: boolean }[];
+  /** Connect questions: the site already has an account and asks for another (requestPublicKey). */
+  another?: boolean;
   /** What the grants say now; anything but 'ask' settles the question unshown. */
   recheck: () => Decision | 'ask';
   resolve: (answer: PromptAnswer) => void;
@@ -52,6 +60,8 @@ export interface PromptAnswer {
   remember: boolean;
   /** A decrypted message the user already looked at, handed on as the result. */
   preview?: string;
+  /** Connect questions: the account the user gave the site. */
+  account?: string;
 }
 
 function shortNpub(pubkey: string): string {
@@ -96,6 +106,9 @@ function Artwork({ request, identity }: { request: NostrBridgeRequest; identity:
 function headline(item: SignerPromptItem, name: string, isConnect: boolean): { title: string; detail?: string } {
   const who = `“${name}”`;
   if (isConnect) {
+    if (item.another) {
+      return { title: `Sign in to ${who} with another account?`, detail: 'It will see that account’s public key, and asks before signing as it.' };
+    }
     return item.question === 'connect'
       ? { title: `Connect ${who}?`, detail: 'It can ask to sign as you from wherever it runs, until you disconnect it.' }
       : { title: `Connect ${who}?`, detail: 'It will see your public key. It still has to ask before signing anything.' };
@@ -132,6 +145,36 @@ export function Person({ label, pubkey }: { label: string; pubkey: unknown }) {
       </Avatar>
       <span className="min-w-0 truncate font-medium text-foreground">{name}</span>
     </div>
+  );
+}
+
+/** One account the user could give a site, in the connect question's list. */
+function AccountChoice({ pubkey, held, chosen, onChoose }: { pubkey: string; held: boolean; chosen: boolean; onChoose: () => void }) {
+  const author = useAuthor(pubkey);
+  const metadata = author.data?.metadata;
+  const name = metadata?.display_name?.trim() || metadata?.name?.trim() || shortNpub(pubkey);
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={chosen}
+      onClick={onChoose}
+      className={cn(
+        'flex h-12 w-full shrink-0 items-center gap-3 rounded-xl px-3 text-left text-sm transition-colors',
+        focusRing,
+        chosen ? chosenClass : 'hover:bg-foreground/5',
+      )}
+    >
+      <Avatar className="size-7">
+        <AvatarImage src={metadata?.picture} alt="" />
+        <AvatarFallback className="text-xs">{name.slice(0, 1).toUpperCase()}</AvatarFallback>
+      </Avatar>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{name}</span>
+        {held && <span className="block text-xs text-muted-foreground">Already signed in here</span>}
+      </span>
+      {chosen && <Check className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />}
+    </button>
   );
 }
 
@@ -237,6 +280,7 @@ function DecryptPreview({
 export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAnswer: (answer: PromptAnswer) => void }) {
   const { users } = useCurrentUser();
   const [preview, setPreview] = useState<string | undefined>();
+  const [chosenAccount, setChosenAccount] = useState(item.account);
 
   const params = (item.request.params ?? {}) as Record<string, unknown>;
   const isConnect = item.question === 'connect' || item.question === 'getPublicKey' || item.question === 'getRelays';
@@ -248,14 +292,21 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
   const { title, detail } = headline(item, item.request.source === 'bunker' ? item.name : identity.name, isConnect);
 
   const answer = (choice: PromptAnswer['choice'], remember = false) =>
-    onAnswer({ choice, remember, preview: choice === 'allow' ? preview : undefined });
+    onAnswer({
+      choice,
+      remember,
+      preview: choice === 'allow' ? preview : undefined,
+      account: isConnect && choice === 'allow' ? chosenAccount : undefined,
+    });
+  // A connect question offers a choice only when there is one to make.
+  const choices = isConnect && item.choices && (item.choices.length > 1 || item.another) ? item.choices : null;
 
   const isEncrypt = item.question === 'nip04.encrypt' || item.question === 'nip44.encrypt';
   const isDecrypt = item.question === 'nip04.decrypt' || item.question === 'nip44.decrypt';
   // A signed event names its author in its own card; otherwise the account is
   // worth a line only when there is more than one it could be.
-  const showAccount = item.question !== 'signEvent' && users.length > 1;
-  const hasBody = item.question === 'signEvent' || isEncrypt || isDecrypt || Boolean(item.psbt) || showAccount;
+  const showAccount = item.question !== 'signEvent' && users.length > 1 && !choices;
+  const hasBody = item.question === 'signEvent' || isEncrypt || isDecrypt || Boolean(item.psbt) || showAccount || Boolean(choices);
 
   return (
     <Dialog open onOpenChange={(open) => !open && answer('dismiss')}>
@@ -315,6 +366,20 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
             {item.psbt && <Transaction summary={item.psbt} />}
 
             {showAccount && <Person label="As" pubkey={item.account} />}
+
+            {choices && (
+              <div role="radiogroup" aria-label="Account" className="-mx-2 space-y-0.5">
+                {choices.map((choice) => (
+                  <AccountChoice
+                    key={choice.pubkey}
+                    pubkey={choice.pubkey}
+                    held={choice.held}
+                    chosen={choice.pubkey === chosenAccount}
+                    onChoose={() => setChosenAccount(choice.pubkey)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -322,12 +387,12 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
           {isConnect ? (
             <>
               <Button onClick={() => answer('allow')}>
-                Connect
+                {item.another ? 'Sign in' : 'Connect'}
               </Button>
               <Button variant="secondary" onClick={() => answer('deny')}>
                 Not now
               </Button>
-              {item.request.source === 'tab' && (
+              {item.request.source === 'tab' && !item.another && (
                 <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => answer('block')}>
                   Block this site
                 </Button>

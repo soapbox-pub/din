@@ -34,7 +34,10 @@ export interface NostrBridgeRequest {
   requestId: number;
   /**
    * The NIP-07 method: 'getPublicKey' | 'signEvent' | 'getRelays' |
-   * 'nip04.encrypt' | 'nip04.decrypt' | 'nip44.encrypt' | 'nip44.decrypt'.
+   * 'nip04.encrypt' | 'nip04.decrypt' | 'nip44.encrypt' | 'nip44.decrypt' |
+   * 'signPsbt', or window.nostr's 'requestPublicKey' | 'getSigner'. A page's
+   * may carry `account` in its params: the identity it's pinned to
+   * (getSigner), instead of the site's own.
    */
   method: string;
   /** Method arguments (shape depends on `method`). */
@@ -55,6 +58,8 @@ export interface NostrBridgeRequest {
   client?: BunkerClientInfo;
 }
 
+export type SignerErrorName = 'NotAllowedError' | 'NotFoundError' | 'TypeError';
+
 /** A decision a bunker client's request should leave behind (kept by main). */
 export interface RememberedDecision {
   method: string;
@@ -70,6 +75,13 @@ export interface NostrBridgeResponse {
   result?: unknown;
   /** Present when not `ok` - a human-readable failure message. */
   error?: string;
+  /**
+   * Present when not `ok`, for window.nostr: the DOMException (or TypeError)
+   * the page's promise rejects with. NotFoundError: the site doesn't hold
+   * the account. NotAllowedError: the user (or what they remembered) said
+   * no. TypeError: the call itself was malformed.
+   */
+  errorName?: SignerErrorName;
   /** Bunker clients only. */
   remember?: RememberedDecision;
 }
@@ -83,8 +95,6 @@ export interface NostrHostBridge {
   onPageChanged(callback: (wcId: number) => void): () => void;
   /** Answer a relayed request. */
   respond(response: NostrBridgeResponse): void;
-  /** Tell every page with window.nostr that the account changed. */
-  accountChanged(): void;
 }
 
 declare global {
