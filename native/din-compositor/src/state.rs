@@ -17,7 +17,7 @@ use smithay::{
             utils::{self, on_commit_buffer_handler},
         },
     },
-    delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
+    delegate_compositor, delegate_cursor_shape, delegate_data_control, delegate_dmabuf,
     delegate_ext_data_control, delegate_fractional_scale, delegate_output, delegate_seat, delegate_shm,
     delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell, delegate_xwayland_shell,
     desktop::{PopupKind, PopupManager, Window, utils::{bbox_from_surface_tree, with_surfaces_surface_tree}},
@@ -1048,7 +1048,7 @@ delegate_shm!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_decoration!(State);
 delegate_seat!(State);
-delegate_data_device!(State);
+crate::data_device::delegate_data_device_cancelling_refused_drags!(State);
 delegate_data_control!(State);
 delegate_ext_data_control!(State);
 delegate_output!(State);
