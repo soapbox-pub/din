@@ -1,12 +1,26 @@
 import type { ReactNode } from 'react';
 
-/**
- * Web addresses in a text: with a scheme, or starting `www.`, as phones send
- * them. Trailing punctuation that ends the sentence isn't part of the link.
- */
-const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"]+[^\s<>"'.,;:!?)\]}]/gi;
+/** Top-level domains common enough to link a bare host (`example.com`) without a path. */
+const COMMON_TLDS =
+  'com|org|net|edu|gov|mil|int|io|co|app|dev|me|us|uk|ca|au|de|fr|nl|eu|ly|gl|gg|tv|ai|info|biz|xyz|pub|link|page|site|online|store|shop|news|social|health';
 
-/** A link's address as something to open: `www.` ones get `https://`. */
+/** Where a link ends: never on punctuation that ends the sentence. */
+const TAIL = String.raw`[^\s<>"]*[^\s<>"'.,;:!?)\]}]`;
+
+/**
+ * Web addresses in a text: with a scheme, starting `www.`, or a bare host as
+ * texts from businesses send them (`t.example.com/c?p=…`). A bare host links
+ * when its domain is a common one or a path follows it, so "e.g." and file
+ * names don't, and an email address's domain doesn't either.
+ */
+const URL_RE = new RegExp(
+  String.raw`\b(?:https?:\/\/|www\.)${TAIL}` +
+    String.raw`|(?<![@\w.\-/])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+` +
+    String.raw`(?:(?:${COMMON_TLDS})\b(?![.\-]?\w)(?::\d+)?(?:[/?#]${TAIL})?|[a-z]{2,24}(?::\d+)?\/${TAIL})`,
+  'gi',
+);
+
+/** A link's address as something to open: ones without a scheme get `https://`. */
 export function linkHref(text: string): string {
   return /^https?:\/\//i.test(text) ? text : `https://${text}`;
 }
