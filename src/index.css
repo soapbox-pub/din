@@ -639,6 +639,17 @@
   ::selection {
     background-color: var(--selection);
   }
+
+  /* A window's page (a <webview>, or an iframe in the browser dev loop) is
+     a document of its own, which a selection in the desktop's can't reach
+     into, yet one running over it paints the whole window in the
+     selection's color, and every window with it on a Select All, until
+     something selectable on the desktop is clicked. Selecting inside the
+     page is the page's business and still works. */
+  webview,
+  iframe {
+    user-select: none;
+  }
 }
 
 /* While a screenshot is taken (captureDesktop in src/lib/screenshot.ts),

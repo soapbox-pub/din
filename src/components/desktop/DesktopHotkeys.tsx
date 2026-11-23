@@ -464,6 +464,25 @@ export function DesktopHotkeys() {
     };
   }, []);
 
+  // Ctrl+A outside a text field would select the whole desktop document:
+  // every label, the menu bar and each window's frame, left highlighted
+  // with no way out but a click on something selectable. Nothing on the
+  // desktop has a use for that, so it does nothing there. A field keeps
+  // its own Select All, and a list that selects its rows on Ctrl+A
+  // (preventing the default itself) still gets the key: this runs after
+  // it, in the bubble phase.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key.toLowerCase() !== 'a') return;
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.matches('input, textarea, select'))) return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   useEffect(() => {
     const bridge = getShellShortcuts();
     if (!bridge) return;
