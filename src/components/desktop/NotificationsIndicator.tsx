@@ -67,7 +67,8 @@ export function NotificationsPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Not sideways: a row swiped away slides out past its edge. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {appNotifications.length > 0 ? (
           <ul className="flex flex-col gap-1 p-2" aria-label="Notifications">
             {appNotifications.map((notification) => (
