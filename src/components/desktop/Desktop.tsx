@@ -14,7 +14,7 @@ import { SecurityOptions } from './SecurityOptions';
 import { ScreenshotHost } from './ScreenshotHost';
 import { ScreenRecordingHost } from './ScreenRecordingHost';
 import { MenuBar } from './MenuBar';
-import { menuBarWindow } from '@/lib/menuBarWindow';
+import { menuBarWindow, paintsBarStrip } from '@/lib/menuBarWindow';
 import { Taskbar } from './Taskbar';
 import { setPauseMediaWhileRecording } from '@/lib/mediaPause';
 import { setSpeechVoice } from '@/lib/speech';
@@ -332,7 +332,8 @@ function DesktopSession() {
   );
   const moving = useMovingWindows();
   const covered = coveredWindows(manager.windows, areas, moving);
-  const barWindowId = taskbar ? null : menuBarWindow(manager.windows, primaryArea(areas))?.id;
+  const barArea = primaryArea(areas);
+  const barWindow = taskbar ? null : menuBarWindow(manager.windows, barArea);
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -402,7 +403,7 @@ function DesktopSession() {
                             isTop={isShown(win) && win.z === topZ &&
                               !(scratchpadEmpty && homeArea(areas, win)?.id === scratchpadArea?.id)}
                             covered={covered.has(win.id)}
-                            onBar={win.id === barWindowId}
+                            onBar={!taskbar && paintsBarStrip(win, barWindow, barArea)}
                           />
                         ))}
                       </main>

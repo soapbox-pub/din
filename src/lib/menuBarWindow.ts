@@ -28,3 +28,17 @@ export function menuBarWindow(windows: WindowState[], area: WorkArea): WindowSta
   const under = windows.filter((w) => underMenuBar(w) && isShown(w) && (w.monitor === null || w.monitor === area.id));
   return coversWidth(under, area) ? under.reduce<WindowState | null>((top, w) => (!top || w.z > top.z ? w : top), null) : null;
 }
+
+/**
+ * Whether a window on the bar's monitor paints the bar's strip while it's
+ * maximized: unless it's under the window the bar takes (`barWindow`, from
+ * menuBarWindow), one snapped over it, say. Not whether it's that window
+ * itself: one minimizing, closing or restoring stops being it the moment it
+ * starts, and its strip has to go with it through the animation, not vanish
+ * before it, and one maximizing has to bring its strip up as it grows. So a
+ * window that isn't shown, or is above the bar's window, keeps its strip.
+ */
+export function paintsBarStrip(w: WindowState, barWindow: WindowState | null, area: WorkArea): boolean {
+  if (w.monitor !== null && w.monitor !== area.id) return false;
+  return !barWindow || !isShown(w) || w.z >= barWindow.z;
+}

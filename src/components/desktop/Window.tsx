@@ -423,7 +423,7 @@ export const Window = memo(function Window({
   isTop: boolean;
   /** Whether a window above this one, at rest, covers all of it. */
   covered: boolean;
-  /** Whether the menu bar takes this window's look (MenuBar's menuBarWindow). */
+  /** Whether this window paints the menu bar's strip while maximized (paintsBarStrip). */
   onBar: boolean;
 }) {
   // Actions only (stable identity): subscribing to the full manager would
@@ -474,8 +474,9 @@ export const Window = memo(function Window({
   });
   const sectionRef = useRef<HTMLElement>(null);
   // The strip of the window's title bar color behind the menu bar
-  // (BAR_STRIP_PX), shown while it's maximized and the bar takes its look:
-  // not under a window snapped over it, whose look the bar's text follows.
+  // (BAR_STRIP_PX), shown while it's maximized on the bar's monitor, but not
+  // under a window snapped over it, whose look the bar's text follows
+  // (paintsBarStrip, which keeps it through minimizing and restoring).
   const stripRef = useRef<HTMLDivElement>(null);
   const onBarRef = useRef(onBar);
   useLayoutEffect(() => {
