@@ -132,31 +132,34 @@ async function readPsbt(params: Record<string, unknown>, account: string): Promi
 /**
  * Desktop-lifetime host for Din's signer as other software sees it: NIP-07
  * window.nostr in browser tabs and installed web apps (electron/nostr-preload.cjs),
- * and self.nostr in their service workers and Din apps' (which can't connect
- * a site or ask for an account, having no window),
+ * and self.nostr in their service workers and Din apps',
  * Din's own app windows with the nostr permission (din.account.nostr, by way
  * of src/lib/appSigner.ts), and apps connected over NIP-46 (electron/bunker.mts).
  * Main, or the app's window, establishes who is asking; this decides, asks
  * the user when it has to, and signs with the account's signer.
  *
  * - window.nostr's own methods act as the account signed in to Din, as they
- *   always have. A client that holds its
- *   accounts itself asks for one with requestPublicKey() (the user picks
- *   which) and acts as it through getSigner(pubkey), which switching Din's
- *   account doesn't change. A site holds an account when that account's
- *   grant for it is connected.
- * - A browser tab has to be **connected** before it learns who the user is,
- *   and asking to connect needs a click on the page, so sites can't pop the
- *   question on load. Installed apps are connected by being installed, and
- *   Din's apps by holding the nostr permission.
+ *   always have. A client that holds its accounts itself asks for one with
+ *   requestPublicKey() (the user picks which) and acts as it through
+ *   getSigner(pubkey), which switching Din's account doesn't change. A site
+ *   holds an account when that account's grant for it is connected.
+ * - A website, in a tab or by its worker, has to be **connected** before it
+ *   learns who the user is. Installed apps are connected by being installed,
+ *   and Din's apps by holding the nostr permission.
+ * - A question asked right after the user pressed something in the asker is
+ *   a dialog; any other (on load, from a background tab, a worker or a
+ *   bunker client) is a notification first, which brings up the dialog when
+ *   clicked and is a no when dismissed, so sites can ask whenever they like
+ *   without taking the screen.
  * - Signing (per kind) and encrypting or decrypting (per method) are asked
  *   about, unless the user remembered an answer for that site and that
  *   account. NIP-42 relay AUTH is signed without asking once a site is
  *   connected.
  * - Signing a Bitcoin transaction (signPsbt) is asked about every time, with
  *   where the money goes and the fee, as the PSBT itself says.
- * - Closing the prompt is a no, never remembered, and that tab can't ask again
- *   until it navigates or the user clicks in it.
+ * - Closing the prompt (or dismissing its notification) is a no, never
+ *   remembered, and that tab, or the site's workers, can't ask again until
+ *   it navigates or the user clicks in one of the site's pages.
  * - One question at a time; queued ones that a remembered answer has since
  *   settled are answered without being shown.
  * - A page's promise rejects with a DOMException it can tell apart
@@ -189,14 +192,17 @@ export function NostrBridgeHost() {
 
   /** Every signed-in account's site grants, as each one's feed reports them. */
   const accounts = useRef(new Map<string, AccountGrants>());
+  /** Counts grant changes, so queued questions are looked at again. */
+  const [grantsVersion, setGrantsVersion] = useState(0);
   const onAccountGrants = useCallback((pubkey: string, entry: AccountGrants | null) => {
     if (entry) accounts.current.set(pubkey, entry);
     else accounts.current.delete(pubkey);
+    setGrantsVersion((v) => v + 1);
   }, []);
 
   const queueRef = useRef<SignerPromptItem[]>([]);
   const nextItemId = useRef(1);
-  /** `${wcId}|${origin}`: tabs whose prompt was dismissed. */
+  /** `${wcId}|${origin}` (`worker|${origin}` for a site's workers): askers whose prompt was dismissed. */
   const suppressed = useRef(new Set<string>());
   const asked = useRef(new Map<string, number[]>());
   /**
@@ -212,46 +218,71 @@ export function NostrBridgeHost() {
 
   const settle = useCallback(
     (item: SignerPromptItem, answer: PromptAnswer) => {
+      const current = queueRef.current.find((i) => i.id === item.id);
+      if (!current) return;
       updateQueue((q) => q.filter((i) => i.id !== item.id));
       if (queueRef.current.length === 0) bunkerAnswers.current.clear();
-      if (item.request.source === 'bunker') closeNotification(`signer:${item.id}`, 'closed');
-      item.resolve(answer);
+      if (!current.attended) closeNotification(`signer:${item.id}`, 'closed');
+      current.resolve(answer);
     },
     [updateQueue],
   );
 
-  /** Put a question to the user; resolves with their answer. */
-  const ask = useCallback(
-    (item: Omit<SignerPromptItem, 'id' | 'resolve'>): Promise<PromptAnswer> =>
-      new Promise((resolve) => {
-        const full: SignerPromptItem = { ...item, id: nextItemId.current++, resolve };
-        updateQueue((q) => [...q, full]);
-        // A remote app's question may come while nobody is looking at Din.
-        // Like Tenna's lock-screen notice, it says what kind of thing is
-        // asked, never what's in it.
-        if (item.request.source === 'bunker') {
-          notify({
-            id: `signer:${full.id}`,
-            source: { name: 'Din', icon: KeyRound },
-            title: `${item.name} is asking`,
-            body: questionTitle(item.question, item.kind),
-            badge: KeyRound,
-            history: false,
-            timeout: 0,
-          });
-        }
-      }),
+  /** Bring an unattended question on screen: the user clicked its notification. */
+  const attend = useCallback(
+    (id: number) => updateQueue((q) => q.map((i) => (i.id === id ? { ...i, attended: true } : i))),
     [updateQueue],
   );
 
-  // The question at the front may have been settled by an answer the user
-  // just remembered for an earlier one: answer it without showing it.
-  const head = queue[0];
+  /**
+   * Put a question to the user; resolves with their answer. One asked right
+   * after the user pressed something in the asker (or by a Din app's window)
+   * is a dialog; any other (a page asking on load, a background tab, a
+   * worker, a bunker client) is a notification first, so nothing takes the
+   * screen while the user is elsewhere: clicking it brings up the dialog, and
+   * dismissing it is a no. Like Tenna's lock-screen notice, it says what kind
+   * of thing is asked, never what's in it.
+   */
+  const ask = useCallback(
+    (item: Omit<SignerPromptItem, 'id' | 'resolve' | 'attended'>): Promise<PromptAnswer> =>
+      new Promise((resolve) => {
+        const { request } = item;
+        const attended = request.userActivated || request.appWindow === true;
+        const full: SignerPromptItem = { ...item, id: nextItemId.current++, resolve, attended };
+        updateQueue((q) => [...q, full]);
+        if (attended) return;
+        notify({
+          id: `signer:${full.id}`,
+          source: { name: 'Din', icon: KeyRound },
+          title: `${item.name} is asking`,
+          body: questionTitle(item.question, item.kind),
+          badge: KeyRound,
+          actions: [{ id: 'deny', label: 'Don’t allow' }],
+          onActivate: (action) => {
+            if (action === 'deny') settle(full, { choice: 'deny', remember: false });
+            else attend(full.id);
+          },
+          onClose: (reason) => {
+            // Dismissed unanswered; clicking it (attend) closes it too.
+            const queued = queueRef.current.find((i) => i.id === full.id);
+            if (reason === 'dismissed' && queued && !queued.attended) settle(queued, { choice: 'dismiss', remember: false });
+          },
+        });
+      }),
+    [updateQueue, settle, attend],
+  );
+
+  // A queued question may have been settled by an answer the user just
+  // remembered for another (the grants changed): answer it without showing it. The dialog is the
+  // first question the user is looking at; the rest wait, unattended ones in
+  // the notification center.
   useEffect(() => {
-    if (!head) return;
-    const decision = head.recheck();
-    if (decision !== 'ask') settle(head, { choice: decision, remember: false });
-  }, [head, settle]);
+    for (const item of queue) {
+      const decision = item.recheck();
+      if (decision !== 'ask') settle(item, { choice: decision, remember: false });
+    }
+  }, [queue, grantsVersion, settle]);
+  const head = queue.find((i) => i.attended);
 
   // Questions asked as the previous account are dropped on a switch, except
   // those from a signer pinned to its own (getSigner) or a site asking for
@@ -363,17 +394,12 @@ export function NostrBridgeHost() {
 
     /**
      * Give a site an account (requestPublicKey): the user always picks which
-     * of the signed-in accounts, after a click, and it resolves with the one
-     * they gave.
+     * of the signed-in accounts, and it resolves with the one they gave.
      */
     async function connectAnother(request: NostrBridgeRequest, name: string, tabKey: string): Promise<string> {
       const { origin } = request;
       const { users } = latest.current;
-      if (request.wcId === null) throw new SignerError('NotAllowedError', 'Only a page can ask for an account');
       if (suppressed.current.has(tabKey)) throw rejected();
-      if (!request.userActivated) {
-        throw new SignerError('NotAllowedError', 'Din asks to connect a site only after a click on the page');
-      }
       const choices = users
         .filter((u) => grantOf(u.pubkey, origin)?.status !== 'blocked')
         .map((u) => ({ pubkey: u.pubkey, held: holds(origin, u.pubkey) }));
@@ -404,25 +430,20 @@ export function NostrBridgeHost() {
     }
 
     /**
-     * Connect a site to Din's account, as window.nostr always has: a tab is
-     * asked about (after a click), and an installed app or Din's own app is
-     * connected by being installed or holding the nostr permission.
+     * Connect a site to Din's account, as window.nostr always has: a website
+     * (a tab or its worker) is asked about, and an installed app or Din's own
+     * app is connected by being installed or holding the nostr permission.
      */
     async function connectDesktop(request: NostrBridgeRequest, account: string, name: string, tabKey: string): Promise<void> {
       const { origin } = request;
       const grant = grantOf(account, origin);
       if (grant?.status === 'blocked') throw rejected();
       if (grant) return;
-      // A website's worker has no window to ask in: it uses what the user
-      // gave its site in one.
-      if (request.source === 'worker') {
-        throw new SignerError('NotAllowedError', 'Connect the site in a window first');
-      }
-      if (request.source === 'tab') {
+      // A website, in a tab or by its worker, is asked about; an installed
+      // app is connected by being installed, and a Din app by holding the
+      // nostr permission.
+      if (request.source === 'tab' || request.source === 'worker') {
         if (suppressed.current.has(tabKey)) throw rejected();
-        if (!request.userActivated) {
-          throw new SignerError('NotAllowedError', 'Din asks to connect a site only after a click on the page');
-        }
         const answer = await ask({
           request,
           question: 'connect',
@@ -495,7 +516,7 @@ export function NostrBridgeHost() {
           updateGrant(account, origin, (g) => (g ? withDecision(g, method as GuardedMethod, kind, remembered) : g));
         }
         if (answer.choice !== 'allow') {
-          if (answer.choice === 'dismiss' && request.source === 'tab') suppressed.current.add(tabKey);
+          if (answer.choice === 'dismiss' && (request.source === 'tab' || request.source === 'worker')) suppressed.current.add(tabKey);
           throw rejected();
         }
         preview = answer.preview;
@@ -510,8 +531,12 @@ export function NostrBridgeHost() {
       if (!isSignerMethod(method) && !IDENTITY_METHODS.has(method)) throw invalid(`Unsupported method: ${method}`);
       if (latest.current.users.length === 0) throw new SignerError('NotAllowedError', 'Not signed in to Din');
       const params = (request.params ?? {}) as Record<string, unknown>;
-      const tabKey = `${request.wcId}|${origin}`;
-      if (request.userActivated) suppressed.current.delete(tabKey);
+      const tabKey = request.source === 'worker' ? `worker|${origin}` : `${request.wcId}|${origin}`;
+      // A click in one of the site's pages lets it, and its workers, ask again.
+      if (request.userActivated) {
+        suppressed.current.delete(tabKey);
+        suppressed.current.delete(`worker|${origin}`);
+      }
       const name = originLabel(origin);
 
       if (method === 'requestPublicKey') return connectAnother(request, name, tabKey);

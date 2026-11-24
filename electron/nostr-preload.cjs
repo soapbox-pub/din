@@ -13,9 +13,9 @@
 // account and per site, and signs with the account's signer. The page only
 // ever sees results.
 //
-// A worker has no window to click in, so it can't connect its site or ask
-// for an account (requestPublicKey): it uses what the user gave the site in
-// a window, and asks on screen for anything else, as its pages would.
+// A worker asks what its pages would; having no window the user just pressed
+// something in, its questions come as notifications (as a page's do when
+// nobody clicked in it).
 //
 // Din owns window.nostr: it is defined before any page script runs, and can't
 // be replaced, so a Chrome extension that also provides one (nos2x, Alby)
@@ -34,7 +34,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  * accounts themselves:
  *
  * - requestPublicKey(): asks the user to give the site an account (always a
- *   question, and only after a click), resolving with its key.
+ *   question), resolving with its key.
  * - getSigner(pubkey): a NIP-07 signer pinned to an account the site was
  *   given, which switching Din's account doesn't change; never asks. Rejects
  *   with NotFoundError if the site doesn't hold it.
@@ -63,8 +63,8 @@ function installNostr(bridge) {
    */
   const call = (method, params) => {
     // Read now, before waiting in line: whether the page was just clicked is
-    // only true for a moment. Din uses it to keep pages from asking to connect
-    // on their own, not as a security boundary.
+    // only true for a moment. Din asks with a dialog only then, and otherwise
+    // with a notification; not a security boundary.
     const activated = Boolean(globalThis.navigator.userActivation && globalThis.navigator.userActivation.isActive);
     // Main answers with an envelope rather than throwing, so the page sees
     // "User rejected", not Electron's "Error invoking remote method ...".

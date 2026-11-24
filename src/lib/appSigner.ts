@@ -26,5 +26,5 @@ export function askSignerForApp(
   request: Pick<NostrBridgeRequest, 'method' | 'params' | 'origin' | 'wcId'>,
 ): Promise<unknown> {
   if (!handler) return Promise.reject(new Error("Din's signer isn't available"));
-  return handler({ ...request, requestId: nextRequestId--, source: 'app', userActivated: false });
+  return handler({ ...request, requestId: nextRequestId--, source: 'app', userActivated: false, appWindow: true });
 }

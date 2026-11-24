@@ -35,11 +35,11 @@ interface NostrProvider extends NostrSigner {
 }
 ```
 
-- **`getPublicKey()`** asks the first time a site wants Din's account (after
-  a click on the page), and after that answers unasked.
+- **`getPublicKey()`** asks the first time a site wants Din's account
+  ([How Din asks](#how-din-asks)), and after that answers unasked.
 - A site **holds** an account once that account is connected to it: by
   `getPublicKey()` while it was Din's, or by `requestPublicKey()`.
-- **`requestPublicKey()`** always asks, and only after a click: the user
+- **`requestPublicKey()`** always asks: the user
   picks one of the accounts signed in to Din, and it resolves with its key.
   Picking one the site already holds just returns it.
 - **`getSigner(pubkey)`** never asks. It resolves with a plain NIP-07 signer
@@ -63,20 +63,27 @@ A site's service worker has the same provider as `self.nostr`: tabs',
 installed web apps' and nsites' alike, from `nostr-preload.cjs` registered as
 a service-worker preload too, its calls answered by the worker's own IPC in
 main, which reads the origin from the worker's scope. It acts as its pages
-do, so a worker can sign with every window of its site closed, with two
-limits that come from having no window:
-
-- It can't connect its site: until the user has connected it in a window,
-  Din's account's methods reject with `NotAllowedError`.
-- It can't ask for an account: `requestPublicKey()` rejects with
-  `NotAllowedError`. `getSigner(pubkey)` works for any account the site holds.
-
-Anything its site's remembered answers don't settle is asked on screen, as a
-page's request would be.
+do, so a worker can sign with every window of its site closed: it can
+connect its site, ask for an account, and use `getSigner(pubkey)` for any
+account the site holds. What its site's remembered answers don't settle is
+asked as a notification (below).
 
 Din apps' workers get `self.nostr` from `din-app-worker-preload.cjs`
 ([din/background.md](din/background.md)), shaped like their
 `window.nostr`.
+
+## How Din asks
+
+A question asked right after the user pressed something in the site's page
+(main checks it, not just the page's word) is a dialog. Any other, a page
+asking on load or from a background tab, a worker, a bunker client, is a
+notification first: clicking it brings up the dialog, its Don't allow
+button or dismissing it is a no. So a site can call `getPublicKey()` on load
+without putting a dialog over itself, and nothing takes the screen while the
+user is elsewhere. A no that wasn't remembered keeps the tab (or the site's
+workers) from asking again until the page navigates or the user clicks in
+one of the site's pages, and a site may ask at most 5 questions in 30
+seconds.
 
 ## Errors
 

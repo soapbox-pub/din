@@ -52,6 +52,12 @@ export interface SignerPromptItem {
   /** What the grants say now; anything but 'ask' settles the question unshown. */
   recheck: () => Decision | 'ask';
   resolve: (answer: PromptAnswer) => void;
+  /**
+   * Whether the user is looking at it: asked right after they pressed
+   * something in the asker, or brought up from its notification. Only an
+   * attended question is a dialog.
+   */
+  attended: boolean;
 }
 
 export interface PromptAnswer {
@@ -393,7 +399,7 @@ export function SignerPrompt({ item, onAnswer }: { item: SignerPromptItem; onAns
               <Button variant="secondary" onClick={() => answer('deny')}>
                 Not now
               </Button>
-              {item.request.source === 'tab' && !item.another && (
+              {(item.request.source === 'tab' || item.request.source === 'worker') && !item.another && (
                 <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => answer('block')}>
                   Block this site
                 </Button>

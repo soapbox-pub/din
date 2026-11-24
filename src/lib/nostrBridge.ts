@@ -53,6 +53,11 @@ export interface NostrBridgeRequest {
   wcId: number | null;
   /** Whether the page had just been clicked or typed in (its own report). */
   userActivated: boolean;
+  /**
+   * From one of Din's own app windows (src/lib/appSigner.ts), whose questions
+   * are dialogs, as they always were: the window is Din's, on screen.
+   */
+  appWindow?: boolean;
   /** Bunker clients: the account the connection signs for. */
   account?: string;
   /** Bunker clients: who they are and what they're allowed. */
