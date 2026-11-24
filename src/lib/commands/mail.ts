@@ -1,10 +1,12 @@
-import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailLabel, type MailSubscription } from '@/lib/mail';
+import { formatBytes } from '@/lib/fs';
+import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailboxInfo, type MailLabel, type MailSubscription, type MessageSummary } from '@/lib/mail';
 import { markRead, markReadTargets } from '@/lib/mailInbox';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
- * `din mail`: Mail's accounts, their labels, their inboxes' tabs and the
+ * `din mail`: Mail's accounts, their mailboxes and messages (listed,
+ * searched and read as Mail opens them, which leaves them unread), their labels, their inboxes' tabs and the
  * senders moved between them, and the mailing lists in their inboxes, as
  * Mail's Subscriptions shows them (electron/mail.mts), and leaving them. Unsubscribing asks on screen first: it sends mail or
  * requests from the user's account, and can't be taken back; so does
@@ -56,15 +58,142 @@ function day(ms: number): string {
   return new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+const MAILBOX: Param = { name: 'mailbox', type: 'string', optional: true, help: 'Which mailbox, by name or path, as din mail mailboxes lists them (default: the inbox)' };
+
+/** An account's mailbox, by name, path or kind (sent, trash…), else its inbox. */
+async function mailboxIn(account: MailAccount, query: string | undefined): Promise<MailboxInfo> {
+  const boxes = (await call(mail().mailboxes(account.id))).filter((b) => b.selectable);
+  if (query) return pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox');
+  const inbox = boxes.find((b) => b.special === 'inbox');
+  if (!inbox) throw new CommandError(`${account.name} has no inbox`);
+  return inbox;
+}
+
+function who(list: MailAddress[]): string {
+  return list.map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(', ');
+}
+
+/** A message's date as a list shows it: the time today, the day this year, else the date. */
+function when(ms: number): string {
+  const d = new Date(ms);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.getFullYear() === now.getFullYear()) return day(ms);
+  return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** The text of an HTML-only message, for reading on the command line; parsing it runs nothing. */
+function htmlText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, head, title').forEach((el) => el.remove());
+  doc.querySelectorAll('br').forEach((el) => el.replaceWith('\n'));
+  doc.querySelectorAll('p, div, tr, li, h1, h2, h3, h4, h5, h6, blockquote').forEach((el) => el.append('\n'));
+  return (doc.body?.textContent ?? '').replace(/[ \t\u00a0]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, their mailboxes and messages (list, search, read), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
       return {
         data: list.map((a) => ({ id: a.id, name: a.name, email: a.email })),
         text: list.length ? list.map((a) => `${a.name}  ${a.email}`).join('\n') : 'No mail accounts yet; add one in Mail',
+      };
+    }),
+    command('mail', 'mailboxes', 'Each account’s mailboxes, as Mail’s sidebar lists them, with how many messages each has and how many are unread', [ACCOUNT], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const all = await Promise.all(accounts.map(async (a) => ({ account: a, boxes: (await call(mail().mailboxes(a.id))).filter((b) => b.selectable) })));
+      return {
+        data: all.map(({ account, boxes }) => ({ accountId: account.id, account: account.name, mailboxes: boxes })),
+        text: all
+          .map(({ account, boxes }) => [
+            account.name,
+            ...boxes.map((b) => `  ${b.path}${b.name !== b.path ? `  (${b.name})` : ''}  ${b.total.toLocaleString()}${b.unseen ? `, ${b.unseen.toLocaleString()} unread` : ''}`),
+          ].join('\n'))
+          .join('\n'),
+      };
+    }),
+    command('mail', 'messages', 'The messages in a mailbox (the inbox by default), newest first, as Mail lists them: all of them, or those a search finds, the unread or the flagged ones, or an inbox tab’s', [
+      { name: 'search', type: 'string', positional: true, optional: true, help: 'Words to look for, as Mail’s search does (sender, recipients, subject and text)' },
+      MAILBOX,
+      ACCOUNT,
+      { name: 'unread', type: 'boolean', optional: true, help: 'Only unread messages' },
+      { name: 'flagged', type: 'boolean', optional: true, help: 'Only flagged messages' },
+      { name: 'tab', type: 'string', optional: true, choices: MAIL_CATEGORIES, help: 'Only an inbox tab’s messages, as Mail’s tabs show them' },
+      { name: 'limit', type: 'integer', optional: true, min: 1, max: 200, help: 'How many (default: 20)' },
+      { name: 'before', type: 'integer', optional: true, min: 1, help: 'Older than this message, by its number, for the next page' },
+    ], async (args) => {
+      const unread = args.optBool('unread') === true;
+      const flagged = args.optBool('flagged') === true;
+      if (unread && flagged) throw new CommandError('Say --unread or --flagged, not both', 'usage');
+      const tab = args.optString('tab');
+      const query = args.optString('search')?.trim() || undefined;
+      const limit = args.optNumber('limit') ?? 20;
+      const before = args.optNumber('before');
+      const accounts = await accountsFor(args.optString('account'));
+      if (before !== undefined && accounts.length > 1) throw new CommandError('Say which account, with --account, to page with --before', 'usage');
+      const pages = await Promise.all(accounts.map(async (account) => {
+        const box = await mailboxIn(account, args.optString('mailbox'));
+        if (tab && box.special !== 'inbox') throw new CommandError('Only the inbox has tabs', 'usage');
+        const page = await call(mail().messages(account.id, box.path, {
+          limit,
+          before,
+          query,
+          filter: unread ? 'unread' : flagged ? 'flagged' : null,
+          category: isMailCategory(tab) ? tab : undefined,
+        }));
+        return { account, box, page };
+      }));
+      const rows = pages
+        .flatMap(({ account, box, page }) => page.messages.map((m) => ({ account, box, m })))
+        .sort((x, y) => y.m.date - x.m.date)
+        .slice(0, limit);
+      const several = accounts.length > 1;
+      const row = ({ account, m }: { account: MailAccount; m: MessageSummary }) => {
+        const marks = `${m.seen ? ' ' : '•'}${m.flagged ? '⚑' : ' '}${m.hasAttachments ? '📎' : '  '}`;
+        const from = m.from[0] ? m.from[0].name || m.from[0].address : '(no sender)';
+        return `${String(m.uid).padStart(7)} ${marks} ${when(m.date).padEnd(12)}  ${from}  ${m.subject || '(no subject)'}${several ? `  (${account.name})` : ''}`;
+      };
+      const more = pages.filter((p) => p.page.more);
+      const foot = more.length === 1 && !several ? `\nOlder: --before ${more[0].page.next ?? more[0].page.messages.at(-1)?.uid}` : '';
+      const head = pages.map(({ account, box, page }) => `${several ? `${account.name}: ` : ''}${box.name}, ${page.total.toLocaleString()} ${query ? 'found' : unread ? 'unread' : flagged ? 'flagged' : page.total === 1 ? 'message' : 'messages'}`).join('; ');
+      return {
+        data: {
+          mailboxes: pages.map(({ account, box, page }) => ({ accountId: account.id, account: account.name, mailbox: box.path, total: page.total, more: page.more, next: page.next ?? page.messages.at(-1)?.uid ?? null })),
+          messages: rows.map(({ account, box, m }) => ({ accountId: account.id, mailbox: box.path, ...m })),
+        },
+        text: rows.length ? `${head}\n${rows.map(row).join('\n')}${foot}` : `${head}: nothing there`,
+      };
+    }),
+    command('mail', 'read', 'Read a message, as Mail opens it: who it’s from and to, its date, subject, text and attachments; it stays unread', [
+      { name: 'message', type: 'integer', positional: true, min: 1, help: 'Which message, by its number, as din mail messages lists it' },
+      MAILBOX,
+      ACCOUNT,
+      { name: 'html', type: 'boolean', optional: true, help: 'Its HTML as it came, rather than its text' },
+    ], async (args) => {
+      const account = await oneAccount(args.optString('account'));
+      const box = await mailboxIn(account, args.optString('mailbox'));
+      const m = await call(mail().message(account.id, box.path, args.number('message')));
+      const html = args.optBool('html') === true;
+      const plain = m.text.trim() || (m.html ? htmlText(m.html) : '');
+      const body = html ? (m.html ?? plain) : plain;
+      const listed = m.attachments.filter((a) => !a.inline);
+      const head = [
+        `From: ${who(m.from) || '(no sender)'}${m.senderVerified ? '' : m.senderVerified === false ? '  (unverified)' : ''}`,
+        m.replyTo.length ? `Reply-To: ${who(m.replyTo)}` : '',
+        `To: ${who(m.to)}`,
+        m.cc.length ? `Cc: ${who(m.cc)}` : '',
+        m.bcc.length ? `Bcc: ${who(m.bcc)}` : '',
+        `Date: ${new Date(m.date).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}`,
+        `Subject: ${m.subject || '(no subject)'}`,
+        listed.length ? `Attachments: ${listed.map((a) => `${a.filename} (${formatBytes(a.size)})`).join(', ')}` : '',
+      ].filter(Boolean);
+      const { html: rawHtml, ...rest } = m;
+      return {
+        data: { accountId: account.id, mailbox: box.path, ...rest, text: plain, ...(html ? { html: rawHtml } : {}) },
+        text: `${head.join('\n')}\n\n${body || '(no text)'}`,
       };
     }),
     command('mail', 'subscriptions', 'The mailing lists in the inbox, most mail first, as Mail’s Subscriptions shows them', [ACCOUNT, MONTHS], async (args) => {

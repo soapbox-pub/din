@@ -45,7 +45,7 @@
 //     the menu bar and Settings
 //   - window.dinos.phone: text messages from the user's phones over Bluetooth,
 //     for Settings and notifications
-//   - window.dinos.mail: the mail accounts' mailing lists and labels, for `din mail`
+//   - window.dinos.mail: the mail accounts' messages, mailing lists and labels, for `din mail`
 //   - window.dinos.printing: printers, the print dialog's previews and jobs, and
 //     the print queue, for the print dialog and Settings
 //   - window.dinos.features: DinOS's optional features (Wine, QEMU, Whisper, ...),
@@ -2169,12 +2169,12 @@ expose('phone', {
 });
 
 // Mail (window.dinos.mail), backed by electron/mail.mts: the accounts'
-// mailing lists, labels and inbox tabs, for the `din mail` commands, and new mail and unread
+// mailboxes and messages, mailing lists, labels and inbox tabs, for the `din mail` commands, and new mail and unread
 // counts, for notifications and Mail's Dock badge; Mail has all of it
 // through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'mailboxes', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'inboxTabs', 'setInboxTabs', 'tabRules', 'setTabRule', 'unseen']) {
+for (const method of ['accounts', 'mailboxes', 'messages', 'message', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'inboxTabs', 'setInboxTabs', 'tabRules', 'setTabRule', 'unseen']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
 expose('mail', {
