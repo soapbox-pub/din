@@ -212,8 +212,8 @@ export interface PasswordSuggestion {
   locked: boolean;
   /** A strong password to offer, for a new-password field. */
   generated: string | null;
-  /** For a verification code field: the codes in the user's texts lately, newest first (electron/phone-codes.mts). */
-  codes: { id: string; code: string; from: string; time: number }[];
+  /** For a verification code field: the codes in the user's texts and mail lately, newest first (electron/verification-codes.mts). */
+  codes: { id: string; source: 'messages' | 'mail'; code: string; from: string; time: number }[];
 }
 
 /** A submitted login the vault doesn't have, or has with another password. */

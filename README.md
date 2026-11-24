@@ -1134,16 +1134,19 @@ files — `git add` new source files before `npm run os:build`.
   group text; iPhones share texts alone, and nothing can send a picture.
   New texts pop up as notifications with a reply field.
   Messages are kept only on this computer, sealed (`electron/sealing.mts`).
-- A text with a verification code in it (`electron/phone-codes.mts` finds
-  it) has the code offered in the Web Browser's code fields for 10 minutes,
-  as a Mac offers the codes from Messages: the suggestions below the field
-  (`autocomplete="one-time-code"`, a field named like one, or a row of
-  one-digit boxes) list it "From Messages", and the one picked is typed in,
-  spread across the boxes. A code arriving while the cursor is in the field
-  brings them up. The code is kept in memory only, and goes only to the page
-  it's picked for; its notification has a button to copy it. "Fill in
-  verification codes" on the phone's page (`din phone fill-codes`) turns it
-  off.
+- A text with a verification code in it (`electron/verification-codes.mts`
+  finds it) has the code offered in the Web Browser's code fields for 10
+  minutes, as a Mac offers the codes from Messages: the suggestions below
+  the field (`autocomplete="one-time-code"`, a field named like one, or a
+  row of one-digit boxes) list it "From Messages", and the one picked is
+  typed in, spread across the boxes. A code arriving while the cursor is in
+  the field brings them up. The code is kept in memory only, and goes only
+  to the page it's picked for; its notification has a button to copy it.
+  "Fill in verification codes" on the phone's page (`din phone fill-codes`)
+  turns it off. New mail in Primary does the same ("From Mail"), with only
+  a code the words around it call one ("your code is 123456"), since email
+  is full of other numbers; Mail's account settings have the switch (`din
+  mail fill-codes <address> [on|off]`).
 - A phone added there can share files to the computer over Bluetooth (the
   share sheet's Bluetooth target): `electron/phone-receive.mts` is obexd's
   agent, saving them to Downloads without asking, with one notification per

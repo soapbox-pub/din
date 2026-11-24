@@ -31,7 +31,7 @@ export interface PhoneDevice {
   lastSeen: number | null;
   /** Whether it may share files here: over Bluetooth (electron/phone-receive.mts), and with Quick Share while it's connected (electron/quickshare.mts). */
   receiveFiles: boolean;
-  /** Whether verification codes in its texts are offered in web pages' code fields (electron/phone-codes.mts). */
+  /** Whether verification codes in its texts are offered in web pages' code fields (electron/verification-codes.mts). */
   fillCodes: boolean;
   /**
    * Whether a text to several people goes as one group text (an MMS), which

@@ -11,6 +11,7 @@ import { closeNotificationByKey, notify } from '@/lib/notificationCenter';
  * for all of it), as a notification per message, which a click opens in
  * Mail, on its tab. None shows while Mail is the window in front, and one
  * goes once its message is read, moved or deleted, here or anywhere else.
+ * A message with a verification code in it has a button to copy it.
  * Mail's Dock tile shows the inboxes' unread count (Primary's, likewise),
  * and offers Mark All as Read while there is some (src/lib/mailInbox.ts).
  */
@@ -46,7 +47,13 @@ export function MailHost() {
         title: sender?.name.trim() || sender?.address || 'New Mail',
         body: [m.subject, m.preview].filter(Boolean).join('\n'),
         replaceKey: key(m.accountId, m.path, m.uid),
-        onActivate: () => {
+        // A verification code, a click from the clipboard.
+        actions: m.code ? [{ id: 'copy-code', label: `Copy ${m.code}` }] : undefined,
+        onActivate: (action) => {
+          if (action === 'copy-code' && m.code) {
+            void navigator.clipboard?.writeText(m.code).catch(() => {});
+            return;
+          }
           const params = { accountId: m.accountId, mailbox: m.path, uid: m.uid, tab: m.category, nonce: Date.now() };
           // The Mail window the user was last in, unless it's one writing a message.
           const viewer = windowsRef.current

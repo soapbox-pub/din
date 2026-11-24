@@ -22,7 +22,7 @@
 //
 // A new text with a verification code in it, from a phone with "Fill in
 // verification codes" on, has its code offered in web pages' code fields
-// for a few minutes (phone-codes.mts, passwords.mts).
+// for a few minutes (verification-codes.mts, passwords.mts).
 //
 // Files a phone shares over Bluetooth land in Downloads (phone-receive.mts),
 // from phones here with "Receive files" on; `phone:receive` (the shell's
@@ -39,7 +39,7 @@ import path from 'node:path';
 import { app, ipcMain } from 'electron';
 import { needsReseal, seal, unseal } from './sealing.mts';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
-import { extractCode, forgetCodes, noteCode } from './phone-codes.mts';
+import { extractCode, forgetCodes, noteCode } from './verification-codes.mts';
 import { groupThreadId, MapConnection } from './phone-map.mts';
 import { cancelReceive, startReceiving } from './phone-receive.mts';
 import type {

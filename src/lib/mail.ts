@@ -28,6 +28,12 @@ export interface MailAccount {
   signature: string;
   /** Its color in Mail, kept on this computer; until it's given one, Mail picks one by its place in the list. */
   color?: LabelColor | null;
+  /**
+   * Whether verification codes in its new mail are offered in web pages'
+   * code fields, and on their notifications (electron/verification-codes.mts);
+   * on unless it's false.
+   */
+  fillCodes?: boolean;
 }
 
 export interface NewMailAccount {
@@ -48,6 +54,7 @@ export interface MailAccountPatch {
   smtp?: MailServer;
   /** Null gives the account back the color Mail picks. */
   color?: LabelColor | null;
+  fillCodes?: boolean;
 }
 
 /** What `discover` found for an address: the servers, and which provider they are. */
@@ -391,6 +398,8 @@ export interface MailArrival {
   date: number;
   /** The inbox tab it's in. */
   category: MailCategory;
+  /** The verification code in it, offered in web pages' code fields too, if it has one and its account fills them in. */
+  code?: string | null;
 }
 
 /** Announced mail that's been read, moved or deleted: its notification goes. */
@@ -412,6 +421,8 @@ export type MailDesktopBridge = Pick<
 > & {
   /** Give an account its color in Mail, or (null) back the one Mail picks; nothing else of the account. */
   setAccountColor(id: string, color: LabelColor | null): Promise<MailAccount>;
+  /** Whether an account's verification codes are offered in web pages' code fields; nothing else of the account. */
+  setFillCodes(id: string, on: boolean): Promise<MailAccount>;
   /** Each account's unread mail in its inbox (only Primary's, when only Primary notifies), as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;

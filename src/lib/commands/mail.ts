@@ -164,7 +164,7 @@ function htmlText(html: string): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, their mailboxes and messages (list, search, read, send, reply), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts (their colors, and whether codes in their mail are filled in), their mailboxes and messages (list, search, read, send, reply), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -181,6 +181,20 @@ export const mailArea: Area = {
       const color = args.string('color');
       const saved = await call(mail().setAccountColor(account.id, color === 'auto' ? null : (color as LabelColor)));
       return { data: { id: saved.id, email: saved.email, color: saved.color ?? null }, text: saved.color ? `${saved.email} is ${saved.color}` : `${saved.email} has the color Mail picks` };
+    }),
+    command('mail', 'fill-codes', 'Whether the Web Browser offers the verification codes in an account’s new mail in pages’ code fields, as Mail’s Fill in verification codes does', [
+      { name: 'account', type: 'string', positional: true, help: 'Which account, by address' },
+      { name: 'state', type: 'string', positional: true, optional: true, help: 'on or off (leave out to see which)' },
+    ], async (args) => {
+      const [account] = await accountsFor(args.string('account'));
+      const state = args.optString('state');
+      if (state === undefined) {
+        const on = account.fillCodes !== false;
+        return { data: { id: account.id, email: account.email, fillCodes: on }, text: `Filling in codes from ${account.email}’s mail is ${on ? 'on' : 'off'}` };
+      }
+      if (state !== 'on' && state !== 'off') throw new CommandError('Say on or off', 'usage');
+      const saved = await call(mail().setFillCodes(account.id, state === 'on'));
+      return { data: { id: saved.id, email: saved.email, fillCodes: saved.fillCodes !== false }, text: `Filling in codes from ${saved.email}’s mail is ${state}` };
     }),
     command('mail', 'mailboxes', 'Each account’s mailboxes, as Mail’s sidebar lists them, with how many messages each has and how many are unread', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));

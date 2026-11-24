@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CATEGORY_NAMES, MAIL_CATEGORIES, type InboxTabs, type MailAccount, type MailServer } from '@/lib/mail';
-import { useInboxTabs, useMail, useSetAccountColor, useSetInboxTabs } from './api';
+import { useInboxTabs, useMail, useSetAccountColor, useSetFillCodes, useSetInboxTabs } from './api';
 import { accountColor } from './accounts';
 import { ColorPicker } from './LabelDialogs';
 import { REMOTE_KEY } from './Reader';
@@ -92,6 +92,7 @@ function Server({ title, value, onChange }: { title: string; value: MailServer; 
 
 function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; accounts: MailAccount[]; onRemoved: () => void }) {
   const setAccountColor = useSetAccountColor();
+  const setFillCodes = useSetFillCodes();
   const mail = useMail();
   const qc = useQueryClient();
   const [fullName, setFullName] = useState(account.fullName);
@@ -168,6 +169,18 @@ function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; a
           <Label htmlFor="acct-pass">Password</Label>
           <Input id="acct-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Unchanged" autoComplete="off" />
         </div>
+        <label className="flex items-start justify-between gap-4">
+          <span>
+            <span className="block text-[13px] font-medium">Fill in verification codes</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              A sign-in code in new mail to this address is offered in web pages’ code fields for 10 minutes, and its notification can copy it. It stays on this computer.
+            </span>
+          </span>
+          <Switch
+            checked={account.fillCodes !== false}
+            onCheckedChange={(on) => void setFillCodes(account.id, on).catch((error: unknown) => setMessage({ error: true, text: error instanceof Error ? error.message : String(error) }))}
+          />
+        </label>
         {servers ? (
           <div className="space-y-3">
             <Server title="Incoming (IMAP)" value={imap} onChange={setImap} />

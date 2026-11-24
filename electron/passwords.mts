@@ -41,8 +41,8 @@
 // before anything is sent to it. A submitted login the vault doesn't have
 // becomes an offer to save it, which the desktop shows.
 //
-// A verification code field gets the codes from the user's texts lately
-// instead (phone-codes.mts), vault or no vault; the one picked goes to the
+// A verification code field gets the codes from the user's texts and mail lately
+// instead (verification-codes.mts), vault or no vault; the one picked goes to the
 // frame that asked, if it's still on the same site. A code arriving while the
 // cursor is in such a field brings the suggestions up there.
 //
@@ -63,7 +63,7 @@ import type { Kdbx, KdbxEntry, KdbxGroup } from 'kdbxweb';
 import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
 import { parseCsvExport, parseJsonExport, type ImportedItem, type ParsedExport } from './passwords-import.mts';
-import { onCode, recentCodes } from './phone-codes.mts';
+import { onCode, recentCodes } from './verification-codes.mts';
 import { CARD_FIELDS, CARD_TAG, cardSummary, formatExpiry, parseCard, readCard, type CardDetails, type CardSummary } from './passwords-cards.mts';
 import { sealingMethod, seal, unseal } from './sealing.mts';
 import { deleteSecret, lookupSecret, storeSecret, type SecretLookup } from './secret-service.mts';
@@ -1648,7 +1648,7 @@ async function onField(event: Electron.IpcMainEvent, raw: unknown): Promise<void
   sendToFrame(sender.frame, 'passwords:shown', { visible: true, highlighted: false });
 }
 
-/** The codes from the user's texts lately, below a verification code field. */
+/** The codes from the user's texts and mail lately, below a verification code field. */
 function suggestCodes(sender: { contents: WebContents; frame: WebFrameMain; url: string }, place: Placement): void {
   const codes = recentCodes();
   if (codes.length === 0) return hideSuggestions();
@@ -1667,8 +1667,8 @@ function suggestCodes(sender: { contents: WebContents; frame: WebFrameMain; url:
     cards: [],
     locked: false,
     generated: null,
-    // Only the code itself and who sent it: never the rest of the text.
-    codes: codes.map((c) => ({ id: c.id, code: c.code, from: c.from, time: c.time })),
+    // Only the code itself and who sent it: never the rest of the text or message.
+    codes: codes.map((c) => ({ id: c.id, source: c.source, code: c.code, from: c.from, time: c.time })),
   });
   sendToFrame(sender.frame, 'passwords:shown', { visible: true, highlighted: false });
 }
@@ -1778,7 +1778,7 @@ function choose(requestId: unknown, raw: unknown): void {
     }
     if (card?.number) fillCard(s.contents, s.frame, card);
   } else if (choice.type === 'code') {
-    // Still the page it was offered to, and still a code from a text lately.
+    // Still the page it was offered to, and still a code from a text or email lately.
     const code = recentCodes().find((c) => c.id === choice.id);
     if (!code || !isWebUrl(url) || originOf(url) !== originOf(s.url)) return;
     sendToFrame(s.frame, 'passwords:fill-code', { code: code.code });

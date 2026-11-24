@@ -64,6 +64,20 @@ export function useSetAccountColor() {
   );
 }
 
+/** Whether an account's verification codes are offered in web pages' code fields (Account Settings' switch). */
+export function useSetFillCodes() {
+  const mail = useMail();
+  const qc = useQueryClient();
+  return useCallback(
+    async (accountId: string, on: boolean) => {
+      if (!mail) return;
+      const updated = await mail.updateAccount(accountId, { fillCodes: on });
+      qc.setQueryData<MailAccount[]>(ACCOUNTS, (list) => list?.map((a) => (a.id === updated.id ? updated : a)));
+    },
+    [mail, qc],
+  );
+}
+
 export function mailboxesKey(accountId: string) {
   return ['mail', 'mailboxes', accountId] as const;
 }

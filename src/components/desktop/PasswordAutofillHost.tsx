@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { CreditCard, KeyRound, LockKeyhole, MessageCircle, Sparkles, X } from 'lucide-react';
+import { CreditCard, KeyRound, LockKeyhole, Mail, MessageCircle, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -23,8 +23,8 @@ const MARGIN = 8;
  *  - below a login field the cursor goes into, the vault's logins for the
  *    site, or a strong password for a new-password field, or Unlock while
  *    the vault is locked; below a verification code field, the codes in the
- *    user's texts lately (electron/phone-codes.mts), as a Mac offers the
- *    ones from Messages; below a payment card field, the vault's cards, by
+ *    user's texts and mail lately (electron/verification-codes.mts), as a
+ *    Mac offers the ones from Messages and Mail; below a payment card field, the vault's cards, by
  *    their network and last four digits. The page keeps the keyboard; its preload sends the
  *    arrow keys, Enter and Escape here while the list is up;
  *  - after a login the vault doesn't have is submitted, an offer to save it
@@ -267,10 +267,10 @@ function SuggestionList({
             active={highlighted === index}
             onHover={() => onHover(index)}
             onClick={() => onPick(`code:${c.id}`)}
-            icon={<MessageCircle className="size-4" />}
+            icon={c.source === 'mail' ? <Mail className="size-4" /> : <MessageCircle className="size-4" />}
             title={c.code}
             titleMono
-            subtitle={`From Messages · ${formatAddress(c.from)} · ${sentAgo(c.time)}`}
+            subtitle={c.source === 'mail' ? `From Mail · ${c.from} · ${sentAgo(c.time)}` : `From Messages · ${formatAddress(c.from)} · ${sentAgo(c.time)}`}
           />
         ))
       ) : suggestion.locked ? (

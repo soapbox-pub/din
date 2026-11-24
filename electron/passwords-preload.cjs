@@ -11,7 +11,7 @@
 // login the user picks.
 //
 // Verification code fields are reported too, for the desktop to offer the
-// codes from the user's texts (electron/phone-codes.mts): one field, or a
+// codes from the user's texts and mail (electron/verification-codes.mts): one field, or a
 // row of one-digit boxes, which the code picked is spread across.
 //
 // So are payment card fields, for the vault's cards. The card picked comes

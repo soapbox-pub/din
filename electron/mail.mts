@@ -64,6 +64,14 @@
 // isn't shown is in Primary. Only Primary's new mail is announced and counted
 // on the Dock, unless the user asks for all of it.
 //
+// New unread mail in Primary, just sent, with a verification code in it has
+// the code offered in the Web Browser's code fields for a few minutes
+// (electron/verification-codes.mts), as texts' are, and on its
+// notification, unless its account's "Fill in verification codes" is off.
+// Email is full of numbers, so only a code the words around it say is one
+// counts, in the subject or the start of the text, read further (without
+// marking it read) when those talk about codes but don't show one.
+//
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
@@ -81,6 +89,7 @@ import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
 import { CATEGORIES, CATEGORY_HEADERS, GMAIL_PRIMARY, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
+import { codeFresh, extractCode, forgetCodes, keepCode, mentionsCode } from './verification-codes.mts';
 import type {
   ConversationMessage,
   InboxTabs,
@@ -606,10 +615,15 @@ async function lookForCorrespondents(a: StoredAccount): Promise<void> {
  * it's sorted; Primary for a tab not shown.
  */
 function tabOf(a: StoredAccount, s: MessageSummary): MailCategory {
+  const c = sortedTab(a, s);
+  return c === 'primary' || (inboxTabs.tabs as MailCategory[]).includes(c) ? c : 'primary';
+}
+
+/** The tab an inbox message is sorted into, shown or not. */
+function sortedTab(a: StoredAccount, s: MessageSummary): MailCategory {
   const address = s.from[0]?.address.toLowerCase();
   const writesTo = !!address && !s.listUnsubscribe && correspondentsOf(a).has(address);
-  const c = (address && a.tabRules?.[address]) || (writesTo ? 'primary' : s.category) || 'primary';
-  return c === 'primary' || (inboxTabs.tabs as MailCategory[]).includes(c) ? c : 'primary';
+  return (address && a.tabRules?.[address]) || (writesTo ? 'primary' : s.category) || 'primary';
 }
 
 /** Count an inbox's unread mail again (Primary's, when only it notifies), telling the desktop of the count and of announced mail now read. */
@@ -650,14 +664,63 @@ async function countUnseen(a: StoredAccount): Promise<void> {
   deps.sendToShell('mail:read', { accountId: a.id, path: 'INBOX', uids: read });
 }
 
-/** Announce the new unread mail among these uids, just stored (only Primary's, unless all of it notifies). */
-function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
+/** How much of a message's text is read for a code its subject and preview don't show. */
+const CODE_TEXT_BYTES = 16 * 1024;
+const CODE_TEXT_CHARS = 4000;
+
+/** The verification codes in these new messages, by uid: in the subject or preview, else further into the text where those talk about codes. */
+async function findCodes(a: StoredAccount, list: MessageSummary[]): Promise<Map<number, string>> {
+  const found = new Map<number, string>();
+  const deeper: number[] = [];
+  for (const m of list) {
+    const code = extractCode(m.subject, { strict: true }) ?? (m.preview ? extractCode(m.preview, { strict: true }) : null);
+    if (code) found.set(m.uid, code);
+    else if (mentionsCode(m.subject) || (m.preview && mentionsCode(m.preview))) deeper.push(m.uid);
+  }
+  if (!deeper.length) return found;
+  try {
+    await inMailbox(a, 'INBOX', async (client) => {
+      const parts = new Map<number, MessageStructureObject>();
+      for await (const m of client.fetch(uidRanges(deeper), { uid: true, bodyStructure: true }, { uid: true })) {
+        const part = previewPart(m.bodyStructure);
+        if (part) parts.set(m.uid, { ...part, part: part.part ?? '1' });
+      }
+      for (const [uid, part] of parts) {
+        // Body parts are fetched with BODY.PEEK: reading it doesn't mark it read.
+        for await (const m of client.fetch(String(uid), { uid: true, bodyParts: [{ key: part.part ?? '1', maxLength: CODE_TEXT_BYTES }] }, { uid: true })) {
+          const raw = m.bodyParts ? [...m.bodyParts.values()][0] : undefined;
+          const code = raw ? extractCode(partText(part, raw), { strict: true, max: CODE_TEXT_CHARS }) : null;
+          if (code) found.set(uid, code);
+        }
+      }
+    }, false);
+  } catch {
+    // The notification goes without its code.
+  }
+  return found;
+}
+
+/** Announce the new unread mail among these uids, just stored (only Primary's, unless all of it notifies), and offer the codes in it. */
+async function announce(a: StoredAccount, store: MailStore, uids: number[]): Promise<void> {
   const now = Date.now();
-  const fresh = [...store.summaries('INBOX', uids).values()]
+  const unread = [...store.summaries('INBOX', uids).values()]
     .map((k) => k.summary)
-    .filter((m) => !m.seen && !m.draft && now - m.date < ARRIVAL_FRESH_MS && (!primaryOnly() || tabOf(a, m) === 'primary'))
-    .sort((x, y) => y.uid - x.uid)
+    .filter((m) => !m.seen && !m.draft)
+    .sort((x, y) => y.uid - x.uid);
+  const fresh = unread
+    .filter((m) => now - m.date < ARRIVAL_FRESH_MS && (!primaryOnly() || tabOf(a, m) === 'primary'))
     .slice(0, ARRIVAL_MAX);
+  // Codes come only from mail sorted into Primary, whichever tabs are shown: a promotion's "use code SAVE20" isn't one.
+  const coded = a.fillCodes === false ? [] : unread.filter((m) => codeFresh(m.date, now) && sortedTab(a, m) === 'primary').slice(0, ARRIVAL_MAX);
+  const codes = coded.length ? await findCodes(a, coded) : new Map<number, string>();
+  if (!accounts.includes(a)) return;
+  if (a.fillCodes !== false) {
+    for (const m of coded.toReversed()) {
+      const code = codes.get(m.uid);
+      const sender = m.from[0];
+      if (code) keepCode({ id: `mail:${a.id}:${m.uid}`, source: 'mail', code, from: sender?.name.trim() || sender?.address || '', time: m.date });
+    }
+  }
   if (!fresh.length) return;
   let told = announced.get(a.id);
   if (!told) announced.set(a.id, (told = new Set()));
@@ -673,6 +736,7 @@ function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
       preview: m.preview,
       date: m.date,
       category: tabOf(a, m),
+      code: a.fillCodes === false ? null : (codes.get(m.uid) ?? null),
     };
     deps.sendToShell('mail:arrived', arrival);
   }
@@ -680,6 +744,7 @@ function announce(a: StoredAccount, store: MailStore, uids: number[]): void {
 
 /** Forget an account's counts and announcements (it's gone, or moved servers). */
 function forgetArrivals(id: string): void {
+  forgetCodes(`mail:${id}`);
   inboxNewest.delete(id);
   correspondents.delete(id);
   correspondentsLooked.delete(id);
@@ -1036,7 +1101,8 @@ function htmlToText(html: string): string {
     });
 }
 
-function previewText(part: MessageStructureObject, raw: Buffer): string {
+/** A text part's words, decoded, without its quoted replies, from its start (what of it was fetched). */
+function partText(part: MessageStructureObject, raw: Buffer): string {
   let bytes = raw;
   const encoding = part.encoding?.toLowerCase();
   if (encoding === 'base64') {
@@ -1060,8 +1126,11 @@ function previewText(part: MessageStructureObject, raw: Buffer): string {
     .replace(/\s+/g, ' ')
     .replace(/\s(On\s.{4,120}?\swrote:|-{2,}\s*Original Message\s*-{2,}|Begin forwarded message:).*$/i, '')
     .replace(/\uFFFD+$/, '')
-    .trim()
-    .slice(0, PREVIEW_CHARS);
+    .trim();
+}
+
+function previewText(part: MessageStructureObject, raw: Buffer): string {
+  return partText(part, raw).slice(0, PREVIEW_CHARS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1271,7 +1340,7 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
   }, false);
   if (isInbox(mailbox)) void lookForCorrespondents(a).catch(() => {});
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
-  if (arrived.length) announce(a, store, arrived);
+  if (arrived.length) void announce(a, store, arrived).catch((error: unknown) => console.error('mail:', error));
   if (dirty) changed(a.id, mailbox);
 }
 
@@ -2547,6 +2616,10 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   if (typeof p.fullName === 'string') a.fullName = p.fullName.trim().slice(0, 200).replace(/[\r\n]/g, ' ');
   if (typeof p.signature === 'string') a.signature = p.signature.slice(0, 10_000);
   if (p.color !== undefined) a.color = colorArg(p.color);
+  if (typeof p.fillCodes === 'boolean') {
+    a.fillCodes = p.fillCodes;
+    if (!p.fillCodes) forgetCodes(`mail:${a.id}`);
+  }
   const movedServer = a.imap.host !== imap.host || a.imap.port !== imap.port || a.imap.user !== imap.user;
   a.imap = { ...imap };
   a.smtp = { ...smtp };
@@ -2591,6 +2664,11 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:updateAccount', (id, patch) => updateAccount(id, patch));
   // `din mail account-color`: the color alone, as Mail's own Color menu changes it.
   handle('mail:setAccountColor', (id, color) => updateAccount(id, { color: color === null ? null : colorArg(color) }));
+  // `din mail fill-codes`: that alone, as Mail's switch in the account's settings changes it.
+  handle('mail:setFillCodes', (id, on) => {
+    if (typeof on !== 'boolean') throw new Error('Say on or off');
+    return updateAccount(id, { fillCodes: on });
+  });
   handle('mail:removeAccount', (id) => {
     const a = account(id);
     accounts = accounts.filter((x) => x !== a);

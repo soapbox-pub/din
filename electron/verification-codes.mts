@@ -1,23 +1,27 @@
-// Verification codes in the user's texts (electron/phone.mts), for the Web
-// Browser's autofill (electron/passwords.mts) to offer in a page's code
-// field, as a Mac offers the codes from Messages, and for a text's
-// notification to copy.
+// Verification codes in the user's texts (electron/phone.mts) and new mail
+// (electron/mail.mts), for the Web Browser's autofill (electron/passwords.mts)
+// to offer in a page's code field, as a Mac offers the codes from Messages
+// and Mail, and for a text's or a message's notification to copy.
 //
-// Codes are kept here in memory only, for CODE_TTL_MS after the text was
-// sent, and are handed to a page only when the user picks one from the
-// suggestions below its field (passwords.mts).
+// Codes are kept here in memory only, for CODE_TTL_MS after the text or
+// message was sent, and are handed to a page only when the user picks one
+// from the suggestions below its field (passwords.mts).
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
-/** A code from a text, as the autofill offers it. */
-export interface PhoneCode {
-  /** The phone's and the message's ids. */
+/** Where a code came from: a phone's texts, or an inbox. */
+export type CodeSource = 'messages' | 'mail';
+
+/** A code from a text or an email, as the autofill offers it. */
+export interface VerificationCode {
+  /** Where it came from, and the phone's or the account's id with the message's: `<phone>:<message>`, `mail:<account>:<uid>`. */
   id: string;
+  source: CodeSource;
   code: string;
-  /** Who sent it: the conversation's name, a contact or a number. */
+  /** Who sent it: the conversation's name, a contact or a number; the sender's name or address. */
   from: string;
-  /** When the text was sent (ms). */
+  /** When it was sent (ms). */
   time: number;
 }
 
@@ -25,8 +29,8 @@ export interface PhoneCode {
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_CODES = 10;
 
-let codes: PhoneCode[] = [];
-const listeners = new Set<(code: PhoneCode) => void>();
+let codes: VerificationCode[] = [];
+const listeners = new Set<(code: VerificationCode) => void>();
 
 /** Words a text with a code has in it, in the languages most of them come in. */
 const KEYWORD =
@@ -50,20 +54,29 @@ interface Candidate {
   marked: boolean;
 }
 
+/** Whether a text talks about codes at all (one worth reading more of for one). */
+export function mentionsCode(text: string): boolean {
+  return KEYWORD.test(text);
+}
+
 /**
  * The verification code in a text, if it has one: four to eight digits (or
  * two groups of three, or Google's G-123456), or letters and digits mixed
  * where the text says "code: …", in a text that talks about codes.
+ *
+ * `strict` takes only a code the words around it say is one ("your code is
+ * 123456", "123456 is your code"), for email, whose footers, order numbers
+ * and addresses are full of digits a text hasn't room for.
  */
-export function extractCode(body: string): string | null {
-  const text = body.slice(0, 1000);
+export function extractCode(body: string, { strict: onlyMarked = false, max = 1000 }: { strict?: boolean; max?: number } = {}): string | null {
+  const text = body.slice(0, max);
   if (!KEYWORD.test(text)) return null;
   const candidates: Candidate[] = [];
   const add = (code: string, start: number, end: number, strict: boolean) => {
     const before = text.slice(Math.max(0, start - 40), start);
     const after = text.slice(end, end + 40);
     const marked = LEAD_IN.test(before) || LEAD_OUT.test(after);
-    if (strict && !marked) return;
+    if ((onlyMarked || strict) && !marked) return;
     if (!marked && NOT_A_CODE_BEFORE.test(before)) return;
     candidates.push({ code, start, end, marked });
   };
@@ -104,32 +117,41 @@ function prune(now = Date.now()): void {
   codes = codes.filter((c) => now - c.time < CODE_TTL_MS);
 }
 
-/** Note a new text's code, if it has one, to offer in pages' code fields. */
-export function noteCode(id: string, body: string, from: string, time: number): void {
-  const code = extractCode(body);
-  if (!code) return;
+/** Offer a code found in a text or an email in pages' code fields, unless it's too old already. */
+export function keepCode(found: VerificationCode): void {
   const now = Date.now();
-  // A phone's clock may run ahead of this computer's.
-  const entry: PhoneCode = { id, code, from, time: Math.min(time, now) };
+  // A phone's or a mail server's clock may run ahead of this computer's.
+  const entry: VerificationCode = { ...found, time: Math.min(found.time, now) };
   if (now - entry.time >= CODE_TTL_MS) return;
-  codes = [entry, ...codes.filter((c) => c.id !== id)].slice(0, MAX_CODES);
+  codes = [entry, ...codes.filter((c) => c.id !== entry.id)].slice(0, MAX_CODES);
   prune(now);
   for (const listener of listeners) listener(entry);
 }
 
-/** The codes from texts lately, newest first. */
-export function recentCodes(): PhoneCode[] {
+/** Note a new text's code, if it has one, to offer in pages' code fields. */
+export function noteCode(id: string, body: string, from: string, time: number): void {
+  const code = extractCode(body);
+  if (code) keepCode({ id, source: 'messages', code, from, time });
+}
+
+/** Whether a code from this long ago is still offered. */
+export function codeFresh(time: number, now = Date.now()): boolean {
+  return now - time < CODE_TTL_MS;
+}
+
+/** The codes from texts and mail lately, newest first. */
+export function recentCodes(): VerificationCode[] {
   prune();
   return [...codes].sort((a, b) => b.time - a.time);
 }
 
-/** Forget a phone's codes (it was forgotten, or stopped filling them). */
-export function forgetCodes(phoneId: string): void {
-  codes = codes.filter((c) => !c.id.startsWith(`${phoneId}:`));
+/** Forget a phone's codes, or (`mail:<account>`) an account's: it was forgotten, or stopped filling them. */
+export function forgetCodes(owner: string): void {
+  codes = codes.filter((c) => !c.id.startsWith(`${owner}:`));
 }
 
 /** Hear of each new code as it arrives. */
-export function onCode(listener: (code: PhoneCode) => void): () => void {
+export function onCode(listener: (code: VerificationCode) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
