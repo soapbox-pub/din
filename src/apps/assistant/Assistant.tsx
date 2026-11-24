@@ -25,7 +25,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
-import { useSecretRequests } from '@/shared/assistant/secretRequests';
+import { useGivenSecretNames, useSecretRequests } from '@/shared/assistant/secretRequests';
 import { SecretRequestCard } from '@/shared/assistant/Secrets';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
@@ -1070,6 +1070,8 @@ function Conversation({
     return { messages: all.slice(0, at), undone: all.slice(at).filter((m) => m.type === 'user').length };
   }, [transcript?.messages, revert]);
   const secretRequests = useSecretRequests(sessionID, messages);
+  // Undone messages' secrets too: the conversation still has them.
+  const givenSecrets = useGivenSecretNames(transcript?.messages);
   const commands = useSlashCommands(session?.location.directory, revert ? UNDONE_COMMANDS : CONVERSATION_COMMANDS);
   const directory = session?.location.directory;
   const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
@@ -1382,6 +1384,7 @@ function Conversation({
             autoFocus
             draftKey={sessionID}
             secrets
+            givenSecrets={givenSecrets}
             onCall={call?.start}
             running={running}
             busy={send.isPending || compact.isPending || undo.isPending || redo.isPending}

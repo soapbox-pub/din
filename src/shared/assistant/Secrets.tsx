@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { assistantApi, cleanAssistantError, SECRET_NAME } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { useAssistantHost } from '@/shared/assistant/host';
-import type { SecretRequest } from '@/shared/assistant/secretRequests';
+import { nextSecretName, type SecretRequest } from '@/shared/assistant/secretRequests';
 
 /*
  * Secrets handed to a conversation: values (a token, a password) its shell
@@ -27,7 +27,10 @@ function variableName(typed: string): string {
     .slice(0, 64);
 }
 
-/** + → Secret…: a name and a value, attached to the message being written. */
+/**
+ * + → Secret…: paste a value and it's attached to the message being written,
+ * as the next free SECRET_N unless a name is typed over it.
+ */
 export function SecretDialog({
   open,
   onOpenChange,
@@ -37,18 +40,20 @@ export function SecretDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdd: (name: string, value: string) => void;
-  /** Names already attached. */
+  /** Names already attached to the message or given to the conversation. */
   taken?: string[];
 }) {
-  const [name, setName] = useState('');
+  const [typedName, setTypedName] = useState('');
   const [value, setValue] = useState('');
   const id = useId();
+  const fallback = nextSecretName(taken);
+  const name = typedName || fallback;
   const validName = SECRET_NAME.test(name);
-  const clash = taken.includes(name);
+  const clash = typedName !== '' && taken.includes(typedName);
 
   const close = (next: boolean) => {
     if (!next) {
-      setName('');
+      setTypedName('');
       setValue('');
     }
     onOpenChange(next);
@@ -68,34 +73,12 @@ export function SecretDialog({
           <DialogHeader>
             <DialogTitle>Add a secret</DialogTitle>
             <DialogDescription>
-              The assistant’s commands get it as an environment variable for the rest of this conversation. It never sees
-              the value, which isn’t saved anywhere and is gone when the conversation is deleted.
+              The assistant’s commands get it as <span className="font-mono">${name}</span> for the rest of this
+              conversation. It never sees the value, which isn’t saved anywhere.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor={`${id}-name`}>Name</Label>
-            <Input
-              id={`${id}-name`}
-              value={name}
-              onChange={(e) => setName(variableName(e.target.value))}
-              placeholder="GITHUB_TOKEN"
-              autoComplete="off"
-              spellCheck={false}
-              autoFocus
-              className="font-mono"
-              aria-invalid={(name !== '' && !validName) || clash || undefined}
-              aria-describedby={`${id}-name-hint`}
-            />
-            <p id={`${id}-name-hint`} className={cn('text-xs text-muted-foreground', (clash || (name && !validName)) && 'text-destructive')}>
-              {clash
-                ? 'That name is attached already; this one replaces it.'
-                : name && !validName
-                  ? 'A name can’t start with a digit.'
-                  : `The assistant uses it as $${name || 'NAME'}.`}
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor={`${id}-value`}>Value</Label>
+            <Label htmlFor={`${id}-value`}>Secret</Label>
             <Input
               id={`${id}-value`}
               type="password"
@@ -104,7 +87,29 @@ export function SecretDialog({
               placeholder="Paste it here"
               autoComplete="off"
               spellCheck={false}
+              autoFocus
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor={`${id}-name`}>
+              Name <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id={`${id}-name`}
+              value={typedName}
+              onChange={(e) => setTypedName(variableName(e.target.value))}
+              placeholder={fallback}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+              aria-invalid={(typedName !== '' && !validName) || clash || undefined}
+              aria-describedby={clash || !validName ? `${id}-name-hint` : undefined}
+            />
+            {(clash || !validName) && (
+              <p id={`${id}-name-hint`} className="text-xs text-destructive">
+                {clash ? 'That name is taken already; this one replaces it.' : 'A name can’t start with a digit.'}
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => close(false)}>

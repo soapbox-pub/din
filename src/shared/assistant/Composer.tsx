@@ -157,6 +157,7 @@ export function Composer({
   draftKey,
   onCall,
   secrets = false,
+  givenSecrets = [],
   ref: handleRef,
 }: {
   ref?: Ref<ComposerHandle>;
@@ -187,6 +188,8 @@ export function Composer({
   onCall?: () => void;
   /** + → Secret…: for a composer whose messages go through `assistantApi.prompt`. */
   secrets?: boolean;
+  /** The secrets the conversation has already, by name: a new one is named after them. */
+  givenSecrets?: string[];
 }) {
   const [text, setText] = useDraft(draftKey);
   const [files, setFiles] = useDraftFiles(draftKey);
@@ -626,7 +629,7 @@ export function Composer({
               if (!open) requestAnimationFrame(() => ref.current?.focus());
             }}
             onAdd={addSecret}
-            taken={files.flatMap((f) => secretName(f) ?? [])}
+            taken={[...givenSecrets, ...files.flatMap((f) => secretName(f) ?? [])]}
           />
         )}
         {recorder.recording ? (
