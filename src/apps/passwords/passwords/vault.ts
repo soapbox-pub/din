@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { appLink } from '@/shared/launch';
 import {
   getPasswordsBridge,
+  type CardDetails,
   type PasswordGroup,
   type PasswordsImportResult,
   type PasswordItemInput,
@@ -98,6 +99,7 @@ export type Section =
   | { type: 'favorites' }
   | { type: 'codes' }
   | { type: 'notes' }
+  | { type: 'cards' }
   | { type: 'folder'; id: string }
   | { type: 'trash' };
 
@@ -132,6 +134,8 @@ export function itemsIn(list: PasswordList, section: Section): PasswordSummary[]
       return live.filter((i) => i.otp);
     case 'notes':
       return live.filter((i) => i.kind === 'note');
+    case 'cards':
+      return live.filter((i) => i.kind === 'card');
     case 'folder': {
       const ids = folderAndDescendants(list.groups, section.id);
       return live.filter((i) => ids.has(i.groupId));
@@ -151,6 +155,8 @@ export function sectionTitle(section: Section, list: PasswordList | undefined): 
       return 'Codes';
     case 'notes':
       return 'Secure Notes';
+    case 'cards':
+      return 'Cards';
     case 'trash':
       return 'Recently Deleted';
     case 'folder':
@@ -188,16 +194,55 @@ export function displayTitle(item: Pick<PasswordSummary, 'title' | 'url'>): stri
 export function matchesSearch(item: PasswordSummary, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [item.title, item.username, item.url].some((v) => v.toLowerCase().includes(q));
+  const card = item.card ? [item.card.brand, item.card.last4] : [];
+  return [item.title, item.username, item.url, ...card].some((v) => v.toLowerCase().includes(q));
 }
 
 export function byTitle(a: PasswordSummary, b: PasswordSummary): number {
   return displayTitle(a).localeCompare(displayTitle(b), undefined, { sensitivity: 'base' });
 }
 
-/** A new item, before it's saved. */
-export type BlankItem = PasswordItemInput & { kind: 'login' | 'note' };
+export type ItemKind = PasswordSummary['kind'];
 
-export function blankItem(kind: 'login' | 'note', groupId: string): BlankItem {
-  return { kind, groupId, title: '', username: '', password: '', url: '', notes: '', otpUri: '', fields: [], favorite: false };
+/** A new item, before it's saved. */
+export type BlankItem = PasswordItemInput & { kind: ItemKind };
+
+export function blankCard(): CardDetails {
+  return { holder: '', number: '', expMonth: '', expYear: '', code: '' };
+}
+
+export function blankItem(kind: ItemKind, groupId: string): BlankItem {
+  return {
+    kind,
+    groupId,
+    title: '',
+    username: '',
+    password: '',
+    url: '',
+    notes: '',
+    otpUri: '',
+    fields: [],
+    favorite: false,
+    card: kind === 'card' ? blankCard() : null,
+  };
+}
+
+/** The network a card number belongs to, by its first digits (as electron/passwords-cards.mts reads it). */
+export function cardBrand(number: string): string {
+  const n = number.replace(/\D/g, '');
+  if (/^4/.test(n)) return 'Visa';
+  if (/^(5[1-5]|2(2[2-9]|[3-6]\d|7[01]|720))/.test(n)) return 'Mastercard';
+  if (/^3[47]/.test(n)) return 'American Express';
+  if (/^(6011|65|64[4-9])/.test(n)) return 'Discover';
+  if (/^3(0[0-5]|[689])/.test(n)) return 'Diners Club';
+  if (/^35(2[89]|[3-8])/.test(n)) return 'JCB';
+  if (/^62/.test(n)) return 'UnionPay';
+  return 'Card';
+}
+
+/** A card's number in groups of four, as it's printed (American Express's 4-6-5). */
+export function groupCardNumber(number: string): string {
+  const digits = number.replace(/\D/g, '');
+  if (/^3[47]/.test(digits) && digits.length === 15) return `${digits.slice(0, 4)} ${digits.slice(4, 10)} ${digits.slice(10)}`;
+  return digits.replace(/(.{4})(?=.)/g, '$1 ');
 }

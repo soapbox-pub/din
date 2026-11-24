@@ -681,8 +681,8 @@ Elsewhere Din uses a `deckmon` on PATH.
 
 ### Passwords
 
-The Passwords app keeps logins, verification codes (TOTP) and secure notes
-in a KeePass file, `~/.local/share/din/Passwords.kdbx` (KDBX 4, Argon2id),
+The Passwords app keeps logins, verification codes (TOTP), secure notes and
+payment cards in a KeePass file, `~/.local/share/din/Passwords.kdbx` (KDBX 4, Argon2id),
 which KeePassXC, Strongbox and KeePassDX open with the same password. Only
 Din's main process holds it open (`electron/passwords.mts`); the app reaches
 it through its `passwords` permission. Argon2 runs in a worker thread with
@@ -697,10 +697,11 @@ takes the computer's password, checked by `din-password check`, or one of
 the vault's own.
 
 Set up with the computer's password, it opens at login with no prompt. The
-key derived from the password, not the password, is kept in the login
-keyring over the Secret Service (`electron/secret-service.mts`), which the
-boot screen's password unlocks; the vault keeps its KDF salt across saves so
-that key stays valid. Settings → Password re-keys the vault along with
+key derived from the password, not the password, is kept: on DinOS sealed
+with dindaemon's key beside the vault (`Passwords.key`), elsewhere in the
+login keyring over the Secret Service (`electron/secret-service.mts`), which
+the boot screen's password unlocks; the vault keeps its KDF salt across saves
+so that key stays valid. Settings → Password re-keys the vault along with
 everything else when its password was the computer's old one. Lock in the
 app locks it until the password is typed; a save by another app (which draws
 a new salt) makes the next unlock ask once.
@@ -712,8 +713,22 @@ checks the one picked against the frame's own URL (same host or registrable
 domain, never https to http) before sending it to that frame. New-password
 fields offer a strong password. A login submitted that the vault doesn't
 have becomes an offer to save it, and the toolbar shows a site's saved
-logins to fill or copy. Copied passwords and codes leave the clipboard after
-90 seconds.
+logins to fill or copy. Copied passwords, codes and card numbers leave the
+clipboard after 90 seconds.
+
+Cards fill in the same way. KeePass has no card type, so a card is an item
+tagged `Card` with `Cardholder`, `Card Number`, `Expiry` (MM/YYYY) and
+`Security Code` fields; one imported from Bitwarden or NordPass is read by its
+own fields' names when its number passes the Luhn check, and saving it writes
+it as Passwords does (`electron/passwords-cards.mts`). Focus on a card field
+(its `autocomplete="cc-…"`, or its name or label beside a card number field)
+offers the vault's cards by network and last four digits, under the page's
+own site even when the field is in the payment provider's frame; only the
+card picked leaves main, and only to the frames of the asking frame's site or
+the page's own, so a checkout split over frames (Stripe's) fills whole and
+another site's frame gets nothing. Each fills only the card fields it shows,
+the expiry as its placeholder asks. A field in a frame right in the page has
+the list beside it: the page's frame says where that frame is.
 
 Passkeys work too: Din is the authenticator, since Chromium has none on
 Linux. `electron/passkeys-preload.cjs` gives pages a `navigator.credentials`

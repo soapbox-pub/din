@@ -64,6 +64,7 @@ import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
 import { parseCsvExport, parseJsonExport, type ImportedItem, type ParsedExport } from './passwords-import.mts';
 import { onCode, recentCodes } from './phone-codes.mts';
+import { CARD_FIELDS, CARD_TAG, cardSummary, formatExpiry, parseCard, readCard, type CardDetails, type CardSummary } from './passwords-cards.mts';
 import { sealingMethod, seal, unseal } from './sealing.mts';
 import { deleteSecret, lookupSecret, storeSecret, type SecretLookup } from './secret-service.mts';
 
@@ -120,12 +121,14 @@ export interface PasswordSummary {
   username: string;
   url: string;
   groupId: string;
-  kind: 'login' | 'note';
+  kind: 'login' | 'note' | 'card';
   favorite: boolean;
   /** Whether it has a verification code (TOTP). */
   otp: boolean;
   /** Whether it has a passkey. */
   passkey: boolean;
+  /** A card's network, last four digits and expiry (passwords-cards.mts). */
+  card: CardSummary | null;
   trashed: boolean;
   created: number;
   modified: number;
@@ -146,6 +149,8 @@ export interface PasswordItem extends PasswordSummary {
   tags: string[];
   /** Its passkey: the site (relying party) it signs in to, and the account. */
   passkeyDetails: { rpId: string; username: string } | null;
+  /** A card's details; its fields aren't in `fields`. */
+  cardDetails: CardDetails | null;
 }
 
 export interface PasswordItemInput {
@@ -159,6 +164,8 @@ export interface PasswordItemInput {
   otpUri: string;
   fields: PasswordField[];
   favorite: boolean;
+  /** A card: written to its fields (CARD_FIELDS), and tagged one. */
+  card?: CardDetails | null;
 }
 
 export interface PasswordGroup {
@@ -184,7 +191,7 @@ export interface GenerateOptions {
   symbols?: boolean;
 }
 
-type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | { field: string };
+type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | 'cardNumber' | 'cardExpiry' | 'cardCode' | 'cardholder' | { field: string };
 
 export interface ImportOptions {
   /** The file's name, which a KeePass file's folder is named after. */
@@ -754,6 +761,22 @@ function urlsOf(entry: KdbxEntry): string[] {
   return urls.filter(Boolean);
 }
 
+/** An item's own fields: neither KeePass's standard ones nor a passkey's. */
+function extraFields(entry: KdbxEntry): Map<string, string> {
+  const fields = new Map<string, string>();
+  for (const name of entry.fields.keys()) {
+    if (!STANDARD_FIELDS.has(name) && !PASSKEY_FIELD.test(name)) fields.set(name, fieldText(entry, name));
+  }
+  return fields;
+}
+
+/** The card an item holds, and the fields it's in (passwords-cards.mts). */
+function cardOf(entry: KdbxEntry): { card: CardDetails; used: Set<string> } | null {
+  // A login with a password isn't a card, whatever its fields.
+  if (fieldText(entry, 'Password') || fieldText(entry, 'UserName')) return null;
+  return readCard(extraFields(entry), entry.tags.includes(CARD_TAG));
+}
+
 function recycleBin(db: Kdbx): KdbxGroup | undefined {
   const id = db.meta.recycleBinUuid;
   return db.meta.recycleBinEnabled && id && !id.empty ? db.getGroup(id) : undefined;
@@ -768,6 +791,7 @@ function inTrash(db: Kdbx, group: KdbxGroup | undefined): boolean {
 function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
   const username = fieldText(entry, 'UserName');
   const url = fieldText(entry, 'URL');
+  const card = cardOf(entry);
   const hasSecret = !!(username || url || fieldText(entry, 'Password'));
   // A note, or a card or such brought in from another app: fields and no login.
   const hasNote = !!fieldText(entry, 'Notes')
@@ -778,10 +802,11 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
     username,
     url,
     groupId: entry.parentGroup?.uuid.id ?? '',
-    kind: hasSecret || !hasNote ? 'login' : 'note',
+    kind: card ? 'card' : hasSecret || !hasNote ? 'login' : 'note',
     favorite: entry.tags.includes(FAVORITE_TAG),
     otp: !!otpOf(entry),
     passkey: hasPasskey(entry),
+    card: card ? cardSummary(card.card) : null,
     trashed: inTrash(db, entry.parentGroup),
     created: entry.times.creationTime?.getTime() ?? 0,
     modified: entry.lastModTime,
@@ -789,9 +814,10 @@ function summary(db: Kdbx, entry: KdbxEntry): PasswordSummary {
 }
 
 function item(db: Kdbx, entry: KdbxEntry): PasswordItem {
+  const card = cardOf(entry);
   const fields: PasswordField[] = [];
   for (const [name, value] of entry.fields) {
-    if (STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name)) continue;
+    if (STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name) || card?.used.has(name)) continue;
     fields.push({ name, value: typeof value === 'string' ? value : value.getText(), protected: typeof value !== 'string' });
   }
   return {
@@ -800,10 +826,11 @@ function item(db: Kdbx, entry: KdbxEntry): PasswordItem {
     notes: fieldText(entry, 'Notes'),
     otpUri: otpOf(entry),
     fields,
-    tags: entry.tags.filter((t) => t !== FAVORITE_TAG),
+    tags: entry.tags.filter((t) => t !== FAVORITE_TAG && t !== CARD_TAG),
     passkeyDetails: hasPasskey(entry)
       ? { rpId: fieldText(entry, PASSKEY.rpId), username: passkeyUsername(entry) }
       : null,
+    cardDetails: card?.card ?? null,
   };
 }
 
@@ -855,6 +882,8 @@ function parseInput(raw: unknown): PasswordItemInput {
   if (!raw || typeof raw !== 'object') throw new Error('Not an item');
   const r = raw as Record<string, unknown>;
   const fields = Array.isArray(r.fields) ? r.fields : [];
+  const card = r.card ? parseCard(r.card) : null;
+  const cardNames = new Set<string>(card ? Object.values(CARD_FIELDS) : []);
   return {
     id: typeof r.id === 'string' ? r.id : undefined,
     groupId: typeof r.groupId === 'string' ? r.groupId : undefined,
@@ -865,10 +894,11 @@ function parseInput(raw: unknown): PasswordItemInput {
     notes: text(r.notes, 'note'),
     otpUri: text(r.otpUri ?? '', 'verification code'),
     favorite: r.favorite === true,
+    card,
     fields: fields.map((f: unknown) => {
       const field = (f ?? {}) as Record<string, unknown>;
       const name = text(field.name, 'field name').trim();
-      if (!name || STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name)) throw new Error(`"${name}" can't be a field's name`);
+      if (!name || STANDARD_FIELDS.has(name) || PASSKEY_FIELD.test(name) || cardNames.has(name)) throw new Error(`"${name}" can't be a field's name`);
       return { name, value: text(field.value, 'field'), protected: field.protected === true };
     }),
   };
@@ -889,6 +919,8 @@ function saveItem(db: Kdbx, input: PasswordItemInput): string {
     const group = input.groupId ? findGroup(db, input.groupId) : db.getDefaultGroup();
     entry = db.createEntry(inTrash(db, group) ? db.getDefaultGroup() : group);
   }
+  // A card's details were read from these (another app's names, perhaps); they're written as Passwords' below.
+  const cardFields = input.card ? cardOf(entry)?.used ?? new Set<string>() : new Set<string>();
   setField(entry, 'Title', input.title, false);
   setField(entry, 'UserName', input.username, false);
   setField(entry, 'Password', input.password, true);
@@ -899,9 +931,10 @@ function saveItem(db: Kdbx, input: PasswordItemInput): string {
   const keep = new Set(input.fields.map((f) => f.name));
   for (const name of [...entry.fields.keys()]) {
     // A passkey stays: the editor never sees its fields.
-    if (!STANDARD_FIELDS.has(name) && !PASSKEY_FIELD.test(name) && !keep.has(name)) entry.fields.delete(name);
+    if (!STANDARD_FIELDS.has(name) && !PASSKEY_FIELD.test(name) && (!keep.has(name) || cardFields.has(name))) entry.fields.delete(name);
   }
   for (const field of input.fields) setField(entry, field.name, field.value, field.protected);
+  if (input.card) writeCard(entry, input.card);
   setFavorite(entry, input.favorite);
   entry.times.update();
   if (input.id && input.groupId && entry.parentGroup?.uuid.id !== input.groupId) {
@@ -909,6 +942,18 @@ function saveItem(db: Kdbx, input: PasswordItemInput): string {
     if (!inTrash(db, group)) db.move(entry, group);
   }
   return entry.uuid.id;
+}
+
+function writeCard(entry: KdbxEntry, card: CardDetails): void {
+  const put = (name: string, value: string, isProtected: boolean) => {
+    if (value) setField(entry, name, value, isProtected);
+    else entry.fields.delete(name);
+  };
+  put(CARD_FIELDS.holder, card.holder, false);
+  put(CARD_FIELDS.number, card.number, true);
+  put(CARD_FIELDS.expiry, formatExpiry(card, true), false);
+  put(CARD_FIELDS.code, card.code, true);
+  if (!entry.tags.includes(CARD_TAG)) entry.tags = [...entry.tags, CARD_TAG];
 }
 
 function setFavorite(entry: KdbxEntry, favorite: boolean): void {
@@ -1212,6 +1257,14 @@ function copyField(entry: KdbxEntry, field: CopyField): void {
   if (field === 'otp') return copy(totp(otpOf(entry)), true);
   if (field === 'url') return copy(fieldText(entry, 'URL'), false);
   if (field === 'notes') return copy(fieldText(entry, 'Notes'), false);
+  if (field === 'cardNumber' || field === 'cardExpiry' || field === 'cardCode' || field === 'cardholder') {
+    const card = cardOf(entry)?.card;
+    if (!card) throw new Error('Not a card');
+    if (field === 'cardNumber') return copy(card.number, true);
+    if (field === 'cardCode') return copy(card.code, true);
+    if (field === 'cardExpiry') return copy(formatExpiry(card), false);
+    return copy(card.holder, false);
+  }
   if (field && typeof field === 'object' && typeof field.field === 'string' && entry.fields.has(field.field)) {
     return copy(fieldText(entry, field.field), typeof entry.fields.get(field.field) !== 'string');
   }
@@ -1394,8 +1447,8 @@ export const passkeyVault = {
 // Autofill
 // ---------------------------------------------------------------------------
 
-type FieldKind = 'username' | 'password' | 'new-password' | 'one-time-code';
-const FIELD_KINDS: readonly string[] = ['username', 'password', 'new-password', 'one-time-code'];
+type FieldKind = 'username' | 'password' | 'new-password' | 'one-time-code' | 'card';
+const FIELD_KINDS: readonly string[] = ['username', 'password', 'new-password', 'one-time-code', 'card'];
 
 interface Rect {
   x: number;
@@ -1411,6 +1464,7 @@ interface Suggestion {
   frame: WebFrameMain;
   url: string;
   generated: string | null;
+  kind: FieldKind;
 }
 
 let suggestion: Suggestion | null = null;
@@ -1497,34 +1551,96 @@ function webSender(event: Electron.IpcMainEvent): { contents: WebContents; frame
   return isWebUrl(url) ? { contents, frame, url } : null;
 }
 
+/** Where the list goes: the field's place in the page, or in its own frame when that isn't known. */
+interface Placement {
+  rect: Rect;
+  mainFrame: boolean;
+}
+
+const LOCATE_TIMEOUT_MS = 300;
+let nextLocateId = 1;
+const locating = new Map<number, { frame: WebFrameMain; resolve: (rect: Rect | null) => void }>();
+
+/**
+ * Where a field in a frame of its own is in the page (a checkout's card
+ * fields, in the payment provider's frame): the frame's place in the page,
+ * which only the page can say, found there by the frame's name or address,
+ * and the field's place in the frame. Only for a frame right in the page;
+ * deeper ones, and a page that doesn't answer in time, give null.
+ */
+function locateInPage(contents: WebContents, frame: WebFrameMain, rect: Rect): Promise<Rect | null> {
+  const top = contents.mainFrame;
+  if (!frame.parent || !sameFrame(frame.parent, top)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const id = nextLocateId++;
+    const done = (box: Rect | null) => {
+      clearTimeout(timer);
+      locating.delete(id);
+      resolve(
+        box && {
+          x: box.x + rect.x * box.width,
+          y: box.y + rect.y * box.height,
+          width: rect.width * box.width,
+          height: rect.height * box.height,
+        },
+      );
+    };
+    const timer = setTimeout(() => done(null), LOCATE_TIMEOUT_MS);
+    locating.set(id, { frame: top, resolve: done });
+    sendToFrame(top, 'passwords:locate-frame', { id, name: frame.name, url: frame.url });
+  });
+}
+
+async function placement(sender: { contents: WebContents; frame: WebFrameMain }, rect: Rect): Promise<Placement> {
+  if (sender.frame === sender.contents.mainFrame) return { rect, mainFrame: true };
+  const inPage = await locateInPage(sender.contents, sender.frame, rect);
+  return inPage ? { rect: inPage, mainFrame: true } : { rect, mainFrame: false };
+}
+
+/** The vault's cards, as the list shows them: never a number or code. */
+function cardsIn(db: Kdbx): { id: string; title: string; brand: string; last4: string; expiry: string }[] {
+  const cards = [];
+  for (const entry of db.getDefaultGroup().allEntries()) {
+    if (inTrash(db, entry.parentGroup)) continue;
+    const card = cardOf(entry)?.card;
+    if (!card?.number) continue;
+    cards.push({ id: entry.uuid.id, title: fieldText(entry, 'Title'), ...cardSummary(card), modified: entry.lastModTime });
+  }
+  return cards.sort((a, b) => b.modified - a.modified).map(({ modified: _, ...card }) => card);
+}
+
 async function onField(event: Electron.IpcMainEvent, raw: unknown): Promise<void> {
   const sender = webSender(event);
   if (!sender) return;
   const r = (raw ?? {}) as Record<string, unknown>;
   const kind = typeof r.kind === 'string' && FIELD_KINDS.includes(r.kind) ? (r.kind as FieldKind) : null;
-  const rect = parseRect(r.rect);
-  if (!kind || !rect) return;
-  if (kind === 'one-time-code') return suggestCodes(sender, rect);
+  const fieldRect = parseRect(r.rect);
+  if (!kind || !fieldRect) return;
+  const place = await placement(sender, fieldRect);
+  if (kind === 'one-time-code') return suggestCodes(sender, place);
   await serial(refresh).catch(() => {});
   const db = vault?.db;
   if (!db && !(await exists())) return hideSuggestions();
-  const items = db && kind !== 'new-password'
+  const items = db && (kind === 'username' || kind === 'password')
     ? loginsFor(db, sender.url).map((e) => ({ id: e.uuid.id, title: fieldText(e, 'Title'), username: fieldText(e, 'UserName') }))
     : [];
+  const cards = db && kind === 'card' ? cardsIn(db) : [];
   const generated = db && kind === 'new-password' ? generatePassword() : null;
-  if (db && items.length === 0 && !generated) return hideSuggestions();
+  if (db && items.length === 0 && cards.length === 0 && !generated) return hideSuggestions();
   if (suggestion) hideSuggestions();
   watch(sender.contents);
   const requestId = nextRequestId++;
-  suggestion = { requestId, contents: sender.contents, frame: sender.frame, url: sender.url, generated };
+  suggestion = { requestId, contents: sender.contents, frame: sender.frame, url: sender.url, generated, kind };
   options?.sendToShell('passwords:suggest', {
     requestId,
     wcId: sender.contents.id,
-    mainFrame: sender.frame === sender.contents.mainFrame,
-    rect,
+    mainFrame: place.mainFrame,
+    rect: place.rect,
     kind,
-    site: siteOf(sender.url)?.host ?? '',
+    // A card goes to whoever the page is: the shop, not its payment provider's frame.
+    site: siteOf(kind === 'card' ? sender.contents.mainFrame.url : sender.url)?.host ?? '',
     items,
+    cards,
     locked: !db,
     generated,
     codes: [],
@@ -1533,27 +1649,43 @@ async function onField(event: Electron.IpcMainEvent, raw: unknown): Promise<void
 }
 
 /** The codes from the user's texts lately, below a verification code field. */
-function suggestCodes(sender: { contents: WebContents; frame: WebFrameMain; url: string }, rect: Rect): void {
+function suggestCodes(sender: { contents: WebContents; frame: WebFrameMain; url: string }, place: Placement): void {
   const codes = recentCodes();
   if (codes.length === 0) return hideSuggestions();
   if (suggestion) hideSuggestions();
   watch(sender.contents);
   const requestId = nextRequestId++;
-  suggestion = { requestId, contents: sender.contents, frame: sender.frame, url: sender.url, generated: null };
+  suggestion = { requestId, contents: sender.contents, frame: sender.frame, url: sender.url, generated: null, kind: 'one-time-code' };
   options?.sendToShell('passwords:suggest', {
     requestId,
     wcId: sender.contents.id,
-    mainFrame: sender.frame === sender.contents.mainFrame,
-    rect,
+    mainFrame: place.mainFrame,
+    rect: place.rect,
     kind: 'one-time-code',
     site: siteOf(sender.url)?.host ?? '',
     items: [],
+    cards: [],
     locked: false,
     generated: null,
     // Only the code itself and who sent it: never the rest of the text.
     codes: codes.map((c) => ({ id: c.id, code: c.code, from: c.from, time: c.time })),
   });
   sendToFrame(sender.frame, 'passwords:shown', { visible: true, highlighted: false });
+}
+
+/**
+ * A card goes to the frame that asked, and to the page's other frames of
+ * that frame's site or the page's own: a payment form split over frames
+ * (Stripe's card number, expiry and code, a frame each) fills whole, while
+ * another site's frame (an ad) gets nothing. Each fills only the card
+ * fields it shows (passwords-preload.cjs).
+ */
+function fillCard(contents: WebContents, asking: WebFrameMain, card: CardDetails): void {
+  const origins = new Set([originOf(asking.url), originOf(contents.mainFrame.url)]);
+  for (const frame of contents.mainFrame.framesInSubtree) {
+    if (!isWebUrl(frame.url) || !origins.has(originOf(frame.url))) continue;
+    sendToFrame(frame, 'passwords:fill-card', { ...card, asking: sameFrame(frame, asking) });
+  }
 }
 
 function originOf(url: string): string | null {
@@ -1614,7 +1746,7 @@ function onSubmitted(event: Electron.IpcMainEvent, raw: unknown): void {
 }
 
 /** What the desktop picked from the suggestions. */
-type Choice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'code'; id: string } | { type: 'dismiss' };
+type Choice = { type: 'login'; id: string } | { type: 'card'; id: string } | { type: 'generated' } | { type: 'code'; id: string } | { type: 'dismiss' };
 
 function choose(requestId: unknown, raw: unknown): void {
   const s = suggestion;
@@ -1634,6 +1766,17 @@ function choose(requestId: unknown, raw: unknown): void {
       password: fieldText(entry, 'Password'),
       generated: false,
     });
+  } else if (choice.type === 'card') {
+    const db = vault?.db;
+    // Still the page it was offered to.
+    if (!db || s.kind !== 'card' || !isWebUrl(url) || originOf(url) !== originOf(s.url)) return;
+    let card: CardDetails | undefined;
+    try {
+      card = cardOf(findEntry(db, choice.id))?.card;
+    } catch {
+      return;
+    }
+    if (card?.number) fillCard(s.contents, s.frame, card);
   } else if (choice.type === 'code') {
     // Still the page it was offered to, and still a code from a text lately.
     const code = recentCodes().find((c) => c.id === choice.id);
@@ -1872,4 +2015,9 @@ export function registerPasswordsHandlers(opts: Options): void {
     }
   });
   ipcMain.on('passwords:submitted', (event, raw: unknown) => onSubmitted(event, raw));
+  ipcMain.on('passwords:frame-located', (event, raw: unknown) => {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const pending = typeof r.id === 'number' ? locating.get(r.id) : undefined;
+    if (pending && sameFrame(event.senderFrame, pending.frame)) pending.resolve(parseRect(r.rect));
+  });
 }

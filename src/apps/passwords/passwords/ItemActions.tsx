@@ -1,4 +1,4 @@
-import { Copy, ExternalLink, Folder, FolderInput, KeyRound, KeySquare, Pencil, RotateCcw, ShieldCheck, Star, StarOff, Trash2, User } from 'lucide-react';
+import { CalendarClock, Copy, CreditCard, ExternalLink, Folder, FolderInput, KeyRound, KeySquare, Pencil, RotateCcw, ShieldCheck, Star, StarOff, Trash2, User } from 'lucide-react';
 import {
   ContextMenuItem,
   ContextMenuSeparator,
@@ -86,6 +86,20 @@ export function ItemMenuItems({
           <ShieldCheck className="size-4.5" strokeWidth={1.75} aria-hidden />
           Copy Verification Code
         </Item>
+      )}
+      {item.kind === 'card' && (
+        <>
+          <Item onSelect={() => actions.copy(item.id, 'cardNumber')}>
+            <CreditCard className="size-4.5" strokeWidth={1.75} aria-hidden />
+            Copy Card Number
+          </Item>
+          {item.card?.expiry && (
+            <Item onSelect={() => actions.copy(item.id, 'cardExpiry')}>
+              <CalendarClock className="size-4.5" strokeWidth={1.75} aria-hidden />
+              Copy Expiry
+            </Item>
+          )}
+        </>
       )}
       {item.kind === 'note' && (
         <Item onSelect={() => actions.copy(item.id, 'notes')}>

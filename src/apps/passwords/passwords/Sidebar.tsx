@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
-import { Folder, FolderPlus, KeyRound, Lock, Pencil, Settings, ShieldCheck, Star, StickyNote, Trash2 } from 'lucide-react';
+import { CreditCard, Folder, FolderPlus, KeyRound, Lock, Pencil, Settings, ShieldCheck, Star, StickyNote, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,7 @@ const FIXED: { section: Section; name: string; badge: ReactNode }[] = [
   { section: { type: 'favorites' }, name: 'Favorites', badge: <Badge icon={Star} /> },
   { section: { type: 'codes' }, name: 'Codes', badge: <Badge icon={ShieldCheck} /> },
   { section: { type: 'notes' }, name: 'Secure Notes', badge: <Badge icon={StickyNote} /> },
+  { section: { type: 'cards' }, name: 'Cards', badge: <Badge icon={CreditCard} /> },
 ];
 
 function Row({

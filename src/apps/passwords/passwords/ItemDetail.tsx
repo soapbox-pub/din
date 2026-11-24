@@ -8,7 +8,7 @@ import type { CopyField, PasswordItem, PasswordList } from '@/lib/passwords';
 import { parseTotp, totpCode } from '@/shared/totp';
 import { ItemIcon } from './ItemIcon';
 import { ItemMenuItems, type ItemActions } from './ItemActions';
-import { displayTitle, openableUrl, siteHost, useBridge, useVaultItem } from './vault';
+import { displayTitle, groupCardNumber, openableUrl, siteHost, useBridge, useVaultItem } from './vault';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 /** A field's row: its label over its value, copied on a click. */
@@ -272,6 +272,47 @@ export function ItemDetail({
               }
             >
               {siteHost(item.url)}
+            </FieldRow>
+          )}
+        </Card>
+      )}
+
+      {item.cardDetails && (
+        <Card>
+          {item.cardDetails.holder && (
+            <FieldRow label="Name on card" copyLabel={`Copy the name on the card, ${item.cardDetails.holder}`} onCopy={copy('cardholder')}>
+              {item.cardDetails.holder}
+            </FieldRow>
+          )}
+          <FieldRow
+            label={item.card?.brand && item.card.brand !== 'Card' ? `${item.card.brand} number` : 'Card number'}
+            copyLabel="Copy the card number"
+            onCopy={item.cardDetails.number ? copy('cardNumber') : undefined}
+            extra={item.cardDetails.number ? reveal('cardNumber', 'the card number') : undefined}
+          >
+            {!item.cardDetails.number ? (
+              <span className="text-muted-foreground">None</span>
+            ) : shown.has('cardNumber') ? (
+              <span className="font-mono tabular-nums">{groupCardNumber(item.cardDetails.number)}</span>
+            ) : (
+              <span className="tabular-nums" aria-label={`Ending in ${item.cardDetails.number.slice(-4)}`}>
+                •••• {item.cardDetails.number.slice(-4)}
+              </span>
+            )}
+          </FieldRow>
+          {item.card?.expiry && (
+            <FieldRow label="Expires" copyLabel={`Copy the expiry, ${item.card.expiry}`} onCopy={copy('cardExpiry')}>
+              <span className="tabular-nums">{item.card.expiry}</span>
+            </FieldRow>
+          )}
+          {item.cardDetails.code && (
+            <FieldRow
+              label="Security code"
+              copyLabel="Copy the security code"
+              onCopy={copy('cardCode')}
+              extra={reveal('cardCode', 'the security code')}
+            >
+              <Secret value={item.cardDetails.code} shown={shown.has('cardCode')} />
             </FieldRow>
           )}
         </Card>

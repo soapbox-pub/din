@@ -5,11 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { cleanPasswordsError, type PasswordField, type PasswordItem, type PasswordItemInput, type PasswordList } from '@/lib/passwords';
+import { cleanPasswordsError, type CardDetails, type PasswordField, type PasswordItem, type PasswordItemInput, type PasswordList } from '@/lib/passwords';
 import { parseTotp } from '@/shared/totp';
 import { GeneratorButton } from './Generator';
 import { ItemIcon } from './ItemIcon';
-import { useBridge, type BlankItem } from './vault';
+import { blankCard, cardBrand, groupCardNumber, useBridge, type BlankItem } from './vault';
 import { settingsGroup } from '@/shared/settingsChromeStyles';
 
 function Row({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
@@ -20,6 +20,119 @@ function Row({ label, htmlFor, children }: { label: string; htmlFor: string; chi
       </Label>
       <div className="flex min-w-0 items-center gap-1">{children}</div>
     </div>
+  );
+}
+
+/** The Luhn checksum a card number ends with: a typo shows. */
+function luhn(digits: string): boolean {
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
+const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+
+/** The years a card can expire in: this one and the next 15, and the card's own if it's older. */
+function expiryYears(current: string): string[] {
+  const now = new Date().getFullYear();
+  const years = Array.from({ length: 16 }, (_, i) => String(now + i));
+  if (current && !years.includes(current)) years.unshift(current);
+  return years;
+}
+
+/** A card's own fields: who it's for, its number, expiry and code. */
+function CardFields({ card, onChange }: { card: CardDetails; onChange: (card: CardDetails) => void }) {
+  const [showCode, setShowCode] = useState(!card.code);
+  const set = (patch: Partial<CardDetails>) => onChange({ ...card, ...patch });
+  const digits = card.number;
+  const badNumber = digits.length >= 12 && !luhn(digits);
+  const NONE = 'none';
+  return (
+    <>
+      <Row label="Name on card" htmlFor="edit-card-holder">
+        <Input id="edit-card-holder" autoComplete="off" value={card.holder} onChange={(e) => set({ holder: e.target.value })} />
+      </Row>
+      <Row label="Card number" htmlFor="edit-card-number">
+        <div className="w-full space-y-1">
+          <Input
+            id="edit-card-number"
+            inputMode="numeric"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="1234 5678 9012 3456"
+            value={groupCardNumber(digits)}
+            onChange={(e) => set({ number: e.target.value.replace(/\D/g, '').slice(0, 19) })}
+            aria-invalid={badNumber}
+            aria-describedby="edit-card-number-help"
+            className="font-mono tabular-nums"
+          />
+          <p id="edit-card-number-help" className={badNumber ? 'text-xs text-destructive' : 'sr-only'}>
+            {badNumber ? 'That number doesn’t look right. Check it against the card.' : 'The long number on the front of the card.'}
+          </p>
+        </div>
+      </Row>
+      <Row label="Expires" htmlFor="edit-card-month">
+        <Select value={card.expMonth || NONE} onValueChange={(v) => set({ expMonth: v === NONE ? '' : v })}>
+          <SelectTrigger id="edit-card-month" aria-label="Expiry month" className="w-24">
+            <SelectValue placeholder="MM" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>MM</SelectItem>
+            {MONTHS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span aria-hidden className="px-1 text-muted-foreground">/</span>
+        <Select value={card.expYear || NONE} onValueChange={(v) => set({ expYear: v === NONE ? '' : v })}>
+          <SelectTrigger aria-label="Expiry year" className="w-28">
+            <SelectValue placeholder="YYYY" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>YYYY</SelectItem>
+            {expiryYears(card.expYear).map((y) => (
+              <SelectItem key={y} value={y}>
+                {y}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
+      <Row label="Security code" htmlFor="edit-card-code">
+        <Input
+          id="edit-card-code"
+          type={showCode ? 'text' : 'password'}
+          inputMode="numeric"
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={4}
+          placeholder="CVC"
+          value={card.code}
+          onChange={(e) => set({ code: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+          className="w-28 font-mono"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label={showCode ? 'Hide the security code' : 'Show the security code'}
+          aria-pressed={showCode}
+          onClick={() => setShowCode((s) => !s)}
+        >
+          {showCode ? <EyeOff className="size-4.5" strokeWidth={1.75} /> : <Eye className="size-4.5" strokeWidth={1.75} />}
+        </Button>
+      </Row>
+    </>
   );
 }
 
@@ -47,6 +160,7 @@ export function ItemEditor({
     otpUri: initial.otpUri,
     fields: initial.fields.map((f) => ({ ...f })),
     favorite: initial.favorite,
+    card: initial.kind === 'card' ? { ...(('cardDetails' in initial ? initial.cardDetails : initial.card) ?? blankCard()) } : null,
   }));
   const [showPassword, setShowPassword] = useState(!initial.id);
   const [busy, setBusy] = useState(false);
@@ -59,13 +173,15 @@ export function ItemEditor({
   const names = draft.fields.map((f) => f.name.trim());
   const badField = names.some((n, i) => !n || names.indexOf(n) !== i);
   const folders = list.groups.filter((g) => !g.trash);
+  const badCard = kind === 'card' && (draft.card?.number.length ?? 0) < 12;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!bridge || busy || badOtp || badField) return;
+    if (!bridge || busy || badOtp || badField || badCard) return;
     setBusy(true);
     setError(null);
-    const title = draft.title.trim() || (kind === 'note' ? 'Untitled Note' : '');
+    const cardTitle = draft.card ? `${cardBrand(draft.card.number)} •••• ${draft.card.number.slice(-4)}` : '';
+    const title = draft.title.trim() || (kind === 'note' ? 'Untitled Note' : kind === 'card' ? cardTitle : '');
     bridge.save({ ...draft, title, fields: draft.fields.map((f) => ({ ...f, name: f.name.trim() })) }).then(onSaved, (err: unknown) => {
       setError(cleanPasswordsError(err));
       setBusy(false);
@@ -84,10 +200,10 @@ export function ItemEditor({
       className="mx-auto w-full max-w-2xl space-y-6 px-6 py-8 @3xl/passwords:px-10"
     >
       <header className="flex items-center gap-4">
-        <ItemIcon item={{ title: draft.title, url: draft.url, kind }} size="lg" />
+        <ItemIcon item={{ title: draft.title, url: draft.url, kind, card: draft.card ? { brand: cardBrand(draft.card.number) } : null }} size="lg" />
         <Input
           aria-label="Title"
-          placeholder={kind === 'note' ? 'Note title' : 'Title (like the site’s name)'}
+          placeholder={kind === 'note' ? 'Note title' : kind === 'card' ? 'Card name (like “Work Visa”)' : 'Title (like the site’s name)'}
           value={draft.title}
           onChange={(e) => set('title', e.target.value)}
           autoFocus
@@ -148,6 +264,12 @@ export function ItemEditor({
               </p>
             </div>
           </Row>
+        </div>
+      )}
+
+      {kind === 'card' && draft.card && (
+        <div className={settingsGroup}>
+          <CardFields card={draft.card} onChange={(card) => set('card', card)} />
         </div>
       )}
 
@@ -246,9 +368,9 @@ export function ItemEditor({
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={busy || badOtp || badField}>
+        <Button type="submit" disabled={busy || badOtp || badField || badCard}>
           {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}
-          {initial.id ? 'Save' : kind === 'note' ? 'Save Note' : 'Save Password'}
+          {initial.id ? 'Save' : kind === 'note' ? 'Save Note' : kind === 'card' ? 'Save Card' : 'Save Password'}
         </Button>
       </div>
     </form>

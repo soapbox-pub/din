@@ -27,15 +27,36 @@ export interface PasswordSummary {
   username: string;
   url: string;
   groupId: string;
-  kind: 'login' | 'note';
+  kind: 'login' | 'note' | 'card';
   favorite: boolean;
   /** Whether it has a verification code (TOTP). */
   otp: boolean;
   /** Whether it has a passkey. */
   passkey: boolean;
+  /** A card's network, last four digits and expiry ("MM/YY"): never its number. */
+  card: CardSummary | null;
   trashed: boolean;
   created: number;
   modified: number;
+}
+
+export interface CardSummary {
+  /** "Visa", "Mastercard", "American Express"…, or "Card". */
+  brand: string;
+  last4: string;
+  expiry: string;
+}
+
+/** A payment card's details, as kept in an item's fields (KeePass has no card type). */
+export interface CardDetails {
+  holder: string;
+  /** Digits only. */
+  number: string;
+  /** "01" to "12", or empty. */
+  expMonth: string;
+  /** Four digits, or empty. */
+  expYear: string;
+  code: string;
 }
 
 export interface PasswordField {
@@ -53,6 +74,8 @@ export interface PasswordItem extends PasswordSummary {
   tags: string[];
   /** Its passkey, which the Web Browser signs in with: the site (relying party) it's for, and the account. */
   passkeyDetails: { rpId: string; username: string } | null;
+  /** A card's details; its fields aren't in `fields`. */
+  cardDetails: CardDetails | null;
 }
 
 export interface PasswordItemInput {
@@ -67,6 +90,8 @@ export interface PasswordItemInput {
   otpUri: string;
   fields: PasswordField[];
   favorite: boolean;
+  /** Makes the item a card, with these details. */
+  card?: CardDetails | null;
 }
 
 export interface PasswordGroup {
@@ -95,7 +120,7 @@ export interface GenerateOptions {
 }
 
 /** What `copy` puts on the clipboard. Passwords and codes are cleared from it after 90 seconds. */
-export type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | { field: string };
+export type CopyField = 'username' | 'password' | 'otp' | 'url' | 'notes' | 'cardNumber' | 'cardExpiry' | 'cardCode' | 'cardholder' | { field: string };
 
 export interface PasswordsImportOptions {
   /** The file's name, which a KeePass file's folder is named after. */
@@ -170,16 +195,19 @@ export interface FieldRect {
   height: number;
 }
 
-/** Logins for the field the cursor just went into, for the desktop to show below it. */
+/** Logins (or cards) for the field the cursor just went into, for the desktop to show below it. */
 export interface PasswordSuggestion {
   requestId: number;
   wcId: number;
-  /** In a frame of its own, `rect` is that frame's; the list goes at the top of the page instead. */
+  /** False when the field's place in the page isn't known (`rect` is its frame's): the list goes at the top of the page. */
   mainFrame: boolean;
   rect: FieldRect;
-  kind: 'username' | 'password' | 'new-password' | 'one-time-code';
+  kind: 'username' | 'password' | 'new-password' | 'one-time-code' | 'card';
+  /** The page's site; for a card, the page's own even when the field is in its payment provider's frame. */
   site: string;
   items: { id: string; title: string; username: string }[];
+  /** For a card field: the vault's cards, newest first. */
+  cards: ({ id: string; title: string } & CardSummary)[];
   /** The vault is locked: offer to unlock it. */
   locked: boolean;
   /** A strong password to offer, for a new-password field. */
@@ -197,7 +225,12 @@ export interface PasswordOffer {
   update: boolean;
 }
 
-export type SuggestionChoice = { type: 'login'; id: string } | { type: 'generated' } | { type: 'code'; id: string } | { type: 'dismiss' };
+export type SuggestionChoice =
+  | { type: 'login'; id: string }
+  | { type: 'card'; id: string }
+  | { type: 'generated' }
+  | { type: 'code'; id: string }
+  | { type: 'dismiss' };
 
 /** The desktop's extras: the browser's toolbar and autofill. */
 export interface PasswordsDesktopBridge extends PasswordsBridge {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ChevronLeft, FileUp, KeyRound, Lock, PanelLeft, Plus, StickyNote } from 'lucide-react';
+import { ChevronLeft, CreditCard, FileUp, KeyRound, Lock, PanelLeft, Plus, StickyNote } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,6 +46,7 @@ import {
   useVaultList,
   useVaultState,
   type BlankItem,
+  type ItemKind,
   type PasswordsWindow,
   type Section,
 } from './passwords/vault';
@@ -191,13 +192,17 @@ function Vault({ state }: { state: PasswordsState }) {
       otp: 'Code copied',
       url: 'Website copied',
       notes: 'Note copied',
+      cardNumber: 'Card number copied',
+      cardExpiry: 'Expiry copied',
+      cardCode: 'Security code copied',
+      cardholder: 'Name copied',
     };
     return {
       copy: (id: string, field: CopyField) =>
         void bridge.copy(id, field).then(
           () =>
             toast(typeof field === 'string' ? copied[field] : `${field.field} copied`, {
-              body: field === 'password' || field === 'otp' ? 'It’s taken off the clipboard in 90 seconds.' : undefined,
+              body: field === 'password' || field === 'otp' || field === 'cardNumber' || field === 'cardCode' ? 'It’s taken off the clipboard in 90 seconds.' : undefined,
             }),
           fail,
         ),
@@ -216,7 +221,7 @@ function Vault({ state }: { state: PasswordsState }) {
   }, [bridge, fail]);
 
   const startNew = useCallback(
-    (kind: 'login' | 'note') => {
+    (kind: ItemKind) => {
       if (!list) return;
       const groupId = section.type === 'folder' ? section.id : list.rootId;
       setEditing({ initial: { ...blankItem(kind, groupId), favorite: section.type === 'favorites' } });
@@ -287,6 +292,10 @@ function Vault({ state }: { state: PasswordsState }) {
         <DropdownMenuItem onSelect={() => startNew('note')}>
           <StickyNote className="size-4.5" strokeWidth={1.75} aria-hidden />
           New Secure Note
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => startNew('card')}>
+          <CreditCard className="size-4.5" strokeWidth={1.75} aria-hidden />
+          New Card
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openPasswordsWindow('import')}>
@@ -557,7 +566,10 @@ function ItemRow({
             data-id={item.id}
             onClick={onSelect}
             onFocus={onSelect}
-            onDoubleClick={() => item.kind === 'login' && actions.copy(item.id, 'password')}
+            onDoubleClick={() => {
+              if (item.kind === 'login') actions.copy(item.id, 'password');
+              else if (item.kind === 'card') actions.copy(item.id, 'cardNumber');
+            }}
             aria-current={active ? 'true' : undefined}
             className={cn(
               'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left',
@@ -569,7 +581,13 @@ function ItemRow({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{displayTitle(item)}</span>
               <span className="block truncate text-xs text-muted-foreground">
-                {item.kind === 'note' ? 'Secure note' : item.username || siteHost(item.url) || 'No username'}
+                {item.kind === 'note'
+                  ? 'Secure note'
+                  : item.kind === 'card'
+                    ? item.card
+                      ? `${item.card.brand} •••• ${item.card.last4}${item.card.expiry ? ` · ${item.card.expiry}` : ''}`
+                      : 'Card'
+                    : item.username || siteHost(item.url) || 'No username'}
               </span>
             </span>
           </button>
@@ -590,7 +608,7 @@ function EmptyList({
 }: {
   section: Section;
   searching: boolean;
-  onNew: (kind: 'login' | 'note') => void;
+  onNew: (kind: ItemKind) => void;
   onImport: () => void;
 }) {
   const text = searching
@@ -603,14 +621,16 @@ function EmptyList({
           ? 'Logins with a verification code appear here. Add a site’s setup key to a login to keep its codes in Passwords.'
           : section.type === 'notes'
             ? 'Keep things like recovery codes and Wi-Fi passwords in secure notes.'
-            : 'Passwords you save in the Web Browser, or add here, appear in this list.';
+            : section.type === 'cards'
+              ? 'Add a card here, and the Web Browser offers it when a checkout asks for one.'
+              : 'Passwords you save in the Web Browser, or add here, appear in this list.';
   return (
     <div className="m-2 rounded-xl px-4 py-10 text-center">
       <p className="mx-auto max-w-xs text-sm text-muted-foreground">{text}</p>
       {!searching && section.type !== 'trash' && section.type !== 'codes' && (
-        <Button variant="secondary" size="sm" className="mt-4" onClick={() => onNew(section.type === 'notes' ? 'note' : 'login')}>
+        <Button variant="secondary" size="sm" className="mt-4" onClick={() => onNew(section.type === 'notes' ? 'note' : section.type === 'cards' ? 'card' : 'login')}>
           <Plus className="size-4.5" strokeWidth={1.75} aria-hidden />
-          {section.type === 'notes' ? 'New Secure Note' : 'New Password'}
+          {section.type === 'notes' ? 'New Secure Note' : section.type === 'cards' ? 'New Card' : 'New Password'}
         </Button>
       )}
       {!searching && section.type === 'all' && (

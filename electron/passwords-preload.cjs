@@ -14,6 +14,14 @@
 // codes from the user's texts (electron/phone-codes.mts): one field, or a
 // row of one-digit boxes, which the code picked is spread across.
 //
+// So are payment card fields, for the vault's cards. The card picked comes
+// to every frame of the page on the asking frame's site or the page's own
+// (a checkout's card number, expiry and code may each be in a frame of the
+// payment provider's), and each fills the card fields it shows.
+//
+// The page's own frame also says where in it one of its frames is, for the
+// desktop to put the list beside a field in that frame.
+//
 // Stays in the isolated world: the page can't see or call any of this. It
 // can see the events filling dispatches, which is what makes its own
 // scripts notice the values, and the values themselves, as it would had
@@ -60,7 +68,8 @@ if (/^https?:$/.test(location.protocol)) {
   /** @param {Document | HTMLFormElement} scope */
   const passwordFields = (scope) =>
     /** @type {HTMLInputElement[]} */ ([...scope.querySelectorAll('input[type=password]')]).filter(
-      (i) => !i.disabled && visible(i),
+      // A card's code hidden as a password isn't one.
+      (i) => !i.disabled && visible(i) && !cardKind(i),
     );
 
   /**
@@ -157,12 +166,59 @@ if (/^https?:$/.test(location.protocol)) {
     return /otp|one[-_ ]?time|verif|2fa|mfa|two[-_ ]?(factor|step)|passcode|sms[-_ ]?code|security[-_ ]?code|auth\w*[-_ ]?code|confirm\w*[-_ ]?code|login[-_ ]?code|sign[-_ ]?in[-_ ]?code|\bcode\b|\bpin\b|token/i.test(text);
   };
 
+  /** What a card field takes, by its autocomplete token. */
+  const CARD_TOKENS = new Set(['cc-name', 'cc-given-name', 'cc-family-name', 'cc-number', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-csc']);
+
+  /** @param {HTMLInputElement | HTMLSelectElement} el */
+  const fieldHints = (el) =>
+    `${el.name} ${el.id} ${el.getAttribute('placeholder') ?? ''} ${el.getAttribute('aria-label') ?? ''} ${[...(el.labels ?? [])].map((l) => l.textContent ?? '').join(' ')}`.toLowerCase();
+
+  /** Card fields by their names and labels, where they don't say (autocomplete). */
+  const CARD_HINTS = /** @type {[RegExp, string][]} */ ([
+    [/card.?num|cc.?num|cardnum|credit.?card|debit.?card|kartennummer|num[eé]ro.?de.?(la.?)?carte|n[uú]mero.?de.?(la.?)?tarjeta/, 'cc-number'],
+    [/cvc|cvv|csc|security.?code|card.?code|card.?verif|kartenpr[uü]f/, 'cc-csc'],
+    [/exp\w*.?month|month.?exp|cc.?month|exp.?mm\b/, 'cc-exp-month'],
+    [/exp\w*.?year|year.?exp|cc.?year|exp.?yy/, 'cc-exp-year'],
+    [/expir|exp.?date|valid.?(thru|until)|mm.?\/.?yy|ablauf/, 'cc-exp'],
+    [/name.?on.?card|card.?holder|cardholder|cc.?name|karteninhaber|titular/, 'cc-name'],
+  ]);
+
+  /** @param {Element} el */
+  const cardScope = (el) => /** @type {HTMLInputElement | HTMLSelectElement} */ (el).form ?? document;
+
   /**
-   * What kind of field the autofill offers something for, if any.
+   * What a payment card field takes, if it is one: what it says
+   * (autocomplete), or what its names say in a form that has a field for a
+   * card's number.
    * @param {EventTarget | null} el
-   * @returns {'username' | 'password' | 'new-password' | 'one-time-code' | null}
+   * @param {boolean} [named] Already checked that the form has a number field.
+   * @returns {string | null}
    */
-  const fieldKind = (el) => (isCodeField(el) ? 'one-time-code' : loginKind(el));
+  const cardKind = (el, named = false) => {
+    const isSelect = el instanceof HTMLSelectElement;
+    if (!isSelect && !isInput(el)) return null;
+    const field = /** @type {HTMLInputElement | HTMLSelectElement} */ (el);
+    if (field.disabled || (isInput(field) && (field.readOnly || !['text', 'tel', 'number', 'search', 'password'].includes(field.type)))) return null;
+    const tokens = (field.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/);
+    const said = tokens.find((t) => CARD_TOKENS.has(t));
+    if (said) return said;
+    if (tokens.some((t) => t && t !== 'off' && t !== 'on')) return null;
+    const text = fieldHints(field);
+    const hinted = CARD_HINTS.find(([pattern]) => pattern.test(text))?.[1] ?? null;
+    if (!hinted || hinted === 'cc-number') return hinted;
+    // "Security code" and the like are a card's only beside a card's number.
+    if (named) return hinted;
+    const scope = cardScope(field);
+    return [...scope.querySelectorAll('input')].some((i) => i !== field && cardKind(i, true) === 'cc-number') ? hinted : null;
+  };
+
+  /**
+   * What kind of field the autofill offers something for, if any. A card
+   * field is offered cards from a text field (a select is only filled).
+   * @param {EventTarget | null} el
+   * @returns {'username' | 'password' | 'new-password' | 'one-time-code' | 'card' | null}
+   */
+  const fieldKind = (el) => (isInput(el) && cardKind(el) ? 'card' : isCodeField(el) ? 'one-time-code' : loginKind(el));
 
   /**
    * The field a username goes in, for a password field (the last text field before it).
@@ -351,6 +407,106 @@ if (/^https?:$/.test(location.protocol)) {
       pageBlurred = !document.hasFocus();
     }
   });
+
+  /**
+   * Choose the option of a select that stands for a value: by its value or
+   * its text, as a number where both are ("01", "1", "January").
+   * @param {HTMLSelectElement} select @param {string[]} candidates
+   */
+  const choose = (select, candidates) => {
+    const wanted = candidates.map((c) => c.toLowerCase());
+    const option = [...select.options].find((o) => {
+      const value = o.value.trim().toLowerCase();
+      const label = (o.textContent ?? '').trim().toLowerCase();
+      return wanted.some((w) => value === w || label === w || (/^\d+$/.test(w) && (Number(value) === Number(w) || Number(label) === Number(w))));
+    });
+    if (!option) return;
+    select.value = option.value;
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+  /**
+   * An expiry in the form a field asks for: "MM/YY" mostly; "MM / YY",
+   * "MM/YYYY" or "MMYY" where its placeholder or length says so.
+   * @param {HTMLInputElement} input @param {string} mm @param {string} yyyy
+   */
+  const expiryFor = (input, mm, yyyy) => {
+    const hint = (input.getAttribute('placeholder') ?? '').toLowerCase();
+    const yy = yyyy.slice(-2);
+    if (/yyyy|aaaa|jjjj/.test(hint) || input.maxLength === 7) return `${mm}/${yyyy}`;
+    if (input.maxLength === 4) return `${mm}${yy}`;
+    if (/\s\/\s/.test(hint)) return `${mm} / ${yy}`;
+    return `${mm}/${yy}`;
+  };
+
+  ipcRenderer.on('passwords:fill-card', (_event, /** @type {{ holder: string, number: string, expMonth: string, expYear: string, code: string, asking: boolean }} */ card) => {
+    if (!card || typeof card.number !== 'string' || !/^\d{12,19}$/.test(card.number)) return;
+    const fields = /** @type {(HTMLInputElement | HTMLSelectElement)[]} */ ([...document.querySelectorAll('input, select')]).filter(
+      (f) => visible(f) && cardKind(f),
+    );
+    if (fields.length === 0) return;
+    const [given, ...rest] = card.holder.split(/\s+/);
+    const mm = card.expMonth;
+    const yyyy = card.expYear;
+    filling = true;
+    try {
+      for (const field of fields) {
+        const kind = cardKind(field);
+        if (field instanceof HTMLSelectElement) {
+          if (kind === 'cc-exp-month' && mm) choose(field, [mm, String(Number(mm)), MONTHS[Number(mm) - 1] ?? '', (MONTHS[Number(mm) - 1] ?? '').slice(0, 3)]);
+          else if (kind === 'cc-exp-year' && yyyy) choose(field, [yyyy, yyyy.slice(-2)]);
+          continue;
+        }
+        const input = /** @type {HTMLInputElement} */ (field);
+        const value =
+          kind === 'cc-number' ? card.number
+          : kind === 'cc-csc' ? card.code
+          : kind === 'cc-name' ? card.holder
+          : kind === 'cc-given-name' ? given ?? ''
+          : kind === 'cc-family-name' ? rest.join(' ')
+          : kind === 'cc-exp' ? (mm && yyyy ? expiryFor(input, mm, yyyy) : '')
+          : kind === 'cc-exp-month' ? mm
+          : kind === 'cc-exp-year' ? (input.maxLength === 2 ? yyyy.slice(-2) : yyyy)
+          : '';
+        if (value) type(input, value);
+      }
+    } finally {
+      // Back in the field it was asked from, for the user to carry on.
+      if (card.asking && current?.isConnected) current.focus();
+      filling = false;
+      pageBlurred = !document.hasFocus();
+    }
+  });
+
+  // The page's own frame, asked where one of its frames is: found by its
+  // name, or else its address, if just one matches.
+  if (window === window.top) {
+    ipcRenderer.on('passwords:locate-frame', (_event, /** @type {{ id: number, name: string, url: string }} */ ask) => {
+      const frames = /** @type {HTMLIFrameElement[]} */ ([...document.querySelectorAll('iframe, frame')]);
+      const absolute = (/** @type {string} */ src) => {
+        try {
+          return new URL(src, location.href).href;
+        } catch {
+          return '';
+        }
+      };
+      let matches = ask.name ? frames.filter((f) => f.name === ask.name) : [];
+      if (matches.length !== 1) matches = frames.filter((f) => f.src && absolute(f.src) === ask.url);
+      const frame = matches.length === 1 && visible(matches[0]) ? matches[0] : null;
+      let rect = null;
+      if (frame) {
+        const r = frame.getBoundingClientRect();
+        // The frame's content, inside its border.
+        const x = r.left + frame.clientLeft;
+        const y = r.top + frame.clientTop;
+        rect = { x: x / innerWidth, y: y / innerHeight, width: frame.clientWidth / innerWidth, height: frame.clientHeight / innerHeight };
+      }
+      ipcRenderer.send('passwords:frame-located', { id: ask.id, rect });
+    });
+  }
 
   ipcRenderer.on('passwords:fill', (_event, /** @type {{ username: string | null, password: string, generated: boolean }} */ login) => {
     const anchor = current?.isConnected ? current : firstLoginField();

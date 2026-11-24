@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { KeyRound, LockKeyhole, MessageCircle, Sparkles, X } from 'lucide-react';
+import { CreditCard, KeyRound, LockKeyhole, MessageCircle, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
@@ -24,7 +24,8 @@ const MARGIN = 8;
  *    site, or a strong password for a new-password field, or Unlock while
  *    the vault is locked; below a verification code field, the codes in the
  *    user's texts lately (electron/phone-codes.mts), as a Mac offers the
- *    ones from Messages. The page keeps the keyboard; its preload sends the
+ *    ones from Messages; below a payment card field, the vault's cards, by
+ *    their network and last four digits. The page keeps the keyboard; its preload sends the
  *    arrow keys, Enter and Escape here while the list is up;
  *  - after a login the vault doesn't have is submitted, an offer to save it
  *    at the top right of the page.
@@ -64,7 +65,9 @@ export function PasswordAutofillHost() {
       ? suggestion.codes.map((c) => `code:${c.id}`)
       : suggestion.locked
         ? ['unlock']
-        : [...(suggestion.generated ? ['generated'] : []), ...suggestion.items.map((i) => `login:${i.id}`)]
+        : suggestion.kind === 'card'
+          ? suggestion.cards.map((c) => `card:${c.id}`)
+          : [...(suggestion.generated ? ['generated'] : []), ...suggestion.items.map((i) => `login:${i.id}`)]
     : [];
 
   const pick = useCallback(
@@ -84,6 +87,8 @@ export function PasswordAutofillHost() {
         void bridge.choose(s.requestId, { type: 'generated' });
       } else if (row.startsWith('login:')) {
         void bridge.choose(s.requestId, { type: 'login', id: row.slice('login:'.length) });
+      } else if (row.startsWith('card:')) {
+        void bridge.choose(s.requestId, { type: 'card', id: row.slice('card:'.length) });
       } else if (row.startsWith('code:')) {
         void bridge.choose(s.requestId, { type: 'code', id: row.slice('code:'.length) });
       }
@@ -243,12 +248,13 @@ function SuggestionList({
   }
   left = Math.max(MARGIN, Math.min(left, window.innerWidth - width - MARGIN));
   const codes = suggestion.kind === 'one-time-code';
+  const cards = suggestion.kind === 'card';
 
   return (
     <div
       ref={listRef}
       role="listbox"
-      aria-label={codes ? 'Verification codes from Messages' : `Passwords for ${suggestion.site}`}
+      aria-label={codes ? 'Verification codes from Messages' : cards ? `Cards for ${suggestion.site}` : `Passwords for ${suggestion.site}`}
       // Clicks here mustn't take the keyboard from the page's field.
       onMouseDown={(e) => e.preventDefault()}
       style={{ left, top, width }}
@@ -274,10 +280,25 @@ function SuggestionList({
           onClick={() => onPick('unlock')}
           icon={<LockKeyhole className="size-4" />}
           title="Unlock Passwords"
-          subtitle={`To fill in your password for ${suggestion.site}`}
+          subtitle={cards ? `To fill in a card on ${suggestion.site}` : `To fill in your password for ${suggestion.site}`}
         />
       ) : (
         rows.map((row, index) => {
+          if (row.startsWith('card:')) {
+            const card = suggestion.cards.find((c) => `card:${c.id}` === row);
+            if (!card) return null;
+            return (
+              <Row
+                key={row}
+                active={highlighted === index}
+                onHover={() => onHover(index)}
+                onClick={() => onPick(row)}
+                icon={<CreditCard className="size-4" />}
+                title={`${card.brand} •••• ${card.last4}`}
+                subtitle={[card.title, card.expiry && `Expires ${card.expiry}`].filter(Boolean).join(' · ') || `Fill in on ${suggestion.site}`}
+              />
+            );
+          }
           if (row === 'generated') {
             return (
               <Row
