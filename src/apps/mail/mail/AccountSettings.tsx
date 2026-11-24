@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { AtSign, Loader2, Plus, Settings2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DialogButton, Overlay } from '@/shared/dialogs';
+import { DialogButton } from '@/shared/dialogs';
+import { ContentPane, SidebarHeading, SidebarRow, SidebarTitle, SidebarTitleIcon } from '@/shared/appChrome';
+import { sidebarWidthClass } from '@/shared/appChromeStyles';
+import { useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -9,8 +12,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CATEGORY_NAMES, MAIL_CATEGORIES, type InboxTabs, type MailAccount, type MailServer } from '@/lib/mail';
-import { useInboxTabs, useMail, useSetAccountColor, useSetFillCodes, useSetInboxTabs } from './api';
-import { accountColor } from './accounts';
+import { announceSettings, useAccounts, useInboxTabs, useMail, useSetAccountColor, useSetFillCodes, useSetInboxTabs, useSettingsChanges } from './api';
+import { AccountSetup } from './AccountSetup';
+import { accountColor, accountDot } from './accounts';
 import { ColorPicker } from './LabelDialogs';
 import { REMOTE_KEY } from './Reader';
 import { TAB_ICONS } from './tabs';
@@ -123,6 +127,7 @@ function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; a
       });
       qc.setQueryData<MailAccount[]>(['mail', 'accounts'], (list) => list?.map((a) => (a.id === updated.id ? updated : a)));
       if (password || serversChanged) void qc.invalidateQueries({ queryKey: ['mail', 'mailboxes', account.id] });
+      announceSettings({ kind: 'account', accountId: account.id });
       setPassword('');
       setMessage({ error: false, text: 'Saved.' });
     } catch (error) {
@@ -137,6 +142,7 @@ function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; a
     await mail.removeAccount(account.id);
     qc.setQueryData<MailAccount[]>(['mail', 'accounts'], (list) => list?.filter((a) => a.id !== account.id));
     qc.removeQueries({ queryKey: ['mail', 'mailboxes', account.id] });
+    announceSettings({ kind: 'account', accountId: account.id });
     onRemoved();
   };
 
@@ -216,8 +222,19 @@ function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; a
   );
 }
 
-export function AccountSettings({ accounts, initial, onClose, onAdd }: { accounts: MailAccount[]; initial: string | null; onClose: () => void; onAdd: () => void }) {
-  const [selected, setSelected] = useState<string | 'general'>(initial ?? accounts[0]?.id ?? 'general');
+/**
+ * Mail's settings, in a window of their own (launched with `{ window:
+ * 'settings', account? }`, see openMailSettings): General, then each account,
+ * down the side. What's changed here reaches Mail's other windows
+ * (announceSettings).
+ */
+export function SettingsWindow({ initial }: { initial: string | null }) {
+  useSettingsChanges();
+  useWindowTitle('Mail Settings');
+  const accountsQuery = useAccounts();
+  const accounts = accountsQuery.data ?? [];
+  const [selected, setSelected] = useState<string | 'general'>(initial ?? 'general');
+  const [adding, setAdding] = useState(false);
   const [remote, setRemote] = useState(() => localStorage.getItem(REMOTE_KEY) === 'always');
   const account = accounts.find((a) => a.id === selected);
   const mail = useMail();
@@ -225,68 +242,85 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
   const lookups = useQuery({ queryKey: ['mail', 'avatar-lookups'], queryFn: () => mail!.avatarLookups(), enabled: !!mail });
 
   return (
-    <Overlay label="Mail settings" onClose={onClose} className="h-[560px] max-w-[720px]">
-      <div className="flex h-11 shrink-0 items-center border-b border-border/60 px-4">
-        <h2 className="flex-1 text-[13px] font-semibold">Settings</h2>
-        <DialogButton onClick={onClose}>Done</DialogButton>
-      </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex w-52 shrink-0 flex-col border-r border-border/60 bg-muted/30 p-2">
-          <button type="button" onClick={() => setSelected('general')} className={cn('rounded-md px-2 py-1.5 text-left text-[13px]', selected === 'general' ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/5')}>
-            General
-          </button>
-          <div className="mt-3 mb-1 px-2 text-[11px] font-semibold text-muted-foreground">Accounts</div>
-          <div className="min-h-0 flex-1 space-y-px overflow-y-auto">
-            {accounts.map((a) => (
-              <button key={a.id} type="button" onClick={() => setSelected(a.id)} className={cn('block w-full rounded-md px-2 py-1.5 text-left', selected === a.id ? 'bg-foreground/10' : 'hover:bg-foreground/5')}>
-                <span className="block truncate text-[13px] font-medium">{a.email}</span>
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={onAdd} className="mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-primary hover:bg-foreground/5">
-            <Plus className="size-4" /> Add Account…
-          </button>
-        </div>
-        {account ? (
-          <AccountForm key={account.id} account={account} accounts={accounts} onRemoved={() => setSelected('general')} />
-        ) : (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-            <InboxTabsSettings />
-            <label className="flex items-start justify-between gap-4">
-              <span>
-                <span className="block text-[13px] font-medium">Load remote content in messages</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">Pictures and styles from the web tell senders when you’ve read their mail. Off, each message asks first.</span>
-              </span>
-              <Switch
-                checked={remote}
-                onCheckedChange={(on) => {
-                  setRemote(on);
-                  if (on) localStorage.setItem(REMOTE_KEY, 'always');
-                  else localStorage.removeItem(REMOTE_KEY);
-                  window.dispatchEvent(new Event('din-mail-remote'));
-                }}
-              />
-            </label>
-            <label className="flex items-start justify-between gap-4">
-              <span>
-                <span className="block text-[13px] font-medium">Look up senders’ pictures</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  From the sender’s own domain (its Nostr profile or brand logo), only for senders your server checked, and never when you open a message. Their domain can see that it was asked.
+    <div className="flex h-full w-full text-foreground">
+      <aside className={cn('flex shrink-0 flex-col', sidebarWidthClass)}>
+        <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/mail.png" />} title="Settings" />
+        <nav aria-label="Settings" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pt-1 pb-4">
+          <SidebarRow icon={Settings2} label="General" selected={selected === 'general'} onClick={() => setSelected('general')} />
+          <SidebarHeading className="mt-3">Accounts</SidebarHeading>
+          {accounts.map((a) => (
+            <SidebarRow
+              key={a.id}
+              icon={AtSign}
+              label={a.email}
+              title={a.email}
+              selected={selected === a.id}
+              onClick={() => setSelected(a.id)}
+              trailing={accounts.length > 1 ? <span aria-hidden className={cn('size-2 shrink-0 rounded-full', accountDot(accounts, a.id))} /> : undefined}
+            />
+          ))}
+          <SidebarRow icon={Plus} label="Add Account…" onClick={() => setAdding(true)} />
+        </nav>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <WindowDragRegion className="flex h-12 shrink-0 items-center justify-end px-3">
+          <WindowControls />
+        </WindowDragRegion>
+        <ContentPane>
+          {account ? (
+            <AccountForm key={account.id} account={account} accounts={accounts} onRemoved={() => setSelected('general')} />
+          ) : (
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+              <InboxTabsSettings />
+              <label className="flex items-start justify-between gap-4">
+                <span>
+                  <span className="block text-[13px] font-medium">Load remote content in messages</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">Pictures and styles from the web tell senders when you’ve read their mail. Off, each message asks first.</span>
                 </span>
-              </span>
-              <Switch
-                checked={lookups.data ?? true}
-                disabled={!lookups.isSuccess}
-                onCheckedChange={async (on) => {
-                  qc.setQueryData(['mail', 'avatar-lookups'], on);
-                  await mail?.setAvatarLookups(on);
-                  void qc.invalidateQueries({ queryKey: ['mail', 'avatar'] });
-                }}
-              />
-            </label>
-          </div>
-        )}
+                <Switch
+                  checked={remote}
+                  onCheckedChange={(on) => {
+                    setRemote(on);
+                    // Mail's other windows hear it as a storage event.
+                    if (on) localStorage.setItem(REMOTE_KEY, 'always');
+                    else localStorage.removeItem(REMOTE_KEY);
+                    window.dispatchEvent(new Event('din-mail-remote'));
+                  }}
+                />
+              </label>
+              <label className="flex items-start justify-between gap-4">
+                <span>
+                  <span className="block text-[13px] font-medium">Look up senders’ pictures</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    From the sender’s own domain (its Nostr profile or brand logo), only for senders your server checked, and never when you open a message. Their domain can see that it was asked.
+                  </span>
+                </span>
+                <Switch
+                  checked={lookups.data ?? true}
+                  disabled={!lookups.isSuccess}
+                  onCheckedChange={async (on) => {
+                    qc.setQueryData(['mail', 'avatar-lookups'], on);
+                    await mail?.setAvatarLookups(on);
+                    void qc.invalidateQueries({ queryKey: ['mail', 'avatar'] });
+                    announceSettings({ kind: 'avatars' });
+                  }}
+                />
+              </label>
+            </div>
+          )}
+        </ContentPane>
       </div>
-    </Overlay>
+      {adding && (
+        <AccountSetup
+          first={false}
+          onClose={() => setAdding(false)}
+          onAdded={(a) => {
+            setAdding(false);
+            setSelected(a.id);
+            announceSettings({ kind: 'account', accountId: a.id });
+          }}
+        />
+      )}
+    </div>
   );
 }

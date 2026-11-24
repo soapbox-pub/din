@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import { CATEGORY_NAMES, type MailAccount, type MailboxInfo, type MailCategory, type MailLabel, type MailLabels, type MailSubscription, type MessageFilter, type SpecialMailbox } from '@/lib/mail';
 import type { MenuItem } from '@/sdk/din';
-import { keywordOf, sourcesOf, useAccounts, useInboxTabs, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, useSetInboxTabs, useTabCounts, type Item, type Selection } from './api';
+import { keywordOf, openMailSettings, sourcesOf, useAccounts, useSettingsChanges, useInboxTabs, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, useSetInboxTabs, useTabCounts, type Item, type Selection } from './api';
 import { useLabelActions, useMessageActions } from './actions';
 import { accountDot } from './accounts';
 import { labelsOfItems } from './labels';
@@ -26,7 +26,6 @@ import { DropdownEntries } from './MenuEntries';
 import { groupConversations, type Conversation } from './conversations';
 import { isSelection, messageTarget, savedViewer, type SavedWindow } from './restore';
 import { AccountSetup } from './AccountSetup';
-import { AccountSettings } from './AccountSettings';
 import { Subscriptions, UnsubscribeDialog } from './Subscriptions';
 import { DialogButton, Overlay } from '@/shared/dialogs';
 import { ContentPane, PillButton, SearchField, ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
@@ -190,7 +189,8 @@ export function Viewer() {
   const anchor = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_KEY) !== 'hidden');
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
-  const [dialog, setDialog] = useState<{ kind: 'setup' } | { kind: 'settings'; accountId: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: 'setup' } | null>(null);
+  useSettingsChanges();
   const [leaving, setLeaving] = useState<Item | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -735,7 +735,7 @@ export function Viewer() {
         case 'new': return newMessage(defaultAccount);
         case 'window': return void window.open(appLink('mail', { viewer: true }));
         case 'add-account': return setDialog({ kind: 'setup' });
-        case 'settings': return setDialog({ kind: 'settings', accountId: null });
+        case 'settings': return openMailSettings();
         case 'sidebar': return toggleSidebar(!sidebarOpen);
         case 'unread-only': return filterUnread();
         case 'back': return backToList();
@@ -891,7 +891,7 @@ export function Viewer() {
           fresh={freshMail}
           onPick={setTab}
           onHide={(t) => void setInboxTabs({ tabs: (inboxTabs.data?.tabs ?? []).filter((x) => x !== t) })}
-          onSettings={() => setDialog({ kind: 'settings', accountId: null })}
+          onSettings={() => openMailSettings()}
         />
       )}
       {filter === 'unread' && !current && (
@@ -981,7 +981,7 @@ export function Viewer() {
                 onDropMessages={onDropMessages}
                 onRefresh={refresh}
                 onMarkAllRead={setMarkingRead}
-                onAccountSettings={(accountId) => setDialog({ kind: 'settings', accountId })}
+                onAccountSettings={(accountId) => openMailSettings(accountId)}
                 onAddAccount={() => setDialog({ kind: 'setup' })}
                 labels={labels}
                 onLabel={onLabel}
@@ -1097,9 +1097,6 @@ export function Viewer() {
             });
           }}
         />
-      )}
-      {dialog?.kind === 'settings' && (
-        <AccountSettings accounts={accounts} initial={dialog.accountId} onClose={() => setDialog(null)} onAdd={() => setDialog({ kind: 'setup' })} />
       )}
     </div>
   );

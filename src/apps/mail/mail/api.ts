@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
+import { appLink } from '@/shared/launch';
 import type { InboxTabs, LabelColor, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
@@ -59,6 +60,7 @@ export function useSetAccountColor() {
       if (!mail) return;
       const updated = await mail.updateAccount(accountId, { color });
       qc.setQueryData<MailAccount[]>(ACCOUNTS, (list) => list?.map((a) => (a.id === updated.id ? updated : a)));
+      announceSettings({ kind: 'account', accountId });
     },
     [mail, qc],
   );
@@ -73,6 +75,7 @@ export function useSetFillCodes() {
       if (!mail) return;
       const updated = await mail.updateAccount(accountId, { fillCodes: on });
       qc.setQueryData<MailAccount[]>(ACCOUNTS, (list) => list?.map((a) => (a.id === updated.id ? updated : a)));
+      announceSettings({ kind: 'account', accountId });
     },
     [mail, qc],
   );
@@ -389,6 +392,7 @@ export function useSetInboxTabs() {
         void qc.invalidateQueries({ queryKey: INBOX_TABS });
         void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
         void qc.invalidateQueries({ queryKey: ['mail', 'tab-counts'] });
+        announceSettings({ kind: 'tabs' });
       }
     },
     [mail, qc],
@@ -439,4 +443,48 @@ export function useLiveUpdates(): void {
       });
     });
   }, [mail, qc]);
+}
+
+/**
+ * What changed in one of Mail's windows (the Settings window's, mostly) that
+ * the others keep a copy of: an account (added, edited, removed), the inbox's
+ * tabs, or whether senders' pictures are looked up.
+ */
+export type SettingsChange = { kind: 'account'; accountId: string } | { kind: 'tabs' } | { kind: 'avatars' };
+
+const SETTINGS_CHANNEL = 'mail-settings';
+
+/** Tell Mail's other windows to read what changed again. */
+export function announceSettings(change: SettingsChange): void {
+  const channel = new BroadcastChannel(SETTINGS_CHANNEL);
+  channel.postMessage(change);
+  channel.close();
+}
+
+/** Read again what another of Mail's windows changed. */
+export function useSettingsChanges(): void {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const channel = new BroadcastChannel(SETTINGS_CHANNEL);
+    channel.onmessage = (e: MessageEvent<SettingsChange>) => {
+      const change = e.data;
+      if (change?.kind === 'account') {
+        void qc.invalidateQueries({ queryKey: ACCOUNTS });
+        void qc.invalidateQueries({ queryKey: mailboxesKey(change.accountId) });
+      } else if (change?.kind === 'tabs') {
+        void qc.invalidateQueries({ queryKey: INBOX_TABS });
+        void qc.invalidateQueries({ queryKey: ['mail', 'messages'] });
+        void qc.invalidateQueries({ queryKey: ['mail', 'tab-counts'] });
+      } else if (change?.kind === 'avatars') {
+        void qc.invalidateQueries({ queryKey: ['mail', 'avatar-lookups'] });
+        void qc.invalidateQueries({ queryKey: ['mail', 'avatar'] });
+      }
+    };
+    return () => channel.close();
+  }, [qc]);
+}
+
+/** Open Mail's settings in a window of their own, at an account's when one is given. */
+export function openMailSettings(accountId: string | null = null): void {
+  void window.open(appLink(null, { window: 'settings', ...(accountId ? { account: accountId } : {}), floating: true, width: 760, height: 660 }));
 }

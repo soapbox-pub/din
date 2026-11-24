@@ -7,9 +7,8 @@ import { cn } from '@/lib/utils';
 import { SidebarHeading, ToolButton } from '@/shared/appChrome';
 import { focusRing, sidebarHeadingClass, sidebarRowClass } from '@/shared/appChromeStyles';
 import { LABEL_COLORS, type LabelColor, type MailAccount, type MailboxInfo, type MailLabel, type MailLabels, type SpecialMailbox } from '@/lib/mail';
-import { sameSelection, useSetAccountColor, type Selection } from './api';
-import { accountColor, accountDot } from './accounts';
-import { toast } from '@/shared/toast';
+import { sameSelection, type Selection } from './api';
+import { accountDot } from './accounts';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS, SPECIAL_NAMES } from './mailboxes';
 import { shortCount } from './format';
 import { COLOR_NAMES, LABEL_STYLES, labelColor } from './labels';
@@ -269,22 +268,12 @@ export function Sidebar({
   /** What a mailbox's row counts: not the read-anyway ones. */
   const countOf = (box: MailboxInfo) => (box.special === 'sent' || box.special === 'trash' || box.special === 'all' ? 0 : box.unseen);
 
-  const setAccountColor = useSetAccountColor();
-  const pickColor = (id: string, color: LabelColor) =>
-    void setAccountColor(id, color).catch((error: unknown) => toast('Couldn’t change the account’s color', { body: error instanceof Error ? error.message : String(error), destructive: true }));
-
   const accountMenu = (id: string) => (
     <>
       <ContextMenuItem onSelect={onRefresh}>
         <RefreshCw /> Get New Mail
       </ContextMenuItem>
       <ContextMenuSeparator />
-      {several && (
-        <ContextEntries<LabelColor>
-          entries={[{ kind: 'sub', label: 'Color', icon: Palette, items: LABEL_COLORS.map((c) => ({ kind: 'check', pick: c, label: COLOR_NAMES[c], checked: c === accountColor(accounts, id), color: c })) }]}
-          onPick={(c) => pickColor(id, c)}
-        />
-      )}
       <ContextMenuItem onSelect={() => onAccountSettings(id)}>
         <Settings2 /> Account Settings…
       </ContextMenuItem>

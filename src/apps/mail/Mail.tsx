@@ -3,6 +3,7 @@ import { parseMailto } from '@/lib/mailto';
 import { restoredState, wasReopened, windowLaunch, type Launch } from '@/shared/launch';
 import { blankSeed, escapeHtml, parseAddresses, type ComposeSeed } from './mail/format';
 import { Viewer } from './mail/Viewer';
+import { SettingsWindow } from './mail/AccountSettings';
 import { savedCompose } from './mail/restore';
 import './mail/mail.css';
 
@@ -71,9 +72,15 @@ function sharedFiles(launch: Launch): readonly FileSystemHandle[] | undefined {
 }
 
 export function Mail() {
+  // A window opened for Mail's settings (openMailSettings), not a mailbox.
+  const settings = useMemo(() => {
+    const { params } = windowLaunch();
+    return params.window === 'settings' ? { account: typeof params.account === 'string' ? params.account : null } : null;
+  }, []);
   // A message being written comes back as it was left, not as it was started.
   const saved = useMemo(() => savedCompose(restoredState()), []);
   const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(windowLaunch())), [saved]);
+  if (settings) return <SettingsWindow initial={settings.account} />;
   return seed ? (
     <Suspense>
       <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : sharedFiles(windowLaunch())} />
