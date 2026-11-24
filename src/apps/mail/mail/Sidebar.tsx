@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentProps, type DragEvent } from 'react';
+import { useMemo, useState, type ComponentProps, type DragEvent, type ReactNode } from 'react';
 import { ChevronRight, Folder, Inbox, MailCheck, MailMinus, MoreHorizontal, Palette, Pencil, Plus, RefreshCw, Settings2, Tag, Trash2, TriangleAlert, UserPlus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -8,6 +8,7 @@ import { SidebarHeading, ToolButton } from '@/shared/appChrome';
 import { focusRing, sidebarHeadingClass, sidebarRowClass } from '@/shared/appChromeStyles';
 import { LABEL_COLORS, type LabelColor, type MailAccount, type MailboxInfo, type MailLabel, type MailLabels, type SpecialMailbox } from '@/lib/mail';
 import { sameSelection, type Selection } from './api';
+import { accountColor } from './accounts';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS, SPECIAL_NAMES } from './mailboxes';
 import { shortCount } from './format';
 import { COLOR_NAMES, LABEL_STYLES, labelColor } from './labels';
@@ -16,6 +17,25 @@ import { ContextEntries, DropdownEntries } from './MenuEntries';
 
 /** Special mailboxes first, in a fixed order. */
 const ORDER: SpecialMailbox[] = ['inbox', 'drafts', 'sent', 'junk', 'trash', 'archive', 'all', 'flagged'];
+
+/**
+ * With several accounts, these are one row each over every account, which
+ * opens to each account's own; account sections keep the rest.
+ */
+const UNIFIED: SpecialMailbox[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash'];
+
+/** Which sidebar sections and unified rows are open, where the user changed it. */
+const OPEN_KEY = 'mail:sidebar-open';
+
+function savedOpen(): Record<string, boolean> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}');
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).filter(([, b]) => typeof b === 'boolean')) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
 
 interface Node {
   box: MailboxInfo;
@@ -55,6 +75,8 @@ function folders(list: MailboxInfo[] | undefined, info: MailLabels | undefined):
 
 const Row = ({
   icon: Icon,
+  dot,
+  indent = 0,
   label,
   count,
   selected,
@@ -66,7 +88,7 @@ const Row = ({
   className,
   onDrop,
   ...props
-}: ComponentProps<'button'> & { icon: LucideIcon; label: string; count?: number; selected: boolean; depth?: number; tone?: 'flag'; iconClassName?: string; dropEffect?: 'move' | 'copy'; onDrop?: (e: DragEvent) => void }) => {
+}: ComponentProps<'button'> & { icon?: LucideIcon; dot?: string; indent?: number; label: string; count?: number; selected: boolean; depth?: number; tone?: 'flag'; iconClassName?: string; dropEffect?: 'move' | 'copy'; onDrop?: (e: DragEvent) => void }) => {
   const [over, setOver] = useState(false);
   return (
     <button
@@ -91,9 +113,13 @@ const Row = ({
         disabled && 'opacity-50',
         className,
       )}
-      style={{ paddingLeft: 10 + depth * 16 }}
+      style={{ paddingLeft: 10 + indent + depth * 16 }}
     >
-      <Icon className={cn('size-4.5 shrink-0', iconClassName ?? (tone === 'flag' ? 'text-amber-500' : 'text-ink-accent'))} strokeWidth={1.75} />
+      {dot ? (
+        <span aria-hidden className="grid size-4.5 shrink-0 place-items-center"><span className={cn('size-2 rounded-full', dot)} /></span>
+      ) : Icon ? (
+        <Icon className={cn('size-4.5 shrink-0', iconClassName ?? (tone === 'flag' ? 'text-amber-500' : 'text-ink-accent'))} strokeWidth={1.75} />
+      ) : null}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count ? <span className={cn('shrink-0 text-xs tabular-nums', selected ? 'font-semibold' : 'text-muted-foreground')} title={count.toLocaleString()}>{shortCount(count)}</span> : null}
     </button>
@@ -158,7 +184,7 @@ function LabelRow({ label, count, selected, onPick, onDrop }: { label: MailLabel
   );
 }
 
-function Section({ title, open, onToggle, children, menu }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode; menu?: React.ReactNode }) {
+function Section({ title, dot, open, onToggle, children, menu }: { title: string; dot?: string; open: boolean; onToggle: () => void; children: ReactNode; menu?: ReactNode }) {
   const header = (
     <button
       type="button"
@@ -166,8 +192,9 @@ function Section({ title, open, onToggle, children, menu }: { title: string; ope
       aria-expanded={open}
       className={cn('group w-full rounded-md text-left', sidebarHeadingClass, focusRing)}
     >
+      {dot && <span aria-hidden className={cn('mb-1 size-2 shrink-0 rounded-full', dot)} />}
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      <ChevronRight className={cn('size-3.5 opacity-0 transition-transform group-hover:opacity-100 group-focus-visible:opacity-100', open && 'rotate-90')} />
+      <ChevronRight className={cn('size-3.5 transition-transform motion-reduce:transition-none', open ? 'rotate-90 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100' : 'opacity-70')} />
     </button>
   );
   return (
@@ -219,23 +246,27 @@ export function Sidebar({
   onAccountSettings: (accountId: string) => void;
   onAddAccount: () => void;
 }) {
-  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const several = accounts.length > 1;
+  const [open, setOpen] = useState<Record<string, boolean>>(savedOpen);
+  // Account sections start closed when there are several: their standard
+  // mailboxes are in the unified rows above, each account's under its own.
+  const isOpen = (k: string) => open[k] ?? (k.startsWith('unified:') ? false : k.startsWith('account:') ? !several : true);
   const toggle = (k: string) =>
-    setClosed((s) => {
-      const n = new Set(s);
-      if (n.has(k)) n.delete(k);
-      else n.add(k);
+    setOpen((o) => {
+      const n = { ...o, [k]: !isOpen(k) };
+      localStorage.setItem(OPEN_KEY, JSON.stringify(n));
       return n;
     });
 
   const favorites = useMemo(() => {
     const all = [...boxes.values()].flat();
-    const unseen = (special: SpecialMailbox) => all.filter((b) => b.special === special).reduce((n, b) => n + b.unseen, 0);
-    const has = (special: SpecialMailbox) => all.some((b) => b.special === special);
-    return (['inbox', 'flagged', 'drafts', 'sent'] as SpecialMailbox[])
-      .filter((s) => s === 'flagged' || s === 'inbox' || has(s))
-      .map((special) => ({ special, unseen: special === 'inbox' ? unseen('inbox') : 0 }));
-  }, [boxes]);
+    const has = (special: SpecialMailbox) => all.some((b) => b.special === special && b.selectable);
+    const list: SpecialMailbox[] = several ? ['inbox', 'flagged', ...UNIFIED.filter((s) => s !== 'inbox')] : ['inbox', 'flagged', 'drafts', 'sent'];
+    return list.filter((s) => s === 'flagged' || s === 'inbox' || has(s));
+  }, [boxes, several]);
+
+  /** What a mailbox's row counts: not the read-anyway ones. */
+  const countOf = (box: MailboxInfo) => (box.special === 'sent' || box.special === 'trash' || box.special === 'all' ? 0 : box.unseen);
 
   const accountMenu = (id: string) => (
     <>
@@ -252,44 +283,116 @@ export function Sidebar({
     </>
   );
 
+  /** One account's mailbox, with its menu. */
+  const mailboxRow = (a: MailAccount, box: MailboxInfo, props: Partial<ComponentProps<typeof Row>> = {}) => {
+    const s: Selection = { kind: 'mailbox', accountId: a.id, path: box.path };
+    return (
+      <ContextMenu key={`${a.id}\u0000${box.path}`}>
+        <ContextMenuTrigger asChild>
+          <Row
+            icon={box.special ? SPECIAL_ICONS[box.special] : Folder}
+            tone={box.special === 'flagged' ? 'flag' : undefined}
+            label={mailboxTitle(box)}
+            count={countOf(box)}
+            selected={sameSelection(selection, s)}
+            disabled={!box.selectable}
+            onClick={() => onSelect(s)}
+            onDrop={box.selectable ? (e) => onDropMessages(e, a.id, box.path) : undefined}
+            {...props}
+          />
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {box.selectable && (
+            <>
+              <ContextMenuItem onSelect={() => onSelect(s)}>
+                <Inbox /> Open
+              </ContextMenuItem>
+              <ContextMenuItem disabled={!box.unseen} onSelect={() => onMarkAllRead(s)}>
+                <MailCheck /> Mark All as Read
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          {accountMenu(a.id)}
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
+
   return (
     <nav aria-label="Mailboxes" className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-4">
-      <Section title="Favorites" open={!closed.has('favorites')} onToggle={() => toggle('favorites')}>
-        {favorites.map(({ special, unseen }) => {
+      <Section title={several ? 'Mailboxes' : 'Favorites'} open={isOpen('favorites')} onToggle={() => toggle('favorites')}>
+        {favorites.map((special) => {
           const s: Selection = { kind: 'all', special };
-          const row = (
-            <Row
-              icon={SPECIAL_ICONS[special]}
-              tone={special === 'flagged' ? 'flag' : undefined}
-              label={special === 'inbox' && accounts.length > 1 ? 'All Inboxes' : SPECIAL_NAMES[special]}
-              count={unseen}
-              selected={sameSelection(selection, s)}
-              onClick={() => onSelect(s)}
-            />
-          );
-          if (special !== 'inbox') return <div key={special}>{row}</div>;
+          const name = special === 'inbox' && several ? 'All Inboxes' : SPECIAL_NAMES[special];
+          // Each account's own, under the unified row (Starred is the inboxes' starred mail, not a mailbox).
+          const each = several && special !== 'flagged'
+            ? accounts.flatMap((a) => {
+                const box = boxes.get(a.id)?.find((b) => b.special === special && b.selectable);
+                return box ? [{ account: a, box }] : [];
+              })
+            : [];
+          const unseen = special === 'flagged' ? 0 : several ? each.reduce((n, e) => n + countOf(e.box), 0) : [...boxes.values()].flat().filter((b) => b.special === 'inbox').reduce((n, b) => n + (special === 'inbox' ? b.unseen : 0), 0);
+          const key = `unified:${special}`;
+          const expanded = each.length > 0 && isOpen(key);
           return (
-            <ContextMenu key={special}>
-              <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuItem onSelect={() => onSelect(s)}>
-                  <Inbox /> Open
-                </ContextMenuItem>
-                <ContextMenuItem disabled={!unseen} onSelect={() => onMarkAllRead(s)}>
-                  <MailCheck /> Mark All as Read
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onSelect={onRefresh}>
-                  <RefreshCw /> Get New Mail
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
+            <div key={special}>
+              <div className="relative">
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <Row
+                      icon={SPECIAL_ICONS[special]}
+                      tone={special === 'flagged' ? 'flag' : undefined}
+                      label={name}
+                      count={unseen}
+                      indent={several ? 16 : 0}
+                      selected={sameSelection(selection, s)}
+                      onClick={() => onSelect(s)}
+                    />
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem onSelect={() => onSelect(s)}>
+                      <Inbox /> Open
+                    </ContextMenuItem>
+                    {special !== 'flagged' && (
+                      <ContextMenuItem disabled={!unseen} onSelect={() => onMarkAllRead(s)}>
+                        <MailCheck /> Mark All as Read
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={onRefresh}>
+                      <RefreshCw /> Get New Mail
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+                {each.length > 0 && (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-label={expanded ? `Hide each account’s ${name}` : `Show each account’s ${name}`}
+                    title={expanded ? 'Hide accounts' : 'Show accounts'}
+                    onClick={() => toggle(key)}
+                    className={cn('absolute top-1.5 left-1 grid size-5 place-items-center rounded text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground', focusRing)}
+                  >
+                    <ChevronRight className={cn('size-3.5 transition-transform motion-reduce:transition-none', expanded && 'rotate-90')} />
+                  </button>
+                )}
+              </div>
+              {expanded && (
+                <div role="group" aria-label={`Each account’s ${name}`} className="mt-0.5 space-y-0.5">
+                  {each.map(({ account, box }) =>
+                    mailboxRow(account, box, { icon: undefined, dot: accountColor(accounts, account.id), label: account.email, title: `${mailboxTitle(box)} of ${account.email}`, indent: 16, depth: 1 }),
+                  )}
+                </div>
+              )}
+            </div>
           );
         })}
         <Row
           icon={MailMinus}
           label="Subscriptions"
           title="Mailing lists in your inbox, to unsubscribe from"
+          indent={several ? 16 : 0}
           selected={selection.kind === 'subscriptions'}
           onClick={() => onSelect({ kind: 'subscriptions' })}
         />
@@ -297,10 +400,14 @@ export function Sidebar({
 
       {accounts.map((a) => {
         const info = labels.get(a.id);
-        const list = folders(boxes.get(a.id), info);
+        const all = folders(boxes.get(a.id), info);
+        // With several accounts, the standard mailboxes are the unified rows'.
+        const list = several ? all?.filter((b) => !b.special || !UNIFIED.includes(b.special)) : all;
         const error = errors.get(a.id);
+        const hasLabels = !!info && info.kind !== 'none';
+        if (several && list && !list.length && !hasLabels && !error) return null;
         return (
-          <Section key={a.id} title={a.email} open={!closed.has(a.id)} onToggle={() => toggle(a.id)} menu={accountMenu(a.id)}>
+          <Section key={a.id} title={a.email} dot={several ? accountColor(accounts, a.id) : undefined} open={isOpen(`account:${a.id}`)} onToggle={() => toggle(`account:${a.id}`)} menu={accountMenu(a.id)}>
             {error && !list && (
               <button
                 type="button"
@@ -318,47 +425,12 @@ export function Sidebar({
                 ))}
               </div>
             )}
-            {list &&
-              tree(list).map(({ box, depth }) => {
-                const s: Selection = { kind: 'mailbox', accountId: a.id, path: box.path };
-                const row = (
-                  <Row
-                    icon={box.special ? SPECIAL_ICONS[box.special] : Folder}
-                    tone={box.special === 'flagged' ? 'flag' : undefined}
-                    label={mailboxTitle(box)}
-                    depth={depth}
-                    count={box.special === 'sent' || box.special === 'trash' || box.special === 'all' ? 0 : box.unseen}
-                    selected={sameSelection(selection, s)}
-                    disabled={!box.selectable}
-                    onClick={() => onSelect(s)}
-                    onDrop={box.selectable ? (e) => onDropMessages(e, a.id, box.path) : undefined}
-                  />
-                );
-                return (
-                  <ContextMenu key={box.path}>
-                    <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                    <ContextMenuContent>
-                      {box.selectable && (
-                        <>
-                          <ContextMenuItem onSelect={() => onSelect(s)}>
-                            <Inbox /> Open
-                          </ContextMenuItem>
-                          <ContextMenuItem disabled={!box.unseen} onSelect={() => onMarkAllRead(s)}>
-                            <MailCheck /> Mark All as Read
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                        </>
-                      )}
-                      {accountMenu(a.id)}
-                    </ContextMenuContent>
-                  </ContextMenu>
-                );
-              })}
-            {list && info && info.kind !== 'none' && (
-              <div className="pt-2" role="group" aria-label={`${a.name} labels`}>
+            {list && tree(list).map(({ box, depth }) => mailboxRow(a, box, { depth }))}
+            {list && info && hasLabels && (
+              <div className={cn(list.length > 0 && 'pt-2')} role="group" aria-label={`${a.email} labels`}>
                 <SidebarHeading className="pr-1">
                   <span className="min-w-0 flex-1 truncate">Labels</span>
-                  <ToolButton size="xs" label={`New label in ${a.name}`} title="New label" onClick={() => onNewLabel(a.id)}>
+                  <ToolButton size="xs" label={`New label in ${a.email}`} title="New label" onClick={() => onNewLabel(a.id)}>
                     <Plus className="size-4" />
                   </ToolButton>
                 </SidebarHeading>

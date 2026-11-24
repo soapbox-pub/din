@@ -10,6 +10,7 @@ import { CATEGORY_NAMES, type MailAccount, type MailboxInfo, type MailCategory, 
 import type { MenuItem } from '@/sdk/din';
 import { keywordOf, sourcesOf, useAccounts, useInboxTabs, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, useSetInboxTabs, useTabCounts, type Item, type Selection } from './api';
 import { useLabelActions, useMessageActions } from './actions';
+import { accountColor } from './accounts';
 import { labelsOfItems } from './labels';
 import { DeleteLabelDialog, LabelEditor } from './LabelDialogs';
 import { blankSeed, parseAddresses } from './format';
@@ -341,6 +342,12 @@ export function Viewer() {
   const special = selection.kind === 'all' ? selection.special : selection.kind === 'mailbox' ? box(selection.accountId, selection.path)?.special ?? null : null;
   const recipients = special === 'sent' || special === 'drafts';
   const viewingLabel = selection.kind === 'label' ? selection.id : null;
+  // All Inboxes and the other unified mailboxes mark which address each message came to.
+  const accountOf = useMemo(() => {
+    if (selection.kind !== 'all' || accounts.length < 2) return undefined;
+    const marks = new Map(accounts.map((a) => [a.id, { email: a.email, color: accountColor(accounts, a.id) }]));
+    return (id: string) => marks.get(id) ?? null;
+  }, [selection.kind, accounts]);
 
   const titleOf = (s: Selection) =>
     s.kind === 'subscriptions'
@@ -937,6 +944,7 @@ export function Viewer() {
           onPick={(pick, c) => pickFor(pick, pickTargets(pick, targetsFor(c)))}
           targetsFor={targetsFor}
           tabPlace={tabPlace}
+          accountOf={accountOf}
           restoreScroll={() => {
             const top = restoreScroll.current;
             restoreScroll.current = 0;

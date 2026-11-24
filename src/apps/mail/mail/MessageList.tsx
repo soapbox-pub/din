@@ -11,6 +11,7 @@ import { LabelChip } from './LabelChip';
 import { addressLine, displayName, listDate } from './format';
 import { MAIL_DRAG } from './mailboxes';
 import { Avatar } from './Avatar';
+import type { AccountMark } from './accounts';
 import { messageMenu, type MenuPick, type TabPlace } from './menu';
 import { ContextEntries } from './MenuEntries';
 
@@ -82,6 +83,7 @@ const MessageRow = ({
   recipients,
   labels,
   hideLabel,
+  account,
   onPick,
   onCheck,
   className,
@@ -94,6 +96,8 @@ const MessageRow = ({
   labels: MailLabels | undefined;
   /** The label the list is of, which every row has. */
   hideLabel: string | null;
+  /** In a list of several accounts' mail, which one this came to. */
+  account: AccountMark | null;
   onPick: (pick: MenuPick) => void;
   onCheck: (e: MouseEvent) => void;
 }) => {
@@ -120,11 +124,15 @@ const MessageRow = ({
       <RowButton label={c.flagged ? 'Remove star' : 'Star'} onClick={() => onPick(c.flagged ? 'unflag' : 'flag')}>
         <Star className={cn('size-4', c.flagged ? 'fill-amber-400 text-amber-500' : 'opacity-60 group-hover:opacity-100')} strokeWidth={1.75} />
       </RowButton>
-      {recipients ? <Avatar who={item.to[0]} className="mr-1 size-8 text-xs" /> : <Avatar who={item.from[0]} verified={item.senderVerified} className="mr-1 size-8 text-xs" />}
+      <span className="relative mr-1 shrink-0" title={account ? `${recipients ? 'From' : 'To'} ${account.email}` : undefined}>
+        {recipients ? <Avatar who={item.to[0]} className="size-8 text-xs" /> : <Avatar who={item.from[0]} verified={item.senderVerified} className="size-8 text-xs" />}
+        {account && <span aria-hidden className={cn('absolute -right-0.5 -bottom-0.5 size-3 rounded-full ring-2 ring-background', account.color)} />}
+      </span>
       <div className="min-w-0 flex-1 pl-1 @2xl:flex @2xl:items-center @2xl:gap-4">
         <div className="flex items-baseline gap-2 @2xl:w-52 @2xl:shrink-0">
           <span className={cn('flex min-w-0 flex-1 items-baseline gap-1', unread ? 'font-semibold' : 'text-foreground/85')}>
             <span className="truncate">{who}</span>
+            {account && <span className="sr-only">, {recipients ? 'from' : 'to'} {account.email}</span>}
             {c.items.length > 1 && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{c.items.length}</span>}
           </span>
           <span className={cn('shrink-0 text-xs tabular-nums @2xl:hidden', unread ? 'font-semibold' : 'text-muted-foreground')}>{date}</span>
@@ -187,6 +195,7 @@ export function MessageList({
   restoreScroll,
   onScroll,
   tabPlace = null,
+  accountOf,
 }: {
   conversations: Conversation[];
   /** The conversations chosen to act on together (Ctrl- and Shift-click), by key. */
@@ -215,6 +224,8 @@ export function MessageList({
   onScroll?: (top: number) => void;
   /** The inbox tab the list is of, for its rows' Move to Tab. */
   tabPlace?: TabPlace | null;
+  /** In a list of several accounts' mail, which one each row came to. */
+  accountOf?: (accountId: string) => AccountMark | null;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -266,6 +277,7 @@ export function MessageList({
               recipients={recipients}
               labels={labelsFor(c.latest.accountId)}
               hideLabel={hideLabel}
+              account={accountOf?.(c.latest.accountId) ?? null}
               selected={selected.has(c.key)}
               cursor={cursor === c.key}
               onPick={(pick) => onPick(pick, c)}
