@@ -150,9 +150,10 @@ function ReaderSkeleton() {
 
 const unsubscribedOn = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
-/** Who a message went to, in a few words: "to me, Sam". */
+/** Who a message went to, in a few words: "to me, Sam". With several
+ *  accounts, "me" is spelled out as the address, which says which one. */
 function recipientLine(m: MailMessage, me: Set<string>): string {
-  const names = [...m.to, ...m.cc].map((a) => (me.has(a.address.toLowerCase()) ? 'me' : displayName(a)));
+  const names = [...m.to, ...m.cc].map((a) => (me.has(a.address.toLowerCase()) ? (me.size > 1 ? a.address : 'me') : displayName(a)));
   return names.length ? `to ${names.join(', ')}` : 'to undisclosed recipients';
 }
 
