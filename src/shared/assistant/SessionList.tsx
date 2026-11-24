@@ -146,7 +146,9 @@ function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
 /**
  * The conversation list: one line per conversation, under the project it
  * belongs to, with the ones waiting on the user pulled out on top so a
- * collapsed project can't hide them. Searching flattens it. Middle-clicking
+ * collapsed project can't hide them. Searching keeps the projects, each
+ * with the conversations that match, and those whose names match with none
+ * at all, so a conversation can be started in one found. Middle-clicking
  * a conversation opens it in a new tab; right-clicking one does that too, or
  * forks, moves, renames or deletes it; right-clicking a project starts a conversation there.
  * Dragging a conversation onto another project moves it to that project's folder.
@@ -204,7 +206,17 @@ export function SessionList({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const listed = useMemo(() => (sessions ?? []).filter((s) => !s.time.archived), [sessions]);
-  const directories = useMemo(() => [...new Set(listed.map((s) => s.location.directory))], [listed]);
+  const needle = filter.trim().toLowerCase();
+  // The server searches every conversation's title; the ones loaded here
+  // can match by their worktree's name too.
+  const search = useSessionSearch(useDebouncedValue(needle, 250));
+  const found = useMemo(() => (search.data ?? []).filter((s) => !s.time.archived), [search.data]);
+  // Everything the list knows of: what it's loaded, and what the search found beyond it.
+  const known = useMemo(
+    () => (needle ? [...new Map([...listed, ...found].map((s) => [s.id, s])).values()] : listed),
+    [needle, listed, found],
+  );
+  const directories = useMemo(() => [...new Set(known.map((s) => s.location.directory))], [known]);
   const mains = useMainCheckouts(directories);
   const checkouts = useGitCheckouts(directories);
   const folders: Checkouts = { mains, checkouts };
@@ -225,8 +237,26 @@ export function SessionList({
         sessions: inOrder(p.sessions, held.sessions, (s) => s.id),
       }))
     : grouped;
-  const icons = useProjectIcons([...new Set(projects.map((p) => p.root))]);
-  const projectOf = new Map(projects.flatMap((p) => p.sessions.map((s) => [s.id, p] as const)));
+  // Searching, the projects are those of everything known, in the same order,
+  // each with the conversations that match; a project whose name matches is
+  // listed even when none of its conversations do.
+  const searchGrouped = needle ? groupByProject(known, folders, home) : [];
+  const searchProjects = (held ? inOrder(searchGrouped, held.projects, (p) => p.key) : searchGrouped)
+    .map((p) => {
+      const named = p.label.toLowerCase().includes(needle) || tildify(p.root, home).toLowerCase().includes(needle);
+      const sessions = p.sessions.filter((s) => {
+        if (sessionTitle(s).toLowerCase().includes(needle)) return true;
+        // A worktree's own name, not the project's folder every conversation shares.
+        const directory = s.location.directory;
+        return directory !== p.root && directoryName(directory, home).toLowerCase().includes(needle);
+      });
+      return { project: p, named, sessions: held ? inOrder(sessions, held.sessions, (s) => s.id) : sessions };
+    })
+    .filter((m) => m.named || m.sessions.length > 0);
+  const icons = useProjectIcons([...new Set([...projects, ...searchGrouped].map((p) => p.root))]);
+  const projectOf = new Map(
+    [...searchGrouped, ...projects].flatMap((p) => p.sessions.map((s) => [s.id, p] as const)),
+  );
   const needsYou = held
     ? inOrder(
         listed.filter((s) => waiting.has(s.id)),
@@ -253,33 +283,13 @@ export function SessionList({
       },
     );
   };
-  const draggedSession = dragging ? listed.find((s) => s.id === dragging) : undefined;
+  const draggedSession = dragging ? known.find((s) => s.id === dragging) : undefined;
   const endDrag = () => {
     draggingRef.current = false;
     setDragging(null);
     setDropTarget(null);
   };
 
-  const needle = filter.trim().toLowerCase();
-  // The server searches every conversation's title; the ones loaded here
-  // can match by folder or project too.
-  const search = useSessionSearch(useDebouncedValue(needle, 250));
-  const found = useMemo(() => (search.data ?? []).filter((s) => !s.time.archived), [search.data]);
-  const matches = needle
-    ? [
-        ...new Map(
-          [
-            ...listed.filter(
-              (s) =>
-                sessionTitle(s).toLowerCase().includes(needle) ||
-                s.location.directory.toLowerCase().includes(needle) ||
-                projectOf.get(s.id)?.label.toLowerCase().includes(needle),
-            ),
-            ...found.filter((s) => sessionTitle(s).toLowerCase().includes(needle)),
-          ].map((s) => [s.id, s]),
-        ).values(),
-      ].sort((a, b) => b.time.updated - a.time.updated)
-    : [];
   const searching = needle !== '' && (search.isFetching || search.isPending);
 
   const row = (session: SessionInfo, tag?: string) => (
@@ -382,6 +392,109 @@ export function SessionList({
       return next;
     });
 
+  /**
+   * A project's heading and what goes under it, taking conversations dragged
+   * onto it. Searching, the heading doesn't collapse: it's there to start a
+   * conversation in the project.
+   */
+  const projectSection = (project: Project, open: boolean | null, body: ReactNode) => {
+    const accepts = draggedSession !== undefined && projectOf.get(draggedSession.id)?.key !== project.key;
+    const name = (
+      <>
+        <ProjectIcon
+          src={icons.get(project.root)}
+          className="size-4 shrink-0"
+          fallback={<Folder className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />}
+        />
+        <span className="truncate">{project.label}</span>
+      </>
+    );
+    const heading = 'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-xs font-semibold text-muted-foreground';
+    return (
+      <section
+        key={project.key}
+        aria-label={project.label}
+        onDragOver={(e) => {
+          if (!accepts || !e.dataTransfer.types.includes(SESSION_DRAG_TYPE)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDropTarget(project.key);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDropTarget((key) => (key === project.key ? null : key));
+          }
+        }}
+        onDrop={(e) => {
+          if (!accepts) return;
+          e.preventDefault();
+          moveTo(draggedSession, project);
+          endDrag();
+        }}
+        className={cn(
+          'rounded-lg motion-safe:transition-colors',
+          dropTarget === project.key && accepts && 'bg-selected ring-2 ring-ring/60',
+        )}
+      >
+        <div className="group flex items-center gap-1">
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              {open === null ? (
+                <div title={tildify(project.root, home)} className={heading}>
+                  {name}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => toggleCollapsed(project.key)}
+                  title={tildify(project.root, home)}
+                  // The project's icon (a folder when it has none) on the
+                  // rows' line, then its name; the chevron at the end
+                  // only while pointed at or reached by keyboard, not
+                  // left showing by the click that collapsed it.
+                  className={cn(heading, 'hover:text-foreground', focusRing)}
+                >
+                  {name}
+                  <ChevronRight
+                    className={cn(
+                      'ml-auto size-3.5 shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 motion-safe:transition-transform',
+                      open && 'rotate-90',
+                    )}
+                    aria-hidden
+                  />
+                </button>
+              )}
+            </ContextMenuTrigger>
+            <ContextMenuContent className={cn('w-60', roomyMenu)}>
+              <ContextMenuItem onSelect={() => onNew(project.root)}>
+                <SquarePen aria-hidden /> New Conversation
+              </ContextMenuItem>
+              {open !== null && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => toggleCollapsed(project.key)}>
+                    {open ? 'Collapse' : 'Expand'}
+                  </ContextMenuItem>
+                </>
+              )}
+            </ContextMenuContent>
+          </ContextMenu>
+          <ToolButton
+            size="xs"
+            label={`New conversation in ${project.label}`}
+            // Searching, the project may be all there is to show: its + stays in sight.
+            className={cn(open !== null && 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100')}
+            onClick={() => onNew(project.root)}
+          >
+            <Plus {...toolIcon} aria-hidden />
+          </ToolButton>
+        </div>
+        {body}
+      </section>
+    );
+  };
+
   return (
     <nav
       aria-label="Conversations"
@@ -417,19 +530,23 @@ export function SessionList({
             ))}
           </div>
         ) : needle ? (
-          matches.length === 0 ? (
+          searchProjects.length === 0 ? (
             searching ? (
               <p className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-muted-foreground" role="status">
                 <Loader2 className="size-3.5 animate-spin" aria-hidden /> Searching…
               </p>
             ) : (
-              <p className="px-3 py-8 text-center text-sm text-muted-foreground">No conversation matches.</p>
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">No project or conversation matches.</p>
             )
           ) : (
-            <>
-              <ul className="space-y-0.5">
-                {matches.map((s) => row(s, projectOf.get(s.id)?.label ?? directoryName(mains.get(s.location.directory) ?? s.location.directory, home)))}
-              </ul>
+            <div className="space-y-3">
+              {searchProjects.map(({ project, sessions }) =>
+                projectSection(
+                  project,
+                  null,
+                  sessions.length > 0 && <ul className="space-y-0.5">{sessions.map((s) => row(s))}</ul>,
+                ),
+              )}
               {search.hasNextPage && (
                 <LoadMore
                   scrollRef={scrollRef}
@@ -440,10 +557,9 @@ export function SessionList({
                   onLoad={() => void search.fetchNextPage()}
                   label="Show more matches"
                   loadingLabel="Searching…"
-                  className="mt-2"
                 />
               )}
-            </>
+            </div>
           )
         ) : listed.length === 0 ? (
           <p className="px-3 py-8 text-center text-sm text-muted-foreground">Conversations you start show up here.</p>
@@ -467,82 +583,10 @@ export function SessionList({
                 : sessions.filter((s, i) => i < PROJECT_LIMIT || s.id === selected || busy.has(s.id));
               const hidden = sessions.length - shown.length;
               if (sessions.length === 0) return null;
-              const accepts = draggedSession !== undefined && projectOf.get(draggedSession.id)?.key !== project.key;
-              return (
-                <section
-                  key={project.key}
-                  aria-label={project.label}
-                  onDragOver={(e) => {
-                    if (!accepts || !e.dataTransfer.types.includes(SESSION_DRAG_TYPE)) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    setDropTarget(project.key);
-                  }}
-                  onDragLeave={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                      setDropTarget((key) => (key === project.key ? null : key));
-                    }
-                  }}
-                  onDrop={(e) => {
-                    if (!accepts) return;
-                    e.preventDefault();
-                    moveTo(draggedSession, project);
-                    endDrag();
-                  }}
-                  className={cn(
-                    'rounded-lg motion-safe:transition-colors',
-                    dropTarget === project.key && accepts && 'bg-selected ring-2 ring-ring/60',
-                  )}
-                >
-                  <div className="group flex items-center gap-1">
-                    <ContextMenu>
-                      <ContextMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-expanded={open}
-                          onClick={() => toggleCollapsed(project.key)}
-                          title={tildify(project.root, home)}
-                          // The project's icon (a folder when it has none) on the
-                          // rows' line, then its name; the chevron at the end
-                          // only while pointed at or reached by keyboard, not
-                          // left showing by the click that collapsed it.
-                          className={cn('flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-xs font-semibold text-muted-foreground hover:text-foreground', focusRing)}
-                        >
-                          <ProjectIcon
-                            src={icons.get(project.root)}
-                            className="size-4 shrink-0"
-                            fallback={<Folder className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />}
-                          />
-                          <span className="truncate">{project.label}</span>
-                          <ChevronRight
-                            className={cn(
-                              'ml-auto size-3.5 shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 motion-safe:transition-transform',
-                              open && 'rotate-90',
-                            )}
-                            aria-hidden
-                          />
-                        </button>
-                      </ContextMenuTrigger>
-                      <ContextMenuContent className={cn('w-60', roomyMenu)}>
-                        <ContextMenuItem onSelect={() => onNew(project.root)}>
-                          <SquarePen aria-hidden /> New Conversation
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onSelect={() => toggleCollapsed(project.key)}>
-                          {open ? 'Collapse' : 'Expand'}
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                    <ToolButton
-                      size="xs"
-                      label={`New conversation in ${project.label}`}
-                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      onClick={() => onNew(project.root)}
-                    >
-                      <Plus {...toolIcon} aria-hidden />
-                    </ToolButton>
-                  </div>
-                  {open && (
+              return projectSection(
+                project,
+                open,
+                open && (
                     <ProjectSessions
                       projectID={project.sessions[0].projectID}
                       projectKey={project.key}
@@ -556,8 +600,7 @@ export function SessionList({
                       onToggle={() => toggleExpanded(project.key)}
                       row={row}
                     />
-                  )}
-                </section>
+                  ),
               );
             })}
             {sessionPages.hasNextPage && (
