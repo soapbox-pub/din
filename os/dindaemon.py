@@ -107,8 +107,14 @@ def peer_process(sock):
         with open(f"/proc/self/fdinfo/{pidfd}") as f:
             pinned = next((int(line.split()[1]) for line in f if line.startswith("Pid:")), -1)
         info = stat(pinned) if pinned > 0 else None
-        # What was read is the connecting process's only if it's still alive now.
-        signal.pidfd_send_signal(pidfd, 0)
+        # What was read is the connecting process's only if it's still alive
+        # now. Signal 0 delivers nothing but is still checked against
+        # permission: Din, another user's process, answers EPERM while it
+        # lives and ESRCH once it's gone.
+        try:
+            signal.pidfd_send_signal(pidfd, 0)
+        except PermissionError:
+            pass
         if not info:
             return uid, None, None
         return uid, pinned, info[1]
