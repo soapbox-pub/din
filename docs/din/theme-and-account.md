@@ -73,6 +73,8 @@ finalized. The user is shown where the money goes and asked every time.
 `src/shared/bitcoin.ts` builds, reads and finalizes them, and
 `src/shared/esplora.ts` talks to the network (the Wallet app's
 `src/apps/wallet/`).
+The app's service worker has the same signer as `self.nostr`
+([background.md](background.md)).
 `getPublicKey()` rejects while nobody is signed in. NIP-07 has no event for
 another account signing in, so ask again when the window comes back to the
 front (React Query's `refetchOnWindowFocus`). The user's relays and media

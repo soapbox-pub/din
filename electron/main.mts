@@ -4485,7 +4485,7 @@ interface NostrRelayRequest {
   params: unknown;
   /** Who is asking: a web origin, or `nip46:<connection>` for a bunker client. */
   origin: string;
-  source: 'tab' | 'app' | 'bunker';
+  source: 'tab' | 'app' | 'worker' | 'bunker';
   wcId: number | null;
   /** Whether the page was just clicked or typed in (the page's own report). */
   userActivated: boolean;
@@ -4510,6 +4510,62 @@ function relayNostrRequest(request: NostrRelayRequest, timeoutMs = NOSTR_REQUEST
     pendingNostrRequests.set(requestId, { resolve, timer, wcId: request.wcId });
     sendToShell('nostr-bridge:request', { requestId, ...request });
   });
+}
+
+/** What a worker's self.nostr may call: NIP-07's methods and window.nostr's additions, as nostr-preload.cjs names them. */
+const WORKER_SIGNER_METHODS = new Set([
+  'getPublicKey',
+  'signEvent',
+  'getRelays',
+  'nip04.encrypt',
+  'nip04.decrypt',
+  'nip44.encrypt',
+  'nip44.decrypt',
+  'signPsbt',
+  'requestPublicKey',
+  'getSigner',
+]);
+
+/**
+ * A service worker's self.nostr call, once its caller has established it may
+ * make one: decided as its site's or app's windows' requests are, under its
+ * origin, with no window. `source`: 'app' for a Din app's worker
+ * (din-app-workers.mts), connected by the app's nostr permission; 'worker'
+ * for a website's, which uses only what the user gave the site in a window.
+ */
+function askSignerForWorker(origin: string, method: string, params: unknown, source: 'app' | 'worker'): Promise<NostrReply> {
+  if (!WORKER_SIGNER_METHODS.has(method)) return Promise.resolve({ ok: false, error: `Unsupported method: ${method}`, errorName: 'TypeError' });
+  return relayNostrRequest({ method, params, origin, source, wcId: null, userActivated: false });
+}
+
+/** The origin a website's worker signs as, from its scope, or null if it gets no self.nostr. */
+function workerNostrOrigin(scope: string): string | null {
+  try {
+    const { protocol, host } = new URL(scope);
+    const origin = `${protocol}//${host}`;
+    return host && isNostrCapableOrigin(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+const nostrWorkers = new WeakSet<Electron.ServiceWorkerMain>();
+
+/** Answer a website's worker's self.nostr calls (nostr-preload.cjs, as a worker preload). */
+function attachNostrWorker(worker: Electron.ServiceWorkerMain): void {
+  if (nostrWorkers.has(worker) || !workerNostrOrigin(worker.scope)) return;
+  nostrWorkers.add(worker);
+  try {
+    worker.ipc.handle('nostr-bridge:call', (event, payload): Promise<NostrReply> | NostrReply => {
+      // Read from the worker main saw start, never from what it sent.
+      const origin = event.session === browserSession() ? workerNostrOrigin(event.serviceWorker.scope) : null;
+      if (!origin) return { ok: false, error: 'Nostr is not available here', errorName: 'NotAllowedError' };
+      const method = payload && typeof payload.method === 'string' ? payload.method : '';
+      return askSignerForWorker(origin, method, payload ? payload.params : undefined, 'worker');
+    });
+  } catch {
+    // Already wired (a second handle() for the same worker throws).
+  }
 }
 
 /** Fail every request a guest is waiting on: its page has gone. */
@@ -4551,6 +4607,14 @@ function nostrCaller(event: Electron.IpcMainInvokeEvent): { origin: string; sour
 }
 
 function registerNostrBridge(): void {
+  // Websites' service workers (tabs', installed web apps', nsites') get
+  // self.nostr as their pages get window.nostr.
+  browserSession().serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+    if (runningStatus !== 'starting' && runningStatus !== 'running') return;
+    const worker = browserSession().serviceWorkers.getWorkerFromVersionID(versionId);
+    if (worker) attachNostrWorker(worker);
+  });
+
   ipcMain.handle('nostr-bridge:call', (event, payload): Promise<NostrReply> | NostrReply => {
     const caller = nostrCaller(event);
     if (!caller) return { ok: false, error: 'Nostr is not available here' };
@@ -6477,6 +6541,8 @@ app.whenReady().then(() => {
   // And a window.nostr backed by Din's signer, for tabs and installed apps;
   // private tabs get none.
   browserSession().registerPreloadScript({ id: 'din-nostr', type: 'frame', filePath: NOSTR_PRELOAD });
+  // Their service workers get self.nostr, the same signer.
+  browserSession().registerPreloadScript({ id: 'din-nostr-worker', type: 'service-worker', filePath: NOSTR_PRELOAD });
   // Installed nsites are napps: their pages and their service workers.
   browserSession().registerPreloadScript({ id: 'din-napp', type: 'frame', filePath: NAPP_PRELOAD });
   browserSession().registerPreloadScript({ id: 'din-napp-worker', type: 'service-worker', filePath: NAPP_PRELOAD });
@@ -6650,7 +6716,11 @@ app.whenReady().then(() => {
     requestSyncPermission: (origin) => requestSiteCapability(browserSession(), origin, 'background-sync'),
     forgetSyncPermission: (origin) => decide(browserSession(), origin, 'background-sync', null),
   });
-  registerDinAppWorkers({ sendToShell, backgroundGrant });
+  registerDinAppWorkers({
+    sendToShell,
+    backgroundGrant,
+    askSigner: (origin, method, params) => askSignerForWorker(origin, method, params, 'app'),
+  });
   registerPeriodicSyncHandlers({ assertShellSender, sendToShell });
   registerGeolocationHandlers({
     request: (s, origin) => requestSiteCapability(s, origin, 'geolocation'),

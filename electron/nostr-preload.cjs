@@ -1,16 +1,21 @@
 // @ts-check
 // Session preload giving web pages a NIP-07 window.nostr: browser tabs (not
-// private ones) and installed web apps. Registered with
-// session.registerPreloadScript in main.mts, so it runs alongside each guest's
-// own preload.
+// private ones), installed web apps and nsites. Registered with
+// session.registerPreloadScript in main.mts twice, as a frame preload and as
+// a service-worker preload, so their service workers get the same signer as
+// self.nostr; it works out which it is.
 //
 // The provider holds no keys and decides nothing. Every call goes over IPC to
 // the main process, which checks that it came from a tab's or app's top
-// document and reads the origin from the frame itself (never from the page),
-// then relays it to the Din shell. There NostrBridgeHost asks the user, keeps
-// what they decided per account and per site, and signs with the account's
-// signer. The page only ever sees
-// results.
+// document, or a worker of such a site, and reads the origin from the frame
+// or the worker's scope (never from the page), then relays it to the Din
+// shell. There NostrBridgeHost asks the user, keeps what they decided per
+// account and per site, and signs with the account's signer. The page only
+// ever sees results.
+//
+// A worker has no window to click in, so it can't connect its site or ask
+// for an account (requestPublicKey): it uses what the user gave the site in
+// a window, and asks on screen for anything else, as its pages would.
 //
 // Din owns window.nostr: it is defined before any page script runs, and can't
 // be replaced, so a Chrome extension that also provides one (nos2x, Alby)
@@ -60,7 +65,7 @@ function installNostr(bridge) {
     // Read now, before waiting in line: whether the page was just clicked is
     // only true for a moment. Din uses it to keep pages from asking to connect
     // on their own, not as a security boundary.
-    const activated = Boolean(navigator.userActivation && navigator.userActivation.isActive);
+    const activated = Boolean(globalThis.navigator.userActivation && globalThis.navigator.userActivation.isActive);
     // Main answers with an envelope rather than throwing, so the page sees
     // "User rejected", not Electron's "Error invoking remote method ...".
     const run = () =>
@@ -118,15 +123,27 @@ function installNostr(bridge) {
     },
   });
 
-  Object.defineProperty(window, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });
+  // A worker's preload can't see its scope, so it checks here: only secure
+  // sites' workers get one (main checks every call's scope anyway).
+  const where = globalThis.location;
+  const secure = /^(https|nsite):$/.test(where.protocol) || (where.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(where.hostname));
+  if (!secure) return;
+  Object.defineProperty(globalThis, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });
 }
 
-const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const isWorker = typeof window === 'undefined';
 
-// Top documents of secure web pages only. The browser session loads frame
-// preloads into iframes too (for extensions), and an embedded frame gets no
-// signer: main refuses its calls anyway.
-if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) || isLocalhost)) {
+/**
+ * @param {string} method
+ * @param {Record<string, unknown> | undefined} params
+ * @param {boolean} userActivated
+ */
+const invoke = (method, params, userActivated) =>
+  ipcRenderer.invoke('nostr-bridge:call', { method, params, userActivated });
+
+if (isWorker) {
+  // A worker that starts before main has seen it gets "no handler": once
+  // more after a beat.
   contextBridge.executeInMainWorld({
     func: installNostr,
     args: [
@@ -134,11 +151,21 @@ if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) ||
         /**
          * @param {string} method
          * @param {Record<string, unknown> | undefined} params
-         * @param {boolean} userActivated
          */
-        call: (method, params, userActivated) =>
-          ipcRenderer.invoke('nostr-bridge:call', { method, params, userActivated }),
+        call: (method, params) =>
+          invoke(method, params, false).catch(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            return invoke(method, params, false).catch(() => ({ ok: false, error: 'Din is unavailable' }));
+          }),
       },
     ],
   });
+} else {
+  // Top documents of secure web pages only. The browser session loads frame
+  // preloads into iframes too (for extensions), and an embedded frame gets no
+  // signer: main refuses its calls anyway.
+  const isLocalhost = location.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (window.top === window.self && (/^(https|nsite):$/.test(location.protocol) || isLocalhost)) {
+    contextBridge.executeInMainWorld({ func: installNostr, args: [{ call: invoke }] });
+  }
 }

@@ -30,6 +30,7 @@ export interface AppsBridge {
    * may notify (electron/din-app-workers.mts).
    */
   grantBackground(webContentsId: number, options: { notifications: boolean }): Promise<void>;
+  grantNostr(webContentsId: number): Promise<void>;
   /** `camera`: the app's page may use the camera and the microphone, not the screen. */
   grantCamera(webContentsId: number): Promise<void>;
   /** `microphone`: the app's page may use the microphone, not the camera or the screen. */

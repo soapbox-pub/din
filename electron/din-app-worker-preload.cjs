@@ -11,6 +11,8 @@
 //     notification center (Electron shows none from a registration)
 //   - navigator.permissions.query for 'periodic-background-sync'
 // In the service worker:
+//   - self.nostr, for an app with the nostr permission: the NIP-07 signer its
+//     windows have as window.nostr, so it signs with every window closed
 //   - clients.openWindow / WindowClient.focus, through the desktop
 //   - the periodicsync, notificationclick and notificationclose events
 //     din-app-workers.mts raises, with waitUntil() waited on before it's
@@ -179,6 +181,45 @@ function installAppWorkers(bridge) {
   // -------------------------------------------------------------------------
   // The worker
   // -------------------------------------------------------------------------
+
+  // self.nostr: what the app's windows have as window.nostr (src/sdk/runtime.ts),
+  // decided by the desktop's signer under the app's origin as their requests
+  // are. An app without the nostr permission gets NotAllowedError from every
+  // call. One call at a time, in order, as window.nostr's are.
+  /** @type {Promise<unknown>} */
+  let signerTail = Promise.resolve();
+  /**
+   * @param {string} method
+   * @param {Record<string, unknown>} [params]
+   */
+  const sign = (method, params) => {
+    const run = () => call('nostr', { method, params });
+    const result = signerTail.then(run, run);
+    signerTail = result.catch(() => undefined);
+    return result;
+  };
+  /** @param {unknown} value */
+  const str = (value) => String(value);
+  const nostr = Object.freeze({
+    getPublicKey: () => sign('getPublicKey'),
+    /** @param {unknown} event */
+    signEvent: (event) => sign('signEvent', { event }),
+    nip04: Object.freeze({
+      /** @param {string} pubkey @param {string} text */
+      encrypt: (pubkey, text) => sign('nip04.encrypt', { pubkey: str(pubkey), plaintext: str(text) }),
+      /** @param {string} pubkey @param {string} text */
+      decrypt: (pubkey, text) => sign('nip04.decrypt', { pubkey: str(pubkey), ciphertext: str(text) }),
+    }),
+    nip44: Object.freeze({
+      /** @param {string} pubkey @param {string} text */
+      encrypt: (pubkey, text) => sign('nip44.encrypt', { pubkey: str(pubkey), plaintext: str(text) }),
+      /** @param {string} pubkey @param {string} text */
+      decrypt: (pubkey, text) => sign('nip44.decrypt', { pubkey: str(pubkey), ciphertext: str(text) }),
+    }),
+    /** @param {string} psbt */
+    signPsbt: (psbt) => sign('signPsbt', { psbt: str(psbt) }),
+  });
+  Object.defineProperty(self, 'nostr', { value: nostr, writable: false, configurable: false, enumerable: true });
 
   /**
    * @typedef {{ id: string, url: string }} WorkerClient

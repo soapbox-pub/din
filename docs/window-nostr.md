@@ -57,6 +57,27 @@ if ('getSigner' in window.nostr) {
 }
 ```
 
+## Service workers
+
+A site's service worker has the same provider as `self.nostr`: tabs',
+installed web apps' and nsites' alike, from `nostr-preload.cjs` registered as
+a service-worker preload too, its calls answered by the worker's own IPC in
+main, which reads the origin from the worker's scope. It acts as its pages
+do, so a worker can sign with every window of its site closed, with two
+limits that come from having no window:
+
+- It can't connect its site: until the user has connected it in a window,
+  Din's account's methods reject with `NotAllowedError`.
+- It can't ask for an account: `requestPublicKey()` rejects with
+  `NotAllowedError`. `getSigner(pubkey)` works for any account the site holds.
+
+Anything its site's remembered answers don't settle is asked on screen, as a
+page's request would be.
+
+Din apps' workers get `self.nostr` from `din-app-worker-preload.cjs`
+([din/background.md](din/background.md)), shaped like their
+`window.nostr`.
+
 ## Errors
 
 Rejections are `DOMException`s, so a client can tell them apart by `name`:

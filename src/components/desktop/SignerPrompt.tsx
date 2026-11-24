@@ -83,9 +83,10 @@ function Artwork({ request, identity }: { request: NostrBridgeRequest; identity:
   switch (request.source) {
     case 'tab':
     case 'app':
+    case 'worker':
       if (identity.icon) return <AppIcon icon={identity.icon} className="size-14 rounded-2xl object-contain" />;
       return tile(
-        request.source === 'tab' ? <Globe className="size-7" aria-hidden /> : <AppWindow className="size-7" aria-hidden />,
+        request.source === 'app' ? <AppWindow className="size-7" aria-hidden /> : <Globe className="size-7" aria-hidden />,
       );
     case 'bunker': {
       const image = request.client?.image;

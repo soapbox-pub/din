@@ -25,7 +25,7 @@
 
 import { ipcMain } from 'electron';
 import v8 from 'node:v8';
-import { appIdOf, appOrigin, appsSession, isAppGuest, isBuiltInApp, isFileAppId } from './din-apps.mts';
+import { appIdOf, appOrigin, appsSession, hasNostrGrant, isAppGuest, isBuiltInApp, isFileAppId } from './din-apps.mts';
 import { isServedFolder } from './din-file-apps.mts';
 import { isLaunchedApp } from './din-launch.mts';
 import { closeAppNotification, setAppNotificationHandlers, showAppNotification } from './notifications.mts';
@@ -36,6 +36,8 @@ interface Options {
   sendToShell: (channel: string, payload?: unknown) => void;
   /** What the desktop granted a window of an app beyond its page: null when not `background`. */
   backgroundGrant: (webContentsId: number) => { appId: string; notifications: boolean } | null;
+  /** Ask the desktop's signer as the app at `origin`, with no window (main.mts's askSignerForWorker). */
+  askSigner: (origin: string, method: string, params: unknown) => Promise<{ ok: boolean; result?: unknown; error?: string; errorName?: string }>;
 }
 
 /** How long after a click on its notification a worker may open or focus a window. */
@@ -283,6 +285,16 @@ async function call(caller: Caller, method: unknown, params: unknown): Promise<R
         }
         options.sendToShell('din-app-sw:open', { appId: caller.appId, url, focus: method === 'clients.focus' });
         result = true;
+        break;
+      }
+      case 'nostr': {
+        // The page has window.nostr from the runtime; this is the worker's.
+        if (!caller.worker || !hasNostrGrant(caller.appId)) {
+          throw new DinAppWorkerError('This app has no "nostr" permission.', 'NotAllowedError');
+        }
+        const reply = await options.askSigner(caller.origin, typeof args.method === 'string' ? args.method : '', args.params ?? {});
+        if (!reply.ok) throw new DinAppWorkerError(reply.error || 'Request failed', reply.errorName ?? 'NotAllowedError');
+        result = reply.result;
         break;
       }
       default:

@@ -1306,6 +1306,9 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       if (permissions.includes('preview')) {
         await apps.grantPreview(webContentsId).catch((e: unknown) => console.error('din: granting preview:', e));
       }
+      if (permissions.includes('nostr')) {
+        await apps.grantNostr(webContentsId).catch((e: unknown) => console.error('din: granting nostr:', e));
+      }
       if (permissions.includes('background')) {
         await apps
           .grantBackground(webContentsId, { notifications: permissions.includes('notifications') })

@@ -4683,6 +4683,13 @@ expose('apps', {
    */
   grantBackground: (webContentsId, options) => ipcRenderer.invoke('dinos-apps:grantBackground', webContentsId, options),
   /**
+   * `nostr`: the app's service worker may use the signer as its windows do
+   * (self.nostr, electron/din-app-workers.mts), until Din quits.
+   * @param {number} webContentsId
+   * @returns {Promise<void>}
+   */
+  grantNostr: (webContentsId) => ipcRenderer.invoke('dinos-apps:grantNostr', webContentsId),
+  /**
    * `camera`: the app's page may use the camera and the microphone, not the screen.
    * @param {number} webContentsId
    * @returns {Promise<void>}

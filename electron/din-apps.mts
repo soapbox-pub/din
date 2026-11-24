@@ -303,6 +303,18 @@ export function registerDinApps(opts: Options, preloadPath: string): void {
     backgroundGrants.set(contents.id, { appId, notifications });
   });
 
+  // `nostr`: the app's service worker gets self.nostr, the signer its windows
+  // have as window.nostr (din-app-workers.mts). Kept for the app, not the
+  // window, until Din quits: the worker signs with every window closed.
+  ipcMain.handle('dinos-apps:grantNostr', (event, wcId) => {
+    opts.assertShellSender(event);
+    const contents = typeof wcId === 'number' ? webContents.fromId(wcId) : undefined;
+    if (!contents || !isAppGuest(contents) || contents.hostWebContents !== opts.shell()) throw new Error('Not an app');
+    const appId = appIdOf(contents.getURL());
+    if (!appId) throw new Error('Not an app');
+    nostrApps.add(appId);
+  });
+
   // `camera`: the camera and the microphone in the app's page. No port: the
   // permission handlers above check it.
   ipcMain.handle('dinos-apps:grantCamera', (event, wcId) => {
@@ -648,6 +660,14 @@ const grants = new Map<number, Map<SystemPermission, Grant>>();
 
 /** Windows the desktop granted `background`, by webContents id. */
 const backgroundGrants = new Map<number, { appId: string; notifications: boolean }>();
+
+/** Apps one of whose windows the desktop granted `nostr` since Din started. */
+const nostrApps = new Set<string>();
+
+/** Whether an app's worker may use the signer: one of its windows had `nostr`. */
+export function hasNostrGrant(appId: string): boolean {
+  return nostrApps.has(appId);
+}
 
 /** Windows the desktop granted `camera`, by webContents id. */
 const cameraGrants = new Set<number>();

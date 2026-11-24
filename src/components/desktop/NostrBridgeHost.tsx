@@ -132,6 +132,8 @@ async function readPsbt(params: Record<string, unknown>, account: string): Promi
 /**
  * Desktop-lifetime host for Din's signer as other software sees it: NIP-07
  * window.nostr in browser tabs and installed web apps (electron/nostr-preload.cjs),
+ * and self.nostr in their service workers and Din apps' (which can't connect
+ * a site or ask for an account, having no window),
  * Din's own app windows with the nostr permission (din.account.nostr, by way
  * of src/lib/appSigner.ts), and apps connected over NIP-46 (electron/bunker.mts).
  * Main, or the app's window, establishes who is asking; this decides, asks
@@ -411,6 +413,11 @@ export function NostrBridgeHost() {
       const grant = grantOf(account, origin);
       if (grant?.status === 'blocked') throw rejected();
       if (grant) return;
+      // A website's worker has no window to ask in: it uses what the user
+      // gave its site in one.
+      if (request.source === 'worker') {
+        throw new SignerError('NotAllowedError', 'Connect the site in a window first');
+      }
       if (request.source === 'tab') {
         if (suppressed.current.has(tabKey)) throw rejected();
         if (!request.userActivated) {

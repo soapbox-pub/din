@@ -65,14 +65,20 @@ Din apps' workers get, from `electron/din-app-workers.mts` through
 - `clients.openWindow(url)`, for a minute after a click: a new window of the
   app, with `url` in its launch params (`decodeLaunchParams(targetURL).url`), and
   `WindowClient.focus()`, which brings the app's frontmost window forward.
+- `self.nostr`, with `nostr` in the manifest: the NIP-07 signer the app's
+  windows have as `window.nostr`, decided as their requests are, so the
+  worker signs with every window closed. It's granted once one of the app's
+  windows has opened since Din started; before that every call rejects with
+  `NotAllowedError`.
 - The web's own worker APIs: `fetch`, IndexedDB, the Cache API,
   `clients.matchAll()` and `postMessage` to open windows.
 
-A worker has no `window.din`: the account, the signer and `din.system` are
-the page's.
+A worker has no `window.din`: the account and `din.system` are the page's.
 
 Installed nsites' workers have the napp runtime (Tenna's NAPP.md,
 `electron/napp.mts`), and web apps' have Web Push (`electron/web-push.mts`).
+Websites' workers, tabs', web apps' and nsites' alike, have `self.nostr` as
+their pages have `window.nostr` ([../window-nostr.md](../window-nostr.md)).
 
 ## A built-in app's worker
 

@@ -17,7 +17,8 @@
 import type { SiteGrant } from '@/lib/signerPermissions';
 
 /** Where a request came from. */
-export type NostrRequestSource = 'tab' | 'app' | 'bunker';
+/** `worker`: a website's service worker (self.nostr), with no window. */
+export type NostrRequestSource = 'tab' | 'app' | 'worker' | 'bunker';
 
 /** A bunker client, as main describes it alongside its requests. */
 export interface BunkerClientInfo {
