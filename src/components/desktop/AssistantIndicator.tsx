@@ -22,7 +22,11 @@ import {
   usePendingRequests,
   usePreferredModel,
   useStartConversation,
+  workKind,
+  commandsUnder,
+  type AssistantWork,
 } from '@/hooks/useAssistant';
+import { WorkIndicator } from '@/shared/assistant/WorkIndicator';
 import { useToast } from '@/hooks/useToast';
 import {
   cleanAssistantError,
@@ -150,7 +154,8 @@ function AssistantPanel({ onDone }: { onDone: () => void }) {
 
 function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string, spoken?: boolean) => void; onDone: () => void }) {
   const { data: sessions, isLoading } = useAssistantSessions();
-  const { busy } = useAssistantWork();
+  const work = useAssistantWork();
+  const { busy } = work;
   const pending = usePendingRequests();
   const home = useHomeDirectory();
   const directory = useAssistantDirectory();
@@ -205,7 +210,7 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string, spoken?: 
         </p>
       ) : (
         recent.length > 0 && (
-          <SessionSection title="Recent" sessions={recent} busy={busy} home={home} onShow={(id) => onShow(id)} />
+          <SessionSection title="Recent" sessions={recent} work={work} home={home} onShow={(id) => onShow(id)} />
         )
       )}
       <div className={trayFooter}>
@@ -227,13 +232,13 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string, spoken?: 
 function SessionSection({
   title,
   sessions,
-  busy,
+  work,
   home,
   onShow,
 }: {
   title: string;
   sessions: SessionInfo[];
-  busy: ReadonlySet<string>;
+  work: AssistantWork;
   home?: string;
   onShow: (sessionID: string) => void;
 }) {
@@ -242,15 +247,17 @@ function SessionSection({
     <section aria-label={title} className="pb-2">
       <h3 className="px-4 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
       <ul>
-        {sessions.map((session) => (
+        {sessions.map((session) => {
+          const kind = workKind(work, session.id);
+          return (
           <li key={session.id}>
             <button
               type="button"
               onClick={() => onShow(session.id)}
               className="flex w-full items-center gap-2.5 px-4 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
             >
-              {busy.has(session.id) ? (
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-ink-accent" aria-label="Working" />
+              {kind ? (
+                <WorkIndicator kind={kind} commands={commandsUnder(work, session.id).length} className="text-ink-accent" />
               ) : (
                 <ProjectIcon
                   src={icons.get(session.location.directory)}
@@ -263,7 +270,8 @@ function SessionSection({
               </span>
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </section>
   );

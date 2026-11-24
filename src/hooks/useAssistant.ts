@@ -333,6 +333,11 @@ export interface AssistantWork {
    * a subagent's, or a command still running, in the foreground or not.
    */
   busy: ReadonlySet<string>;
+  /**
+   * Those of them where an agent is at work: their own turn, or a subagent's
+   * under them. The rest are busy only with commands left running.
+   */
+  agents: ReadonlySet<string>;
   /** The top-level conversations among them. */
   roots: ReadonlySet<string>;
   /** What each session started that's still running, by the session. */
@@ -427,12 +432,13 @@ export function useAssistantWork(directories: string[] = []): AssistantWork {
   return useMemo(() => {
     const chains = new Map([...activeLineages, ...ownerLineages].map((chain) => [chain[0].id, chain]));
     const busy = new Set<string>();
+    const agents = new Set<string>();
     const roots = new Set<string>();
     const tasks = new Map<string, BackgroundTask[]>();
-    const markBusy = (sessionID: string) => {
+    const markBusy = (sessionID: string, into: Set<string> = busy) => {
       const chain = chains.get(sessionID);
-      for (const session of chain ?? []) busy.add(session.id);
-      busy.add(sessionID);
+      for (const session of chain ?? []) into.add(session.id);
+      into.add(sessionID);
       roots.add(chain?.at(-1)?.id ?? sessionID);
     };
     const add = (sessionID: string, task: BackgroundTask) => {
@@ -441,7 +447,10 @@ export function useAssistantWork(directories: string[] = []): AssistantWork {
       tasks.set(sessionID, list);
     };
 
-    for (const sessionID of active) markBusy(sessionID);
+    for (const sessionID of active) {
+      markBusy(sessionID);
+      markBusy(sessionID, agents);
+    }
     const seen = new Set<string>();
     for (const shell of shells) {
       const owner = shell.metadata.sessionID;
@@ -473,13 +482,36 @@ export function useAssistantWork(directories: string[] = []): AssistantWork {
       }
     }
     for (const list of tasks.values()) list.sort((a, b) => a.started - b.started);
-    return { busy, roots, tasks };
+    return { busy, agents, roots, tasks };
   }, [active, shells, activeLineages, ownerLineages]);
 }
 
 /** What a session started that's still running, from `useAssistantWork`. */
 export function tasksOf(work: AssistantWork, sessionID: string): BackgroundTask[] {
   return work.tasks.get(sessionID) ?? NO_TASKS;
+}
+
+/**
+ * What a conversation is busy with: an agent at work (its own turn, or a
+ * subagent's), only commands it left running in the background, or nothing.
+ */
+export type WorkKind = 'agent' | 'commands' | null;
+
+export function workKind(work: Pick<AssistantWork, 'busy' | 'agents'>, sessionID: string): WorkKind {
+  return work.agents.has(sessionID) ? 'agent' : work.busy.has(sessionID) ? 'commands' : null;
+}
+
+/** The commands running under a conversation, subagents' included, from `useAssistantWork`. */
+export function commandsUnder(work: AssistantWork, sessionID: string): BackgroundTask[] {
+  const out: BackgroundTask[] = [];
+  const visit = (id: string, depth: number) => {
+    for (const task of tasksOf(work, id)) {
+      if (task.kind === 'shell') out.push(task);
+      else if (depth < 16) visit(task.id, depth + 1);
+    }
+  };
+  visit(sessionID, 0);
+  return out;
 }
 
 /** A page of a session's earlier messages; the first also says where the latest ones started then. */

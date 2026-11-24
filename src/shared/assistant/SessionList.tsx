@@ -27,7 +27,11 @@ import {
   useProjectIcons,
   useProjectSessions,
   useSessionSearch,
+  workKind,
+  commandsUnder,
+  type WorkKind,
 } from '@/hooks/useAssistant';
+import { WorkIndicator } from '@/shared/assistant/WorkIndicator';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { cleanAssistantError, directoryName, relativeTime, sessionTitle, tildify, type SessionInfo } from '@/lib/assistant';
@@ -182,7 +186,8 @@ export function SessionList({
   const { data: sessions, isLoading } = sessionPages;
   const scrollRef = useRef<HTMLDivElement>(null);
   // Working, or still running a command or subagent it started.
-  const { busy } = useAssistantWork();
+  const work = useAssistantWork();
+  const { busy } = work;
   const pending = usePendingRequests();
   const home = useHomeDirectory();
   const [filter, setFilter] = useState('');
@@ -289,7 +294,8 @@ export function SessionList({
               tag={tag}
               worktree={mains.has(session.location.directory)}
               selected={session.id === selected}
-              running={busy.has(session.id)}
+              work={workKind(work, session.id)}
+              commands={commandsUnder(work, session.id).length}
               waiting={waitingNow.has(session.id)}
               unread={unread?.has(session.id) ?? false}
               home={home}
@@ -661,7 +667,8 @@ function SessionRow({
   tag,
   worktree,
   selected,
-  running,
+  work,
+  commands,
   waiting,
   unread,
   home,
@@ -675,7 +682,10 @@ function SessionRow({
   /** It ran in a worktree, not the project's main checkout. */
   worktree: boolean;
   selected: boolean;
-  running: boolean;
+  /** What it's busy with: an agent at work, or only commands left running. */
+  work: WorkKind;
+  /** How many commands it has running. */
+  commands: number;
   waiting: boolean;
   /** It has unread notifications. */
   unread: boolean;
@@ -704,8 +714,8 @@ function SessionRow({
       )}
       {waiting ? (
         <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Waiting for you" />
-      ) : running ? (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Working" />
+      ) : work ? (
+        <WorkIndicator kind={work} commands={commands} className="text-muted-foreground" />
       ) : unread ? (
         <span className="size-2 shrink-0 rounded-full bg-primary" aria-label="Unread notification" />
       ) : (

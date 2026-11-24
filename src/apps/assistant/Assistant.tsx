@@ -41,6 +41,7 @@ import { LoadMore } from '@/shared/assistant/LoadMore';
 import { FormCard, PasswordCard, PermissionCard } from '@/shared/assistant/RequestCards';
 import { SessionList } from '@/shared/assistant/SessionList';
 import { Transcript } from '@/shared/assistant/Transcript';
+import { WorkIndicator } from '@/shared/assistant/WorkIndicator';
 import { useQuestionHandoff } from '@/shared/assistant/useQuestionHandoff';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { AppAssistantHost } from '@/shared/assistant/appHost';
@@ -64,6 +65,8 @@ import {
   useBackgroundSession,
   useKillShell,
   tasksOf,
+  workKind,
+  commandsUnder,
   type BackgroundTask,
   useDirectoryIcons,
   useCancelQueued,
@@ -252,7 +255,10 @@ interface TabsState {
 interface TabInfo {
   id: string;
   title: string;
-  state: 'new' | 'idle' | 'running' | 'waiting';
+  /** `background`: all that's left running is commands, not an agent. */
+  state: 'new' | 'idle' | 'running' | 'background' | 'waiting';
+  /** How many commands it has running, for the background state's label. */
+  commands?: number;
   /** The folder its conversation works in, for the project's favicon. */
   directory?: string;
   /** Its conversation has unread notifications. */
@@ -496,10 +502,12 @@ function AssistantWindow() {
     tabs.map((tab): TabInfo => {
       if (!tab.sessionID) return { id: tab.id, title: 'New conversation', state: 'new' };
       const session = sessions[sessionIDs.indexOf(tab.sessionID)]?.session;
+      const kind = workKind(work, tab.sessionID);
       return {
         id: tab.id,
         title: session ? sessionTitle(session) : 'Loading…',
-        state: waiting.has(tab.sessionID) ? 'waiting' : work.busy.has(tab.sessionID) ? 'running' : 'idle',
+        state: waiting.has(tab.sessionID) ? 'waiting' : kind === 'agent' ? 'running' : kind ? 'background' : 'idle',
+        commands: kind === 'commands' ? commandsUnder(work, tab.sessionID).length : undefined,
         directory: session?.location.directory,
         unread: unread.has(tab.sessionID) || undefined,
       };
@@ -762,7 +770,7 @@ function AssistantWindow() {
             tabs={stripTabs.map((t) => ({
               id: t.id,
               title: t.title,
-              icon: <TabIcon state={t.state} favicon={t.directory && icons.get(t.directory)} unread={t.unread} />,
+              icon: <TabIcon state={t.state} commands={t.commands} favicon={t.directory && icons.get(t.directory)} unread={t.unread} />,
             }))}
             activeId={activeId}
             label="Assistant tabs"
@@ -949,11 +957,21 @@ function AssistantMenu({
 }
 
 /**
- * A tab's icon: whether its conversation is working or waiting on the user,
- * else a dot while it has unread notifications, else its project's favicon,
- * if it has one.
+ * A tab's icon: whether its conversation is working, running only commands
+ * in the background, or waiting on the user, else a dot while it has unread
+ * notifications, else its project's favicon, if it has one.
  */
-function TabIcon({ state, favicon, unread }: { state: TabInfo['state']; favicon?: string; unread?: boolean }) {
+function TabIcon({
+  state,
+  commands,
+  favicon,
+  unread,
+}: {
+  state: TabInfo['state'];
+  commands?: number;
+  favicon?: string;
+  unread?: boolean;
+}) {
   if (state === 'waiting' || (state === 'idle' && unread)) {
     return (
       <span className="grid size-3.5 place-items-center" aria-label={state === 'waiting' ? 'Waiting for you' : 'Unread notification'}>
@@ -963,7 +981,9 @@ function TabIcon({ state, favicon, unread }: { state: TabInfo['state']; favicon?
   }
   switch (state) {
     case 'running':
-      return <Loader2 className="size-3.5 animate-spin" aria-label="Working" />;
+      return <WorkIndicator kind="agent" />;
+    case 'background':
+      return <WorkIndicator kind="commands" commands={commands} />;
     case 'new':
       return <SquarePen className="size-3.5" aria-hidden />;
     default:
