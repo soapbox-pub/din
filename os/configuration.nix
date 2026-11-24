@@ -1822,8 +1822,10 @@ in
   # directory: making apps and widgets, and changing DinOS. They point at
   # Din's docs and API types, which come along in /etc/din.
   environment.etc."opencode/skills".source = ./opencode/skills;
-  # And its plugins: `preview`, which shows a page beside the conversation
-  # in the Assistant.
+  # And Din's plugin (opencode/plugins/din): `preview`, which shows a page
+  # beside the conversation in the Assistant, and secrets, values the user
+  # hands a conversation as environment variables its commands get and the
+  # model never sees (`ask_secret`, and + → Secret… in the Assistant).
   environment.etc."opencode/plugins".source = ./opencode/plugins;
   environment.etc."din/docs".source = din-root + "/docs";
   # The optional features Settings offers (above, and electron/features.mts).

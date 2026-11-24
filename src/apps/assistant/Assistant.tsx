@@ -25,6 +25,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
+import { useSecretRequests } from '@/shared/assistant/secretRequests';
+import { SecretRequestCard } from '@/shared/assistant/Secrets';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { BackgroundTasks } from '@/shared/assistant/BackgroundTasks';
 import { CallBar } from '@/shared/assistant/Call';
@@ -1067,6 +1069,7 @@ function Conversation({
     if (!all || at === -1) return { messages: all, undone: 0 };
     return { messages: all.slice(0, at), undone: all.slice(at).filter((m) => m.type === 'user').length };
   }, [transcript?.messages, revert]);
+  const secretRequests = useSecretRequests(sessionID, messages);
   const commands = useSlashCommands(session?.location.directory, revert ? UNDONE_COMMANDS : CONVERSATION_COMMANDS);
   const directory = session?.location.directory;
   const fileLinkBase = useMemo(() => ({ directory, home }), [directory, home]);
@@ -1155,7 +1158,7 @@ function Conversation({
     }
     // Loading all of them brings several pages.
     prepending.current = { first: firstID, top: el.scrollTop, height: el.scrollHeight };
-  }, [firstID, messages, queued, permissions.length, forms.length, passwords.length, running]);
+  }, [firstID, messages, queued, permissions.length, forms.length, passwords.length, secretRequests.length, running]);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1164,7 +1167,7 @@ function Conversation({
       el.scrollTop = restoreTop.current;
       restoreTop.current = null;
     }
-  }, [messages, queued, permissions.length, forms.length, passwords.length, running]);
+  }, [messages, queued, permissions.length, forms.length, passwords.length, secretRequests.length, running]);
 
   useImperativeHandle(ref, () => ({
     find: () => {
@@ -1369,12 +1372,16 @@ function Conversation({
             onFocused={onPasswordFocused}
           />
         ))}
+        {secretRequests.map((request) => (
+          <SecretRequestCard key={request.callID} request={request} />
+        ))}
         {onCall && forms.length === 0 && <CallBar call={call!} />}
         <div ref={composerRef} hidden={forms.length > 0 || onCall}>
           <Composer
             ref={composer}
             autoFocus
             draftKey={sessionID}
+            secrets
             onCall={call?.start}
             running={running}
             busy={send.isPending || compact.isPending || undo.isPending || redo.isPending}
@@ -1614,6 +1621,7 @@ function NewConversation({
           <Composer
             autoFocus
             draftKey={draftKey}
+            secrets
             className={call?.active ? 'hidden' : undefined}
             onCall={call?.start}
             busy={start.isPending}

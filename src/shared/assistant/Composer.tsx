@@ -1,8 +1,8 @@
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
-import { ArrowUp, AudioLines, Mic, Paperclip, Phone, Plus, Square } from 'lucide-react';
+import { ArrowUp, AudioLines, KeyRound, Mic, Paperclip, Phone, Plus, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { parseSlashCommand, type PromptAttachment } from '@/lib/assistant';
+import { parseSlashCommand, secretAttachment, secretName, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey, loadDraftFiles, saveDraftFiles } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { DRAG_MIME } from '@/sdk';
@@ -10,6 +10,7 @@ import { attachmentOf, canRecordAudio, fileUri, saveRecording, splitAttachedPath
 import { AttachmentItem } from '@/shared/assistant/Attachments';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { RecordingBar } from '@/shared/assistant/RecordingBar';
+import { SecretDialog } from '@/shared/assistant/Secrets';
 import { useAudioRecorder } from '@/shared/assistant/useAudioRecorder';
 import { ToastViewport } from '@/shared/Toaster';
 
@@ -134,6 +135,10 @@ function matchCommands(commands: SlashCommand[], typed: string): SlashCommand[] 
  * instant one), Escape puts it away.
  *
  * With `draftKey`, unsent text and files are kept until they're sent.
+ *
+ * With `secrets`, the + menu attaches a secret too (Secrets.tsx): its value
+ * is held here in memory alone (never in the draft) until the message goes,
+ * when `assistantApi.prompt` hands it to the conversation.
  */
 export function Composer({
   onSubmit,
@@ -151,6 +156,7 @@ export function Composer({
   textareaRef,
   draftKey,
   onCall,
+  secrets = false,
   ref: handleRef,
 }: {
   ref?: Ref<ComposerHandle>;
@@ -179,6 +185,8 @@ export function Composer({
   draftKey?: string;
   /** Call the assistant (Call.tsx): a phone button beside the mic. */
   onCall?: () => void;
+  /** + → Secret…: for a composer whose messages go through `assistantApi.prompt`. */
+  secrets?: boolean;
 }) {
   const [text, setText] = useDraft(draftKey);
   const [files, setFiles] = useDraftFiles(draftKey);
@@ -248,7 +256,9 @@ export function Composer({
       // Files sent as their paths come back as attachments.
       const sent = splitAttachedPaths(value);
       setText(sent.text);
-      setFiles([...attached, ...sent.paths.map(attachmentOf).filter((f) => !attached.some((a) => a.uri === f.uri))]);
+      // Secrets come back without their values: the conversation has them already.
+      const named = [...sent.paths.map(attachmentOf), ...sent.secrets.map((name) => secretAttachment(name))];
+      setFiles([...attached, ...named.filter((f) => !attached.some((a) => a.uri === f.uri))]);
       const textarea = ref.current;
       if (!textarea) return;
       textarea.focus();
@@ -379,6 +389,12 @@ export function Composer({
         .map((path) => ({ uri: fileUri(path), name: path.split('/').pop() || path })),
     ]);
     ref.current?.focus();
+  };
+
+  const [addingSecret, setAddingSecret] = useState(false);
+  const addSecret = (name: string, value: string) => {
+    const file = secretAttachment(name, value);
+    setFiles((current) => [...current.filter((f) => f.uri !== file.uri), file]);
   };
 
   /** Pictures' bytes (copied from a page or Preview, dropped from a web page), attached. */
@@ -595,8 +611,24 @@ export function Composer({
                 <AudioLines aria-hidden /> Record Audio
               </DropdownMenuItem>
             )}
+            {secrets && (
+              <DropdownMenuItem onSelect={() => setAddingSecret(true)}>
+                <KeyRound aria-hidden /> Secret…
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
+        {secrets && (
+          <SecretDialog
+            open={addingSecret}
+            onOpenChange={(open) => {
+              setAddingSecret(open);
+              if (!open) requestAnimationFrame(() => ref.current?.focus());
+            }}
+            onAdd={addSecret}
+            taken={files.flatMap((f) => secretName(f) ?? [])}
+          />
+        )}
         {recorder.recording ? (
           <RecordingBar
             startedAt={recorder.startedAt}

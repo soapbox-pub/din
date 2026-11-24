@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { PromptAttachment } from '@/lib/assistant';
+import { secretName, type PromptAttachment } from '@/lib/assistant';
 
 /**
  * The Assistant's tabs, kept across closing its window and across restarts,
@@ -123,7 +123,9 @@ export async function loadDraftFiles(key: string): Promise<PromptAttachment[]> {
 }
 
 /** Keep `files` under `key`, or forget them when there are none. */
-export function saveDraftFiles(key: string, files: PromptAttachment[]): void {
+export function saveDraftFiles(key: string, attached: PromptAttachment[]): void {
+  // A secret's value is never written down, so it isn't kept at all.
+  const files = attached.filter((file) => secretName(file) === null);
   try {
     if (files.length > 0) localStorage.setItem(draftFilesMarkKey(key), '1');
     else localStorage.removeItem(draftFilesMarkKey(key));

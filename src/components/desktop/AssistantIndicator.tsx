@@ -188,6 +188,7 @@ function ReadyPanel({ onShow, onDone }: { onShow: (sessionID?: string, spoken?: 
       <div className="p-3">
         <Composer
           busy={start.isPending}
+          secrets
           placeholder="Ask the assistant…"
           className="rounded-xl"
           onSubmit={(text, files, { spoken }) =>

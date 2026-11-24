@@ -13,6 +13,7 @@ import {
   GitFork,
   Globe,
   Highlighter,
+  KeyRound,
   Lightbulb,
   ListTodo,
   Loader2,
@@ -60,6 +61,7 @@ import {
   type ToolContent,
   type ToolState,
   type ModelRef,
+  secretAttachment,
 } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 import { useAgentColor, useAssistantModels } from '@/hooks/useAssistant';
@@ -238,10 +240,10 @@ function QueuedBubble({
   onCancel?: () => void;
   onSendNow?: () => void;
 }) {
-  const { text, paths } = splitAttachedPaths(message.payload.text);
+  const { text, paths, secrets } = splitAttachedPaths(message.payload.text);
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-      <Attachments files={message.payload.files} paths={paths} />
+      <Attachments files={message.payload.files} paths={paths} secrets={secrets} />
       {text.trim() && (
         <div className="whitespace-pre-wrap wrap-anywhere rounded-3xl border border-dashed border-border px-5 py-2.5 leading-7 text-muted-foreground">
           {text}
@@ -277,8 +279,8 @@ function QueuedBubble({
 }
 
 /** A message's files, and those it named by path at the end of its text (`withAttachedPaths`). */
-function Attachments({ files = [], paths = [] }: { files?: PromptFile[]; paths?: string[] }) {
-  if (files.length === 0 && paths.length === 0) return null;
+function Attachments({ files = [], paths = [], secrets = [] }: { files?: PromptFile[]; paths?: string[]; secrets?: string[] }) {
+  if (files.length === 0 && paths.length === 0 && secrets.length === 0) return null;
   return (
     <ul className="flex flex-wrap items-end justify-end gap-1.5" aria-label="Attachments">
       {files.map((file, index) => (
@@ -287,16 +289,19 @@ function Attachments({ files = [], paths = [] }: { files?: PromptFile[]; paths?:
       {paths.map((path) => (
         <AttachmentItem key={path} file={attachmentOf(path)} />
       ))}
+      {secrets.map((name) => (
+        <AttachmentItem key={`secret:${name}`} file={secretAttachment(name)} />
+      ))}
     </ul>
   );
 }
 
 function UserBubble({ message, onFork }: { message: UserMessage; onFork?: () => void }) {
-  const { text, paths } = splitAttachedPaths(message.text);
+  const { text, paths, secrets } = splitAttachedPaths(message.text);
   const hasText = !!text.trim();
   return (
     <div className="flex max-w-[80%] flex-col items-end gap-1.5">
-      <Attachments files={message.files} paths={paths} />
+      <Attachments files={message.files} paths={paths} secrets={secrets} />
       <ContextMenu>
         <ContextMenuTrigger asChild disabled={!hasText && !onFork}>
           <div className={cn('whitespace-pre-wrap wrap-anywhere rounded-3xl bg-muted px-5 py-2.5 leading-7 text-foreground', !hasText && 'hidden')}>
@@ -790,6 +795,7 @@ const TOOL_KINDS: [RegExp, ToolKind][] = [
   [/^todo/, { icon: ListTodo, active: fixed('Updating the plan'), past: fixed('Updated the plan'), count: counted('updated the plan', 'updated the plan # times') }],
   [/^(task|subagent|agent)/, { icon: Bot, active: fixed('Delegating'), past: fixed('Delegated'), count: counted('started a subagent', 'started # subagents'), target: (input) => str(input.description) }],
   [/^skill/, { icon: Sparkles, active: fixed('Loading skill'), past: fixed('Loaded skill'), count: counted('loaded a skill', 'loaded # skills'), target: (input) => str(input.id) ?? str(input.name) }],
+  [/(^|__)ask_secret$/, { icon: KeyRound, active: fixed('Asking you for'), past: fixed('Asked you for'), count: counted('asked you for a secret', 'asked you for # secrets'), target: (input) => (str(input.name) ? `$${str(input.name)}` : undefined), distinct: true }],
   [/^question/, { icon: MessageCircleQuestion, active: fixed('Asking you'), past: fixed('Asked you'), count: counted('asked you a question', 'asked you # questions') }],
 ];
 

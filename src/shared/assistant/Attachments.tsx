@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Copy, ExternalLink, FileText, FolderOpen, Pause, Play, X } from 'lucide-react';
+import { Copy, ExternalLink, FileText, FolderOpen, KeyRound, Pause, Play, X } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { secretName } from '@/lib/assistant';
 import { fileUrl } from '@/lib/fs';
 import { cn } from '@/lib/utils';
 import { AUDIO_NAME, pathOfFileUri } from '@/shared/assistant/attachedFiles';
@@ -91,6 +92,7 @@ export function AttachmentItem({
   const [open, setOpen] = useState(false);
   const name = file.name ?? file.mime ?? 'Attachment';
   const path = file.path ?? (file.uri ? pathOfFileUri(file.uri) : null);
+  const secret = secretName(file);
   const audio = !!path && (file.mime ? file.mime.startsWith('audio/') : AUDIO_NAME.test(path));
   const withMenu = (item: ReactNode) => (
     <AttachmentMenu path={path} onRemove={onRemove}>
@@ -141,8 +143,18 @@ export function AttachmentItem({
         className,
       )}
     >
-      {audio && path ? <AudioToggle path={path} name={name} /> : <FileText className="size-3.5 shrink-0" aria-hidden />}
-      <span className="truncate" title={path ?? name}>
+      {audio && path ? (
+        <AudioToggle path={path} name={name} />
+      ) : secret !== null ? (
+        <KeyRound className="size-3.5 shrink-0 text-ink-accent" aria-hidden />
+      ) : (
+        <FileText className="size-3.5 shrink-0" aria-hidden />
+      )}
+      <span
+        className={cn('truncate', secret !== null && 'font-mono')}
+        title={secret !== null ? `Secret: $${secret}, an environment variable of this conversation’s commands` : (path ?? name)}
+      >
+        {secret !== null && <span className="sr-only">Secret </span>}
         {name}
       </span>
       {remove}

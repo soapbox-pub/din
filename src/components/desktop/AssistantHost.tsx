@@ -397,6 +397,7 @@ const QuickPrompt = memo(function QuickPrompt() {
                   <AssistantHostContext value={host}>
                     <Composer
                       textareaRef={textareaRef}
+                      secrets
                       busy={start.isPending}
                       placeholder="What should it do?"
                       onSubmit={submit}

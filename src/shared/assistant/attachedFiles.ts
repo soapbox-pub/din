@@ -1,4 +1,4 @@
-import type { PromptAttachment } from '@/lib/assistant';
+import { secretName, type PromptAttachment } from '@/lib/assistant';
 import { getFsBridge } from '@/lib/fs';
 
 /**
@@ -39,8 +39,14 @@ export function attachmentOf(path: string): PromptAttachment {
   return { uri: fileUri(path), name: path.split('/').pop() || path };
 }
 
+/** How a secret goes in the message: its name, and how to use it. */
+const ATTACHED_SECRET = 'Attached secret: $';
+const SECRET_NOTE = ' (an environment variable of this conversation’s shell commands; use it by reference and never print its value)';
+const SECRET_LINE = /^Attached secret: \$([A-Za-z_][A-Za-z0-9_]*)\b/;
+
 /** Whether the model gets a file itself (a pasted picture, a picture or PDF on disk), not its path. */
 function modelReads(file: PromptAttachment): boolean {
+  if (secretName(file) !== null) return false;
   const path = pathOfFileUri(file.uri);
   return path === null || MODEL_READS.test(path);
 }
@@ -48,26 +54,41 @@ function modelReads(file: PromptAttachment): boolean {
 /**
  * A message as it's sent: files the model reads stay attached, and the rest
  * are named at the end of the text, one `Attached file: <path>` line each.
+ * Secrets are named there too (`Attached secret: $NAME`) and stay among the
+ * files, whose values `assistantApi.prompt` hands to the conversation.
  */
 export function withAttachedPaths(text: string, files: PromptAttachment[]): { text: string; files: PromptAttachment[] } {
-  const paths = files.flatMap((f) => (modelReads(f) ? [] : [pathOfFileUri(f.uri)!]));
-  if (paths.length === 0) return { text, files };
-  const block = paths.map((p) => ATTACHED + p).join('\n');
-  return { text: text ? `${text}\n\n${block}` : block, files: files.filter(modelReads) };
+  const lines = files.flatMap((f) => {
+    if (modelReads(f)) return [];
+    const secret = secretName(f);
+    return [secret !== null ? ATTACHED_SECRET + secret + SECRET_NOTE : ATTACHED + pathOfFileUri(f.uri)!];
+  });
+  if (lines.length === 0) return { text, files };
+  const block = lines.join('\n');
+  return { text: text ? `${text}\n\n${block}` : block, files: files.filter((f) => modelReads(f) || secretName(f) !== null) };
 }
 
 /**
- * A sent message's text without the paths `withAttachedPaths` put at its
- * end, and those paths: shown as attachments again, and back in the
+ * A sent message's text without the paths and secrets `withAttachedPaths`
+ * put at its end, and those: shown as attachments again, and back in the
  * composer as such when it's undone.
  */
-export function splitAttachedPaths(text: string): { text: string; paths: string[] } {
+export function splitAttachedPaths(text: string): { text: string; paths: string[]; secrets: string[] } {
   const lines = text.split('\n');
   const paths: string[] = [];
-  while (lines.length > 0 && lines.at(-1)!.startsWith(`${ATTACHED}/`)) paths.unshift(lines.pop()!.slice(ATTACHED.length));
-  if (paths.length === 0 || (lines.length > 0 && lines.at(-1) !== '')) return { text, paths: [] };
+  const secrets: string[] = [];
+  for (;;) {
+    const last = lines.at(-1);
+    if (last === undefined) break;
+    const secret = SECRET_LINE.exec(last);
+    if (secret) secrets.unshift(secret[1]);
+    else if (last.startsWith(`${ATTACHED}/`)) paths.unshift(last.slice(ATTACHED.length));
+    else break;
+    lines.pop();
+  }
+  if ((paths.length === 0 && secrets.length === 0) || (lines.length > 0 && lines.at(-1) !== '')) return { text, paths: [], secrets: [] };
   while (lines.length > 0 && lines.at(-1) === '') lines.pop();
-  return { text: lines.join('\n'), paths };
+  return { text: lines.join('\n'), paths, secrets };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');

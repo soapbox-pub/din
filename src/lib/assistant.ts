@@ -514,10 +514,46 @@ export interface OAuthAttempt {
 
 export type OAuthStatus = { status: 'pending' } | { status: 'complete' } | { status: 'failed'; message: string } | { status: 'expired' };
 
-/** A file attached to a prompt: a path on this computer, or pasted data. */
+/**
+ * A file attached to a prompt: a path on this computer, or pasted data. Or
+ * a secret (`secret:<NAME>`, `secretAttachment`): its `secret` value, held
+ * in memory alone, goes to Din's OpenCode plugin when the message is sent,
+ * not in the message (`handOverSecrets`).
+ */
 export interface PromptAttachment {
   uri: string;
   name?: string;
+  secret?: string;
+}
+
+/** Where a secret's name goes in its attachment's `uri`. */
+export const SECRET_URI = 'secret:';
+
+/** What an environment variable's name may be, as a secret's is. */
+export const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+/** A secret as an attachment: its name, and its value until it's handed over. */
+export function secretAttachment(name: string, value?: string): PromptAttachment {
+  return { uri: `${SECRET_URI}${name}`, name: `$${name}`, ...(value !== undefined ? { secret: value } : {}) };
+}
+
+/** The secret an attachment is, by its name, or null for a file. */
+export function secretName(file: { uri?: string }): string | null {
+  return file.uri?.startsWith(SECRET_URI) ? file.uri.slice(SECRET_URI.length) : null;
+}
+
+/**
+ * Give a conversation the secrets among `files` (an environment variable of
+ * its commands, through Din's OpenCode plugin, os/opencode/plugins/din) and
+ * return the files without them. One already given (no value, as in a
+ * message undone and sent again) is left out.
+ */
+async function handOverSecrets(sessionID: string, files: PromptAttachment[]): Promise<PromptAttachment[]> {
+  for (const file of files) {
+    const name = secretName(file);
+    if (name && file.secret !== undefined) await assistantApi.setSecret(sessionID, name, file.secret);
+  }
+  return files.filter((file) => secretName(file) === null);
 }
 
 // ---------------------------------------------------------------------------
@@ -620,11 +656,28 @@ export const assistantApi = {
       })
     ).data,
 
-  prompt: (sessionID: string, text: string, files: PromptAttachment[] = []) =>
-    call<unknown>('POST', `/api/session/${id(sessionID)}/prompt`, {
+  prompt: async (sessionID: string, text: string, attached: PromptAttachment[] = []) => {
+    const files = await handOverSecrets(sessionID, attached);
+    return call<unknown>('POST', `/api/session/${id(sessionID)}/prompt`, {
       text,
       ...(files.length > 0 ? { files } : {}),
-    }),
+    });
+  },
+
+  /**
+   * Give a conversation a secret: an environment variable of its shell
+   * commands, never in the conversation (Din's OpenCode plugin).
+   */
+  setSecret: (sessionID: string, name: string, value: string) =>
+    call<unknown>('POST', '/api/rpc/din-secrets/set', { input: { sessionID, name, value } }),
+
+  /** Answer the agent's `ask_secret` call `callID`: with the value, or with none to decline. */
+  answerSecret: async (sessionID: string, callID: string, value: string | null) =>
+    (
+      await call<{ output?: { ok?: boolean } }>('POST', '/api/rpc/din-secrets/answer', {
+        input: { sessionID, callID, ...(value !== null ? { value } : {}) },
+      })
+    ).output?.ok === true,
 
   /**
    * Give the agent something the user didn't type, ahead of their next
@@ -634,12 +687,14 @@ export const assistantApi = {
     call<unknown>('POST', `/api/session/${id(sessionID)}/synthetic`, { text, description, resume: false }),
 
   /** Run a slash command (`/review branch` is `review` with `branch`). */
-  command: (sessionID: string, name: string, text: string, files: PromptAttachment[] = []) =>
-    call<unknown>('POST', `/api/session/${id(sessionID)}/command`, {
+  command: async (sessionID: string, name: string, text: string, attached: PromptAttachment[] = []) => {
+    const files = await handOverSecrets(sessionID, attached);
+    return call<unknown>('POST', `/api/session/${id(sessionID)}/command`, {
       name,
       text,
       ...(files.length > 0 ? { files } : {}),
-    }),
+    });
+  },
 
   /** Summarize the conversation so far, to free up the model's context. */
   compact: (sessionID: string) => call<unknown>('POST', `/api/session/${id(sessionID)}/compact`, {}),
