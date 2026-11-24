@@ -22,8 +22,8 @@
 //
 // Going live: Studio sends the picture it composes, already encoded, and
 // FFmpeg turns its Opus into the AAC that RTMP wants and pushes it to the
-// destination. Stream keys are kept here, sealed with the login keyring
-// (safeStorage), and never go back to the app.
+// destination. Stream keys are kept here, sealed (electron/sealing.mts),
+// and never go back to the app.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -34,7 +34,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { app, ipcMain, safeStorage, screen, webContents, type BrowserWindow } from 'electron';
+import { app, ipcMain, screen, webContents, type BrowserWindow } from 'electron';
+import { needsReseal, seal, unseal } from './sealing.mts';
 import { pointerArrow } from './cursor.mts';
 import { findRecorder, lastError, recorderArgs, RENDER_NODE } from './screen-recorder.mts';
 
@@ -1307,7 +1308,7 @@ interface StoredDestination {
   service: Destination['service'];
   name: string;
   server: string;
-  /** `enc:` + safeStorage ciphertext (base64), or `plain:` where there's no keyring; empty for none. */
+  /** Sealed (electron/sealing.mts); empty for none. */
   key: string;
 }
 
@@ -1315,24 +1316,27 @@ function destinationsFile(): string {
   return path.join(app.getPath('userData'), 'studio', 'destinations.json');
 }
 
-function seal(secret: string): string {
-  if (safeStorage.isEncryptionAvailable()) return `enc:${safeStorage.encryptString(secret).toString('base64')}`;
-  return `plain:${Buffer.from(secret, 'utf8').toString('base64')}`;
-}
-
-function unseal(sealed: string): string {
-  if (sealed.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'));
-  if (sealed.startsWith('plain:')) return Buffer.from(sealed.slice(6), 'base64').toString('utf8');
-  return '';
-}
-
 function loadDestinations(): StoredDestination[] {
+  let list: StoredDestination[];
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(destinationsFile(), 'utf8'));
-    return Array.isArray(parsed) ? (parsed as StoredDestination[]).filter((d) => d && typeof d.id === 'string') : [];
+    list = Array.isArray(parsed) ? (parsed as StoredDestination[]).filter((d) => d && typeof d.id === 'string') : [];
   } catch {
     return [];
   }
+  // Keys saved before there was dindaemon or a keyring are sealed again with it.
+  let resealed = false;
+  for (const d of list) {
+    if (typeof d.key !== 'string' || !needsReseal(d.key)) continue;
+    try {
+      d.key = seal(unseal(d.key));
+      resealed = true;
+    } catch {
+      // Unreadable either way: going live asks for it again.
+    }
+  }
+  if (resealed) saveDestinations(list);
+  return list;
 }
 
 function saveDestinations(list: StoredDestination[]): void {

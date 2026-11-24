@@ -11,8 +11,9 @@
 // to several people go to those as one group text.
 //
 // The phones and their messages live here. Each phone's messages are kept in
-// userData/phone/<id>.json, sealed with safeStorage (the login keyring) so
-// they're unreadable off this computer, and never go anywhere else: an
+// userData/phone/<id>.json, sealed (electron/sealing.mts: dindaemon's key on
+// DinOS, the login keyring elsewhere) so they're unreadable off this
+// computer, and never go anywhere else: an
 // iPhone can't send them again. A backend reports messages and contacts as
 // it gets them; this file merges them, works out the conversations and their
 // names, and pushes `phone:changed` (the phones), `phone:messages` (which
@@ -35,7 +36,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, ipcMain, safeStorage } from 'electron';
+import { app, ipcMain } from 'electron';
+import { needsReseal, seal, unseal } from './sealing.mts';
 import { bluetoothPhones, onBluetoothChanged } from './bluetooth.mts';
 import { extractCode, forgetCodes, noteCode } from './phone-codes.mts';
 import { groupThreadId, MapConnection } from './phone-map.mts';
@@ -174,17 +176,6 @@ function writeFile(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
-function seal(text: string): string {
-  if (safeStorage.isEncryptionAvailable()) return `enc:${safeStorage.encryptString(text).toString('base64')}`;
-  return `plain:${Buffer.from(text, 'utf8').toString('base64')}`;
-}
-
-function unseal(sealed: string): string {
-  if (sealed.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'));
-  if (sealed.startsWith('plain:')) return Buffer.from(sealed.slice(6), 'base64').toString('utf8');
-  return '';
-}
-
 function loadPhones(): void {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(path.join(dir(), 'phones.json'), 'utf8'));
@@ -209,13 +200,18 @@ function phoneData(id: string): PhoneData {
   let d = data.get(id);
   if (d) return d;
   d = { threads: {}, hidden: {}, contacts: [] };
+  let resealed = false;
   try {
-    const parsed = JSON.parse(unseal(fs.readFileSync(dataFile(id), 'utf8'))) as Partial<PhoneData>;
+    const sealed = fs.readFileSync(dataFile(id), 'utf8');
+    const parsed = JSON.parse(unseal(sealed)) as Partial<PhoneData>;
     d = { threads: parsed.threads ?? {}, hidden: parsed.hidden ?? {}, contacts: parsed.contacts ?? [] };
+    resealed = needsReseal(sealed);
   } catch {
-    // None yet, or sealed with a keyring that's gone.
+    // None yet, or sealed with a key that's gone.
   }
   data.set(id, d);
+  // Saved before there was dindaemon or a keyring: sealed again with it.
+  if (resealed) scheduleSave(id);
   return d;
 }
 
@@ -734,7 +730,7 @@ export function registerPhoneHandlers(options: Deps): void {
     for (const p of phones) connections.get(p.id)?.bluetoothChanged?.();
   });
 
-  // safeStorage needs the app to be ready, which it is by now.
+  // Sealing is ready by now (main.mts waits for it).
   for (const p of phones) start(p);
   void refreshBluetoothCandidates();
   startReceiving({ sender: fileSender, emit: (update) => deps.sendToShell('phone:receive', update) });

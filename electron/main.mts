@@ -195,6 +195,7 @@ import { argsForDin, drives, isComputerRoot, isWindowsHidden } from './windows-p
 import { LOCAL_FILE_SCHEME, registerFileOpsHandlers, registerLocalFileProtocol } from './files.mts';
 import { registerProjectHandlers } from './project.mts';
 import { startWatchdog } from './watchdog.mts';
+import { startSealing } from './sealing.mts';
 
 // electron-chrome-context-menu ships CJS only, but exports the builder as a
 // named export too, which Node's ESM-CJS interop resolves statically.
@@ -384,7 +385,8 @@ if (process.env.DIN_DESKTOP_SESSION === '1' && hasSessionBus) {
   app.commandLine.appendSwitch('enable-features', PIPEWIRE_CAMERA_FEATURE);
 }
 
-// safeStorage (Mail's passwords, the bunker's keys, Chromium's cookies) picks
+// safeStorage (Chromium's cookies, and Din's own secrets where dindaemon
+// isn't there to seal them: electron/sealing.mts) picks
 // its Linux keyring by XDG_CURRENT_DESKTOP, and knows only the big desktops:
 // for Din's own session ("Din", or nothing at all on DinOS) it would settle
 // for basic_text, a key written into Chromium, and isEncryptionAvailable()
@@ -6435,7 +6437,10 @@ function registerDevtoolsHandlers(): void {
 // Before the default session is created (electron/user-agent.mts).
 setupUserAgents();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // The key secrets are sealed with, before anything reads one (electron/sealing.mts).
+  await startSealing();
+
   if (process.env.DIN_DESKTOP_SESSION === '1' && hasSessionBus) {
     sessionBusAddress().then(allowCameraThroughPortal).catch((error) => {
       console.warn('Could not allow the camera through the desktop portal:', error);

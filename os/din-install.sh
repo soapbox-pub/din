@@ -70,13 +70,15 @@ MIN_INSTALL_BYTES=$((56 * GIB))
 HEADROOM_BYTES=$((8 * GIB))
 # What a reinstall carries over from the old root, besides home: saved WiFi,
 # Bluetooth pairings, the keyboard layout, the Nostr account keys (nostrd's
-# store), the machine's identity, and NixOS's record of the ids it handed
-# out (which files in home are owned by).
+# store), the key Din's secrets in home are sealed with (dindaemon's), the
+# machine's identity, and NixOS's record of the ids it handed out (which
+# files in home are owned by).
 KEEP_PATHS=(
   etc/NetworkManager/system-connections
   var/lib/bluetooth
   var/lib/din/keyboard
   var/lib/nostrd
+  var/lib/dindaemon
   var/lib/nixos
   etc/machine-id
 )

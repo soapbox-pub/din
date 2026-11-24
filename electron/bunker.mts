@@ -24,7 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { app, ipcMain, safeStorage } from 'electron';
+import { app, ipcMain } from 'electron';
+import { needsReseal, seal, unseal } from './sealing.mts';
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent, type Event } from 'nostr-tools/pure';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
@@ -53,7 +54,7 @@ interface BunkerGrants {
 interface StoredConnection {
   /** The connection's own public key (hex): what the client talks to. */
   id: string;
-  /** Its secret key: `enc:` + safeStorage ciphertext (base64), or `hex:` where there's no keyring. */
+  /** Its secret key, hex, sealed (electron/sealing.mts); `hex:` and the hex as it is from before. */
   key: string;
   /** The account (hex pubkey) this connection signs for. */
   account: string;
@@ -122,24 +123,21 @@ function storePath(): string {
 }
 
 function sealKey(secretKey: Uint8Array): string {
-  const hex = Buffer.from(secretKey).toString('hex');
-  if (safeStorage.isEncryptionAvailable()) {
-    return `enc:${safeStorage.encryptString(hex).toString('base64')}`;
-  }
-  return `hex:${hex}`;
+  return seal(Buffer.from(secretKey).toString('hex'));
 }
 
 function unsealKey(sealed: string): Uint8Array | null {
   try {
-    const hex = sealed.startsWith('enc:')
-      ? safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'))
-      : sealed.startsWith('hex:')
-        ? sealed.slice(4)
-        : '';
+    const hex = sealed.startsWith('hex:') ? sealed.slice(4) : unseal(sealed);
     return HEX64.test(hex) ? Uint8Array.from(Buffer.from(hex, 'hex')) : null;
   } catch {
     return null;
   }
+}
+
+/** Whether a stored key would be kept better sealed again now. */
+function keyNeedsReseal(sealed: string): boolean {
+  return sealed.startsWith('hex:') || needsReseal(sealed);
 }
 
 function isDecision(value: unknown): value is Decision {
@@ -190,14 +188,15 @@ function load(): void {
   } catch {
     connections = [];
   }
-  // Keys saved while there was no keyring are sealed once there is.
-  if (safeStorage.isEncryptionAvailable() && connections.some((c) => c.key.startsWith('hex:'))) {
-    for (const c of connections) {
-      const secretKey = secretKeys.get(c.id);
-      if (c.key.startsWith('hex:') && secretKey) c.key = sealKey(secretKey);
-    }
-    save();
+  // Keys saved before there was dindaemon or a keyring are sealed again with it.
+  let resealed = false;
+  for (const c of connections) {
+    const secretKey = secretKeys.get(c.id);
+    if (!secretKey || !keyNeedsReseal(c.key)) continue;
+    c.key = sealKey(secretKey);
+    resealed = true;
   }
+  if (resealed) save();
 }
 
 function save(): void {
@@ -516,7 +515,7 @@ export function registerBunkerHandlers(d: Deps): void {
     load();
     for (const c of connections) listen(c);
   };
-  // safeStorage needs the app to be ready, which it is by now.
+  // Sealing is ready by now (main.mts waits for it).
   ensureLoaded();
 
   ipcMain.handle('bunker:list', (event) => {

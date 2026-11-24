@@ -89,7 +89,7 @@ export function SettingsWindow({ state }: { state: PasswordsState }) {
               Unlock when you sign in
             </Label>
             <p className="text-xs text-muted-foreground">
-              Your computer’s password opens Passwords at login, through the login keyring. Off, it asks for its password each time.
+              Passwords opens at login without asking for its password. Off, it asks each time.
             </p>
           </div>
           <Switch id="auto-unlock" checked={state.autoUnlock} onCheckedChange={(on) => void bridge?.setAutoUnlock(on)} />

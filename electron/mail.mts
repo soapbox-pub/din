@@ -3,8 +3,8 @@
 //
 // Apps can't open sockets, so the accounts live here. Each account's
 // settings are kept in userData/mail/accounts.json with its password sealed
-// by safeStorage (the login keyring, see main.mts's --password-store; only
-// base64 where there's none), and never go back to the app. Each
+// (electron/sealing.mts: dindaemon's key on DinOS, the login keyring
+// elsewhere), and never go back to the app. Each
 // account gets one IMAP connection for what the app asks (imapflow queues
 // commands behind its mailbox locks), closed after a while without calls,
 // and one more that idles on the inbox from the moment Din starts, Mail
@@ -71,7 +71,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
-import { app, ipcMain, net, powerMonitor, safeStorage } from 'electron';
+import { app, ipcMain, net, powerMonitor } from 'electron';
+import { needsReseal, seal, unseal as unsealSecret } from './sealing.mts';
 import type { ImapFlow, FetchMessageObject, FetchQueryObject, ListResponse, MessageAddressObject, MessageStructureObject, SearchObject } from 'imapflow';
 import type { createTransport } from 'nodemailer';
 import type MailComposer from 'nodemailer/lib/mail-composer';
@@ -115,7 +116,7 @@ interface Deps {
 }
 
 interface StoredAccount extends MailAccount {
-  /** `enc:` + safeStorage ciphertext (base64), or `plain:` where there's no keyring. */
+  /** Sealed (electron/sealing.mts). */
   password: string;
   /** What Din keeps of the account's labels, by id. */
   labels?: SavedLabel[];
@@ -184,22 +185,12 @@ function storePath(): string {
   return path.join(app.getPath('userData'), 'mail', 'accounts.json');
 }
 
-function seal(password: string): string {
-  if (safeStorage.isEncryptionAvailable()) return `enc:${safeStorage.encryptString(password).toString('base64')}`;
-  return `plain:${Buffer.from(password, 'utf8').toString('base64')}`;
-}
-
 function unseal(sealed: string): string {
-  if (sealed.startsWith('enc:')) {
-    try {
-      return safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64'));
-    } catch {
-      // The keyring's key was replaced (Chromium writes a new one when it can't read it), and the old one is gone.
-      throw new Error('Mail can’t read this account’s saved password, because the login keyring’s key changed. Enter the password again in the account’s settings.');
-    }
+  try {
+    return unsealSecret(sealed);
+  } catch (error) {
+    throw new Error(`Mail can’t read this account’s saved password. ${error instanceof Error ? error.message : ''}. Enter the password again in the account’s settings.`, { cause: error });
   }
-  if (sealed.startsWith('plain:')) return Buffer.from(sealed.slice(6), 'base64').toString('utf8');
-  return '';
 }
 
 function load(): void {
@@ -216,11 +207,18 @@ function load(): void {
   } catch {
     accounts = [];
   }
-  // Passwords saved while there was no keyring are sealed once there is.
-  if (safeStorage.isEncryptionAvailable() && accounts.some((a) => a.password.startsWith('plain:'))) {
-    for (const a of accounts) if (a.password.startsWith('plain:')) a.password = seal(unseal(a.password));
-    save();
+  // Passwords saved before there was dindaemon or a keyring are sealed again with it.
+  let resealed = false;
+  for (const a of accounts) {
+    if (!needsReseal(a.password)) continue;
+    try {
+      a.password = seal(unsealSecret(a.password));
+      resealed = true;
+    } catch {
+      // Unreadable either way: the account's settings ask for it again.
+    }
   }
+  if (resealed) save();
 }
 
 function save(): void {

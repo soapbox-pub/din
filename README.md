@@ -280,6 +280,17 @@ vault), and any GPG key whose passphrase is the same, so signing
 commits doesn't ask (`os/din-gpg.py`). Settings → Password changes it
 everywhere at once (`os/din-password.py`, disk first).
 
+Din's own secrets (Mail's passwords, the bunker's keys, phone pairings and
+messages, stream keys, and the key that opens Passwords' vault at login) are
+sealed with a key from **dindaemon** (`os/dindaemon.py`), which runs as its
+own user and gives it only to Din's main process, the one child of
+din-shell's compositor, as nostrd picks its approver. The login keyring would
+hand them to anything `din` runs that asks. Din keeps the key in memory and
+seals with it itself (`electron/sealing.mts`); without dindaemon (a browser,
+`npm run dev`, another distro) it's the login keyring, and secrets sealed
+that way move to dindaemon's key the next time they're read on DinOS.
+Chromium's cookies stay with the keyring, which Electron gives no way around.
+
 `sudo` (Din's own helpers excepted) asks you to approve the command in Din,
 with a click and no password: the agent's commands in the Assistant's
 conversation, others (typed in Din's Terminal, say) from a notification.
@@ -1107,7 +1118,7 @@ files — `git add` new source files before `npm run os:build`.
   too (`electron/phone-mms.mts`), and a text to several people goes as one
   group text; iPhones share texts alone, and nothing can send a picture.
   New texts pop up as notifications with a reply field.
-  Messages are kept only on this computer, sealed with the login keyring.
+  Messages are kept only on this computer, sealed (`electron/sealing.mts`).
 - A text with a verification code in it (`electron/phone-codes.mts` finds
   it) has the code offered in the Web Browser's code fields for 10 minutes,
   as a Mac offers the codes from Messages: the suggestions below the field

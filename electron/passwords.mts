@@ -9,10 +9,12 @@
 //
 // Unlocking at login: deriving the vault's key from its password (Argon2,
 // in passwords-kdf.mts's worker) gives a key that opens the file, and that
-// key - not the password, which is usually the computer's - is kept in the
-// login keyring (secret-service.mts), which the boot screen's password
-// unlocks. Having it gives what having the file does with a lot of guessing;
-// it can't be turned back into the password. To keep it valid the vault is
+// key - not the password, which is usually the computer's - is kept: sealed
+// with dindaemon's key beside the vault on DinOS (keptKey), out of reach of
+// the user's other programs, or elsewhere in the login keyring
+// (secret-service.mts), which the boot screen's password unlocks. Having
+// it gives what having the file does with a lot of guessing; it can't be
+// turned back into the password. To keep it valid the vault is
 // saved with the same KDF salt each time (KeePass draws a new one), and a new
 // one only when its password changes. A save by another app does draw one,
 // and then the next unlock asks for the password once.
@@ -62,7 +64,8 @@ import { getDomain } from 'tldts-experimental';
 import type { KdfRequest } from './passwords-kdf.mts';
 import { parseCsvExport, parseJsonExport, type ImportedItem, type ParsedExport } from './passwords-import.mts';
 import { onCode, recentCodes } from './phone-codes.mts';
-import { deleteSecret, lookupSecret, storeSecret } from './secret-service.mts';
+import { sealingMethod, seal, unseal } from './sealing.mts';
+import { deleteSecret, lookupSecret, storeSecret, type SecretLookup } from './secret-service.mts';
 
 const require = createRequire(import.meta.url);
 
@@ -70,6 +73,8 @@ const KDF_WORKER = path.join(import.meta.dirname, `passwords-kdf${path.extname(i
 const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
 const VAULT_FILE = path.join(DATA_HOME, 'din', 'Passwords.kdbx');
 const KEYRING_ATTRIBUTES = { application: 'din', 'din-secret': 'passwords-key', file: VAULT_FILE };
+/** Where dindaemon seals the vault's key: beside the vault (keptKey). */
+const SEALED_KEY_FILE = path.join(DATA_HOME, 'din', 'Passwords.key');
 /** A key for a vault not made yet, from din-keyring; os/din-keyring.py names it the same. */
 const NEW_KEY_ATTRIBUTES = { application: 'din', 'din-secret': 'passwords-new-key', file: VAULT_FILE };
 const PASSWORD_HELPER = process.env.DIN_PASSWORD;
@@ -101,7 +106,7 @@ export interface PasswordsState {
   locked: boolean;
   /** Where the vault is. */
   file: string;
-  /** Whether it opens at login, from the login keyring. */
+  /** Whether it opens at login, from its kept key (keptKey). */
   autoUnlock: boolean;
   /** Sites (origins) the browser never offers to save a password for. */
   never: string[];
@@ -405,11 +410,64 @@ function notifyChanged(): void {
   }, 50);
 }
 
-/** The keyring's copy of the open vault's key, refreshed. */
+// The vault's key, kept to open it at login: sealed with dindaemon's key in
+// a file beside the vault where there's dindaemon (DinOS), so nothing else
+// running as the user can take it; in the login keyring elsewhere, where any
+// program of the user's could. A key kept in the keyring from before
+// dindaemon moves to the file the first time it's read.
+
+async function writeSealedKey(secret: Buffer): Promise<void> {
+  await fs.mkdir(path.dirname(SEALED_KEY_FILE), { recursive: true, mode: 0o700 });
+  const tmp = `${SEALED_KEY_FILE}.tmp`;
+  await fs.writeFile(tmp, seal(secret.toString('utf8')), { mode: 0o600 });
+  await fs.rename(tmp, SEALED_KEY_FILE);
+}
+
+async function keptKey(): Promise<SecretLookup> {
+  if (sealingMethod() !== 'dindaemon') return lookupSecret(KEYRING_ATTRIBUTES);
+  let sealed: string | null = null;
+  try {
+    sealed = await fs.readFile(SEALED_KEY_FILE, 'utf8');
+  } catch {
+    // None yet: perhaps still in the keyring.
+  }
+  if (sealed !== null) {
+    try {
+      const secret = Buffer.from(unseal(sealed.trim()), 'utf8');
+      // One left in the keyring by a start without dindaemon.
+      void deleteSecret(KEYRING_ATTRIBUTES);
+      return { state: 'found', secret };
+    } catch (error) {
+      console.warn('[passwords] the kept key can’t be opened:', error);
+      return { state: 'missing' };
+    }
+  }
+  const found = await lookupSecret(KEYRING_ATTRIBUTES);
+  if (found.state === 'found') {
+    await writeSealedKey(found.secret);
+    await deleteSecret(KEYRING_ATTRIBUTES);
+  }
+  return found;
+}
+
+async function keepKey(secret: Buffer): Promise<void> {
+  if (sealingMethod() !== 'dindaemon') {
+    await storeSecret('Passwords (Din)', KEYRING_ATTRIBUTES, secret);
+    return;
+  }
+  await writeSealedKey(secret);
+  await deleteSecret(KEYRING_ATTRIBUTES);
+}
+
+async function forgetKey(): Promise<void> {
+  await fs.rm(SEALED_KEY_FILE, { force: true }).catch(() => {});
+  await deleteSecret(KEYRING_ATTRIBUTES);
+}
+
+/** The kept copy of the open vault's key, refreshed. */
 async function rememberKey(): Promise<void> {
   if (!settings.autoUnlock || !knownKey) return;
-  const secret = Buffer.from(JSON.stringify({ salt: knownKey.salt, key: Buffer.from(knownKey.key).toString('base64') }));
-  await storeSecret('Passwords (Din)', KEYRING_ATTRIBUTES, secret);
+  await keepKey(Buffer.from(JSON.stringify({ salt: knownKey.salt, key: Buffer.from(knownKey.key).toString('base64') })));
 }
 
 function isWrongKey(error: unknown): boolean {
@@ -450,7 +508,7 @@ async function unlockWithPassword(password: string): Promise<void> {
 
 type AutoUnlock = 'unlocked' | 'retry' | 'no';
 
-/** A key kept in the keyring: `{ salt, key }`, both base64. */
+/** A kept key: `{ salt, key }`, both base64. */
 function parseKey(secret: Buffer): DerivedKey | null {
   try {
     const parsed = JSON.parse(secret.toString()) as { salt?: unknown; key?: unknown };
@@ -499,7 +557,7 @@ async function unlockFromKeyring(): Promise<AutoUnlock> {
   if (vault) return 'unlocked';
   if (!(await exists())) return createFromKeyring();
   if (!settings.autoUnlock || lockedByUser) return 'no';
-  const found = await lookupSecret(KEYRING_ATTRIBUTES);
+  const found = await keptKey();
   if (found.state === 'locked' || found.state === 'unavailable') return 'retry';
   if (found.state !== 'found') return 'no';
   const key = parseKey(found.secret);
@@ -517,7 +575,7 @@ async function unlockFromKeyring(): Promise<AutoUnlock> {
   } catch (error) {
     knownKey = null;
     // Another app saved the vault with a new salt: the password opens it next.
-    if (isWrongKey(error)) void deleteSecret(KEYRING_ATTRIBUTES);
+    if (isWrongKey(error)) void forgetKey();
     else console.warn('[passwords] unlocking from the keyring:', error);
     return 'no';
   }
@@ -1700,7 +1758,7 @@ export function registerPasswordsHandlers(opts: Options): void {
     settings.autoUnlock = on === true;
     await saveSettings();
     if (settings.autoUnlock) await rememberKey();
-    else await deleteSecret(KEYRING_ATTRIBUTES);
+    else await forgetKey();
     notifyChanged();
   }));
   handle('forgetNever', async (origin) => {

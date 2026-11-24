@@ -13,7 +13,7 @@ export interface PasswordsState {
   locked: boolean;
   /** Where the vault is. */
   file: string;
-  /** Whether it opens at login, from the login keyring. */
+  /** Whether it opens at login, from its kept key. */
   autoUnlock: boolean;
   /** Sites (origins) the browser never offers to save a password for. */
   never: string[];
@@ -122,7 +122,7 @@ export function isKdbx(head: Uint8Array): boolean {
 }
 
 export interface PasswordsBridge {
-  /** Tries the login keyring first, while the vault is locked and wasn't locked by hand. */
+  /** Tries the kept key first, while the vault is locked and wasn't locked by hand. */
   state(): Promise<PasswordsState>;
   create(password: string): Promise<void>;
   /** Make the vault with the computer's password, once it's checked to be that. */

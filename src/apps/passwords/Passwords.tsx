@@ -77,7 +77,7 @@ function TitleBar({ children, className }: { children?: React.ReactNode; classNa
  *
  * The vault is Electron main's (din.system.passwords, the `passwords`
  * permission; electron/passwords.mts): a KeePass file that opens at login
- * from the login keyring. The Web Browser fills its logins in and offers to
+ * with a key Din keeps. The Web Browser fills its logins in and offers to
  * save new ones; this is where they're seen and edited. Launch params
  * `{ item?: string }` show an item.
  */

@@ -621,6 +621,8 @@ let
     export DIN_WINE_VKD3D_X86=${featurePart "windows" "vkd3d"}/x86
     export DIN_AIRPLAY_PORTS=${toString airplayPorts.from}-${toString airplayPorts.to}
     export DIN_NOSTRD_SOCKET=/run/nostrd/signer.sock
+    # The key Din seals its secrets with (electron/sealing.mts).
+    export DIN_DINDAEMON_SOCKET=/run/dindaemon/dindaemon.sock
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
     export DIN_QEMU=${featurePart "vms" "qemu"}/bin/qemu-system-x86_64
@@ -1164,6 +1166,57 @@ in
     approverUnit = "din-shell.service";
   };
 
+  # dindaemon: the key Din seals its secrets with (Mail's passwords, the
+  # bunker's keys, phone pairings, stream keys, Passwords' vault key), as its
+  # own user, given only to Din's main process, the one child of din-shell's
+  # compositor (os/dindaemon.py, electron/sealing.mts). Sealed with the login
+  # keyring instead, they'd open for anything `din` runs.
+  users.users.dindaemon = {
+    isSystemUser = true;
+    group = "dindaemon";
+  };
+  users.groups.dindaemon = { };
+  systemd.services.dindaemon = {
+    description = "The key Din seals its secrets with";
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      User = "dindaemon";
+      Group = "dindaemon";
+      ExecStart = lib.escapeShellArgs [
+        "${pkgs.python3}/bin/python3" "-I" "${./dindaemon.py}"
+        "--user" "din"
+        "--unit" "din-shell.service"
+        "--systemctl" "${config.systemd.package}/bin/systemctl"
+        "--state-dir" "/var/lib/dindaemon"
+        "--socket" "/run/dindaemon/dindaemon.sock"
+      ];
+      Restart = "on-failure";
+      StateDirectory = "dindaemon";
+      StateDirectoryMode = "0700";
+      RuntimeDirectory = "dindaemon";
+      RuntimeDirectoryMode = "0755";
+      UMask = "0077";
+      LimitCORE = 0;
+      NoNewPrivileges = true;
+      PrivateNetwork = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectControlGroups = true;
+      # Telling Din's main process from the rest takes reading `din`'s
+      # /proc/<pid>/stat.
+      ProtectProc = "default";
+      RestrictAddressFamilies = [ "AF_UNIX" ];
+      RestrictNamespaces = true;
+      LockPersonality = true;
+      SystemCallFilter = [ "@system-service" ];
+      SystemCallArchitectures = "native";
+    };
+  };
+
   # Din Drive: the encrypted drive on Nostr and Blossom, mounted at ~/Drive
   # by a user service once Settings → Drive has set it up (`din-drive init`).
   # It signs and decrypts through nostrd, so it never holds the keys.
@@ -1413,9 +1466,10 @@ in
       "plymouth-quit.service"
       "systemd-logind.service"
       "getty@tty1.service"
+      "dindaemon.service"
     ];
     before = [ "graphical.target" ];
-    wants = [ "dbus.socket" "systemd-logind.service" "plymouth-quit.service" ];
+    wants = [ "dbus.socket" "systemd-logind.service" "plymouth-quit.service" "dindaemon.service" ];
     wantedBy = [ "graphical.target" ];
     conflicts = [ "getty@tty1.service" ];
     # A system switch must never restart it: that's Din, and everything in
