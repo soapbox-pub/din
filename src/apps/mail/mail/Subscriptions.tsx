@@ -200,7 +200,7 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
   const current = sorted.filter((s) => !s.unsubscribed || s.since > 0 || results.has(rowKey(s)));
   const left = sorted.filter((s) => !current.includes(s));
   const chosen = sorted.filter((s) => checked.has(rowKey(s)));
-  const accountName = (id: string) => (accounts.length > 1 ? accounts.find((a) => a.id === id)?.name ?? null : null);
+  const accountName = (id: string) => (accounts.length > 1 ? accounts.find((a) => a.id === id)?.email ?? null : null);
   const openPage = (url: string) => window.open(url);
 
   const check = (s: MailSubscription, on: boolean) =>
@@ -310,7 +310,7 @@ export function Subscriptions({ accounts, onShowMail }: { accounts: MailAccount[
       {[...errors].map(([id, error]) => (
         <div key={id} role="alert" className="flex items-center gap-2 border-b border-border/60 bg-destructive/5 px-5 py-2 text-[13px]">
           <CircleAlert className="size-4 shrink-0 text-destructive" />
-          <span className="min-w-0 flex-1 truncate">{accounts.find((a) => a.id === id)?.name}: {error}</span>
+          <span className="min-w-0 flex-1 truncate">{accounts.find((a) => a.id === id)?.email}: {error}</span>
         </div>
       ))}
 

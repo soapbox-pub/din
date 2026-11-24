@@ -300,7 +300,7 @@ export function Sidebar({
         const list = folders(boxes.get(a.id), info);
         const error = errors.get(a.id);
         return (
-          <Section key={a.id} title={a.name} open={!closed.has(a.id)} onToggle={() => toggle(a.id)} menu={accountMenu(a.id)}>
+          <Section key={a.id} title={a.email} open={!closed.has(a.id)} onToggle={() => toggle(a.id)} menu={accountMenu(a.id)}>
             {error && !list && (
               <button
                 type="button"

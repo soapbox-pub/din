@@ -581,7 +581,7 @@ export function Compose({
         <Overlay label="Save draft" onClose={() => setAsking(null)}>
           <div className="p-5">
             <h2 className="text-[15px] font-semibold">Do you want to save this message as a draft?</h2>
-            <p className="mt-1 text-[13px] text-muted-foreground">Drafts are kept in the account’s Drafts mailbox{account ? ` (${account.name})` : ''}.</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">Drafts are kept in the account’s Drafts mailbox{account ? ` (${account.email})` : ''}.</p>
           </div>
           <div className="flex gap-2 border-t border-border/60 px-5 py-3">
             <DialogButton className="mr-auto" onClick={close}>Don’t Save</DialogButton>

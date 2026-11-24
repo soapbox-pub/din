@@ -93,7 +93,6 @@ export function AccountSetup({ onClose, onAdded, first }: { onClose: () => void;
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [description, setDescription] = useState('');
   const [servers, setServers] = useState<{ imap: MailServer; smtp: MailServer } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,15 +108,13 @@ export function AccountSetup({ onClose, onAdded, first }: { onClose: () => void;
     setError(null);
     try {
       let settings = servers;
-      let found: MailSettings | null = null;
       if (!settings) {
         setBusy('Finding the account’s servers…');
-        found = await mail.discover(address);
+        const found = await mail.discover(address);
         settings = { imap: found.imap, smtp: found.smtp };
       }
       setBusy('Signing in…');
-      const name = description.trim() || (provider && provider !== 'other' ? NAMES[provider] : '') || (found?.provider ? NAMES[found.provider] : '') || address.split('@')[1];
-      const account = await mail.addAccount({ name, fullName: fullName.trim(), email: address, password, imap: settings.imap, smtp: settings.smtp });
+      const account = await mail.addAccount({ name: address, fullName: fullName.trim(), email: address, password, imap: settings.imap, smtp: settings.smtp });
       qc.setQueryData<MailAccount[]>(['mail', 'accounts'], (list) => [...(list ?? []), account]);
       onAdded(account);
     } catch (err) {
@@ -201,12 +198,6 @@ export function AccountSetup({ onClose, onAdded, first }: { onClose: () => void;
               <Label htmlFor="mail-password">Password</Label>
               <Input id="mail-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
             </div>
-            {(servers || provider === 'other') && (
-              <div className="space-y-1.5">
-                <Label htmlFor="mail-description">Description</Label>
-                <Input id="mail-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={email.split('@')[1] || 'Work, Personal…'} />
-              </div>
-            )}
             {servers && (
               <div className="space-y-3">
                 <ServerFields title="Incoming Mail (IMAP)" value={servers.imap} onChange={(imap) => setServers({ ...servers, imap })} />

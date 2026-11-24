@@ -646,7 +646,7 @@ export function Viewer() {
     }));
     const perAccount: MenuItem[] = accounts.map((a) => ({
       id: `account:${a.id}`,
-      label: a.name,
+      label: a.email,
       type: 'submenu',
       items: [
         ...(boxes.get(a.id) ?? []).filter((b) => b.selectable && !labels.get(a.id)?.labels.some((l) => l.path === b.path)).map((b) => ({ id: `box:${a.id}\u0000${b.path}`, label: mailboxTitle(b) })),

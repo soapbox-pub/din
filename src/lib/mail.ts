@@ -17,7 +17,7 @@ export interface MailServer {
 
 export interface MailAccount {
   id: string;
-  /** What the sidebar calls it: "iCloud", "Work". */
+  /** Kept for older copies of Din; Mail calls an account by its address. */
   name: string;
   /** The sender's name on outgoing mail. */
   fullName: string;

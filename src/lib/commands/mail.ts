@@ -40,7 +40,7 @@ const COLOR: Param = { name: 'color', type: 'string', optional: true, choices: L
 
 async function labelIn(account: MailAccount, query: string): Promise<MailLabel> {
   const { kind, labels } = await call(mail().labels(account.id));
-  if (kind === 'none') throw new CommandError(`${account.name}’s server can’t keep labels`);
+  if (kind === 'none') throw new CommandError(`${account.email}’s server can’t keep labels`);
   return pick(labels, query, (l) => [l.id, l.name], 'label');
 }
 
@@ -65,7 +65,7 @@ async function mailboxIn(account: MailAccount, query: string | undefined): Promi
   const boxes = (await call(mail().mailboxes(account.id))).filter((b) => b.selectable);
   if (query) return pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox');
   const inbox = boxes.find((b) => b.special === 'inbox');
-  if (!inbox) throw new CommandError(`${account.name} has no inbox`);
+  if (!inbox) throw new CommandError(`${account.email} has no inbox`);
   return inbox;
 }
 
@@ -98,18 +98,18 @@ export const mailArea: Area = {
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
       return {
-        data: list.map((a) => ({ id: a.id, name: a.name, email: a.email })),
-        text: list.length ? list.map((a) => `${a.name}  ${a.email}`).join('\n') : 'No mail accounts yet; add one in Mail',
+        data: list.map((a) => ({ id: a.id, email: a.email })),
+        text: list.length ? list.map((a) => a.email).join('\n') : 'No mail accounts yet; add one in Mail',
       };
     }),
     command('mail', 'mailboxes', 'Each account’s mailboxes, as Mail’s sidebar lists them, with how many messages each has and how many are unread', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));
       const all = await Promise.all(accounts.map(async (a) => ({ account: a, boxes: (await call(mail().mailboxes(a.id))).filter((b) => b.selectable) })));
       return {
-        data: all.map(({ account, boxes }) => ({ accountId: account.id, account: account.name, mailboxes: boxes })),
+        data: all.map(({ account, boxes }) => ({ accountId: account.id, account: account.email, mailboxes: boxes })),
         text: all
           .map(({ account, boxes }) => [
-            account.name,
+            account.email,
             ...boxes.map((b) => `  ${b.path}${b.name !== b.path ? `  (${b.name})` : ''}  ${b.total.toLocaleString()}${b.unseen ? `, ${b.unseen.toLocaleString()} unread` : ''}`),
           ].join('\n'))
           .join('\n'),
@@ -154,14 +154,14 @@ export const mailArea: Area = {
       const row = ({ account, m }: { account: MailAccount; m: MessageSummary }) => {
         const marks = `${m.seen ? ' ' : '•'}${m.flagged ? '⚑' : ' '}${m.hasAttachments ? '📎' : '  '}`;
         const from = m.from[0] ? m.from[0].name || m.from[0].address : '(no sender)';
-        return `${String(m.uid).padStart(7)} ${marks} ${when(m.date).padEnd(12)}  ${from}  ${m.subject || '(no subject)'}${several ? `  (${account.name})` : ''}`;
+        return `${String(m.uid).padStart(7)} ${marks} ${when(m.date).padEnd(12)}  ${from}  ${m.subject || '(no subject)'}${several ? `  (${account.email})` : ''}`;
       };
       const more = pages.filter((p) => p.page.more);
       const foot = more.length === 1 && !several ? `\nOlder: --before ${more[0].page.next ?? more[0].page.messages.at(-1)?.uid}` : '';
-      const head = pages.map(({ account, box, page }) => `${several ? `${account.name}: ` : ''}${box.name}, ${page.total.toLocaleString()} ${query ? 'found' : unread ? 'unread' : flagged ? 'flagged' : page.total === 1 ? 'message' : 'messages'}`).join('; ');
+      const head = pages.map(({ account, box, page }) => `${several ? `${account.email}: ` : ''}${box.name}, ${page.total.toLocaleString()} ${query ? 'found' : unread ? 'unread' : flagged ? 'flagged' : page.total === 1 ? 'message' : 'messages'}`).join('; ');
       return {
         data: {
-          mailboxes: pages.map(({ account, box, page }) => ({ accountId: account.id, account: account.name, mailbox: box.path, total: page.total, more: page.more, next: page.next ?? page.messages.at(-1)?.uid ?? null })),
+          mailboxes: pages.map(({ account, box, page }) => ({ accountId: account.id, account: account.email, mailbox: box.path, total: page.total, more: page.more, next: page.next ?? page.messages.at(-1)?.uid ?? null })),
           messages: rows.map(({ account, box, m }) => ({ accountId: account.id, mailbox: box.path, ...m })),
         },
         text: rows.length ? `${head}\n${rows.map(row).join('\n')}${foot}` : `${head}: nothing there`,
@@ -199,7 +199,7 @@ export const mailArea: Area = {
     command('mail', 'subscriptions', 'The mailing lists in the inbox, most mail first, as Mail’s Subscriptions shows them', [ACCOUNT, MONTHS], async (args) => {
       const accounts = await accountsFor(args.optString('account'));
       const list = await subscriptions(accounts, args.optNumber('months') ?? 6);
-      const name = (id: string) => accounts.find((a) => a.id === id)?.name ?? id;
+      const name = (id: string) => accounts.find((a) => a.id === id)?.email ?? id;
       return {
         data: list,
         text: list.length
@@ -226,7 +226,7 @@ export const mailArea: Area = {
       const targets = await call(markReadTargets(accounts, query ? (boxes) => pick(boxes, query, (b) => [b.path, b.name, b.special ?? ''], 'mailbox') : undefined));
       const unseen = targets.reduce((n, t) => n + t.box.unseen, 0);
       if (!unseen) return { data: { marked: 0 }, text: 'Nothing unread there' };
-      const where = targets.map((t) => (accounts.length > 1 ? `${t.box.name} (${t.account.name})` : t.box.name)).join(', ');
+      const where = targets.map((t) => (accounts.length > 1 ? `${t.box.name} (${t.account.email})` : t.box.name)).join(', ');
       const ok = await ctx.confirm({
         title: `Mark ${unseen.toLocaleString()} ${unseen === 1 ? 'message' : 'messages'} in ${where} as read?`,
         description: 'They’re marked read on the server too, and there’s no undoing it all at once.',
@@ -271,7 +271,7 @@ export const mailArea: Area = {
     command('mail', 'tab-rules', 'The senders whose mail goes to an inbox tab the user moved it to', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));
       const all = await Promise.all(accounts.map(async (a) => ({ account: a, rules: await call(mail().tabRules(a.id)) })));
-      const rows = all.flatMap(({ account, rules }) => Object.entries(rules).map(([address, tab]) => ({ accountId: account.id, account: account.name, address, tab })));
+      const rows = all.flatMap(({ account, rules }) => Object.entries(rules).map(([address, tab]) => ({ accountId: account.id, account: account.email, address, tab })));
       return {
         data: rows,
         text: rows.length ? rows.map((r) => `${r.address}  ${CATEGORY_NAMES[r.tab]}${accounts.length > 1 ? `  (${r.account})` : ''}`).join('\n') : 'No senders moved to a tab',
@@ -293,10 +293,10 @@ export const mailArea: Area = {
       const accounts = await accountsFor(args.optString('account'));
       const all = await Promise.all(accounts.map(async (a) => ({ account: a, ...(await call(mail().labels(a.id))) })));
       return {
-        data: all.map(({ account, kind, labels }) => ({ accountId: account.id, account: account.name, kind, labels })),
+        data: all.map(({ account, kind, labels }) => ({ accountId: account.id, account: account.email, kind, labels })),
         text: all
           .map(({ account, kind, labels }) => {
-            const head = `${account.name} (${LABEL_KINDS[kind]})`;
+            const head = `${account.email} (${LABEL_KINDS[kind]})`;
             if (kind === 'none') return head;
             return [head, ...(labels.length ? labels.map((l) => `  ${l.name}${l.color ? `  ${l.color}` : ''}`) : ['  No labels yet'])].join('\n');
           })
@@ -310,7 +310,7 @@ export const mailArea: Area = {
     ], async (args) => {
       const account = await oneAccount(args.optString('account'));
       const made = await call(mail().createLabel(account.id, { name: args.string('name'), color: (args.optString('color') as LabelColor | undefined) ?? null }));
-      return { data: made, text: `Made the label ${made.name} in ${account.name}` };
+      return { data: made, text: `Made the label ${made.name} in ${account.email}` };
     }),
     command('mail', 'label-edit', 'Rename a label or change its color, as Mail’s Edit Label… does (a Gmail label is renamed on Gmail too)', [
       { name: 'label', type: 'string', positional: true, help: 'Which label, by name' },

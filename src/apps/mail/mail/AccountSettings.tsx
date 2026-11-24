@@ -91,7 +91,6 @@ function Server({ title, value, onChange }: { title: string; value: MailServer; 
 function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: () => void }) {
   const mail = useMail();
   const qc = useQueryClient();
-  const [name, setName] = useState(account.name);
   const [fullName, setFullName] = useState(account.fullName);
   const [signature, setSignature] = useState(account.signature);
   const [imap, setImap] = useState(account.imap);
@@ -103,7 +102,7 @@ function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: 
   const [confirm, setConfirm] = useState(false);
 
   const dirty =
-    name !== account.name || fullName !== account.fullName || signature !== account.signature || password !== '' ||
+    fullName !== account.fullName || signature !== account.signature || password !== '' ||
     JSON.stringify(imap) !== JSON.stringify(account.imap) || JSON.stringify(smtp) !== JSON.stringify(account.smtp);
 
   const save = async () => {
@@ -113,7 +112,6 @@ function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: 
     try {
       const serversChanged = JSON.stringify(imap) !== JSON.stringify(account.imap) || JSON.stringify(smtp) !== JSON.stringify(account.smtp);
       const updated = await mail.updateAccount(account.id, {
-        name,
         fullName,
         signature,
         ...(password ? { password } : {}),
@@ -141,10 +139,6 @@ function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-        <div className="grid gap-1.5">
-          <Label htmlFor="acct-desc">Description</Label>
-          <Input id="acct-desc" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
         <div className="grid gap-1.5">
           <Label htmlFor="acct-email">Email Address</Label>
           <Input id="acct-email" value={account.email} readOnly className="text-muted-foreground" />
@@ -219,8 +213,7 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
           <div className="min-h-0 flex-1 space-y-px overflow-y-auto">
             {accounts.map((a) => (
               <button key={a.id} type="button" onClick={() => setSelected(a.id)} className={cn('block w-full rounded-md px-2 py-1.5 text-left', selected === a.id ? 'bg-foreground/10' : 'hover:bg-foreground/5')}>
-                <span className="block truncate text-[13px] font-medium">{a.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{a.email}</span>
+                <span className="block truncate text-[13px] font-medium">{a.email}</span>
               </button>
             ))}
           </div>
