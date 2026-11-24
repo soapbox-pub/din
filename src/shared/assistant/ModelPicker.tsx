@@ -19,7 +19,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ClaudeUsageBars } from '@/shared/assistant/ClaudeUsageBars';
 import { useAssistantHost } from '@/shared/assistant/host';
+import { CLAUDE_PROVIDER } from '@/lib/claudeProvider';
 import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { useAssistantIntegrations } from '@/hooks/useAssistant';
 import {
@@ -39,7 +41,8 @@ const PER_PROVIDER = 12;
 /**
  * Which model a conversation uses: the connected providers' models, newest
  * first, searchable by name or id, each with its provider's icon and a
- * rough price. "Manage providers" at the bottom opens Settings → Assistant, where they are.
+ * rough price. "Manage providers" at the bottom opens Settings → Assistant, where they are;
+ * while a Claude model is chosen, the Claude plan's usage shows under it.
  */
 export function ModelPicker({
   models,
@@ -176,6 +179,7 @@ export function ModelPicker({
               </CommandGroup>
             </CommandList>
           </Command>
+          {selected?.providerID === CLAUDE_PROVIDER && <ClaudeUsageBars className="border-t border-border/70 px-3 py-3" />}
         </PopoverContent>
       </Popover>
     </>

@@ -41,7 +41,7 @@ import { revokeSudoGrant } from './askpass.mts';
 import { revokeSignerSession } from './nostrd-approval.mts';
 import { assistantGit } from './assistant-git.mts';
 import { changeSkills, skillSettings } from './assistant-skills.mts';
-import { cancelClaudeLogin, claudeStatus, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
+import { cancelClaudeLogin, claudeStatus, claudeUsage, findClaude, installClaude, sendClaudeLoginCode, startClaudeLogin } from './claude-code.mts';
 
 const INSTALL_DIR = path.join(os.homedir(), '.opencode/bin');
 const STATE_DIR = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'opencode');
@@ -656,6 +656,11 @@ export function registerAssistantHandlers(options: {
   ipcMain.handle('assistant:claudeCancel', (event) => {
     assertShellSender(event);
     cancelClaudeLogin();
+  });
+
+  ipcMain.handle('assistant:claudeUsage', (event, fresh: unknown) => {
+    assertShellSender(event);
+    return claudeUsage(fresh === true);
   });
 
   // Git for the Assistant's side panel (assistant-git.mts). Only the Assistant

@@ -2925,6 +2925,12 @@ expose('assistant', {
   claudeCancel: () => ipcRenderer.invoke('assistant:claudeCancel'),
 
   /**
+   * How much of the Claude plan is used: its session and weekly limits.
+   * @param {boolean} [fresh] Ask Anthropic now rather than within the last 30 seconds.
+   */
+  claudeUsage: (fresh) => ipcRenderer.invoke('assistant:claudeUsage', fresh === true),
+
+  /**
    * Git for the Assistant's side panel (electron/assistant-git.mts): `status`,
    * `log`, `commit`, or `fetch`, `pull`, `push`, `sync`, `forcePull`, `forcePush`.
    * @param {string} op

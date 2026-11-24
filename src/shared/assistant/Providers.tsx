@@ -13,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ClaudeUsageBars } from '@/shared/assistant/ClaudeUsageBars';
 import { ProviderIcon } from '@/shared/assistant/ProviderIcon';
 import { assistantKeys, useAssistantIntegrations, useAssistantModels, useAssistantReady } from '@/hooks/useAssistant';
 import {
@@ -139,7 +140,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
             const name = providerName(integration.id, integration.name);
             const problem = integration.connections.find((c) => c.status)?.status;
             return (
-              <li key={integration.id} className="flex items-center gap-3 py-2.5 pr-2 pl-4">
+              <li key={integration.id} className="flex flex-wrap items-center gap-x-3 py-2.5 pr-2 pl-4">
                 <ProviderIcon providerID={integration.id} baseURL={baseURLs.get(integration.id)} size={20} className="text-foreground/80" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{name}</p>
@@ -179,6 +180,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
                     <Trash2 className="size-4.5" strokeWidth={1.75} aria-hidden />
                   </Button>
                 )}
+                {integration.id === CLAUDE_PROVIDER && !problem && <ClaudeUsageBars className="mt-2 mb-1 basis-full pr-2 pl-8" />}
               </li>
             );
           })}

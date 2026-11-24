@@ -47,6 +47,28 @@ export interface ClaudeCodeStatus {
   error: string | null;
 }
 
+/** One of the Claude plan's limits (electron/claude-code.mts). */
+export interface ClaudeUsageLimit {
+  /** "Current session", "This week", "This week, Opus"… */
+  label: string;
+  /** 0 to 100. */
+  percent: number;
+  /** When it resets, as an ISO time. */
+  resetsAt: string | null;
+  /** Anthropic's say on how close it is: "normal", "warning", "critical"… */
+  severity: string | null;
+}
+
+/** The Claude plan's usage, as Claude Code's /usage shows it. */
+export interface ClaudeUsage {
+  /** "pro", "max"…, when the sign-in says. */
+  plan: string | null;
+  limits: ClaudeUsageLimit[];
+  /** Pay-as-you-go usage past the plan's limits, where it's turned on. */
+  extra: { used: number; limit: number | null; currency: string } | null;
+  checkedAt: string;
+}
+
 /** A skill: instructions the agent loads when a task calls for them. */
 export interface SkillInfo {
   id: string;
@@ -144,6 +166,8 @@ export interface AssistantBridge {
   claudeCode(code: string): Promise<void>;
   /** Stop a sign-in under way. */
   claudeCancel(): Promise<void>;
+  /** How much of the Claude plan is used; `fresh` asks Anthropic now rather than within the last 30 seconds. */
+  claudeUsage(fresh?: boolean): Promise<ClaudeUsage>;
   /** The folders OpenCode finds skills in, their skills, and which are on. The desktop's only. */
   skills(): Promise<SkillSettings>;
   /** Change them, in OpenCode's config: how things stand after. The desktop's only. */

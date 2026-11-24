@@ -269,7 +269,7 @@ function fsBridge(t: NonNullable<Transport['system']>): FsBridge {
 
 function assistantBridge(t: NonNullable<Transport['system']>, sudo: boolean): AssistantBridge {
   const bridge: Record<string, unknown> = {};
-  for (const m of ['status', 'setEnabled', 'install', 'restart', 'checkUpdate', 'upgrade', 'recentModels', 'request', 'claude', 'claudeInstall', 'claudeLogin', 'claudeCode', 'claudeCancel', 'git']) {
+  for (const m of ['status', 'setEnabled', 'install', 'restart', 'checkUpdate', 'upgrade', 'recentModels', 'request', 'claude', 'claudeInstall', 'claudeLogin', 'claudeCode', 'claudeCancel', 'claudeUsage', 'git']) {
     bridge[m] = (...args: unknown[]) => t.call('assistant', `assistant:${m}`, args);
   }
   // sudo's requests are answered only with assistant-sudo; without it there

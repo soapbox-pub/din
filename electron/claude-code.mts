@@ -10,7 +10,10 @@
 // names a little script that hands back the sign-in page, which the shell
 // opens in Din's browser, and its redirect to Claude Code's own localhost
 // listener finishes it. The page printed for other devices gives a code
-// instead, which goes to the command's stdin. Din never sees a token.
+// instead, which goes to the command's stdin. Din never hands a token on:
+// the plan's usage (claudeUsage) reads Claude Code's sign-in here in main and
+// sends it to Anthropic alone, as Claude Code's own /usage does, and only the
+// percentages leave this process.
 //
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
@@ -250,4 +253,166 @@ export function cancelClaudeLogin(): void {
   loginChild?.kill('SIGTERM');
   loginChild = null;
   if (login && login.state !== 'done') login = null;
+}
+
+// ---------------------------------------------------------------------------
+// The plan's usage
+// ---------------------------------------------------------------------------
+
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+/** Asked again at most this often, however many windows show it. */
+const USAGE_CACHE_MS = 30_000;
+
+/** One of the plan's limits: how much of it is used, and when it starts over. */
+export interface ClaudeUsageLimit {
+  /** "Current session", "This week", "This week, Opus"… */
+  label: string;
+  /** 0 to 100. */
+  percent: number;
+  /** When it resets, as an ISO time, or null where it doesn't say. */
+  resetsAt: string | null;
+  /** Anthropic's say on how close it is: "normal", "warning", "critical"… */
+  severity: string | null;
+}
+
+/** The Claude plan's usage, as Claude Code's /usage shows it. */
+export interface ClaudeUsage {
+  /** The plan, "pro" or "max", when the sign-in says. */
+  plan: string | null;
+  limits: ClaudeUsageLimit[];
+  /** Pay-as-you-go usage past the plan's limits, where it's turned on. */
+  extra: { used: number; limit: number | null; currency: string } | null;
+  /** When Anthropic was asked, as an ISO time. */
+  checkedAt: string;
+}
+
+let usageCache: { at: number; usage: Promise<ClaudeUsage> } | null = null;
+
+function credentialsFile(): string {
+  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  return path.join(dir, '.credentials.json');
+}
+
+function readOAuth(): { token: string; expiresAt: number | null; plan: string | null } {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(credentialsFile(), 'utf8');
+  } catch {
+    throw new Error('Claude Code isn’t signed in to a Claude plan');
+  }
+  const oauth = (JSON.parse(raw) as { claudeAiOauth?: Record<string, unknown> }).claudeAiOauth;
+  if (!oauth || typeof oauth.accessToken !== 'string') throw new Error('Claude Code isn’t signed in to a Claude plan');
+  return {
+    token: oauth.accessToken,
+    expiresAt: typeof oauth.expiresAt === 'number' ? oauth.expiresAt : null,
+    plan: typeof oauth.subscriptionType === 'string' ? oauth.subscriptionType : null,
+  };
+}
+
+type Json = Record<string, unknown>;
+const isObject = (value: unknown): value is Json => typeof value === 'object' && value !== null && !Array.isArray(value);
+const num = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
+
+/** What a limit in the reply's `limits` is called, from its kind, group and scope. */
+function limitLabel(limit: Json): string {
+  const kind = str(limit.kind) ?? '';
+  const group = str(limit.group) ?? '';
+  const scope = isObject(limit.scope) ? limit.scope : {};
+  const model = isObject(scope.model) ? str(scope.model.display_name) : null;
+  const surface = isObject(scope.surface) ? str(scope.surface.display_name) : str(scope.surface);
+  const span = /week/.test(kind + group)
+    ? 'This week'
+    : /session|five_hour|5h/.test(kind + group)
+      ? 'Current session'
+      : /day/.test(kind + group)
+        ? 'Today'
+        : /month/.test(kind + group)
+          ? 'This month'
+          : (group || kind).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) || 'Usage';
+  const of = model ?? surface;
+  return of ? `${span}, ${of}` : span;
+}
+
+/** The reply's limits: its `limits` list, else the older five_hour, seven_day… windows. */
+function parseLimits(reply: Json): ClaudeUsageLimit[] {
+  if (Array.isArray(reply.limits) && reply.limits.length > 0) {
+    return reply.limits.filter(isObject).flatMap((limit) => {
+      const percent = num(limit.percent);
+      if (percent === null) return [];
+      return [{ label: limitLabel(limit), percent, resetsAt: str(limit.resets_at), severity: str(limit.severity) }];
+    });
+  }
+  const windows: [string, string][] = [
+    ['five_hour', 'Current session'],
+    ['seven_day', 'This week'],
+    ['seven_day_opus', 'This week, Opus'],
+    ['seven_day_sonnet', 'This week, Sonnet'],
+  ];
+  return windows.flatMap(([key, label]) => {
+    const window = reply[key];
+    const percent = isObject(window) ? num(window.utilization) : null;
+    if (!isObject(window) || percent === null) return [];
+    return [{ label, percent, resetsAt: str(window.resets_at), severity: null }];
+  });
+}
+
+/** An amount as `spend` has it: { amount_minor, currency, exponent }. */
+function money(value: unknown): { amount: number; currency: string } | null {
+  if (!isObject(value)) return null;
+  const minor = num(value.amount_minor);
+  if (minor === null) return null;
+  return { amount: minor / 10 ** (num(value.exponent) ?? 2), currency: str(value.currency) ?? 'USD' };
+}
+
+function parseExtra(reply: Json): ClaudeUsage['extra'] {
+  const spend = reply.spend;
+  if (isObject(spend)) {
+    const used = money(spend.used);
+    if (spend.enabled !== true || !used) return null;
+    return { used: used.amount, limit: money(spend.limit)?.amount ?? null, currency: used.currency };
+  }
+  const extra = reply.extra_usage;
+  if (!isObject(extra) || extra.is_enabled !== true) return null;
+  const places = num(extra.decimal_places) ?? 2;
+  const scale = 10 ** places;
+  const used = num(extra.used_credits) ?? 0;
+  const limit = num(extra.monthly_limit);
+  return { used: used / scale, limit: limit === null ? null : limit / scale, currency: str(extra.currency) ?? 'USD' };
+}
+
+async function fetchUsage(): Promise<ClaudeUsage> {
+  const { token, expiresAt, plan } = readOAuth();
+  if (expiresAt !== null && expiresAt < Date.now()) {
+    throw new Error('Claude Code’s sign-in has expired; it renews the next time the assistant uses Claude');
+  }
+  const response = await fetch(USAGE_URL, {
+    headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': 'Din' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Anthropic didn’t accept Claude Code’s sign-in; sign in to Claude again');
+  }
+  if (!response.ok) throw new Error(`Anthropic couldn’t say how much of the plan is used (${response.status})`);
+  const reply = (await response.json()) as unknown;
+  if (!isObject(reply)) throw new Error('Anthropic’s answer about the plan’s usage couldn’t be read');
+  return { plan, limits: parseLimits(reply), extra: parseExtra(reply), checkedAt: new Date().toISOString() };
+}
+
+/**
+ * How much of the Claude plan Claude Code is signed in to is used: its
+ * session and weekly limits, as Claude Code's /usage shows them. Asked of
+ * Anthropic with Claude Code's own sign-in, at most every 30 seconds unless
+ * `fresh`.
+ */
+export function claudeUsage(fresh = false): Promise<ClaudeUsage> {
+  if (!fresh && usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) return usageCache.usage;
+  const usage = fetchUsage();
+  const entry = { at: Date.now(), usage };
+  usageCache = entry;
+  // A failure isn't kept: the next ask tries again.
+  usage.catch(() => {
+    if (usageCache === entry) usageCache = null;
+  });
+  return usage;
 }

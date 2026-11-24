@@ -2,6 +2,7 @@ import { getAssistantBridge, type SkillInfo, type SkillSettings } from '@/lib/as
 import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceName } from '@/lib/assistantSkills';
 import { connectClaudeProvider } from '@/lib/claudeProvider';
 import { getFsBridge } from '@/lib/fs';
+import { usageText } from '@/shared/assistant/claudeUsage';
 import { CommandError, type Area } from './types';
 import { call, command, need, pick } from './util';
 
@@ -71,6 +72,16 @@ export const assistantArea: Area = {
         ].filter(Boolean).join('\n'),
       };
     }),
+    command(
+      'assistant',
+      'claude-usage',
+      'How much of the Claude plan is used, as Settings → Assistant shows under Claude: its session and weekly limits and when each resets',
+      [],
+      async () => {
+        const usage = await call(assistant().claudeUsage(true));
+        return { data: usage, text: usageText(usage) };
+      },
+    ),
     command(
       'assistant',
       'connect-claude',
