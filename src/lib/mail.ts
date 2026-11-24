@@ -26,6 +26,8 @@ export interface MailAccount {
   smtp: MailServer;
   /** Plain text, added below new messages. */
   signature: string;
+  /** Its color in Mail, kept on this computer; until it's given one, Mail picks one by its place in the list. */
+  color?: LabelColor | null;
 }
 
 export interface NewMailAccount {
@@ -44,6 +46,8 @@ export interface MailAccountPatch {
   password?: string;
   imap?: MailServer;
   smtp?: MailServer;
+  /** Null gives the account back the color Mail picks. */
+  color?: LabelColor | null;
 }
 
 /** What `discover` found for an address: the servers, and which provider they are. */
@@ -406,6 +410,8 @@ export type MailDesktopBridge = Pick<
   MailBridge,
   'accounts' | 'mailboxes' | 'messages' | 'message' | 'send' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule'
 > & {
+  /** Give an account its color in Mail, or (null) back the one Mail picks; nothing else of the account. */
+  setAccountColor(id: string, color: LabelColor | null): Promise<MailAccount>;
   /** Each account's unread mail in its inbox (only Primary's, when only Primary notifies), as last counted. */
   unseen(): Promise<Record<string, number>>;
   onUnseen(cb: (unseen: Record<string, number>) => void): () => void;

@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils';
 import { SidebarHeading, ToolButton } from '@/shared/appChrome';
 import { focusRing, sidebarHeadingClass, sidebarRowClass } from '@/shared/appChromeStyles';
 import { LABEL_COLORS, type LabelColor, type MailAccount, type MailboxInfo, type MailLabel, type MailLabels, type SpecialMailbox } from '@/lib/mail';
-import { sameSelection, type Selection } from './api';
-import { accountColor } from './accounts';
+import { sameSelection, useSetAccountColor, type Selection } from './api';
+import { accountColor, accountDot } from './accounts';
+import { toast } from '@/shared/toast';
 import { MAIL_DRAG, mailboxTitle, SPECIAL_ICONS, SPECIAL_NAMES } from './mailboxes';
 import { shortCount } from './format';
 import { COLOR_NAMES, LABEL_STYLES, labelColor } from './labels';
@@ -268,12 +269,22 @@ export function Sidebar({
   /** What a mailbox's row counts: not the read-anyway ones. */
   const countOf = (box: MailboxInfo) => (box.special === 'sent' || box.special === 'trash' || box.special === 'all' ? 0 : box.unseen);
 
+  const setAccountColor = useSetAccountColor();
+  const pickColor = (id: string, color: LabelColor) =>
+    void setAccountColor(id, color).catch((error: unknown) => toast('Couldn’t change the account’s color', { body: error instanceof Error ? error.message : String(error), destructive: true }));
+
   const accountMenu = (id: string) => (
     <>
       <ContextMenuItem onSelect={onRefresh}>
         <RefreshCw /> Get New Mail
       </ContextMenuItem>
       <ContextMenuSeparator />
+      {several && (
+        <ContextEntries<LabelColor>
+          entries={[{ kind: 'sub', label: 'Color', icon: Palette, items: LABEL_COLORS.map((c) => ({ kind: 'check', pick: c, label: COLOR_NAMES[c], checked: c === accountColor(accounts, id), color: c })) }]}
+          onPick={(c) => pickColor(id, c)}
+        />
+      )}
       <ContextMenuItem onSelect={() => onAccountSettings(id)}>
         <Settings2 /> Account Settings…
       </ContextMenuItem>
@@ -381,7 +392,7 @@ export function Sidebar({
               {expanded && (
                 <div role="group" aria-label={`Each account’s ${name}`} className="mt-0.5 space-y-0.5">
                   {each.map(({ account, box }) =>
-                    mailboxRow(account, box, { icon: undefined, dot: accountColor(accounts, account.id), label: account.email, title: `${mailboxTitle(box)} of ${account.email}`, indent: 16, depth: 1 }),
+                    mailboxRow(account, box, { icon: undefined, dot: accountDot(accounts, account.id), label: account.email, title: `${mailboxTitle(box)} of ${account.email}`, indent: 16, depth: 1 }),
                   )}
                 </div>
               )}
@@ -407,7 +418,7 @@ export function Sidebar({
         const hasLabels = !!info && info.kind !== 'none';
         if (several && list && !list.length && !hasLabels && !error) return null;
         return (
-          <Section key={a.id} title={a.email} dot={several ? accountColor(accounts, a.id) : undefined} open={isOpen(`account:${a.id}`)} onToggle={() => toggle(`account:${a.id}`)} menu={accountMenu(a.id)}>
+          <Section key={a.id} title={a.email} dot={several ? accountDot(accounts, a.id) : undefined} open={isOpen(`account:${a.id}`)} onToggle={() => toggle(`account:${a.id}`)} menu={accountMenu(a.id)}>
             {error && !list && (
               <button
                 type="button"

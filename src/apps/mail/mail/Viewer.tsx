@@ -10,7 +10,7 @@ import { CATEGORY_NAMES, type MailAccount, type MailboxInfo, type MailCategory, 
 import type { MenuItem } from '@/sdk/din';
 import { keywordOf, sourcesOf, useAccounts, useInboxTabs, useLabels, useLiveUpdates, useMail, useMailboxes, useMessage, useMessages, useSetInboxTabs, useTabCounts, type Item, type Selection } from './api';
 import { useLabelActions, useMessageActions } from './actions';
-import { accountColor } from './accounts';
+import { accountDot } from './accounts';
 import { labelsOfItems } from './labels';
 import { DeleteLabelDialog, LabelEditor } from './LabelDialogs';
 import { blankSeed, parseAddresses } from './format';
@@ -345,7 +345,7 @@ export function Viewer() {
   // All Inboxes and the other unified mailboxes mark which address each message came to.
   const accountOf = useMemo(() => {
     if (selection.kind !== 'all' || accounts.length < 2) return undefined;
-    const marks = new Map(accounts.map((a) => [a.id, { email: a.email, color: accountColor(accounts, a.id) }]));
+    const marks = new Map(accounts.map((a) => [a.id, { email: a.email, color: accountDot(accounts, a.id) }]));
     return (id: string) => marks.get(id) ?? null;
   }, [selection.kind, accounts]);
 

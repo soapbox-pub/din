@@ -2546,6 +2546,7 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   if (typeof p.name === 'string') a.name = p.name.trim().slice(0, 100) || a.name;
   if (typeof p.fullName === 'string') a.fullName = p.fullName.trim().slice(0, 200).replace(/[\r\n]/g, ' ');
   if (typeof p.signature === 'string') a.signature = p.signature.slice(0, 10_000);
+  if (p.color !== undefined) a.color = colorArg(p.color);
   const movedServer = a.imap.host !== imap.host || a.imap.port !== imap.port || a.imap.user !== imap.user;
   a.imap = { ...imap };
   a.smtp = { ...smtp };
@@ -2588,6 +2589,8 @@ export function registerMailHandlers(options: Deps): void {
   });
   handle('mail:addAccount', (input) => addAccount(input));
   handle('mail:updateAccount', (id, patch) => updateAccount(id, patch));
+  // `din mail account-color`: the color alone, as Mail's own Color menu changes it.
+  handle('mail:setAccountColor', (id, color) => updateAccount(id, { color: color === null ? null : colorArg(color) }));
   handle('mail:removeAccount', (id) => {
     const a = account(id);
     accounts = accounts.filter((x) => x !== a);

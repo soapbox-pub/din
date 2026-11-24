@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
-import type { InboxTabs, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
+import type { InboxTabs, LabelColor, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
   return useDin().system.mail ?? null;
@@ -48,6 +48,20 @@ export function useAccounts() {
     enabled: !!mail,
     staleTime: Infinity,
   });
+}
+
+/** Give an account its own color, or (null) back the one Mail picks: from Account Settings and the sidebar's Color menu alike. */
+export function useSetAccountColor() {
+  const mail = useMail();
+  const qc = useQueryClient();
+  return useCallback(
+    async (accountId: string, color: LabelColor | null) => {
+      if (!mail) return;
+      const updated = await mail.updateAccount(accountId, { color });
+      qc.setQueryData<MailAccount[]>(ACCOUNTS, (list) => list?.map((a) => (a.id === updated.id ? updated : a)));
+    },
+    [mail, qc],
+  );
 }
 
 export function mailboxesKey(accountId: string) {

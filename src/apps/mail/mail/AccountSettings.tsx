@@ -9,7 +9,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CATEGORY_NAMES, MAIL_CATEGORIES, type InboxTabs, type MailAccount, type MailServer } from '@/lib/mail';
-import { useInboxTabs, useMail, useSetInboxTabs } from './api';
+import { useInboxTabs, useMail, useSetAccountColor, useSetInboxTabs } from './api';
+import { accountColor } from './accounts';
+import { ColorPicker } from './LabelDialogs';
 import { REMOTE_KEY } from './Reader';
 import { TAB_ICONS } from './tabs';
 
@@ -88,7 +90,8 @@ function Server({ title, value, onChange }: { title: string; value: MailServer; 
   );
 }
 
-function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: () => void }) {
+function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; accounts: MailAccount[]; onRemoved: () => void }) {
+  const setAccountColor = useSetAccountColor();
   const mail = useMail();
   const qc = useQueryClient();
   const [fullName, setFullName] = useState(account.fullName);
@@ -143,6 +146,16 @@ function AccountForm({ account, onRemoved }: { account: MailAccount; onRemoved: 
           <Label htmlFor="acct-email">Email Address</Label>
           <Input id="acct-email" value={account.email} readOnly className="text-muted-foreground" />
         </div>
+        {accounts.length > 1 && (
+          <div className="grid gap-1.5">
+            <span className="text-sm leading-none font-medium">Color</span>
+            <ColorPicker
+              value={accountColor(accounts, account.id)}
+              onChange={(c) => void setAccountColor(account.id, c).catch((error: unknown) => setMessage({ error: true, text: error instanceof Error ? error.message : String(error) }))}
+            />
+            <p className="text-xs text-muted-foreground">Marks its mail in All Inboxes, and its address in the sidebar.</p>
+          </div>
+        )}
         <div className="grid gap-1.5">
           <Label htmlFor="acct-name">Full Name</Label>
           <Input id="acct-name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
@@ -222,7 +235,7 @@ export function AccountSettings({ accounts, initial, onClose, onAdd }: { account
           </button>
         </div>
         {account ? (
-          <AccountForm key={account.id} account={account} onRemoved={() => setSelected('general')} />
+          <AccountForm key={account.id} account={account} accounts={accounts} onRemoved={() => setSelected('general')} />
         ) : (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <InboxTabsSettings />

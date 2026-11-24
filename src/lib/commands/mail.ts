@@ -169,9 +169,18 @@ export const mailArea: Area = {
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
       return {
-        data: list.map((a) => ({ id: a.id, email: a.email })),
-        text: list.length ? list.map((a) => a.email).join('\n') : 'No mail accounts yet; add one in Mail',
+        data: list.map((a) => ({ id: a.id, email: a.email, color: a.color ?? null })),
+        text: list.length ? list.map((a) => (a.color ? `${a.email}  ${a.color}` : a.email)).join('\n') : 'No mail accounts yet; add one in Mail',
       };
+    }),
+    command('mail', 'account-color', 'Give an account its color in Mail, the dot that marks its mail in All Inboxes and its address in the sidebar, as Mail’s Color menu does; auto gives back the one Mail picks', [
+      { name: 'account', type: 'string', positional: true, help: 'Which account, by address' },
+      { name: 'color', type: 'string', positional: true, choices: [...LABEL_COLORS, 'auto'], help: 'Its color, or auto' },
+    ], async (args) => {
+      const [account] = await accountsFor(args.string('account'));
+      const color = args.string('color');
+      const saved = await call(mail().setAccountColor(account.id, color === 'auto' ? null : (color as LabelColor)));
+      return { data: { id: saved.id, email: saved.email, color: saved.color ?? null }, text: saved.color ? `${saved.email} is ${saved.color}` : `${saved.email} has the color Mail picks` };
     }),
     command('mail', 'mailboxes', 'Each account’s mailboxes, as Mail’s sidebar lists them, with how many messages each has and how many are unread', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));
