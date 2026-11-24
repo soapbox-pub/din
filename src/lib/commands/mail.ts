@@ -1,14 +1,18 @@
-import { formatBytes } from '@/lib/fs';
-import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailboxInfo, type MailLabel, type MailSubscription, type MessageSummary } from '@/lib/mail';
+import { formatBytes, getFsBridge } from '@/lib/fs';
+import { mimeOf } from '@/lib/mime';
+import { blankSeed, outgoingMessage, parseAddresses, recipientsProblem, replySeed, writtenAbove, type ComposeSeed } from '@/shared/mailCompose';
+import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailAttachment, type MailboxInfo, type MailLabel, type MailSubscription, type MessageSummary } from '@/lib/mail';
 import { markRead, markReadTargets } from '@/lib/mailInbox';
 import { CommandError, type Area, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
  * `din mail`: Mail's accounts, their mailboxes and messages (listed,
- * searched and read as Mail opens them, which leaves them unread), their labels, their inboxes' tabs and the
+ * searched and read as Mail opens them, which leaves them unread, and
+ * sent and replied to as its compose window sends them), their labels, their inboxes' tabs and the
  * senders moved between them, and the mailing lists in their inboxes, as
- * Mail's Subscriptions shows them (electron/mail.mts), and leaving them. Unsubscribing asks on screen first: it sends mail or
+ * Mail's Subscriptions shows them (electron/mail.mts), and leaving them.
+ * Sending, replying and unsubscribing ask on screen first: they send mail or
  * requests from the user's account, and can't be taken back; so does
  * deleting a label, which comes off every message.
  */
@@ -82,6 +86,73 @@ function when(ms: number): string {
   return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/** The most a message's attachments come to, as most servers take. */
+const ATTACH_MAX = 25 * 1024 * 1024;
+
+const WRITTEN: Param[] = [
+  { name: 'text', type: 'string', optional: true, help: 'What to write (blank lines between paragraphs)' },
+  { name: 'text-file', type: 'path', optional: true, help: 'A text file to write it from, instead of --text' },
+  { name: 'files', type: 'path', positional: true, optional: true, rest: true, help: 'Files to attach' },
+];
+
+/** What's written, from --text or --text-file. */
+async function writtenText(args: { optString(name: string): string | undefined }): Promise<string> {
+  const text = args.optString('text');
+  const file = args.optString('text-file');
+  if (text !== undefined && file !== undefined) throw new CommandError('Say --text or --text-file, not both', 'usage');
+  if (file === undefined) return text ?? '';
+  const read = await call(need(getFsBridge(), 'Files').readFile(file, 4 * 1024 * 1024));
+  if (read.truncated) throw new CommandError('That text file is too big');
+  return new TextDecoder().decode(read.data);
+}
+
+async function attachments(paths: string[]): Promise<MailAttachment[]> {
+  if (!paths.length) return [];
+  const fs = need(getFsBridge(), 'Files');
+  const out: MailAttachment[] = [];
+  let total = 0;
+  for (const path of paths) {
+    const read = await call(fs.readFile(path, ATTACH_MAX - total + 1));
+    total += read.data.byteLength;
+    if (read.truncated || total > ATTACH_MAX) throw new CommandError(`The attachments come to more than ${formatBytes(ATTACH_MAX)}`);
+    const filename = path.split('/').pop() || 'Attachment';
+    out.push({ filename, contentType: mimeOf(filename) || 'application/octet-stream', content: read.data });
+  }
+  return out;
+}
+
+/** Ask on screen, then send it as Mail's Send does. */
+async function sendWritten(
+  ctx: { confirm(request: { title: string; description: string; action: string }): Promise<boolean> },
+  account: MailAccount,
+  seed: ComposeSeed,
+  text: string,
+  files: MailAttachment[],
+): Promise<{ data: unknown; text: string }> {
+  const everyone = [...seed.to, ...seed.cc, ...seed.bcc];
+  const problem = recipientsProblem(everyone);
+  if (problem) throw new CommandError(problem.replace(/\.$/, ''), 'usage');
+  const message = outgoingMessage(seed, writtenAbove(seed, account, text), files, seed, null);
+  const start = text.trim().replace(/\s+/g, ' ');
+  const ok = await ctx.confirm({
+    title: `Send “${message.subject || '(no subject)'}” to ${seed.to.length ? who(seed.to) : who(everyone)}?`,
+    description: [
+      `From ${account.email}.`,
+      seed.cc.length ? `Cc ${who(seed.cc)}.` : '',
+      seed.bcc.length ? `Bcc ${who(seed.bcc)}.` : '',
+      start ? `“${start.length > 200 ? `${start.slice(0, 200)}…` : start}”` : 'It has no text of its own.',
+      files.length ? `Attached: ${files.map((f) => f.filename).join(', ')}.` : '',
+    ].filter(Boolean).join(' '),
+    action: 'Send',
+  });
+  if (!ok) throw new CommandError('You didn’t allow it');
+  await call(mail().send(account.id, message));
+  return {
+    data: { sent: true, accountId: account.id, to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: message.subject, attachments: files.map((f) => f.filename) },
+    text: `Sent “${message.subject || '(no subject)'}” to ${who(everyone)}`,
+  };
+}
+
 /** The text of an HTML-only message, for reading on the command line; parsing it runs nothing. */
 function htmlText(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -93,7 +164,7 @@ function htmlText(html: string): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts, their mailboxes and messages (list, search, read), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts, their mailboxes and messages (list, search, read, send, reply), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -195,6 +266,47 @@ export const mailArea: Area = {
         data: { accountId: account.id, mailbox: box.path, ...rest, text: plain, ...(html ? { html: rawHtml } : {}) },
         text: `${head.join('\n')}\n\n${body || '(no text)'}`,
       };
+    }),
+    command('mail', 'send', 'Send a message, as Mail’s Send does, signed with the account’s signature and kept in Sent (asks on screen first)', [
+      { name: 'to', type: 'string', help: 'Who to, as Mail’s To field takes them: addresses, or Name <address>, separated by commas' },
+      { name: 'cc', type: 'string', optional: true, help: 'Who to copy, the same way' },
+      { name: 'bcc', type: 'string', optional: true, help: 'Who to copy unseen, the same way' },
+      { name: 'subject', type: 'string', optional: true, help: 'Its subject' },
+      ...WRITTEN,
+      { name: 'account', type: 'string', optional: true, help: 'Which account to send from, by name or address (default: the only one)' },
+    ], async (args, ctx) => {
+      const account = await oneAccount(args.optString('account'));
+      const seed: ComposeSeed = {
+        ...blankSeed(account.id),
+        to: parseAddresses(args.string('to')),
+        cc: parseAddresses(args.optString('cc') ?? ''),
+        bcc: parseAddresses(args.optString('bcc') ?? ''),
+        subject: args.optString('subject') ?? '',
+      };
+      const text = await writtenText(args);
+      const files = await attachments(args.list('files'));
+      if (!text.trim() && !seed.subject.trim() && !files.length) throw new CommandError('Give it a --subject, some --text or a file', 'usage');
+      return sendWritten(ctx, account, seed, text, files);
+    }),
+    command('mail', 'reply', 'Reply to a message, as Mail’s Reply does: to its sender (everyone with --all), in its conversation, quoting it, and marking it answered (asks on screen first)', [
+      { name: 'message', type: 'integer', positional: true, min: 1, help: 'Which message, by its number, as din mail messages lists it' },
+      ...WRITTEN,
+      { name: 'all', type: 'boolean', optional: true, help: 'Reply to everyone it went to, as Reply All does' },
+      { name: 'cc', type: 'string', optional: true, help: 'Others to copy, as Mail’s Cc field takes them' },
+      { name: 'bcc', type: 'string', optional: true, help: 'Others to copy unseen, the same way' },
+      MAILBOX,
+      ACCOUNT,
+    ], async (args, ctx) => {
+      const account = await oneAccount(args.optString('account'));
+      const box = await mailboxIn(account, args.optString('mailbox'));
+      const original = await call(mail().message(account.id, box.path, args.number('message')));
+      const text = await writtenText(args);
+      if (!text.trim()) throw new CommandError('Say what to reply, with --text or --text-file', 'usage');
+      const files = await attachments(args.list('files'));
+      const seed = replySeed(original, account.id, box.path, account, args.optBool('all') === true);
+      const taken = new Set([...seed.to, ...seed.cc].map((a) => a.address.toLowerCase()));
+      const extra = (field: string) => parseAddresses(args.optString(field) ?? '').filter((a) => !taken.has(a.address.toLowerCase()));
+      return sendWritten(ctx, account, { ...seed, cc: [...seed.cc, ...extra('cc')], bcc: extra('bcc') }, text, files);
     }),
     command('mail', 'subscriptions', 'The mailing lists in the inbox, most mail first, as Mail’s Subscriptions shows them', [ACCOUNT, MONTHS], async (args) => {
       const accounts = await accountsFor(args.optString('account'));

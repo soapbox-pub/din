@@ -398,13 +398,13 @@ export interface MailRead {
 
 /**
  * What the desktop has of it: the mailboxes and their messages (read
- * without marking them read), the mailing lists, labels and inbox tabs, for
+ * without marking them read), sending mail, the mailing lists, labels and inbox tabs, for
  * `din mail`; and new mail and each inbox's unread count, watched from the
  * moment Din starts, for notifications and Mail's Dock badge.
  */
 export type MailDesktopBridge = Pick<
   MailBridge,
-  'accounts' | 'mailboxes' | 'messages' | 'message' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule'
+  'accounts' | 'mailboxes' | 'messages' | 'message' | 'send' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule'
 > & {
   /** Each account's unread mail in its inbox (only Primary's, when only Primary notifies), as last counted. */
   unseen(): Promise<Record<string, number>>;

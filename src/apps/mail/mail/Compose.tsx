@@ -9,10 +9,11 @@ import { pickFiles } from '@/shared/fileHandles';
 import { cn } from '@/lib/utils';
 import { ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
 import { toolIcon } from '@/shared/appChromeStyles';
-import type { MailAccount, MailAddress, MailAttachment, OutgoingMessage } from '@/lib/mail';
+import type { MailAddress, MailAttachment, OutgoingMessage } from '@/lib/mail';
+import { outgoingMessage, recipientsProblem, withSignature } from '@/shared/mailCompose';
 import { useAccounts, useMail } from './api';
 import { rememberAddresses, suggestAddresses } from './contacts';
-import { EMAIL, fileSize, formatAddress, parseAddresses, textToHtml, type ComposeSeed } from './format';
+import { EMAIL, fileSize, formatAddress, parseAddresses, type ComposeSeed } from './format';
 import { messageTarget, type SavedWindow } from './restore';
 
 const NO_FILES: readonly FileSystemHandle[] = [];
@@ -134,55 +135,6 @@ function RecipientField({ label, value, onChange, autoFocus, trailing }: { label
       )}
     </div>
   );
-}
-
-/** The editor's HTML as plain text, with quotes as "> " lines, for the text part of the message. */
-function htmlToPlain(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const out: string[] = [];
-  const walk = (node: Node, quote: string): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
-    if (!(node instanceof Element)) return '';
-    const tag = node.tagName;
-    if (tag === 'BR') return '\n';
-    if (tag === 'BLOCKQUOTE') {
-      for (const c of node.childNodes) block(c, `${quote}> `);
-      return '';
-    }
-    let s = '';
-    for (const c of node.childNodes) s += walk(c, quote);
-    if (tag === 'A') {
-      const href = node.getAttribute('href');
-      if (href && href !== s && !href.startsWith('mailto:')) s += ` <${href}>`;
-    }
-    return s;
-  };
-  const block = (node: Node, quote: string) => {
-    if (node instanceof Element && node.tagName === 'BLOCKQUOTE') {
-      walk(node, quote);
-      return;
-    }
-    if (node instanceof Element && (node.tagName === 'UL' || node.tagName === 'OL')) {
-      [...node.children].forEach((li, i) => out.push(`${quote}${node.tagName === 'OL' ? `${i + 1}.` : '•'} ${walk(li, quote).trim()}`));
-      return;
-    }
-    const text = walk(node, quote);
-    for (const line of text.split('\n')) out.push(`${quote}${line}`.trimEnd());
-  };
-  for (const c of doc.body.childNodes) block(c, '');
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
-}
-
-function wrapHtml(body: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>p { margin: 0; }</style></head><body style="font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5;">${body.replace(/<p><\/p>/g, '<p><br></p>').replace(/<blockquote>/g, '<blockquote type="cite" style="margin: 0 0 0 4px; padding-left: 12px; border-left: 2px solid #0a84ff;">')}</body></html>`;
-}
-
-function withSignature(seed: ComposeSeed, account: MailAccount | undefined): string {
-  const sig = account?.signature.trim();
-  const rest = seed.html.replace(/^(<p><\/p>)+/, '');
-  if (seed.draftUid) return seed.html;
-  const block = sig ? `<p>${textToHtml(sig)}</p>` : '';
-  return `<p></p>${block ? `<p></p>${block}` : ''}${rest ? `<p></p>${rest}` : ''}`;
 }
 
 function FormatButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -331,22 +283,10 @@ export function Compose({
     attachHandles(files).catch((e: unknown) => setError(`Couldn’t attach the files: ${e instanceof Error ? e.message : String(e)}`));
   }, [files, attachHandles]);
 
-  const message = useCallback((): OutgoingMessage => {
-    const html = editor?.getHTML() ?? '';
-    return {
-      to,
-      cc,
-      bcc,
-      subject: subject.trim(),
-      text: htmlToPlain(html),
-      html: wrapHtml(html),
-      attachments: attached.flatMap((a) => (a.file ? [a.file] : [])),
-      inReplyTo: seed.inReplyTo,
-      references: seed.references,
-      answering: seed.answering,
-      draftUid,
-    };
-  }, [editor, to, cc, bcc, subject, attached, seed, draftUid]);
+  const message = useCallback(
+    (): OutgoingMessage => outgoingMessage({ to, cc, bcc, subject }, editor?.getHTML() ?? '', attached.flatMap((a) => (a.file ? [a.file] : [])), seed, draftUid),
+    [editor, to, cc, bcc, subject, attached, seed, draftUid],
+  );
 
   // Set once the window is going for good (sent, or the user said not to save).
   const closing = useRef(false);
@@ -375,13 +315,9 @@ export function Compose({
     async (force = false) => {
       if (!mail || !account || sending) return;
       const everyone = [...to, ...cc, ...bcc];
-      if (!everyone.length) {
-        setError('Add someone to send this message to.');
-        return;
-      }
-      const bad = everyone.find((a) => !EMAIL.test(a.address));
-      if (bad) {
-        setError(`“${bad.address}” isn’t an email address.`);
+      const problem = recipientsProblem(everyone);
+      if (problem) {
+        setError(problem);
         return;
       }
       if (attached.some((a) => !a.file)) {
