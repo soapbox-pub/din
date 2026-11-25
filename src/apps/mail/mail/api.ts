@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useDin } from '@/sdk/react';
 import { appLink } from '@/shared/launch';
-import type { InboxTabs, LabelColor, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, SpecialMailbox } from '@/lib/mail';
+import type { InboxTabs, LabelColor, MailAccount, MailBridge, MailboxInfo, MailCategory, MailLabels, MailMessage, MailSubscription, MessageFilter, MessageSummary, RuleCondition, SpecialMailbox } from '@/lib/mail';
 
 export function useMail(): MailBridge | null {
   return useDin().system.mail ?? null;
@@ -429,6 +429,8 @@ export function useLiveUpdates(): void {
   useEffect(() => {
     if (!mail) return;
     return mail.onChanged(({ accountId, path }) => {
+      // No mailbox: the account's rules, or what its server does with them.
+      if (!path) return void qc.invalidateQueries({ queryKey: rulesKey(accountId) });
       void qc.invalidateQueries({ queryKey: mailboxesKey(accountId) });
       // New keywords on the mail. (Gmail's labels are its mailboxes, listed again when Mail changes them.)
       if (qc.getQueryData<MailLabels>(labelsKey(accountId))?.kind !== 'gmail') void qc.invalidateQueries({ queryKey: labelsKey(accountId) });
@@ -484,7 +486,29 @@ export function useSettingsChanges(): void {
   }, [qc]);
 }
 
-/** Open Mail's settings in a window of their own, at an account's when one is given. */
-export function openMailSettings(accountId: string | null = null): void {
-  void window.open(appLink(null, { window: 'settings', ...(accountId ? { account: accountId } : {}), floating: true, width: 760, height: 660 }));
+/** Open Mail's settings in a window of their own, at an account's when one is given, or at its Rules (`rules`). */
+export function openMailSettings(accountId: string | null = null, section: 'rules' | null = null): void {
+  void window.open(appLink(null, { window: 'settings', ...(accountId ? { account: accountId } : {}), ...(section ? { section } : {}), floating: true, width: 760, height: 660 }));
+}
+
+export function rulesKey(accountId: string) {
+  return ['mail', 'rules', accountId] as const;
+}
+
+/** An account's blocked senders and rules, and what its server does with them. */
+export function useRules(accountId: string | null) {
+  const mail = useMail();
+  return useQuery({ queryKey: rulesKey(accountId ?? ''), queryFn: () => mail!.rules(accountId!), enabled: !!mail && !!accountId });
+}
+
+/** What a rule window starts with: a rule of the account's to edit (by id), or a new one's conditions. */
+export interface RuleSeed {
+  accountId: string;
+  rule?: string;
+  conditions?: RuleCondition[];
+}
+
+/** Edit a rule, or make one, in a window of its own. */
+export function openRuleWindow(seed: RuleSeed): void {
+  void window.open(appLink(null, { window: 'rule', ...seed, floating: true, width: 600, height: 640 }));
 }

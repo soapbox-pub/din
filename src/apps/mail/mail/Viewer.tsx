@@ -495,6 +495,8 @@ export function Viewer() {
    */
   const pickTargets = (pick: MenuPick, list: Conversation[]): Item[] => {
     if (pick === 'reply' || pick === 'reply-all' || pick === 'forward' || pick === 'open-draft' || pick === 'assistant') return list.slice(0, 1).map((c) => c.latest);
+    // A rule from the first conversation's newest message that isn't the user's own (run picks it).
+    if (pick === 'make-rule') return list.slice(0, 1).flatMap((c) => c.items);
     if (pick === 'flag') return list.map((c) => c.latest);
     if (pick === 'unflag') return list.flatMap((c) => c.items.filter((i) => i.flagged));
     if (pick === 'unread') return list.map((c) => c.latest);
@@ -721,6 +723,7 @@ export function Viewer() {
           { id: 'new-label', label: 'New Label…', enabled: !!newLabelAccount },
           { type: 'separator' },
           { id: 'subscriptions', label: 'Subscriptions' },
+          { id: 'rules', label: 'Rules and Blocked Senders…' },
         ],
       },
       {
@@ -738,6 +741,8 @@ export function Viewer() {
           { id: 'trash', label: 'Delete', accelerator: 'Delete', notInFields: true, enabled: has, destructive: true },
           { type: 'separator' },
           { id: 'unsubscribe', label: 'Unsubscribe…', enabled: canUnsubscribe },
+          { id: 'block', label: 'Block Sender', enabled: has },
+          { id: 'make-rule', label: 'Make Rule…', enabled: targetConversations.length === 1 },
         ],
       },
     ],
@@ -755,6 +760,7 @@ export function Viewer() {
         case 'refresh': return refresh();
         case 'mark-all-read': return setMarkingRead(selection);
         case 'subscriptions': return setSelection({ kind: 'subscriptions' });
+        case 'rules': return openMailSettings(defaultAccount, 'rules');
         case 'new-label': return newLabelAccount ? setLabelDialog({ kind: 'new', accountId: newLabelAccount, apply: [] }) : undefined;
         case 'unsubscribe': return current ? setLeaving(current.latest) : undefined;
         case 'read':
@@ -768,6 +774,8 @@ export function Viewer() {
         case 'junk':
         case 'not-junk':
         case 'trash':
+        case 'block':
+        case 'make-rule':
           return pickFor(id, pickTargets(id, targetConversations));
       }
     },

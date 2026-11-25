@@ -2178,12 +2178,12 @@ expose('phone', {
 });
 
 // Mail (window.dinos.mail), backed by electron/mail.mts: the accounts'
-// mailboxes and messages (reading and sending), mailing lists, labels and inbox tabs, for the `din mail` commands, and new mail and unread
+// mailboxes and messages (reading and sending), mailing lists, labels, inbox tabs, moving mail, and the rules and blocked senders, for the `din mail` commands, and new mail and unread
 // counts, for notifications and Mail's Dock badge; Mail has all of it
 // through its bridge port. Types in src/lib/mail.ts.
 /** @type {Record<string, (...args: unknown[]) => unknown>} */
 const mail = {};
-for (const method of ['accounts', 'mailboxes', 'messages', 'message', 'send', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'inboxTabs', 'setInboxTabs', 'tabRules', 'setTabRule', 'unseen', 'setAccountColor', 'setFillCodes']) {
+for (const method of ['accounts', 'mailboxes', 'messages', 'message', 'send', 'markAllRead', 'avatarLookups', 'setAvatarLookups', 'subscriptions', 'unsubscribe', 'labels', 'createLabel', 'updateLabel', 'deleteLabel', 'inboxTabs', 'setInboxTabs', 'tabRules', 'setTabRule', 'move', 'remove', 'rules', 'saveRule', 'deleteRule', 'orderRules', 'block', 'unblock', 'applyRules', 'syncRules', 'rulesScript', 'unseen', 'setAccountColor', 'setFillCodes']) {
   mail[method] = (...args) => ipcRenderer.invoke(`mail:${method}`, ...args);
 }
 expose('mail', {

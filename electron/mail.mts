@@ -72,13 +72,18 @@
 // counts, in the subject or the start of the text, read further (without
 // marking it read) when those talk about codes but don't show one.
 //
+// Blocked senders and the user's rules (electron/mail-rules.mts) run on new
+// mail in the inbox before it's announced, here, whichever server it is;
+// and where the server has ManageSieve they're put there as a Sieve script
+// too, so they run with Din off, and come back from it on another computer.
+//
 // Types are src/lib/mail.ts. Runs as TypeScript directly via Node's native
 // type stripping - erasable syntax only, like the rest of electron/.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { app, ipcMain, net, powerMonitor } from 'electron';
 import { needsReseal, seal, unseal as unsealSecret } from './sealing.mts';
 import type { ImapFlow, FetchMessageObject, FetchQueryObject, ListResponse, MessageAddressObject, MessageStructureObject, SearchObject } from 'imapflow';
@@ -90,7 +95,14 @@ import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
 import { CATEGORIES, CATEGORY_HEADERS, GMAIL_PRIMARY, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
 import { codeFresh, extractCode, forgetCodes, keepCode, mentionsCode } from './verification-codes.mts';
+import { BLOCKED_MAX, RULES_MAX, SCRIPT_NAME, SIEVE_PORT, SieveError, blockMatches, blockedFrom, neededHeaders, readScript, ruleMatches, ruleOf, rulesFrom, senderOf, sieveScript, withSieve, type CarriedRules, type RuleMessage, type SievePlaces } from './mail-rules.mts';
 import type {
+  BlockedSender,
+  MailRule,
+  MailRules,
+  RuleAction,
+  RulesApplied,
+  RulesServer,
   ConversationMessage,
   InboxTabs,
   LabelColor,
@@ -131,6 +143,21 @@ interface StoredAccount extends MailAccount {
   labels?: SavedLabel[];
   /** The inbox tab each of these senders' mail goes to, by address (lowercase), as the user moved it. */
   tabRules?: Record<string, MailCategory>;
+  /** Senders whose new mail goes straight to Junk or the Trash. */
+  blocked?: BlockedSender[];
+  /** The user's rules, in the order they run. */
+  rules?: MailRule[];
+  /** When the blocks or rules last changed here, ms (the newer of these and the server's copy wins). */
+  rulesUpdated?: number;
+  /** What Din knows of the server's Sieve, for putting the rules there too. */
+  sieve?: SieveState;
+}
+
+interface SieveState extends RulesServer {
+  /** The hash of the script Din last put there. */
+  pushed?: string;
+  /** The user's own script Din's includes, once Din's took over from it. */
+  included?: string | null;
 }
 
 const DEFAULT_TABS: InboxTabs = { tabs: ['promotions', 'social'], notify: 'primary' };
@@ -210,6 +237,9 @@ function load(): void {
     for (const a of accounts) {
       a.labels = Array.isArray(a.labels) ? a.labels.filter(isSavedLabel) : undefined;
       a.tabRules = tabRulesOf(a.tabRules);
+      a.blocked = blockedFrom(a.blocked);
+      a.rules = rulesFrom(a.rules);
+      if (typeof a.sieve !== 'object' || a.sieve === null) a.sieve = undefined;
     }
     const tabs = (data as { inboxTabs?: unknown }).inboxTabs;
     inboxTabs = isInboxTabs(tabs) ? { tabs: tabList(tabs.tabs), notify: tabs.notify } : DEFAULT_TABS;
@@ -264,7 +294,7 @@ function text(v: unknown, max: number): string {
 }
 
 function publicAccount(a: StoredAccount): MailAccount {
-  const { password: _password, labels: _labels, tabRules: _tabRules, ...rest } = a;
+  const { password: _password, labels: _labels, tabRules: _tabRules, blocked: _blocked, rules: _rules, rulesUpdated: _rulesUpdated, sieve: _sieve, ...rest } = a;
   return rest;
 }
 
@@ -850,6 +880,7 @@ function watch(a: StoredAccount, s: Session): void {
       s.backoff = RETRY_MIN_MS;
       scheduleSync(a, 'INBOX', 0);
       void countUnseen(a);
+      checkSieve(a);
     })
     .catch(() => {
       // The main connection reports problems; this one just tries again later.
@@ -1287,6 +1318,7 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
   let dirty = false;
   let arrived: number[] = [];
   let newestNow: number | null = null;
+  let lastSynced = 0;
   await inMailbox(a, mailbox, async (client) => {
     const box = client.mailbox;
     if (!box) return;
@@ -1294,6 +1326,7 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     const renumbered = checkValidity(a, store, mailbox, validity);
     if (renumbered) dirty = true;
     const prev = store.box(mailbox);
+    lastSynced = prev?.synced ?? 0;
     const uids = box.exists > 0 ? ((await client.search({ all: true }, { uid: true })) || []).sort((x, y) => y - x) : [];
     // New mail: uids past the newest one synced before (none the first
     // time, or after renumbering). Kept apart from the stored uids, which
@@ -1340,7 +1373,17 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
   }, false);
   if (isInbox(mailbox)) void lookForCorrespondents(a).catch(() => {});
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
-  if (arrived.length) void announce(a, store, arrived).catch((error: unknown) => console.error('mail:', error));
+  if (arrived.length) {
+    const fresh = arrived;
+    // The rules and blocks first, so what they move away never notifies.
+    void runRules(a, fresh, { since: lastSynced - ARRIVAL_SLACK_MS })
+      .then((r) => r.left, (error: unknown) => {
+        console.error('mail: rules:', error);
+        return fresh;
+      })
+      .then((left) => (left.length ? announce(a, store, left) : undefined))
+      .catch((error: unknown) => console.error('mail:', error));
+  }
   if (dirty) changed(a.id, mailbox);
 }
 
@@ -2213,6 +2256,339 @@ function setTabRule(a: StoredAccount, address: unknown, category: unknown): void
 }
 
 // ---------------------------------------------------------------------------
+// Rules and blocked senders (electron/mail-rules.mts)
+// ---------------------------------------------------------------------------
+//
+// Din runs them on new mail in the inbox as it syncs it, before it's
+// announced, so what they move away never notifies; and puts them on the
+// server as a Sieve script where it has ManageSieve, so they run there too,
+// with Din off. Running them twice does nothing twice: what the server
+// moved isn't in the inbox, and what it flagged is flagged. Mail that came
+// before the inbox's last sync (put back from Junk, or moved there by hand)
+// is left as it is.
+
+/** Mail that came before the inbox's last sync, less this, isn't new: rules leave it be. */
+const ARRIVAL_SLACK_MS = 10 * 60_000;
+/** How often the server's copy is looked at, for rules changed on another computer. */
+const SIEVE_CHECK_MS = 6 * 60 * 60_000;
+/** How long a server with no ManageSieve goes before it's knocked on again. */
+const NO_SIEVE_RECHECK_MS = 7 * 24 * 60 * 60_000;
+/** The most of the inbox applying the rules looks through, newest first, and how many at a time. */
+const APPLY_MAX = 5000;
+const APPLY_CHUNK = 500;
+/** Taken to be what a server has when it hasn't been asked yet, for showing the script. */
+const USUAL_EXTENSIONS = ['copy', 'fileinto', 'imap4flags', 'include'];
+
+/** Providers that have no ManageSieve, not knocked on. */
+const NO_SIEVE = /(^|\.)(gmail\.com|googlemail\.com|mail\.me\.com|icloud\.com|office365\.com|outlook\.com|hotmail\.com|yahoo\.com|aol\.com)$/i;
+
+function sieveHopeless(a: StoredAccount): boolean {
+  return NO_SIEVE.test(a.imap.host) || isLocal(a.imap.host);
+}
+
+function serverOf(a: StoredAccount): RulesServer {
+  const s = a.sieve;
+  return {
+    state: s?.state ?? (sieveHopeless(a) ? 'none' : 'unchecked'),
+    host: s?.host ?? null,
+    activeScript: s?.activeScript ?? null,
+    extensions: s?.extensions ?? [],
+    checked: s?.checked ?? null,
+    error: s?.error ?? null,
+  };
+}
+
+function rulesOf(a: StoredAccount): MailRules {
+  return { blocked: [...(a.blocked ?? [])], rules: [...(a.rules ?? [])], server: serverOf(a) };
+}
+
+function carriedOf(a: StoredAccount): CarriedRules {
+  return { updated: a.rulesUpdated ?? 0, blocked: a.blocked ?? [], rules: a.rules ?? [] };
+}
+
+/** Mail's windows read the account's rules again (a change with no mailbox). */
+function rulesTold(a: StoredAccount): void {
+  deps.sendToShell('mail:changed', { accountId: a.id, path: '' });
+}
+
+/** One look at an account's server at a time. */
+const sieveRuns = new Map<string, Promise<void>>();
+
+function serially(a: StoredAccount, fn: () => Promise<void>): Promise<void> {
+  const next = (sieveRuns.get(a.id) ?? Promise.resolve()).catch(() => {}).then(fn);
+  sieveRuns.set(a.id, next);
+  void next.catch(() => {}).finally(() => {
+    if (sieveRuns.get(a.id) === next) sieveRuns.delete(a.id);
+  });
+  return next;
+}
+
+/** The rules changed here: kept, told to Mail's windows, and put on the server. */
+function rulesChanged(a: StoredAccount): MailRules {
+  a.rulesUpdated = Date.now();
+  save();
+  rulesTold(a);
+  void serially(a, () => syncSieve(a)).catch(() => {});
+  return rulesOf(a);
+}
+
+/** Where moves go on the server: its junk, trash and archive mailboxes, or the usual names. */
+async function sievePlaces(a: StoredAccount): Promise<SievePlaces> {
+  const find = (special: SpecialMailbox, usual: string) => specialPath(a, special).catch(() => usual);
+  return { junk: await find('junk', 'Junk'), trash: await find('trash', 'Trash'), archive: await find('archive', 'Archive') };
+}
+
+/**
+ * Look at the server's Sieve and bring it up to date: rules changed on
+ * another computer since are taken from it, and Din's script is put there
+ * (and made the active one, when there's none or `takeOver`). A script of
+ * the user's own that's active is left so, unless `takeOver`; so is a copy
+ * of Din's changed elsewhere. Nothing is written for an account with no
+ * rules that never had any there.
+ */
+async function syncSieve(a: StoredAccount, takeOver = false): Promise<void> {
+  if (!accounts.includes(a)) return;
+  const prior = a.sieve;
+  if (sieveHopeless(a)) {
+    a.sieve = { ...serverOf(a), state: 'none', checked: Date.now(), error: null };
+    save();
+    return;
+  }
+  const host = a.imap.host;
+  const at = `${host}:${SIEVE_PORT}`;
+  try {
+    const password = unseal(a.password);
+    const places = await sievePlaces(a);
+    await withSieve({ host, port: SIEVE_PORT, user: a.imap.user }, password, async (s) => {
+      const extensions = [...s.extensions].sort();
+      const base = { host: at, extensions, checked: Date.now(), error: null, pushed: prior?.pushed, included: prior?.included ?? null };
+      const scripts = await s.list();
+      const active = scripts.find((x) => x.active)?.name ?? null;
+      const ours = scripts.some((x) => x.name === SCRIPT_NAME);
+      let there = '';
+      if (ours) {
+        there = await s.get(SCRIPT_NAME);
+        const remote = readScript(there);
+        if (remote === 'edited') {
+          if (!takeOver) {
+            a.sieve = { ...base, state: 'edited', activeScript: active === SCRIPT_NAME ? null : active };
+            return;
+          }
+        } else if (remote.updated > (a.rulesUpdated ?? 0)) {
+          // Changed on another computer since: those are the rules now.
+          a.blocked = remote.blocked;
+          a.rules = remote.rules;
+          a.rulesUpdated = remote.updated;
+        }
+      }
+      // Nothing to put there yet: nothing's written, and the user's own script stays as it is.
+      if (!ours && !a.blocked?.length && !a.rules?.length) {
+        a.sieve = { ...base, state: 'ready', activeScript: active };
+        return;
+      }
+      let include = prior?.included ?? null;
+      if (takeOver && active && active !== SCRIPT_NAME) include = active;
+      if (include && !scripts.some((x) => x.name === include)) include = null;
+      if (!s.extensions.has('include')) include = null;
+      const script = sieveScript(carriedOf(a), places, s.extensions, include);
+      if (script !== there) await s.put(SCRIPT_NAME, script);
+      const ourTurn = active === SCRIPT_NAME || active === null || takeOver;
+      if (ourTurn && active !== SCRIPT_NAME) await s.setActive(SCRIPT_NAME);
+      a.sieve = {
+        ...base,
+        state: ourTurn ? 'active' : 'inactive',
+        activeScript: ourTurn ? null : active,
+        pushed: createHash('sha256').update(script).digest('hex'),
+        included: ourTurn ? include : (prior?.included ?? null),
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // A server that never answered on ManageSieve's port has none; one that did and doesn't now is in trouble.
+    const never = !prior || prior.state === 'none' || prior.state === 'unchecked';
+    const nothing = error instanceof SieveError && error.unreachable && never;
+    a.sieve = {
+      ...serverOf(a),
+      state: nothing ? 'none' : 'error',
+      host: nothing ? null : at,
+      checked: Date.now(),
+      error: nothing ? null : message,
+      pushed: prior?.pushed,
+      included: prior?.included ?? null,
+    };
+  } finally {
+    if (accounts.includes(a)) {
+      save();
+      rulesTold(a);
+    }
+  }
+}
+
+/** Now and then (as the inbox's watcher connects), look at the server's copy of the rules. */
+function checkSieve(a: StoredAccount): void {
+  const s = a.sieve;
+  if (s?.state === 'none' && Date.now() - (s.checked ?? 0) < NO_SIEVE_RECHECK_MS) return;
+  if (s && Date.now() - (s.checked ?? 0) < SIEVE_CHECK_MS) return;
+  if (!s && sieveHopeless(a)) return;
+  void serially(a, () => syncSieve(a)).catch(() => {});
+}
+
+type MoveTo = Extract<RuleAction, { type: 'move' }>['to'];
+
+/**
+ * Run the blocks and enabled rules (or one rule, `only`, enabled or not)
+ * over these inbox messages, leaving those that came before `since`; what
+ * they did, and the uids still in the inbox.
+ */
+async function runRules(a: StoredAccount, uids: number[], opts: { since?: number; only?: string; blocks?: boolean } = {}): Promise<RulesApplied & { left: number[] }> {
+  const blocked = opts.only ? [] : (a.blocked ?? []);
+  const rules = opts.blocks ? [] : (a.rules ?? []).filter((r) => (opts.only ? r.id === opts.only : r.enabled));
+  if (!uids.length || (!blocked.length && !rules.length)) return { checked: 0, matched: 0, moved: 0, left: uids };
+  const headers = neededHeaders(rules);
+  interface Plan {
+    uid: number;
+    seen: boolean;
+    flagged: boolean;
+    labels: Set<string>;
+    to: MoveTo | null;
+  }
+  const plans: Plan[] = [];
+  let checked = 0;
+  await inMailbox(a, 'INBOX', async (client) => {
+    const query: FetchQueryObject = { uid: true, envelope: true, flags: true, internalDate: true, ...(headers.length ? { headers } : {}) };
+    for await (const m of client.fetch(uidRanges(uids), query, { uid: true })) {
+      const came = m.internalDate ? new Date(m.internalDate).getTime() : 0;
+      if (opts.since !== undefined && opts.since > 0 && came && came < opts.since) continue;
+      checked++;
+      const msg: RuleMessage = {
+        from: addresses(m.envelope?.from),
+        to: [...addresses(m.envelope?.to), ...addresses(m.envelope?.cc)],
+        subject: m.envelope?.subject ?? '',
+        headers: m.headers ? headerFields(m.headers.toString('utf8')) : new Map(),
+      };
+      const block = blocked.find((b) => blockMatches(b, msg));
+      if (block) {
+        plans.push({ uid: m.uid, seen: false, flagged: false, labels: new Set(), to: { special: block.to } });
+        continue;
+      }
+      const plan: Plan = { uid: m.uid, seen: false, flagged: false, labels: new Set(), to: null };
+      let hit = false;
+      for (const r of rules) {
+        if (!ruleMatches(r, msg)) continue;
+        hit = true;
+        for (const act of r.actions) {
+          if (act.type === 'read') plan.seen = !m.flags?.has('\\Seen');
+          else if (act.type === 'flag') plan.flagged = !m.flags?.has('\\Flagged');
+          else if (act.type === 'label') plan.labels.add(act.label);
+          else if (act.type === 'move') plan.to ??= act.to;
+          // Forwarding is the server's alone: Din doesn't send mail on its own.
+        }
+        if (r.stop) break;
+      }
+      if (hit) plans.push(plan);
+    }
+  }, false);
+
+  const tried = async (what: string, fn: () => Promise<void>): Promise<boolean> => {
+    try {
+      await fn();
+      return true;
+    } catch (error) {
+      console.error(`mail: rules couldn’t ${what}:`, error instanceof Error ? error.message : error);
+      return false;
+    }
+  };
+  const seen = plans.filter((p) => p.seen).map((p) => p.uid);
+  const flagged = plans.filter((p) => p.flagged).map((p) => p.uid);
+  if (seen.length) await tried('mark mail read', () => setFlags(a, 'INBOX', seen, { seen: true }));
+  if (flagged.length) await tried('star mail', () => setFlags(a, 'INBOX', flagged, { flagged: true }));
+  const byLabel = new Map<string, number[]>();
+  for (const p of plans) for (const l of p.labels) byLabel.set(l, [...(byLabel.get(l) ?? []), p.uid]);
+  for (const [label, some] of byLabel) await tried('label mail', () => setLabels(a, 'INBOX', some, { add: [label] }));
+  const byPlace = new Map<string, { to: MoveTo; uids: number[] }>();
+  for (const p of plans) {
+    if (!p.to) continue;
+    const key = typeof p.to === 'string' ? `path:${p.to}` : `special:${p.to.special}`;
+    const g = byPlace.get(key) ?? { to: p.to, uids: [] };
+    g.uids.push(p.uid);
+    byPlace.set(key, g);
+  }
+  const moved = new Set<number>();
+  for (const g of byPlace.values()) {
+    if (g.to === 'INBOX') continue;
+    if (await tried('move mail', () => move(a, 'INBOX', g.uids, g.to))) for (const u of g.uids) moved.add(u);
+  }
+  return { checked, matched: plans.length, moved: moved.size, left: uids.filter((u) => !moved.has(u)) };
+}
+
+/** Run the rules and the blocks (or one rule, or only the blocks) over what's in the inbox now, the newest APPLY_MAX. */
+async function applyRules(a: StoredAccount, only?: string, blocks = false): Promise<RulesApplied> {
+  if (only !== undefined && !(a.rules ?? []).some((r) => r.id === only)) throw new Error('No such rule');
+  const uids = await inMailbox(a, 'INBOX', async (client) => (client.mailbox && client.mailbox.exists > 0 ? (await client.search({ all: true }, { uid: true })) || [] : []));
+  const newest = uids.sort((x, y) => y - x).slice(0, APPLY_MAX);
+  const total: RulesApplied = { checked: 0, matched: 0, moved: 0 };
+  for (let i = 0; i < newest.length; i += APPLY_CHUNK) {
+    const r = await runRules(a, newest.slice(i, i + APPLY_CHUNK), { only, blocks });
+    total.checked += r.checked;
+    total.matched += r.matched;
+    total.moved += r.moved;
+  }
+  return total;
+}
+
+function saveRule(a: StoredAccount, input: unknown): MailRules {
+  const rule = ruleOf(input);
+  const list = [...(a.rules ?? [])];
+  const at = list.findIndex((r) => r.id === rule.id);
+  if (at >= 0) list[at] = rule;
+  else if (list.length >= RULES_MAX) throw new Error('That’s too many rules.');
+  else list.push(rule);
+  a.rules = list;
+  return rulesChanged(a);
+}
+
+function deleteRule(a: StoredAccount, id: unknown): MailRules {
+  if (!(a.rules ?? []).some((r) => r.id === id)) throw new Error('No such rule');
+  a.rules = (a.rules ?? []).filter((r) => r.id !== id);
+  return rulesChanged(a);
+}
+
+function orderRules(a: StoredAccount, ids: unknown): MailRules {
+  const list = a.rules ?? [];
+  if (!Array.isArray(ids) || ids.length !== list.length || new Set(ids).size !== ids.length) throw new Error('Give every rule, once each.');
+  const byId = new Map(list.map((r) => [r.id, r]));
+  const next = ids.map((id) => byId.get(id as string));
+  if (next.some((r) => !r)) throw new Error('No such rule');
+  a.rules = next as MailRule[];
+  return rulesChanged(a);
+}
+
+function block(a: StoredAccount, sender: unknown, to: unknown): MailRules {
+  const who = senderOf(sender);
+  if (to !== undefined && to !== null && to !== 'junk' && to !== 'trash') throw new Error('Blocked mail goes to junk or trash.');
+  const where = to === 'trash' ? 'trash' : 'junk';
+  const list = [...(a.blocked ?? [])];
+  const at = list.findIndex((b) => b.sender === who);
+  if (at >= 0) list[at] = { ...list[at], to: where };
+  else if (list.length >= BLOCKED_MAX) throw new Error('That’s too many blocked senders.');
+  else list.push({ sender: who, to: where, added: Date.now() });
+  a.blocked = list;
+  return rulesChanged(a);
+}
+
+function unblock(a: StoredAccount, sender: unknown): MailRules {
+  const who = senderOf(sender);
+  if (!(a.blocked ?? []).some((b) => b.sender === who)) throw new Error(`${who} isn’t blocked.`);
+  a.blocked = (a.blocked ?? []).filter((b) => b.sender !== who);
+  return rulesChanged(a);
+}
+
+async function rulesScript(a: StoredAccount): Promise<string> {
+  const extensions = new Set(a.sieve?.extensions.length ? a.sieve.extensions : USUAL_EXTENSIONS);
+  return sieveScript(carriedOf(a), await sievePlaces(a), extensions, a.sieve?.state === 'active' ? (a.sieve.included ?? null) : null);
+}
+
+// ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
 
@@ -2655,6 +3031,8 @@ async function updateAccount(id: unknown, patch: unknown): Promise<MailAccount> 
   // Another server numbers its messages its own way.
   if (movedServer) {
     a.labels = undefined;
+    // Another server's Sieve is looked at afresh; the rules stay, and go there.
+    a.sieve = undefined;
     save();
     dropStore(a.id);
     forgetArrivals(a.id);
@@ -2747,6 +3125,22 @@ export function registerMailHandlers(options: Deps): void {
   handle('mail:tabCounts', (id) => tabCounts(account(id)));
   handle('mail:tabRules', (id) => ({ ...account(id).tabRules }));
   handle('mail:setTabRule', (id, address, category) => setTabRule(account(id), address, category));
+  handle('mail:rules', (id) => rulesOf(account(id)));
+  handle('mail:saveRule', (id, rule) => saveRule(account(id), rule));
+  handle('mail:deleteRule', (id, ruleId) => deleteRule(account(id), ruleId));
+  handle('mail:orderRules', (id, ids) => orderRules(account(id), ids));
+  handle('mail:block', (id, sender, to) => block(account(id), sender, to));
+  handle('mail:unblock', (id, sender) => unblock(account(id), sender));
+  handle('mail:applyRules', (id, opts) => {
+    const o = (opts ?? {}) as { rule?: unknown; blocked?: unknown };
+    return applyRules(account(id), typeof o.rule === 'string' ? o.rule : undefined, o.blocked === true);
+  });
+  handle('mail:syncRules', async (id, opts) => {
+    const a = account(id);
+    await serially(a, () => syncSieve(a, (opts as { takeOver?: unknown } | undefined)?.takeOver === true));
+    return rulesOf(a);
+  });
+  handle('mail:rulesScript', (id) => rulesScript(account(id)));
   handle('mail:markAllRead', (id, mailbox) => markAllRead(account(id), mailboxArg(mailbox)));
   handle('mail:move', (id, mailbox, uids, to) => move(account(id), mailboxArg(mailbox), uidList(uids), to));
   handle('mail:remove', (id, mailbox, uids) => remove(account(id), mailboxArg(mailbox), uidList(uids)));

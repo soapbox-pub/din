@@ -301,6 +301,103 @@ export interface OutgoingMessage {
   draftUid?: number | null;
 }
 
+/**
+ * What a rule looks at: the sender, the recipients (To or Cc), the subject,
+ * the mailing list's List-Id, or any header by name.
+ */
+export const RULE_FIELDS = ['from', 'to', 'subject', 'list-id', 'header'] as const;
+export type RuleField = (typeof RULE_FIELDS)[number];
+
+/** How it's matched: contains the words, is exactly (an address, for From and To), or an address at a domain. */
+export const RULE_MATCHES = ['contains', 'is', 'domain'] as const;
+export type RuleMatch = (typeof RULE_MATCHES)[number];
+
+export interface RuleCondition {
+  field: RuleField;
+  /** The header's name, for `header`. */
+  header?: string;
+  match: RuleMatch;
+  /** Matched without regard to case. */
+  value: string;
+}
+
+/**
+ * What a rule does: move the message (to a mailbox by path, or the
+ * account's junk, trash or archive), put a label on it, mark it read, star
+ * it, or forward a copy (only the server can, so only where it runs the
+ * rules).
+ */
+export type RuleAction =
+  | { type: 'move'; to: string | { special: 'junk' | 'trash' | 'archive' } }
+  | { type: 'label'; label: string }
+  | { type: 'read' }
+  | { type: 'flag' }
+  | { type: 'forward'; to: string };
+
+export interface MailRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Whether every condition must match, or any one. */
+  match: 'all' | 'any';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  /** No later rule looks at mail this one matched. */
+  stop: boolean;
+}
+
+/** A sender whose mail goes straight to Junk or the Trash: an address, or `@domain` for everyone there. */
+export interface BlockedSender {
+  sender: string;
+  to: 'junk' | 'trash';
+  /** When it was blocked, ms. */
+  added: number;
+}
+
+/**
+ * Whether the account's server runs the rules too (Sieve, RFC 5228, put
+ * there over ManageSieve, RFC 5804): `active`, it does, from Din's own
+ * script; `ready`, it can, and Din's script goes there with the first rule
+ * or block; `inactive`, it could, but another script of the user's is the
+ * active one, so Din's waits beside it until the user takes over;
+ * `edited`, Din's script there was changed by something other than Din, so
+ * it's left alone; `none`, the server has no ManageSieve (Gmail, iCloud,
+ * Outlook, Yahoo, Proton…); `error`, it couldn't be reached last time; and
+ * `unchecked`, not looked at yet. Whatever the server does, Din runs the
+ * rules on new mail itself while it's running.
+ */
+export type RulesServerState = 'unchecked' | 'none' | 'ready' | 'active' | 'inactive' | 'edited' | 'error';
+
+export interface RulesServer {
+  state: RulesServerState;
+  /** The ManageSieve server, host:port. */
+  host: string | null;
+  /** The script the server runs, when it isn't Din's. */
+  activeScript: string | null;
+  /** The Sieve extensions it has. */
+  extensions: string[];
+  /** When it was last looked at, ms. */
+  checked: number | null;
+  error: string | null;
+}
+
+export interface MailRules {
+  blocked: BlockedSender[];
+  /** In the order they run, after the blocked senders. */
+  rules: MailRule[];
+  server: RulesServer;
+}
+
+/** What running the rules over mail already in the inbox did. */
+export interface RulesApplied {
+  /** Messages looked at. */
+  checked: number;
+  /** Messages a rule or a block matched. */
+  matched: number;
+  /** Of those, moved out of the inbox. */
+  moved: number;
+}
+
 /** Something in a mailbox changed: new mail, flags, a move. */
 export interface MailChange {
   accountId: string;
@@ -364,6 +461,27 @@ export interface MailBridge {
   tabRules(accountId: string): Promise<Record<string, MailCategory>>;
   /** Send a sender's mail, what's in the inbox and what comes, to a tab; null goes back to how it's sorted. */
   setTabRule(accountId: string, address: string, category: MailCategory | null): Promise<void>;
+  /** The account's blocked senders and rules, and whether its server runs them too. */
+  rules(accountId: string): Promise<MailRules>;
+  /** Add a rule, or change the one with its id (a new one goes last). */
+  saveRule(accountId: string, rule: MailRule): Promise<MailRules>;
+  deleteRule(accountId: string, id: string): Promise<MailRules>;
+  /** Put the rules in this order, by id. */
+  orderRules(accountId: string, ids: string[]): Promise<MailRules>;
+  /** Send a sender's new mail (an address, or `@domain`) to Junk or the Trash. */
+  block(accountId: string, sender: string, to?: 'junk' | 'trash'): Promise<MailRules>;
+  unblock(accountId: string, sender: string): Promise<MailRules>;
+  /** Run the rules and the blocks over what's in the inbox now: or one rule, by id, or (`blocked`) only the blocks. */
+  applyRules(accountId: string, options?: { rule?: string; blocked?: boolean }): Promise<RulesApplied>;
+  /**
+   * Look at the server again and put the rules there; `takeOver` makes Din's
+   * script the active one in place of the user's own (kept on the server,
+   * and run after Din's where the server can include it), or in place of an
+   * edited copy of Din's.
+   */
+  syncRules(accountId: string, options?: { takeOver?: boolean }): Promise<MailRules>;
+  /** The Sieve script Din puts on the server for the account. */
+  rulesScript(accountId: string): Promise<string>;
   /** Mark every message in a mailbox read; resolves with how many were unread. */
   markAllRead(accountId: string, path: string): Promise<number>;
   /** Move to a mailbox by path, or to the account's archive, trash or junk. */
@@ -418,7 +536,8 @@ export interface MailRead {
  */
 export type MailDesktopBridge = Pick<
   MailBridge,
-  'accounts' | 'mailboxes' | 'messages' | 'message' | 'send' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule'
+  'accounts' | 'mailboxes' | 'messages' | 'message' | 'send' | 'markAllRead' | 'avatarLookups' | 'setAvatarLookups' | 'subscriptions' | 'unsubscribe' | 'labels' | 'createLabel' | 'updateLabel' | 'deleteLabel' | 'inboxTabs' | 'setInboxTabs' | 'tabRules' | 'setTabRule' | 'move' | 'remove'
+  | 'rules' | 'saveRule' | 'deleteRule' | 'orderRules' | 'block' | 'unblock' | 'applyRules' | 'syncRules' | 'rulesScript'
 > & {
   /** Give an account its color in Mail, or (null) back the one Mail picks; nothing else of the account. */
   setAccountColor(id: string, color: LabelColor | null): Promise<MailAccount>;

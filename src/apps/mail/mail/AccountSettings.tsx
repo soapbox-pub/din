@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AtSign, Loader2, Plus, Settings2 } from 'lucide-react';
+import { AtSign, ListFilter, Loader2, Plus, Settings2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DialogButton } from '@/shared/dialogs';
 import { ContentPane, SidebarHeading, SidebarRow, SidebarTitle, SidebarTitleIcon } from '@/shared/appChrome';
@@ -12,8 +12,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { CATEGORY_NAMES, MAIL_CATEGORIES, type InboxTabs, type MailAccount, type MailServer } from '@/lib/mail';
-import { announceSettings, useAccounts, useInboxTabs, useMail, useSetAccountColor, useSetFillCodes, useSetInboxTabs, useSettingsChanges } from './api';
+import { announceSettings, useAccounts, useInboxTabs, useLiveUpdates, useMail, useSetAccountColor, useSetFillCodes, useSetInboxTabs, useSettingsChanges } from './api';
 import { AccountSetup } from './AccountSetup';
+import { RulesSettings } from './RulesSettings';
 import { accountColor, accountDot } from './accounts';
 import { ColorPicker } from './LabelDialogs';
 import { REMOTE_KEY } from './Reader';
@@ -224,16 +225,17 @@ function AccountForm({ account, accounts, onRemoved }: { account: MailAccount; a
 
 /**
  * Mail's settings, in a window of their own (launched with `{ window:
- * 'settings', account? }`, see openMailSettings): General, then each account,
- * down the side. What's changed here reaches Mail's other windows
+ * 'settings', account?, section? }`, see openMailSettings): General, the
+ * Rules and blocked senders, then each account, down the side. What's changed here reaches Mail's other windows
  * (announceSettings).
  */
-export function SettingsWindow({ initial }: { initial: string | null }) {
+export function SettingsWindow({ initial, section = null }: { initial: string | null; section?: 'rules' | null }) {
   useSettingsChanges();
+  useLiveUpdates();
   useWindowTitle('Mail Settings');
   const accountsQuery = useAccounts();
   const accounts = accountsQuery.data ?? [];
-  const [selected, setSelected] = useState<string | 'general'>(initial ?? 'general');
+  const [selected, setSelected] = useState<string | 'general' | 'rules'>(section ?? initial ?? 'general');
   const [adding, setAdding] = useState(false);
   const [remote, setRemote] = useState(() => localStorage.getItem(REMOTE_KEY) === 'always');
   const account = accounts.find((a) => a.id === selected);
@@ -247,6 +249,7 @@ export function SettingsWindow({ initial }: { initial: string | null }) {
         <SidebarTitle icon={<SidebarTitleIcon src="/icons/apps/mail.png" />} title="Settings" />
         <nav aria-label="Settings" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pt-1 pb-4">
           <SidebarRow icon={Settings2} label="General" selected={selected === 'general'} onClick={() => setSelected('general')} />
+          <SidebarRow icon={ListFilter} label="Rules" selected={selected === 'rules'} onClick={() => setSelected('rules')} />
           <SidebarHeading className="mt-3">Accounts</SidebarHeading>
           {accounts.map((a) => (
             <SidebarRow
@@ -267,7 +270,9 @@ export function SettingsWindow({ initial }: { initial: string | null }) {
           <WindowControls />
         </WindowDragRegion>
         <ContentPane>
-          {account ? (
+          {selected === 'rules' ? (
+            <RulesSettings accounts={accounts} initial={initial} />
+          ) : account ? (
             <AccountForm key={account.id} account={account} accounts={accounts} onRemoved={() => setSelected('general')} />
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">

@@ -1,7 +1,8 @@
 import { formatBytes, getFsBridge } from '@/lib/fs';
 import { mimeOf } from '@/lib/mime';
 import { blankSeed, outgoingMessage, parseAddresses, recipientsProblem, replySeed, writtenAbove, type ComposeSeed } from '@/shared/mailCompose';
-import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailAttachment, type MailboxInfo, type MailLabel, type MailSubscription, type MessageSummary } from '@/lib/mail';
+import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailAttachment, type MailboxInfo, type MailLabel, type MailRule, type MailRules, type MailSubscription, type MessageSummary, type RuleAction, type RuleCondition, type RulesApplied } from '@/lib/mail';
+import { describeBlocked, describeRule, looksLikeAddress, serverText } from '@/shared/mailRules';
 import { markRead, markReadTargets } from '@/lib/mailInbox';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { call, command, need, pick } from './util';
@@ -16,7 +17,9 @@ import { call, command, need, pick } from './util';
  * to; with --compose they open Mail's compose window filled in instead, for
  * the user to send. Unsubscribing asks on screen first: it sends requests
  * from the user's account, and can't be taken back; so does deleting a
- * label, which comes off every message.
+ * label, which comes off every message, and deleting a rule. Blocked
+ * senders and rules (Settings → Rules) run on new mail in Din, and on the
+ * account's server too where it has Sieve.
  */
 
 const mail = () => need(getMailDesktopBridge(), 'Mail');
@@ -157,6 +160,100 @@ async function sendWritten(
   };
 }
 
+const RULE_CONDITIONS: Param[] = [
+  { name: 'from', type: 'string', optional: true, help: 'Mail from this address (or with these words in its sender)' },
+  { name: 'from-domain', type: 'string', optional: true, help: 'Mail from anyone at this domain (and its subdomains)' },
+  { name: 'to', type: 'string', optional: true, help: 'Mail to or copied to this address (or with these words in its recipients)' },
+  { name: 'to-domain', type: 'string', optional: true, help: 'Mail to or copied to anyone at this domain' },
+  { name: 'subject', type: 'string', optional: true, help: 'Mail whose subject has these words' },
+  { name: 'subject-is', type: 'string', optional: true, help: 'Mail whose subject is exactly this' },
+  { name: 'list', type: 'string', optional: true, help: 'Mail from a mailing list whose List-Id has this in it' },
+  { name: 'header', type: 'string', optional: true, help: 'Mail with a header that has words in it, as Name: words' },
+  { name: 'any', type: 'boolean', optional: true, help: 'Match when any of the conditions do, not all of them' },
+];
+
+const RULE_ACTIONS: Param[] = [
+  { name: 'move-to', type: 'string', optional: true, help: 'Move it to a mailbox, by name or path, or junk, trash or archive' },
+  { name: 'label', type: 'string', optional: true, help: 'Put this label on it, by name' },
+  { name: 'mark-read', type: 'boolean', optional: true, help: 'Mark it read' },
+  { name: 'star', type: 'boolean', optional: true, help: 'Star it' },
+  { name: 'forward', type: 'string', optional: true, help: 'Forward a copy to this address (only where the account’s server runs the rules)' },
+];
+
+/** The conditions the flags give, or none. */
+function ruleConditions(args: { optString(name: string): string | undefined }): RuleCondition[] {
+  const out: RuleCondition[] = [];
+  const who = (field: 'from' | 'to', v: string | undefined, domain: string | undefined) => {
+    if (v !== undefined) out.push({ field, match: looksLikeAddress(v) ? 'is' : 'contains', value: v.trim() });
+    if (domain !== undefined) out.push({ field, match: 'domain', value: domain.trim().replace(/^@/, '') });
+  };
+  who('from', args.optString('from'), args.optString('from-domain'));
+  who('to', args.optString('to'), args.optString('to-domain'));
+  const subject = args.optString('subject');
+  if (subject !== undefined) out.push({ field: 'subject', match: 'contains', value: subject });
+  const exact = args.optString('subject-is');
+  if (exact !== undefined) out.push({ field: 'subject', match: 'is', value: exact });
+  const list = args.optString('list');
+  if (list !== undefined) out.push({ field: 'list-id', match: 'contains', value: list });
+  const header = args.optString('header');
+  if (header !== undefined) {
+    const at = header.indexOf(':');
+    if (at <= 0) throw new CommandError('Give --header as Name: words', 'usage');
+    out.push({ field: 'header', header: header.slice(0, at).trim(), match: 'contains', value: header.slice(at + 1).trim() });
+  }
+  return out;
+}
+
+/** The actions the flags give, or none; a mailbox and a label are looked up in the account. */
+async function ruleActions(account: MailAccount, args: { optString(name: string): string | undefined; optBool(name: string): boolean | undefined }): Promise<RuleAction[]> {
+  const out: RuleAction[] = [];
+  const to = args.optString('move-to');
+  if (to !== undefined) {
+    const special = to.trim().toLowerCase();
+    if (special === 'junk' || special === 'trash' || special === 'archive') out.push({ type: 'move', to: { special } });
+    else out.push({ type: 'move', to: (await mailboxIn(account, to)).path });
+  }
+  const label = args.optString('label');
+  if (label !== undefined) out.push({ type: 'label', label: (await labelIn(account, label)).id });
+  if (args.optBool('mark-read') === true) out.push({ type: 'read' });
+  if (args.optBool('star') === true) out.push({ type: 'flag' });
+  const forward = args.optString('forward');
+  if (forward !== undefined) out.push({ type: 'forward', to: forward.trim() });
+  return out;
+}
+
+/** A rule of the account's, by its number in the list, its name or its id. */
+async function ruleIn(account: MailAccount, query: string): Promise<{ rule: MailRule; rules: MailRules }> {
+  const rules = await call(mail().rules(account.id));
+  if (!rules.rules.length) throw new CommandError(`${account.email} has no rules`);
+  const n = Number(query);
+  if (Number.isInteger(n) && n >= 1 && n <= rules.rules.length && String(n) === query.trim()) return { rule: rules.rules[n - 1], rules };
+  return { rule: pick(rules.rules, query, (r) => [r.id, r.name], 'rule'), rules };
+}
+
+/** Names for mailboxes and labels in a rule's words. */
+async function ruleNames(account: MailAccount): Promise<{ mailbox: (path: string) => string; label: (id: string) => string }> {
+  const [boxes, labels] = await Promise.all([call(mail().mailboxes(account.id)).catch(() => []), call(mail().labels(account.id)).catch(() => null)]);
+  return {
+    mailbox: (path) => boxes.find((b) => b.path === path)?.name ?? path,
+    label: (id) => labels?.labels.find((l) => l.id === id)?.name ?? id,
+  };
+}
+
+function rulesText(account: MailAccount, rules: MailRules, names: Awaited<ReturnType<typeof ruleNames>>, several: boolean): string {
+  const head = several ? `${account.email}\n` : '';
+  const pad = several ? '  ' : '';
+  const blocked = rules.blocked.length ? [`${pad}Blocked:`, ...rules.blocked.map((b) => `${pad}  ${describeBlocked(b)}`)] : [`${pad}No blocked senders`];
+  const list = rules.rules.length
+    ? [`${pad}Rules:`, ...rules.rules.map((r, i) => `${pad}  ${i + 1}. ${r.enabled ? '' : '(off) '}${r.name ? `${r.name}: ` : ''}${describeRule(r, names)}`)]
+    : [`${pad}No rules`];
+  return `${head}${[...blocked, ...list, `${pad}${serverText(rules.server)}`].join('\n')}`;
+}
+
+function appliedText(r: RulesApplied): string {
+  return `Looked at ${r.checked.toLocaleString()} ${r.checked === 1 ? 'message' : 'messages'} in the inbox: ${r.matched.toLocaleString()} matched, ${r.moved.toLocaleString()} moved`;
+}
+
 /** The text of an HTML-only message, for reading on the command line; parsing it runs nothing. */
 function htmlText(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -168,7 +265,7 @@ function htmlText(html: string): string {
 
 export const mailArea: Area = {
   name: 'mail',
-  summary: 'Mail’s accounts (their colors, and whether codes in their mail are filled in), their mailboxes and messages (list, search, read, send, reply), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, and the mailing lists in their inboxes: list them, unsubscribe',
+  summary: 'Mail’s accounts (their colors, and whether codes in their mail are filled in), their mailboxes and messages (list, search, read, send, reply), marking a mailbox read, senders’ pictures, labels (list, make, edit, delete), the inbox’s tabs and which new mail notifies, moving senders between tabs, blocking senders and the rules that sort new mail (list, add, edit, delete, run on the inbox, put on the mail server), and the mailing lists in their inboxes: list them, unsubscribe',
   commands: [
     command('mail', 'accounts', 'The mail accounts Mail has', [], async () => {
       const list = await call(mail().accounts());
@@ -435,6 +532,174 @@ export const mailArea: Area = {
       const to = isMailCategory(tab) ? tab : null;
       for (const a of accounts) await call(mail().setTabRule(a.id, sender, to));
       return { data: { sender, tab: to }, text: to ? `Mail from ${sender} goes to ${CATEGORY_NAMES[to]}` : `Mail from ${sender} is sorted as it comes again` };
+    }),
+    command('mail', 'blocked', 'The senders each account blocks, whose new mail goes straight to Junk (or the Trash), as Mail’s Settings → Rules lists them', [ACCOUNT], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const all = await Promise.all(accounts.map(async (a) => ({ account: a, rules: await call(mail().rules(a.id)) })));
+      const rows = all.flatMap(({ account, rules }) => rules.blocked.map((b) => ({ accountId: account.id, account: account.email, ...b })));
+      return {
+        data: rows,
+        text: rows.length ? rows.map((r) => `${describeBlocked(r)}${accounts.length > 1 ? `  (${r.account})` : ''}`).join('\n') : 'No blocked senders',
+      };
+    }),
+    command('mail', 'block', 'Block senders, as a message’s Block Sender does: their new mail goes straight to Junk (or the Trash), on the server too where it can be given rules', [
+      { name: 'senders', type: 'string', positional: true, rest: true, help: 'Addresses, or @domain for everyone at a domain' },
+      { name: 'trash', type: 'boolean', optional: true, help: 'Send their mail to the Trash rather than Junk' },
+      { name: 'existing', type: 'boolean', optional: true, help: 'Also move what they’ve sent that’s in the inbox now' },
+      ACCOUNT,
+    ], async (args) => {
+      const senders = args.list('senders').map((s) => s.trim()).filter(Boolean);
+      if (!senders.length) throw new CommandError('Say who to block', 'usage');
+      const accounts = await accountsFor(args.optString('account'));
+      const to = args.optBool('trash') === true ? 'trash' : 'junk';
+      let applied: RulesApplied | null = null;
+      for (const a of accounts) {
+        for (const s of senders) await call(mail().block(a.id, s, to));
+        if (args.optBool('existing') === true) {
+          const r = await call(mail().applyRules(a.id, { blocked: true }));
+          applied = applied ? { checked: applied.checked + r.checked, matched: applied.matched + r.matched, moved: applied.moved + r.moved } : r;
+        }
+      }
+      return {
+        data: { blocked: senders, to, applied },
+        text: `Mail from ${senders.join(', ')} goes to ${to === 'trash' ? 'the Trash' : 'Junk'}${applied ? `; ${applied.moved.toLocaleString()} already in the inbox moved there` : ''}`,
+      };
+    }),
+    command('mail', 'unblock', 'Stop blocking senders: their mail comes to the inbox again (what went to Junk stays there)', [
+      { name: 'senders', type: 'string', positional: true, rest: true, help: 'Addresses or @domains, as din mail blocked lists them' },
+      ACCOUNT,
+    ], async (args) => {
+      const senders = args.list('senders').map((s) => s.trim()).filter(Boolean);
+      if (!senders.length) throw new CommandError('Say who to unblock', 'usage');
+      const accounts = await accountsFor(args.optString('account'));
+      const done = new Set<string>();
+      for (const a of accounts) {
+        const { blocked } = await call(mail().rules(a.id));
+        for (const s of senders) {
+          const who = s.toLowerCase().replace(/^(?!.*@)/, '@');
+          if (!blocked.some((b) => b.sender === who)) continue;
+          await call(mail().unblock(a.id, who));
+          done.add(who);
+        }
+      }
+      if (!done.size) throw new CommandError(`${senders.join(', ')} ${senders.length === 1 ? 'isn’t' : 'aren’t'} blocked`);
+      return { data: { unblocked: [...done] }, text: `Unblocked ${[...done].join(', ')}` };
+    }),
+    command('mail', 'rules', 'Each account’s blocked senders and rules, in the order they run, and whether its mail server runs them too, as Mail’s Settings → Rules shows them', [ACCOUNT], async (args) => {
+      const accounts = await accountsFor(args.optString('account'));
+      const all = await Promise.all(accounts.map(async (a) => ({ account: a, rules: await call(mail().rules(a.id)), names: await ruleNames(a) })));
+      return {
+        data: all.map(({ account, rules }) => ({ accountId: account.id, account: account.email, ...rules })),
+        text: all.map(({ account, rules, names }) => rulesText(account, rules, names, accounts.length > 1)).join('\n\n'),
+      };
+    }),
+    command('mail', 'rule-add', 'Add a rule, as Mail’s New Rule… does: what new mail to look for (every condition given, or --any of them) and what to do with it; it goes last, and runs on the server too where it can', [
+      { name: 'name', type: 'string', optional: true, help: 'What to call it' },
+      ...RULE_CONDITIONS,
+      ...RULE_ACTIONS,
+      { name: 'stop', type: 'boolean', optional: true, help: 'Don’t run the rules after it on mail it matches' },
+      { name: 'apply', type: 'boolean', optional: true, help: 'Also run it on what’s in the inbox now' },
+      ACCOUNT,
+    ], async (args) => {
+      const account = await oneAccount(args.optString('account'));
+      const conditions = ruleConditions(args);
+      if (!conditions.length) throw new CommandError('Say what to look for: --from, --to, --subject, --list or --header', 'usage');
+      const actions = await ruleActions(account, args);
+      if (!actions.length) throw new CommandError('Say what to do: --move-to, --label, --mark-read, --star or --forward', 'usage');
+      const rule: MailRule = { id: '', name: args.optString('name') ?? '', enabled: true, match: args.optBool('any') === true ? 'any' : 'all', conditions, actions, stop: args.optBool('stop') === true };
+      const saved = await call(mail().saveRule(account.id, rule));
+      const made = saved.rules[saved.rules.length - 1];
+      const applied = args.optBool('apply') === true ? await call(mail().applyRules(account.id, { rule: made.id })) : null;
+      return {
+        data: { rule: made, applied, server: saved.server },
+        text: `Rule ${saved.rules.length}: ${describeRule(made, await ruleNames(account))}${applied ? `\n${appliedText(applied)}` : ''}`,
+      };
+    }),
+    command('mail', 'rule-edit', 'Change a rule: conditions given replace its conditions, actions given replace its actions', [
+      { name: 'rule', type: 'string', positional: true, help: 'Which rule, by its number in din mail rules, or its name' },
+      { name: 'name', type: 'string', optional: true, help: 'Its new name' },
+      ...RULE_CONDITIONS,
+      ...RULE_ACTIONS,
+      { name: 'stop', type: 'boolean', optional: true, help: 'Whether the rules after it skip mail it matches (--no-stop for not)' },
+      { name: 'enabled', type: 'boolean', optional: true, help: 'Turn it on, or off with --no-enabled' },
+      { name: 'position', type: 'integer', optional: true, min: 1, help: 'Move it to this place in the order' },
+      ACCOUNT,
+    ], async (args) => {
+      const account = await oneAccount(args.optString('account'));
+      const { rule, rules } = await ruleIn(account, args.string('rule'));
+      const conditions = ruleConditions(args);
+      const actions = await ruleActions(account, args);
+      const any = args.optBool('any');
+      const next: MailRule = {
+        ...rule,
+        name: args.optString('name') ?? rule.name,
+        conditions: conditions.length ? conditions : rule.conditions,
+        actions: actions.length ? actions : rule.actions,
+        match: any === undefined ? (conditions.length ? 'all' : rule.match) : any ? 'any' : 'all',
+        stop: args.optBool('stop') ?? rule.stop,
+        enabled: args.optBool('enabled') ?? rule.enabled,
+      };
+      let saved = await call(mail().saveRule(account.id, next));
+      const position = args.optNumber('position');
+      if (position !== undefined) {
+        const ids = rules.rules.map((r) => r.id).filter((id) => id !== rule.id);
+        ids.splice(Math.min(position - 1, ids.length), 0, rule.id);
+        saved = await call(mail().orderRules(account.id, ids));
+      }
+      const at = saved.rules.findIndex((r) => r.id === rule.id);
+      return { data: saved.rules[at], text: `Rule ${at + 1}: ${saved.rules[at].enabled ? '' : '(off) '}${describeRule(saved.rules[at], await ruleNames(account))}` };
+    }),
+    command('mail', 'rule-delete', 'Delete a rule (asks on screen first); the mail it moved stays where it is', [
+      { name: 'rule', type: 'string', positional: true, help: 'Which rule, by its number in din mail rules, or its name' },
+      ACCOUNT,
+    ], async (args, ctx) => {
+      const account = await oneAccount(args.optString('account'));
+      const { rule } = await ruleIn(account, args.string('rule'));
+      const ok = await ctx.confirm({
+        title: `Delete the rule “${rule.name || describeRule(rule)}”?`,
+        description: 'New mail isn’t sorted by it any more, here or on the server. The mail it already moved stays where it is.',
+        action: 'Delete Rule',
+        destructive: true,
+      });
+      if (!ok) throw new CommandError('You didn’t allow it');
+      await call(mail().deleteRule(account.id, rule.id));
+      return { data: { deleted: rule.id }, text: `Deleted the rule ${rule.name || describeRule(rule)}` };
+    }),
+    command('mail', 'rules-apply', 'Run the rules and blocks (or one rule) on what’s in the inbox now, as Mail’s Apply to Inbox does, not only on new mail', [
+      { name: 'rule', type: 'string', positional: true, optional: true, help: 'Just this rule, by its number or name (default: every rule that’s on, and the blocks)' },
+      ACCOUNT,
+    ], async (args) => {
+      const query = args.optString('rule');
+      const accounts = query ? [await oneAccount(args.optString('account'))] : await accountsFor(args.optString('account'));
+      const results = [];
+      for (const a of accounts) {
+        const rule = query ? (await ruleIn(a, query)).rule : null;
+        results.push({ accountId: a.id, account: a.email, ...(await call(mail().applyRules(a.id, rule ? { rule: rule.id } : undefined))) });
+      }
+      return { data: results, text: results.map((r) => `${accounts.length > 1 ? `${r.account}: ` : ''}${appliedText(r)}`).join('\n') };
+    }),
+    command('mail', 'rules-server', 'Whether an account’s mail server runs its rules too (by Sieve, over ManageSieve), looked at again and brought up to date; --take-over makes Din’s rules the ones the server runs, in place of your own script there (kept, and run after Din’s where the server can)', [
+      { name: 'take-over', type: 'boolean', optional: true, help: 'Make Din’s rules the server’s active ones' },
+      { name: 'script', type: 'boolean', optional: true, help: 'Show the Sieve script Din puts there' },
+      ACCOUNT,
+    ], async (args, ctx) => {
+      const account = await oneAccount(args.optString('account'));
+      if (args.optBool('script') === true) {
+        const script = await call(mail().rulesScript(account.id));
+        return { data: { script }, text: script };
+      }
+      const takeOver = args.optBool('take-over') === true;
+      if (takeOver && (await call(mail().rules(account.id))).server.state === 'edited') {
+        const ok = await ctx.confirm({
+          title: 'Replace the changed rules on the server?',
+          description: 'Din’s rules on your mail server were changed somewhere else. Din puts its own back over those changes.',
+          action: 'Replace',
+          destructive: true,
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+      }
+      const now = await call(mail().syncRules(account.id, { takeOver }));
+      return { data: now.server, text: `${account.email}: ${serverText(now.server)}${now.server.host ? ` (${now.server.host})` : ''}` };
     }),
     command('mail', 'labels', 'Each account’s labels, as Mail’s sidebar lists them, and how the account keeps them (Gmail’s own labels, or IMAP keywords)', [ACCOUNT], async (args) => {
       const accounts = await accountsFor(args.optString('account'));

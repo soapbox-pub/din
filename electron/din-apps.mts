@@ -70,7 +70,7 @@ const SYSTEM_PERMISSIONS = {
   volumes: /^volumes:(state|mount|unlock|eject)$/,
   // Checking on Din Drive and turning it on; its trash stays the desktop's.
   drive: /^drive:(state|setup)$/,
-  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|labels|createLabel|updateLabel|deleteLabel|setLabels|markAllRead|avatar|avatarLookups|setAvatarLookups|inboxTabs|setInboxTabs|tabCounts|tabRules|setTabRule|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage)$/,
+  mail: /^mail:(accounts|discover|addAccount|updateAccount|removeAccount|mailboxes|messages|message|conversation|attachment|setFlags|labels|createLabel|updateLabel|deleteLabel|setLabels|markAllRead|avatar|avatarLookups|setAvatarLookups|inboxTabs|setInboxTabs|tabCounts|tabRules|setTabRule|move|remove|send|saveDraft|subscriptions|unsubscribe|unsubscribeMessage|rules|saveRule|deleteRule|orderRules|block|unblock|applyRules|syncRules|rulesScript)$/,
   passwords: /^passwords:(state|create|createWithComputerPassword|unlock|lock|setAutoUnlock|forgetNever|changePassword|list|get|save|setFavorite|move|trash|restore|removePasskey|deleteForever|emptyTrash|createGroup|renameGroup|deleteGroup|import|generate|copy)$/,
   phone: /^phone:(state|conversations|messages|contacts|send|markRead|deleteConversation|refresh)$/,
   vms: /^vms:(status|list|create|install|retryInstall|cancelInstall|update|remove|start|shutdown|forceStop|pause|resume|reset|setCdrom|resizeDisk|snapshots|takeSnapshot|restoreSnapshot|deleteSnapshot|openDisplay|displayWrite|closeDisplay)$/,

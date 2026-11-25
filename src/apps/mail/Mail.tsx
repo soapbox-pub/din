@@ -4,6 +4,8 @@ import { restoredState, wasReopened, windowLaunch, type Launch } from '@/shared/
 import { blankSeed, escapeHtml, parseAddresses, type ComposeSeed } from './mail/format';
 import { Viewer } from './mail/Viewer';
 import { SettingsWindow } from './mail/AccountSettings';
+import { RuleWindow } from './mail/RuleWindow';
+import type { RuleSeed } from './mail/api';
 import { savedCompose } from './mail/restore';
 import './mail/mail.css';
 
@@ -75,7 +77,17 @@ export function Mail() {
   // A window opened for Mail's settings (openMailSettings), not a mailbox.
   const settings = useMemo(() => {
     const { params } = windowLaunch();
-    return params.window === 'settings' ? { account: typeof params.account === 'string' ? params.account : null } : null;
+    return params.window === 'settings' ? { account: typeof params.account === 'string' ? params.account : null, section: params.section === 'rules' ? ('rules' as const) : null } : null;
+  }, []);
+  // A rule being made or edited (openRuleWindow).
+  const rule = useMemo((): RuleSeed | null => {
+    const { params } = windowLaunch();
+    if (params.window !== 'rule' || typeof params.accountId !== 'string') return null;
+    return {
+      accountId: params.accountId,
+      rule: typeof params.rule === 'string' ? params.rule : undefined,
+      conditions: Array.isArray(params.conditions) ? (params.conditions as RuleSeed['conditions']) : undefined,
+    };
   }, []);
   // A message being written comes back as it was left, not as it was started.
   const saved = useMemo(() => savedCompose(restoredState()), []);
@@ -85,7 +97,8 @@ export function Mail() {
     const { params } = windowLaunch();
     return !saved && params.compose && typeof params.text === 'string' ? params.text : undefined;
   }, [saved]);
-  if (settings) return <SettingsWindow initial={settings.account} />;
+  if (settings) return <SettingsWindow initial={settings.account} section={settings.section} />;
+  if (rule) return <RuleWindow seed={rule} />;
   return seed ? (
     <Suspense>
       <Compose seed={seed} written={written} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : sharedFiles(windowLaunch())} />

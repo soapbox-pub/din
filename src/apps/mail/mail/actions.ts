@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { toast } from '@/shared/toast';
-import { CATEGORY_NAMES, type LabelColor, type MailAccount, type MailCategory, type MailLabel, type MailLabels, type MailMessage } from '@/lib/mail';
-import { labelsKey, mailboxesKey, patchItems, patchUnseen, useMail, type Item, type Source } from './api';
+import { CATEGORY_NAMES, type LabelColor, type MailAccount, type MailboxInfo, type MailCategory, type MailLabel, type MailLabels, type MailMessage } from '@/lib/mail';
+import { labelsKey, mailboxesKey, openRuleWindow, patchItems, patchUnseen, useMail, type Item, type Source } from './api';
 import { blankSeed, draftSeed, formatAddress, forwardSeed, replySeed, type ComposeSeed } from './format';
 import { htmlToPlain } from '@/shared/mailCompose';
 import { appLink } from '@/shared/launch';
@@ -20,7 +20,9 @@ export type MessageAction =
   | 'read'
   | 'unread'
   | 'open-draft'
-  | 'assistant';
+  | 'assistant'
+  | 'block'
+  | 'make-rule';
 
 /**
  * Open in Assistant: a new conversation with the message attached, as a
@@ -95,6 +97,8 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
       const first = items[0];
       const account = accounts.find((a) => a.id === first.accountId);
       const keys = new Set(items.map((i) => i.key));
+      const own = new Set(accounts.map((a) => a.email.toLowerCase()));
+      const isJunk = (i: Item) => qc.getQueryData<MailboxInfo[]>(mailboxesKey(i.accountId))?.find((b) => b.path === i.path)?.special === 'junk';
       try {
         switch (action) {
           case 'reply':
@@ -110,6 +114,37 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
           case 'assistant':
             openInAssistant(await full(first), first, account);
             return;
+          case 'make-rule': {
+            // From the newest message someone else sent (a conversation holds the user's replies too).
+            const theirs = items.filter((i) => !own.has(i.from[0]?.address.toLowerCase() ?? '')).sort((x, y) => y.date - x.date)[0] ?? first;
+            const sender = theirs.from[0]?.address.toLowerCase();
+            openRuleWindow({ accountId: theirs.accountId, conditions: [sender ? { field: 'from', match: 'is', value: sender } : { field: 'subject', match: 'contains', value: theirs.subject }] });
+            return;
+          }
+          case 'block': {
+            // Each account's senders, never the user's own address.
+            const senders = new Map<string, { accountId: string; address: string }>();
+            for (const i of items) {
+              const address = i.from[0]?.address.toLowerCase();
+              if (address && !own.has(address)) senders.set(`${i.accountId}\u0000${address}`, { accountId: i.accountId, address });
+            }
+            if (!senders.size) return;
+            for (const s of senders.values()) await mail.block(s.accountId, s.address);
+            // What they sent that's here goes to Junk now, as what they send will.
+            const theirs = items.filter((i) => senders.has(`${i.accountId}\u0000${i.from[0]?.address.toLowerCase()}`) && !isJunk(i));
+            if (theirs.length) {
+              const gone = new Set(theirs.map((i) => i.key));
+              onRemoved(gone);
+              patchItems(qc, gone, null);
+              for (const g of byMailbox(theirs).values()) await mail.move(g.accountId, g.path, g.uids, { special: 'junk' });
+            }
+            const names = [...new Set([...senders.values()].map((s) => s.address))];
+            toast(names.length === 1 ? `Blocked ${names[0]}` : `Blocked ${names.length} senders`, {
+              body: 'Their mail goes to Junk from now on. Unblock them in Settings → Rules.',
+            });
+            void qc.invalidateQueries({ queryKey: ['mail', 'rules'] });
+            return;
+          }
           case 'flag':
           case 'unflag': {
             const flagged = action === 'flag';

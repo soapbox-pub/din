@@ -1,4 +1,4 @@
-import { Archive, Bot, Folder, Forward, Inbox, LayoutPanelTop, Mail, MailMinus, MailOpen, OctagonAlert, Pencil, Plus, Reply, ReplyAll, Star, StarOff, Tag, Trash2 } from 'lucide-react';
+import { Archive, Ban, Bot, Folder, ListFilter, Forward, Inbox, LayoutPanelTop, Mail, MailMinus, MailOpen, OctagonAlert, Pencil, Plus, Reply, ReplyAll, Star, StarOff, Tag, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { CATEGORY_NAMES, type LabelColor, type MailboxInfo, type MailCategory, type MailLabels } from '@/lib/mail';
 import type { Item } from './api';
@@ -84,7 +84,11 @@ export function messageMenu(targets: Item[], boxes: MailboxInfo[], labels: MailL
       ...(labelling.length ? [{ kind: 'sub', label: 'Label as', icon: Tag, items: labelling } satisfies MenuEntry] : []),
       ...(tabbing.length ? [{ kind: 'sub', label: 'Move to Tab', icon: LayoutPanelTop, items: tabbing } satisfies MenuEntry] : []),
     ],
-    first.listUnsubscribe && !many ? [item('unsubscribe', 'Unsubscribe…', MailMinus)] : [],
+    [
+      ...(first.listUnsubscribe && !many ? [item('unsubscribe', 'Unsubscribe…', MailMinus)] : []),
+      item('block', 'Block Sender', Ban),
+      item('make-rule', 'Make Rule…', ListFilter, { disabled: many }),
+    ],
     [item('trash', 'Delete', Trash2, { destructive: true })],
   ];
   const kept = groups.map((g) => g.filter((e) => e.kind !== 'item' || typeof e.pick === 'object' || !skip.has(e.pick))).filter((g) => g.length);
