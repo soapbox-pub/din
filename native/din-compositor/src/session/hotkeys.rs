@@ -18,13 +18,16 @@
 //! DIN_SHELL_KEYS. Only Din's own process (the one the compositor started)
 //! is kept; each press is a line: `screenshot-area`, `mic-mute` or
 //! `display-switch`. The keys still go on to whatever has the keyboard.
+//! In the other direction, Din can move the pointer with two little-endian
+//! i32 coordinates relative to its window.
 
 use std::{
-    io::Write,
+    io::{ErrorKind, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
 };
 
+use smithay::reexports::calloop::{Interest, Mode, PostAction, generic::Generic};
 use tracing::{info, warn};
 
 use super::{direct::peer_pid, state::State};
@@ -79,6 +82,27 @@ impl State {
                     // behind a full socket is one it's too busy to act on.
                     if stream.set_nonblocking(true).is_err() {
                         continue;
+                    }
+                    let Ok(reader) = stream.try_clone() else { continue };
+                    let mut point = [0; 8];
+                    let mut used = 0;
+                    let source = Generic::new(reader, Interest::READ, Mode::Level);
+                    if let Err(err) = self.handle.insert_source(source, move |_, stream, state| {
+                        match (&**stream).read(&mut point[used..]) {
+                            Ok(0) => return Ok(PostAction::Remove),
+                            Ok(n) => used += n,
+                            Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => {}
+                            Err(_) => return Ok(PostAction::Remove),
+                        }
+                        if used == point.len() {
+                            let x = i32::from_le_bytes([point[0], point[1], point[2], point[3]]);
+                            let y = i32::from_le_bytes([point[4], point[5], point[6], point[7]]);
+                            state.jump_pointer(x, y);
+                            used = 0;
+                        }
+                        Ok(PostAction::Continue)
+                    }) {
+                        warn!("hotkeys: listening to Din: {err}");
                     }
                     info!("hotkeys: Din ({pid}) connected");
                     self.hotkeys.client = Some(stream);

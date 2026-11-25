@@ -314,6 +314,31 @@ impl State {
         self.move_pointer(target, event.time_msec());
     }
 
+    /// Move to a point in Din's window after keyboard focus changes.
+    pub fn jump_pointer(&mut self, x: i32, y: i32) {
+        if self.direct_takes_pointer() {
+            return;
+        }
+        let Some(pointer) = self.seat.get_pointer() else { return };
+        if pointer.is_grabbed() {
+            return;
+        }
+        let current = pointer.current_location();
+        if let Some((surface, _)) = self.surface_under(current) {
+            let locked = with_pointer_constraint(&surface, &pointer, |constraint| {
+                constraint.is_some_and(|constraint| constraint.is_active())
+            });
+            if locked {
+                return;
+            }
+        }
+        let location = self.layout_box().loc.to_f64() + Point::from((f64::from(x), f64::from(y)));
+        if location != current {
+            let time = std::time::Duration::from(self.clock.now()).as_millis() as u32;
+            self.move_pointer(location, time);
+        }
+    }
+
     /// Moves the pointer to LOCATION on the layout.
     pub fn move_pointer(&mut self, location: Point<f64, Logical>, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else { return };

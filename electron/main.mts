@@ -4059,11 +4059,22 @@ function registerScreenshotHandlers(): void {
 
 function watchShellHotkeys(): void {
   const socket = process.env.DIN_SHELL_KEYS;
-  if (!socket) return;
   // Din's children (Terminal's shells, apps) needn't see where it is: they
   // couldn't connect anyway.
   delete process.env.DIN_SHELL_KEYS;
-  const connection = netSocket.createConnection(socket);
+  const connection = socket ? netSocket.createConnection(socket) : null;
+  // Coordinates in the shell window, as two little-endian signed integers.
+  ipcMain.handle('mouse:jump', (event, x: unknown, y: unknown) => {
+    assertShellSender(event);
+    if (!connection?.writable || connection.writableNeedDrain) return;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y) ||
+        Math.abs(x) > 0x7fffffff || Math.abs(y) > 0x7fffffff) return;
+    const point = Buffer.alloc(8);
+    point.writeInt32LE(Math.round(x), 0);
+    point.writeInt32LE(Math.round(y), 4);
+    connection.write(point);
+  });
+  if (!connection) return;
   connection.on('error', (err) => console.warn('[hotkeys] din-shell:', err.message));
   createInterface({ input: connection }).on('line', (line) => {
     if (line === 'screenshot-area') sendToShell('shortcut', { action: 'screenshot-area' });

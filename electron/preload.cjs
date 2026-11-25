@@ -1294,6 +1294,11 @@ expose('mouse', {
    * @param {{ scrollDirection: string, trackingSpeed: number, scrollSpeed: number, secondaryClick: string, middleClick: boolean, swipe: string, touchpadSwipe: boolean }} settings
    */
   set: (settings) => ipcRenderer.invoke('mouse:set', settings),
+  /** @param {number} x @param {number} y */
+  jump: (x, y) => {
+    const zoom = webFrame.getZoomFactor();
+    return ipcRenderer.invoke('mouse:jump', x * zoom, y * zoom);
+  },
 });
 
 // Cursor bridge (window.dinos.cursor), backed by the cursor:* handlers in

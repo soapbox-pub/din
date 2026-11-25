@@ -54,6 +54,7 @@ interface Dinos {
   zoom: ZoomBridge;
   brightness: BrightnessBridge;
   keyboard: KeyboardBridge;
+  mouse: MouseBridge;
   cursor: SystemCursorBridge;
   iconTheme: IconThemeBridge;
   screenshot: ScreenshotBridge;
@@ -150,7 +151,7 @@ directly by components.
 | Session and boot | `boot`, `session`, `bootScreen`, `lock`, `erase`, `power`, `installer`, `updater`, `features`, `firmware` |
 | Files and terminals | `fs`, `volumes`, `drive`, `flasher`, `torrents`, `pty`, `indd`, `passwords` |
 | Network | `wifi`, `vpn`, `tor`, `siteLocations`, `bluetooth`, `bluetoothLogin`, `phone`, `airplay` |
-| Displays and input | `display`, `monitors`, `zoom`, `brightness`, `keyboard`, `cursor`, `iconTheme`, `screenshot`, `dictation`, `shellShortcuts` |
+| Displays and input | `display`, `monitors`, `zoom`, `brightness`, `keyboard`, `mouse`, `cursor`, `iconTheme`, `screenshot`, `dictation`, `shellShortcuts` |
 | Sound and media | `audio`, `media`, `capture` (Studio's takes and live streams) |
 | System | `datetime`, `theme`, `systemEvents`, `systemMonitor`, `systemNotifications`, `tray`, `printing` |
 | Native apps | `nativeApps`, `nativeDisplay` |

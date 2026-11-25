@@ -21,6 +21,8 @@ export interface MouseSettings {
 export interface MouseBridge {
   status(): Promise<{ available: boolean }>;
   set(settings: MouseSettings): Promise<void>;
+  /** Move the pointer to a point relative to Din's whole desktop. */
+  jump(x: number, y: number): Promise<void>;
 }
 
 declare global {
