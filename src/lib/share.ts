@@ -7,6 +7,7 @@
  * sheet's own (Copy, Save to Downloads). The app hears the share in its
  * `launchQueue`; the sharer learns only whether it was shared.
  */
+import type { LucideIcon } from 'lucide-react';
 import type { DinManifest, ShareTarget } from '@/sdk/din';
 import type { AppDefinition } from '@/lib/apps';
 import { dinManifests } from '@/lib/dinApps';
@@ -83,6 +84,18 @@ export interface ShareAlternative {
   save?: (quality: string | null) => void;
 }
 
+/**
+ * Something the sharer offers to do with it besides sending it, as a row
+ * under the sheet's Copy (the Web Browser's Install as App…). Choosing it
+ * closes the sheet, which answers with its id.
+ */
+export interface ShareAction {
+  /** Its id, the sheet's answer; never an app's. */
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
 /** A share waiting on the user, for the sheet to show. */
 export interface ShareRequest {
   id: number;
@@ -95,6 +108,8 @@ export interface ShareRequest {
   alternatives: readonly ShareAlternative[];
   /** Where the sheet remembers which way was last chosen, for shares of the same kind. */
   rememberAs: string | null;
+  /** The sharer's own actions, as rows under Copy. */
+  actions: readonly ShareAction[];
   /** The way the sheet opens on, over what it remembers: 'link' or an alternative's id. */
   sendAs: string | null;
   /** The sheet's answer: the app it went to, an action's id, or null when it was closed. */
@@ -134,6 +149,7 @@ export function requestShare(
     alternatives?: readonly ShareAlternative[];
     rememberAs?: string | null;
     sendAs?: string | null;
+    actions?: readonly ShareAction[];
   } = {},
 ): Promise<string | null> {
   current?.finish(null);
@@ -145,6 +161,7 @@ export function requestShare(
       anchor: options.anchor ?? null,
       opener: options.opener ?? null,
       alternatives: options.alternatives ?? [],
+      actions: options.actions ?? [],
       rememberAs: options.rememberAs ?? null,
       sendAs: options.sendAs ?? null,
       finish: (result) => {

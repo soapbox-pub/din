@@ -65,6 +65,12 @@ take it as a grid, those picked lately first, and the sheet's own actions:
 **Save to Downloads** for files. The app that shared isn't offered. A new
 share replaces one still open.
 
+What shares from the desktop can add rows of its own under those
+(`actions` in `requestShare`, each a `ShareAction`); choosing one closes the
+sheet, which answers with its id. The Web Browser's is **Install as App…**
+(**Open as App** once it is), where Safari has Add to Dock: its popover
+points at the address bar's Share.
+
 ### Send as
 
 A share can come with other ways to send it (`alternatives` in

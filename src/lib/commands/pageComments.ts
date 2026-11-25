@@ -1,12 +1,7 @@
+import type { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
-import {
-  canonicalPageUrl,
-  draftPageComment,
-  pageCommentsFilter,
-  setCommentCountsShown,
-  threadOf,
-} from '@/lib/pageComments';
+import { canonicalPageUrl, draftPageComment, fetchCommentsPage, threadOf } from '@/lib/pageComments';
 import { CommandError, type Command, type CommandContext, type Param } from './types';
 import { command } from './util';
 
@@ -23,29 +18,30 @@ function pageOf(url: string): string {
   return page;
 }
 
-function eTag(tags: string[][]): string | undefined {
-  return tags.find(([n]) => n === 'e')?.[1];
-}
-
 export const pageCommentCommands: Command[] = [
-  command('browser', 'comments', 'The comments people posted on Nostr about a web page, as the Web Browser’s comments pane shows them, newest first', [URL_PARAM], async (args, ctx: CommandContext) => {
+  command('browser', 'comments', 'The comments people posted on Nostr about a web page, as the Web Browser’s comments pane shows them: a page of the newest, each followed by its replies; --until for older ones', [
+    URL_PARAM,
+    { name: 'until', type: 'integer', optional: true, help: 'Only comments posted at or before this Unix time (the “until” the last page gave)' },
+  ], async (args, ctx: CommandContext) => {
     const page = pageOf(args.string('url'));
-    const thread = threadOf(await ctx.query([pageCommentsFilter(page)]), page);
-    const rows = [...thread.all]
-      .sort((a, b) => b.created_at - a.created_at)
-      .map((c) => ({
-        id: c.id,
-        nevent: nip19.neventEncode({ id: c.id, author: c.pubkey, kind: c.kind }),
-        author: nip19.npubEncode(c.pubkey),
-        created: new Date(c.created_at * 1000).toISOString(),
-        replyTo: thread.all.some((p) => p.id === eTag(c.tags)) ? eTag(c.tags)! : null,
-        content: c.content,
-      }));
+    const fetched = await fetchCommentsPage((filters) => ctx.query(filters), page, args.optNumber('until'));
+    const thread = threadOf([fetched], page);
+    const row = (c: NostrEvent) => ({
+      id: c.id,
+      nevent: nip19.neventEncode({ id: c.id, author: c.pubkey, kind: c.kind }),
+      author: nip19.npubEncode(c.pubkey),
+      created: new Date(c.created_at * 1000).toISOString(),
+      replyTo: thread.parent(c.id)?.id ?? null,
+      content: c.content,
+    });
+    const rows = thread.top.flatMap((c) => [row(c), ...thread.replies(c.id).map(row)]);
+    const lines = rows.map(
+      (r) => `${r.replyTo ? '    ' : ''}${r.created} ${r.author}\n${r.replyTo ? '      ' : '  '}${r.content.replace(/\n/g, `\n${r.replyTo ? '      ' : '  '}`)}`,
+    );
+    if (fetched.until !== null) lines.push(`Older: din browser comments ${page} --until ${fetched.until}`);
     return {
-      data: { page, comments: rows },
-      text: rows.length
-        ? rows.map((r) => `${r.created} ${r.author}${r.replyTo ? ` (reply to ${r.replyTo.slice(0, 8)})` : ''}\n  ${r.content.replace(/\n/g, '\n  ')}`).join('\n')
-        : `No comments on ${page}`,
+      data: { page, comments: rows, until: fetched.until },
+      text: rows.length ? lines.join('\n') : `No comments on ${page}`,
     };
   }),
   command('browser', 'comment', 'Comment on a web page: opens it in the Web Browser with its comments pane showing the comment in the composer, which posts it when you press Post', [
@@ -61,12 +57,5 @@ export const pageCommentCommands: Command[] = [
     if (!hasTabConsumer()) ctx.actions.open('web-browser');
     publishTabCommand({ type: 'open', url: page });
     return { data: { page }, text: 'The comment is in the Web Browser’s composer; it posts when you press Post' };
-  }),
-  command('browser', 'comment-counts', 'Show how many comments each page has on the toolbar’s comments button, which asks your relays about every page you visit (never in private windows or Tor tabs)', [
-    { name: 'shown', type: 'string', positional: true, choices: ['on', 'off'], help: 'on: count every page’s; off: only when the comments pane is open' },
-  ], (args) => {
-    const on = args.string('shown') === 'on';
-    setCommentCountsShown(on);
-    return { text: on ? 'Pages’ comment counts show on the comments button' : 'Comment counts show only while the comments pane is open' };
   }),
 ];

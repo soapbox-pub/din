@@ -629,7 +629,7 @@ function siteOrigin(site: string): string {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), pages’ Nostr comments (read them, draft one, the toolbar’s counts), downloading a page’s video, the tabs making sound and muting them, site data, what each site may do, and the sites the user limited for their own sake',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), pages’ Nostr comments (read them, draft one), downloading a page’s video, the tabs making sound and muting them, site data, what each site may do, and the sites the user limited for their own sake',
   commands: [
     ...bookmarkCommands,
     ...pageCommentCommands,

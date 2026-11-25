@@ -1,23 +1,21 @@
-import { useSyncExternalStore } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query';
 
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
-import {
-  areCommentCountsShown,
-  pageCommentsFilter,
-  pageCommentTags,
-  setCommentCountsShown,
-  subscribeCommentCounts,
-  threadOf,
-} from '@/lib/pageComments';
+import { fetchCommentsPage, pageCommentTags, threadOf, type CommentsPage } from '@/lib/pageComments';
 
 /**
  * A web page's NIP-22 comments (src/lib/pageComments.ts) for the Web
- * Browser's comments pane and its toolbar count, which share one query per
- * page.
+ * Browser's comments pane, a page of them at a time.
  */
 
 const QUERY_TIMEOUT_MS = 6000;
@@ -27,29 +25,28 @@ const STALE_MS = 60_000;
 const threadKey = (page: string) => ['page-comments', page] as const;
 const reactionsKey = (page: string) => ['page-comment-reactions', page] as const;
 
-/** Whether pages' comment counts show in the toolbar, and a way to change it. */
-export function useCommentCountsShown(): [boolean, (shown: boolean) => void] {
-  return [useSyncExternalStore(subscribeCommentCounts, areCommentCountsShown), setCommentCountsShown];
-}
+type Pages = InfiniteData<CommentsPage, number | undefined>;
 
-/** Every comment on `page` (a canonical URL), as a thread; nothing is asked while it's null. */
+/** The comments on `page` (a canonical URL), as a thread, with `fetchNextPage` for older ones. */
 export function usePageComments(page: string | null) {
   const { nostr } = useNostr();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: threadKey(page ?? ''),
     enabled: page !== null,
     staleTime: STALE_MS,
-    queryFn: async ({ signal }) => {
-      const events = await nostr.query([pageCommentsFilter(page!)], {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(QUERY_TIMEOUT_MS)]),
-      });
-      return events;
-    },
-    select: (events) => threadOf(events, page!),
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      fetchCommentsPage(
+        (filters) => nostr.query(filters, { signal: AbortSignal.any([signal, AbortSignal.timeout(QUERY_TIMEOUT_MS)]) }),
+        page!,
+        pageParam,
+      ),
+    getNextPageParam: (last) => last.until ?? undefined,
+    select: (data) => threadOf(data.pages, page!),
   });
 }
 
-/** A comment's likes: who, and the signed-in account's own, to undo. */
+/** A comment's likes: how many, and the signed-in account's own, to undo. */
 export interface CommentLikes {
   count: number;
   mine: NostrEvent | null;
@@ -59,16 +56,16 @@ type LikesByComment = Record<string, NostrEvent[]>;
 
 const isLike = (reaction: NostrEvent) => reaction.content !== '-';
 
-/** The likes (NIP-25 reactions) on a thread's comments, in one request for them all. */
+/** The likes (NIP-25 reactions) on the comments shown, in one request for them all. */
 export function useCommentLikes(page: string | null, ids: string[]) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
-  const key = ids.slice().sort().join(',');
+  const queryKey = [...reactionsKey(page ?? ''), ids.slice().sort().join(',')];
   const query = useQuery({
-    queryKey: [...reactionsKey(page ?? ''), key],
+    queryKey,
     enabled: page !== null && ids.length > 0,
     staleTime: STALE_MS,
-    // Showing more comments asks again for them all: keep the counts meanwhile.
+    // Loading older comments asks again for them all: keep the counts meanwhile.
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }) => {
       const events = await nostr.query([{ kinds: [7], '#e': ids, limit: Math.min(ids.length * 20, 2000) }], {
@@ -85,13 +82,17 @@ export function useCommentLikes(page: string | null, ids: string[]) {
   });
   const likesOf = (id: string): CommentLikes => {
     const reactions = (query.data?.[id] ?? []).filter(isLike);
-    const pubkeys = new Set(reactions.map((r) => r.pubkey));
     return {
-      count: pubkeys.size,
+      count: new Set(reactions.map((r) => r.pubkey)).size,
       mine: (user && reactions.find((r) => r.pubkey === user.pubkey)) || null,
     };
   };
-  return { likesOf, queryKey: [...reactionsKey(page ?? ''), key] };
+  return { likesOf, queryKey };
+}
+
+/** Change every loaded page of a thread. */
+function updatePages(data: Pages | undefined, update: (pages: CommentsPage[]) => CommentsPage[]): Pages | undefined {
+  return data && { ...data, pages: update(data.pages) };
 }
 
 /** Post a comment on `page`, at its top or in reply to `parent`. */
@@ -102,8 +103,13 @@ export function usePostPageComment(page: string) {
     mutationFn: ({ content, parent }: { content: string; parent?: NostrEvent }) =>
       publish({ kind: 1111, content, tags: pageCommentTags(page, parent) }),
     // Shown at once: relays needn't have it yet when the thread's asked for again.
-    onSuccess: (event) => {
-      queryClient.setQueryData<NostrEvent[]>(threadKey(page), (events) => [event, ...(events ?? [])]);
+    onSuccess: (event, { parent }) => {
+      queryClient.setQueryData<Pages>(threadKey(page), (data) =>
+        updatePages(data, ([first, ...rest]) => [
+          parent ? { ...first, replies: [...first.replies, event] } : { ...first, top: [event, ...first.top] },
+          ...rest,
+        ]),
+      );
     },
   });
 }
@@ -116,7 +122,15 @@ export function useDeletePageComment(page: string) {
     mutationFn: (comment: NostrEvent) =>
       publish({ kind: 5, content: '', tags: [['e', comment.id], ['k', String(comment.kind)]] }),
     onSuccess: (_, comment) => {
-      queryClient.setQueryData<NostrEvent[]>(threadKey(page), (events) => events?.filter((e) => e.id !== comment.id));
+      queryClient.setQueryData<Pages>(threadKey(page), (data) =>
+        updatePages(data, (pages) =>
+          pages.map((p) => ({
+            ...p,
+            top: p.top.filter((e) => e.id !== comment.id),
+            replies: p.replies.filter((e) => e.id !== comment.id),
+          })),
+        ),
+      );
     },
   });
 }

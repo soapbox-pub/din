@@ -63,19 +63,21 @@ export function canonicalPageUrl(input: string | null | undefined): string | nul
   return url.toString();
 }
 
-/** The most comments one page's thread loads. */
-export const PAGE_COMMENTS_LIMIT = 500;
-
-/** Every comment on a page, top-level and replies: NIP-22 puts the root's `I` on each. */
-export function pageCommentsFilter(page: string, limit = PAGE_COMMENTS_LIMIT): NostrFilter {
-  return { kinds: [1111], '#I': [page], limit };
-}
+/** Comments on the page itself fetched at a time; their replies come with them. */
+export const COMMENTS_PAGE_SIZE = 30;
+/** How many levels of replies are followed under a page of comments. */
+const REPLY_ROUNDS = 4;
 
 const tagValue = (event: NostrEvent, name: string) => event.tags.find(([n]) => n === name)?.[1];
 
 /** Whether an event really is a comment on `page`, whatever a relay sent for the filter. */
 export function isPageComment(event: NostrEvent, page: string): boolean {
   return event.kind === 1111 && event.tags.some(([n, v]) => n === 'I' && v === page);
+}
+
+/** A comment on the page itself, not a reply: its parent (`i`) is the page. */
+function isTopLevel(event: NostrEvent, page: string): boolean {
+  return event.tags.some(([n, v]) => n === 'i' && v === page);
 }
 
 /** NIP-22 tags for a comment on `page`, at its top or in reply to `parent` (a comment on it). */
@@ -92,77 +94,110 @@ export function pageCommentTags(page: string, parent?: NostrEvent): string[][] {
   return tags;
 }
 
+/** One page of a page's comments: comments on it, the replies under them, and where the next page starts. */
+export interface CommentsPage {
+  top: NostrEvent[];
+  replies: NostrEvent[];
+  /** The next page's `until`, or null at the end. */
+  until: number | null;
+}
+
+type Query = (filters: NostrFilter[]) => Promise<NostrEvent[]>;
+
+/**
+ * Fetch a page of comments on `page`: the newest comments on the page itself
+ * up to `until`, and the replies under them, a level at a time. Relays are
+ * asked for no more than that, so there's no knowing how many there are in
+ * all until the last page.
+ */
+export async function fetchCommentsPage(query: Query, page: string, until?: number): Promise<CommentsPage> {
+  const found = await query([
+    { kinds: [1111], '#i': [page], limit: COMMENTS_PAGE_SIZE, ...(until !== undefined ? { until } : {}) },
+  ]);
+  const top = found
+    .filter((e) => isPageComment(e, page) && isTopLevel(e, page))
+    .sort((a, b) => b.created_at - a.created_at);
+  const seen = new Set(top.map((e) => e.id));
+  const replies: NostrEvent[] = [];
+  let frontier = [...seen];
+  for (let round = 0; round < REPLY_ROUNDS && frontier.length > 0; round++) {
+    const level = (await query([{ kinds: [1111], '#e': frontier, limit: 500 }])).filter(
+      (e) => isPageComment(e, page) && !seen.has(e.id),
+    );
+    for (const e of level) seen.add(e.id);
+    replies.push(...level);
+    frontier = level.map((e) => e.id);
+  }
+  // `until` takes in the oldest's second again, for others posted in it: a
+  // page with nothing new in it is the end.
+  const oldest = top.at(-1)?.created_at;
+  const more = top.length >= COMMENTS_PAGE_SIZE && oldest !== undefined && top.some((e) => e.created_at !== until);
+  return { top, replies, until: more ? oldest : null };
+}
+
 /** A page's comments arranged as a thread. */
 export interface PageThread {
   /** Every comment, by id. */
   all: NostrEvent[];
   /** Comments on the page itself, newest first. */
   top: NostrEvent[];
-  /** The direct replies to a comment, oldest first. */
+  /** Every reply under a comment on the page, however deep, oldest first. */
   replies(id: string): NostrEvent[];
+  /** The comment a reply answers, when it's among them. */
+  parent(id: string): NostrEvent | undefined;
 }
 
 /**
- * Arrange comments into a thread. A reply whose parent isn't among them (not
- * on these relays, or deleted) is shown at the top, rather than lost.
+ * Arrange pages of comments into a thread one level deep, as comments read
+ * best in a narrow pane: each comment on the page, then all the replies under
+ * it in the order they came, each saying who it answers when that isn't the
+ * comment they're under.
  */
-export function threadOf(events: NostrEvent[], page: string): PageThread {
+export function threadOf(pages: CommentsPage[], page: string): PageThread {
   const byId = new Map<string, NostrEvent>();
-  for (const event of events) if (isPageComment(event, page)) byId.set(event.id, event);
-  const all = [...byId.values()];
-  const children = new Map<string, NostrEvent[]>();
   const top: NostrEvent[] = [];
-  for (const event of all) {
-    const parent = tagValue(event, 'e');
-    if (parent && parent !== event.id && byId.has(parent)) {
-      const list = children.get(parent) ?? [];
-      list.push(event);
-      children.set(parent, list);
-    } else {
-      top.push(event);
+  for (const p of pages) {
+    for (const e of p.top) {
+      if (byId.has(e.id)) continue;
+      byId.set(e.id, e);
+      top.push(e);
     }
+  }
+  const topIds = new Set(top.map((e) => e.id));
+  const replyList: NostrEvent[] = [];
+  for (const p of pages) {
+    for (const e of p.replies) {
+      if (byId.has(e.id) || !isPageComment(e, page)) continue;
+      byId.set(e.id, e);
+      replyList.push(e);
+    }
+  }
+  const parentId = (e: NostrEvent) => tagValue(e, 'e');
+  const groups = new Map<string, NostrEvent[]>();
+  for (const reply of replyList) {
+    // Up the chain to the comment on the page it's under.
+    let at: NostrEvent | undefined = reply;
+    for (let i = 0; at && i < 50 && !topIds.has(at.id); i++) {
+      const next = parentId(at);
+      at = next ? byId.get(next) : undefined;
+    }
+    if (!at || !topIds.has(at.id)) continue;
+    const group = groups.get(at.id) ?? [];
+    group.push(reply);
+    groups.set(at.id, group);
   }
   top.sort((a, b) => b.created_at - a.created_at);
-  for (const list of children.values()) list.sort((a, b) => a.created_at - b.created_at);
-  return { all, top, replies: (id) => children.get(id) ?? [] };
-}
-
-// ---- showing how many comments a page has ----
-
-/**
- * Counting a page's comments as it loads asks relays about every page the
- * user visits, so it's off until they turn it on in about:preferences (or
- * `din browser comment-counts on`); private windows and Tor tabs never
- * count. Opening the comments pane asks about that one page, always.
- */
-const COUNTS_KEY = 'din:browser:comment-counts';
-const listeners = new Set<() => void>();
-let countsShown: boolean | null = null;
-
-export function subscribeCommentCounts(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-export function areCommentCountsShown(): boolean {
-  if (countsShown === null) {
-    try {
-      countsShown = localStorage.getItem(COUNTS_KEY) === 'true';
-    } catch {
-      countsShown = false;
-    }
-  }
-  return countsShown;
-}
-
-export function setCommentCountsShown(shown: boolean): void {
-  countsShown = shown;
-  try {
-    localStorage.setItem(COUNTS_KEY, String(shown));
-  } catch (error) {
-    console.warn('Failed to save the comment counts setting:', error);
-  }
-  for (const listener of listeners) listener();
+  for (const group of groups.values()) group.sort((a, b) => a.created_at - b.created_at);
+  return {
+    all: [...byId.values()],
+    top,
+    replies: (id) => groups.get(id) ?? [],
+    parent: (id) => {
+      const e = byId.get(id);
+      const p = e && parentId(e);
+      return p ? byId.get(p) : undefined;
+    },
+  };
 }
 
 // ---- a comment drafted elsewhere (`din browser comment`) ----

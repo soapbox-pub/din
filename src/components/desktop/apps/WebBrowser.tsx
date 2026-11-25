@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -102,8 +102,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
-  PopoverTrigger,
 } from '@/components/ui/popover';
 import {
   DropdownMenu,
@@ -634,6 +634,8 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   // The comments pane beside the page, following the active tab. A Tor tab's
   // page is never asked about: the relays would be reached outside Tor.
+  // Share's sheet opens Install as App…'s popover with this.
+  const installSite = useRef<InstallSiteHandle | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const commentsPage = activeTab.tor ? null : canonicalPageUrl(activeTab.url);
   // A comment `din browser comment` drafted for the page in front shows the
@@ -2218,24 +2220,28 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           nsiteLocation={siteLocations.nsite}
           end={
             <>
-              {/* Chrome's place for it: in the bar, before the star. */}
-              {!activeTab.tor && (
-                <InstallSiteButton
-                  url={activeTab.url}
-                  pageTitle={activeTab.title}
-                  favicon={activeTab.favicon}
-                  themeColor={activeTab.themeColor}
-                  collectIcons={() =>
-                    views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
-                  }
-                  collectManifest={() =>
-                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, bitcoin: null, shortcuts: [], share: null })
-                  }
-                />
-              )}
-              {shareableUrl(activeTab.url) && (
-                <SharePageButton onShare={(el) => sharePage(activeTab, el, pageHasMedia)} />
-              )}
+              {/* Install as App… is in Share's sheet, as Safari has Add
+                  to Dock in its Share menu; its popover points at Share. */}
+              {shareableUrl(activeTab.url) &&
+                (activeTab.tor ? (
+                  <SharePageButton onShare={(el) => sharePage(activeTab, el, pageHasMedia)} />
+                ) : (
+                  <InstallSitePopover
+                    ref={installSite}
+                    url={activeTab.url}
+                    pageTitle={activeTab.title}
+                    favicon={activeTab.favicon}
+                    themeColor={activeTab.themeColor}
+                    collectIcons={() =>
+                      views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
+                    }
+                    collectManifest={() =>
+                      views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, bitcoin: null, shortcuts: [], share: null })
+                    }
+                  >
+                    <SharePageButton onShare={(el) => sharePage(activeTab, el, pageHasMedia, installSite.current)} />
+                  </InstallSitePopover>
+                ))}
               {isBookmarkableUrl(activeTab.url) && (
                 <BookmarkStarButton
                   url={activeTab.url}
@@ -2243,6 +2249,12 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                   onOpenChange={(open) => setStarTab(open ? activeId : null)}
                   onBookmark={bookmarkPage}
                   onOpenManager={openBookmarks}
+                />
+              )}
+              {(commentsPage !== null || commentsShown) && (
+                <CommentsButton
+                  open={commentsShown}
+                  onToggle={() => (commentsShown ? closeComments() : setCommentsOpen(true))}
                 />
               )}
             </>
@@ -2293,15 +2305,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           </StatusPill>
         )}
 
-        {(commentsPage !== null || commentsShown) && (
-          <CommentsButton
-            page={commentsPage}
-            open={commentsShown}
-            countable={!isPrivate}
-            onToggle={() => (commentsShown ? closeComments() : setCommentsOpen(true))}
-          />
-        )}
-
         {/* One overflow menu gathers the browser's less-frequent *actions*:
             new/private windows, find-in-page, page source, developer tools,
             clearing data.
@@ -2319,7 +2322,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           downloadVideoDisabled={!canDownloadVideo}
           onDownloadVideo={(format) => downloadVideo(activeTab.wcId, format)}
           shareDisabled={!shareableUrl(activeTab.url)}
-          onShare={(el) => sharePage(activeTab, el, pageHasMedia)}
+          onShare={(el) => sharePage(activeTab, el, pageHasMedia, activeTab.tor ? null : installSite.current)}
           hasDevtools={!!devtools}
           devtoolsActive={activeTab.dock !== 'closed'}
           devtoolsDisabled={activeTab.wcId === null}
@@ -2458,7 +2461,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           <CommentsPane
             page={commentsPage}
             reason={activeTab.tor ? 'tor' : 'not-web'}
-            title={activeTab.title ?? undefined}
+            style={chromeTokens}
             draft={commentDraft}
             onDraftPosted={() => {
               // Kept open on what was just posted.
@@ -5283,14 +5286,28 @@ function shareableUrl(url: string): boolean {
  * the video or its sound instead (src/lib/videoShare.ts), and save it to
  * Downloads from there, as Download Video does.
  */
-function sharePage(tab: { url: string; title: string | null; wcId: number | null }, anchor: Element | null, video: boolean): void {
+function sharePage(
+  tab: { url: string; title: string | null; wcId: number | null },
+  anchor: Element | null,
+  video: boolean,
+  install?: InstallSiteHandle | null,
+): void {
   const bridge = getBrowserBridge();
   const alternatives = video && bridge && tab.wcId !== null ? videoShareAlternatives(bridge, { wcId: tab.wcId }) : [];
   void requestShare(
     { title: tab.title?.trim() || undefined, url: tab.url, files: [] },
-    { anchor: anchorOf(anchor), alternatives, rememberAs: VIDEO_SHARE_KEY },
-  );
+    {
+      anchor: anchorOf(anchor),
+      alternatives,
+      rememberAs: VIDEO_SHARE_KEY,
+      actions: install ? [{ id: INSTALL_ACTION, label: install.installed ? 'Open as App' : 'Install as App…', icon: MonitorDown }] : [],
+    },
+  ).then((answer) => {
+    if (answer === INSTALL_ACTION) install?.open();
+  });
 }
+
+const INSTALL_ACTION = 'install-site';
 
 /** The address bar's Share: the page's address, to an app or the clipboard. */
 function SharePageButton({ onShare }: { onShare: (anchor: Element) => void }) {
@@ -5311,13 +5328,23 @@ function SharePageButton({ onShare }: { onShare: (anchor: Element) => void }) {
   );
 }
 
+/** What Share's sheet does with Install as App…: open the popover, or the installed app. */
+interface InstallSiteHandle {
+  installed: boolean;
+  open: () => void;
+}
+
 /**
- * Toolbar button + popover to install the current site as a desktop app,
- * like installing a PWA on other OSes. An https site becomes a web app; an
- * nsite is installed into the OS-level nsite store by its canonical host, with
- * its name and icon read from its own files (see src/lib/nsiteAppInfo.ts).
+ * The popover to install the current site as a desktop app, like installing
+ * a PWA on other OSes, pointing at `children` (the address bar's Share, whose
+ * sheet has Install as App…). An https site becomes a web app; an nsite is
+ * installed into the OS-level nsite store by its canonical host, with its
+ * name and icon read from its own files (see src/lib/nsiteAppInfo.ts). Once
+ * installed, the sheet's Open as App opens it.
  */
-function InstallSiteButton({
+function InstallSitePopover({
+  ref,
+  children,
   url,
   pageTitle,
   favicon,
@@ -5325,6 +5352,8 @@ function InstallSiteButton({
   collectIcons,
   collectManifest,
 }: {
+  ref: React.Ref<InstallSiteHandle | null>;
+  children: ReactNode;
   url: string;
   pageTitle: string | null;
   favicon: string | null;
@@ -5456,24 +5485,23 @@ function InstallSiteButton({
     });
   };
 
-  if (!site) return null;
+  useImperativeHandle<InstallSiteHandle | null, InstallSiteHandle | null>(ref, () =>
+    site
+      ? {
+          installed: !!installed,
+          open: () => {
+            if (installed) openApp(installed.id);
+            else onOpenChange(true);
+          },
+        }
+      : null,
+  );
+
+  if (!site) return children;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label="Install site as app"
-          title="Install site as app"
-          className={cn(
-            'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground',
-            'hover:bg-foreground/[0.07] hover:text-foreground data-[state=open]:bg-foreground/[0.07]',
-            'outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-          )}
-        >
-          <MonitorDown className="size-4.5" strokeWidth={1.75} />
-        </button>
-      </PopoverTrigger>
+      <PopoverAnchor className="flex shrink-0">{children}</PopoverAnchor>
       <PopoverContent align="end" sideOffset={8} className="w-80">
         {!site ? null : installed ? (
           <div className="space-y-3">

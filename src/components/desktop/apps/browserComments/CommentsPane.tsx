@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
-import { Copy, ExternalLink, Heart, Link2, Loader2, MessageCircle, MessageSquare, MoreHorizontal, Reply, Trash2, X } from 'lucide-react';
+import { Copy, ExternalLink, Heart, Link2, Loader2, MessageCircle, MoreHorizontal, Reply, Trash2, X } from 'lucide-react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -34,10 +34,8 @@ import { cn } from '@/lib/utils';
 import { CommentBody } from './CommentBody';
 import { ago, displayNameOf } from './names';
 
-/** Replies indent this deep, then carry on at that depth. */
-const MAX_INDENT = 3;
-/** Comments on the page shown at a time (with their replies), and asked about for likes. */
-const PAGE_SIZE = 30;
+/** Replies shown under a comment before the rest wait behind "Show replies". */
+const REPLIES_SHOWN = 2;
 
 /** Why a page can't be commented on from here. */
 export type NoCommentsReason = 'tor' | 'not-web';
@@ -46,8 +44,6 @@ export interface CommentsPaneProps {
   /** The page's canonical URL (src/lib/pageComments.ts), or null with the reason. */
   page: string | null;
   reason?: NoCommentsReason;
-  /** The page's title, for the header. */
-  title?: string;
   onClose: () => void;
   /** Open a web address from a comment, in a tab of this window. */
   onOpenLink: (url: string) => void;
@@ -55,75 +51,69 @@ export interface CommentsPaneProps {
   draft?: string;
   /** The draft was posted. */
   onDraftPosted?: () => void;
+  /** The window frame's tokens, when a page's color tints it. */
+  style?: React.CSSProperties;
 }
 
 /**
- * The Web Browser's comments pane, beside the page: what people say about
- * the page in front on Nostr (NIP-22 comments on its URL, as Ditto and its
- * browser extension post them), and a composer to add to it. It follows the
- * window's active tab.
+ * The Web Browser's comments pane, a sidebar on the window's frame beside
+ * the page: what people say about the page in front on Nostr (NIP-22
+ * comments on its URL, as Ditto and its browser extension post them), and a
+ * composer to add to it. It follows the window's active tab, and asks relays
+ * for a page of comments at a time.
  */
-export function CommentsPane({ page, reason, title, onClose, onOpenLink, draft, onDraftPosted }: CommentsPaneProps) {
-  const { data: thread, isLoading, isError, refetch } = usePageComments(page);
-  const count = thread?.all.length ?? 0;
+export function CommentsPane({ page, reason, onClose, onOpenLink, draft, onDraftPosted, style }: CommentsPaneProps) {
+  const comments = usePageComments(page);
+  const thread = comments.data;
   const openUrl = useOpenUrl();
   const open = (url: string) => (/^https?:/i.test(url) ? onOpenLink(url) : openUrl(url));
 
-  let host = '';
-  try {
-    host = page ? new URL(page).host : '';
-  } catch {
-    // shown without it
-  }
-
   return (
-    <aside
-      aria-label="Comments"
-      className="relative flex w-[22.5rem] min-w-0 shrink-0 flex-col border-l border-border bg-background text-foreground"
-    >
-      <header className="flex h-12 shrink-0 items-center gap-2 pl-4 pr-2">
-        <MessageSquare className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
-        <div className="min-w-0 flex-1 leading-tight">
-          <h2 className="truncate text-sm font-semibold">
-            Comments{thread && count > 0 && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{count}</span>}
-          </h2>
-          {page && (
-            <p className="truncate text-xs text-muted-foreground" title={page}>
-              {title ? `${title} · ` : ''}
-              <span className="font-mono">{host}</span>
-            </p>
-          )}
-        </div>
+    <aside aria-label="Comments" style={style} className="relative flex w-[22.5rem] min-w-0 shrink-0 flex-col text-foreground">
+      <header className="flex h-12 shrink-0 items-center gap-2 pr-2 pl-4">
+        <h2 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-base font-semibold">Comments</h2>
         <ToolButton label="Close comments" onClick={onClose}>
           <X {...toolIcon} />
         </ToolButton>
       </header>
 
       {page === null ? (
-        <EmptyState icon={MessageSquare} title={reason === 'tor' ? 'Not in Tor tabs' : 'No comments here'} className="flex-1">
+        <EmptyState title={reason === 'tor' ? 'Not in Tor tabs' : 'No comments here'} className="flex-1">
           {reason === 'tor'
             ? 'Asking relays about this page would happen outside Tor, so comments are off in Tor tabs.'
             : 'Open a web page to see what people say about it on Nostr, and add to it.'}
         </EmptyState>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-4">
           <Composer key={`${page}\n${draft ?? ''}`} page={page} initial={draft} onDone={draft !== undefined ? onDraftPosted : undefined} />
-          {isLoading ? (
+          {comments.isLoading ? (
             <ThreadSkeleton />
-          ) : isError ? (
+          ) : comments.isError && !thread ? (
             <EmptyState
-              icon={MessageSquare}
               title="Couldn’t load comments"
-              action={<Button size="sm" variant="secondary" onClick={() => void refetch()}>Try again</Button>}
+              action={<Button size="sm" variant="secondary" onClick={() => void comments.refetch()}>Try again</Button>}
             >
               Your relays didn’t answer.
             </EmptyState>
           ) : thread && thread.top.length > 0 ? (
-            <Thread key={page} page={page} thread={thread} onOpen={open} />
+            <>
+              <Thread key={page} page={page} thread={thread} onOpen={open} />
+              {comments.hasNextPage && (
+                <div className="flex justify-center px-4 pt-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={comments.isFetchingNextPage}
+                    onClick={() => void comments.fetchNextPage()}
+                  >
+                    {comments.isFetchingNextPage && <Loader2 className="motion-safe:animate-spin" aria-hidden />}
+                    Show Older Comments
+                  </Button>
+                </div>
+              )}
+            </>
           ) : (
-            <EmptyState icon={MessageSquare} title="No comments yet">
-              Be the first to say something about this page.
-            </EmptyState>
+            <EmptyState title="No comments yet">Be the first to say something about this page.</EmptyState>
           )}
         </div>
       )}
@@ -133,7 +123,7 @@ export function CommentsPane({ page, reason, title, onClose, onOpenLink, draft, 
 
 function ThreadSkeleton() {
   return (
-    <div className="flex flex-col gap-4 px-4 py-4" aria-hidden>
+    <div className="flex flex-col gap-5 px-4 py-4" aria-hidden>
       {[0, 1, 2].map((i) => (
         <div key={i} className="flex gap-3">
           <Skeleton className="size-8 shrink-0 rounded-full" />
@@ -167,14 +157,13 @@ function Composer({
 
   if (!user) {
     return (
-      <p className="border-b border-border px-4 py-4 text-sm text-muted-foreground">
+      <p className="px-4 pt-1 pb-3 text-sm text-muted-foreground">
         Sign in to Din with a Nostr account to {parent ? 'reply' : 'comment'}.
       </p>
     );
   }
 
   const name = displayNameOf(metadata, user.pubkey);
-  const picture = metadata?.picture ? sanitizeUrl(metadata.picture) ?? undefined : undefined;
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -194,14 +183,14 @@ function Composer({
   };
 
   return (
-    <form onSubmit={submit} className={cn('flex flex-col gap-2', parent ? 'py-2' : 'border-b border-border px-4 py-3')}>
+    <form onSubmit={submit} className={cn('flex flex-col gap-2', parent ? 'pt-1 pb-3' : 'px-4 pt-1 pb-4')}>
       <Textarea
         autoFocus={!!parent || initial !== undefined}
         dir="auto"
         rows={parent ? 1 : 2}
         className="max-h-56 min-h-10 resize-none"
         aria-label={parent ? 'Reply' : 'Comment'}
-        placeholder={parent ? 'Write a reply…' : 'Say something about this page…'}
+        placeholder={parent ? 'Write a reply…' : 'Add a comment…'}
         value={text}
         disabled={post.isPending}
         onChange={(e) => setText(e.target.value)}
@@ -211,16 +200,7 @@ function Composer({
         }}
       />
       <div className="flex items-center gap-2">
-        {!parent && (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-            <Avatar className="size-5" shape={getAvatarShape(metadata)}>
-              <AvatarImage src={picture} alt="" />
-              <AvatarFallback className="text-[0.625rem]">{name.charAt(0).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <span className="truncate">Public, as {name}</span>
-          </span>
-        )}
-        {parent && <span className="flex-1" />}
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{parent ? '' : `Public, as ${name}`}</span>
         {parent && (
           <Button type="button" size="sm" variant="ghost" onClick={onDone} disabled={post.isPending}>
             Cancel
@@ -236,46 +216,56 @@ function Composer({
 }
 
 function Thread({ page, thread, onOpen }: { page: string; thread: PageThread; onOpen: (url: string) => void }) {
-  const [shown, setShown] = useState(PAGE_SIZE);
-  const top = thread.top.slice(0, shown);
-  const visible: string[] = [];
-  const collect = (c: NostrEvent) => {
-    visible.push(c.id);
-    thread.replies(c.id).forEach(collect);
-  };
-  top.forEach(collect);
-  const { likesOf, queryKey } = useCommentLikes(page, visible);
+  const { likesOf, queryKey } = useCommentLikes(page, thread.all.map((c) => c.id));
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<NostrEvent | null>(null);
 
-  const render = (comment: NostrEvent, depth: number) => (
-    <li key={comment.id}>
-      <Comment
-        page={page}
-        comment={comment}
-        replies={thread.replies(comment.id).length}
-        likes={likesOf(comment.id)}
-        likesKey={queryKey}
-        onOpen={onOpen}
-        onDelete={() => setDeleting(comment)}
-      />
-      {thread.replies(comment.id).length > 0 && (
-        <ul className={cn(depth < MAX_INDENT && 'ml-8 border-l border-border/70')}>
-          {thread.replies(comment.id).map((reply) => render(reply, depth + 1))}
-        </ul>
-      )}
-    </li>
+  const comment = (c: NostrEvent, replyTo?: NostrEvent) => (
+    <Comment
+      key={c.id}
+      page={page}
+      comment={c}
+      replyTo={replyTo}
+      likes={likesOf(c.id)}
+      likesKey={queryKey}
+      onOpen={onOpen}
+      onDelete={() => setDeleting(c)}
+    />
   );
 
   return (
     <>
-      <ul className="py-1">{top.map((comment) => render(comment, 0))}</ul>
-      {thread.top.length > shown && (
-        <div className="flex justify-center px-4 pt-1 pb-4">
-          <Button size="sm" variant="secondary" onClick={() => setShown((n) => n + PAGE_SIZE)}>
-            Show more
-          </Button>
-        </div>
-      )}
+      <ul className="flex flex-col gap-1">
+        {thread.top.map((top) => {
+          const replies = thread.replies(top.id);
+          const open = expanded.has(top.id) || replies.length <= REPLIES_SHOWN;
+          return (
+            <li key={top.id}>
+              {comment(top)}
+              {replies.length > 0 && (
+                <ul aria-label={`Replies to ${top.id.slice(0, 8)}`}>
+                  {open ? (
+                    replies.map((r) => {
+                      const parent = thread.parent(r.id);
+                      return <li key={r.id}>{comment(r, parent && parent.id !== top.id ? parent : undefined)}</li>;
+                    })
+                  ) : (
+                    <li className="pl-15">
+                      <button
+                        type="button"
+                        onClick={() => setExpanded((s) => new Set(s).add(top.id))}
+                        className="rounded-full py-1 text-sm font-medium text-ink-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        Show {replies.length} replies
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
       {deleting && <DeleteConfirm page={page} comment={deleting} onClose={() => setDeleting(null)} />}
     </>
   );
@@ -315,10 +305,36 @@ function DeleteConfirm({ page, comment, onClose }: { page: string; comment: Nost
   );
 }
 
+/** Who a reply answers, when that isn't the comment it's under. */
+function ReplyingTo({ pubkey, onOpen }: { pubkey: string; onOpen: (url: string) => void }) {
+  const author = useAuthor(pubkey);
+  const uri = `nostr:${nip19.npubEncode(pubkey)}`;
+  return (
+    <p className="truncate text-xs text-muted-foreground">
+      Replying to{' '}
+      <a
+        href={uri}
+        onClick={(e) => {
+          e.preventDefault();
+          onOpen(uri);
+        }}
+        className="rounded-sm text-ink-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        @{displayNameOf(author.data?.metadata, pubkey)}
+      </a>
+    </p>
+  );
+}
+
+/**
+ * One comment: a comment on the page with a 32px avatar, or a reply (with
+ * `replyTo` when it answers another reply), indented so its 24px avatar
+ * lines up with the text above.
+ */
 function Comment({
   page,
   comment,
-  replies,
+  replyTo,
   likes,
   likesKey,
   onOpen,
@@ -326,7 +342,7 @@ function Comment({
 }: {
   page: string;
   comment: NostrEvent;
-  replies: number;
+  replyTo?: NostrEvent;
   likes: CommentLikes;
   likesKey: readonly unknown[];
   onOpen: (url: string) => void;
@@ -338,6 +354,7 @@ function Comment({
   const { toast } = useToast();
   const like = useToggleCommentLike(likesKey);
   const [replying, setReplying] = useState(false);
+  const isReply = comment.tags.some(([n]) => n === 'e');
 
   const metadata = author.data?.metadata;
   const name = displayNameOf(metadata, comment.pubkey);
@@ -376,14 +393,14 @@ function Comment({
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <article className="group flex gap-3 px-4 py-2.5 hover:bg-foreground/[0.03]">
+          <article className={cn('group flex gap-3 pr-4 pt-2', isReply ? 'pl-15' : 'pl-4')}>
             <button
               type="button"
               onClick={() => onOpen(profile)}
               aria-label={`${name}’s profile`}
               className="h-fit shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
-              <Avatar className="size-8" shape={getAvatarShape(metadata)}>
+              <Avatar className={isReply ? 'size-6' : 'size-8'} shape={getAvatarShape(metadata)}>
                 <AvatarImage src={picture} alt="" />
                 <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
@@ -397,26 +414,17 @@ function Comment({
                 >
                   {name}
                 </button>
-                <time
-                  dateTime={when.toISOString()}
-                  title={when.toLocaleString()}
-                  className="shrink-0 text-xs text-muted-foreground"
-                >
+                <time dateTime={when.toISOString()} title={when.toLocaleString()} className="shrink-0 text-xs text-muted-foreground">
                   {ago(comment.created_at)}
                 </time>
               </div>
+              {replyTo && <ReplyingTo pubkey={replyTo.pubkey} onOpen={onOpen} />}
               <div className="mt-0.5 text-sm">
                 <CommentBody content={comment.content} onOpen={onOpen} />
               </div>
-              <div className="-ml-1.5 mt-1 flex items-center gap-1 text-muted-foreground">
-                <ActionButton
-                  label={replies > 0 ? `Reply (${replies} ${replies === 1 ? 'reply' : 'replies'})` : 'Reply'}
-                  disabled={!user}
-                  pressed={replying}
-                  onClick={() => setReplying((r) => !r)}
-                >
+              <div className="-ml-1.5 mt-0.5 flex items-center gap-1 text-muted-foreground">
+                <ActionButton label="Reply" disabled={!user} pressed={replying} onClick={() => setReplying((r) => !r)}>
                   <MessageCircle className="size-4.5" strokeWidth={1.75} aria-hidden />
-                  {replies > 0 && <span className="tabular-nums">{replies}</span>}
                 </ActionButton>
                 <ActionButton
                   label={likes.mine ? 'Unlike' : 'Like'}
@@ -452,7 +460,7 @@ function Comment({
         </ContextMenuContent>
       </ContextMenu>
       {replying && (
-        <div className="pl-15 pr-4">
+        <div className={cn('pr-4', isReply ? 'pl-24' : 'pl-15')}>
           <Composer page={page} parent={comment} onDone={() => setReplying(false)} />
         </div>
       )}

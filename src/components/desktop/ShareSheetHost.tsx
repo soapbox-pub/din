@@ -229,6 +229,14 @@ function ShareSheet({ request }: { request: ShareRequest }) {
                   Save to Downloads
                 </button>
               )}
+              {request.actions.map(({ id, label, icon: Icon }) => (
+                <button key={id} type="button" onClick={() => close(id)} className={trayRowClass()}>
+                  <span className={trayTokenClass(false)}>
+                    <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
+                  </span>
+                  {label}
+                </button>
+              ))}
             </div>
           </>
         )}
