@@ -3,7 +3,7 @@ import { mimeOf } from '@/lib/mime';
 import { blankSeed, outgoingMessage, parseAddresses, recipientsProblem, replySeed, writtenAbove, type ComposeSeed } from '@/shared/mailCompose';
 import { CATEGORY_NAMES, getMailDesktopBridge, isMailCategory, LABEL_COLORS, MAIL_CATEGORIES, UNSUBSCRIBE_METHODS, type InboxTabs, type LabelColor, type LabelKind, type MailAccount, type MailAddress, type MailAttachment, type MailboxInfo, type MailLabel, type MailSubscription, type MessageSummary } from '@/lib/mail';
 import { markRead, markReadTargets } from '@/lib/mailInbox';
-import { CommandError, type Area, type Param } from './types';
+import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { call, command, need, pick } from './util';
 
 /**
@@ -12,9 +12,11 @@ import { call, command, need, pick } from './util';
  * sent and replied to as its compose window sends them), their labels, their inboxes' tabs and the
  * senders moved between them, and the mailing lists in their inboxes, as
  * Mail's Subscriptions shows them (electron/mail.mts), and leaving them.
- * Sending, replying and unsubscribing ask on screen first: they send mail or
- * requests from the user's account, and can't be taken back; so does
- * deleting a label, which comes off every message.
+ * Sending and replying send straight away, since whoever runs them was asked
+ * to; with --compose they open Mail's compose window filled in instead, for
+ * the user to send. Unsubscribing asks on screen first: it sends requests
+ * from the user's account, and can't be taken back; so does deleting a
+ * label, which comes off every message.
  */
 
 const mail = () => need(getMailDesktopBridge(), 'Mail');
@@ -121,9 +123,23 @@ async function attachments(paths: string[]): Promise<MailAttachment[]> {
   return out;
 }
 
-/** Ask on screen, then send it as Mail's Send does. */
+const COMPOSE: Param = { name: 'compose', type: 'boolean', optional: true, help: 'Open it in Mail’s New Message window, filled in, for the user to finish and send, instead of sending it' };
+
+/**
+ * Open it in Mail's compose window, as its Reply or New Message would, with
+ * what's written above the signature and any quote; nothing is sent.
+ */
+function composeWritten(ctx: CommandContext, account: MailAccount, seed: ComposeSeed, text: string, files: string[]): { data: unknown; text: string } {
+  if (files.length) throw new CommandError('Files can’t be attached to an open message from here; attach them in its window, or send it without --compose', 'usage');
+  ctx.actions.open('mail', { compose: seed, ...(text.trim() ? { text } : {}) });
+  return {
+    data: { opened: true, accountId: account.id, to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: seed.subject },
+    text: `Opened “${seed.subject || '(no subject)'}” in Mail’s compose window, for you to send`,
+  };
+}
+
+/** Send it as Mail's Send does: the user asked for it, so nothing asks again. */
 async function sendWritten(
-  ctx: { confirm(request: { title: string; description: string; action: string }): Promise<boolean> },
   account: MailAccount,
   seed: ComposeSeed,
   text: string,
@@ -133,19 +149,6 @@ async function sendWritten(
   const problem = recipientsProblem(everyone);
   if (problem) throw new CommandError(problem.replace(/\.$/, ''), 'usage');
   const message = outgoingMessage(seed, writtenAbove(seed, account, text), files, seed, null);
-  const start = text.trim().replace(/\s+/g, ' ');
-  const ok = await ctx.confirm({
-    title: `Send “${message.subject || '(no subject)'}” to ${seed.to.length ? who(seed.to) : who(everyone)}?`,
-    description: [
-      `From ${account.email}.`,
-      seed.cc.length ? `Cc ${who(seed.cc)}.` : '',
-      seed.bcc.length ? `Bcc ${who(seed.bcc)}.` : '',
-      start ? `“${start.length > 200 ? `${start.slice(0, 200)}…` : start}”` : 'It has no text of its own.',
-      files.length ? `Attached: ${files.map((f) => f.filename).join(', ')}.` : '',
-    ].filter(Boolean).join(' '),
-    action: 'Send',
-  });
-  if (!ok) throw new CommandError('You didn’t allow it');
   await call(mail().send(account.id, message));
   return {
     data: { sent: true, accountId: account.id, to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: message.subject, attachments: files.map((f) => f.filename) },
@@ -290,30 +293,36 @@ export const mailArea: Area = {
         text: `${head.join('\n')}\n\n${body || '(no text)'}`,
       };
     }),
-    command('mail', 'send', 'Send a message, as Mail’s Send does, signed with the account’s signature and kept in Sent (asks on screen first)', [
-      { name: 'to', type: 'string', help: 'Who to, as Mail’s To field takes them: addresses, or Name <address>, separated by commas' },
+    command('mail', 'send', 'Send a message, as Mail’s Send does, signed with the account’s signature and kept in Sent; with --compose, open it in Mail’s New Message window instead, for the user to send', [
+      { name: 'to', type: 'string', optional: true, help: 'Who to, as Mail’s To field takes them: addresses, or Name <address>, separated by commas (with --compose, it can be left for the user)' },
       { name: 'cc', type: 'string', optional: true, help: 'Who to copy, the same way' },
       { name: 'bcc', type: 'string', optional: true, help: 'Who to copy unseen, the same way' },
       { name: 'subject', type: 'string', optional: true, help: 'Its subject' },
       ...WRITTEN,
       { name: 'account', type: 'string', optional: true, help: 'Which account to send from, by name or address (default: the only one)' },
+      COMPOSE,
     ], async (args, ctx) => {
       const account = await oneAccount(args.optString('account'));
+      const compose = args.optBool('compose') === true;
+      const to = args.optString('to');
+      if (to === undefined && !compose) throw new CommandError('Say who to, with --to', 'usage');
       const seed: ComposeSeed = {
         ...blankSeed(account.id),
-        to: parseAddresses(args.string('to')),
+        to: parseAddresses(to ?? ''),
         cc: parseAddresses(args.optString('cc') ?? ''),
         bcc: parseAddresses(args.optString('bcc') ?? ''),
         subject: args.optString('subject') ?? '',
       };
       const text = await writtenText(args);
+      if (compose) return composeWritten(ctx, account, seed, text, args.list('files'));
       const files = await attachments(args.list('files'));
       if (!text.trim() && !seed.subject.trim() && !files.length) throw new CommandError('Give it a --subject, some --text or a file', 'usage');
-      return sendWritten(ctx, account, seed, text, files);
+      return sendWritten(account, seed, text, files);
     }),
-    command('mail', 'reply', 'Reply to a message, as Mail’s Reply does: to its sender (everyone with --all), in its conversation, quoting it, and marking it answered (asks on screen first)', [
+    command('mail', 'reply', 'Reply to a message, as Mail’s Reply does: to its sender (everyone with --all), in its conversation, quoting it, and marking it answered; with --compose, open the reply in Mail’s compose window instead, for the user to send', [
       { name: 'message', type: 'integer', positional: true, min: 1, help: 'Which message, by its number, as din mail messages lists it' },
       ...WRITTEN,
+      COMPOSE,
       { name: 'all', type: 'boolean', optional: true, help: 'Reply to everyone it went to, as Reply All does' },
       { name: 'cc', type: 'string', optional: true, help: 'Others to copy, as Mail’s Cc field takes them' },
       { name: 'bcc', type: 'string', optional: true, help: 'Others to copy unseen, the same way' },
@@ -324,12 +333,14 @@ export const mailArea: Area = {
       const box = await mailboxIn(account, args.optString('mailbox'));
       const original = await call(mail().message(account.id, box.path, args.number('message')));
       const text = await writtenText(args);
-      if (!text.trim()) throw new CommandError('Say what to reply, with --text or --text-file', 'usage');
-      const files = await attachments(args.list('files'));
+      const compose = args.optBool('compose') === true;
+      if (!text.trim() && !compose) throw new CommandError('Say what to reply, with --text or --text-file', 'usage');
       const seed = replySeed(original, account.id, box.path, account, args.optBool('all') === true);
       const taken = new Set([...seed.to, ...seed.cc].map((a) => a.address.toLowerCase()));
       const extra = (field: string) => parseAddresses(args.optString(field) ?? '').filter((a) => !taken.has(a.address.toLowerCase()));
-      return sendWritten(ctx, account, { ...seed, cc: [...seed.cc, ...extra('cc')], bcc: extra('bcc') }, text, files);
+      const full = { ...seed, cc: [...seed.cc, ...extra('cc')], bcc: extra('bcc') };
+      if (compose) return composeWritten(ctx, account, full, text, args.list('files'));
+      return sendWritten(account, full, text, await attachments(args.list('files')));
     }),
     command('mail', 'subscriptions', 'The mailing lists in the inbox, most mail first, as Mail’s Subscriptions shows them', [ACCOUNT, MONTHS], async (args) => {
       const accounts = await accountsFor(args.optString('account'));

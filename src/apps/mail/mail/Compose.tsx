@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { ToolButton, Toolbar, ToolbarDivider } from '@/shared/appChrome';
 import { toolIcon } from '@/shared/appChromeStyles';
 import type { MailAddress, MailAttachment, OutgoingMessage } from '@/lib/mail';
-import { outgoingMessage, recipientsProblem, withSignature } from '@/shared/mailCompose';
+import { outgoingMessage, recipientsProblem, withSignature, writtenAbove } from '@/shared/mailCompose';
 import { useAccounts, useMail } from './api';
 import { rememberAddresses, suggestAddresses } from './contacts';
 import { EMAIL, fileSize, formatAddress, parseAddresses, type ComposeSeed } from './format';
@@ -148,14 +148,17 @@ function FormatButton({ label, active, onClick, children }: { label: string; act
 /**
  * `restored` when Din reopened the window: the seed is the message as it
  * was left (its body signed already), and `dirty` whether it was unsaved.
- * `files` are attached as it starts (what was shared to Mail).
+ * `files` are attached as it starts (what was shared to Mail), and `written`
+ * is text it starts with above the signature and any quote.
  */
 export function Compose({
   seed,
+  written,
   restored = null,
   files = NO_FILES,
 }: {
   seed: ComposeSeed;
+  written?: string;
   restored?: { dirty: boolean } | null;
   files?: readonly FileSystemHandle[];
 }) {
@@ -172,7 +175,7 @@ export function Compose({
   const [subject, setSubject] = useState(seed.subject);
   const [attached, setAttached] = useState<Attached[]>(() => (seed.forwardFrom?.indexes ?? []).map((i) => ({ id: `fwd-${i}`, file: null, name: 'Attachment', size: 0 })));
   const [draftUid, setDraftUid] = useState(seed.draftUid);
-  const [dirty, setDirty] = useState(restored?.dirty ?? false);
+  const [dirty, setDirty] = useState(restored?.dirty ?? !!written?.trim());
   const [revision, setRevision] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -206,9 +209,9 @@ export function Compose({
   useEffect(() => {
     if (!editor || started.current || accounts.isPending) return;
     started.current = true;
-    editor.commands.setContent(restored ? seed.html : withSignature(seed, account), { emitUpdate: false });
+    editor.commands.setContent(restored ? seed.html : written?.trim() ? writtenAbove(seed, account, written) : withSignature(seed, account), { emitUpdate: false });
     if (seed.to.length) editor.commands.focus('start');
-  }, [editor, accounts.isPending, seed, account, restored]);
+  }, [editor, accounts.isPending, seed, account, restored, written]);
 
   // Kept for Din to reopen the window with, as it changes. Files attached
   // from this computer aren't (they can be bigger than what's kept); a

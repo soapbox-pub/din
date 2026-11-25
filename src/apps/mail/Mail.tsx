@@ -80,10 +80,15 @@ export function Mail() {
   // A message being written comes back as it was left, not as it was started.
   const saved = useMemo(() => savedCompose(restoredState()), []);
   const seed = useMemo(() => (saved ? { ...blankSeed(null), ...saved.seed } : seedOf(windowLaunch())), [saved]);
+  // What's written to start the message with (din mail send/reply --compose), above the signature.
+  const written = useMemo(() => {
+    const { params } = windowLaunch();
+    return !saved && params.compose && typeof params.text === 'string' ? params.text : undefined;
+  }, [saved]);
   if (settings) return <SettingsWindow initial={settings.account} />;
   return seed ? (
     <Suspense>
-      <Compose seed={seed} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : sharedFiles(windowLaunch())} />
+      <Compose seed={seed} written={written} restored={saved ? { dirty: saved.dirty } : null} files={saved ? undefined : sharedFiles(windowLaunch())} />
     </Suspense>
   ) : (
     <Viewer />
