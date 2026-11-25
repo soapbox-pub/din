@@ -290,7 +290,7 @@ function PreviewView({ preview, mode, reload }: { preview: Preview; mode: FileMo
   const { target } = preview;
   return (
     <div role="tabpanel" aria-label={preview.title} className="flex min-h-0 flex-1 flex-col">
-      <div className={cn('mr-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl clay', flushPane, target.kind === 'server' && 'bg-white')}>
+      <div className={cn('mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl clay', flushPane, target.kind === 'server' && 'bg-white')}>
         {target.kind === 'server' ? (
           <iframe
             key={`${target.url}#${reload}`}
