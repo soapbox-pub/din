@@ -131,6 +131,8 @@ export function removalConsequence(feature: Pick<FeatureState, 'id' | 'title'>):
       return 'Your games, saves and where you left them stay on this computer, but won’t play until you install it again.';
     case 'dictation':
       return 'Dictation and Studio’s captions stop working until you install it again.';
+    case 'local-ai':
+      return 'The models you’ve downloaded stay on this computer, but the assistant can’t use them until you install it again.';
     case 'webkit':
       return 'Linux apps that need it won’t open until you install it again.';
     case 'containers':

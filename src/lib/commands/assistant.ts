@@ -3,6 +3,7 @@ import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceN
 import { connectClaudeProvider } from '@/lib/claudeProvider';
 import { connectShakespeareProvider, SHAKESPEARE_MONTHLY_LIMIT } from '@/lib/shakespeareProvider';
 import { getFsBridge } from '@/lib/fs';
+import { CATALOG, catalogEntry, describeHardware, describePull, describeSpeed, fitLocalModel, formatModelSize, getLocalModelsBridge, localModelTitle, rankLocalModels } from '@/lib/localModels';
 import { usageText } from '@/shared/assistant/claudeUsage';
 import { CommandError, type Area } from './types';
 import { call, command, need, pick } from './util';
@@ -10,6 +11,22 @@ import { call, command, need, pick } from './util';
 /** `din assistant`: OpenCode, the agent behind the Assistant, as Settings → Assistant shows it. */
 
 const assistant = () => need(getAssistantBridge(), 'The assistant');
+const localModels = () => need(getLocalModelsBridge(), 'Local models');
+
+/** Ollama's state, once it's known to be running. */
+async function ollama() {
+  const state = await call(localModels().state());
+  if (!state.available) throw new CommandError('Ollama isn’t installed (din features install local-ai)');
+  if (!state.running) throw new CommandError(state.error ?? 'Ollama isn’t running');
+  return state;
+}
+
+/** A model's name as typed, or a catalog model's by its title ("Qwen3.6 35B-A3B"). */
+function modelName(query: string): string {
+  const q = query.trim();
+  const byTitle = CATALOG.find((m) => m.title.toLowerCase() === q.toLowerCase());
+  return byTitle?.name ?? q;
+}
 
 /** The skills named, each by its id or a name that's only its. */
 function pickSkills(settings: SkillSettings, names: string[]): SkillInfo[] {
@@ -30,7 +47,7 @@ async function setSkillsEnabled(names: string[], enabled: boolean) {
 
 export const assistantArea: Area = {
   name: 'assistant',
-  summary: 'OpenCode, the agent behind the Assistant: its status, updating it, restarting it, Claude and Shakespeare AI for it, and its skills and their folders',
+  summary: 'OpenCode, the agent behind the Assistant: its status, updating it, restarting it, Claude and Shakespeare AI for it, models on this computer (Ollama), and its skills and their folders',
   commands: [
     command('assistant', 'status', 'OpenCode’s version, whether its server runs, and any newer release', [], async () => {
       const status = await call(assistant().status());
@@ -221,6 +238,96 @@ export const assistantArea: Area = {
         // Launches are merged into the window's last, so both are named (Assistant.tsx).
         ctx.actions.open('assistant', { sessionID, directory: null, terminal, terminalAt: nonce, nonce });
         return { data: { sessionID, terminal }, text: `The terminal is ${terminal === 'show' ? 'shown' : 'hidden'}` };
+      },
+    ),
+    command('assistant', 'models', 'The AI models on this computer (Ollama’s), and the ones Settings → Assistant recommends for it, best first', [], async () => {
+      const state = await ollama();
+      const { picks, others } = rankLocalModels(state);
+      const installed = new Set(state.models.map((m) => m.name));
+      const line = (m: (typeof picks)[number]) =>
+        `${m.name}\t${m.title}\t${formatModelSize(m.size)}\t${m.fit.fit === 'good' ? describeSpeed(m.fit.speed) : m.fit.reason}${m.best ? '\tbest' : ''}${installed.has(m.name) ? '\tdownloaded' : ''}`;
+      return {
+        data: { ...state, picks, others },
+        text: [
+          describeHardware(state),
+          '',
+          'Downloaded (the assistant lists them as ollama/<name>):',
+          ...(state.models.length
+            ? state.models.map((m) => `${m.name}\t${formatModelSize(m.size)}${m.loaded ? '\tin memory' : ''}${m.tools === false ? '\tno tools' : ''}`)
+            : ['none']),
+          ...state.pulls.map((p) => `${p.model}\t${describePull(p)}`),
+          '',
+          'Recommended here:',
+          ...(picks.length ? picks.map(line) : ['none runs well here']),
+          '',
+          'Others:',
+          ...others.map(line),
+        ].join('\n'),
+      };
+    }),
+    command(
+      'assistant',
+      'download-model',
+      'Download a model for the assistant to run on this computer, as Download does in Settings → Assistant: a recommended one (din assistant models) or any in Ollama’s library',
+      [{ name: 'model', type: 'string', positional: true, help: 'Its name and tag ("qwen3.6:35b-a3b")' }],
+      async (args, ctx) => {
+        const name = modelName(args.string('model'));
+        const state = await ollama();
+        const entry = catalogEntry(name);
+        const fit = entry ? fitLocalModel(entry, state) : undefined;
+        if (fit?.fit === 'unsupported') throw new CommandError(`${entry?.title ?? name} can’t run here: ${fit.reason}`);
+        if (entry && fit && fit.fit !== 'good') {
+          const ok = await ctx.confirm({
+            title: fit.fit === 'too-big' ? `${entry.title} is too big for this computer` : `${entry.title} will be slow here`,
+            description: `A command asked to download it (${formatModelSize(entry.size)}). ${fit.reason}.`,
+            action: 'Download Anyway',
+          });
+          if (!ok) throw new CommandError('You didn’t allow it');
+        }
+        const bridge = localModels();
+        const stop = bridge.onChanged((next) => {
+          const pull = next.pulls.find((p) => p.model === name);
+          if (!pull) return;
+          const percent = pull.total > 0 ? Math.floor((pull.completed / pull.total) * 100) : undefined;
+          ctx.progress?.(percent !== undefined ? { text: `${localModelTitle(name)}: ${describePull(pull)}`, percent } : { text: `${localModelTitle(name)}: ${describePull(pull)}` });
+        });
+        try {
+          await call(bridge.pull(name));
+        } finally {
+          stop();
+        }
+        return { text: `${localModelTitle(name)} is downloaded: the assistant lists it as ollama/${name}` };
+      },
+    ),
+    command(
+      'assistant',
+      'stop-model-download',
+      'Stop downloading a model; downloading it again picks up where it stopped',
+      [{ name: 'model', type: 'string', positional: true, help: 'Its name and tag' }],
+      async (args) => {
+        const name = modelName(args.string('model'));
+        await call(localModels().cancel(name));
+        return { text: `Stopped downloading ${localModelTitle(name)}` };
+      },
+    ),
+    command(
+      'assistant',
+      'remove-model',
+      'Delete a downloaded model from this computer, as Remove does in Settings → Assistant',
+      [{ name: 'model', type: 'string', positional: true, help: 'Its name and tag (din assistant models)' }],
+      async (args, ctx) => {
+        const state = await ollama();
+        const query = modelName(args.string('model'));
+        const model = pick(state.models, query, (m) => [m.name, m.name.replace(/:latest$/, ''), localModelTitle(m.name)], 'model');
+        const ok = await ctx.confirm({
+          title: `Remove ${localModelTitle(model.name)}?`,
+          description: `A command asked to delete it from this computer (${formatModelSize(model.size)}). The assistant can’t use it until it’s downloaded again.`,
+          action: 'Remove',
+          destructive: true,
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+        await call(localModels().remove(model.name));
+        return { text: `${localModelTitle(model.name)} is removed` };
       },
     ),
     command('assistant', 'restart', 'Restart OpenCode’s server, as Restart does in Settings → Assistant, stopping whatever the agent is doing', [], async () => {

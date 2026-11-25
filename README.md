@@ -958,6 +958,25 @@ idle minutes. On DinOS the server and Whisper large-v3-turbo (about
 `$DIN_WHISPER_SERVER` and `$DIN_WHISPER_MODEL`; elsewhere, set both to
 dictate.
 
+### Local models
+
+The assistant can use AI models that run on this computer, through Ollama.
+Din starts Ollama's server when it starts (`electron/local-models.mts`), on
+its usual `127.0.0.1:11434`, where OpenCode's own Ollama provider finds it
+and lists its models (`ollama/<name>`) with the rest, and where `ollama` in
+a Terminal finds it too; a server already answering there (the system's) is
+used as it is. Idle it's a few tens of megabytes, and a model is loaded only
+while it's in use and for five minutes after. Din's server uses integrated
+GPUs, which Ollama otherwise skips, and gives each model a 32K context,
+room for the agent's instructions and tools. Settings → Assistant (and
+`din assistant models`) downloads, lists and removes models, into
+`~/.ollama/models`, recommending the best few for this computer from a
+short catalog (`src/lib/localModels.ts`), by what fits the GPU's memory
+(as Ollama reports it at start) and how fast it would write there, and
+warning about the rest. On DinOS Ollama's Vulkan build is the Local AI
+models optional feature, which comes with the computer (`$DIN_OLLAMA`);
+elsewhere it's the system's `ollama`.
+
 ### Tiling and workspaces
 
 Windows float by default. Super+Shift+T (or Settings → Windows, or Super+T
@@ -985,7 +1004,8 @@ keep going (`WorkspaceSwipeHost.tsx`; Settings → Mouse turns it off).
 Some of DinOS takes a lot of space and only some people use it, so it isn't
 on the disk until someone installs it, in Settings → Optional Features or
 with `din features`: Windows apps (Wine), Virtual machines (QEMU, swtpm,
-OVMF), Dictation & transcripts (whisper.cpp and its model), a web view for
+OVMF), Dictation & transcripts (whisper.cpp and its model), Local AI
+models (Ollama), a web view for
 Linux apps (WebKitGTK, on nix-ld's library path) and Linux containers
 (Podman, `docker`, distrobox). Together they're over 2 GB the disk image
 doesn't carry.
@@ -1012,7 +1032,7 @@ DinOS that had them all built in keeps them all: the first time Din starts
 with optional features there, it installs every one, from what's still in
 the store.
 
-Dictation is `default`: it comes with the computer all the same, without
+Dictation and Local AI models are `default`: they come with the computer all the same, without
 the disk image carrying it. Din keeps which features the user wants in
 `~/.local/state/din/feature-choices.json`, and a default one counts as
 wanted until they remove it, so a new or erased computer downloads it in

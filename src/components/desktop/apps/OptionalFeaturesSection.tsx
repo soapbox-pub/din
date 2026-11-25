@@ -6,6 +6,7 @@ import {
   AudioLines,
   Ban,
   Boxes,
+  BrainCircuit,
   Download,
   Gamepad2,
   Globe,
@@ -58,6 +59,7 @@ const ICONS: Record<string, LucideIcon> = {
   games: Gamepad2,
   dictation: Mic,
   speech: AudioLines,
+  'local-ai': BrainCircuit,
   containers: Boxes,
   webkit: Globe,
   xvfb: SquareTerminal,
@@ -128,8 +130,8 @@ export function OptionalFeaturesSection() {
       ) : (
         <p className="text-sm text-muted-foreground">
           Parts of DinOS that take a lot of space, kept off the disk until you want them. Each downloads from the
-          internet when you install it, and comes back to the size it was when you remove it. Dictation comes with
-          DinOS, and downloads in the background once it’s installed.
+          internet when you install it, and comes back to the size it was when you remove it. Dictation and Local AI
+          models come with DinOS, and download in the background once it’s installed.
         </p>
       )}
 

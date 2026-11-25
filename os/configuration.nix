@@ -178,6 +178,20 @@ let
       default = true;
       parts = { whisper = pkgs.whisper-cpp-vulkan; model = whisperModel; };
     };
+    # AI models on this computer, for the assistant (electron/
+    # local-models.mts): Ollama, its Vulkan build, which runs them on AMD,
+    # Intel and NVIDIA GPUs alike, integrated ones included (ROCm's is 4 GB,
+    # and AMD's alone). Din runs its server, where OpenCode's Ollama provider
+    # finds it, and `ollama` is on PATH; idle it's a few tens of megabytes.
+    # The models are the user's own downloads, from Settings → Assistant, in
+    # ~/.ollama.
+    local-ai = {
+      title = "Local AI models";
+      description = "Ollama, which runs AI models on this computer, for an assistant that works offline and keeps everything here.";
+      size = 160;
+      default = true;
+      parts = { ollama = pkgs.ollama-vulkan; };
+    };
     # Din's voice (electron/speech.mts): sherpa-onnx's library, opened by
     # din-tts (below), reading Kokoro 1.0 (Apache-2.0, 82M parameters) on the
     # CPU about five times faster than it speaks. Full precision: int8 was
@@ -610,6 +624,8 @@ let
     export DIN_WHISPER_CLI=${featurePart "dictation" "whisper"}/bin/whisper-cli
     export DIN_WHISPER_SERVER=${featurePart "dictation" "whisper"}/bin/whisper-server
     export DIN_WHISPER_MODEL=${featurePart "dictation" "model"}
+    # Local models (electron/local-models.mts): Ollama's server.
+    export DIN_OLLAMA=${featurePart "local-ai" "ollama"}/bin/ollama
     # Din's voice (electron/speech.mts): din-tts, the feature's sherpa-onnx
     # library it opens, and Kokoro's model.
     export DIN_TTS_HELPER=${din-tts}/bin/din-tts
@@ -1842,6 +1858,9 @@ in
   # model never sees (`ask_secret`, and + → Secret… in the Assistant). And
   # Shakespeare AI's (opencode/plugins/shakespeare): the provider and its
   # models, connected with a key Din makes (src/lib/shakespeareProvider.ts).
+  # And local-models (opencode/plugins/local-models): OpenCode's own Ollama
+  # provider, which finds Din's Ollama server by itself, told how much
+  # context that server gives each model.
   environment.etc."opencode/plugins".source = ./opencode/plugins;
   environment.etc."din/docs".source = din-root + "/docs";
   # The optional features Settings offers (above, and electron/features.mts).

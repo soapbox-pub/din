@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { ProviderList } from '@/shared/assistant/Providers';
+import { LocalModelsSettings } from '@/components/desktop/apps/LocalModelsSettings';
 import { SkillsSettings } from '@/components/desktop/apps/AssistantSkillsSettings';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -25,7 +26,8 @@ import { bundledIconProps } from '@/shared/iconSizes';
 
 /**
  * Settings → Assistant: whether Din keeps OpenCode running, the state of
- * its server, the AI providers it may use, its skills and the folders
+ * its server, the AI providers it may use, the models on this computer
+ * (LocalModelsSettings), its skills and the folders
  * they're in (AssistantSkillsSettings), and below them where new
  * conversations work, how replies look, and when and in what voice they're
  * read aloud.
@@ -67,6 +69,7 @@ export function AssistantSettingsSection() {
             <>
               <ServerStatus />
               <ProviderList />
+              <LocalModelsSettings />
               <SkillsSettings />
               {/* Smaller things, out of the way below the providers. */}
               <div className={settingsGroup}>

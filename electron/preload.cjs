@@ -41,6 +41,8 @@
 //     assistant's mic button and holding Super+A
 //   - window.dinos.speech: text to speech with Kokoro, for the desktop's voice
 //     (the assistant's spoken replies, apps' speechSynthesis)
+//   - window.dinos.localModels: AI models on this computer through Ollama, for
+//     Settings → Assistant and `din assistant models`
 //   - window.dinos.bluetooth: BlueZ adapter and devices (pairing, connecting), for
 //     the menu bar and Settings
 //   - window.dinos.phone: text messages from the user's phones over Bluetooth,
@@ -2850,6 +2852,43 @@ expose('dictation', {
    * @param {string} text
    */
   insertIntoGuest: (wcId, text) => ipcRenderer.invoke('dictation:insert-guest', wcId, text),
+});
+
+// Local models bridge (window.dinos.localModels), backed by
+// electron/local-models.mts: Ollama's server, which the assistant's Ollama
+// provider finds, and the models it has.
+expose('localModels', {
+  /** Whether Ollama is here and running, the GPU it found, its models and downloads. */
+  state: () => ipcRenderer.invoke('local-models:state'),
+  /**
+   * Download a model; resolves when it's ready.
+   * @param {string} model Ollama's name for it ("qwen3.6:35b-a3b")
+   */
+  pull: (model) => ipcRenderer.invoke('local-models:pull', model),
+  /**
+   * Stop a download (it picks up there next time), or let go of one that failed.
+   * @param {string} model
+   */
+  cancel: (model) => ipcRenderer.invoke('local-models:cancel', model),
+  /**
+   * Delete a model from this computer.
+   * @param {string} model
+   */
+  remove: (model) => ipcRenderer.invoke('local-models:remove', model),
+  /**
+   * Called with the whole state whenever it changes.
+   * @param {(state: unknown) => void} callback
+   * @returns {() => void} unsubscribe
+   */
+  onChanged: (callback) => {
+    /**
+     * @param {Electron.IpcRendererEvent} _event
+     * @param {unknown} state
+     */
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('local-models:changed', handler);
+    return () => ipcRenderer.removeListener('local-models:changed', handler);
+  },
 });
 
 // Speech bridge (window.dinos.speech), backed by electron/speech.mts:

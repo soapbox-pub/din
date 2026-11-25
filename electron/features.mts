@@ -1,6 +1,6 @@
 // The optional features bridge (window.dinos.features, for Settings →
 // Optional Features and `din features`): parts of DinOS that aren't on the
-// disk until someone wants them - Wine, QEMU, Whisper, Kokoro, WebKitGTK, Podman.
+// disk until someone wants them - Wine, QEMU, Whisper, Kokoro, Ollama, WebKitGTK, Podman.
 //
 // The system lists them in DIN_FEATURES (/etc/dinos/features.json, written
 // by os/configuration.nix): for each, its parts, by the store paths they
@@ -57,7 +57,7 @@ const LIVE = fs.existsSync('/run/din/live');
 const RETRY_MS = 5 * 60_000;
 
 /** The order Settings lists them in; any others follow by id. */
-const ORDER = ['windows', 'vms', 'games', 'dictation', 'speech', 'containers', 'webkit'];
+const ORDER = ['windows', 'vms', 'games', 'dictation', 'speech', 'local-ai', 'containers', 'webkit'];
 
 const STORE_PATH = /^\/nix\/store\/[0-9a-z]{32}-[^/]+$/;
 

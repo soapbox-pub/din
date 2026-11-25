@@ -121,6 +121,15 @@ export const CATALOG: Record<string, SystemFeature> = {
     needs: ['podman', 'distrobox'],
     packages: everywhere('podman', 'distrobox'),
   },
+  // Ollama's own install script is the way elsewhere (Settings says so); Arch
+  // packages its Vulkan build.
+  'local-ai': {
+    title: 'Local AI models',
+    description: 'Run AI models on this computer, for the assistant (Ollama).',
+    size: 160 * MB,
+    needs: ['ollama'],
+    packages: { pacman: ['ollama-vulkan'] },
+  },
   webkit: {
     title: 'Web view for Linux apps',
     description: 'Needed by some downloaded Linux apps (WebKitGTK).',
