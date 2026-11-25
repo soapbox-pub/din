@@ -195,6 +195,7 @@ export function MessageList({
   restoreScroll,
   onScroll,
   tabPlace = null,
+  assistant = false,
   accountOf,
 }: {
   conversations: Conversation[];
@@ -224,6 +225,8 @@ export function MessageList({
   onScroll?: (top: number) => void;
   /** The inbox tab the list is of, for its rows' Move to Tab. */
   tabPlace?: TabPlace | null;
+  /** Whether the Assistant can be opened, for its rows' Open in Assistant. */
+  assistant?: boolean;
   /** In a list of several accounts' mail, which one each row came to. */
   accountOf?: (accountId: string) => AccountMark | null;
 }) {
@@ -291,7 +294,7 @@ export function MessageList({
             />
           </ContextMenuTrigger>
           <ContextMenuContent className="w-56">
-            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} labels={labelsFor(c.latest.accountId)} place={tabPlace} onPick={onPick} />
+            <RowMenu conversation={c} targets={targetsFor(c)} boxes={boxesFor(c.latest.accountId)} labels={labelsFor(c.latest.accountId)} place={tabPlace} assistant={assistant} onPick={onPick} />
           </ContextMenuContent>
         </ContextMenu>
       ))}
@@ -305,6 +308,6 @@ export function MessageList({
 }
 
 /** Built only when the menu opens, not for every row of the list. */
-function RowMenu({ conversation, targets, boxes, labels, place, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; labels: MailLabels | undefined; place: TabPlace | null; onPick: (pick: MenuPick, c: Conversation) => void }) {
-  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, labels, undefined, targets.length === 1, place)} onPick={(pick) => onPick(pick, conversation)} />;
+function RowMenu({ conversation, targets, boxes, labels, place, assistant, onPick }: { conversation: Conversation; targets: Conversation[]; boxes: MailboxInfo[]; labels: MailLabels | undefined; place: TabPlace | null; assistant: boolean; onPick: (pick: MenuPick, c: Conversation) => void }) {
+  return <ContextEntries entries={messageMenu(targets.flatMap((t) => t.items), boxes, labels, undefined, targets.length === 1, place, assistant)} onPick={(pick) => onPick(pick, conversation)} />;
 }

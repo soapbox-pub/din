@@ -3,7 +3,7 @@ import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, MoreVertical, PanelLeft
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
-import { appLink, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
+import { appLink, canOpenApp, restoredState, saveState, useOnLaunch, wasReopened, windowLaunch } from '@/shared/launch';
 import { cn } from '@/lib/utils';
 import { parseMailto } from '@/lib/mailto';
 import { CATEGORY_NAMES, type MailAccount, type MailboxInfo, type MailCategory, type MailLabel, type MailLabels, type MailSubscription, type MessageFilter, type SpecialMailbox } from '@/lib/mail';
@@ -191,6 +191,18 @@ export function Viewer() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [dialog, setDialog] = useState<{ kind: 'setup' } | null>(null);
   useSettingsChanges();
+  // Whether the Assistant is set up and on, for Open in Assistant; checked again as the window comes forward.
+  const [hasAssistant, setHasAssistant] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const check = () => void canOpenApp('assistant').then((can) => live && setHasAssistant(can), () => {});
+    check();
+    window.addEventListener('focus', check);
+    return () => {
+      live = false;
+      window.removeEventListener('focus', check);
+    };
+  }, []);
   const [leaving, setLeaving] = useState<Item | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -482,7 +494,7 @@ export function Viewer() {
    * off; all of them otherwise.
    */
   const pickTargets = (pick: MenuPick, list: Conversation[]): Item[] => {
-    if (pick === 'reply' || pick === 'reply-all' || pick === 'forward' || pick === 'open-draft') return list.slice(0, 1).map((c) => c.latest);
+    if (pick === 'reply' || pick === 'reply-all' || pick === 'forward' || pick === 'open-draft' || pick === 'assistant') return list.slice(0, 1).map((c) => c.latest);
     if (pick === 'flag') return list.map((c) => c.latest);
     if (pick === 'unflag') return list.flatMap((c) => c.items.filter((i) => i.flagged));
     if (pick === 'unread') return list.map((c) => c.latest);
@@ -841,7 +853,7 @@ export function Viewer() {
       <ToolButton label="Delete" onClick={() => pickFor('trash', current.items)}><Trash2 className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <ToolButton label="Mark as unread" onClick={() => pickFor('unread', [current.latest])}><MailIcon className="size-4.5" strokeWidth={1.75} /></ToolButton>
       <LabelMenu entries={labelEntries(current.items, labelsFor(current.latest.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
-      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), labelsFor(current.latest.accountId), TOOLBAR_PICKS, true, tabPlace)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
+      <MoreMenu entries={messageMenu(current.items, boxesOf(current.latest.accountId), labelsFor(current.latest.accountId), TOOLBAR_PICKS, true, tabPlace, hasAssistant)} onPick={(pick) => pickFor(pick, pickTargets(pick, [current]))} />
     </ActionBar>
   );
 
@@ -877,7 +889,7 @@ export function Viewer() {
       {selectedItems.every((i) => i.accountId === first.accountId) && (
         <LabelMenu entries={labelEntries(selectedItems, labelsFor(first.accountId))} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
       )}
-      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), labelsFor(first.accountId), SELECTION_PICKS, chosenConversations.length === 1, tabPlace)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
+      <MoreMenu entries={messageMenu(selectedItems, boxesOf(first.accountId), labelsFor(first.accountId), SELECTION_PICKS, chosenConversations.length === 1, tabPlace, hasAssistant)} onPick={(pick) => pickFor(pick, pickTargets(pick, chosenConversations))} />
     </ActionBar>
   ));
 
@@ -944,6 +956,7 @@ export function Viewer() {
           onPick={(pick, c) => pickFor(pick, pickTargets(pick, targetsFor(c)))}
           targetsFor={targetsFor}
           tabPlace={tabPlace}
+          assistant={hasAssistant}
           accountOf={accountOf}
           restoreScroll={() => {
             const top = restoreScroll.current;
@@ -1017,7 +1030,7 @@ export function Viewer() {
                   key={opened?.key}
                   items={current.items}
                   me={me}
-                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), labelsFor(item.accountId), READER_PICKS, true, tabPlace)}
+                  menuFor={(item) => messageMenu([item], boxesOf(item.accountId), labelsFor(item.accountId), READER_PICKS, true, tabPlace, hasAssistant)}
                   onPick={(pick, item) => pickFor(pick, [item])}
                   labels={labelsOfItems(current.items, labelsFor(current.latest.accountId))}
                   onRemoveLabel={(id) => pickFor({ label: id, on: false }, current.items)}

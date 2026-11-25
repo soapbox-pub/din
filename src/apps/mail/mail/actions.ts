@@ -3,7 +3,8 @@ import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { toast } from '@/shared/toast';
 import { CATEGORY_NAMES, type LabelColor, type MailAccount, type MailCategory, type MailLabel, type MailLabels, type MailMessage } from '@/lib/mail';
 import { labelsKey, mailboxesKey, patchItems, patchUnseen, useMail, type Item, type Source } from './api';
-import { blankSeed, draftSeed, forwardSeed, replySeed, type ComposeSeed } from './format';
+import { blankSeed, draftSeed, formatAddress, forwardSeed, replySeed, type ComposeSeed } from './format';
+import { htmlToPlain } from '@/shared/mailCompose';
 import { appLink } from '@/shared/launch';
 
 export type MessageAction =
@@ -18,7 +19,39 @@ export type MessageAction =
   | 'unflag'
   | 'read'
   | 'unread'
-  | 'open-draft';
+  | 'open-draft'
+  | 'assistant';
+
+/**
+ * Open in Assistant: a new conversation with the message attached, as a
+ * file the Assistant writes from what's sent here (its intent `mail.message`,
+ * src/apps/assistant/intents.ts), naming where it is for `din mail`.
+ */
+function openInAssistant(m: MailMessage, item: Item, account: MailAccount | undefined): void {
+  const nonce = Date.now();
+  const list = (l: MailMessage['to']) => l.map(formatAddress).join(', ');
+  window.open(
+    appLink('assistant', {
+      intent: 'mail.message',
+      account: account?.email ?? '',
+      mailbox: item.path,
+      uid: item.uid,
+      subject: m.subject,
+      from: list(m.from),
+      replyTo: list(m.replyTo),
+      to: list(m.to),
+      cc: list(m.cc),
+      date: m.date,
+      // A little over what the Assistant keeps, so it knows to say the rest was cut.
+      text: (m.text.trim() || (m.html ? htmlToPlain(m.html) : '')).slice(0, 100_001),
+      attachments: m.attachments.filter((a) => !a.inline).map((a) => a.filename).join(', '),
+      nonce,
+      intentNonce: nonce,
+      sessionID: null,
+      directory: null,
+    }),
+  );
+}
 
 function byMailbox(items: Item[]): Map<string, { accountId: string; path: string; uids: number[] }> {
   const out = new Map<string, { accountId: string; path: string; uids: number[] }>();
@@ -73,6 +106,9 @@ export function useMessageActions(accounts: MailAccount[], onRemoved: (keys: Set
             return;
           case 'open-draft':
             compose(draftSeed(await full(first), first.accountId));
+            return;
+          case 'assistant':
+            openInAssistant(await full(first), first, account);
             return;
           case 'flag':
           case 'unflag': {

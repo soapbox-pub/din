@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
-import { attachmentOf, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
+import { attachmentOf, saveHandedFile, splitAttachedPaths } from '@/shared/assistant/attachedFiles';
 import { useGivenSecretNames, useSecretRequests } from '@/shared/assistant/secretRequests';
 import { SecretRequestCard } from '@/shared/assistant/Secrets';
 import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
@@ -129,7 +129,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ContentPane, ToolButton } from '@/shared/appChrome';
 import { SIDEBAR_WIDTH, flushPane } from '@/shared/appChromeStyles';
-import { intentOf, type LaunchIntent } from './intents';
+import { ATTACHED_DIR, intentOf, type LaunchIntent } from './intents';
 import { GitBranchChip } from './GitPanel';
 import { SidePanel, type SideTab } from './SidePanel';
 import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
@@ -415,6 +415,19 @@ function AssistantWindow() {
   const { model } = usePreferredModel();
   const runIntent = useCallback(
     (intent: LaunchIntent) => {
+      if (intent.kind === 'attach') {
+        // A new conversation in the usual folder, the file waiting in its composer.
+        saveHandedFile(ATTACHED_DIR, intent.folder, intent.name, intent.content).then(
+          (path) => {
+            const tab = newAssistantTab(null, null);
+            saveDraft(newConversationDraftKey(tab.id), '', [attachmentOf(path)]);
+            setState((prev) => placeTab(prev, tab));
+          },
+          (error: unknown) =>
+            host.notify({ title: 'Couldn’t attach that', description: error instanceof Error ? error.message : String(error), destructive: true }),
+        );
+        return;
+      }
       if (!intent.context) {
         const tab = newAssistantTab(null, intent.directory);
         saveDraft(newConversationDraftKey(tab.id), intent.prompt);

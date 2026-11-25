@@ -106,6 +106,21 @@ export async function saveRecording(audio: Blob, extension: string): Promise<str
   return path;
 }
 
+/**
+ * Keep a text file another app handed the Assistant (Mail's "Open in
+ * Assistant") in `dir` under home, in a folder of its own; resolves to its
+ * path. It's written again each time, so it's as the app last sent it.
+ */
+export async function saveHandedFile(dir: string, folder: string, name: string, content: string): Promise<string> {
+  const fs = getFsBridge();
+  if (!fs) throw new Error('Attaching files needs Din’s desktop app');
+  const at = `${await fs.homedir()}/${dir}/${folder}`;
+  await fs.mkdir(at);
+  const path = `${at}/${name}`;
+  await fs.writeFile(path, content);
+  return path;
+}
+
 /** Whether this window may record: a microphone, Din's files to keep it in, and (in an app) the permission. */
 export async function canRecordAudio(): Promise<boolean> {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined' || !getFsBridge()) return false;

@@ -18,6 +18,9 @@
       "files": [{ "name": "attachments", "accept": ["*/*"] }]
     }
   },
+  "related_applications": [
+    { "platform": "webapp", "url": "din://assistant/manifest.webmanifest" }
+  ],
   "din": {
     "permissions": ["mail"],
     "window": { "size": { "width": 1180, "height": 760 }, "frame": "custom" },

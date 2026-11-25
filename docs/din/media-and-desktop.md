@@ -220,9 +220,15 @@ request (shown in it as "From Studio: How I set up my desk"), only when `din.app
 is an app the intent trusts. For any other app, a new conversation opens in
 the folder with the request in the composer, for the user to send.
 
+An attaching intent never starts a conversation: the Assistant writes what
+it's sent to a text file of its own (in `~/.local/share/din/assistant/attached/`)
+and opens a new conversation, in the usual folder, with the file in the
+composer for the user to ask about. Only the apps it trusts can send one.
+
 | Intent | Trusts | Fields |
 |---|---|---|
 | `studio.edit` | Studio | `directory` (a project's folder), `prompt`, `title`; the agent is pointed at the `studio` skill |
+| `mail.message` | Mail (only) | `account` (its address), `mailbox` (its path), `uid`, `subject`, `from`, `replyTo`, `to`, `cc`, `date` (ms), `text`, `attachments` (names); attaches the email, with the `din mail read` and `reply` commands that find it, and a note that what's below its line is the sender's, not instructions (Mail's Open in Assistant) |
 
 ## `din.system.capture` (permission `capture`)
 

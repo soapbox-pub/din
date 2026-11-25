@@ -1,4 +1,4 @@
-import { Archive, Folder, Forward, Inbox, LayoutPanelTop, Mail, MailMinus, MailOpen, OctagonAlert, Pencil, Plus, Reply, ReplyAll, Star, StarOff, Tag, Trash2 } from 'lucide-react';
+import { Archive, Bot, Folder, Forward, Inbox, LayoutPanelTop, Mail, MailMinus, MailOpen, OctagonAlert, Pencil, Plus, Reply, ReplyAll, Star, StarOff, Tag, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { CATEGORY_NAMES, type LabelColor, type MailboxInfo, type MailCategory, type MailLabels } from '@/lib/mail';
 import type { Item } from './api';
@@ -54,8 +54,9 @@ function tabEntries(targets: Item[], place: TabPlace | null): MenuEntry[] {
  * leaves out what's already a button beside the menu. `one` is whether
  * they're one message or one conversation (newest first), which Reply and
  * Forward answer. `place` is the inbox tab they're shown in, for Move to Tab.
+ * `assistant` is whether the Assistant can be opened, for Open in Assistant.
  */
-export function messageMenu(targets: Item[], boxes: MailboxInfo[], labels: MailLabels | undefined, skip: ReadonlySet<MenuPick> = new Set(), one = targets.length === 1, place: TabPlace | null = null): MenuEntry[] {
+export function messageMenu(targets: Item[], boxes: MailboxInfo[], labels: MailLabels | undefined, skip: ReadonlySet<MenuPick> = new Set(), one = targets.length === 1, place: TabPlace | null = null, assistant = false): MenuEntry[] {
   if (!targets.length) return [];
   const first = targets[0];
   const many = !one;
@@ -69,6 +70,7 @@ export function messageMenu(targets: Item[], boxes: MailboxInfo[], labels: MailL
   const groups: MenuEntry[][] = [
     first.draft && !many ? [item('open-draft', 'Open Draft', Pencil)] : [],
     [item('reply', 'Reply', Reply, { disabled: many }), item('reply-all', 'Reply All', ReplyAll, { disabled: many }), item('forward', 'Forward', Forward, { disabled: many })],
+    assistant && !many ? [item('assistant', 'Open in Assistant', Bot)] : [],
     [
       allRead ? item('unread', 'Mark as Unread', Mail) : item('read', 'Mark as Read', MailOpen),
       allStarred ? item('unflag', 'Remove Star', StarOff) : item('flag', 'Star', Star),
