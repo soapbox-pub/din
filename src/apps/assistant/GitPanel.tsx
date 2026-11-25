@@ -221,7 +221,13 @@ function useGitOperations(directory: string | undefined, status: GitRepoStatus |
     return () => clearTimeout(timer);
   }, [succeeded]);
 
-  const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: gitKey() }), [queryClient]);
+  // Everything but the fetch itself: the fetch's own answer refreshes the
+  // rest, and invalidating it from there started it again at once, so the
+  // panel fetched (git, ngit and its relays) every few seconds, not minutes.
+  const refresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: gitKey(), predicate: (query) => query.queryKey[1] !== 'fetch' }),
+    [queryClient],
+  );
 
   const run = useCallback(
     async (op: GitSyncOperation) => {
