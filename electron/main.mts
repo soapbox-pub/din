@@ -5506,9 +5506,12 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
     // A nostr: link (NIP-21) opens in the app the user chose for its kind,
     // or as a preview in a tab beside the page (src/hooks/useNostrLinks.ts);
     // a mailto: link opens a new message in Mail, a magnet: link the Add
-    // window in Torrents, and a bitcoin: link (BIP-21) Wallet's Send or the
-    // app chosen for them. Not from Tor's session: the preview reaches relays
-    // directly, and a torrent's peers would be reached without Tor.
+    // window in Torrents, and a link of any other scheme Chromium leaves to
+    // the system (bitcoin:, monero:, tel:, ...) the app that opens them, or
+    // Open With, which asks which or says none does (src/lib/schemeLinks.ts
+    // decides which schemes an app may take). Not from Tor's session: the
+    // preview reaches relays directly, and a torrent's peers and the apps
+    // that open links would be reached without Tor.
     if (
       permission === 'openExternal' &&
       prompts &&
@@ -5516,7 +5519,7 @@ function hardenGuestSession(s: Electron.Session, { prompts }: { prompts: boolean
       'externalURL' in details &&
       typeof details.externalURL === 'string' &&
       details.externalURL.length <= 8192 &&
-      /^(nostr|mailto|magnet|bitcoin):/i.test(details.externalURL)
+      /^[a-z][a-z0-9+.-]*:/i.test(details.externalURL)
     ) {
       sendToShell('crx:openTab', { url: details.externalURL, openerWcId: _contents.id });
       callback(false);

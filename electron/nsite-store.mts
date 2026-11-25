@@ -91,8 +91,8 @@ export interface NsiteAppInfo {
   themeColor: string | null;
   /** How the site opens `nostr:` links: a path with `%s` for the URI, and the kinds it shows. */
   nostr?: { path: string; kinds: number[] | null } | null;
-  /** How the site opens `bitcoin:` links: a path with `%s` for the URI. */
-  bitcoin?: { path: string } | null;
+  /** How the site opens other schemes' links (bitcoin:, monero:, ...), by scheme: a path with `%s` for the URI. */
+  protocols?: Record<string, { path: string }>;
   /**
    * The app's web app manifest id as a path on the site (`/` for most), which
    * a website's `web-app-origin-association` names as `nsite://<host><id>`.
@@ -497,7 +497,8 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
       ? value.version
       : undefined;
   const nostr = parseNostrHandler(value.nostr);
-  const bitcoin = parseBitcoinHandler(value.bitcoin);
+  // Before every scheme had one, info carried bitcoin: links' alone.
+  const protocols = parseSchemeHandlers(value.protocols ?? (value.bitcoin ? { bitcoin: value.bitcoin } : undefined));
   const id = isScopePath(value.id) && !/[\s\\#]/.test(value.id) ? value.id : null;
   const scopeExtensions = Array.isArray(value.scopeExtensions)
     ? [...new Set(value.scopeExtensions.map(httpsOrigin).filter((origin) => origin !== null))].slice(
@@ -513,7 +514,7 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     favicon,
     themeColor,
     nostr,
-    bitcoin,
+    protocols,
     id,
     scopeExtensions,
     shortcuts: parseShortcuts(value.shortcuts),
@@ -575,12 +576,18 @@ function parseNostrHandler(raw: unknown): NsiteAppInfo['nostr'] {
   return { path, kinds: valid.length > 0 ? valid : null };
 }
 
-function parseBitcoinHandler(raw: unknown): NsiteAppInfo['bitcoin'] {
-  if (!raw || typeof raw !== 'object') return null;
-  const { path } = raw as Record<string, unknown>;
-  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
-  if (path.length > 2048 || !path.includes('%s') || /[\s\\]/.test(path)) return null;
-  return { path };
+function parseSchemeHandlers(raw: unknown): NonNullable<NsiteAppInfo['protocols']> {
+  const kept: NonNullable<NsiteAppInfo['protocols']> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return kept;
+  for (const [scheme, handler] of Object.entries(raw).slice(0, 32)) {
+    // A scheme's name, as src/lib/schemeLinks.ts's isClaimableScheme has them.
+    if (!/^(?:[a-z][a-z0-9]{1,15}|web\+[a-z]{1,32})$/.test(scheme) || !handler || typeof handler !== 'object') continue;
+    const { path } = handler as Record<string, unknown>;
+    if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) continue;
+    if (path.length > 2048 || !path.includes('%s') || /[\s\\]/.test(path)) continue;
+    kept[scheme] = { path };
+  }
+  return kept;
 }
 
 function parseIconData(value: unknown): string | null {

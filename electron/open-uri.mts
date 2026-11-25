@@ -9,8 +9,8 @@
 // origin, or as a tab in the Web Browser. A nostr: link opens in the app
 // chosen for its kind, or as a preview with an "Open with" choice; a
 // blossom: link (BUD-10) as a tab showing the file (electron/blossom.mts); a
-// magnet: link in Torrents; a bitcoin: link (BIP-21) in Wallet, or the app
-// chosen for them.
+// magnet: link in Torrents; a link of another scheme (bitcoin:, monero:,
+// ...) in the app that opens them, or Open With (src/lib/schemeLinks.ts).
 //
 // Folders come the same way (din-open is the handler for inode/directory
 // too) and open in Files, as do the files apps ask to show: Electron and
@@ -182,7 +182,7 @@ function answer(call: MethodCall): [string, unknown[]] | void {
   }
   const [uris] = call.body as [unknown[]];
   for (const uri of uris.slice(0, MAX_URIS)) {
-    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && /^(https?|nsite|nostr|blossom|magnet|bitcoin):/i.test(uri)) {
+    if (typeof uri === 'string' && uri.length <= MAX_URI_LENGTH && !/^file:/i.test(uri) && /^[a-z][a-z0-9+.-]*:/i.test(uri)) {
       sendToShell('open-uri:open', uri);
       continue;
     }

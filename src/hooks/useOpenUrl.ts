@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
-import { useBitcoinLinks } from '@/hooks/useBitcoinLinks';
-import { isBitcoinUri } from '@/lib/bitcoinUri';
+import { useSchemeLinks } from '@/hooks/useSchemeLinks';
+import { appLinkScheme } from '@/lib/schemeLinks';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { isNsiteUrl } from '@/lib/nsite';
 import { isNostrUri } from '@/lib/nostrUri';
@@ -22,8 +22,10 @@ import { isWebviewAvailable } from '@/lib/isElectron';
  * the Web Browser app, launching a browser window first when none is open.
  *
  * A `mailto:` link opens a new message in Mail, a `magnet:` link the Add
- * window in Torrents, and a `bitcoin:` link Wallet's Send, or the app chosen
- * for them (useBitcoinLinks).
+ * window in Torrents, and a link of any other scheme (`bitcoin:`,
+ * `monero:`, `xmpp:`, …) the app that opens them, or the one chosen for
+ * them, or Open With, which asks which, or says nothing opens it
+ * (useSchemeLinks).
  *
  * A `nostr:` link opens in the default app for its kind, or else as a
  * preview in the Web Browser, with buttons to open it in an app. A `blossom:`
@@ -40,7 +42,7 @@ export function useOpenUrl(): (url: string) => void {
   const { open } = useWindowActions();
   const { findAppForLink } = useInstalledApps();
   const { openNostrUri } = useNostrLinks();
-  const { openBitcoinUri } = useBitcoinLinks();
+  const { openSchemeUri } = useSchemeLinks();
 
   return useCallback(
     (rawUrl: string) => {
@@ -52,8 +54,8 @@ export function useOpenUrl(): (url: string) => void {
         open('torrents', { magnet: rawUrl.trim() });
         return;
       }
-      if (isBitcoinUri(rawUrl)) {
-        openBitcoinUri(rawUrl);
+      if (appLinkScheme(rawUrl)) {
+        openSchemeUri(rawUrl);
         return;
       }
 
@@ -93,6 +95,6 @@ export function useOpenUrl(): (url: string) => void {
       if (!hasTabConsumer()) open('web-browser');
       publishTabCommand({ type: 'open', url });
     },
-    [open, findAppForLink, openNostrUri, openBitcoinUri],
+    [open, findAppForLink, openNostrUri, openSchemeUri],
   );
 }

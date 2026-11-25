@@ -51,7 +51,7 @@ when the app is published as an nsite, and Din reads ordinary members
 | `shortcuts` | `actions` | Right-click jump lists on the app's Dock, taskbar and launcher tiles; the launch's `targetURL` is the shortcut's `url` (`"/?new"`), with `din.params` added to its query; `din.id` names it to the Dock (optional: a shortcut without one is named by its `url`). Installed websites and nsites get their manifest's shortcuts too (up to 8, on their own origin), each opening the app's window at its `url` |
 | `file_handlers` | `appForFile` | Not read yet. Which files Files opens here; `din.default: true` makes it the default over other handlers of the same type |
 | `related_applications` | | Apps `navigator.getInstalledRelatedApps()` may say are installed: `{ "platform": "webapp", "url": "din://<id>/manifest.webmanifest" }` ([lifecycle.md](lifecycle.md#opening-other-things)) |
-| `protocol_handlers` | `bitcoin` | Which `nostr:` links open here, and which event kinds, and whether `bitcoin:` links do; see below |
+| `protocol_handlers` | `protocols` | Which `nostr:` links open here, and which event kinds, and which other schemes' links (`bitcoin:`, `monero:`, …) do; see below |
 | `share_target` | | What the share sheet offers this app for, and where a share lands ([sharing.md](sharing.md)) |
 | `id`, `scope_extensions` | | Which websites' links an installed nsite opens; see below |
 
@@ -90,32 +90,45 @@ lists `x-scheme-handler/nostr` and takes a `%u` are offered for every
 kind. Defaults are listed, changed and reset in Settings > Nostr &
 Storage, and with `din nostr links` and `din nostr link-default`.
 
-## Opening `bitcoin:` links
+## Opening `bitcoin:`, `monero:` and other links
 
 > **Status: works for built-in apps, installed nsites and web apps, and
-> native apps** (`src/lib/bitcoinUri.ts`, `src/hooks/useBitcoinLinks.ts`).
+> native apps** (`src/lib/schemeLinks.ts`, `src/hooks/useSchemeLinks.ts`).
 
-An app that pays (or shows) [BIP-21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)
-`bitcoin:` links says so with a `protocol_handlers` entry for `bitcoin`:
+An app that opens links of another scheme says so with a
+`protocol_handlers` entry for it, one per scheme:
 
 ```json
-"protocol_handlers": [{ "protocol": "bitcoin", "url": "/open?uri=%s" }]
+"protocol_handlers": [
+  { "protocol": "bitcoin", "url": "/open?uri=%s" },
+  { "protocol": "monero", "url": "/open?uri=%s" }
+]
 ```
+
+The schemes an app may claim are the HTML spec's safelist for
+`registerProtocolHandler` (`geo`, `im`, `irc`, `matrix`, `sip`, `sms`,
+`tel`, `webcal`, `xmpp`, …; not `mailto` or `magnet`, which Mail and
+Torrents take), the payment schemes `bitcoin`
+([BIP-21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)),
+`monero`, `lightning` and `cashu`, and `web+<name>` (`LINK_SCHEMES`).
 
 For an installed website or nsite, `url` is resolved against the manifest,
 must stay on the app's own origin, and its window opens there with `%s`
 the whole link, percent-encoded. For a built-in app, the `url`'s query is
-the launch's parameters, with `%s` where the link goes: Wallet's is
-`/?section=send&to=%s`, which opens Send with the address and amount
-filled in. Native apps whose desktop entry lists
-`x-scheme-handler/bitcoin` and takes a `%u` are started with the link.
+the launch's parameters, with `%s` where the link goes: Wallet's
+`bitcoin` handler is `/?section=send&to=%s`, which opens Send with the
+address and amount filled in. Native apps whose desktop entry lists
+`x-scheme-handler/<scheme>` and takes a `%u` are started with the link.
 
-Clicking a `bitcoin:` link anywhere (a web page, an app, a native app's
-`xdg-open`) opens it in Wallet when no other app opens them; with more
-(Ditto's manifest names `bitcoin` too), in the one chosen with
-**Always**, or else in the **Open With** chooser. The choice is changed
-or let go of in Settings > Nostr & Storage > Bitcoin links, and with
-`din wallet links` and `din wallet link-default`.
+Clicking such a link anywhere (a web page, an app, a native app's
+`xdg-open`) opens it in the app that opens them when there's one (Wallet,
+for `bitcoin:`, until another says so: Ditto's manifest names `bitcoin`
+and `monero`); with more, in the one chosen with **Always**, or else in
+the **Open With** chooser. A link no app opens, of any scheme, opens Open
+With too, which says so and offers to copy it. The choices are changed or
+let go of in Settings > Nostr & Storage > Other links, and with `din links
+list` and `din links default monero ditto` (`din wallet links` and `din
+wallet link-default` for `bitcoin:`).
 
 ## Opening a website's links
 

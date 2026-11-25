@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { normalizeNostrHandler, type NostrHandler } from '@/lib/nostrUri';
-import { normalizeBitcoinHandler, type BitcoinHandler } from '@/lib/bitcoinUri';
+import { normalizeSchemeHandlers, type SchemeHandlers } from '@/lib/schemeLinks';
 import { normalizeShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
 import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 
@@ -33,10 +33,11 @@ export interface WebApp {
    */
   nostr?: NostrHandler;
   /**
-   * How the site opens `bitcoin:` links, from its manifest's
-   * `protocol_handlers` at install time. The URL is on the app's own origin.
+   * How the site opens other schemes' links (`bitcoin:`, `monero:`, …,
+   * src/lib/schemeLinks.ts), by scheme, from its manifest's
+   * `protocol_handlers` at install time. Each URL is on the app's own origin.
    */
-  bitcoin?: BitcoinHandler;
+  protocols?: SchemeHandlers;
   /**
    * Its manifest's `shortcuts` at install time, for the jump list on its
    * Dock and launcher tiles. Each is on the app's own origin.
@@ -69,16 +70,21 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
       .unknown()
       .transform((value) => normalizeNostrHandler(value) ?? undefined)
       .optional(),
-    bitcoin: z
-      .unknown()
-      .transform((value) => normalizeBitcoinHandler(value) ?? undefined)
-      .optional(),
+    protocols: z.unknown().optional(),
+    // Before every scheme had one: its handler for bitcoin: links alone.
+    bitcoin: z.unknown().optional(),
     shortcuts: z.unknown().optional(),
     share: z.unknown().optional(),
-  }).transform(({ shortcuts, share, ...app }) => {
+  }).transform(({ protocols, bitcoin, shortcuts, share, ...app }) => {
     const kept = normalizeShortcuts(shortcuts, originOf(app.url));
     const target = normalizeWebShareTarget(share, originOf(app.url));
-    return { ...app, ...(kept.length > 0 ? { shortcuts: kept } : {}), ...(target ? { share: target } : {}) };
+    const handlers = normalizeSchemeHandlers(protocols ?? (bitcoin ? { bitcoin } : undefined));
+    return {
+      ...app,
+      ...(Object.keys(handlers).length > 0 ? { protocols: handlers } : {}),
+      ...(kept.length > 0 ? { shortcuts: kept } : {}),
+      ...(target ? { share: target } : {}),
+    };
   }),
 );
 

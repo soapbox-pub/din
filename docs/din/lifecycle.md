@@ -168,7 +168,8 @@ listed. `canOpenApp('assistant')` in `src/shared/launch.ts` asks for one.
 
 The web's `window.open(url)` opens a link into an installed app that owns
 the site, `mailto:` in Mail, `nostr:` in its viewer, `bitcoin:` in Wallet
-(or the app chosen for them), and anything else in
+(or the app chosen for them), `monero:` and other schemes' links in the
+app that opens them (or Open With, which says when none does), and anything else in
 the Web Browser, a `blossom:` link (BUD-10) among them, which shows its file. Like a `noopener` open, it returns no window; `_self`,
 `_parent` and `_top` navigate the app's own page.
 

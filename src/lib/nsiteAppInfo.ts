@@ -12,7 +12,7 @@
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { parseNostrProtocolHandler } from '@/lib/nostrUri';
-import { parseBitcoinProtocolHandler } from '@/lib/bitcoinUri';
+import { parseSchemeHandlers } from '@/lib/schemeLinks';
 import { parseManifestShortcuts } from '@/lib/webAppShortcuts';
 import { parseWebShareTarget, shareTargetPath } from '@/lib/webShareTarget';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
@@ -213,9 +213,10 @@ const FAVICON_SIZE = 64;
  * an older Din is derived again (3: full-bleed icons are cut to a squircle;
  * 4: favicons are kept too; 5: and how it opens nostr: links; 6: and its
  * manifest id and scope_extensions, so installed sites can open websites' links;
- * 7: and its shortcuts; 8: and its share target; 9: a POST one too).
+ * 7: and its shortcuts; 8: and its share target; 9: a POST one too; 10: how
+ * it opens bitcoin: links; 11: and every other scheme's, monero: and all).
  */
-export const NSITE_APP_INFO_VERSION = 10;
+export const NSITE_APP_INFO_VERSION = 11;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -419,13 +420,14 @@ function pickNostrHandler(webManifest: unknown, manifestPath: string): NsiteAppI
   return { path: `${url.pathname}${url.search}${url.hash}`, kinds: handler.kinds };
 }
 
-/** How the site opens `bitcoin:` links, from its manifest: a path on the site itself. */
-function pickBitcoinHandler(webManifest: unknown, manifestPath: string): NsiteAppInfo['bitcoin'] {
-  const handler = parseBitcoinProtocolHandler(webManifest, `https://nsite.invalid${manifestPath}`);
-  if (!handler) return null;
-  const url = new URL(handler.url);
-  if (url.origin !== 'https://nsite.invalid') return null;
-  return { path: `${url.pathname}${url.search}${url.hash}` };
+/** How the site opens other schemes' links (`bitcoin:`, `monero:`, …), from its manifest: paths on the site itself. */
+function pickSchemeHandlers(webManifest: unknown, manifestPath: string): NonNullable<NsiteAppInfo['protocols']> {
+  const picked: NonNullable<NsiteAppInfo['protocols']> = {};
+  for (const [scheme, handler] of Object.entries(parseSchemeHandlers(webManifest, `https://nsite.invalid${manifestPath}`))) {
+    const url = new URL(handler.url);
+    if (url.origin === 'https://nsite.invalid') picked[scheme] = { path: `${url.pathname}${url.search}${url.hash}` };
+  }
+  return picked;
 }
 
 /** The manifest's shortcuts, each a path on the site itself. */
@@ -646,7 +648,7 @@ export async function deriveNsiteAppDetails(
     favicon: null,
     themeColor: null,
     nostr: null,
-    bitcoin: null,
+    protocols: {},
     id: null,
     scopeExtensions: [],
     shortcuts: [],
@@ -672,7 +674,7 @@ export async function deriveNsiteAppDetails(
     candidates.push(...collectFromWebManifest(webManifest, manifestBase));
     info.installable = isInstallable(webManifest, manifestBase, paths);
     info.nostr = pickNostrHandler(webManifest, manifestPath);
-    info.bitcoin = pickBitcoinHandler(webManifest, manifestPath);
+    info.protocols = pickSchemeHandlers(webManifest, manifestPath);
     info.shortcuts = pickShortcuts(webManifest, manifestPath);
     info.share = pickShareTarget(webManifest, manifestPath);
     Object.assign(info, pickScope(webManifest, manifestPath));

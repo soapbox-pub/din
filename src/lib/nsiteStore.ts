@@ -33,10 +33,11 @@ export interface NsiteAppInfo {
    */
   nostr?: { path: string; kinds: number[] | null } | null;
   /**
-   * How the site opens `bitcoin:` links (its manifest's `protocol_handlers`):
-   * a path on the site, with `%s` where the URI goes. Null when it doesn't.
+   * How the site opens other schemes' links (`bitcoin:`, `monero:`, …, its
+   * manifest's `protocol_handlers`), by scheme: a path on the site, with
+   * `%s` where the URI goes.
    */
-  bitcoin?: { path: string } | null;
+  protocols?: Record<string, { path: string }>;
   /**
    * The web app manifest's id, as a path on the site (`/` for most). A
    * website names the app as `nsite://<host><id>` to let it open its links.

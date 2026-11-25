@@ -29,6 +29,7 @@ import { torrentsArea } from './torrents';
 import { speakArea } from './speech';
 import { grammarArea } from './grammar';
 import { walletArea } from './wallet';
+import { linksArea } from './links';
 import { CommandError, type Area, type Command, type CommandContext, type CommandSpec } from './types';
 import { cleanError } from './util';
 
@@ -62,6 +63,7 @@ export const AREAS: readonly Area[] = [
   calendarArea,
   contactsArea,
   walletArea,
+  linksArea,
   vpnArea,
   torArea,
   firewallArea,

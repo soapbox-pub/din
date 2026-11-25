@@ -815,8 +815,8 @@ export function installDin(transport: Transport): void {
   // An app's URL (din://<id>/, its launch parameters in the query) launches
   // it, and the app's own a new window of it. Other links open as they do
   // anywhere on the desktop: into an installed app that owns the site,
-  // mailto: in Mail, nostr: in its viewer, bitcoin: in Wallet, else the
-  // Web Browser. Like a noopener open, it returns no window.
+  // mailto: in Mail, nostr: in its viewer, bitcoin: in Wallet, monero: and
+  // other schemes in the app that opens them, else the Web Browser. Like a noopener open, it returns no window.
   define('open', (url?: string | URL, target?: string) => {
     if (url === undefined || String(url) === '') return null;
     const href = new URL(String(url), location.href).href;

@@ -105,14 +105,16 @@ export interface NostrLinksControl {
   setDefault(kind: number, appId: string | null): void;
 }
 
-/** Where bitcoin: links open, as Settings → Nostr & Storage has it (useBitcoinLinks). */
-export interface BitcoinLinksControl {
-  /** The apps that open them. */
-  readonly handlers: readonly AppDefinition[];
-  /** The one they open in without asking, chosen with Always. */
-  readonly defaultApp: AppDefinition | undefined;
-  /** Make an app the one they open in, or (null) ask again. */
-  setDefault(appId: string | null): void;
+/** Where other schemes' links (bitcoin:, monero:, …) open, as Settings → Nostr & Storage has it (useSchemeLinks). */
+export interface SchemeLinksControl {
+  /** The schemes some app opens. */
+  readonly schemes: readonly string[];
+  /** The apps that open a scheme's links. */
+  handlersFor(scheme: string): AppDefinition[];
+  /** The one a scheme's links open in without asking, chosen with Always. */
+  defaultFor(scheme: string): AppDefinition | undefined;
+  /** Make an app the one a scheme's links open in, or (null) ask again. */
+  setDefault(scheme: string, appId: string | null): void;
 }
 
 /** The desktop as commands see it, always as it is now. */
@@ -134,8 +136,8 @@ export interface CommandContext {
   readonly extensionKeys?: ExtensionKeyStore;
   /** Which apps open nostr: links, and the default for each kind (useNostrLinks). */
   readonly nostrLinks?: NostrLinksControl;
-  /** Which apps open bitcoin: links, and the one they open in without asking (useBitcoinLinks). */
-  readonly bitcoinLinks?: BitcoinLinksControl;
+  /** Which apps open other schemes' links, and the one each opens in without asking (useSchemeLinks). */
+  readonly schemeLinks?: SchemeLinksControl;
   /** The signed-in account's signer, for what signs without publishing (a NIP-98 request). */
   readonly signer?: NostrSigner;
   /** Sign and publish an event as the signed-in account. */

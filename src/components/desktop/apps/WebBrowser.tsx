@@ -2244,7 +2244,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                       views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
                     }
                     collectManifest={() =>
-                      views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, bitcoin: null, shortcuts: [], share: null })
+                      views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, protocols: {}, shortcuts: [], share: null })
                     }
                   >
                     <SharePageButton onShare={(el) => sharePage(activeTab, el, pageHasMedia, installSite.current)} />
@@ -5475,7 +5475,7 @@ function InstallSitePopover({
       icon: effectiveIcon,
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
       nostr: manifest?.nostr ?? undefined,
-      bitcoin: manifest?.bitcoin ?? undefined,
+      protocols: manifest?.protocols,
       shortcuts: manifest?.shortcuts,
       share: manifest?.share ?? undefined,
     });

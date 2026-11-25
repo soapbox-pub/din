@@ -1812,7 +1812,7 @@ in
         Type=Application
         Name=Din
         Exec=din-open %U
-        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;x-scheme-handler/blossom;x-scheme-handler/magnet;x-scheme-handler/bitcoin;inode/directory;
+        MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/nsite;x-scheme-handler/nostr;x-scheme-handler/blossom;x-scheme-handler/magnet;x-scheme-handler/bitcoin;x-scheme-handler/monero;inode/directory;
         NoDisplay=true
       '')
       # The defaults' mimeapps.list in the system profile's etc/xdg too, which
@@ -1893,7 +1893,8 @@ in
   # Links native apps open go to Din's Web Browser (electron/open-uri.mts),
   # nostr: links too, which Din opens in the app chosen for them, and
   # blossom: links (BUD-10), files Din fetches by their hash, magnet:
-  # links, which Torrents adds, and bitcoin: links, which Wallet pays.
+  # links, which Torrents adds, bitcoin: links, which Wallet pays, and
+  # monero: links, which the apps that say so open (Ditto).
   # Electron and Chromium apps (Signal) run xdg-open, and Flatpaks ask the
   # portal's OpenURI; both start the default handler, din-open, which hands
   # the links to Din over the session bus. Folders too, which open in Files:
@@ -1908,6 +1909,7 @@ in
     "x-scheme-handler/blossom" = "din-open.desktop";
     "x-scheme-handler/magnet" = "din-open.desktop";
     "x-scheme-handler/bitcoin" = "din-open.desktop";
+    "x-scheme-handler/monero" = "din-open.desktop";
   };
 
   systemd.services.flathub = {

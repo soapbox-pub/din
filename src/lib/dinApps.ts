@@ -7,6 +7,7 @@ import type { DinManifest, Permission, Size } from '@/sdk/din';
 import { guestsAvailable } from '@/platform/guest';
 import type { Push } from '@/sdk/protocol';
 import { encodeLaunchParams } from '@/shared/launch';
+import { isClaimableScheme } from '@/lib/schemeLinks';
 
 /** The session partition apps run in (DIN_APPS_PARTITION in electron/din-apps.mts). */
 export const DIN_APPS_PARTITION = 'persist:din-apps';
@@ -162,15 +163,20 @@ export function manifestActions(manifest: DinManifest): { label: string; params:
 }
 
 /**
- * A manifest's `bitcoin` protocol handler as launch parameters (AppDefinition
- * `bitcoin`): its `url`'s query, with `%s` where the link goes, as a
- * shortcut's `url` carries its parameters.
+ * A manifest's protocol handlers for schemes apps may claim (`bitcoin`,
+ * `monero`, …) as launch parameters (AppDefinition `protocols`): each
+ * `url`'s query, with `%s` where the link goes, as a shortcut's `url`
+ * carries its parameters.
  */
-export function manifestBitcoin(manifest: DinManifest): { bitcoin?: { params: Record<string, string> } } {
-  const handler = manifest.protocol_handlers?.find((h) => h.protocol.toLowerCase() === 'bitcoin' && h.url.includes('%s'));
-  if (!handler) return {};
-  const query = handler.url.includes('?') ? handler.url.slice(handler.url.indexOf('?') + 1) : '';
-  return { bitcoin: { params: Object.fromEntries(new URLSearchParams(query)) } };
+export function manifestProtocols(manifest: DinManifest): { protocols?: Record<string, { params: Record<string, string> }> } {
+  const protocols: Record<string, { params: Record<string, string> }> = {};
+  for (const handler of manifest.protocol_handlers ?? []) {
+    const scheme = handler.protocol.toLowerCase();
+    if (!isClaimableScheme(scheme) || !handler.url.includes('%s') || protocols[scheme]) continue;
+    const query = handler.url.includes('?') ? handler.url.slice(handler.url.indexOf('?') + 1) : '';
+    protocols[scheme] = { params: Object.fromEntries(new URLSearchParams(query)) };
+  }
+  return Object.keys(protocols).length > 0 ? { protocols } : {};
 }
 
 /**

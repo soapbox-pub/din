@@ -18,7 +18,7 @@ import {
 import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { normalizeNostrHandler } from '@/lib/nostrUri';
-import { normalizeBitcoinHandler } from '@/lib/bitcoinUri';
+import { isClaimableScheme, keepSchemeHandlers, normalizeSchemeHandlers } from '@/lib/schemeLinks';
 import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 import { normalizeShortcuts, shortcutActions } from '@/lib/webAppShortcuts';
 import { useAppData } from '@/hooks/useAppData';
@@ -113,6 +113,17 @@ function webAppComponent(webApp: WebApp, favicon?: string, nsiteHost?: string): 
  * given, stands in for the icon in the window's title bar; `nsiteHost` marks
  * an installed nsite.
  */
+/** An AppDefinition's `protocols`, when there are any. */
+function withProtocols(protocols: AppDefinition['protocols'] | undefined): Pick<AppDefinition, 'protocols'> {
+  return protocols && Object.keys(protocols).length > 0 ? { protocols } : {};
+}
+
+/** The schemes apps may claim among a native app's x-scheme-handler types; it's started with the link. */
+function nativeProtocols(schemes: string[] | undefined): AppDefinition['protocols'] | undefined {
+  const claimed = (schemes ?? []).map((s) => s.toLowerCase()).filter(isClaimableScheme);
+  return claimed.length > 0 ? Object.fromEntries(claimed.map((scheme) => [scheme, {}])) : undefined;
+}
+
 function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string): AppDefinition {
   return {
     id: webApp.id,
@@ -128,7 +139,7 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
     web: true,
     // Only a handler on the app's own origin: the window is pinned to it.
     ...(webApp.nostr && sameOrigin(webApp.nostr.url, webApp.url) ? { nostr: webApp.nostr } : {}),
-    ...(webApp.bitcoin && sameOrigin(webApp.bitcoin.url, webApp.url) ? { bitcoin: { url: webApp.bitcoin.url } } : {}),
+    ...withProtocols(keepSchemeHandlers(webApp.protocols, (url) => sameOrigin(url, webApp.url))),
     actions: shortcutActions(normalizeShortcuts(webApp.shortcuts, originOfUrl(webApp.url))),
     ...withShare(normalizeWebShareTarget(webApp.share, originOfUrl(webApp.url))),
   };
@@ -161,7 +172,7 @@ function nsiteAppToDefinition(
     themeColor: summary?.app?.themeColor ?? undefined,
   }, themed ?? summary?.app?.favicon ?? undefined, entry.host);
   const handler = summary?.app?.nostr;
-  const bitcoin = summary?.app?.bitcoin;
+  const protocols = Object.entries(summary?.app?.protocols ?? {}).filter(([scheme]) => isClaimableScheme(scheme));
   const base = nsiteAppUrl(entry.host).slice(0, -1);
   const shortcuts = summary?.app?.shortcuts ?? [];
   const share = summary?.app?.share;
@@ -174,7 +185,7 @@ function nsiteAppToDefinition(
     ...(handler
       ? { nostr: { url: `${base}${handler.path}`, kinds: handler.kinds } }
       : {}),
-    ...(bitcoin ? { bitcoin: { url: `${base}${bitcoin.path}` } } : {}),
+    ...withProtocols(protocols.length > 0 ? Object.fromEntries(protocols.map(([scheme, { path }]) => [scheme, { url: `${base}${path}` }])) : undefined),
     ...withShare(
       share
         ? {
@@ -222,7 +233,7 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
     keywords: [...app.keywords, ...app.categories],
     // Desktop entries can't say which kinds they show.
     ...(app.schemes?.includes('nostr') && !app.terminal ? { nostr: { kinds: null } } : {}),
-    ...(app.schemes?.includes('bitcoin') && !app.terminal ? { bitcoin: {} } : {}),
+    ...(!app.terminal ? withProtocols(nativeProtocols(app.schemes)) : {}),
   };
 }
 
@@ -432,14 +443,14 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         requestInstall(host);
         return entry;
       },
-      installWebApp: ({ name, url, icon, themeColor, nostr, bitcoin, shortcuts, share }) => {
+      installWebApp: ({ name, url, icon, themeColor, nostr, protocols, shortcuts, share }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
         const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
         const handler = normalizeNostrHandler(nostr);
-        const bitcoinHandler = normalizeBitcoinHandler(bitcoin);
+        const schemeHandlers = keepSchemeHandlers(normalizeSchemeHandlers(protocols), (handlerUrl) => sameOrigin(handlerUrl, safeUrl));
         const kept = normalizeShortcuts(shortcuts, originOfUrl(safeUrl));
         const shareTarget = normalizeWebShareTarget(share, originOfUrl(safeUrl));
         const webApp = createWebApp({
@@ -448,7 +459,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
           icon: safeIcon,
           themeColor: safeThemeColor,
           ...(handler && sameOrigin(handler.url, safeUrl) ? { nostr: handler } : {}),
-          ...(bitcoinHandler && sameOrigin(bitcoinHandler.url, safeUrl) ? { bitcoin: bitcoinHandler } : {}),
+          ...(schemeHandlers ? { protocols: schemeHandlers } : {}),
           ...(kept.length > 0 ? { shortcuts: kept } : {}),
           ...(shareTarget ? { share: shareTarget } : {}),
         });

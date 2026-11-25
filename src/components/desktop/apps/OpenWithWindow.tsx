@@ -1,5 +1,5 @@
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { AtSign, Bitcoin } from 'lucide-react';
+import { AtSign, Bitcoin, Check, Copy, Link2, Wallet } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { WindowControls, WindowDragRegion } from '@/components/desktop/WindowHeader';
@@ -8,8 +8,9 @@ import { useOwnWindowHeader } from '@/contexts/WindowFrameContext';
 import { useWindowTitle } from '@/contexts/WindowTitleContext';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
-import { useBitcoinLinks } from '@/hooks/useBitcoinLinks';
-import { isBitcoinUri } from '@/lib/bitcoinUri';
+import { useSchemeLinks } from '@/hooks/useSchemeLinks';
+import { useToast } from '@/hooks/useToast';
+import { appLinkScheme, describeSchemeLink, isClaimableScheme } from '@/lib/schemeLinks';
 import { useNostrTarget } from '@/hooks/useNostrTarget';
 import type { AppComponentProps, AppDefinition } from '@/lib/apps';
 import { hasTabConsumer, publishTabCommand } from '@/lib/browserTabBus';
@@ -25,13 +26,15 @@ import { ContentPane } from '@/shared/appChrome';
  * the app chosen the default for the kind, as Settings → Nostr & Storage
  * lists). Preview shows the link in the Web Browser instead. Opened by
  * useNostrLinks' openNostrUri; launch params `uri`, and `at` to start over.
- * A `bitcoin:` link with more than one app to pay it and none chosen with
- * Always gets the same question (useBitcoinLinks' openBitcoinUri).
+ * A link of another scheme (`bitcoin:`, `monero:`, …) with more than one
+ * app to open it and none chosen with Always gets the same question
+ * (useSchemeLinks' openSchemeUri), and one no app opens says so here, with
+ * the link to copy.
  */
 export function OpenWithWindow({ windowId, params }: AppComponentProps) {
   const uri = typeof params?.uri === 'string' ? params.uri : '';
   const parsed = useMemo(() => parseNostrUri(uri), [uri]);
-  const bitcoin = !parsed && isBitcoinUri(uri);
+  const scheme = parsed ? null : appLinkScheme(uri);
   useWindowTitle('Open With');
   useOwnWindowHeader();
   return (
@@ -43,8 +46,8 @@ export function OpenWithWindow({ windowId, params }: AppComponentProps) {
       <ContentPane className="ml-2">
         {parsed ? (
           <Chooser key={`${parsed.uri}:${String(params?.at)}`} parsed={parsed} windowId={windowId} />
-        ) : bitcoin ? (
-          <BitcoinChooser key={`${uri}:${String(params?.at)}`} uri={uri.trim()} windowId={windowId} />
+        ) : scheme ? (
+          <SchemeChooser key={`${uri}:${String(params?.at)}`} uri={uri.trim()} windowId={windowId} />
         ) : (
           <p className="p-6 text-sm text-muted-foreground">This isn’t a link Din can read.</p>
         )}
@@ -220,30 +223,44 @@ function AppChoices({
   );
 }
 
-/** Who a `bitcoin:` link pays, for the header: its address, and how much when it says. */
-function describeBitcoinUri(uri: string): { address: string; amount: string | null; label: string | null } {
-  const body = uri.slice('bitcoin:'.length);
-  const q = body.indexOf('?');
-  const params = new URLSearchParams(q === -1 ? '' : body.slice(q + 1));
-  const amount = params.get('amount');
-  return {
-    address: q === -1 ? body : body.slice(0, q),
-    amount: amount && /^\d{1,8}(\.\d{1,8})?$/.test(amount) ? `${amount} BTC` : null,
-    label: params.get('label')?.trim() || null,
-  };
+/** The link's text, copied, with a check for a moment after. */
+function CopyLinkButton({ uri }: { uri: string }) {
+  const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
+  const Icon = copied ? Check : Copy;
+  return (
+    <Button
+      variant="ghost"
+      className="rounded-full"
+      onClick={() =>
+        void navigator.clipboard.writeText(uri).then(
+          () => setCopied(true),
+          () => toast({ title: 'Couldn’t copy the link', variant: 'destructive' }),
+        )}
+    >
+      <Icon className="size-4.5" strokeWidth={1.75} aria-hidden />
+      {copied ? 'Copied' : 'Copy link'}
+    </Button>
+  );
 }
 
-/** Open With for a `bitcoin:` link: the apps that pay them, Just once or Always. */
-function BitcoinChooser({ uri, windowId }: { uri: string; windowId: string }) {
+/**
+ * Open With for a link of another scheme (`bitcoin:`, `monero:`, …): the
+ * apps that open them, Just once or Always; or, when none does, that no app
+ * does, and the link to copy.
+ */
+function SchemeChooser({ uri, windowId }: { uri: string; windowId: string }) {
   const { close } = useWindowActions();
-  const { handlers: apps, setDefault, openWith } = useBitcoinLinks();
+  const { handlersFor, setDefault, openWith } = useSchemeLinks();
+  const { scheme, title, detail, subtitle } = describeSchemeLink(uri);
+  const apps = isClaimableScheme(scheme) ? handlersFor(scheme) : [];
   const [chosenId, setChosenId] = useState<string | null>(null);
   const chosen = apps.find((a) => a.id === chosenId) ?? apps[0];
-  const { address, amount, label } = describeBitcoinUri(uri);
+  const Icon = scheme === 'bitcoin' ? Bitcoin : scheme === 'monero' ? Wallet : Link2;
 
   const go = (app: AppDefinition | undefined, always: boolean) => {
     if (!app) return;
-    if (always) setDefault(app.id);
+    if (always) setDefault(scheme, app.id);
     openWith(app, uri);
     close(windowId);
   };
@@ -255,16 +272,21 @@ function BitcoinChooser({ uri, windowId }: { uri: string; windowId: string }) {
       onChoose={(app) => setChosenId(app.id)}
       onGo={go}
       onEscape={() => close(windowId)}
-      icon={<Bitcoin className="size-5" strokeWidth={1.75} aria-hidden />}
+      icon={<Icon className="size-5" strokeWidth={1.75} aria-hidden />}
       title={
         <>
-          {amount ? `Pay ${amount}` : 'Bitcoin payment'}
-          {label && <span className="font-normal text-muted-foreground"> · {label}</span>}
+          {title}
+          {detail && <span className="font-normal text-muted-foreground"> · {detail}</span>}
         </>
       }
-      subtitle={address || uri}
-      empty="No app on this computer opens bitcoin: links."
-      alwaysTitle={chosen ? `Always open bitcoin: links in ${chosen.name}` : undefined}
+      subtitle={subtitle}
+      empty={
+        isClaimableScheme(scheme)
+          ? `No app on this computer opens ${scheme}: links. An app that does says so in its web app manifest, and shows up here once it’s installed.`
+          : `No app on this computer opens ${scheme}: links.`
+      }
+      alwaysTitle={chosen ? `Always open ${scheme}: links in ${chosen.name}` : undefined}
+      extra={<CopyLinkButton uri={uri} />}
     />
   );
 }

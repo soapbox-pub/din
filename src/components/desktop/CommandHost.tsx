@@ -10,7 +10,7 @@ import { useManifestRelays } from '@/hooks/useNsiteCatalog';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useExtensionKeys } from '@/hooks/useThemePackages';
 import { useNostrLinks } from '@/hooks/useNostrLinks';
-import { useBitcoinLinks } from '@/hooks/useBitcoinLinks';
+import { useSchemeLinks } from '@/hooks/useSchemeLinks';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { runCommandLine, runStructured, type CommandContext } from '@/lib/commands';
@@ -43,11 +43,11 @@ export function CommandHost() {
   const relays = useManifestRelays();
   const extensionKeys = useExtensionKeys();
   const nostrLinks = useNostrLinks();
-  const bitcoinLinks = useBitcoinLinks();
+  const schemeLinks = useSchemeLinks();
 
-  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys, nostrLinks, bitcoinLinks });
+  const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys, nostrLinks, schemeLinks });
   useLayoutEffect(() => {
-    live.current = { config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys, nostrLinks, bitcoinLinks };
+    live.current = { config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys, nostrLinks, schemeLinks };
   });
 
   useEffect(() => {
@@ -71,7 +71,7 @@ export function CommandHost() {
         get signer() { return live.current.user?.signer; },
         get extensionKeys() { return live.current.extensionKeys; },
         get nostrLinks() { return live.current.nostrLinks; },
-        get bitcoinLinks() { return live.current.bitcoinLinks; },
+        get schemeLinks() { return live.current.schemeLinks; },
         publish: (template) => live.current.publish(template),
         upload: (file) => live.current.upload(file),
         query: (filters) => live.current.relays.query(filters, { signal: AbortSignal.timeout(8000) }),
