@@ -10,7 +10,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDin, WindowControls, WindowDragRegion } from '@/sdk/react';
 import { ToolButton } from '@/shared/appChrome';
-import { flushPane, focusRing, toolIcon } from '@/shared/appChromeStyles';
+import { flushPane, focusRing, searchRow, toolIcon } from '@/shared/appChromeStyles';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { cn } from '@/lib/utils';
 import { GitPanel } from './GitPanel';
@@ -61,10 +61,16 @@ export function SidePanel({
   const shown = previews.find((p) => p.uri === tab);
   return (
     <aside aria-label="Git and previews" style={style} className={cn('flex min-h-0 shrink-0 flex-col text-foreground', className)}>
+      {/* The title bar holds only the pane's toggle and the window's controls, so the controls read as the window's, not the pane's. */}
       <WindowDragRegion className="flex h-12 shrink-0 items-center gap-1 pl-3 pr-3">
         <ToolButton label="Hide the side pane (Ctrl+Shift+G for Git)" onClick={onHide}>
           <PanelRightClose {...toolIcon} aria-hidden />
         </ToolButton>
+        <div className="flex-1" />
+        <WindowControls />
+      </WindowDragRegion>
+      {/* The tabs, in the band under the title bar, level with the list's search. */}
+      <div className={searchRow}>
         <div role="tablist" aria-label="Side pane" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
           <SideTabButton
             selected={!shown}
@@ -87,8 +93,7 @@ export function SidePanel({
             </PreviewMenu>
           ))}
         </div>
-        <WindowControls />
-      </WindowDragRegion>
+      </div>
       {shown ? (
         <PreviewView key={shown.uri} preview={shown} reload={reloads[shown.uri] ?? 0} />
       ) : (
@@ -102,7 +107,7 @@ function PreviewIcon({ preview }: { preview: Preview }) {
   return preview.target.kind === 'server' ? <Globe {...toolIcon} aria-hidden /> : <FileCode2 {...toolIcon} aria-hidden />;
 }
 
-/** A tab in the pane's title bar: a capsule, tinted while chosen, a preview's with its close button. */
+/** A tab in the band under the pane's title bar: a capsule, tinted while chosen, a preview's with its close button. */
 function SideTabButton({
   selected,
   onSelect,
@@ -242,7 +247,7 @@ function PreviewView({ preview, reload }: { preview: Preview; reload: number }) 
 
   return (
     <div role="tabpanel" aria-label={preview.title} className="flex min-h-0 flex-1 flex-col">
-      <div className={cn('mr-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl rounded-tl-none bg-white clay', flushPane)}>
+      <div className={cn('mr-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white clay', flushPane)}>
         {src ? (
           <iframe
             key={`${src}#${reload}`}
