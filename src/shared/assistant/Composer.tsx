@@ -1,6 +1,7 @@
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { ArrowUp, AudioLines, KeyRound, Mic, Paperclip, Phone, Plus, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { parseSlashCommand, secretAttachment, secretName, type PromptAttachment } from '@/lib/assistant';
 import { draftStorageKey, loadDraftFiles, saveDraftFiles } from '@/lib/assistantTabs';
@@ -646,38 +647,34 @@ export function Composer({
           <div className="flex min-w-0 flex-1 items-center gap-1">{toolbar}</div>
         )}
         {dictation.available && !recording && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            // Keeps focus in the message, where the text goes.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={dictation.toggle}
-            disabled={disabled}
-            aria-label={dictating ? 'Stop dictating' : 'Dictate'}
-            aria-pressed={dictating}
-            title={dictating ? 'Stop dictating' : 'Dictate (Super+H)'}
-            className={cn(
-              'size-8 rounded-full text-muted-foreground hover:text-foreground',
-              dictating && 'bg-selected text-foreground hover:bg-foreground/[0.07] hover:text-ink-accent',
-            )}
-          >
-            <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />
-          </Button>
-        )}
-        {onCall && !recording && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onCall}
-            disabled={disabled}
-            aria-label="Call the assistant"
-            title="Call — talk, and hear its replies"
-            className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-          >
-            <Phone className="size-4" aria-hidden />
-          </Button>
+          // Calling is still rough, so it's tucked into the mic's right-click menu.
+          <ContextMenu modal={false}>
+            <ContextMenuTrigger asChild disabled={!onCall || disabled}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                // Keeps focus in the message, where the text goes.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={dictation.toggle}
+                disabled={disabled}
+                aria-label={dictating ? 'Stop dictating' : 'Dictate'}
+                aria-pressed={dictating}
+                title={dictating ? 'Stop dictating' : 'Dictate (Super+H)'}
+                className={cn(
+                  'size-8 rounded-full text-muted-foreground hover:text-foreground',
+                  dictating && 'bg-selected text-foreground hover:bg-foreground/[0.07] hover:text-ink-accent',
+                )}
+              >
+                <Mic className={cn('size-4', dictating && 'motion-safe:animate-pulse')} aria-hidden />
+              </Button>
+            </ContextMenuTrigger>
+            <ContextMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
+              <ContextMenuItem onSelect={() => onCall?.()}>
+                <Phone aria-hidden /> Call the Assistant
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         )}
         {running && onStop && (
           <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
