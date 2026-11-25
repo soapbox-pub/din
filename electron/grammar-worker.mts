@@ -87,14 +87,76 @@ function suggestionOf(lint: Lint, kind: number, text: string): GrammarSuggestion
   return null;
 }
 
-async function lint(text: string): Promise<GrammarIssue[]> {
-  await ready;
+/**
+ * Where a text is checked in pieces: after a paragraph's last word, before
+ * the blank line that ends it, so each piece starts with the break before
+ * its paragraph. Harper's hash of an issue (what Ignore remembers) takes in
+ * the words around it, the break included, so an issue hashes the same
+ * checked in its piece as in the whole text.
+ */
+const PARAGRAPH_END = /\S(?=[^\S\n]*\n[^\S\n]*\n)/g;
+/** After a sentence's end, for a paragraph too long to check in one piece. */
+const SENTENCE_END = /[.!?…]["'”’)\]]*(?=\s)/g;
+/** A paragraph longer than this is checked a few sentences at a time. */
+const MAX_PIECE = 2_000;
+/** Pieces whose issues are kept, so a check after typing redoes only the paragraph typed in. */
+const MAX_CACHED = 2_000;
+
+/**
+ * Harper checks a text in time proportional to its length, but its hash of
+ * each issue reads the whole text again, so checking a long text all at once
+ * took time in the square of its length (11 seconds for 60,000 characters),
+ * the worker answering nothing else meanwhile. Pieces keep each hash to its
+ * paragraph, and a piece seen before isn't checked again.
+ */
+function pieces(text: string): string[] {
+  const cuts: number[] = [0];
+  for (const match of text.matchAll(PARAGRAPH_END)) cuts.push(match.index + 1);
+  cuts.push(text.length);
+  const out: string[] = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const piece = text.slice(cuts[i], cuts[i + 1]);
+    if (!piece) continue;
+    if (piece.length <= MAX_PIECE) {
+      out.push(piece);
+      continue;
+    }
+    // A wall of text: cut between sentences, as few times as keeps each piece short.
+    let from = 0;
+    let last = 0;
+    for (const match of piece.matchAll(SENTENCE_END)) {
+      const at = match.index + match[0].length;
+      if (at - from > MAX_PIECE && last > from) {
+        out.push(piece.slice(from, last));
+        from = last;
+      }
+      last = at;
+    }
+    if (piece.length - from > MAX_PIECE && last > from) {
+      out.push(piece.slice(from, last));
+      from = last;
+    }
+    out.push(piece.slice(from));
+  }
+  return out;
+}
+
+/** Issues found in a piece, at offsets into it, by the piece's text. Most recently used last. */
+const cache = new Map<string, GrammarIssue[]>();
+
+async function lintPiece(text: string): Promise<GrammarIssue[]> {
+  const known = cache.get(text);
+  if (known) {
+    cache.delete(text);
+    cache.set(text, known);
+    return known;
+  }
   const groups = await linter.organizedLints(text, { language: 'plaintext' });
   const issues: GrammarIssue[] = [];
   for (const [rule, lints] of Object.entries(groups)) {
     for (const found of lints) {
       const kind = found.lint_kind();
-      if (SKIPPED_KINDS.has(kind) || (!style && STYLE_KINDS.has(kind))) continue;
+      if (SKIPPED_KINDS.has(kind)) continue;
       const span = found.span();
       // "window.din" and "file.txt" aren't two sentences: a sentence starts
       // after a space (or a quote or bracket), never straight after a dot.
@@ -118,13 +180,31 @@ async function lint(text: string): Promise<GrammarIssue[]> {
         suggestions,
         hash: String(await linter.contextHash(text, found)),
       });
+      found.free();
     }
+  }
+  cache.set(text, issues);
+  if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value as string);
+  return issues;
+}
+
+async function lint(text: string): Promise<GrammarIssue[]> {
+  await ready;
+  const issues: GrammarIssue[] = [];
+  let at = 0;
+  for (const piece of pieces(text)) {
+    for (const issue of await lintPiece(piece)) {
+      if (!style && STYLE_KINDS.has(issue.kind)) continue;
+      issues.push(at ? { ...issue, start: issue.start + at, end: issue.end + at } : issue);
+    }
+    at += piece.length;
   }
   return issues.sort((a, b) => a.start - b.start);
 }
 
 async function configure(options: WorkerOptions): Promise<void> {
   await ready;
+  cache.clear();
   style = options.style;
   await linter.setDialect(DIALECTS[options.dialect] ?? Dialect.American);
   const config: LintConfig = await linter.getDefaultLintConfig();
@@ -149,10 +229,12 @@ async function handle(request: WorkerRequest): Promise<unknown> {
       return lint(request.text);
     case 'ignore':
       await ready;
+      cache.clear();
       await linter.ignoreLintHash(BigInt(request.hash));
       return linter.exportIgnoredLints();
     case 'clearIgnored':
       await ready;
+      cache.clear();
       await linter.clearIgnoredLints();
       return null;
     case 'exportIgnored':
