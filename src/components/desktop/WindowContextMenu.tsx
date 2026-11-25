@@ -73,7 +73,7 @@ export function WindowMenuItems({
   onMinimize: () => void;
   onToggleMaximize: () => void;
 }) {
-  const { close, tile, unmaximize, moveToWorkspace, moveToScratchpad, moveToMonitor, toggleFloating } = useWindowActions();
+  const { close, tile, unmaximize, moveToWorkspace, moveToScratchpad, moveToMonitor, toggleFloating, togglePseudo, togglePin } = useWindowActions();
   const { config } = useAppContext();
   const areas = useWorkAreas();
   const { monitors } = useMonitors();
@@ -150,6 +150,14 @@ export function WindowMenuItems({
           Floating
         </ContextMenuCheckboxItem>
       )}
+      {win.tiled && (
+        <ContextMenuCheckboxItem checked={win.pseudo} onCheckedChange={() => togglePseudo(win.id)}>
+          Keep its own size
+        </ContextMenuCheckboxItem>
+      )}
+      <ContextMenuCheckboxItem checked={win.pinned} onCheckedChange={() => togglePin(win.id)}>
+        On every workspace
+      </ContextMenuCheckboxItem>
       <ContextMenuSeparator />
       <ContextMenuSub>
         <ContextMenuSubTrigger>Move to workspace</ContextMenuSubTrigger>

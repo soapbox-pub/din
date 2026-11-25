@@ -2107,6 +2107,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
         shortcut.action === 'screenshot' ||
         shortcut.action === 'screenshot-area' ||
         shortcut.action === 'wm' ||
+        shortcut.action === 'focus-monitor' ||
         shortcut.action === 'history' ||
         shortcut.action === 'workspace-step' ||
         shortcut.action === 'workspace-swipe'

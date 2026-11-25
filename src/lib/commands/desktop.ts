@@ -6,6 +6,7 @@ import { SITE_CAPABILITIES } from '@/lib/siteCapabilities';
 import { listTabAudio, setTabMuted } from '@/lib/tabAudio';
 import { DAILY_MINUTES, describeLimit, formatSpent, getSiteLimitsBridge, type SiteLimitMode } from '@/lib/siteLimits';
 import { SNAP_ZONES, type SnapZone } from '@/lib/monitors';
+import type { Direction } from '@/lib/wmBindings';
 import { getFsBridge } from '@/lib/fs';
 import { openPath } from '@/lib/openPath';
 import { DESKTOP_ICON_SORTS, type DesktopIconSort } from '@/lib/desktopIcons';
@@ -53,6 +54,7 @@ function windowRow(ctx: CommandContext, w: WindowState) {
     title: w.title ?? appRow(ctx, w.appId),
     workspace: w.workspace === SCRATCHPAD ? 'scratchpad' : w.workspace,
     state: w.minimized ? 'minimized' : w.maximized ? 'maximized' : w.snapped ? `tiled ${w.snapped}` : w.away ? 'other workspace' : 'shown',
+    layout: w.pinned ? 'pinned' : w.zoomed && w.tiled ? 'zoomed' : w.tiled ? (w.pseudo ? 'pseudotiled' : 'tiled') : 'floating',
     focused: false,
     x: Math.round(w.x), y: Math.round(w.y), width: Math.round(w.width), height: Math.round(w.height),
   };
@@ -329,6 +331,34 @@ export const windowsArea: Area = {
     command('windows', 'scratchpad', 'Move a window to the scratchpad', [WINDOW], (args, ctx) => {
       ctx.actions.moveToScratchpad(findWindow(ctx, args.string('window')).id);
     }),
+    command('windows', 'float', 'Float a tiled window, or tile a floating one (while windows tile)', [WINDOW], (args, ctx) => {
+      ctx.actions.toggleFloating(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'fullscreen', 'Toggle full screen on the monitor, or inside the current tile', [
+      WINDOW, { name: 'tiled', type: 'boolean', optional: true, help: 'Keep the current tile size' },
+    ], (args, ctx) => ctx.actions.present(findWindow(ctx, args.string('window')).id, args.optBool('tiled') ? 'client' : 'screen')),
+    command('windows', 'pseudo', 'Keep a tiled window its own size inside its tile, or let it fill the tile again', [WINDOW], (args, ctx) => {
+      ctx.actions.togglePseudo(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'zoom', 'Give a tiled window its whole layout, gaps kept, or put it back', [WINDOW], (args, ctx) => {
+      ctx.actions.toggleZoom(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'pin', 'Show a window on every workspace of its monitor, above the others, or stop', [WINDOW], (args, ctx) => {
+      ctx.actions.togglePin(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'pop', 'Pop a window out, floating in the middle of its monitor on every workspace, or put it back', [WINDOW], (args, ctx) => {
+      ctx.actions.togglePop(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'split', 'Turn the split a tiled window sits in the other way', [WINDOW], (args, ctx) => {
+      ctx.actions.toggleSplit(findWindow(ctx, args.string('window')).id);
+    }),
+    command('windows', 'grow', 'Resize a window by pixels: a floating one around its middle; a tiled one has the splits beside it moved right and down', [
+      WINDOW,
+      { name: 'dx', type: 'integer', positional: true, help: 'Pixels across (negative: left)' },
+      { name: 'dy', type: 'integer', positional: true, help: 'Pixels down (negative: up)' },
+    ], (args, ctx) => {
+      ctx.actions.resizeBy(findWindow(ctx, args.string('window')).id, args.number('dx'), args.number('dy'));
+    }),
     command('windows', 'reopen', 'Reopen the windows from before Din started, when it left them closed after a failed start', [], () => {
       if (!reopenSkippedSession()) throw new CommandError('There are no windows to reopen');
     }),
@@ -347,6 +377,14 @@ export const workspaceArea: Area = {
     ], (args, ctx) => {
       ctx.actions.showWorkspace(args.number('n'));
     }),
+    command('workspace', 'send', 'Move the workspace on screen, windows and layout, to the monitor beside it', [
+      { name: 'direction', type: 'string', positional: true, choices: ['left', 'right', 'up', 'down'], help: 'Which way the monitor is' },
+    ], (args, ctx) => {
+      ctx.actions.moveWorkspaceToMonitor(args.string('direction') as Direction);
+    }),
+    command('workspace', 'monitor', 'Focus the next monitor', [
+      { name: 'back', type: 'boolean', optional: true, help: 'Focus the previous monitor' },
+    ], (args, ctx) => ctx.actions.focusMonitor(args.optBool('back') ? -1 : 1)),
     command('workspace', 'scratchpad', 'Show or hide the scratchpad', [], (_args, ctx) => {
       ctx.actions.toggleScratchpad();
     }),

@@ -4209,6 +4209,14 @@ function WindowsSection({ windowId }: { windowId: string }) {
     setLastGap(config.tilingGap);
     setGap(config.tilingGap);
   }
+  // Until it's set, the gap at the screen's edges is the one between windows.
+  const savedOuterGap = config.tilingOuterGap ?? config.tilingGap;
+  const [outerGap, setOuterGap] = useState(savedOuterGap);
+  const [lastOuterGap, setLastOuterGap] = useState(savedOuterGap);
+  if (savedOuterGap !== lastOuterGap) {
+    setLastOuterGap(savedOuterGap);
+    setOuterGap(savedOuterGap);
+  }
 
   return (
     <SectionShell title="Windows">
@@ -4225,7 +4233,7 @@ function WindowsSection({ windowId }: { windowId: string }) {
           id="focus-follows-pointer"
           icon={MousePointer2}
           label="Focus follows the pointer"
-          description="While tiling, moving the pointer onto a tile gives it the keyboard, without a click. Floating windows still take a click."
+          description="While tiling, moving the pointer onto a window gives it the keyboard, without a click."
           checked={config.focusFollowsPointer}
           disabled={!config.tilingEnabled}
           onCheckedChange={(checked) => updateConfig((current) => ({ ...current, focusFollowsPointer: checked }))}
@@ -4241,12 +4249,12 @@ function WindowsSection({ windowId }: { windowId: string }) {
       </SettingsGroup>
       <div className={cn(settingsCard, 'flex flex-col gap-2 px-4 py-3')}>
         <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="tiling-gap" className="text-sm">Gaps</Label>
+          <Label htmlFor="tiling-gap" className="text-sm">Gaps between windows</Label>
           <span className="text-xs tabular-nums text-muted-foreground">{gap} px</span>
         </div>
         <Slider
           id="tiling-gap"
-          aria-label="Gaps"
+          aria-label="Gaps between windows"
           value={[gap]}
           min={0}
           max={MAX_TILING_GAP}
@@ -4254,7 +4262,21 @@ function WindowsSection({ windowId }: { windowId: string }) {
           onValueChange={([v]) => setGap(v)}
           onValueCommit={([v]) => updateConfig((current) => ({ ...current, tilingGap: v }))}
         />
-        <p className="text-xs text-muted-foreground">Space between tiled windows, and around them.</p>
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <Label htmlFor="tiling-outer-gap" className="text-sm">Gaps at the screen’s edges</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">{outerGap} px</span>
+        </div>
+        <Slider
+          id="tiling-outer-gap"
+          aria-label="Gaps at the screen’s edges"
+          value={[outerGap]}
+          min={0}
+          max={MAX_TILING_GAP}
+          step={2}
+          onValueChange={([v]) => setOuterGap(v)}
+          onValueCommit={([v]) => updateConfig((current) => ({ ...current, tilingOuterGap: v }))}
+        />
+        <p className="text-xs text-muted-foreground">Space between tiled windows, and between them and the screen’s edges.</p>
       </div>
 
       <SubHeading>Window effects</SubHeading>

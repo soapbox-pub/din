@@ -176,7 +176,7 @@ export interface AppConfig {
    * this device, like wobbly windows.
    */
   tilingEnabled: boolean;
-  /** Pixels between tiled windows, and between them and the screen's edges. */
+  /** Pixels between tiled windows. */
   tilingGap: number;
   /**
    * While tiling is on, whether the tile under the pointer takes the
@@ -189,6 +189,11 @@ export interface AppConfig {
    * keys, by action id (src/lib/wmBindings.ts). Kept on this device.
    */
   wmBindings: Record<string, string[]>;
+  /**
+   * Pixels between tiled windows and the screen's edges (Hyprland's
+   * `gaps_out`); unset, it's the same as between them.
+   */
+  tilingOuterGap?: number;
   /**
    * Whether Din reopens the windows it had open when it starts again, each
    * where it was (src/lib/windowSession.ts). Kept on this device.

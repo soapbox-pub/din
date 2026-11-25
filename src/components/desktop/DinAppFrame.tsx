@@ -277,7 +277,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
       minimized: w?.minimized ?? false,
       maximized: w?.maximized ?? false,
       snapped: w?.snapped ?? null,
-      fullscreen,
+      fullscreen: fullscreen || !!w?.presentation,
       bounds,
       workArea: area ? { x: area.x, y: area.y, width: area.width, height: area.height } : bounds,
     };

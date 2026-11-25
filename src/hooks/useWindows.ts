@@ -5,7 +5,6 @@ import { closeIntercepted } from '@/lib/closeGuards';
 import {
   areaAt,
   areaFor,
-  contains,
   EVEN_SPLIT,
   primaryArea,
   snapRect,
@@ -27,16 +26,18 @@ import {
   type WorkspaceTransitionSpec,
 } from '@/lib/workspaceTransition';
 import {
-  dropRect,
-  dropSide,
   insertLeaf,
   layoutTree,
+  nearestLeaf,
+  placeLeaf,
   removeLeaf,
   renameLeaves,
   resizeLeaf,
   tilingRect,
   toggleSplit as toggleTreeSplit,
   treeLeaves,
+  type Point,
+  type ResizeEdges,
   type TileNode,
 } from '@/lib/tiling';
 import { takeNativePlacement, type SavedWindow } from '@/lib/windowSession';
@@ -188,11 +189,45 @@ export interface WindowState {
    */
   floating: boolean;
   /**
+   * Full screen: over its whole monitor, menu bar and Dock included
+   * (`screen`, Super+F while windows tile), or still in its tile with its
+   * app told it's full screen (`client`, Super+Ctrl+F, Hyprland's
+   * fullscreenstate 0 2). Not saved with the session.
+   */
+  presentation?: 'screen' | 'client';
+  /**
+   * Whether a tiled window keeps its floating size, centered in its tile,
+   * instead of filling it (Hyprland's pseudotile, Super+P).
+   */
+  pseudo: boolean;
+  /**
+   * Whether a tiled window takes its whole layout, gaps kept, over the
+   * other tiles (Hyprland's maximized fullscreen, Super+Alt+F).
+   */
+  zoomed: boolean;
+  /**
+   * Whether the window shows on every workspace of its monitor, above the
+   * others (Hyprland's pin; Super+O pops a window out, floating and pinned).
+   */
+  pinned: boolean;
+  /**
+   * Set while a tiled window is dragged: it's out of its tile, floating
+   * under the pointer, and this is the floating geometry it gets back when
+   * it's dropped into a tile again.
+   */
+  lifted: Rect | null;
+  /**
    * The rect the tiling layout gives the window, in workspace coordinates,
    * or null when it isn't tiled. Derived by the manager on every commit;
    * x/y/width/height keep the floating geometry to return to.
    */
   tiled: Rect | null;
+  /**
+   * The window's tile in the layout, which `tiled` is unless the window is
+   * pseudotiled (smaller, inside it) or zoomed (the whole layout). Derived
+   * like `tiled`; tells which tiles are beside which.
+   */
+  slot: Rect | null;
   /**
    * Whether the window's workspace isn't the one its monitor is showing.
    * Derived like `tiled`. An away window is hidden the way a minimized one
@@ -207,6 +242,10 @@ export interface WindowState {
  * monitor's work area when snapped, else its own geometry.
  */
 export function windowRect(w: WindowState, areas: WorkArea[]): Rect {
+  if (w.presentation === 'screen') {
+    const area = homeArea(areas, w);
+    if (area) return area.bounds;
+  }
   if (w.tiled && !w.maximized) return w.tiled;
   if (!w.maximized && !w.snapped) return { x: w.x, y: w.y, width: w.width, height: w.height };
   const area = areas.find((a) => a.id === w.monitor) ?? areaFor(areas, w);
@@ -242,7 +281,8 @@ export const SCRATCHPAD_BACKDROP_Z = 500_000;
  */
 export function windowStackZ(w: WindowState): number {
   if (w.workspace === SCRATCHPAD) return w.z + SCRATCHPAD_BACKDROP_Z;
-  return w.z + (w.tiled && !w.maximized ? 0 : FLOATING_LAYER_Z);
+  const layer = w.presentation === 'screen' ? 2 : w.pinned ? 1 : 0;
+  return w.z + (w.tiled && !w.maximized && !w.zoomed && layer === 0 ? 0 : FLOATING_LAYER_Z + layer * 10_000);
 }
 
 /** The focused window: the highest one on screen, or null. */
@@ -262,8 +302,15 @@ export function dockWindows(windows: WindowState[], allWorkspaces: boolean): Win
 /** How the tiling layout is set up (AppConfig's tiling settings). */
 export interface TilingSettings {
   enabled: boolean;
-  /** Pixels between tiles, and between them and the monitor's edges. */
+  /** Pixels between tiles. */
   gap: number;
+  /** Pixels between the tiles and the monitor's edges. */
+  outerGap: number;
+}
+
+/** Whether a tiled window covers the other tiles of its layout: maximized, or zoomed. */
+function fillsLayout(w: WindowState): boolean {
+  return w.maximized || w.zoomed || w.presentation === 'screen';
 }
 
 /** The window manager's whole state. */
@@ -288,8 +335,8 @@ export const SCRATCHPAD = 0;
 
 const treeKey = (areaId: string, workspace: number) => workspace === SCRATCHPAD ? 'scratchpad' : `${workspace}@${areaId}`;
 
-function workspaceTileRect(area: WorkArea, gap: number, workspace: number): Rect {
-  const rect = tilingRect(area, gap);
+function workspaceTileRect(area: WorkArea, outerGap: number, workspace: number): Rect {
+  const rect = tilingRect(area, outerGap);
   if (workspace !== SCRATCHPAD) return rect;
   const x = Math.round(rect.width * 0.1);
   const y = Math.round(rect.height * 0.1);
@@ -320,7 +367,7 @@ export interface WorkspaceSteps {
 /**
  * The work area a window lives on: the one it's maximized or edge-tiled
  * on, else the one under its floating geometry (which a tiled window keeps
- * on the monitor it's tiled on).
+ * on the monitor it's tiled on, a tile being dragged included).
  */
 export function homeArea(areas: WorkArea[], w: WindowState): WorkArea | null {
   if (areas.length === 0) return null;
@@ -328,7 +375,8 @@ export function homeArea(areas: WorkArea[], w: WindowState): WorkArea | null {
     const area = areas.find((a) => a.id === w.monitor);
     if (area) return area;
   }
-  return areaFor(areas, w);
+  // A tile being dragged stays on its monitor's books until it's dropped.
+  return areaFor(areas, w.lifted ?? w);
 }
 
 /** Din windows without a frame can have a fixed shape, like a player skin. */
@@ -338,7 +386,73 @@ function hasCustomShape(w: WindowState): boolean {
 
 /** Whether a window takes part in the tiling layout. */
 function tileable(w: WindowState, tiling: TilingSettings): boolean {
-  return tiling.enabled && !w.floating && !hasCustomShape(w) && !w.closing && !w.minimized && w.snapped === null;
+  return (
+    tiling.enabled &&
+    !w.floating &&
+    !w.pinned &&
+    !w.lifted &&
+    !hasCustomShape(w) &&
+    !w.closing &&
+    !w.minimized &&
+    w.snapped === null
+  );
+}
+
+/**
+ * Where a tiled window paints in its tile: all of it, or pseudotiled, at
+ * its floating size (no bigger than the tile) in the middle of it.
+ */
+function paintedTile(w: WindowState, slot: Rect): Rect {
+  if (!w.pseudo) return slot;
+  const width = Math.min(w.width, slot.width);
+  const height = Math.min(w.height, slot.height);
+  return {
+    x: slot.x + Math.round((slot.width - width) / 2),
+    y: slot.y + Math.round((slot.height - height) / 2),
+    width,
+    height,
+  };
+}
+
+/** A maximized window back at its floating geometry (as toggleMaximize restores it). */
+function restored(w: WindowState): WindowState {
+  return { ...w, ...(w.restore ?? {}), maximized: false, snapped: null, monitor: null, restore: null };
+}
+
+/**
+ * Give a tile the layout when it's focused under one that fills it: on
+ * Hyprland (Omarchy's `on_focus_under_fullscreen = 1`) the window focused
+ * takes the fullscreen over, rather than showing through it.
+ */
+function takeOverLayout(s: WmState, id: string, areas: WorkArea[], tiling: TilingSettings): WmState {
+  const target = s.windows.find((w) => w.id === id);
+  if (!target || !tileable(target, tiling) || fillsLayout(target)) return s;
+  const area = homeArea(areas, target);
+  if (!area) return s;
+  const over = s.windows.find(
+    (w) =>
+      w.id !== id &&
+      fillsLayout(w) &&
+      tileable(w, tiling) &&
+      w.workspace === target.workspace &&
+      homeArea(areas, w)?.id === area.id,
+  );
+  if (!over) return s;
+  return {
+    ...s,
+    windows: s.windows.map((w) => {
+      if (w.id === over.id) return { ...(w.maximized ? restored(w) : w), zoomed: false, presentation: undefined };
+      if (w.id !== id) return w;
+      if (over.presentation === 'screen') return { ...w, presentation: 'screen' };
+      if (!over.maximized) return { ...w, zoomed: true };
+      return {
+        ...w,
+        maximized: true,
+        monitor: area.id,
+        restore: w.restore ?? { x: w.x, y: w.y, width: w.width, height: w.height },
+      };
+    }),
+  };
 }
 
 function sameRect(a: Rect | null, b: Rect | null): boolean {
@@ -362,8 +476,16 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
     if (!old || old === w) return w;
     const to = homeArea(areas, w)!;
     if (homeArea(areas, old)!.id === to.id) return w;
+    if (w.pinned) return w;
     if (w.workspace === SCRATCHPAD && (old.workspace !== SCRATCHPAD || !next.scratchpad || next.scratchpad === to.id)) return w;
     const workspace = activeWorkspace(next.active, to.id);
+    return w.workspace === workspace ? w : { ...w, workspace };
+  });
+
+  // A pinned window is on whichever workspace its monitor shows.
+  windows = windows.map((w) => {
+    if (!w.pinned) return w;
+    const workspace = activeWorkspace(next.active, homeArea(areas, w)!.id);
     return w.workspace === workspace ? w : { ...w, workspace };
   });
 
@@ -398,14 +520,14 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
       const present = new Set(treeLeaves(t));
       const added = members.filter((w) => !present.has(w.id)).sort((a, b) => a.z - b.z);
       if (added.length === 0) continue;
-      const rect = workspaceTileRect(area, tiling.gap, workspace);
+      const rect = workspaceTileRect(area, tiling.outerGap, workspace);
       for (const w of added) {
         // A new window splits the focused tile: the highest one already in.
         const target = members.reduce<WindowState | null>(
           (top, m) => (present.has(m.id) && (!top || m.z > top.z) ? m : top),
           null,
         );
-        t = insertLeaf(t, w.id, target?.id ?? null, rect, tiling.gap);
+        t = insertLeaf(t, w.id, rect, tiling.gap, { target: target?.id ?? null });
         present.add(w.id);
       }
       updated[key] = t!;
@@ -415,23 +537,51 @@ function settle(prev: WmState, next: WmState, areas: WorkArea[], tiling: TilingS
   }
 
   const rects = new Map<string, Rect>();
+  /** The whole layout each tile is part of, which a zoomed one takes. */
+  const layouts = new Map<string, Rect>();
   if (tiling.enabled) {
-    for (const [key, { area, workspace }] of groups) {
-      layoutTree(trees[key] ?? null, workspaceTileRect(area, tiling.gap, workspace), tiling.gap, rects);
+    for (const [key, { area, workspace, members }] of groups) {
+      const layout = workspaceTileRect(area, tiling.outerGap, workspace);
+      layoutTree(trees[key] ?? null, layout, tiling.gap, rects);
+      for (const w of members) layouts.set(w.id, layout);
     }
   }
-  let windowsChanged = windows.some((w, i) => w !== next.windows[i]);
+
+  // Closing the focused tile gives focus to the tile that takes its place
+  // (the one nearest its middle), as Hyprland does, unless something else
+  // was focused in the same change.
+  const was = focusedWindow(prev.windows);
+  if (tiling.enabled && was?.slot && !was.maximized) {
+    const now = windows.find((w) => w.id === was.id);
+    const top = focusedWindow(windows);
+    if ((!now || now.closing) && (!top || top.z < was.z)) {
+      const area = homeArea(areas, was)!;
+      const heir = nearestLeaf(
+        trees[treeKey(area.id, was.workspace)] ?? null,
+        { x: was.slot.x + was.slot.width / 2, y: was.slot.y + was.slot.height / 2 },
+        workspaceTileRect(area, tiling.outerGap, was.workspace),
+        tiling.gap,
+      );
+      if (heir) windows = raise(windows, heir);
+    }
+  }
+  let windowsChanged = windows.length !== next.windows.length || windows.some((w, i) => w !== next.windows[i]);
   windows = windows.map((w) => {
     const areaId = homes.get(w.id)!.id;
-    const away = w.workspace === SCRATCHPAD
-      ? next.scratchpad !== areaId
-      : w.workspace !== activeWorkspace(next.active, areaId);
+    const away = w.pinned
+      ? false
+      : w.workspace === SCRATCHPAD
+        ? next.scratchpad !== areaId
+        : w.workspace !== activeWorkspace(next.active, areaId);
     // Neighbors can fill the vacated tile immediately, but the departing
     // window still needs its last tile rect for the close effect.
-    const tiled = w.closing ? w.tiled : (rects.get(w.id) ?? null);
-    if (away === w.away && sameRect(tiled, w.tiled)) return w;
+    const slot = w.closing ? w.slot : (rects.get(w.id) ?? null);
+    const tiled = w.closing
+      ? w.tiled
+      : slot && (w.zoomed ? (layouts.get(w.id) ?? slot) : paintedTile(w, slot));
+    if (away === w.away && sameRect(tiled, w.tiled) && sameRect(slot, w.slot)) return w;
     windowsChanged = true;
-    return { ...w, away, tiled };
+    return { ...w, away, tiled, slot };
   });
   if (!windowsChanged && trees === next.trees) return next;
   return { ...next, windows: windowsChanged ? windows : next.windows, trees };
@@ -504,6 +654,66 @@ export function inDirection<T>(from: Rect, dir: Direction, candidates: { item: T
   return best;
 }
 
+/**
+ * A tile's box as the layout means it, for telling which tiles are beside
+ * which: half the gap out on every side, so neighbors' boxes meet, and all
+ * the way out to the monitor's edge where the tile is at the layout's (so
+ * tiles on monitors side by side meet too, across any bar between them).
+ */
+function tileBox(tile: Rect, area: WorkArea, gap: number, outerGap: number): Rect {
+  const inner = tilingRect(area, outerGap);
+  const { bounds } = area;
+  const left = tile.x <= inner.x ? bounds.x : tile.x - gap / 2;
+  const top = tile.y <= inner.y ? bounds.y : tile.y - gap / 2;
+  const right = tile.x + tile.width >= inner.x + inner.width ? bounds.x + bounds.width : tile.x + tile.width + gap / 2;
+  const bottom = tile.y + tile.height >= inner.y + inner.height ? bounds.y + bounds.height : tile.y + tile.height + gap / 2;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * Whether span a starts where span b ends, give or take: touching, or
+ * overlapping by no more than half the smaller (Hyprland's isAdjacent).
+ */
+function startsAtEndOf(aMin: number, aMax: number, bMin: number, bMax: number): boolean {
+  const delta = aMin - bMax;
+  if (Math.abs(delta) < 2) return true;
+  if (delta >= 0) return false;
+  if ((bMin <= aMin && bMax >= aMax) || (aMin <= bMin && aMax >= bMax)) return false;
+  return -delta <= Math.min(aMax - aMin, bMax - bMin) * 0.5;
+}
+
+/**
+ * The tile beside `from` in direction `dir`, as Hyprland's movefocus and
+ * swapwindow pick it: of the tiles sharing that edge with it, the one
+ * focused most recently (`z`), not the nearest by center - so going right
+ * and back left returns to the window just left.
+ */
+export function tileInDirection<T extends { z: number }>(
+  from: Rect,
+  dir: Direction,
+  candidates: { item: T; rect: Rect }[],
+): T | null {
+  let best: T | null = null;
+  for (const { item, rect } of candidates) {
+    const beside =
+      dir === 'left'
+        ? startsAtEndOf(from.x, from.x + from.width, rect.x, rect.x + rect.width)
+        : dir === 'right'
+          ? startsAtEndOf(rect.x, rect.x + rect.width, from.x, from.x + from.width)
+          : dir === 'up'
+            ? startsAtEndOf(from.y, from.y + from.height, rect.y, rect.y + rect.height)
+            : startsAtEndOf(rect.y, rect.y + rect.height, from.y, from.y + from.height);
+    if (!beside) continue;
+    const shared =
+      dir === 'left' || dir === 'right'
+        ? Math.min(from.y + from.height, rect.y + rect.height) - Math.max(from.y, rect.y)
+        : Math.min(from.x + from.width, rect.x + rect.width) - Math.max(from.x, rect.x);
+    if (shared <= 1) continue;
+    if (!best || item.z > best.z) best = item;
+  }
+  return best;
+}
+
 /** Minimum window size in pixels. */
 export const MIN_WIDTH = 280;
 export const MIN_HEIGHT = 160;
@@ -517,6 +727,10 @@ function clampSize(width: number, height: number, frameless: boolean): { width: 
     ? { width: Math.max(1, width), height: Math.max(1, height) }
     : { width: Math.max(MIN_WIDTH, width), height: Math.max(MIN_HEIGHT, height) };
 }
+
+/** How big a popped-out window is (Omarchy's), where its monitor has the room. */
+const POP_WIDTH = 1300;
+const POP_HEIGHT = 900;
 
 let nextId = 0;
 const nextWindowId = () => `win-${nextId++}`;
@@ -545,7 +759,7 @@ function showWorkspace(s: WmState, areas: WorkArea[], areaId: string, n: number,
   if (!raiseTop) return next;
   const top = s.windows.reduce<WindowState | null>(
     (t, w) =>
-      w.workspace === n && !w.minimized && !w.closing && homeArea(areas, w)?.id === areaId && (!t || w.z > t.z)
+      w.workspace === n && !w.pinned && !w.minimized && !w.closing && homeArea(areas, w)?.id === areaId && (!t || w.z > t.z)
         ? w
         : t,
     null,
@@ -602,12 +816,17 @@ function fitWindows(s: WmState, areas: WorkArea[]): WmState {
  *   windows open there (stable, like getAreas).
  * @param getTiling The tiling settings (stable, like getAreas; call
  *   `relayout` when they change).
+ * @param getPointer Where the pointer is, in workspace coordinates, if
+ *   known (stable, like getAreas): a floating window tiled again goes
+ *   beside the tile nearest it.
  */
 export function useWindows(
   getApp: (id: string) => AppDefinition | undefined,
   getAreas: () => WorkArea[],
   getLaunchMonitor: () => string | null,
   getTiling: () => TilingSettings,
+  getPointer: () => Point | null = () => null,
+  jumpPointer?: (point: Point) => void,
 ) {
   const [state, setState] = useState<WmState>({ windows: [], trees: {}, active: {}, previous: {}, scratchpad: null });
   const { windows, active, scratchpad } = state;
@@ -644,18 +863,38 @@ export function useWindows(
   // it is current before any input the commit could have prompted.
   const windowsRef = useRef(windows);
   const stateRef = useRef(state);
-  // The workspace each monitor was told to show since the last commit: two
-  // steps in a row, the second before the first has rendered, count on.
+  const pointerTarget = useRef<string | null>(null);
+  // Repeated switches before React commits count from the intended workspace.
   const shownSince = useRef<Record<string, number>>({});
   const shownWorkspace = useCallback(
     (areaId: string) => shownSince.current[areaId] ?? activeWorkspace(stateRef.current.active, areaId),
     [],
   );
   useLayoutEffect(() => {
+    const previous = windowsRef.current;
     windowsRef.current = windows;
     stateRef.current = state;
     shownSince.current = {};
-  }, [windows, state]);
+
+    // Only after focus moved from the keyboard (focusAndJump), and only
+    // while windows tile: a click or a close leaves the pointer where it is.
+    const id = pointerTarget.current;
+    pointerTarget.current = null;
+    if (!id || !jumpPointer || previous === windows || !getTiling().enabled) return;
+    const target = focusedWindow(windows);
+    if (target?.id !== id) return;
+
+    // The middle of what's on screen of it, once the layout has settled.
+    const areas = getAreas();
+    const rect = windowRect(target, areas);
+    const area = homeArea(areas, target)?.bounds;
+    if (!area) return;
+    const left = Math.max(rect.x, area.x);
+    const top = Math.max(rect.y, area.y);
+    const right = Math.min(rect.x + rect.width, area.x + area.width);
+    const bottom = Math.min(rect.y + rect.height, area.y + area.height);
+    if (right > left && bottom > top) jumpPointer({ x: (left + right) / 2, y: (top + bottom) / 2 });
+  }, [windows, state, getAreas, getTiling, jumpPointer]);
 
   // A native app's new window is the end of its launch. After the commit,
   // so a launching app's Dock tile never blinks out between the two.
@@ -677,15 +916,20 @@ export function useWindows(
       if (!target || target.closing) return s;
       const areas = getAreas();
       const area = homeArea(areas, target);
-      const shown = !area
+      const shown = !area || target.pinned
         ? s
         : target.workspace === SCRATCHPAD
           ? (s.scratchpad === area.id ? s : revealScratchpad(s, areas, area))
           : showWorkspace(s.scratchpad === area.id ? { ...s, scratchpad: null } : s, areas, area.id, target.workspace, false);
       const ws = raise(shown.windows, id);
-      return ws === shown.windows ? shown : { ...shown, windows: ws };
+      return takeOverLayout(ws === shown.windows ? shown : { ...shown, windows: ws }, id, areas, getTiling());
     });
-  }, [update, getAreas]);
+  }, [update, getAreas, getTiling]);
+
+  const focusAndJump = useCallback((id: string) => {
+    pointerTarget.current = id;
+    focus(id);
+  }, [focus]);
 
   /**
    * Launch an app again in one of its windows: focus it, merging in the new
@@ -821,7 +1065,12 @@ export function useWindows(
           accent: null,
           workspace,
           floating,
+          pseudo: false,
+          zoomed: false,
+          pinned: false,
+          lifted: null,
           tiled: null,
+          slot: null,
           away: false,
           ...(placed && {
             x: placed.x,
@@ -835,13 +1084,17 @@ export function useWindows(
             restore: placed.restore,
             workspace: Math.min(placed.workspace, WORKSPACE_COUNT),
             floating: placed.floating,
+            pinned: placed.pinned ?? false,
+            pseudo: placed.pseudo ?? false,
+            zoomed: placed.zoomed ?? false,
           }),
         },
       ];
-      return placed ? fitWindows({ ...s, windows }, areas) : { ...s, windows };
+      // Opened over a tile that fills its layout, a new tile takes that over.
+      return placed ? fitWindows({ ...s, windows }, areas) : takeOverLayout({ ...s, windows }, id, areas, getTiling());
     });
     return id;
-  }, [getApp, getAreas, getLaunchMonitor, update, launchIn]);
+  }, [getApp, getAreas, getLaunchMonitor, getTiling, update, launchIn]);
 
   /**
    * Begin closing a window: it stays mounted, marked `closing`, while the
@@ -1173,7 +1426,12 @@ export function useWindows(
           accent: null,
           workspace: Math.min(w.workspace, WORKSPACE_COUNT),
           floating: w.floating,
+          pseudo: w.pseudo ?? false,
+          zoomed: w.zoomed ?? false,
+          pinned: w.pinned ?? false,
+          lifted: null,
           tiled: null,
+          slot: null,
           away: false,
         }));
         // Leaves of windows not coming back get names no window has, for
@@ -1222,7 +1480,8 @@ export function useWindows(
         bounds: area.bounds,
         clip: areas.length > 1,
         windows: windowsRef.current
-          .filter((w) => !w.minimized && (w.workspace === from || w.workspace === to) && homeArea(areas, w)?.id === areaId)
+          .filter((w) => !w.minimized && !w.pinned &&
+            (w.workspace === from || w.workspace === to) && homeArea(areas, w)?.id === areaId)
           .map((w) => ({ id: w.id, workspace: w.workspace, rect: windowRect(w, areas) })),
       };
     },
@@ -1351,10 +1610,38 @@ export function useWindows(
     return inDirection(from.bounds, dir, others);
   }, [getAreas]);
 
+  /** The tile on screen beside a tiled window in direction `dir`, if any. */
+  const tileBeside = useCallback((from: WindowState, dir: Direction): WindowState | null => {
+    if (!from.slot || fillsLayout(from)) return null;
+    const areas = getAreas();
+    const { gap, outerGap } = getTiling();
+    const box = (w: WindowState) => tileBox(w.slot!, homeArea(areas, w)!, gap, outerGap);
+    const candidates = windowsRef.current
+      .filter((w) => isShown(w) && w.id !== from.id && w.slot && !fillsLayout(w) &&
+        (homeArea(areas, w)?.id !== homeArea(areas, from)?.id || w.workspace === from.workspace))
+      .map((w) => ({ item: w, rect: box(w) }));
+    return tileInDirection(box(from), dir, candidates);
+  }, [getAreas, getTiling]);
+
+  /** Make a monitor the one keyboard commands act on, its top window taking focus. */
+  const focusArea = useCallback((area: WorkArea, select = focus) => {
+    currentMonitor.current = area.id;
+    const areas = getAreas();
+    const top = windowsRef.current.reduce<WindowState | null>(
+      (t, w) => (isShown(w) && homeArea(areas, w)?.id === area.id && (!t || w.z > t.z) ? w : t),
+      null,
+    );
+    if (top) select(top.id);
+  }, [focus, getAreas]);
+
   /**
-   * Focus the window on screen in direction `dir` from the focused one,
-   * across monitors. With none that way, the monitor that way (if any)
-   * becomes the current one, so Super+1 and new windows go there.
+   * Focus the window on screen in direction `dir` from the focused one, as
+   * Hyprland's `movefocus`: from a tile, the tile beside it, else whatever
+   * window lies that way; with none, the monitor that way; with no monitor
+   * either, round to the window at the monitor's far edge. A tile that
+   * fills its layout (maximized, zoomed) has only other monitors to go to.
+   * With tiling off, the monitor that way only becomes the current one,
+   * and nothing goes round.
    */
   const focusDirection = useCallback((dir: Direction) => {
     const areas = getAreas();
@@ -1362,18 +1649,75 @@ export function useWindows(
     const focused = focusedWindow(ws);
     const area = commandArea();
     if (!area) return;
-    const from = focused ? windowRect(focused, areas) : area;
-    const candidates = ws
-      .filter((w) => isShown(w) && w.id !== focused?.id)
-      .map((w) => ({ item: w, rect: windowRect(w, areas) }));
-    const next = inDirection(from, dir, candidates);
+    const others = ws.filter((w) => isShown(w) && w.id !== focused?.id &&
+      (stateRef.current.scratchpad !== homeArea(areas, w)?.id || w.workspace === SCRATCHPAD));
+    const isTile = !!focused?.slot;
+    const blocked = focused?.presentation === 'screen' || (!!focused && isTile && fillsLayout(focused));
+    const next = blocked
+      ? null
+      : ((focused ? tileBeside(focused, dir) : null) ??
+        inDirection(
+          focused ? windowRect(focused, areas) : area,
+          dir,
+          others
+            .filter((w) => !(isTile && w.slot && !fillsLayout(w)))
+            .map((w) => ({ item: w, rect: windowRect(w, areas) })),
+        ));
     if (next) {
-      focus(next.id);
+      focusAndJump(next.id);
       return;
     }
-    const neighbor = neighborArea(focused ? (homeArea(areas, focused) ?? area) : area, dir);
-    if (neighbor) currentMonitor.current = neighbor.id;
-  }, [commandArea, focus, getAreas, neighborArea]);
+    const home = focused ? (homeArea(areas, focused) ?? area) : area;
+    const neighbor = neighborArea(home, dir);
+    const tiling = getTiling();
+    // Floating, as it always has, the monitor that way only becomes the
+    // current one (Super+1 and new windows go there).
+    if (neighbor && !tiling.enabled) currentMonitor.current = neighbor.id;
+    if (neighbor && tiling.enabled) {
+      focusArea(neighbor, focusAndJump);
+      return;
+    }
+    if (!focused || blocked || !tiling.enabled) return;
+    // Nothing that way: round to the other side of the monitor, unless the
+    // window already spans it.
+    const horizontal = dir === 'left' || dir === 'right';
+    const { gap, outerGap } = tiling;
+    const b = home.bounds;
+    const mine = focused.slot ? tileBox(focused.slot, home, gap, outerGap) : windowRect(focused, areas);
+    if (horizontal ? mine.x <= b.x + 1 && mine.width >= b.width - 1 : mine.y <= b.y + 1 && mine.height >= b.height - 1) return;
+    const edge: Rect =
+      dir === 'left'
+        ? { x: b.x + b.width, y: b.y, width: 1, height: b.height }
+        : dir === 'right'
+          ? { x: b.x - 1, y: b.y, width: 1, height: b.height }
+          : dir === 'up'
+            ? { x: b.x, y: b.y + b.height, width: b.width, height: 1 }
+            : { x: b.x, y: b.y - 1, width: b.width, height: 1 };
+    const here = others.filter((w) => homeArea(areas, w)?.id === home.id);
+    const round = focused.slot
+      ? tileInDirection(
+          edge,
+          dir,
+          here
+            .filter((w) => w.slot && !fillsLayout(w))
+            .map((w) => ({ item: w, rect: tileBox(w.slot!, home, gap, outerGap) })),
+        )
+      : inDirection(
+          edge,
+          dir,
+          here.filter((w) => !w.slot).map((w) => ({ item: w, rect: windowRect(w, areas) })),
+        );
+    if (round) focusAndJump(round.id);
+  }, [commandArea, focusAndJump, focusArea, getAreas, getTiling, neighborArea, tileBeside]);
+
+  /** Focus the next monitor (or, with -1, the one before), as Hyprland's `focusmonitor +1`. */
+  const focusMonitor = useCallback((step: 1 | -1) => {
+    const areas = getAreas();
+    const current = commandArea();
+    if (!current || areas.length < 2) return;
+    const i = areas.findIndex((a) => a.id === current.id);
+    focusArea(areas[(i + step + areas.length) % areas.length], focusAndJump);
+  }, [commandArea, focusAndJump, focusArea, getAreas]);
 
   /** Send a window to the monitor in direction `dir`, onto the workspace it shows. */
   const moveToMonitor = useCallback((id: string, dir: Direction) => {
@@ -1417,26 +1761,22 @@ export function useWindows(
   }, [getAreas, update]);
 
   /**
-   * Super+Shift+arrow: a tiled window swaps with the tiled window that way
-   * (or, at the edge, moves to the monitor that way). A floating window
-   * snaps instead, as Windows' Win+arrows do: left and right tile it to that
-   * half (a quarter crosses to the one beside it; a half on the other side
-   * comes back), up and down take a half to its top or bottom quarter and a
+   * Super+Shift+arrow: a tiled window swaps with the tile beside it that
+   * way, and with none stays put, as Hyprland's `swapwindow` (Super+Shift+
+   * Ctrl+arrow moves it to another monitor). A floating window snaps
+   * instead, as Windows' Win+arrows do: left and right tile it to that half
+   * (a quarter crosses to the one beside it; a half on the other side comes
+   * back), up and down take a half to its top or bottom quarter and a
    * quarter back to its half, and otherwise up maximizes and down restores,
    * or minimizes a window that's already restored.
    */
   const swapDirection = useCallback((dir: Direction) => {
     const areas = getAreas();
-    const ws = windowsRef.current;
-    const focused = focusedWindow(ws);
+    const focused = focusedWindow(windowsRef.current);
     if (!focused) return;
     if (focused.tiled && !focused.maximized) {
-      const candidates = ws
-        .filter((w) => isShown(w) && w.id !== focused.id && w.tiled && !w.maximized)
-        .map((w) => ({ item: w, rect: w.tiled! }));
-      const other = inDirection(focused.tiled, dir, candidates);
+      const other = tileBeside(focused, dir);
       if (other) swapTiles(focused.id, other.id);
-      else moveToMonitor(focused.id, dir);
       return;
     }
     const restore = () =>
@@ -1459,76 +1799,129 @@ export function useWindows(
     } else {
       minimize(focused.id);
     }
-  }, [getAreas, maximize, minimize, moveToMonitor, swapTiles, tile, unmaximize]);
+  }, [getAreas, maximize, minimize, swapTiles, tile, tileBeside, unmaximize]);
 
   /**
-   * Where a tiled window dragged to (x, y) would go: onto the side of the
-   * tile under the pointer, as the tiles are on screen now (the dragged one
-   * aside), that the pointer is nearest; or, onto a monitor with no tiles,
-   * the whole of it. Null when the drop would change nothing (back on its
-   * own tile). `preview` is the half of the target it shows, and `tree` the
-   * layout after the drop.
+   * Take a tiled window out of its tile to be dragged, as Hyprland does: it
+   * floats at `rect` (under the pointer) while the other tiles close up,
+   * until dropTile puts it down.
    */
-  const planDrop = useCallback((s: WmState, id: string, x: number, y: number) => {
-    const areas = getAreas();
-    const w = s.windows.find((w) => w.id === id);
-    const from = w ? homeArea(areas, w) : null;
-    const to = areaAt(areas, x, y);
-    if (!w?.tiled || !from || !to) return null;
-    const workspace = w.workspace === SCRATCHPAD ? SCRATCHPAD : activeWorkspace(s.active, to.id);
-    const key = treeKey(to.id, workspace);
-    const { gap } = getTiling();
-    const rect = workspaceTileRect(to, gap, workspace);
-    const before = s.trees[key] ?? null;
-    const shown = layoutTree(before, rect, gap);
-    const own = shown.get(id);
-    if (own && contains(own, x, y)) return null;
-    shown.delete(id);
-    if (shown.size === 0) {
-      const tree: TileNode = { leaf: id };
-      return from.id === to.id ? null : { from, to, key, tree, preview: rect };
-    }
-    let target = '';
-    let best = Infinity;
-    for (const [candidate, r] of shown) {
-      const dx = Math.max(r.x - x, x - r.x - r.width, 0);
-      const dy = Math.max(r.y - y, y - r.y - r.height, 0);
-      if (dx * dx + dy * dy < best) {
-        best = dx * dx + dy * dy;
-        target = candidate;
-      }
-    }
-    const at = shown.get(target)!;
-    const side = dropSide(at, x, y);
-    const tree = insertLeaf(removeLeaf(before, id), id, target, rect, gap, side);
-    return { from, to, key, tree, preview: dropRect(at, side, gap) };
-  }, [getAreas, getTiling]);
-
-  const previewDrop = useCallback((id: string, x: number, y: number) =>
-    planDrop(stateRef.current, id, x, y)?.preview ?? null, [planDrop]);
-
-  const dropTile = useCallback((id: string, x: number, y: number) => {
-    update((s) => {
-      const plan = planDrop(s, id, x, y);
-      if (!plan) return s;
-      const { from, to, key, tree } = plan;
-      currentMonitor.current = to.id;
-      const windows = from.id === to.id ? s.windows : s.windows.map((w) => w.id === id ? carryTo(w, from, to) : w);
-      return { ...s, windows, trees: { ...s.trees, [key]: tree } };
-    });
-  }, [planDrop, update]);
-
-  /** Float a tiled window, or tile a floating one (Super+T). */
-  const toggleFloating = useCallback((id: string) => {
+  const liftTile = useCallback((id: string, rect: Rect) => {
     setWindows((ws) => {
       const top = maxZ(ws);
-      return ws.map((w) =>
-        w.id === id
-          ? { ...w, floating: w.tiled !== null, snapped: null, z: top + 1 }
-          : w,
-      );
+      return ws.map((w) => {
+        if (w.id !== id || !w.tiled || w.lifted) return w;
+        // Maximized, it comes out of that first.
+        const base = w.maximized ? restored(w) : w;
+        return {
+          ...base,
+          lifted: { x: base.x, y: base.y, width: base.width, height: base.height },
+          ...rect,
+          zoomed: false,
+          z: top + 1,
+        };
+      });
     });
   }, [setWindows]);
+
+  /**
+   * Where a tile being dragged, dropped at a point (workspace coordinates),
+   * would land: on that monitor's workspace, beside the tile nearest the
+   * point, in the half of it the point is in (see placeLeaf).
+   */
+  const planTileDrop = useCallback((s: WmState, id: string, x: number, y: number) => {
+    const areas = getAreas();
+    const tiling = getTiling();
+    const w = s.windows.find((c) => c.id === id);
+    const from = w ? homeArea(areas, w) : null;
+    const to = areaAt(areas, x, y) ?? from;
+    if (!w || !from || !to || !tiling.enabled) return null;
+    const workspace = to.id === from.id ? w.workspace : activeWorkspace(s.active, to.id);
+    const key = treeKey(to.id, workspace);
+    const rect = workspaceTileRect(to, tiling.outerGap, workspace);
+    const tree = placeLeaf(s.trees[key] ?? null, id, { x, y }, rect, tiling.gap);
+    const slot = layoutTree(tree, rect, tiling.gap).get(id);
+    return { key, tree, from, to, workspace, rect: slot ? paintedTile({ ...w, ...(w.lifted ?? {}) }, slot) : null };
+  }, [getAreas, getTiling]);
+
+  /** The rect a tile being dragged would take, dropped at a point, for the drag's outline. */
+  const tileDropRect = useCallback(
+    (id: string, x: number, y: number): Rect | null => planTileDrop(stateRef.current, id, x, y)?.rect ?? null,
+    [planTileDrop],
+  );
+
+  /**
+   * End a drag of a tile (see liftTile), dropped at a point: it splits the
+   * tile nearest the pointer, taking the half the pointer is in; on another
+   * monitor, it tiles there the same way.
+   */
+  const dropTile = useCallback((id: string, x: number, y: number) => {
+    update((s) => {
+      const w = s.windows.find((c) => c.id === id);
+      if (!w?.lifted) return s;
+      const plan = planTileDrop(s, id, x, y);
+      const back: WindowState = { ...w, ...w.lifted, lifted: null };
+      const put = (to: WindowState) => s.windows.map((c) => (c.id === id ? to : c));
+      if (!plan) return { ...s, windows: put(back) };
+      const { key, tree, from, to } = plan;
+      currentMonitor.current = to.id;
+      return {
+        ...s,
+        trees: { ...s.trees, [key]: tree },
+        windows: put(from.id === to.id ? back : { ...carryTo(back, from, to), workspace: plan.workspace }),
+      };
+    });
+  }, [planTileDrop, update]);
+
+  /**
+   * Float a tiled window, or tile a floating one (Super+T). Floated, it
+   * sits over the middle of the tile it left; tiled, it splits the tile
+   * nearest the pointer, as on Hyprland.
+   */
+  const toggleFloating = useCallback((id: string) => {
+    update((s) => {
+      const w = s.windows.find((c) => c.id === id);
+      if (!w) return s;
+      const areas = getAreas();
+      const tiling = getTiling();
+      const area = homeArea(areas, w);
+      const top = maxZ(s.windows);
+      const put = (to: WindowState) => s.windows.map((c) => (c.id === id ? to : c));
+      if (w.tiled) {
+        const slot = w.slot ?? w.tiled;
+        if (!area || w.maximized) return { ...s, windows: put({ ...w, floating: true, zoomed: false, snapped: null, z: top + 1 }) };
+        const width = Math.min(w.width, area.width);
+        const height = Math.min(w.height, area.height);
+        const within = (v: number, min: number, max: number) => Math.round(Math.max(min, Math.min(v, max)));
+        return {
+          ...s,
+          windows: put({
+            ...w,
+            floating: true,
+            zoomed: false,
+            snapped: null,
+            x: within(slot.x + (slot.width - width) / 2, area.x, area.x + area.width - width),
+            y: within(slot.y + (slot.height - height) / 2, area.y, area.y + area.height - height),
+            width,
+            height,
+            z: top + 1,
+          }),
+        };
+      }
+      const next: WindowState = { ...w, floating: false, pinned: false, snapped: null, z: top + 1 };
+      const point = getPointer();
+      let trees = s.trees;
+      if (area && point && tileable(next, tiling)) {
+        const key = treeKey(area.id, w.workspace);
+        const tree = trees[key] ?? null;
+        if (!treeLeaves(tree).includes(id)) {
+          const rect = workspaceTileRect(area, tiling.outerGap, w.workspace);
+          trees = { ...trees, [key]: insertLeaf(tree, id, rect, tiling.gap, { point }) };
+        }
+      }
+      return { ...s, trees, windows: put(next) };
+    });
+  }, [getAreas, getPointer, getTiling, update]);
 
   /** Flip the split a tiled window's tile came from (Super+J). */
   const toggleSplit = useCallback((id: string) => {
@@ -1541,9 +1934,24 @@ export function useWindows(
     });
   }, [update]);
 
+  /** A tiled window's tree, with what's needed to lay it out. */
+  const treeOf = useCallback((s: WmState, id: string) => {
+    const w = s.windows.find((c) => c.id === id);
+    if (!w?.slot || fillsLayout(w)) return null;
+    const area = homeArea(getAreas(), w);
+    const key = area ? treeKey(area.id, w.workspace) : null;
+    const tree = key ? s.trees[key] : undefined;
+    if (!area || !key || !tree) return null;
+    const { gap, outerGap } = getTiling();
+    const rect = workspaceTileRect(area, outerGap, w.workspace);
+    const resized = (dx: number, dy: number, edges?: ResizeEdges) => resizeLeaf(tree, id, dx, dy, rect, gap, edges) ?? tree;
+    return { key, tree, gap, rect, resized };
+  }, [getAreas, getTiling]);
+
   /**
-   * Grow (or, negative, shrink) a window by `dx` / `dy` pixels: a tiled one
-   * by moving the splits beside it, a floating one around its center.
+   * Grow (or, negative, shrink) a window by `dx` / `dy` pixels: a floating
+   * one around its center; a tiled one has the splits it sits in moved that
+   * far right and down, as Hyprland's `resizeactive` (see resizeLeaf).
    */
   const resizeBy = useCallback((id: string, dx: number, dy: number) => {
     const w = windowsRef.current.find((x) => x.id === id);
@@ -1558,16 +1966,161 @@ export function useWindows(
       return;
     }
     update((s) => {
+      const t = treeOf(s, id);
+      if (!t) return s;
+      const next = t.resized(dx, dy);
+      return next === t.tree ? s : { ...s, trees: { ...s.trees, [t.key]: next! } };
+    });
+  }, [resize, treeOf, update]);
+
+  /**
+   * Where every tile of a window's layout would be with that window's
+   * `edges` dragged by `dx` / `dy`, for a mouse resize to paint as it goes
+   * (it commits once, with resizeTile, when it ends). Null for a window
+   * that isn't a tile to resize.
+   */
+  const tileResizeRects = useCallback(
+    (id: string, dx: number, dy: number, edges: ResizeEdges): Map<string, Rect> | null => {
+      const s = stateRef.current;
+      const t = treeOf(s, id);
+      if (!t) return null;
+      const byId = new Map(s.windows.map((w) => [w.id, w]));
+      const out = new Map<string, Rect>();
+      const tree = t.resized(dx, dy, edges);
+      for (const [leaf, slot] of layoutTree(tree, t.rect, t.gap)) {
+        const w = byId.get(leaf);
+        if (w && !fillsLayout(w)) out.set(leaf, paintedTile(w, slot));
+      }
+      return out;
+    },
+    [treeOf],
+  );
+
+  /** Resize a tile by its `edges`, dragged by `dx` / `dy` (the end of a mouse resize). */
+  const resizeTile = useCallback((id: string, dx: number, dy: number, edges: ResizeEdges) => {
+    update((s) => {
+      const t = treeOf(s, id);
+      if (!t) return s;
+      const next = t.resized(dx, dy, edges);
+      return next === t.tree ? s : { ...s, trees: { ...s.trees, [t.key]: next! } };
+    });
+  }, [treeOf, update]);
+
+  /** Keep a tiled window at its floating size inside its tile, or let it fill it again (Super+P). */
+  const togglePseudo = useCallback((id: string) => {
+    setWindows((ws) => ws.map((w) => (w.id === id ? { ...w, pseudo: !w.pseudo } : w)));
+  }, [setWindows]);
+
+  /**
+   * Give a tile its whole layout, gaps kept, over the other tiles, or put
+   * it back (Super+Alt+F, Hyprland's maximized fullscreen).
+   */
+  const toggleZoom = useCallback((id: string) => {
+    update((s) => {
+      const w = s.windows.find((c) => c.id === id);
+      if (!w || (!w.zoomed && !w.tiled)) return s;
       const areas = getAreas();
       const area = homeArea(areas, w);
-      const key = area ? treeKey(area.id, w.workspace) : null;
-      const tree = key ? s.trees[key] : undefined;
-      if (!area || !key || !tree) return s;
-      const { gap } = getTiling();
-      const next = resizeLeaf(tree, id, dx, dy, workspaceTileRect(area, gap, w.workspace), gap);
-      return next === tree ? s : { ...s, trees: { ...s.trees, [key]: next! } };
+      const top = maxZ(s.windows);
+      return {
+        ...s,
+        windows: s.windows.map((c) => {
+          if (c.id === id) return { ...(c.maximized ? restored(c) : c), zoomed: !w.zoomed, z: top + 1 };
+          // One at a time: it takes the layout over from another.
+          const beside = !w.zoomed && c.workspace === w.workspace && homeArea(areas, c)?.id === area?.id;
+          if (!beside || !c.slot || !fillsLayout(c)) return c;
+          return { ...(c.maximized ? restored(c) : c), zoomed: false };
+        }),
+      };
     });
-  }, [getAreas, getTiling, resize, update]);
+  }, [getAreas, update]);
+
+  /**
+   * Pop a window out (Super+O, as Omarchy's): it floats in the middle of
+   * its monitor, pinned, so it stays on screen on every workspace there.
+   * Again, and it's unpinned and goes back into the layout.
+   */
+  const togglePop = useCallback((id: string) => {
+    update((s) => {
+      const w = s.windows.find((c) => c.id === id);
+      const area = w ? homeArea(getAreas(), w) : null;
+      if (!w || !area || w.frameless) return s;
+      const top = maxZ(s.windows);
+      const put = (to: WindowState) => s.windows.map((c) => (c.id === id ? to : c));
+      if (w.pinned) return { ...s, windows: put({ ...w, pinned: false, floating: false, z: top + 1 }) };
+      const { width, height } = clampSize(Math.min(POP_WIDTH, area.width), Math.min(POP_HEIGHT, area.height), false);
+      return {
+        ...s,
+        windows: put({
+          ...(w.maximized || w.snapped ? restored(w) : w),
+          floating: true,
+          pinned: true,
+          zoomed: false,
+          x: Math.round(area.x + Math.max(0, (area.width - width) / 2)),
+          y: Math.round(area.y + Math.max(0, (area.height - height) / 2)),
+          width,
+          height,
+          z: top + 1,
+        }),
+      };
+    });
+  }, [getAreas, update]);
+
+  /** Pin a window, so it shows on every workspace of its monitor above the others, or unpin it. */
+  const togglePin = useCallback((id: string) => {
+    setWindows((ws) => {
+      const top = maxZ(ws);
+      return ws.map((w) => (w.id === id ? { ...w, pinned: !w.pinned, floating: w.pinned ? w.floating : true, z: top + 1 } : w));
+    });
+  }, [setWindows]);
+
+  /**
+   * Move the workspace the current monitor shows, windows and layout, to
+   * the monitor in direction `dir` (Super+Shift+Alt+arrow): under the same
+   * number there when that one is empty, else the first empty one.
+   */
+  const moveWorkspaceToMonitor = useCallback((dir: Direction) => {
+    const from = commandArea();
+    const to = from ? neighborArea(from, dir) : null;
+    if (!from || !to) return;
+    update((s) => {
+      const areas = getAreas();
+      const n = activeWorkspace(s.active, from.id);
+      const on = (area: WorkArea, workspace: number) => (w: WindowState) =>
+        !w.closing && !w.pinned && w.workspace === workspace && homeArea(areas, w)?.id === area.id;
+      const movers = new Set(s.windows.filter(on(from, n)).map((w) => w.id));
+      if (movers.size === 0) return s;
+      const free = (workspace: number) => !s.windows.some(on(to, workspace));
+      const numbers = Array.from({ length: WORKSPACE_COUNT }, (_, i) => i + 1);
+      const target = free(n) ? n : numbers.find(free);
+      if (target === undefined) return s;
+      const trees = { ...s.trees };
+      const tree = trees[treeKey(from.id, n)];
+      delete trees[treeKey(from.id, n)];
+      if (tree) trees[treeKey(to.id, target)] = tree;
+      else delete trees[treeKey(to.id, target)];
+      const shown = showWorkspace({ ...s, trees, scratchpad: s.scratchpad === to.id ? null : s.scratchpad }, areas, to.id, target, false);
+      currentMonitor.current = to.id;
+      return {
+        ...shown,
+        windows: shown.windows.map((w) => (movers.has(w.id) ? { ...carryTo(w, from, to), workspace: target } : w)),
+      };
+    });
+  }, [commandArea, getAreas, neighborArea, update]);
+
+  /** Turn a window's full screen (see WindowState.presentation) on, or off again. */
+  const present = useCallback((id: string, mode: 'screen' | 'client') => {
+    setWindows((ws) => {
+      const target = ws.find((w) => w.id === id);
+      if (!target) return ws;
+      const areas = getAreas();
+      return raise(ws.map((w) => {
+        if (w.id === id) return { ...w, presentation: w.presentation === mode ? undefined : mode };
+        return mode === 'screen' && w.presentation === 'screen' && target.workspace === w.workspace && homeArea(areas, target)?.id === homeArea(areas, w)?.id
+          ? { ...w, presentation: undefined } : w;
+      }), id);
+    });
+  }, [setWindows, getAreas]);
 
   /** Lay the tiles out again, after the tiling settings changed. */
   const relayout = useCallback(() => {
@@ -1614,16 +2167,26 @@ export function useWindows(
       focusDirection,
       swapDirection,
       moveToMonitor,
+      focusMonitor,
+      moveWorkspaceToMonitor,
+      liftTile,
       dropTile,
-      previewDrop,
+      tileDropRect,
       toggleFloating,
       toggleSplit,
+      togglePseudo,
+      toggleZoom,
+      togglePop,
+      togglePin,
       resizeBy,
+      tileResizeRects,
+      resizeTile,
       relayout,
+      present,
       adoptSession,
       getSession,
     }),
-    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, workspaceSteps, beginWorkspaceSwipe, previousWorkspace, moveToWorkspace, toggleScratchpad, moveToScratchpad, focusDirection, swapDirection, moveToMonitor, dropTile, previewDrop, toggleFloating, toggleSplit, resizeBy, relayout, adoptSession, getSession],
+    [open, launchIn, close, closeApp, destroy, minimize, focus, move, resize, maximize, unmaximize, tile, setSnapSplit, toggleMaximize, cycleFocus, setFrameless, setTitle, setIcon, setAccent, fitToAreas, setCurrentMonitor, showWorkspaceOn, stepWorkspace, workspaceSteps, beginWorkspaceSwipe, previousWorkspace, moveToWorkspace, toggleScratchpad, moveToScratchpad, focusDirection, swapDirection, moveToMonitor, focusMonitor, moveWorkspaceToMonitor, liftTile, dropTile, tileDropRect, toggleFloating, toggleSplit, togglePseudo, toggleZoom, togglePop, togglePin, resizeBy, tileResizeRects, resizeTile, relayout, present, adoptSession, getSession],
   );
 
   // Back-compat full manager: state + actions in one object. Its identity

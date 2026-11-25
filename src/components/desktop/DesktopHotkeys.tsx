@@ -203,6 +203,8 @@ export function DesktopHotkeys() {
           return a.swapDirection(cmd.dir);
         case 'move-to-monitor':
           return top && a.moveToMonitor(top.id, cmd.dir);
+        case 'move-workspace-to-monitor':
+          return a.moveWorkspaceToMonitor(cmd.dir);
         case 'workspace':
           return a.showWorkspace(cmd.n);
         case 'move-to-workspace':
@@ -225,7 +227,18 @@ export function DesktopHotkeys() {
         case 'toggle-tiling':
           return setTiling(!tilingRef.current);
         case 'fullscreen':
-          return top && a.toggleMaximize(top.id);
+          // Omarchy's full screen while windows tile; the floating desktop
+          // keeps maximizing, as it always has.
+          if (!top) return;
+          return tilingRef.current || top.presentation === 'screen' ? a.present(top.id, 'screen') : a.toggleMaximize(top.id);
+        case 'client-screen':
+          return top && a.present(top.id, 'client');
+        case 'zoom':
+          return top && a.toggleZoom(top.id);
+        case 'toggle-pseudo':
+          return top && a.togglePseudo(top.id);
+        case 'pop':
+          return top && a.togglePop(top.id);
         case 'toggle-split':
           return top && a.toggleSplit(top.id);
         case 'minimize':
@@ -329,6 +342,14 @@ export function DesktopHotkeys() {
           if (!e.repeat || cmd.type === 'resize') runWmRef.current(cmd);
           return;
         }
+      }
+
+      // Ctrl+Alt+Tab: the next monitor (Shift: the one before).
+      if (e.key === 'Tab' && e.ctrlKey && e.altKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) actionsRef.current.focusMonitor(e.shiftKey ? -1 : 1);
+        return;
       }
 
       const focusKey = focusAreaFor(e);
@@ -534,6 +555,8 @@ export function DesktopHotkeys() {
         if (isWindowSwitcherActive() || isSecurityOptionsActive()) return;
         const cmd = wmCommandFor(shortcut, bindingsRef.current);
         if (cmd && (!shortcut.repeat || cmd.type === 'resize')) runWmRef.current(cmd);
+      } else if (shortcut.action === 'focus-monitor') {
+        actionsRef.current.focusMonitor(shortcut.backward ? -1 : 1);
       } else if (shortcut.action === 'dictation') {
         toggleDictation();
       } else if (shortcut.action === 'focus-area') {

@@ -56,6 +56,7 @@ export const AppConfigSchema = z.object({
   tilingGap: z.number().min(0).max(64),
   focusFollowsPointer: z.boolean(),
   wmBindings: z.record(z.string(), z.array(z.string())),
+  tilingOuterGap: z.number().min(0).max(64).optional(),
   restoreWindows: z.boolean(),
   pauseMediaWhileRecording: z.boolean(),
   volumeFeedback: z.boolean(),

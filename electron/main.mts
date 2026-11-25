@@ -4358,6 +4358,7 @@ function forwardShellShortcuts(contents: Electron.WebContents): void {
       shortcut?.action === 'system-monitor' ||
       shortcut?.action === 'security-options' ||
       shortcut?.action === 'focus-area' ||
+      shortcut?.action === 'focus-monitor' ||
       shortcut?.action === 'screenshot' ||
       shortcut?.action === 'screenshot-area' ||
       shortcut?.action === 'wm'
@@ -6354,6 +6355,7 @@ type ShellShortcut =
   | { action: 'super-key'; down: boolean }
   | { action: 'focus-area'; area: 'menu-bar' | 'dock' | 'status' | 'next' | 'previous' }
   | { action: 'wm'; code: string; shift: boolean; ctrl: boolean; alt: boolean; repeat: boolean }
+  | { action: 'focus-monitor'; backward: boolean }
   | { action: 'alt-released' }
   | {
       action:
@@ -6423,6 +6425,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   }
   if (input.alt && !input.control && !input.meta && input.key === 'Tab') {
     return { action: 'cycle-windows', backward: Boolean(input.shift) };
+  }
+  // Ctrl+Alt+Tab: the next monitor (Shift: the one before).
+  if (input.alt && input.control && !input.meta && input.key === 'Tab') {
+    return input.isAutoRepeat ? null : { action: 'focus-monitor', backward: Boolean(input.shift) };
   }
   // Super plus a window-management key: the shell decides what it does
   // (src/lib/wmBindings.ts), so the page never sees Super+1 and the like.
@@ -7682,6 +7688,7 @@ app.on('web-contents-created', (_event, contents) => {
         shortcut?.action === 'system-monitor' ||
         shortcut?.action === 'security-options' ||
         shortcut?.action === 'focus-area' ||
+        shortcut?.action === 'focus-monitor' ||
         shortcut?.action === 'screenshot' ||
         shortcut?.action === 'screenshot-area' ||
         shortcut?.action === 'wm'

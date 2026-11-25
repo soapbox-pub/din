@@ -21,6 +21,7 @@ export type WmCommand =
   | { type: 'focus'; dir: Direction }
   | { type: 'swap'; dir: Direction }
   | { type: 'move-to-monitor'; dir: Direction }
+  | { type: 'move-workspace-to-monitor'; dir: Direction }
   | { type: 'workspace'; n: number }
   | { type: 'move-to-workspace'; n: number; follow: boolean }
   | { type: 'workspace-step'; step: 1 | -1 }
@@ -31,6 +32,10 @@ export type WmCommand =
   | { type: 'toggle-float' }
   | { type: 'toggle-tiling' }
   | { type: 'fullscreen' }
+  | { type: 'client-screen' }
+  | { type: 'zoom' }
+  | { type: 'toggle-pseudo' }
+  | { type: 'pop' }
   | { type: 'toggle-split' }
   | { type: 'minimize' }
   | { type: 'resize'; dx: number; dy: number }
@@ -75,8 +80,13 @@ interface WmGroup {
 /** The keys of the actions that aren't as they came, by action id (none: no shortcut). */
 export type WmOverrides = Record<string, string[]>;
 
-/** How far Super+- / Super+= resize a tile, in pixels. */
+/**
+ * How far Super+- / Super+= resize a window, in pixels: a little with Alt,
+ * a lot with Ctrl (Omarchy's steps).
+ */
 const RESIZE_STEP = 100;
+const RESIZE_STEP_SMALL = 25;
+const RESIZE_STEP_LARGE = 300;
 
 const DIRECTIONS: { dir: Direction; code: string; where: string }[] = [
   { dir: 'left', code: 'ArrowLeft', where: 'to the left' },
@@ -94,10 +104,26 @@ export const WM_GROUPS: WmGroup[] = [
       { id: 'toggle-tiling', label: 'Turn tiling on or off', keys: ['Shift+KeyT'], command: { type: 'toggle-tiling' } },
       { id: 'toggle-float', label: 'Float or tile the window (turns tiling on)', keys: ['KeyT'], command: { type: 'toggle-float' } },
       { id: 'toggle-split', label: 'Split the other way', keys: ['KeyJ'], command: { type: 'toggle-split' } },
-      { id: 'narrower', label: 'Make the window narrower', keys: ['Minus'], command: { type: 'resize', dx: -RESIZE_STEP, dy: 0 } },
-      { id: 'wider', label: 'Make the window wider', keys: ['Equal'], command: { type: 'resize', dx: RESIZE_STEP, dy: 0 } },
-      { id: 'shorter', label: 'Make the window shorter', keys: ['Shift+Minus'], command: { type: 'resize', dx: 0, dy: -RESIZE_STEP } },
-      { id: 'taller', label: 'Make the window taller', keys: ['Shift+Equal'], command: { type: 'resize', dx: 0, dy: RESIZE_STEP } },
+      { id: 'toggle-pseudo', label: 'Keep the window its own size inside its tile', keys: ['KeyP'], command: { type: 'toggle-pseudo' } },
+      { id: 'client-screen', label: 'Show fullscreen content inside the tile', keys: ['Ctrl+KeyF'], command: { type: 'client-screen' } },
+      { id: 'zoom', label: 'Give the window the whole layout, gaps kept', keys: ['Alt+KeyF'], command: { type: 'zoom' } },
+      { id: 'pop', label: 'Pop the window out onto every workspace', keys: ['KeyO'], command: { type: 'pop' } },
+      // Floating, a window grows or shrinks around its middle; tiled, the
+      // splits beside it move that way (Hyprland's resizeactive), so a tile
+      // on the right of its split gets narrower as the split goes right.
+      { id: 'narrower', label: 'Narrower, or a tile’s edge left', keys: ['Minus'], command: { type: 'resize', dx: -RESIZE_STEP, dy: 0 } },
+      { id: 'wider', label: 'Wider, or a tile’s edge right', keys: ['Equal'], command: { type: 'resize', dx: RESIZE_STEP, dy: 0 } },
+      { id: 'shorter', label: 'Shorter, or a tile’s edge up', keys: ['Shift+Minus'], command: { type: 'resize', dx: 0, dy: -RESIZE_STEP } },
+      { id: 'taller', label: 'Taller, or a tile’s edge down', keys: ['Shift+Equal'], command: { type: 'resize', dx: 0, dy: RESIZE_STEP } },
+      ...([['a little', 'Alt', RESIZE_STEP_SMALL], ['a lot', 'Ctrl', RESIZE_STEP_LARGE]] as const).flatMap(([size, mod, step]): WmAction[] => {
+        const id = size === 'a little' ? 'small' : 'large';
+        return [
+          { id: `narrower-${id}`, label: `Narrower, or a tile’s edge left, ${size}`, keys: [`${mod}+Minus`], command: { type: 'resize', dx: -step, dy: 0 } },
+          { id: `wider-${id}`, label: `Wider, or a tile’s edge right, ${size}`, keys: [`${mod}+Equal`], command: { type: 'resize', dx: step, dy: 0 } },
+          { id: `shorter-${id}`, label: `Shorter, or a tile’s edge up, ${size}`, keys: [`Shift+${mod}+Minus`], command: { type: 'resize', dx: 0, dy: -step } },
+          { id: `taller-${id}`, label: `Taller, or a tile’s edge down, ${size}`, keys: [`Shift+${mod}+Equal`], command: { type: 'resize', dx: 0, dy: step } },
+        ];
+      }),
     ],
   },
   {
@@ -124,7 +150,7 @@ export const WM_GROUPS: WmGroup[] = [
           id: `move-to-monitor-${dir}`, label: `Move the window to the monitor ${where}`, keys: [`Shift+Ctrl+${code}`], command: { type: 'move-to-monitor', dir },
         })),
       },
-      { id: 'fullscreen', label: 'Full screen', keys: ['KeyF'], command: { type: 'fullscreen' } },
+      { id: 'fullscreen', label: 'Full screen (maximize, while tiling is off)', keys: ['KeyF'], command: { type: 'fullscreen' } },
       { id: 'minimize', label: 'Minimize', keys: ['KeyM'], command: { type: 'minimize' } },
       { id: 'close', label: 'Close', keys: ['KeyW', 'KeyQ'], command: { type: 'close' } },
     ],
@@ -132,6 +158,13 @@ export const WM_GROUPS: WmGroup[] = [
   {
     group: 'Workspaces',
     rows: [
+      {
+        label: 'Move the workspace to the monitor in that direction',
+        keys: ['Super', 'Shift', 'Alt', '←↑↓→'],
+        actions: DIRECTIONS.map(({ dir, code, where }) => ({
+          id: `move-workspace-to-monitor-${dir}`, label: `Move the workspace to the monitor ${where}`, keys: [`Shift+Alt+${code}`], command: { type: 'move-workspace-to-monitor', dir },
+        })),
+      },
       {
         label: 'Go to workspace 1 to 10',
         keys: ['Super', '1 … 0'],

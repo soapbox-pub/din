@@ -16,7 +16,8 @@ function win(id: string, appId: string, extra: Partial<LiveWindow> = {}): LiveWi
   return {
     id, appId, x: 10, y: 20, width: 800, height: 600, z: 1,
     minimized: false, closing: false, maximized: false, snapped: null, split: null, monitor: null,
-    restore: null, frameless: false, floating: false, workspace: 1, ...extra,
+    restore: null, frameless: false, floating: false, pseudo: false, zoomed: false, pinned: false, lifted: null,
+    workspace: 1, ...extra,
   };
 }
 

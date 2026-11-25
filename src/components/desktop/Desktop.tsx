@@ -20,6 +20,7 @@ import { setPauseMediaWhileRecording } from '@/lib/mediaPause';
 import { setSpeechVoice } from '@/lib/speech';
 import { taskbarWorkspaceClass } from '@/lib/taskbarStyles';
 import { cn } from '@/lib/utils';
+import { getMouseBridge } from '@/lib/mouse';
 import { VolumeOsd } from './VolumeOsd';
 import { WorkspaceOsd } from './WorkspacesIndicator';
 import { Announcer } from './Announcer';
@@ -76,6 +77,7 @@ import { WidgetsProvider } from './widgets/WidgetsProvider';
 import { WidgetLayer } from './widgets/WidgetLayer';
 import { DesktopIconsProvider } from './icons/DesktopIconsProvider';
 import { DesktopIconLayer } from './icons/DesktopIconLayer';
+import { WINDOW_GESTURE_ATTR } from '@/shared/liquidGlass';
 import { homeArea, isShown, SCRATCHPAD, SCRATCHPAD_BACKDROP_Z, useWindows, windowRect, windowStackZ, type TilingSettings, type WindowState } from '@/hooks/useWindows';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useMovingWindows } from '@/lib/windowGestures';
@@ -84,6 +86,9 @@ import { WindowActionsContext, WindowManagerContext } from '@/contexts/WindowMan
 import { useMonitors, WorkAreasContext } from '@/contexts/MonitorsContext';
 import { contains, primaryArea, rectStyle, workAreas, type WorkArea } from '@/lib/monitors';
 import { restoreCursorTryOn } from '@/lib/cursorTryOn';
+
+/** The least time between workspace steps from Super and the wheel, so one flick is one step. */
+const WORKSPACE_WHEEL_MS = 200;
 
 /** How long after a click a window it opens still counts as opened by it. */
 const LAUNCH_POINTER_MS = 2000;
@@ -287,8 +292,8 @@ function DesktopSession() {
 
   const { config } = useAppContext();
   const tiling = useMemo<TilingSettings>(
-    () => ({ enabled: config.tilingEnabled, gap: config.tilingGap }),
-    [config.tilingEnabled, config.tilingGap],
+    () => ({ enabled: config.tilingEnabled, gap: config.tilingGap, outerGap: config.tilingOuterGap ?? config.tilingGap }),
+    [config.tilingEnabled, config.tilingGap, config.tilingOuterGap],
   );
   const taskbar = config.desktopLayout === 'taskbar';
   useEffect(() => setPauseMediaWhileRecording(config.pauseMediaWhileRecording !== false), [config.pauseMediaWhileRecording]);
@@ -296,8 +301,66 @@ function DesktopSession() {
   const tilingRef = useRef(tiling);
   const getTiling = useCallback(() => tilingRef.current, []);
 
-  const manager = useWindows(getApp, getAreas, getLaunchMonitor, getTiling);
-  const { fitToAreas, relayout, setCurrentMonitor } = manager.actions;
+  // Where the pointer last was, in the viewport: a floating window tiled
+  // again goes beside the tile under it, as on Hyprland.
+  const pointerAt = useRef<{ x: number; y: number } | null>(null);
+  const getPointer = useCallback(() => {
+    const at = pointerAt.current;
+    const origin = workspaceRef.current?.getBoundingClientRect();
+    return at && origin ? { x: at.x - origin.left, y: at.y - origin.top } : null;
+  }, []);
+
+  const jumpPointer = useCallback(({ x, y }: { x: number; y: number }) => {
+    const workspace = workspaceRef.current;
+    const origin = workspace?.getBoundingClientRect();
+    const screen = workspace?.closest('[data-screen-root]')?.getBoundingClientRect();
+    if (!origin || !screen) return;
+    void getMouseBridge()?.jump(x + origin.left - screen.left, y + origin.top - screen.top)
+      .catch(console.warn);
+  }, []);
+  const manager = useWindows(getApp, getAreas, getLaunchMonitor, getTiling, getPointer, jumpPointer);
+  const { fitToAreas, relayout, setCurrentMonitor, focus, stepWorkspace, getSession } = manager.actions;
+  // While windows tile, focus follows the pointer onto floating windows too
+  // (Hyprland's follow_mouse; tiles handle it themselves, in Window). Only a
+  // real move counts, so a layout change sliding another window under a
+  // resting pointer doesn't take focus, nor does a drag passing over one.
+  const followMouse = config.tilingEnabled && config.focusFollowsPointer;
+  const hovered = useRef<string | null>(null);
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      pointerAt.current = { x: e.clientX, y: e.clientY };
+      if (!followMouse || e.buttons !== 0 || e.pointerType === 'touch') return;
+      if (document.documentElement.hasAttribute(WINDOW_GESTURE_ATTR)) return;
+      const id = e.target instanceof Element ? (e.target.closest<HTMLElement>('[data-window-id]')?.dataset.windowId ?? null) : null;
+      if (id === hovered.current) return;
+      hovered.current = id;
+      if (id) {
+        const session = getSession();
+        const target = session.windows.find((w) => w.id === id);
+        // The window itself handles tiled surfaces, including guest pointer events.
+        if (!target || (target.tiled && !target.maximized)) return;
+        if (session.scratchpad && target.workspace !== SCRATCHPAD && homeArea(areasRef.current, target)?.id === session.scratchpad) return;
+        focus(id);
+      }
+    };
+    window.addEventListener('pointermove', onPointerMove, true);
+    return () => window.removeEventListener('pointermove', onPointerMove, true);
+  }, [followMouse, focus, getSession]);
+  // Super and the wheel go through the workspaces with windows, as
+  // Omarchy's Super+scroll: down to the next, up to the one before.
+  useEffect(() => {
+    let last = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.deltaY === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.timeStamp - last < WORKSPACE_WHEEL_MS) return;
+      last = e.timeStamp;
+      stepWorkspace(e.deltaY > 0 ? 1 : -1);
+    };
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => window.removeEventListener('wheel', onWheel, true);
+  }, [stepWorkspace]);
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       const monitor = monitorsRef.current.find((m) => contains(m, e.clientX, e.clientY));
@@ -334,6 +397,7 @@ function DesktopSession() {
   const covered = coveredWindows(manager.windows, areas, moving);
   const barArea = primaryArea(areas);
   const barWindow = taskbar ? null : menuBarWindow(manager.windows, barArea);
+  const primaryFullscreen = manager.windows.some((w) => isShown(w) && w.presentation === 'screen' && homeArea(areas, w)?.primary);
 
   return (
     <WindowManagerContext.Provider value={manager}>
@@ -346,7 +410,7 @@ function DesktopSession() {
                   <DesktopAssistantHost>
                     <SessionHosts />
                     <Wallpaper backdrop={<DesktopMenu />}>
-                      {!taskbar && <MenuBar />}
+                      {!taskbar && <div className={cn('contents', primaryFullscreen && 'invisible')}><MenuBar /></div>}
 
                       {/* Workspace area - windows render here. It's the primary
                           monitor below the menu bar, but windows may sit outside it on
@@ -408,7 +472,9 @@ function DesktopSession() {
                         ))}
                       </main>
 
-                      {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
+                      <div className={cn('contents', primaryFullscreen && 'invisible')}>
+                        {taskbar ? <Taskbar /> : <Dock workspaceRef={workspaceRef} />}
+                      </div>
                       <SessionOverlays />
                     </Wallpaper>
                   </DesktopAssistantHost>

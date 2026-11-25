@@ -78,6 +78,10 @@ const savedWindowSchema = z.object({
   restore: rectSchema.nullable(),
   frameless: z.boolean(),
   floating: z.boolean(),
+  /** Older sessions have none of these three: off. */
+  pseudo: z.boolean().optional(),
+  zoomed: z.boolean().optional(),
+  pinned: z.boolean().optional(),
   workspace: z.number().int().min(1),
   /**
    * It's in the scratchpad. Saved as this rather than as the scratchpad's
@@ -125,6 +129,11 @@ export interface LiveSession {
     restore: { x: number; y: number; width: number; height: number } | null;
     frameless: boolean;
     floating: boolean;
+    pseudo: boolean;
+    zoomed: boolean;
+    pinned: boolean;
+    /** The floating geometry of a tile being dragged, which is what's saved. */
+    lifted: { x: number; y: number; width: number; height: number } | null;
     workspace: number;
   }[];
   trees: Record<string, TileNode>;
@@ -244,10 +253,10 @@ export function snapshotSession(
         id: w.id,
         appId: w.appId,
         params: lasting(w.params),
-        x: w.x,
-        y: w.y,
-        width: w.width,
-        height: w.height,
+        x: w.lifted?.x ?? w.x,
+        y: w.lifted?.y ?? w.y,
+        width: w.lifted?.width ?? w.width,
+        height: w.lifted?.height ?? w.height,
         z: i + 1,
         minimized: w.minimized,
         maximized: w.maximized,
@@ -259,6 +268,9 @@ export function snapshotSession(
         floating: w.floating,
         workspace: w.workspace === SCRATCHPAD ? 1 : w.workspace,
         ...(w.workspace === SCRATCHPAD ? { scratchpad: true } : {}),
+        ...(w.pseudo ? { pseudo: true } : {}),
+        ...(w.zoomed ? { zoomed: true } : {}),
+        ...(w.pinned ? { pinned: true } : {}),
         native: typeof w.params?.xid === 'number',
         ...(state !== undefined ? { state } : {}),
       };

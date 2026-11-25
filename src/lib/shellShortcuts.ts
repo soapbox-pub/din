@@ -121,6 +121,11 @@ export type ShellShortcut =
       repeat: boolean;
     }
   | {
+      /** Ctrl+Alt+Tab pressed inside a guest: focus the next monitor, or the one before. */
+      action: 'focus-monitor';
+      backward: boolean;
+    }
+  | {
       /** Alt released inside a guest: ends an Alt+Tab started there. */
       action: 'alt-released';
     }

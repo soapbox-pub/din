@@ -990,6 +990,18 @@ with tiling on or off. Each monitor has workspaces 1 to 10 of its own;
 windows on the ones not showing stay mounted, hidden like minimized ones.
 The window manager (`src/hooks/useWindows.ts`) keeps the tiling trees, and
 `settle()` derives every window's tile and visibility after each change.
+The tiling controls follow Omarchy's Hyprland settings: a tile
+dragged by its title bar (or anywhere, with Super) comes out of the layout
+and drops into the half of the tile it's let go over; dragging an edge, or
+Super and the right button, moves the splits beside it; floating windows
+paint over the tiles whichever has focus (`windowStackZ`), pinned ones over
+those; a tile maximized or zoomed (Super+Alt+F) hands that to whichever
+tile is focused next; closing a tile focuses the one that takes its place;
+while windows tile, focus follows the pointer (Settings → Windows), and on
+DinOS the pointer goes to the window Super+arrow focuses (din-shell's
+hotkeys socket, `window.dinos.mouse.jump`). With tiling off, the floating
+desktop's own keys (Super+F maximizing, Super+Shift+arrow snapping) are as
+they were.
 While tiling is on, or a workspace other than 1 is in use, the menu bar shows
 the workspaces and a switch to turn tiling off. Keys pressed inside web pages
 reach the shell through the host's `wm` shortcut (`electron/main.mts`).
