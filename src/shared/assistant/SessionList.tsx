@@ -5,6 +5,7 @@ import {
   FolderInput,
   FolderOpen,
   GitBranch,
+  LayoutDashboard,
   GitFork,
   Loader2,
   Pencil,
@@ -172,6 +173,8 @@ export function SessionList({
   onSelect,
   onOpenInNewTab,
   onNew,
+  onOpenProject,
+  selectedProject,
   onFork,
   onDeleted,
   searchRef,
@@ -189,6 +192,13 @@ export function SessionList({
   onOpenInNewTab: (id: string) => void;
   /** Start a new conversation, in `directory` when given. */
   onNew: (directory?: string) => void;
+  /**
+   * Show a project's page (its heading's click; `behind`, a middle-click, in
+   * a tab of its own). Without it, a heading's click collapses it.
+   */
+  onOpenProject?: (root: string, behind?: boolean) => void;
+  /** The project whose page is showing. */
+  selectedProject?: string | null;
   /** Continue a conversation in a new one with its history. */
   onFork: (id: string) => void;
   /** A conversation was deleted from the list. */
@@ -424,6 +434,15 @@ export function SessionList({
       </>
     );
     const heading = 'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 text-left text-xs font-semibold text-muted-foreground';
+    const chevron = (
+      <ChevronRight
+        className={cn(
+          'ml-auto size-3.5 shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 motion-safe:transition-transform',
+          open && 'rotate-90',
+        )}
+        aria-hidden
+      />
+    );
     return (
       <section
         key={project.key}
@@ -453,7 +472,24 @@ export function SessionList({
         <div className="group flex items-center gap-1">
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              {open === null ? (
+              {onOpenProject ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenProject(project.root)}
+                  onAuxClick={(e) => e.button === 1 && onOpenProject(project.root, true)}
+                  onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                  aria-current={selectedProject === project.root ? 'page' : undefined}
+                  title={`${tildify(project.root, home)}\nShow the project`}
+                  className={cn(
+                    heading,
+                    'hover:bg-foreground/5 hover:text-foreground',
+                    selectedProject === project.root && 'bg-selected text-foreground',
+                    focusRing,
+                  )}
+                >
+                  {name}
+                </button>
+              ) : open === null ? (
                 <div title={tildify(project.root, home)} className={heading}>
                   {name}
                 </div>
@@ -470,17 +506,19 @@ export function SessionList({
                   className={cn(heading, 'hover:text-foreground', focusRing)}
                 >
                   {name}
-                  <ChevronRight
-                    className={cn(
-                      'ml-auto size-3.5 shrink-0 opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 motion-safe:transition-transform',
-                      open && 'rotate-90',
-                    )}
-                    aria-hidden
-                  />
+                  {chevron}
                 </button>
               )}
             </ContextMenuTrigger>
             <ContextMenuContent className={cn('w-60', roomyMenu)}>
+              {onOpenProject && (
+                <>
+                  <ContextMenuItem onSelect={() => onOpenProject(project.root)}>
+                    <LayoutDashboard aria-hidden /> Show Project
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => onOpenProject(project.root, true)}>Show in New Tab</ContextMenuItem>
+                </>
+              )}
               <ContextMenuItem onSelect={() => onNew(project.root)}>
                 <SquarePen aria-hidden /> New Conversation
               </ContextMenuItem>
@@ -501,6 +539,22 @@ export function SessionList({
               )}
             </ContextMenuContent>
           </ContextMenu>
+          {/* Its heading shows the project, so collapsing it is a button of its own. */}
+          {onOpenProject && open !== null && (
+            <ToolButton
+              size="xs"
+              label={open ? `Collapse ${project.label}` : `Expand ${project.label}`}
+              aria-expanded={open}
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              onClick={() => toggleCollapsed(project.key)}
+            >
+              <ChevronRight
+                {...toolIcon}
+                className={cn(toolIcon.className, 'motion-safe:transition-transform', open && 'rotate-90')}
+                aria-hidden
+              />
+            </ToolButton>
+          )}
           <ToolButton
             size="xs"
             label={`New conversation in ${project.label}`}

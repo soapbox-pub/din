@@ -37,6 +37,8 @@ import {
   linkedIconPaths,
   packageIconPath,
   PROJECT_ICON_PATHS,
+  projectStats,
+  type StatsSpan,
   sessionTitle,
   worktreeMainCheckout,
 } from '@/lib/assistant';
@@ -272,6 +274,19 @@ export function useSessionSearch(search: string) {
 /** One project's top-level sessions, a page at a time, once `enabled`. */
 export function useProjectSessions(projectID: string, enabled: boolean) {
   return useSessionPages(assistantKeys.projectSessions(projectID), { project: projectID }, enabled);
+}
+
+/** A folder's project's statistics over `span` (see projectStats). */
+export function useProjectStats(directory: string | undefined, span: StatsSpan) {
+  const ready = useAssistantReady();
+  return useQuery({
+    queryKey: ['assistant', 'project-stats', directory ?? '', span],
+    queryFn: () => projectStats(directory!, span),
+    enabled: ready && directory !== undefined,
+    staleTime: 60_000,
+    // Another span's, while this one loads; never another project's.
+    placeholderData: (previous, query) => (query?.queryKey[2] === (directory ?? '') ? previous : undefined),
+  });
 }
 
 export function useAssistantSession(sessionID: string | null) {

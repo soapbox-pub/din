@@ -7,12 +7,17 @@ import { secretName, type PromptAttachment } from '@/lib/assistant';
  * one window, so there is one list.
  */
 
-/** One tab: a conversation, or a new one not yet started (`sessionID` null). */
+/**
+ * One tab: a conversation, or a new one not yet started (`sessionID` null),
+ * which is a project's page while `project` is set (in `directory`).
+ */
 export interface AssistantTab {
   id: string;
   sessionID: string | null;
   /** Where a new conversation will work; null for the default folder. */
   directory: string | null;
+  /** It shows the project in `directory`: its statistics, and a conversation to start there. */
+  project?: boolean;
   /** Its terminal shows, under the conversation (a fresh shell after a restart). */
   terminal?: boolean;
 }
@@ -24,7 +29,15 @@ export interface SavedAssistantTabs {
 }
 
 const savedSchema: z.ZodType<SavedAssistantTabs> = z.object({
-  tabs: z.array(z.object({ id: z.string(), sessionID: z.string().nullable(), directory: z.string().nullable(), terminal: z.boolean().optional() })),
+  tabs: z.array(
+    z.object({
+      id: z.string(),
+      sessionID: z.string().nullable(),
+      directory: z.string().nullable(),
+      project: z.boolean().optional(),
+      terminal: z.boolean().optional(),
+    }),
+  ),
   active: z.number().int(),
 });
 
@@ -32,6 +45,11 @@ const TABS_KEY = 'din.assistant.tabs';
 
 export function newAssistantTab(sessionID: string | null = null, directory: string | null = null): AssistantTab {
   return { id: crypto.randomUUID(), sessionID, directory };
+}
+
+/** A tab showing the project in `directory`. */
+export function newProjectTab(directory: string): AssistantTab {
+  return { ...newAssistantTab(null, directory), project: true };
 }
 
 export function loadAssistantTabs(): SavedAssistantTabs | null {
@@ -155,8 +173,16 @@ export function newConversationDraftKey(tabId: string): string {
   return `new:${tabId}`;
 }
 
-/** A new-conversation tab with nothing typed in it, fine to reuse. */
+/** A new-conversation tab with nothing typed in it, fine to reuse; a project's page isn't. */
 export function isBlankTab(tab: AssistantTab): boolean {
+  return !tab.project && isUntouchedTab(tab);
+}
+
+/**
+ * A new conversation's tab, a project's page or not, with nothing typed in
+ * it: going to a project's page can take its place, as following a link does.
+ */
+export function isUntouchedTab(tab: AssistantTab): boolean {
   // One with its terminal open is in use.
   if (tab.sessionID !== null || tab.terminal) return false;
   try {

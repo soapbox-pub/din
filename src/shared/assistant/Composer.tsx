@@ -154,6 +154,7 @@ export function Composer({
   placeholder = 'Ask anything…',
   autoFocus = false,
   toolbar,
+  header,
   onCycleAgent,
   className,
   textareaRef,
@@ -181,6 +182,8 @@ export function Composer({
   autoFocus?: boolean;
   /** Controls beside the send button: the model and agent pickers. */
   toolbar?: ReactNode;
+  /** Above the message, inside the box: what it's about (a new conversation's project). */
+  header?: ReactNode;
   /** Shift+Tab: on to the next agent. Without it, Shift+Tab moves focus as usual. */
   onCycleAgent?: () => void;
   className?: string;
@@ -542,6 +545,7 @@ export function Composer({
           ))}
         </ul>
       )}
+      {header}
       {files.length > 0 && (
         <ul className="flex flex-wrap items-end gap-1.5 px-1 pt-1" aria-label="Attachments">
           {files.map((file) => (

@@ -1,4 +1,15 @@
-import { getAssistantBridge, type SkillInfo, type SkillSettings } from '@/lib/assistant';
+import {
+  formatCost,
+  formatCount,
+  getAssistantBridge,
+  modelKey,
+  projectStats,
+  totalTokens,
+  worktreeMainCheckout,
+  type SkillInfo,
+  type SkillSettings,
+  type StatsSpan,
+} from '@/lib/assistant';
 import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceName } from '@/lib/assistantSkills';
 import { connectClaudeProvider } from '@/lib/claudeProvider';
 import { connectShakespeareProvider, SHAKESPEARE_MONTHLY_LIMIT } from '@/lib/shakespeareProvider';
@@ -238,6 +249,44 @@ export const assistantArea: Area = {
         // Launches are merged into the window's last, so both are named (Assistant.tsx).
         ctx.actions.open('assistant', { sessionID, directory: null, terminal, terminalAt: nonce, nonce });
         return { data: { sessionID, terminal }, text: `The terminal is ${terminal === 'show' ? 'shown' : 'hidden'}` };
+      },
+    ),
+    command(
+      'assistant',
+      'project',
+      'Show a project’s page in the Assistant, as its heading in the conversation list and its tile on a new tab do, and print what the agent has done in it there: conversations, messages, steps, tokens, cost, days active and models (a worktree counts as its repository)',
+      [
+        { name: 'folder', type: 'path', positional: true, optional: true, help: 'The project’s folder (the current one if left out)' },
+        { name: 'days', type: 'string', choices: ['30', '90', 'all'], help: 'How far back the statistics go: 30 (the default) or 90 days, or all' },
+        { name: 'open', type: 'boolean', help: 'Show its page (the default); --no-open only prints the statistics' },
+      ],
+      async (args, ctx) => {
+        const given = (args.optString('folder') ?? ctx.cwd).replace(/(.)\/+$/, '$1');
+        if (!given) throw new CommandError('Missing folder', 'usage');
+        // A worktree's page is its main checkout's, as the conversation list has it.
+        const gitFile = await getFsBridge()?.readFile(`${given}/.git`, 4096).catch(() => null);
+        const folder = (gitFile && worktreeMainCheckout(new TextDecoder().decode(gitFile.data))) || given;
+        const span = (args.optString('days') ?? '30') as StatsSpan;
+        const stats = await projectStats(folder, span);
+        if (args.optBool('open') !== false) {
+          const nonce = Date.now();
+          // Launches are merged into the window's last, so both are named (Assistant.tsx).
+          ctx.actions.open('assistant', { sessionID: null, directory: null, project: folder, projectAt: nonce, nonce });
+        }
+        const tokens = totalTokens(stats.tokens);
+        return {
+          data: { folder, ...stats },
+          text: [
+            `${folder}, ${span === 'all' ? 'all time' : `the last ${span} days`}:`,
+            `conversations: ${stats.sessions}${stats.subagents ? ` (and ${stats.subagents} subagents)` : ''}`,
+            `messages sent: ${stats.prompts}`,
+            `steps: ${stats.steps}`,
+            `tokens: ${formatCount(tokens)} (${formatCount(stats.tokens.output + stats.tokens.reasoning)} written)`,
+            `cost: ${formatCost(stats.cost) || '$0'}`,
+            `days active: ${stats.activeDays}${stats.streak > 1 ? `, ${stats.streak} in a row` : ''}`,
+            ...stats.models.map((m) => `model: ${modelKey(m.model)}${m.model.variant && m.model.variant !== 'default' ? ` (${m.model.variant})` : ''}, ${m.steps} steps${m.cost > 0 ? `, ${formatCost(m.cost)}` : ''}`),
+          ].join('\n'),
+        };
       },
     ),
     command('assistant', 'models', 'The AI models on this computer (Ollama’s), the best one for it, and the others Settings → Assistant offers', [], async () => {

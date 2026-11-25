@@ -230,6 +230,26 @@ export interface TokenUsage {
   cache: { read: number; write: number };
 }
 
+/** What `opencode stats` counts (OpenCode's SessionStats.Info), tools left out. */
+export interface AssistantStats {
+  range: { from: number; to: number };
+  /** Top-level conversations, and subagents' apart. */
+  sessions: number;
+  subagents: number;
+  /** Messages the user sent. */
+  prompts: number;
+  /** The model's turns: each reply, and each call to a tool in one. */
+  steps: number;
+  tokens: TokenUsage;
+  cost: number;
+  /** Days it worked on, and how many in a row up to today. */
+  activeDays: number;
+  streak: number;
+  /** Steps a day, on the days it worked (YYYY-MM-DD, in the local time zone). */
+  activity: { date: string; steps: number }[];
+  models: { model: ModelRef; steps: number; tokens: TokenUsage; cost: number }[];
+}
+
 export interface SessionInfo {
   id: string;
   parentID?: string;
@@ -616,6 +636,38 @@ export interface MessagePage {
   older: string | null;
 }
 
+/** How far back a project's statistics go: the last 30 or 90 days, or all time. */
+export type StatsSpan = '30' | '90' | 'all';
+
+/**
+ * A folder's project's statistics over `span`, as `opencode stats --project`
+ * counts them: by OpenCode's project ID, so every worktree of a repository
+ * counts (and other repositories made from the same template too).
+ */
+export async function projectStats(directory: string, span: StatsSpan): Promise<AssistantStats> {
+  const { id: project } = await assistantApi.location(directory);
+  const now = new Date();
+  let from: number | undefined;
+  if (span !== 'all') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    start.setDate(start.getDate() - (Number(span) - 1));
+    from = start.getTime();
+  }
+  return assistantApi.stats({ project, from, to: now.getTime() + 1 });
+}
+
+/** A count to read at a glance: 912, 12.4K, 3.1M, 8.2B. */
+export function formatCount(n: number): string {
+  if (n < 1000) return String(Math.round(n));
+  const [value, unit] = n < 1e6 ? [n / 1e3, 'K'] : n < 1e9 ? [n / 1e6, 'M'] : [n / 1e9, 'B'];
+  return `${value < 10 ? value.toFixed(1).replace(/\.0$/, '') : Math.round(value)}${unit}`;
+}
+
+/** Every token a model read and wrote, cached ones included. */
+export function totalTokens(tokens: TokenUsage): number {
+  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write;
+}
+
 /** OpenCode's API, the requests Din makes. */
 export const assistantApi = {
   /**
@@ -634,6 +686,27 @@ export const assistantApi = {
 
   session: async (sessionID: string) =>
     (await call<{ data: SessionInfo }>('GET', `/api/session/${id(sessionID)}`)).data,
+
+  /** The OpenCode project a folder is in: its ID (a repository's root commit) and its folder. */
+  location: async (directory: string) =>
+    (await call<{ directory: string; project: { id: string; directory: string } }>('GET', `/api/location${query({ 'location[directory]': directory })}`)).project,
+
+  /**
+   * What the agent did between `from` and `to` (ms), in one project or all
+   * of them, as `opencode stats` shows it: conversations, prompts, steps,
+   * tokens, cost, the days it worked, and its models.
+   */
+  stats: (options: { project?: string; from?: number; to?: number }) =>
+    call<{ data: AssistantStats }>(
+      'GET',
+      `/api/experimental/session/stats${query({
+        project: options.project,
+        from: options.from,
+        to: options.to,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        tools: 'none',
+      })}`,
+    ).then((reply) => reply.data),
 
   /** The sessions working right now. */
   active: async () => Object.keys((await call<{ data: Record<string, unknown> }>('GET', '/api/session/active')).data),
