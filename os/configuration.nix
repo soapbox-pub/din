@@ -1849,7 +1849,8 @@ in
     export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH:${featuresPath}"
   '';
   # Its skills for every session on the computer, from OpenCode's system
-  # directory: making apps and widgets, and changing DinOS. They point at
+  # directory: making apps and widgets, editing Studio's recordings,
+  # publishing a site as an nsite with ngit, and changing DinOS. They point at
   # Din's docs and API types, which come along in /etc/din.
   environment.etc."opencode/skills".source = ./opencode/skills;
   # And Din's plugin (opencode/plugins/din): `preview`, which shows a page or a file
