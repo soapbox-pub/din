@@ -125,16 +125,17 @@ function useMinute(): number {
   return now;
 }
 
-/** "3h" beside a message's buttons, the full date and time on hover. */
+/** "3h" beside a message's buttons, the full date and time on hover; nothing in its first minute. */
 function MessageTime({ at }: { at: number }) {
   const now = useContext(NowContext);
+  if (now - at < 60_000) return null;
   return (
     <time
       dateTime={new Date(at).toISOString()}
       title={fullTime(at)}
       className="inline-flex h-8 items-center px-2 text-xs tabular-nums text-muted-foreground"
     >
-      {relativeTime(at, Math.max(now, at))}
+      {relativeTime(at, now)}
     </time>
   );
 }
