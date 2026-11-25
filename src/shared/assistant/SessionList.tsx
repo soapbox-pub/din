@@ -1,5 +1,18 @@
 import { useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type Ref } from 'react';
-import { ChevronRight, Folder, FolderInput, GitBranch, GitFork, Loader2, Pencil, Plus, SquarePen, Trash2 } from 'lucide-react';
+import {
+  ChevronRight,
+  Folder,
+  FolderInput,
+  FolderOpen,
+  GitBranch,
+  GitFork,
+  Loader2,
+  Pencil,
+  Plus,
+  SquarePen,
+  SquareTerminal,
+  Trash2,
+} from 'lucide-react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -150,7 +163,8 @@ function inOrder<T>(items: T[], order: string[], id: (item: T) => string): T[] {
  * with the conversations that match, and those whose names match with none
  * at all, so a conversation can be started in one found. Middle-clicking
  * a conversation opens it in a new tab; right-clicking one does that too, or
- * forks, moves, renames or deletes it; right-clicking a project starts a conversation there.
+ * forks, moves, renames or deletes it; right-clicking a project starts a
+ * conversation there, or opens its folder in Files or the Terminal.
  * Dragging a conversation onto another project moves it to that project's folder.
  */
 export function SessionList({
@@ -200,7 +214,7 @@ export function SessionList({
   // Rename puts focus in the title field; the closing menu mustn't take it back.
   const keepFocus = useRef(false);
   const move = useMoveSession();
-  const { notify } = useAssistantHost();
+  const { notify, openPath, openApp } = useAssistantHost();
   const [dragging, setDragging] = useState<string | null>(null);
   const draggingRef = useRef(false);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -469,6 +483,13 @@ export function SessionList({
             <ContextMenuContent className={cn('w-60', roomyMenu)}>
               <ContextMenuItem onSelect={() => onNew(project.root)}>
                 <SquarePen aria-hidden /> New Conversation
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onSelect={() => openPath(project.root, 'directory')}>
+                <FolderOpen aria-hidden /> Open Folder
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => openApp('terminal', { cwd: project.root })}>
+                <SquareTerminal aria-hidden /> Open in Terminal
               </ContextMenuItem>
               {open !== null && (
                 <>
