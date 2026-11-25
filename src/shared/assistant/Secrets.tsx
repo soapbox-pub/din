@@ -1,5 +1,5 @@
-import { useId, useState, type FormEvent } from 'react';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { useId, useState, type ComponentProps, type FormEvent } from 'react';
+import { Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -25,6 +25,32 @@ function variableName(typed: string): string {
     .replace(/[\s.-]+/g, '_')
     .replace(/[^A-Z0-9_]/g, '')
     .slice(0, 64);
+}
+
+/** A secret's field, hidden as it's typed, with an eye to show it. */
+function SecretInput({ className, ...props }: Omit<ComponentProps<typeof Input>, 'type'>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        {...props}
+        type={shown ? 'text' : 'password'}
+        autoComplete="off"
+        spellCheck={false}
+        className={cn('pr-10', shown && 'font-mono', className)}
+      />
+      <button
+        type="button"
+        className="absolute top-1 right-1 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+        aria-label={shown ? 'Hide secret' : 'Show secret'}
+        aria-pressed={shown}
+        title={shown ? 'Hide' : 'Show'}
+        onClick={() => setShown((s) => !s)}
+      >
+        {shown ? <EyeOff className="size-4.5" strokeWidth={1.75} aria-hidden /> : <Eye className="size-4.5" strokeWidth={1.75} aria-hidden />}
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -79,14 +105,11 @@ export function SecretDialog({
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor={`${id}-value`}>Secret</Label>
-            <Input
+            <SecretInput
               id={`${id}-value`}
-              type="password"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="Paste it here"
-              autoComplete="off"
-              spellCheck={false}
               autoFocus
             />
           </div>
@@ -167,11 +190,8 @@ export function SecretRequestCard({ request, className }: { request: SecretReque
             <Label htmlFor={id} className="sr-only">
               {request.name}
             </Label>
-            <Input
+            <SecretInput
               id={id}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
               placeholder="Paste it here"
               value={value}
               onChange={(e) => setValue(e.target.value)}
