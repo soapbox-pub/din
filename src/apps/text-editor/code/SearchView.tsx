@@ -5,7 +5,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { cn } from '@/lib/utils';
 import { FileIcon } from '@/shared/FileIcon';
-import { FieldBox, IconButton, OptionToggle, TextButton, fieldInputClass } from './controls';
+import { FieldBox, IconButton, OptionToggle, TextButton, fieldInputClass } from '@/shared/code/controls';
 import { searchRegExp, type SearchState } from './search';
 
 const copyText = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});

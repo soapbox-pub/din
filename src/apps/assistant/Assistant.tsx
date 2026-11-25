@@ -134,6 +134,7 @@ import { ATTACHED_DIR, intentOf, type LaunchIntent } from './intents';
 import { GitBranchChip } from './GitPanel';
 import { ProjectHeading, ProjectOverview, RecentProjects } from './ProjectPage';
 import { SidePanel, type SideTab } from './SidePanel';
+import type { FileMode } from './FilePreview';
 import { TERMINAL_ATTRIBUTE, TerminalPanel } from './TerminalPanel';
 import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
@@ -439,6 +440,8 @@ function AssistantWindow() {
   // Each preview's reloads, by URI, so its frame starts again.
   const [reloads, setReloads] = useState<Record<string, number>>({});
   const reloadPreview = (uri: string) => setReloads((prev) => ({ ...prev, [uri]: (prev[uri] ?? 0) + 1 }));
+  // Which files are shown as their source rather than drawn, by URI.
+  const [previewModes, setPreviewModes] = useState<Record<string, FileMode>>({});
   const defaultDirectory = useAssistantDirectory();
   const home = useHomeDirectory();
 
@@ -1023,6 +1026,8 @@ function AssistantWindow() {
             onClosePreview={closePreview}
             reloads={reloads}
             onReload={reloadPreview}
+            modes={previewModes}
+            onMode={(uri, mode) => setPreviewModes((prev) => ({ ...prev, [uri]: mode }))}
             onHide={() => setGitShown(false)}
             style={{ width: sideWidth }}
             className={cn(

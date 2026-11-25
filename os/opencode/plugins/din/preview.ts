@@ -1,12 +1,13 @@
 /*
- * The `preview` tool: shows a web page beside the conversation in Din's
- * Assistant, in the pane where its Git panel is, a tab for each page.
+ * The `preview` tool: shows a web page or a file beside the conversation in
+ * Din's Assistant, in the pane where its Git panel is, a tab for each.
  *
- * The tool itself only checks the page is one the pane can show and says
+ * The tool itself only checks it's something the pane can show and says
  * so; the Assistant sees the call in the conversation and opens the tab
  * (src/shared/assistant/previews.ts), framing a server on this computer as
- * it is and a file through a URL that serves its folder alone
- * (din.files.pageUrl).
+ * it is and an HTML file through a URL that serves its folder alone
+ * (din.files.pageUrl), and showing any other file by its kind
+ * (src/apps/assistant/FilePreview.tsx).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +39,9 @@ function check(uri: string): string {
   } catch {
     throw new Error(`${file} doesn’t exist.`);
   }
-  if (!stats.isFile()) throw new Error(`${file} is a folder: preview a file in it, such as its index.html.`);
+  if (!stats.isFile()) throw new Error(`${file} is a folder: preview a file in it, such as its README or index.html.`);
+  // Only a web page is served with its folder; any other file is read alone.
+  if (!/\.(?:html?|xhtml)$/i.test(file)) return url.href;
   const folder = path.dirname(fs.realpathSync(file));
   const home = fs.realpathSync(os.homedir());
   if (folder === home || home.startsWith(folder === path.sep ? folder : folder + path.sep)) {
@@ -52,17 +55,18 @@ export function addPreview(editor: ToolEditor): void {
   editor.add({
     name: 'preview',
     description: [
-      'Show the user a web page in a pane beside this conversation, in Din’s Assistant: a page you made or the app you’re working on.',
-      'Give a file:// URI for an HTML file (its scripts, styles and pictures load by relative path from its folder, so keep a page in a folder of its own),',
-      'or the http://localhost URL of a development server you started (any port; 127.0.0.1 and [::1] too).',
-      'Each page gets a tab in the pane; calling it again with the same URI reloads that tab. Use it after building or changing something the user would want to see.',
+      'Show the user a file or a web page in a pane beside this conversation, in Din’s Assistant: something you made or changed, a file they asked to see, or the app you’re working on.',
+      'Give a file:// URI for any file: source code is shown highlighted, Markdown drawn as a document, pictures, video, audio and PDFs as themselves,',
+      'and an HTML file as a web page (its scripts, styles and pictures load by relative path from its folder, so keep a page in a folder of its own); a page, Markdown or SVG has a tab for its source too.',
+      'Or give the http://localhost URL of a development server you started (any port; 127.0.0.1 and [::1] too).',
+      'Each gets a tab in the pane, which follows changes to the file as they’re saved; calling it again with the same URI shows and reloads that tab.',
       'Nothing else can be previewed, and only Din’s Assistant shows the pane.',
     ].join(' '),
     input: {
       type: 'object',
       properties: {
-        uri: { type: 'string', description: 'file:///absolute/path/to/index.html, or http://localhost:<port>/<path>' },
-        title: { type: 'string', description: 'A short name for the tab, such as the app’s name' },
+        uri: { type: 'string', description: 'file:///absolute/path/to/a/file (index.html, README.md, src/main.rs, a picture…), or http://localhost:<port>/<path>' },
+        title: { type: 'string', description: 'A short name for the tab, such as the app’s or the file’s name' },
       },
       required: ['uri'],
       additionalProperties: false,
@@ -71,7 +75,7 @@ export function addPreview(editor: ToolEditor): void {
     options: { codemode: false },
     execute: async (input) => {
       const uri = check(String(input.uri ?? ''));
-      return { content: `Showing ${uri} in the preview pane beside the conversation.` };
+      return { content: `Showing ${uri} in the pane beside the conversation.` };
     },
   });
 }

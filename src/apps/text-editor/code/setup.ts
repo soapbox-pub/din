@@ -29,7 +29,7 @@ import {
 } from '@codemirror/autocomplete';
 import { indentationMarkers } from '@replit/codemirror-indentation-markers';
 import { showMinimap } from '@replit/codemirror-minimap';
-import { createFindPanel } from './findPanel';
+import { createFindPanel } from '@/shared/code/findPanel';
 import { editorChrome, fontSizeTheme, syntaxTheme } from '@/shared/codeTheme';
 
 export interface EditorPrefs {

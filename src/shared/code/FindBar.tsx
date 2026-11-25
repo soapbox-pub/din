@@ -70,7 +70,9 @@ export function FindBar({ view, store }: { view: EditorView; store: FindBarStore
     closeSearchPanel(view);
     view.focus();
   };
-  const showReplace = store.replace;
+  // A read-only view (the Assistant's previews) finds, and never replaces.
+  const readOnly = view.state.readOnly;
+  const showReplace = store.replace && !readOnly;
   const toggleReplace = () => {
     store.setReplace(!store.replace);
   };
@@ -118,14 +120,16 @@ export function FindBar({ view, store }: { view: EditorView; store: FindBarStore
 
   return (
     <div className="flex gap-1 bg-background/60 px-2 py-1.5 backdrop-blur-sm" role="search">
-      <IconButton
-        label={showReplace ? 'Hide replace' : 'Show replace (Ctrl+H)'}
-        small
-        className="mt-0.5"
-        onClick={toggleReplace}
-      >
-        <ChevronRight className={cn('size-4 transition-transform motion-reduce:transition-none', showReplace && 'rotate-90')} />
-      </IconButton>
+      {!readOnly && (
+        <IconButton
+          label={showReplace ? 'Hide replace' : 'Show replace (Ctrl+H)'}
+          small
+          className="mt-0.5"
+          onClick={toggleReplace}
+        >
+          <ChevronRight className={cn('size-4 transition-transform motion-reduce:transition-none', showReplace && 'rotate-90')} />
+        </IconButton>
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 items-center gap-1">
           <FieldBox className="min-w-32 max-w-md flex-1" invalid={invalid}>

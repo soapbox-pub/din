@@ -6,7 +6,7 @@
  * plugin's default export needs, and ./types.ts writes out the parts of
  * OpenCode's plugin API it uses.
  *
- * - `preview` (./preview.ts): shows a page beside the conversation.
+ * - `preview` (./preview.ts): shows a page or a file beside the conversation.
  * - Secrets (./secrets.ts): values the user hands a conversation as
  *   environment variables of its commands, hidden from the model, and the
  *   `ask_secret` tool to ask for one.

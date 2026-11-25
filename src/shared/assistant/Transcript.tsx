@@ -52,7 +52,7 @@ import {
 } from '@/shared/assistant/turns';
 import { Markdown } from '@/shared/assistant/Markdown';
 import { dayBreaks, dayLabel, dayOf, fullTime } from '@/shared/assistant/messageTime';
-import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
+import { PreviewOpenContext, previewIcon, previewsOf } from '@/shared/assistant/previews';
 import {
   modelKey,
   relativeTime,
@@ -668,7 +668,7 @@ function TurnPreviews({ items }: { items: SessionMessage[] }) {
           title={`Show ${preview.uri}`}
           className="flex w-full max-w-md min-w-0 items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <AppWindow className="size-4.5 shrink-0 text-ink-accent" strokeWidth={1.75} aria-hidden />
+          {createElement(previewIcon(preview.target), { className: 'size-4.5 shrink-0 text-ink-accent', strokeWidth: 1.75, 'aria-hidden': true })}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{preview.title}</span>
             <span className="block truncate text-xs text-muted-foreground">
@@ -847,7 +847,7 @@ const counted = (one: string, many: string) => (n: number) => (n === 1 ? one : m
 const fixed = (text: string) => () => text;
 
 const TOOL_KINDS: [RegExp, ToolKind][] = [
-  [/(^|__)preview$/, { icon: AppWindow, active: fixed('Showing'), past: fixed('Showed'), count: counted('showed a page', 'showed # pages'), target: (input) => str(input.title) ?? str(input.uri), distinct: true }],
+  [/(^|__)preview$/, { icon: AppWindow, active: fixed('Showing'), past: fixed('Showed'), count: counted('showed a preview', 'showed # previews'), target: (input) => str(input.title) ?? str(input.uri), distinct: true }],
   [/^(read|view|cat)$/, { icon: FileText, active: fixed('Reading'), past: fixed('Read'), count: counted('read a file', 'read # files'), target: filePath, distinct: true }],
   [/^(write|edit|patch|multiedit|apply_patch)/, { icon: FilePen, active: fixed('Editing'), past: fixed('Edited'), count: counted('edited a file', 'edited # files'), target: filePath, distinct: true }],
   [/^(execute|code)/, { icon: Braces, active: fixed('Running code'), past: fixed('Ran code'), count: counted('ran code', 'ran code # times'), target: (input) => str(input.description) }],

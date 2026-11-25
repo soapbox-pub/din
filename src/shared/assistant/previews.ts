@@ -1,16 +1,62 @@
 import { createContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionMessage } from '@/lib/assistant';
+import { AppWindow, FileCode2, FileImage, FileText, Globe, type LucideIcon } from 'lucide-react';
+import { extensionOf, fileCategory } from '@/lib/fileTypes';
 
 /*
- * Previews: the pages the agent showed beside a conversation with its
- * `preview` tool (os/opencode/plugins/preview.ts), each a tab in the side
- * pane. They're read from the conversation itself, so a conversation has
+ * Previews: the pages and files the agent showed beside a conversation
+ * with its `preview` tool (os/opencode/plugins/din/preview.ts), each a tab
+ * in the side pane. They're read from the conversation itself, so a conversation has
  * its tabs again after a restart; closing one is remembered here until the
  * agent shows that page again.
  */
 
-/** What a preview shows: a server on this computer, or an HTML file framed through a URL for its folder. */
+/** What a preview shows: a server on this computer, or a file. */
 export type PreviewTarget = { kind: 'server'; url: string } | { kind: 'file'; path: string };
+
+/**
+ * How a file is shown: a web page framed through a URL for its folder;
+ * Markdown drawn as a document; an SVG drawn as a picture (its scripts never
+ * run); text and code highlighted; anything else as Preview shows it
+ * (pictures, video, songs, PDFs, 3D models, archives). The first three
+ * have their source a click away.
+ */
+export type FileView = 'page' | 'markdown' | 'svg' | 'text' | 'media';
+
+const PAGE = new Set(['html', 'htm', 'xhtml']);
+const MARKDOWN = new Set(['md', 'markdown', 'mdown', 'mkd']);
+
+export function fileView(path: string): FileView {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const ext = extensionOf(name);
+  if (PAGE.has(ext)) return 'page';
+  if (MARKDOWN.has(ext)) return 'markdown';
+  if (ext === 'svg') return 'svg';
+  const category = fileCategory(name, 'file');
+  // One Din doesn't know might be text: it's read, and shown as Preview would if it isn't.
+  return category === 'text' || category === 'code' || category === 'other' ? 'text' : 'media';
+}
+
+/** A preview's icon, for its tab and its card in the transcript. */
+export function previewIcon(target: PreviewTarget): LucideIcon {
+  if (target.kind === 'server') return Globe;
+  switch (fileView(target.path)) {
+    case 'page':
+      return AppWindow;
+    case 'markdown':
+      return FileText;
+    case 'svg':
+    case 'media':
+      return FileImage;
+    default:
+      return FileCode2;
+  }
+}
+
+/** Whether a file's view has its source a click away. */
+export function hasSource(view: FileView): boolean {
+  return view === 'page' || view === 'markdown' || view === 'svg';
+}
 
 export interface Preview {
   /** The page, as the agent named it (normalized): what tells tabs apart. */

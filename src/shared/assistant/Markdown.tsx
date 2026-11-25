@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useContext, useRef, type ComponentProps, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useContext, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, FolderOpen, Link as LinkIcon, SquareArrowOutUpRight } from 'lucide-react';
@@ -11,7 +11,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { cleanFsError, getFsBridge } from '@/lib/fs';
+import { cleanFsError, fileUrl, getFsBridge } from '@/lib/fs';
 import { sanitizeNavigationUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
 import { useAssistantHost } from '@/shared/assistant/host';
@@ -29,8 +29,12 @@ const urlTransform = (url: string) => (/^file:/i.test(url) ? url : defaultUrlTra
  * Unless turned off in Settings, headings, emphasis, code and links each get
  * their own color, and list markers share bold text's, as in OpenCode's
  * terminal UI.
+ *
+ * As a document (`asDocument`: a Markdown file shown beside the conversation), its
+ * headings are a document's sizes and its pictures on this computer are
+ * drawn; those anywhere else stay links, as the CSP wouldn't load them.
  */
-export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
+export const Markdown = memo(function Markdown({ text, className, asDocument }: { text: string; className?: string; asDocument?: boolean }) {
   const { colorfulReplies: c } = useAssistantHost();
   const base = useContext(FileLinkBaseContext);
   const link = cn(
@@ -69,8 +73,18 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     li: ({ children }) => <li className="pl-1 [&>ol]:my-1.5 [&>p]:my-1.5 [&>ul]:my-1.5">{children}</li>,
     strong: ({ children }) => <strong className={cn('font-semibold', c && 'text-md-strong')}>{children}</strong>,
     em: ({ children }) => <em className={cn('italic', c && 'text-md-emph')}>{children}</em>,
-    h1: ({ children }) => <h3 className={cn('mb-3 mt-6 text-xl font-semibold first:mt-0', heading)}>{children}</h3>,
-    h2: ({ children }) => <h3 className={cn('mb-3 mt-6 text-lg font-semibold first:mt-0', heading)}>{children}</h3>,
+    h1: ({ children }) =>
+      asDocument ? (
+        <h1 className={cn('mb-4 mt-8 border-b border-border/60 pb-2 text-3xl font-semibold first:mt-0', heading)}>{children}</h1>
+      ) : (
+        <h3 className={cn('mb-3 mt-6 text-xl font-semibold first:mt-0', heading)}>{children}</h3>
+      ),
+    h2: ({ children }) =>
+      asDocument ? (
+        <h2 className={cn('mb-3 mt-8 border-b border-border/60 pb-1.5 text-2xl font-semibold first:mt-0', heading)}>{children}</h2>
+      ) : (
+        <h3 className={cn('mb-3 mt-6 text-lg font-semibold first:mt-0', heading)}>{children}</h3>
+      ),
     h3: ({ children }) => <h4 className={cn('mb-2 mt-5 font-semibold first:mt-0', heading)}>{children}</h4>,
     h4: ({ children }) => <h4 className={cn('mb-2 mt-4 font-semibold first:mt-0', heading)}>{children}</h4>,
     blockquote: ({ children }) => (
@@ -87,6 +101,7 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     // Pictures the model names could be anything, from anywhere: a link instead.
     img: ({ src, alt }) => {
       const file = typeof src === 'string' ? filePathOfHref(src, base) : null;
+      if (file && asDocument) return <LocalImage path={file} alt={alt ?? ''} />;
       if (file) return <FileLink path={file} className={link}>{alt || file.slice(file.lastIndexOf('/') + 1)}</FileLink>;
       const url = typeof src === 'string' ? sanitizeNavigationUrl(src) : null;
       return url ? <WebLink url={url} className={link}>{alt || url}</WebLink> : null;
@@ -101,6 +116,19 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
     </div>
   );
 });
+
+/** A picture on this computer, in a Markdown file shown as a document. */
+function LocalImage({ path, alt }: { path: string; alt: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fileUrl(path).then((u) => live && setUrl(u), () => {});
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  return url ? <img src={url} alt={alt} title={alt || undefined} className="my-2 inline-block max-w-full rounded-lg align-middle" /> : null;
+}
 
 /**
  * A link to a web page (or anything else Din's router opens): clicking opens
