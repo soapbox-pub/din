@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowLeft, Mail as MailIcon, MailOpen, MoreVertical, PanelLeft, RefreshCw, SquarePen, Star, Tag, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, Mail as MailIcon, Inbox, MailOpen, MoreVertical, RefreshCw, Settings, SquarePen, Star, Tag, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDin, useMediaQuery, useMenuBar, useWindowTitle, WindowControls, WindowDragRegion } from '@/sdk/react';
@@ -792,13 +792,16 @@ export function Viewer() {
 
   const noAccounts = accountsQuery.isSuccess && accounts.length === 0;
 
-  const sidebarToggle = !noAccounts && (
-    <ToolButton
-      label={sidebarFits ? (showSidebar ? 'Hide sidebar' : 'Show sidebar') : 'Mailboxes'}
-      aria-haspopup={sidebarFits ? undefined : 'menu'}
-      onClick={(e) => (sidebarFits ? toggleSidebar(!showSidebar) : void pickMailbox(e))}
-    >
-      <PanelLeft className="size-4.5" strokeWidth={1.75} />
+  const settingsButton = !noAccounts && (
+    <ToolButton label="Settings" onClick={() => openMailSettings()}>
+      <Settings className="size-4.5" strokeWidth={1.75} />
+    </ToolButton>
+  );
+
+  // Without the sidebar (too narrow, or hidden from the View menu), this picks the mailbox.
+  const mailboxPicker = !noAccounts && !showSidebar && (
+    <ToolButton label="Mailboxes" aria-haspopup="menu" onClick={(e) => void pickMailbox(e)}>
+      <Inbox className="size-4.5" strokeWidth={1.75} />
     </ToolButton>
   );
 
@@ -830,11 +833,11 @@ export function Viewer() {
         <div className="flex h-full shrink-0 items-center gap-2 pr-2 pl-3.75" style={{ width: sidebarWidth }}>
           <img {...bundledIconProps('/icons/apps/mail.png')} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
           <h1 className="min-w-0 flex-1 truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
-          {sidebarToggle}
+          {settingsButton}
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2 pl-2">
-          {sidebarToggle}
+          {mailboxPicker}
           <img {...bundledIconProps('/icons/apps/mail.png')} alt="" aria-hidden draggable={false} className="size-6 shrink-0 object-contain" />
           <h1 className="truncate font-[family-name:var(--font-title)] text-lg font-medium text-foreground/90">Mail</h1>
         </div>
@@ -845,6 +848,7 @@ export function Viewer() {
           <SquarePen className="size-4.5" strokeWidth={1.75} />
         </ToolButton>
       )}
+      {!showSidebar && settingsButton}
       <div className="min-w-2 flex-1" />
       <WindowControls />
     </WindowDragRegion>
