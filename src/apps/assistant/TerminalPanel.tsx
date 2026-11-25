@@ -16,7 +16,7 @@ import { paneNotifications, paneSession, terminalTheme, useTerminalLook, type Pa
 /**
  * The terminal under a conversation, across the bottom of the Assistant's
  * content pane: a shell in the conversation's folder, one for each tab.
- * Hiding it (Ctrl+`, the folder under the composer) leaves its shell
+ * Hiding it (Ctrl+` or Ctrl+Shift+I, the folder under the composer) leaves its shell
  * running, as switching tabs does; the shell ending, or Close Terminal,
  * puts it away for good. It's the Terminal's own white or black, solid.
  */

@@ -606,7 +606,7 @@ function AssistantWindow() {
     if (!(focused instanceof HTMLElement) || !focused.closest(`[${TERMINAL_ATTRIBUTE}]`)) return;
     requestAnimationFrame(() => paneRef.current?.querySelector<HTMLTextAreaElement>('textarea:not(.xterm-helper-textarea)')?.focus());
   };
-  // Ctrl+` and the folder under the composer.
+  // Ctrl+`, Ctrl+Shift+I and the folder under the composer.
   const toggleTerminal = () => {
     if (activeTab.terminal) leaveTerminal();
     setState((prev) => withTerminal(prev, null, !activeTab.terminal));
@@ -739,6 +739,7 @@ function AssistantWindow() {
     // deletes a word, Ctrl+K the rest of the line, Ctrl+F moves on).
     const inTerminal = e.target instanceof Element && e.target.closest(`[${TERMINAL_ATTRIBUTE}]`) !== null;
     if ((key === '`' || e.code === 'Backquote') && !e.shiftKey) toggleTerminal();
+    else if (key === 'i' && e.shiftKey) toggleTerminal();
     else if (inTerminal && !e.shiftKey && (/^[1-9]$/.test(key) || ['t', 'w', 'f', 'k'].includes(key))) return;
     else if (key === 't') {
       if (e.shiftKey) reopen();
@@ -1585,7 +1586,7 @@ function StatusLine({
           type="button"
           onClick={onToggleTerminal}
           aria-pressed={terminalOpen}
-          title={`${terminalOpen ? 'Hide' : 'Show'} the terminal in ${directory} (Ctrl+\`)`}
+          title={`${terminalOpen ? 'Hide' : 'Show'} the terminal in ${directory} (Ctrl+\` or Ctrl+Shift+I)`}
           className={cn(
             'inline-flex h-4 min-w-0 shrink items-center gap-1 rounded-full px-1 hover:text-foreground',
             focusRing,

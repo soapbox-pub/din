@@ -226,7 +226,7 @@ export const assistantArea: Area = {
     command(
       'assistant',
       'terminal',
-      'Show the terminal under a conversation in the Assistant, a shell in its folder, as Ctrl+` and the folder under its composer do (the conversation that runs it, else the one shown); --hide hides it, its shell still running',
+      'Show the terminal under a conversation in the Assistant, a shell in its folder, as Ctrl+`, Ctrl+Shift+I and the folder under its composer do (the conversation that runs it, else the one shown); --hide hides it, its shell still running',
       [
         { name: 'session', type: 'string', help: 'The conversation’s id (ses_…)' },
         { name: 'hide', type: 'boolean', help: 'Hide it instead' },
