@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ClaudeUsageBars } from '@/shared/assistant/ClaudeUsageBars';
+import { ClaudeUsageLine } from '@/shared/assistant/ClaudeUsageBars';
 import { useAssistantHost } from '@/shared/assistant/host';
 import { CLAUDE_PROVIDER } from '@/lib/claudeProvider';
 import { ModelPrice, ProviderIcon } from '@/shared/assistant/ProviderIcon';
@@ -179,7 +179,7 @@ export function ModelPicker({
               </CommandGroup>
             </CommandList>
           </Command>
-          {selected?.providerID === CLAUDE_PROVIDER && <ClaudeUsageBars headline className="border-t border-border/70 px-3 py-3" />}
+          {selected?.providerID === CLAUDE_PROVIDER && <ClaudeUsageLine className="border-t border-border/70" />}
         </PopoverContent>
       </Popover>
     </>

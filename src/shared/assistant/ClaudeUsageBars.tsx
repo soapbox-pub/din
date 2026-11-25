@@ -37,24 +37,13 @@ function LimitBar({ limit }: { limit: ClaudeUsageLimit }) {
 /**
  * The Claude plan's usage (claudeUsage.ts): a bar for each of its limits,
  * with when it resets, and any extra usage past them. Shown while Claude
- * is connected. `headline` shows only the limit Anthropic picks for a
- * single meter (its `is_active`), for where there's little room.
+ * is connected.
  */
-export function ClaudeUsageBars({
-  className,
-  refreshable = true,
-  headline = false,
-}: {
-  className?: string;
-  refreshable?: boolean;
-  headline?: boolean;
-}) {
+export function ClaudeUsageBars({ className, refreshable = true }: { className?: string; refreshable?: boolean }) {
   const { data, error, isLoading, isFetching } = useClaudeUsage(true);
   const queryClient = useQueryClient();
   if (!getAssistantBridge()) return null;
-  const all = data?.limits ?? [];
-  const picked = all.filter((limit) => limit.active);
-  const limits = headline ? (picked.length > 0 ? picked : all.slice(0, 1)) : all;
+  const limits = data?.limits ?? [];
 
   const refresh = async () => {
     const bridge = getAssistantBridge();
@@ -105,5 +94,59 @@ export function ClaudeUsageBars({
         )
       )}
     </section>
+  );
+}
+
+/**
+ * The plan's usage in one line, for the model picker: the limit Anthropic
+ * picks for a single meter (its `is_active`), else the first, as its label,
+ * a thin bar and how much is used, with when it resets on hover. Settings
+ * shows every limit (ClaudeUsageBars).
+ */
+export function ClaudeUsageLine({ className }: { className?: string }) {
+  const { data, error, isLoading } = useClaudeUsage(true);
+  if (!getAssistantBridge()) return null;
+  const limits = data?.limits ?? [];
+  const limit = limits.find((each) => each.active) ?? limits[0];
+  const row = cn('flex h-8 items-center gap-2 px-3 text-xs', className);
+
+  if (isLoading) {
+    return (
+      <div className={row} aria-busy>
+        <Skeleton className="h-3 w-16" />
+        <Skeleton className="h-1 flex-1 rounded-full" />
+        <Skeleton className="h-3 w-8" />
+      </div>
+    );
+  }
+  if (!limit) {
+    if (!error) return null;
+    return (
+      <p className={cn(row, 'truncate text-muted-foreground')} title={cleanAssistantError(error)}>
+        Plan usage unavailable
+      </p>
+    );
+  }
+
+  const percent = Math.max(0, Math.min(100, Math.round(limit.percent)));
+  const tone = limitTone(limit);
+  const reset = resetWording(limit.resetsAt);
+  return (
+    <div className={row} title={reset ?? undefined}>
+      <span className="shrink-0 text-muted-foreground">{limit.label}</span>
+      <div
+        role="progressbar"
+        aria-label={`${limit.label}: ${percent}% used${reset ? `. ${reset}` : ''}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        className="h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-foreground/10"
+      >
+        <div className={cn('h-full rounded-full motion-safe:transition-[width]', BAR_TONE[tone])} style={{ width: `${percent}%` }} />
+      </div>
+      <span className={cn('shrink-0 tabular-nums', tone === 'normal' ? 'text-muted-foreground' : tone === 'warning' ? 'text-warning' : 'text-destructive')}>
+        {percent}%
+      </span>
+    </div>
   );
 }
