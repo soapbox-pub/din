@@ -13,6 +13,8 @@ export interface AssistantTab {
   sessionID: string | null;
   /** Where a new conversation will work; null for the default folder. */
   directory: string | null;
+  /** Its terminal shows, under the conversation (a fresh shell after a restart). */
+  terminal?: boolean;
 }
 
 export interface SavedAssistantTabs {
@@ -22,7 +24,7 @@ export interface SavedAssistantTabs {
 }
 
 const savedSchema: z.ZodType<SavedAssistantTabs> = z.object({
-  tabs: z.array(z.object({ id: z.string(), sessionID: z.string().nullable(), directory: z.string().nullable() })),
+  tabs: z.array(z.object({ id: z.string(), sessionID: z.string().nullable(), directory: z.string().nullable(), terminal: z.boolean().optional() })),
   active: z.number().int(),
 });
 
@@ -155,7 +157,8 @@ export function newConversationDraftKey(tabId: string): string {
 
 /** A new-conversation tab with nothing typed in it, fine to reuse. */
 export function isBlankTab(tab: AssistantTab): boolean {
-  if (tab.sessionID !== null) return false;
+  // One with its terminal open is in use.
+  if (tab.sessionID !== null || tab.terminal) return false;
   try {
     const key = newConversationDraftKey(tab.id);
     return !localStorage.getItem(draftStorageKey(key)) && !hasDraftFiles(key);

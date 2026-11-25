@@ -26,7 +26,7 @@ When nsites get `window.din`, the user approves the list at install.
 |---|---|---|
 | `nostr` | `window.nostr` (NIP-07): the signed-in user's pubkey, and signing as them | Calendar |
 | `fs` | `din.system.fs`: the whole filesystem by path; `path` on handles | Files, Text Editor |
-| `pty` | `din.system.pty`: terminals | Terminal |
+| `pty` | `din.system.pty`: terminals | Terminal, Assistant (the terminal under a conversation) |
 | `notifications` | `new Notification()` and `navigator.setAppBadge()`; with `background`, `registration.showNotification()` from the app's service worker | Assistant, Terminal |
 | `background` | `registration.periodicSync`: the app's service worker woken on a schedule while no window is open, at most every 15 minutes ([background.md](background.md)). Listed in Settings → Background Activity, where the user can pause or remove it | — |
 | `wallpaper` | `din.desktop.setWallpaper`: make a picture the desktop's background | Preview |

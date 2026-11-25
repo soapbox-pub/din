@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, PanelRightOpen, Plus, Redo2, Settings, SquarePen, Undo2 } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, PanelRightOpen, Plus, Redo2, Settings, SquarePen, SquareTerminal, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -128,10 +126,11 @@ import {
 } from '@/lib/assistantTabs';
 import { cn } from '@/lib/utils';
 import { ContentPane, ToolButton } from '@/shared/appChrome';
-import { SIDEBAR_WIDTH, flushPane } from '@/shared/appChromeStyles';
+import { SIDEBAR_WIDTH, flushPane, focusRing } from '@/shared/appChromeStyles';
 import { ATTACHED_DIR, intentOf, type LaunchIntent } from './intents';
 import { GitBranchChip } from './GitPanel';
 import { SidePanel, type SideTab } from './SidePanel';
+import { TERMINAL_ATTRIBUTE, TerminalPanel } from './TerminalPanel';
 import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
 import { prefersReducedMotion } from '@/shared/reducedMotion';
 import { bundledIconProps } from '@/shared/iconSizes';
@@ -283,15 +282,24 @@ function showSession(state: TabsState, sessionID: string): TabsState {
   return open ? { ...state, activeId: open.id } : placeTab(state, newAssistantTab(sessionID));
 }
 
-/** The tabs the window opens with: the ones it had, and what it was opened for. */
-function initialTabs(sessionID: string | null, directory: string | null): TabsState {
+/**
+ * The tabs the window opens with: the ones it had, and what it was opened
+ * for (`keep`: only a conversation's, never a new one, unless it has none).
+ */
+function initialTabs(sessionID: string | null, directory: string | null, keep = false): TabsState {
   const saved = loadAssistantTabs();
   const state = saved
     ? { tabs: saved.tabs, activeId: (saved.tabs[saved.active] ?? saved.tabs[0]).id }
     : { tabs: [], activeId: '' };
   if (sessionID) return showSession(state, sessionID);
-  if (directory || state.tabs.length === 0) return placeTab(state, newAssistantTab(null, directory));
+  if ((directory && !keep) || state.tabs.length === 0) return placeTab(state, newAssistantTab(null, directory));
   return state;
+}
+
+/** The terminal shown or hidden in the conversation's tab, or the selected one's. */
+function withTerminal(state: TabsState, sessionID: string | null, terminal: boolean): TabsState {
+  const id = (sessionID && state.tabs.find((t) => t.sessionID === sessionID)?.id) || state.activeId;
+  return { ...state, activeId: id, tabs: state.tabs.map((t) => (t.id === id ? { ...t, terminal } : t)) };
 }
 
 /**
@@ -334,6 +342,8 @@ function launchRequest({ params }: Pick<Launch, 'params'>): {
   focusPassword: boolean;
   /** Its message was spoken (Super+A held, the menu bar's mic): its reply is to be read aloud. */
   speakReply: boolean;
+  /** Show or hide the conversation's terminal (din assistant terminal), not opening a tab for it. */
+  terminal: 'show' | 'hide' | null;
 } {
   return {
     sessionID: typeof params.sessionID === 'string' ? params.sessionID : null,
@@ -341,6 +351,10 @@ function launchRequest({ params }: Pick<Launch, 'params'>): {
     // Params are merged into the last launch's, so only this launch's nonce counts.
     focusPassword: params.focusPassword !== undefined && params.focusPassword === params.nonce,
     speakReply: params.speakReply !== undefined && params.speakReply === params.nonce,
+    terminal:
+      params.terminalAt !== undefined && params.terminalAt === params.nonce && (params.terminal === 'show' || params.terminal === 'hide')
+        ? params.terminal
+        : null,
   };
 }
 
@@ -356,7 +370,8 @@ function AssistantWindow() {
   const ready = useAssistantReady();
   const { data: status } = useAssistantStatus();
   const [{ tabs, activeId }, setState] = useState(() => {
-    const { sessionID, directory } = launchRequest(windowLaunch());
+    const { sessionID, directory, terminal } = launchRequest(windowLaunch());
+    if (terminal) return withTerminal(initialTabs(sessionID, null, true), sessionID, terminal === 'show');
     // An intent opens its own conversation, once it's started (below).
     return initialTabs(sessionID, intentOf(windowLaunch(), din.app.opener, wasReopened()) ? null : directory);
   });
@@ -466,7 +481,11 @@ function AssistantWindow() {
       runIntent(intent);
       return;
     }
-    const { sessionID, directory, focusPassword, speakReply } = launchRequest(launch);
+    const { sessionID, directory, focusPassword, speakReply, terminal } = launchRequest(launch);
+    if (terminal) {
+      setState((prev) => withTerminal(sessionID ? showSession(prev, sessionID) : prev, sessionID, terminal === 'show'));
+      return;
+    }
     if (sessionID && speakReply) speakNextReply(sessionID, Number(launch.params.nonce) || Date.now());
     setPasswordFocus((prev) => (sessionID && focusPassword ? { sessionID, key: (prev?.key ?? 0) + 1 } : null));
     setState((prev) => (sessionID ? showSession(prev, sessionID) : placeTab(prev, newAssistantTab(null, directory))));
@@ -567,6 +586,42 @@ function AssistantWindow() {
   };
 
   const select = (id: string) => setState((prev) => ({ ...prev, activeId: id }));
+
+  // Each tab's terminal, at the bottom of the content pane: shown while its
+  // tab is selected and its `terminal` is on, its shell started when it first
+  // shows and running, hidden or not, until it ends or its tab closes.
+  const paneRef = useRef<HTMLElement>(null);
+  const shownTerminal = activeTab.terminal ? activeTab.id : null;
+  const [terminalsRunning, setTerminalsRunning] = useState<ReadonlySet<string>>(new Set());
+  const tabDirectory = (tab: AssistantTab) =>
+    tab.sessionID ? sessions[sessionIDs.indexOf(tab.sessionID)]?.session?.location.directory : (tab.directory ?? defaultDirectory);
+  // Where it starts must be known first, or it would start in the home folder.
+  if (shownTerminal && !terminalsRunning.has(shownTerminal) && tabDirectory(activeTab)) {
+    setTerminalsRunning(new Set([...terminalsRunning, shownTerminal]));
+  }
+  const terminals = tabs.flatMap((tab) => (terminalsRunning.has(tab.id) ? [{ id: tab.id, directory: tabDirectory(tab) }] : []));
+  /** The keyboard back to the composer, when it was in a terminal that's going away. */
+  const leaveTerminal = () => {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement) || !focused.closest(`[${TERMINAL_ATTRIBUTE}]`)) return;
+    requestAnimationFrame(() => paneRef.current?.querySelector<HTMLTextAreaElement>('textarea:not(.xterm-helper-textarea)')?.focus());
+  };
+  // Ctrl+` and the folder under the composer.
+  const toggleTerminal = () => {
+    if (activeTab.terminal) leaveTerminal();
+    setState((prev) => withTerminal(prev, null, !activeTab.terminal));
+  };
+  // Its shell ended, or Close Terminal.
+  const closeTerminal = (id: string) => {
+    if (id === shownTerminal) leaveTerminal();
+    setState((prev) => ({ ...prev, tabs: prev.tabs.map((t) => (t.id === id ? { ...t, terminal: false } : t)) }));
+    setTerminalsRunning((running) => new Set([...running].filter((r) => r !== id)));
+  };
+  // A long command finished out of sight, and its notification was clicked.
+  const revealTerminal = (id: string) => {
+    setState((prev) => ({ activeId: id, tabs: prev.tabs.map((t) => (t.id === id ? { ...t, terminal: true } : t)) }));
+    window.focus();
+  };
 
   const openTab = () => {
     const tab = newAssistantTab();
@@ -680,7 +735,12 @@ function AssistantWindow() {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    if (key === 't') {
+    // In a terminal, the shell has Ctrl+T, W, F, K and the digits (Ctrl+W
+    // deletes a word, Ctrl+K the rest of the line, Ctrl+F moves on).
+    const inTerminal = e.target instanceof Element && e.target.closest(`[${TERMINAL_ATTRIBUTE}]`) !== null;
+    if ((key === '`' || e.code === 'Backquote') && !e.shiftKey) toggleTerminal();
+    else if (inTerminal && !e.shiftKey && (/^[1-9]$/.test(key) || ['t', 'w', 'f', 'k'].includes(key))) return;
+    else if (key === 't') {
       if (e.shiftKey) reopen();
       else openTab();
     } else if (key === 'w' && !e.shiftKey) closeTab(activeTab.id);
@@ -742,7 +802,7 @@ function AssistantWindow() {
         onFork={forkSession}
         onDeleted={(id) => removeSessions(new Set([id]))}
         unread={unread}
-        menu={<AssistantMenu onAddProvider={addProvider} gitOpen={gitTabShown} onToggleGit={toggleGit} />}
+        menu={<AssistantMenu onAddProvider={addProvider} />}
         searchRef={searchRef}
         style={{ width: listWidth }}
         className={cn(
@@ -840,6 +900,7 @@ function AssistantWindow() {
           {!gitShown && <WindowControls />}
         </WindowDragRegion>
         <ContentPane
+          ref={paneRef}
           inset={false}
           className={cn(
             '@2xl/assistant:mr-2 @2xl/assistant:mb-2 @2xl/assistant:rounded-2xl @2xl/assistant:border-t-0 @2xl/assistant:clay',
@@ -866,6 +927,8 @@ function AssistantWindow() {
               onAddProvider={addProvider}
               gitOpen={gitTabShown}
               onToggleGit={toggleGit}
+              terminalOpen={activeTab.terminal ?? false}
+              onToggleTerminal={toggleTerminal}
             />
           ) : (
             <NewConversation
@@ -878,6 +941,7 @@ function AssistantWindow() {
             />
           )}
           </PreviewOpenContext>
+          <TerminalPanel terminals={terminals} shownId={shownTerminal} onClose={closeTerminal} onReveal={revealTerminal} container={paneRef} />
         </ContentPane>
       </div>
       {gitShown && (
@@ -936,16 +1000,8 @@ function AssistantWindow() {
   );
 }
 
-/** The app’s menu, in the list’s title bar: Add Provider, the Git panel, and Settings → Assistant (providers among it) for the rest. */
-function AssistantMenu({
-  onAddProvider,
-  gitOpen,
-  onToggleGit,
-}: {
-  onAddProvider: () => void;
-  gitOpen: boolean;
-  onToggleGit: () => void;
-}) {
+/** The app’s menu, in the list’s title bar: Add Provider, and Settings → Assistant (providers among it) for the rest. */
+function AssistantMenu({ onAddProvider }: { onAddProvider: () => void }) {
   const { openApp } = useAssistantHost();
   return (
     <DropdownMenu>
@@ -958,10 +1014,6 @@ function AssistantMenu({
         <DropdownMenuItem onSelect={onAddProvider}>
           <Plus aria-hidden /> Add Provider…
         </DropdownMenuItem>
-        <DropdownMenuCheckboxItem checked={gitOpen} onCheckedChange={onToggleGit}>
-          Git Panel
-          <DropdownMenuShortcut>Ctrl+Shift+G</DropdownMenuShortcut>
-        </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => openApp('settings', { section: 'assistant' })}>
           <Settings aria-hidden /> Assistant Settings…
@@ -1027,6 +1079,8 @@ function Conversation({
   onAddProvider,
   gitOpen,
   onToggleGit,
+  terminalOpen,
+  onToggleTerminal,
 }: {
   ref?: Ref<ConversationHandle>;
   sessionID: string;
@@ -1045,6 +1099,9 @@ function Conversation({
   /** The Git panel, which the branch under the composer shows. */
   gitOpen: boolean;
   onToggleGit: () => void;
+  /** The terminal under it, which the folder under the composer shows. */
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }) {
   const { data: session } = useAssistantSession(sessionID);
   const { data: transcript, isLoading, loadEarlier, loadingEarlier, earlierFailed } = useSessionMessages(sessionID);
@@ -1446,6 +1503,8 @@ function Conversation({
             context={messages ? contextUsage(messages, models) : null}
             gitOpen={gitOpen}
             onToggleGit={onToggleGit}
+            terminalOpen={terminalOpen}
+            onToggleTerminal={onToggleTerminal}
           />
         )}
       </div>
@@ -1496,36 +1555,57 @@ function UndoneNotice({
   );
 }
 
-/** Under the composer: where the conversation works and its branch, what it has cost, and how full the model's context is. */
+/**
+ * Under the composer, quietly: where the conversation works, which shows
+ * its terminal; its branch, which shows Git; and what it has cost and how
+ * full the model's context is.
+ */
 function StatusLine({
   session,
   home,
   context,
   gitOpen,
   onToggleGit,
+  terminalOpen,
+  onToggleTerminal,
 }: {
   session: SessionInfo;
   home?: string;
   context: number | null;
   gitOpen: boolean;
   onToggleGit: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }) {
   const cost = formatCost(session.cost);
+  const usage = context !== null ? formatContextUsage(context) : null;
+  const directory = session.location.directory;
   return (
     <div className="flex h-4 items-center gap-3 px-1 text-xs text-muted-foreground">
-      <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 shrink truncate" title={session.location.directory}>
-          {tildify(session.location.directory, home)}
-        </span>
-        <GitBranchChip directory={session.location.directory} open={gitOpen} onToggle={onToggleGit} />
-      </span>
-      {cost && <span className="shrink-0" aria-label="Cost so far">{cost}</span>}
-      {context !== null && (
-        <span
-          className={cn('shrink-0', context >= 0.8 && 'text-warning')}
-          title="How much of the model’s context window the conversation fills"
+      <span className="flex min-w-0 flex-1 items-center gap-3">
+        <button
+          type="button"
+          onClick={onToggleTerminal}
+          aria-pressed={terminalOpen}
+          title={`${terminalOpen ? 'Hide' : 'Show'} the terminal in ${directory} (Ctrl+\`)`}
+          className={cn(
+            'inline-flex h-4 min-w-0 shrink items-center gap-1 rounded-full px-1 hover:text-foreground',
+            focusRing,
+            terminalOpen && 'text-foreground',
+          )}
         >
-          {formatContextUsage(context)} context
+          <SquareTerminal className="size-3 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">{tildify(directory, home)}</span>
+        </button>
+        <GitBranchChip directory={directory} open={gitOpen} onToggle={onToggleGit} />
+      </span>
+      {(cost || usage) && (
+        <span
+          className={cn('shrink-0 tabular-nums', context !== null && context >= 0.8 && 'text-warning')}
+          title={[cost && `${cost} so far`, usage && `${usage} of the model’s context window`].filter(Boolean).join(' · ')}
+          aria-label={[cost && `${cost} so far`, usage && `${usage} of the model’s context window`].filter(Boolean).join(', ')}
+        >
+          {[cost, usage].filter(Boolean).join(' · ')}
         </span>
       )}
     </div>

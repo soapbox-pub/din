@@ -19,7 +19,8 @@
       "fs",
       "microphone",
       "notifications",
-      "preview"
+      "preview",
+      "pty"
     ],
     "window": {
       "size": {

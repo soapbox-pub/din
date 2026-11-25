@@ -206,6 +206,23 @@ export const assistantArea: Area = {
       [{ name: 'skill', type: 'string', positional: true, rest: true, help: 'Their ids (din assistant skills)' }],
       (args) => setSkillsEnabled(args.list('skill'), false),
     ),
+    command(
+      'assistant',
+      'terminal',
+      'Show the terminal under a conversation in the Assistant, a shell in its folder, as Ctrl+` and the folder under its composer do (the conversation that runs it, else the one shown); --hide hides it, its shell still running',
+      [
+        { name: 'session', type: 'string', help: 'The conversation’s id (ses_…)' },
+        { name: 'hide', type: 'boolean', help: 'Hide it instead' },
+      ],
+      (args, ctx) => {
+        const sessionID = args.optString('session') ?? ctx.session ?? null;
+        const terminal = args.optBool('hide') ? 'hide' : 'show';
+        const nonce = Date.now();
+        // Launches are merged into the window's last, so both are named (Assistant.tsx).
+        ctx.actions.open('assistant', { sessionID, directory: null, terminal, terminalAt: nonce, nonce });
+        return { data: { sessionID, terminal }, text: `The terminal is ${terminal === 'show' ? 'shown' : 'hidden'}` };
+      },
+    ),
     command('assistant', 'restart', 'Restart OpenCode’s server, as Restart does in Settings → Assistant, stopping whatever the agent is doing', [], async () => {
       await call(assistant().restart());
     }),
