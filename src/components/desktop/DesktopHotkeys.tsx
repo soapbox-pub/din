@@ -81,14 +81,6 @@ function assistantKeyUp(): void {
   }
 }
 
-/**
- * The Copilot key: Shift+Super+F23, by Microsoft's design, held down
- * together. Chromium names F23, and nothing else sends it.
- */
-function isCopilotKey(e: KeyboardEvent): boolean {
-  return e.key === 'F23';
-}
-
 function isAssistantKeyPressed(): boolean {
   return assistantHoldTimer !== null || assistantHeld;
 }
@@ -109,7 +101,11 @@ function isAssistantKeyPressed(): boolean {
  *   Held, it opens the prompt listening, and what was said is typed into it
  *   (unsent) when the key comes up. The Copilot key (Shift+Super+F23) does
  *   the same, except that a hold sends what was said, and the reply is read
- *   aloud, as holding the power button does on Android.
+ *   aloud, as holding the power button does on Android. Chromium can't name
+ *   it (XKB makes F23 XF86TouchpadOff), so din-shell tells the main process
+ *   when it goes down and up, which comes here as the 'assistant' shortcut
+ *   with `send` and 'assistant-released'; under another compositor it does
+ *   nothing.
  * - Super+H dictates into whatever has focus (src/lib/dictation.ts), or
  *   finishes; Esc cancels.
  * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
@@ -298,15 +294,6 @@ export function DesktopHotkeys() {
           e.preventDefault();
           requestScreenshot(e.shiftKey ? 'area' : 'screen');
         }
-        return;
-      }
-
-      // The Copilot key: Super+A's prompt, a hold sending what was said. Its
-      // Shift and Super are down with it, so it's checked whatever they are.
-      if (isCopilotKey(e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!e.repeat) assistantKeyDown(true);
         return;
       }
 
@@ -509,7 +496,7 @@ export function DesktopHotkeys() {
 
     const onKeyUp = (e: KeyboardEvent) => {
       if (!isAssistantKeyPressed()) return;
-      if (e.key.toLowerCase() === 'a' || e.key === 'Meta' || isCopilotKey(e)) assistantKeyUp();
+      if (e.key.toLowerCase() === 'a' || e.key === 'Meta') assistantKeyUp();
     };
 
     window.addEventListener('keydown', onKeyDown, true);

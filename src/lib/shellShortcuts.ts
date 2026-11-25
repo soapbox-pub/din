@@ -10,7 +10,7 @@
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Super+A                 -> { action: 'assistant' }, and when the A
  *                                comes up -> { action: 'assistant-released' }
- *   - the Copilot key (Shift+Super+F23)
+ *   - the Copilot key (Shift+Super+F23, from din-shell)
  *                             -> { action: 'assistant', send: true }, and
  *                                when it comes up -> { action: 'assistant-released' }
  *   - Super+H                 -> { action: 'dictation' }

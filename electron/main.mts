@@ -4044,6 +4044,10 @@ function registerScreenshotHandlers(): void {
 // - The display-switch key (KEY_SWITCHVIDEOMODE, keysym XF86Display; F7 on
 //   ThinkPads, again from "ThinkPad Extra Buttons"). It switches an AirPlay
 //   receiver between extending the desktop and mirroring it.
+// - The Copilot key, which keyboards send as Shift+Super+F23; XKB makes F23
+//   XF86TouchpadOff, or XF86Assistant with Shift and Super. It's Super+A's
+//   assistant prompt, a hold sending what was said, so its release is told
+//   too.
 //
 // Chromium has no DOM key for these keysyms, and its code for KEY_MICMUTE
 // has no name, so before-input-event reports them as key "Unidentified",
@@ -4080,6 +4084,8 @@ function watchShellHotkeys(): void {
     if (line === 'screenshot-area') sendToShell('shortcut', { action: 'screenshot-area' });
     else if (line === 'mic-mute') pushInputOsd(audioToggleInputMute());
     else if (line === 'display-switch') switchAirPlayMode();
+    else if (line === 'copilot') sendToShell('shortcut', { action: 'assistant', send: true } satisfies ShellShortcut);
+    else if (line === 'copilot-released') sendToShell('shortcut', { action: 'assistant-released' } satisfies ShellShortcut);
   });
 }
 
@@ -6414,10 +6420,6 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
-  // The Copilot key: Shift+Super+F23 held together, by Microsoft's design.
-  // Super+A's prompt, a hold sending what was said. Its repeats are claimed
-  // too, so the page never sees F23.
-  if (input.key === 'F23') return { action: 'assistant', send: true };
   // Super+A: the assistant's prompt.
   if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
     return { action: 'assistant' };
@@ -7422,8 +7424,7 @@ app.on('web-contents-created', (_event, contents) => {
   // forwarded too, so an Alt+Tab started in a guest commits the moment Alt
   // comes up.
   // Super+A's release is forwarded too, when it was pressed here: holding it
-  // dictates into the assistant's prompt until it comes up. So is the
-  // Copilot key's (F23's).
+  // dictates into the assistant's prompt until it comes up.
   if (contents.getType() === 'webview') {
     attachPageFullscreen(contents);
     let assistantKeyDown = false;
@@ -7444,11 +7445,6 @@ app.on('web-contents-created', (_event, contents) => {
       }
       if (input.key === 'Alt' && input.type === 'keyUp') {
         sendToShell('shortcut', { action: 'alt-released' } satisfies ShellShortcut);
-        return;
-      }
-      // The Copilot key came up: a hold ends, sending what was said.
-      if (input.key === 'F23') {
-        if (input.type === 'keyUp') sendToShell('shortcut', { action: 'assistant-released' } satisfies ShellShortcut);
         return;
       }
       if (input.key.toLowerCase() === 'a') {

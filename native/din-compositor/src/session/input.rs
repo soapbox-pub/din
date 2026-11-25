@@ -226,10 +226,8 @@ impl State {
     }
 
     fn deliver_key(&mut self, code: Keycode, state: KeyState, time: u32) {
-        if state == KeyState::Pressed {
-            // XKB's key codes are evdev's plus 8.
-            self.hotkey_pressed(code.raw().saturating_sub(8));
-        }
+        // XKB's key codes are evdev's plus 8.
+        self.hotkey(code.raw().saturating_sub(8), state == KeyState::Pressed);
         let Some(keyboard) = self.seat.get_keyboard() else { return };
         let serial = SERIAL_COUNTER.next_serial();
         let zoom_keys = self.accessibility.settings.zoom_keys;

@@ -6,6 +6,10 @@
 //! - The mic-mute key (KEY_MICMUTE): the default microphone's mute.
 //! - The display-switch key (KEY_SWITCHVIDEOMODE, F7 on ThinkPads): an
 //!   AirPlay receiver between extending the desktop and mirroring it.
+//! - The Copilot key, which keyboards send as Shift+Super+F23 (by
+//!   Microsoft's design): the assistant's prompt, held to speak to it. XKB
+//!   makes F23 XF86TouchpadOff, or XF86Assistant with Shift and Super. Its
+//!   release is told too, since a hold ends there.
 //!
 //! Chromium gives their keysyms no DOM key, so Din sees each as key
 //! "Unidentified" with no code, like any other key it can't name. Din used
@@ -16,8 +20,9 @@
 //!
 //! The socket is `din-shell-keys` in XDG_RUNTIME_DIR, told to Din as
 //! DIN_SHELL_KEYS. Only Din's own process (the one the compositor started)
-//! is kept; each press is a line: `screenshot-area`, `mic-mute` or
-//! `display-switch`. The keys still go on to whatever has the keyboard.
+//! is kept; each press is a line: `screenshot-area`, `mic-mute`,
+//! `display-switch` or `copilot`, and the Copilot key's release is
+//! `copilot-released`. The keys still go on to whatever has the keyboard.
 //! In the other direction, Din can move the pointer with two little-endian
 //! i32 coordinates relative to its window.
 
@@ -32,16 +37,20 @@ use tracing::{info, warn};
 
 use super::{direct::peer_pid, state::State};
 
+const KEY_F23: u32 = 0xc1;
 const KEY_SWITCHVIDEOMODE: u32 = 0xe3;
 const KEY_MICMUTE: u32 = 0xf8;
 const KEY_SELECTIVE_SCREENSHOT: u32 = 0x27a;
 
-/// What Din is told for the evdev key CODE, if it's one of these.
-fn name(code: u32) -> Option<&'static str> {
-    match code {
-        KEY_SELECTIVE_SCREENSHOT => Some("screenshot-area"),
-        KEY_MICMUTE => Some("mic-mute"),
-        KEY_SWITCHVIDEOMODE => Some("display-switch"),
+/// What Din is told for the evdev key CODE going down (PRESSED) or up, if
+/// it's one of these.
+fn name(code: u32, pressed: bool) -> Option<&'static str> {
+    match (code, pressed) {
+        (KEY_SELECTIVE_SCREENSHOT, true) => Some("screenshot-area"),
+        (KEY_MICMUTE, true) => Some("mic-mute"),
+        (KEY_SWITCHVIDEOMODE, true) => Some("display-switch"),
+        (KEY_F23, true) => Some("copilot"),
+        (KEY_F23, false) => Some("copilot-released"),
         _ => None,
     }
 }
@@ -112,9 +121,9 @@ impl State {
         }
     }
 
-    /// The evdev key CODE went down: tell Din, if it's one of its.
-    pub fn hotkey_pressed(&mut self, code: u32) {
-        let Some(name) = name(code) else { return };
+    /// The evdev key CODE went down (PRESSED) or up: tell Din, if it's one of its.
+    pub fn hotkey(&mut self, code: u32, pressed: bool) {
+        let Some(name) = name(code, pressed) else { return };
         let Some(client) = self.hotkeys.client.as_mut() else { return };
         if let Err(err) = client.write_all(format!("{name}\n").as_bytes()) {
             if err.kind() != std::io::ErrorKind::WouldBlock {
@@ -131,9 +140,12 @@ mod tests {
 
     #[test]
     fn names_only_its_keys() {
-        assert_eq!(name(0x27a), Some("screenshot-area"));
-        assert_eq!(name(0xf8), Some("mic-mute"));
-        assert_eq!(name(0xe3), Some("display-switch"));
-        assert_eq!(name(30), None);
+        assert_eq!(name(0x27a, true), Some("screenshot-area"));
+        assert_eq!(name(0xf8, true), Some("mic-mute"));
+        assert_eq!(name(0xe3, true), Some("display-switch"));
+        assert_eq!(name(0xc1, true), Some("copilot"));
+        assert_eq!(name(0xc1, false), Some("copilot-released"));
+        assert_eq!(name(0x27a, false), None);
+        assert_eq!(name(30, true), None);
     }
 }
