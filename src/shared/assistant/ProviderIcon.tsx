@@ -4,7 +4,7 @@ import type { ModelInfo } from '@/lib/assistant';
 import { cn } from '@/lib/utils';
 
 /** Icons of Din's own, in color, for providers models.dev has none for. */
-const OWN_ICONS: Record<string, string> = { 'claude-agent': '/claude.svg' };
+const OWN_ICONS: Record<string, string> = { 'claude-agent': '/claude.svg', shakespeare: '/shakespeare-ai.svg' };
 
 /**
  * Where a provider's icon comes from: Din's own for a few, else the logo

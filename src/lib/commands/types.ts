@@ -1,4 +1,4 @@
-import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
+import type { NostrEvent, NostrFilter, NostrSigner } from '@nostrify/nostrify';
 import type { AppConfig } from '@/contexts/AppContext';
 import type { InstalledAppsManager } from '@/contexts/InstalledAppsContext';
 import type { WidgetsContextValue } from '@/contexts/WidgetsContext';
@@ -124,6 +124,8 @@ export interface CommandContext {
   readonly extensionKeys?: ExtensionKeyStore;
   /** Which apps open nostr: links, and the default for each kind (useNostrLinks). */
   readonly nostrLinks?: NostrLinksControl;
+  /** The signed-in account's signer, for what signs without publishing (a NIP-98 request). */
+  readonly signer?: NostrSigner;
   /** Sign and publish an event as the signed-in account. */
   publish(template: { kind: number; content: string; tags: string[][] }): Promise<unknown>;
   /** Upload a file to the account's Blossom servers; resolves with its NIP-94 tags. */

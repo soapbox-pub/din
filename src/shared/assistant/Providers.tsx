@@ -26,6 +26,13 @@ import {
 } from '@/lib/assistant';
 import { CLAUDE_PROVIDER } from '@/lib/claudeProvider';
 import {
+  connectShakespeareProvider,
+  SHAKESPEARE_CREDITS_URL,
+  SHAKESPEARE_KEYS_URL,
+  SHAKESPEARE_MONTHLY_LIMIT,
+  SHAKESPEARE_PROVIDER,
+} from '@/lib/shakespeareProvider';
+import {
   cancelClaudeSetup,
   sendClaudeCode,
   startClaudeSetup,
@@ -66,6 +73,11 @@ const FEATURED: { id: string; blurb: string; className: string }[] = [
     className: 'bg-gradient-to-br from-[#D97757] to-[#B85C3E] text-white hover:from-[#C96A4B] hover:to-[#A85335]',
   },
   {
+    id: SHAKESPEARE_PROVIDER,
+    blurb: 'Sign in with Nostr, pay with bitcoin or a card',
+    className: 'bg-gradient-to-br from-[#F45125] to-[#C2361A] text-white hover:from-[#E5461C] hover:to-[#B02F15]',
+  },
+  {
     id: 'openrouter',
     blurb: 'Hundreds of models with one key',
     className: 'bg-gradient-to-br from-[#6467F2] to-[#4338CA] text-white hover:from-[#5558E8] hover:to-[#3730A3]',
@@ -75,6 +87,7 @@ const FEATURED: { id: string; blurb: string; className: string }[] = [
 /** Where a provider hands out API keys, for a link beside the field. */
 const KEY_PAGES: Record<string, string> = {
   openrouter: 'https://openrouter.ai/settings/keys',
+  [SHAKESPEARE_PROVIDER]: SHAKESPEARE_KEYS_URL,
   anthropic: 'https://console.anthropic.com/settings/keys',
   openai: 'https://platform.openai.com/api-keys',
   google: 'https://aistudio.google.com/apikey',
@@ -96,7 +109,7 @@ export function ProviderList({ description = true }: { description?: boolean }) 
   const { data: integrations, isLoading } = useAssistantIntegrations();
   const baseURLs = useProviderBaseURLs();
   const refresh = useRefreshProviders();
-  const { notify, openApp } = useAssistantHost();
+  const { notify, openApp, openUrl } = useAssistantHost();
   const openProvider = (provider: string | null) => openApp(PROVIDER_WINDOW_APP_ID, providerWindowParams(provider));
   const remove = useMutation({
     mutationFn: (ids: string[]) => Promise.all(ids.map((id) => assistantApi.removeCredential(id))),
@@ -167,6 +180,11 @@ export function ProviderList({ description = true }: { description?: boolean }) 
                 >
                   <Pencil className="size-4.5" strokeWidth={1.75} aria-hidden />
                 </Button>
+                {integration.id === SHAKESPEARE_PROVIDER && (
+                  <Button variant="ghost" size="sm" className="h-8 text-muted-foreground" onClick={() => openUrl(SHAKESPEARE_CREDITS_URL)}>
+                    Add credits
+                  </Button>
+                )}
                 {credentials.length > 0 && (
                   <Button
                     variant="ghost"
@@ -242,7 +260,9 @@ export function AddProvider({
           {picked
             ? picked.id === CLAUDE_PROVIDER
               ? 'Your Claude plan, through Claude Code on this computer. Din sets it all up.'
-              : editing
+              : picked.id === SHAKESPEARE_PROVIDER
+                ? 'Leading models, paid for with credits you buy with bitcoin, Lightning or a card. Your Nostr account is your account there.'
+                : editing
                 ? 'Replace its API key, or sign in again.'
                 : 'Connect it with an API key, or sign in.'
             : browsing
@@ -254,6 +274,8 @@ export function AddProvider({
         {picked ? (
           picked.id === CLAUDE_PROVIDER ? (
             <ClaudeSetup key={picked.id} onDone={onDone} />
+          ) : picked.id === SHAKESPEARE_PROVIDER ? (
+            <ShakespeareSetup key={picked.id} integration={picked} onDone={onDone} />
           ) : (
             <ConnectProvider key={picked.id} integration={picked} onDone={onDone} />
           )
@@ -299,7 +321,9 @@ function FeaturedProviders({
         >
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white/15">
             {id === CLAUDE_PROVIDER ? (
-              <ClaudeMark className="size-6" />
+              <WhiteMark src="/claude.svg" className="size-6" />
+            ) : id === SHAKESPEARE_PROVIDER ? (
+              <WhiteMark src="/shakespeare-ai.svg" className="size-6" />
             ) : (
               <ProviderIcon providerID={id} size={24} className="text-white" />
             )}
@@ -325,9 +349,9 @@ function FeaturedProviders({
   );
 }
 
-/** Claude's mark in one color, for the colored button (the icon itself is Claude's orange). */
-function ClaudeMark({ className }: { className?: string }) {
-  const mask = 'url("/claude.svg") center / contain no-repeat';
+/** A provider's mark in white, for its colored button (the icons themselves are in color). */
+function WhiteMark({ src, className }: { src: string; className?: string }) {
+  const mask = `url("${src}") center / contain no-repeat`;
   return <span aria-hidden className={cn('inline-block bg-white', className)} style={{ mask, WebkitMask: mask }} />;
 }
 
@@ -553,6 +577,57 @@ function ClaudeSetupSteps({ state, compact }: { state: ClaudeSetupState; compact
       {state.step === 'connecting' && state.restarting && (
         <p className="text-xs text-muted-foreground">OpenCode started before Claude Code was installed, so it’s restarting once to find it.</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Shakespeare AI (shakespeareProvider.ts): one click makes a key for the
+ * signed-in Nostr account and connects the assistant with it; a key made on
+ * Shakespeare's dashboard can be pasted instead.
+ */
+function ShakespeareSetup({ integration, onDone }: { integration: IntegrationInfo; onDone: () => void }) {
+  const refresh = useRefreshProviders();
+  const { notify, openUrl, signer } = useAssistantHost();
+  const [pasting, setPasting] = useState(false);
+  const editing = integration.connections.length > 0;
+  const connect = useMutation({
+    mutationFn: () => connectShakespeareProvider({ signer: signer! }),
+    onSuccess: () => {
+      refresh();
+      notify({ title: editing ? 'Shakespeare AI is updated' : 'Shakespeare AI is connected' });
+      onDone();
+    },
+    onError: (error) => notify({ title: 'Couldn’t connect', description: cleanAssistantError(error), destructive: true }),
+  });
+
+  if (pasting || !signer) {
+    return (
+      <div>
+        {!signer && <p className="px-4 pt-4 text-sm text-muted-foreground">Sign in to Din with your Nostr account to connect in one click, or paste a key.</p>}
+        <ConnectProvider integration={integration} onDone={onDone} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 p-4">
+      <Button className="w-full" disabled={connect.isPending} onClick={() => connect.mutate()}>
+        {connect.isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+        {editing ? 'Make a new key' : 'Connect with your Nostr account'}
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Din makes an API key for your account, which may spend up to ${SHAKESPEARE_MONTHLY_LIMIT} of your credits a month. Change its limit
+        or revoke it on Shakespeare’s dashboard.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={() => openUrl(SHAKESPEARE_CREDITS_URL)}>
+          <ExternalLink className="size-3.5" aria-hidden /> Buy credits
+        </Button>
+        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setPasting(true)}>
+          Paste a key instead
+        </Button>
+      </div>
     </div>
   );
 }

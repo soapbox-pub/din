@@ -77,6 +77,7 @@ export function CommandHost() {
         get workspaces() { return live.current.active; },
         get monitors() { return live.current.areas.map((area) => area.id); },
         get pubkey() { return live.current.user?.pubkey; },
+        get signer() { return live.current.user?.signer; },
         get extensionKeys() { return live.current.extensionKeys; },
         get nostrLinks() { return live.current.nostrLinks; },
         publish: (template) => live.current.publish(template),

@@ -2,6 +2,7 @@ import { useMemo, type ReactNode, type RefObject } from 'react';
 import { useFilePicker } from '@/contexts/FilePickerContext';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSetAssistantEnabled } from '@/hooks/useAssistant';
 import { useIsDictatingInto } from '@/hooks/useDictation';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
@@ -52,6 +53,7 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
   const { pickFile, pickFiles } = useFilePicker();
   const openUrl = useOpenUrl();
   const { toast } = useToast();
+  const signer = useCurrentUser().user?.signer;
 
   const host = useMemo(
     (): AssistantHost => ({
@@ -78,13 +80,14 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
         void requestHighlight({ text, context, source: { name: source } }).catch((error: unknown) =>
           toast({ title: 'Couldn’t highlight', description: error instanceof Error ? error.message : String(error), variant: 'destructive' }),
         ),
+      signer,
       notify: ({ title, description, destructive }) =>
         toast({ title, description, variant: destructive ? 'destructive' : undefined }),
       useDictation: useDesktopDictation,
       pauseMedia: holdMedia,
       useVoice: useDesktopVoice,
     }),
-    [config.assistantDirectory, config.assistantColorfulReplies, config.assistantSpeakReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast],
+    [config.assistantDirectory, config.assistantColorfulReplies, config.assistantSpeakReplies, setEnabled, open, pickFile, pickFiles, openUrl, toast, signer],
   );
 
   return <AssistantHostContext value={host}>{children}</AssistantHostContext>;

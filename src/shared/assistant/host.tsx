@@ -1,4 +1,5 @@
 import { createContext, useContext, type RefObject } from 'react';
+import type { NostrSigner } from '@nostrify/nostrify';
 import type { AssistantSpeakReplies } from '@/contexts/AppContext';
 import type { Voice } from '@/shared/assistant/voice';
 
@@ -41,6 +42,12 @@ export interface AssistantHost {
    * name). Failures are told as a toast. Absent where it can't be done.
    */
   highlight?: (highlight: { text: string; context?: string; source: string }) => void;
+  /**
+   * The signed-in account's signer, where the UI may sign as it (the
+   * desktop): for making a Shakespeare AI key (shakespeareProvider.ts).
+   * Absent elsewhere, or when no one is signed in.
+   */
+  signer?: NostrSigner;
   /** A short-lived message (a toast). */
   notify(message: { title: string; description?: string; destructive?: boolean }): void;
   /**

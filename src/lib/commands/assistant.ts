@@ -1,6 +1,7 @@
 import { getAssistantBridge, type SkillInfo, type SkillSettings } from '@/lib/assistant';
 import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceName } from '@/lib/assistantSkills';
 import { connectClaudeProvider } from '@/lib/claudeProvider';
+import { connectShakespeareProvider, SHAKESPEARE_MONTHLY_LIMIT } from '@/lib/shakespeareProvider';
 import { getFsBridge } from '@/lib/fs';
 import { usageText } from '@/shared/assistant/claudeUsage';
 import { CommandError, type Area } from './types';
@@ -29,7 +30,7 @@ async function setSkillsEnabled(names: string[], enabled: boolean) {
 
 export const assistantArea: Area = {
   name: 'assistant',
-  summary: 'OpenCode, the agent behind the Assistant: its status, updating it, restarting it, Claude for it, and its skills and their folders',
+  summary: 'OpenCode, the agent behind the Assistant: its status, updating it, restarting it, Claude and Shakespeare AI for it, and its skills and their folders',
   commands: [
     command('assistant', 'status', 'OpenCode’s version, whether its server runs, and any newer release', [], async () => {
       const status = await call(assistant().status());
@@ -121,6 +122,25 @@ export const assistantArea: Area = {
           ),
         );
         return { data: { connected: true, account: claude.account }, text: `Claude is connected${claude.account ? ` (${claude.account})` : ''}` };
+      },
+    ),
+    command(
+      'assistant',
+      'connect-shakespeare',
+      `Connect the assistant to Shakespeare AI, as Add provider → Shakespeare AI does: make an API key for the signed-in Nostr account (asking on screen first), which may spend up to $${SHAKESPEARE_MONTHLY_LIMIT} of its credits a month, and give it to OpenCode in place of any it had`,
+      [],
+      async (_args, ctx) => {
+        const signer = ctx.signer;
+        if (!signer) throw new CommandError('Sign in to Din with your Nostr account first');
+        const ok = await ctx.confirm({
+          title: 'Connect Shakespeare AI?',
+          description: `Din makes a Shakespeare AI key for your account, which may spend up to $${SHAKESPEARE_MONTHLY_LIMIT} of your credits a month, and the assistant uses it. Change its limit or revoke it on Shakespeare’s dashboard.`,
+          action: 'Connect',
+        });
+        if (!ok) throw new CommandError('You didn’t allow it');
+        ctx.progress?.({ text: 'Connecting the assistant to Shakespeare AI' });
+        await call(connectShakespeareProvider({ signer }));
+        return { data: { connected: true }, text: 'Shakespeare AI is connected' };
       },
     ),
     command('assistant', 'skills', 'The assistant’s skills, as Settings → Assistant lists them: the folders OpenCode finds them in, the skills in each, and which are off', [], async () => {
