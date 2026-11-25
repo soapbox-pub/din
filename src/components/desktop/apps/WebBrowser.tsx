@@ -2220,6 +2220,13 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           nsiteLocation={siteLocations.nsite}
           end={
             <>
+              {/* The star stays last in the bar, as in every browser. */}
+              {(commentsPage !== null || commentsShown) && (
+                <CommentsButton
+                  open={commentsShown}
+                  onToggle={() => (commentsShown ? closeComments() : setCommentsOpen(true))}
+                />
+              )}
               {/* Install as App… is in Share's sheet, as Safari has Add
                   to Dock in its Share menu; its popover points at Share. */}
               {shareableUrl(activeTab.url) &&
@@ -2249,12 +2256,6 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                   onOpenChange={(open) => setStarTab(open ? activeId : null)}
                   onBookmark={bookmarkPage}
                   onOpenManager={openBookmarks}
-                />
-              )}
-              {(commentsPage !== null || commentsShown) && (
-                <CommentsButton
-                  open={commentsShown}
-                  onToggle={() => (commentsShown ? closeComments() : setCommentsOpen(true))}
                 />
               )}
             </>

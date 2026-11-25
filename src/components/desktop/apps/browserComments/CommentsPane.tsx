@@ -78,7 +78,7 @@ export function CommentsPane({ page, reason, onClose, onOpenLink, draft, onDraft
       </header>
 
       {page === null ? (
-        <EmptyState title={reason === 'tor' ? 'Not in Tor tabs' : 'No comments here'} className="flex-1">
+        <EmptyState icon={MessageCircle} title={reason === 'tor' ? 'Not in Tor tabs' : 'No comments here'} className="flex-1">
           {reason === 'tor'
             ? 'Asking relays about this page would happen outside Tor, so comments are off in Tor tabs.'
             : 'Open a web page to see what people say about it on Nostr, and add to it.'}
@@ -90,6 +90,7 @@ export function CommentsPane({ page, reason, onClose, onOpenLink, draft, onDraft
             <ThreadSkeleton />
           ) : comments.isError && !thread ? (
             <EmptyState
+              icon={MessageCircle}
               title="Couldn’t load comments"
               action={<Button size="sm" variant="secondary" onClick={() => void comments.refetch()}>Try again</Button>}
             >
@@ -113,7 +114,7 @@ export function CommentsPane({ page, reason, onClose, onOpenLink, draft, onDraft
               )}
             </>
           ) : (
-            <EmptyState title="No comments yet">Be the first to say something about this page.</EmptyState>
+            <EmptyState icon={MessageCircle} title="No comments yet">Be the first to say something about this page.</EmptyState>
           )}
         </div>
       )}
