@@ -35,7 +35,7 @@ const { ipcRenderer, webFrame } = require('electron');
  * @typedef {{ start: number, end: number, text: string, hash: string }} Mark
  * @typedef {{ node: Text, start: number, len: number }} Segment
  * @typedef {{ text: string, segs: Segment[] }} Reading
- * @typedef {{ host: HTMLElement, box: HTMLElement, line: HTMLElement, spans: { span: HTMLElement, mark: Mark }[] }} Mirror
+ * @typedef {{ host: HTMLElement, box: HTMLElement, line: HTMLElement, spans: { span: HTMLElement, mark: Mark }[], onTop: boolean | null }} Mirror
  * @typedef {{
  *   el: HTMLElement,
  *   rich: boolean,
@@ -94,6 +94,8 @@ let highlight = null;
 /** @type {CSSStyleSheet | null} */
 let mirrorSheet = null;
 let syncQueued = false;
+/** Whether the queued sync looks again at what's on top of each field. */
+let hitTestQueued = false;
 /** @type {ReturnType<typeof setInterval> | null} */
 let pollTimer = null;
 /** @type {ResizeObserver | null} */
@@ -396,7 +398,7 @@ function editedText(field) {
     .map((m) => (m.start >= oldEnd ? { ...m, start: m.start + delta, end: m.end + delta } : m));
   field.text = now;
   field.marks = marks;
-  if (marks.length) showMirror(field);
+  if (marks.length) showMirror(field, true);
   else clearMarks(field);
 }
 
@@ -449,12 +451,19 @@ function createMirror(field) {
   containerOf(field.el).append(host);
   resizeObserver ??= new ResizeObserver(() => queueSync());
   resizeObserver.observe(field.el);
-  return { host, box, line, spans: [] };
+  return { host, box, line, spans: [], onTop: null };
 }
 
-/** @param {Field} field */
-function showMirror(field) {
+/**
+ * @param {Field} field
+ * @param {boolean} [typed] only the text changed, as the user typed: the
+ *   mirror is put in place in the next frame, with everything else that moved
+ *   (`queueSync`), rather than in the input event, where reading the field's
+ *   style and where it is makes the page lay itself out at every keystroke
+ */
+function showMirror(field, typed = false) {
   const el = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (field.el);
+  const fresh = !field.mirror;
   field.mirror ??= createMirror(field);
   const mirror = field.mirror;
   const text = el.value;
@@ -475,8 +484,13 @@ function showMirror(field) {
   // A trailing space, so a last empty line still counts for scrolling.
   parts.push(document.createTextNode(`${text.slice(at)} `));
   mirror.line.replaceChildren(...parts);
+  if (typed && !fresh) {
+    // sync lays it out again if the field's size changed.
+    queueSync(true);
+    return;
+  }
   layOut(field);
-  sync(field);
+  sync(field, true);
   updatePolling();
 }
 
@@ -540,8 +554,11 @@ function onTop(el, part) {
 /**
  * Put a field's mirror where the field is now, scrolled as it is.
  * @param {Field} field
+ * @param {boolean} hitTest whether to look again at what's on top of the
+ *   field: `elementFromPoint` brings the whole page up to date first, 7 ms on
+ *   a long feed, so typing, which can't change it, keeps the last answer
  */
-function sync(field) {
+function sync(field, hitTest) {
   const mirror = field.mirror;
   if (!mirror) return;
   const el = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (field.el);
@@ -551,7 +568,9 @@ function sync(field) {
   }
   const rect = el.getBoundingClientRect();
   const part = visiblePart(el, rect);
-  const shown = rect.width > 0 && rect.height > 0 && part.bottom > part.top && part.right > part.left && onTop(el, part);
+  const visible = rect.width > 0 && rect.height > 0 && part.bottom > part.top && part.right > part.left;
+  if (visible && (hitTest || mirror.onTop === null)) mirror.onTop = onTop(el, part);
+  const shown = visible && mirror.onTop === true;
   mirror.box.style.display = shown ? '' : 'none';
   if (!shown) return;
   const width = el.offsetWidth;
@@ -566,12 +585,20 @@ function sync(field) {
   mirror.box.scrollLeft = el.scrollLeft;
 }
 
-function queueSync() {
+/**
+ * Put every mirror in place in the next frame.
+ * @param {boolean} [typed] only typing asked, which can't have put anything
+ *   over a field
+ */
+function queueSync(typed = false) {
+  if (!typed) hitTestQueued = true;
   if (syncQueued) return;
   syncQueued = true;
   requestAnimationFrame(() => {
+    const hitTest = hitTestQueued;
     syncQueued = false;
-    for (const field of [...fields.values()]) sync(field);
+    hitTestQueued = false;
+    for (const field of [...fields.values()]) sync(field, hitTest);
   });
 }
 
