@@ -149,10 +149,11 @@ async function sendWritten(
   const problem = recipientsProblem(everyone);
   if (problem) throw new CommandError(problem.replace(/\.$/, ''), 'usage');
   const message = outgoingMessage(seed, writtenAbove(seed, account, text), files, seed, null);
-  await call(mail().send(account.id, message));
+  const result = await call(mail().send(account.id, message));
+  const copyProblem = result ? result.sentCopyProblem : undefined;
   return {
-    data: { sent: true, accountId: account.id, to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: message.subject, attachments: files.map((f) => f.filename) },
-    text: `Sent “${message.subject || '(no subject)'}” to ${who(everyone)}`,
+    data: { sent: true, accountId: account.id, to: seed.to, cc: seed.cc, bcc: seed.bcc, subject: message.subject, attachments: files.map((f) => f.filename), sentCopy: !copyProblem, ...(copyProblem ? { sentCopyProblem: copyProblem } : {}) },
+    text: `Sent “${message.subject || '(no subject)'}” to ${who(everyone)}${copyProblem ? `, but no copy was kept in Sent: ${copyProblem}` : ''}`,
   };
 }
 

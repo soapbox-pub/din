@@ -370,7 +370,8 @@ export interface MailBridge {
   move(accountId: string, path: string, uids: number[], to: string | { special: 'archive' | 'trash' | 'junk' | 'inbox' }): Promise<void>;
   /** To the trash; from the trash, gone for good. */
   remove(accountId: string, path: string, uids: number[]): Promise<void>;
-  send(accountId: string, message: OutgoingMessage): Promise<void>;
+  /** Send it; `sentCopyProblem` says why no copy was kept in Sent, when the message went but that didn't. */
+  send(accountId: string, message: OutgoingMessage): Promise<{ sentCopyProblem?: string } | void>;
   /** Resolves with the draft's uid in Drafts, when the server says. */
   saveDraft(accountId: string, message: OutgoingMessage): Promise<number | null>;
   /** The mailing lists in the inbox over the last `months` (default 6), most mail first. */

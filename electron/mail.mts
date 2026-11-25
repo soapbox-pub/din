@@ -2291,7 +2291,7 @@ async function deleteDraft(a: StoredAccount, uid: number): Promise<void> {
   changed(a.id, drafts);
 }
 
-async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
+async function send(a: StoredAccount, m: OutgoingMessage): Promise<{ sentCopyProblem?: string }> {
   const recipients = [...m.to, ...m.cc, ...m.bcc].map((x) => x.address);
   if (!recipients.length) throw new Error('Add someone to send it to.');
   const size = m.attachments.reduce((n, x) => n + x.content.byteLength, 0);
@@ -2307,15 +2307,13 @@ async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
     transport.close();
   }
   // What's left is bookkeeping: the message has gone either way.
+  let sentCopyProblem: string | undefined;
   if (!keepsSentCopy(a.smtp)) {
     try {
-      const sent = await specialPath(a, 'sent', 'Sent');
-      const client = await connection(a);
-      await client.append(sent, await buildRaw(a, m, messageId, true), ['\\Seen']);
-      changed(a.id, sent);
-      scheduleSync(a, sent, 0);
-    } catch {
-      // No Sent copy, but the message went.
+      await keepSentCopy(a, await buildRaw(a, m, messageId, true));
+    } catch (error) {
+      sentCopyProblem = error instanceof Error ? error.message : String(error);
+      console.error(`[mail] ${a.email}: sent, but no copy was kept in Sent:`, error);
     }
   } else {
     void specialPath(a, 'sent').then((sent) => scheduleSync(a, sent, 2000)).catch(() => {});
@@ -2323,6 +2321,34 @@ async function send(a: StoredAccount, m: OutgoingMessage): Promise<void> {
   rememberCorrespondents(a, recipients);
   if (m.answering) await setFlagsRaw(a, m.answering.path, m.answering.uid, '\\Answered').catch(() => {});
   if (m.draftUid) await deleteDraft(a, m.draftUid);
+  return sentCopyProblem ? { sentCopyProblem } : {};
+}
+
+/**
+ * File a sent message's copy in Sent. imapflow's append does nothing and
+ * says nothing on a connection that's no longer logged in (one the server
+ * dropped while it sat open), so a copy it didn't confirm is tried once
+ * more on a fresh connection, and one that still doesn't land throws.
+ */
+async function keepSentCopy(a: StoredAccount, raw: Buffer): Promise<void> {
+  const sent = await specialPath(a, 'sent', 'Sent');
+  let problem: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) closeClient(sessionOf(a.id));
+    try {
+      const client = await connection(a);
+      const appended = await client.append(sent, raw, ['\\Seen']);
+      if (appended) {
+        changed(a.id, sent);
+        scheduleSync(a, sent, 0);
+        return;
+      }
+      problem = new Error('The mail server connection had closed.');
+    } catch (error) {
+      problem = explain(error);
+    }
+  }
+  throw problem instanceof Error ? problem : new Error(String(problem));
 }
 
 async function setFlagsRaw(a: StoredAccount, mailbox: string, uid: number, flag: string): Promise<void> {

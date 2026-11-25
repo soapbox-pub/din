@@ -334,7 +334,9 @@ export function Compose({
       setError(null);
       setSending(true);
       try {
-        await mail.send(account.id, message());
+        const result = await mail.send(account.id, message());
+        // It went; say so if its copy didn't make it to Sent, since the window is about to close.
+        if (result && result.sentCopyProblem) new Notification('Sent, but no copy was kept in Sent', { body: result.sentCopyProblem });
         rememberAddresses(everyone, 5);
         close();
       } catch (e) {
