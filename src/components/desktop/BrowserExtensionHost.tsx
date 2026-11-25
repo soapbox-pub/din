@@ -8,6 +8,8 @@ import { useNostrLinks } from '@/hooks/useNostrLinks';
 import { isNostrUri } from '@/lib/nostrUri';
 import { isMailtoUrl } from '@/lib/mailto';
 import { isMagnetUrl } from '@/lib/torrents';
+import { useBitcoinLinks } from '@/hooks/useBitcoinLinks';
+import { isBitcoinUri } from '@/lib/bitcoinUri';
 
 /**
  * Desktop-lifetime listener for Chrome-extension tab commands (window.dinos.crx).
@@ -31,6 +33,7 @@ export function BrowserExtensionHost() {
   const { open } = useWindowActions();
   const { findAppForLink } = useInstalledApps();
   const { openNostrUri } = useNostrLinks();
+  const { openBitcoinUri } = useBitcoinLinks();
 
   useEffect(() => {
     const crx = getCrxBridge();
@@ -62,6 +65,11 @@ export function BrowserExtensionHost() {
         open('torrents', { magnet: command.url.trim() });
         return;
       }
+      // A bitcoin: link opens Wallet's Send, or the app chosen for them.
+      if (command.type === 'open' && isBitcoinUri(command.url)) {
+        openBitcoinUri(command.url);
+        return;
+      }
       if (command.type === 'open' && isNostrUri(command.url)) {
         void openNostrUri(command.url, (uri) => {
           if (!hasTabConsumer(command)) open('web-browser');
@@ -83,7 +91,7 @@ export function BrowserExtensionHost() {
       }
       publishTabCommand(command);
     });
-  }, [open, findAppForLink, openNostrUri]);
+  }, [open, findAppForLink, openNostrUri, openBitcoinUri]);
 
   return null;
 }

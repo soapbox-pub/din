@@ -9,6 +9,7 @@ import {
   parseNostrProtocolHandler,
   type NostrHandler,
 } from '@/lib/nostrUri';
+import { parseBitcoinProtocolHandler, type BitcoinHandler } from '@/lib/bitcoinUri';
 import { parseManifestShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
 import { shownUrl } from '@/lib/tor';
 import { getBrowserBridge } from '@/lib/browser';
@@ -18,6 +19,7 @@ import type { GuestLoadOptions } from '@/platform/guest';
 /** What a page's web app manifest says for installing its site as an app. */
 export interface InstallManifest {
   nostr: NostrHandler | null;
+  bitcoin: BitcoinHandler | null;
   shortcuts: WebAppShortcut[];
   /** Its `share_target`, on the manifest's own origin (installWebApp checks it's the app's). */
   share: WebShareTarget | null;
@@ -44,7 +46,7 @@ function serviceWorkerProbe(url: string, waitMs: number): string {
 })()`;
 }
 
-const NO_INSTALL_MANIFEST: InstallManifest = { nostr: null, shortcuts: [], share: null };
+const NO_INSTALL_MANIFEST: InstallManifest = { nostr: null, bitcoin: null, shortcuts: [], share: null };
 
 /**
  * The Electron session partition for the Web Browser app's tabs and for
@@ -374,6 +376,7 @@ const WebviewSurface = forwardRef<BrowserViewHandle, BrowserViewProps>(
           if (typeof base !== 'string') return NO_INSTALL_MANIFEST;
           return {
             nostr: parseNostrProtocolHandler(manifest, base),
+            bitcoin: parseBitcoinProtocolHandler(manifest, base),
             shortcuts: parseManifestShortcuts(manifest, base, null),
             share: parseWebShareTarget(manifest, base, new URL(base).origin),
           };

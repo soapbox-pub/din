@@ -162,6 +162,18 @@ export function manifestActions(manifest: DinManifest): { label: string; params:
 }
 
 /**
+ * A manifest's `bitcoin` protocol handler as launch parameters (AppDefinition
+ * `bitcoin`): its `url`'s query, with `%s` where the link goes, as a
+ * shortcut's `url` carries its parameters.
+ */
+export function manifestBitcoin(manifest: DinManifest): { bitcoin?: { params: Record<string, string> } } {
+  const handler = manifest.protocol_handlers?.find((h) => h.protocol.toLowerCase() === 'bitcoin' && h.url.includes('%s'));
+  if (!handler) return {};
+  const query = handler.url.includes('?') ? handler.url.slice(handler.url.indexOf('?') + 1) : '';
+  return { bitcoin: { params: Object.fromEntries(new URLSearchParams(query)) } };
+}
+
+/**
  * A launch's `targetURL`: the app's own URL (`din://<id>/`, wherever the
  * page is served from), at `action` for a share (its `share_target`'s), the
  * shortcut's `url` when a shortcut launched it, else the start URL, with the

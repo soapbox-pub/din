@@ -52,7 +52,11 @@ export interface SendSeed {
 export function SendView({ pubkey, address, seed, onDone }: { pubkey: string; address: string; seed?: SendSeed; onDone: () => void }) {
   const [to, setTo] = useState(seed?.to ?? '');
   const [unit, setUnit] = useState<Unit>('btc');
-  const [amountText, setAmountText] = useState(seed?.amount ? formatBtc(seed.amount) : '');
+  // A bitcoin: link it was opened with may say how much it's asking for.
+  const [amountText, setAmountText] = useState(() => {
+    const sats = seed?.amount ?? (seed?.to ? parseRecipient(seed.to)?.amount : undefined);
+    return sats ? formatBtc(sats) : '';
+  });
   const [max, setMax] = useState(false);
   const [speed, setSpeed] = useState<Speed>('normal');
   const [stage, setStage] = useState<SendStage | null>(null);

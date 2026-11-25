@@ -1390,9 +1390,11 @@ export interface DinManifest {
   /** File types Files opens in this app. */
   file_handlers?: { action: string; accept: Record<string, string[]>; din?: { default?: boolean } }[];
   /**
-   * `nostr:` links this app opens: `url` has `%s` for the link, and `kinds`
-   * (Din's addition) lists the event kinds it shows, every kind when absent.
-   * Only `protocol: "nostr"` counts.
+   * Links this app opens: `url` has `%s` for the link. For `nostr:` links
+   * (a web app's or nsite's), `kinds` (Din's addition) lists the event kinds
+   * it shows, every kind when absent. For `bitcoin:` links (BIP-21), the
+   * `url`'s query is the launch's parameters, as a shortcut's is, with `%s`
+   * where the link goes (Wallet's: `/?section=send&to=%s`).
    */
   protocol_handlers?: { protocol: string; url: string; kinds?: number[] }[];
   /**

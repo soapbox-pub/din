@@ -105,6 +105,16 @@ export interface NostrLinksControl {
   setDefault(kind: number, appId: string | null): void;
 }
 
+/** Where bitcoin: links open, as Settings → Nostr & Storage has it (useBitcoinLinks). */
+export interface BitcoinLinksControl {
+  /** The apps that open them. */
+  readonly handlers: readonly AppDefinition[];
+  /** The one they open in without asking, chosen with Always. */
+  readonly defaultApp: AppDefinition | undefined;
+  /** Make an app the one they open in, or (null) ask again. */
+  setDefault(appId: string | null): void;
+}
+
 /** The desktop as commands see it, always as it is now. */
 export interface CommandContext {
   readonly config: AppConfig;
@@ -124,6 +134,8 @@ export interface CommandContext {
   readonly extensionKeys?: ExtensionKeyStore;
   /** Which apps open nostr: links, and the default for each kind (useNostrLinks). */
   readonly nostrLinks?: NostrLinksControl;
+  /** Which apps open bitcoin: links, and the one they open in without asking (useBitcoinLinks). */
+  readonly bitcoinLinks?: BitcoinLinksControl;
   /** The signed-in account's signer, for what signs without publishing (a NIP-98 request). */
   readonly signer?: NostrSigner;
   /** Sign and publish an event as the signed-in account. */

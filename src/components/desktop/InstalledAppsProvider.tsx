@@ -18,6 +18,7 @@ import {
 import { sanitizeImageUrl, sanitizeUrl, sameOrigin } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { normalizeNostrHandler } from '@/lib/nostrUri';
+import { normalizeBitcoinHandler } from '@/lib/bitcoinUri';
 import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 import { normalizeShortcuts, shortcutActions } from '@/lib/webAppShortcuts';
 import { useAppData } from '@/hooks/useAppData';
@@ -127,6 +128,7 @@ function webAppToDefinition(webApp: WebApp, favicon?: string, nsiteHost?: string
     web: true,
     // Only a handler on the app's own origin: the window is pinned to it.
     ...(webApp.nostr && sameOrigin(webApp.nostr.url, webApp.url) ? { nostr: webApp.nostr } : {}),
+    ...(webApp.bitcoin && sameOrigin(webApp.bitcoin.url, webApp.url) ? { bitcoin: { url: webApp.bitcoin.url } } : {}),
     actions: shortcutActions(normalizeShortcuts(webApp.shortcuts, originOfUrl(webApp.url))),
     ...withShare(normalizeWebShareTarget(webApp.share, originOfUrl(webApp.url))),
   };
@@ -159,6 +161,7 @@ function nsiteAppToDefinition(
     themeColor: summary?.app?.themeColor ?? undefined,
   }, themed ?? summary?.app?.favicon ?? undefined, entry.host);
   const handler = summary?.app?.nostr;
+  const bitcoin = summary?.app?.bitcoin;
   const base = nsiteAppUrl(entry.host).slice(0, -1);
   const shortcuts = summary?.app?.shortcuts ?? [];
   const share = summary?.app?.share;
@@ -171,6 +174,7 @@ function nsiteAppToDefinition(
     ...(handler
       ? { nostr: { url: `${base}${handler.path}`, kinds: handler.kinds } }
       : {}),
+    ...(bitcoin ? { bitcoin: { url: `${base}${bitcoin.path}` } } : {}),
     ...withShare(
       share
         ? {
@@ -218,6 +222,7 @@ function nativeAppToDefinition(app: NativeApp): AppDefinition {
     keywords: [...app.keywords, ...app.categories],
     // Desktop entries can't say which kinds they show.
     ...(app.schemes?.includes('nostr') && !app.terminal ? { nostr: { kinds: null } } : {}),
+    ...(app.schemes?.includes('bitcoin') && !app.terminal ? { bitcoin: {} } : {}),
   };
 }
 
@@ -427,13 +432,14 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
         requestInstall(host);
         return entry;
       },
-      installWebApp: ({ name, url, icon, themeColor, nostr, shortcuts, share }) => {
+      installWebApp: ({ name, url, icon, themeColor, nostr, bitcoin, shortcuts, share }) => {
         const safeUrl = sanitizeUrl(url);
         if (!safeUrl) return null;
         const safeIcon = icon ? (sanitizeImageUrl(icon) ?? undefined) : undefined;
         const safeThemeColor = normalizeThemeColor(themeColor) ?? undefined;
         const trimmedName = name.trim() || new URL(safeUrl).hostname;
         const handler = normalizeNostrHandler(nostr);
+        const bitcoinHandler = normalizeBitcoinHandler(bitcoin);
         const kept = normalizeShortcuts(shortcuts, originOfUrl(safeUrl));
         const shareTarget = normalizeWebShareTarget(share, originOfUrl(safeUrl));
         const webApp = createWebApp({
@@ -442,6 +448,7 @@ export function InstalledAppsProvider({ children }: { children: ReactNode }) {
           icon: safeIcon,
           themeColor: safeThemeColor,
           ...(handler && sameOrigin(handler.url, safeUrl) ? { nostr: handler } : {}),
+          ...(bitcoinHandler && sameOrigin(bitcoinHandler.url, safeUrl) ? { bitcoin: bitcoinHandler } : {}),
           ...(kept.length > 0 ? { shortcuts: kept } : {}),
           ...(shareTarget ? { share: shareTarget } : {}),
         });

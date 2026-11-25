@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeNostrHandler, type NostrHandler } from '@/lib/nostrUri';
+import { normalizeBitcoinHandler, type BitcoinHandler } from '@/lib/bitcoinUri';
 import { normalizeShortcuts, type WebAppShortcut } from '@/lib/webAppShortcuts';
 import { normalizeWebShareTarget, type WebShareTarget } from '@/lib/webShareTarget';
 
@@ -32,6 +33,11 @@ export interface WebApp {
    */
   nostr?: NostrHandler;
   /**
+   * How the site opens `bitcoin:` links, from its manifest's
+   * `protocol_handlers` at install time. The URL is on the app's own origin.
+   */
+  bitcoin?: BitcoinHandler;
+  /**
    * Its manifest's `shortcuts` at install time, for the jump list on its
    * Dock and launcher tiles. Each is on the app's own origin.
    */
@@ -62,6 +68,10 @@ export const WebAppsSchema: z.ZodType<WebApp[]> = z.array(
     nostr: z
       .unknown()
       .transform((value) => normalizeNostrHandler(value) ?? undefined)
+      .optional(),
+    bitcoin: z
+      .unknown()
+      .transform((value) => normalizeBitcoinHandler(value) ?? undefined)
       .optional(),
     shortcuts: z.unknown().optional(),
     share: z.unknown().optional(),

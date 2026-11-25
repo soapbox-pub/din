@@ -225,6 +225,7 @@ import {
 import { RelayListManager } from '@/components/RelayListManager';
 import { BlossomServerManager } from '@/components/BlossomServerManager';
 import { NostrLinkSettings } from '@/components/desktop/NostrLinkSettings';
+import { BitcoinLinkSettings } from '@/components/desktop/BitcoinLinkSettings';
 import { WebsiteLinkSettings } from '@/components/desktop/WebsiteLinkSettings';
 import {
   AlertDialog,
@@ -3916,6 +3917,7 @@ function NostrStorageSection() {
       </div>
 
       <NostrLinkSettings />
+      <BitcoinLinkSettings />
       <WebsiteLinkSettings />
     </SectionShell>
   );

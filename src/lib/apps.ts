@@ -8,7 +8,7 @@ import { PRINT_WINDOW_APP_ID } from '@/lib/printing';
 import { FILE_PICKER_APP_ID } from '@/lib/filePickerWindows';
 import { PROVIDER_WINDOW_APP_ID } from '@/shared/assistant/providerWindow';
 import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WINDOW_ID, OPEN_WITH_APP_ID } from '@/lib/settingsWindows';
-import { dinManifest, dinManifests, manifestActions, manifestIcon, manifestSize } from '@/lib/dinApps';
+import { dinManifest, dinManifests, manifestActions, manifestBitcoin, manifestIcon, manifestSize } from '@/lib/dinApps';
 import { FINGERPRINT_SETUP_APP_ID } from '@/lib/lock';
 import { PROGRAM_SIGNER_APP_ID } from '@/lib/programSignerWindows';
 
@@ -185,6 +185,14 @@ export interface AppDefinition {
    */
   nostr?: { url?: string; kinds: number[] | null };
   /**
+   * The `bitcoin:` links (BIP-21) the app opens (src/lib/bitcoinUri.ts):
+   * the `url` (with `%s` for the URI) an installed web app's or nsite's
+   * window opens at, a built-in app's launch `params` (any `%s` among them
+   * becomes the URI), or nothing for a native app, which is started with
+   * the URI.
+   */
+  bitcoin?: { url?: string; params?: Record<string, string> };
+  /**
    * How an installed website or nsite takes shares (src/lib/share.ts): its
    * manifest's `share_target`, its action on the app's own origin.
    */
@@ -220,6 +228,7 @@ function dinApp(id: string): AppDefinition {
     singleInstance: manifest.launch_handler?.client_mode === 'focus-existing',
     dockAs: manifest.din.dockAs,
     actions: manifestActions(manifest),
+    ...manifestBitcoin(manifest),
     sandboxed: true,
   };
 }

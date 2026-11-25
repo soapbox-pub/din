@@ -1,6 +1,6 @@
 import { formatBtc, formatSats, parseBtc } from '@/shared/bitcoinAmounts';
 import { CommandError, type Area, type CommandContext } from './types';
-import { command } from './util';
+import { command, need, pick } from './util';
 
 /**
  * `din wallet`: the signed-in account's onchain bitcoin, as the Wallet app
@@ -70,6 +70,32 @@ export const walletArea: Area = {
         return { text: 'Wallet is open with it filled in; send it from there.' };
       },
     ),
+    // Settings → Nostr & Storage's Bitcoin links.
+    command('wallet', 'links', 'Where bitcoin: links open: the apps that open them, and the one chosen to open them without asking', [], (_args, ctx) => {
+      const links = need(ctx.bitcoinLinks, 'bitcoin: links');
+      const apps = links.handlers.map((app) => ({ id: app.id, name: app.name }));
+      const chosen = links.defaultApp;
+      return {
+        data: { default: chosen?.id ?? null, apps },
+        text: [
+          `open in: ${chosen ? chosen.name : apps.length === 1 ? `${apps[0].name}, the only app that opens them` : 'ask which app'}`,
+          `apps: ${apps.map((a) => a.name).join(', ') || 'none'}`,
+        ].join('\n'),
+      };
+    }),
+    command('wallet', 'link-default', 'Open bitcoin: links in an app without asking, as Always does; without an app, ask again', [
+      { name: 'app', type: 'string', positional: true, optional: true, help: 'Its id or name, from din wallet links' },
+    ], (args, ctx) => {
+      const links = need(ctx.bitcoinLinks, 'bitcoin: links');
+      const query = args.optString('app');
+      if (query === undefined) {
+        links.setDefault(null);
+        return { text: 'bitcoin: links ask again when more than one app opens them' };
+      }
+      const app = pick(links.handlers, query, (a) => [a.id, a.name], 'app that opens bitcoin: links');
+      links.setDefault(app.id);
+      return { text: `bitcoin: links open in ${app.name}` };
+    }),
     command('wallet', 'receive', 'Open Wallet showing the account’s address and its QR code', [], async (_args, ctx) => {
       const addr = await address(ctx);
       ctx.actions.open('wallet', { section: 'receive' });

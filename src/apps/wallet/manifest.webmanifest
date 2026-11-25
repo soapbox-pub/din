@@ -8,6 +8,7 @@
     { "name": "Send Bitcoin", "url": "/?section=send", "din": { "id": "send" } },
     { "name": "Receive Bitcoin", "url": "/?section=receive", "din": { "id": "receive" } }
   ],
+  "protocol_handlers": [{ "protocol": "bitcoin", "url": "/?section=send&to=%s" }],
   "din": {
     "permissions": ["nostr"],
     "window": { "size": { "width": 920, "height": 680 }, "frame": "custom" },

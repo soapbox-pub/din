@@ -2207,7 +2207,7 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
                     views.current.get(activeTab.id)?.collectIcons() ?? Promise.resolve([])
                   }
                   collectManifest={() =>
-                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, shortcuts: [], share: null })
+                    views.current.get(activeTab.id)?.collectManifest() ?? Promise.resolve({ nostr: null, bitcoin: null, shortcuts: [], share: null })
                   }
                 />
               )}
@@ -5396,6 +5396,7 @@ function InstallSiteButton({
       icon: effectiveIcon,
       themeColor: normalizeThemeColor(themeColor) ?? undefined,
       nostr: manifest?.nostr ?? undefined,
+      bitcoin: manifest?.bitcoin ?? undefined,
       shortcuts: manifest?.shortcuts,
       share: manifest?.share ?? undefined,
     });

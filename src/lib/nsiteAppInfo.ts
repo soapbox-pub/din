@@ -12,6 +12,7 @@
 import { sanitizeImageUrl } from '@/lib/sanitizeUrl';
 import { normalizeThemeColor } from '@/lib/themeColor';
 import { parseNostrProtocolHandler } from '@/lib/nostrUri';
+import { parseBitcoinProtocolHandler } from '@/lib/bitcoinUri';
 import { parseManifestShortcuts } from '@/lib/webAppShortcuts';
 import { parseWebShareTarget, shareTargetPath } from '@/lib/webShareTarget';
 import type { NsiteAppInfo, NsiteStore, NsiteSummary } from '@/lib/nsiteStore';
@@ -214,7 +215,7 @@ const FAVICON_SIZE = 64;
  * manifest id and scope_extensions, so installed sites can open websites' links;
  * 7: and its shortcuts; 8: and its share target; 9: a POST one too).
  */
-export const NSITE_APP_INFO_VERSION = 9;
+export const NSITE_APP_INFO_VERSION = 10;
 
 /**
  * Margin left around a squircle-cut icon, so it sits at the same visual size
@@ -416,6 +417,15 @@ function pickNostrHandler(webManifest: unknown, manifestPath: string): NsiteAppI
   const url = new URL(handler.url);
   if (url.origin !== 'https://nsite.invalid') return null;
   return { path: `${url.pathname}${url.search}${url.hash}`, kinds: handler.kinds };
+}
+
+/** How the site opens `bitcoin:` links, from its manifest: a path on the site itself. */
+function pickBitcoinHandler(webManifest: unknown, manifestPath: string): NsiteAppInfo['bitcoin'] {
+  const handler = parseBitcoinProtocolHandler(webManifest, `https://nsite.invalid${manifestPath}`);
+  if (!handler) return null;
+  const url = new URL(handler.url);
+  if (url.origin !== 'https://nsite.invalid') return null;
+  return { path: `${url.pathname}${url.search}${url.hash}` };
 }
 
 /** The manifest's shortcuts, each a path on the site itself. */
@@ -636,6 +646,7 @@ export async function deriveNsiteAppDetails(
     favicon: null,
     themeColor: null,
     nostr: null,
+    bitcoin: null,
     id: null,
     scopeExtensions: [],
     shortcuts: [],
@@ -661,6 +672,7 @@ export async function deriveNsiteAppDetails(
     candidates.push(...collectFromWebManifest(webManifest, manifestBase));
     info.installable = isInstallable(webManifest, manifestBase, paths);
     info.nostr = pickNostrHandler(webManifest, manifestPath);
+    info.bitcoin = pickBitcoinHandler(webManifest, manifestPath);
     info.shortcuts = pickShortcuts(webManifest, manifestPath);
     info.share = pickShareTarget(webManifest, manifestPath);
     Object.assign(info, pickScope(webManifest, manifestPath));

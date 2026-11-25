@@ -157,18 +157,32 @@ function parseKinds(value: unknown): number[] | null {
  * checks the URL is on the app's own origin.
  */
 export function parseNostrProtocolHandler(manifest: unknown, base: string): NostrHandler | null {
+  const found = findProtocolHandler(manifest, base, 'nostr');
+  return found ? { url: found.url, kinds: parseKinds(found.entry.kinds) } : null;
+}
+
+/**
+ * The first entry of a web app manifest's `protocol_handlers` for `protocol`
+ * (`nostr`, `bitcoin`) whose `url` has `%s`, that URL resolved against
+ * `base`, or null. The caller checks the URL is on the app's own origin.
+ */
+export function findProtocolHandler(
+  manifest: unknown,
+  base: string,
+  protocol: string,
+): { url: string; entry: Record<string, unknown> } | null {
   if (typeof manifest !== 'object' || manifest === null) return null;
   const { protocol_handlers: handlers } = manifest as { protocol_handlers?: unknown };
   if (!Array.isArray(handlers)) return null;
   for (const entry of handlers) {
     if (typeof entry !== 'object' || entry === null) continue;
-    const { protocol, url, kinds } = entry as Record<string, unknown>;
-    if (typeof protocol !== 'string' || protocol.trim().toLowerCase() !== 'nostr') continue;
+    const { protocol: scheme, url } = entry as Record<string, unknown>;
+    if (typeof scheme !== 'string' || scheme.trim().toLowerCase() !== protocol) continue;
     if (typeof url !== 'string' || !url.includes('%s')) continue;
     try {
       const resolved = new URL(url.trim(), base).href;
       if (resolved.length > MAX_HANDLER_URL || !resolved.includes('%s')) continue;
-      return { url: resolved, kinds: parseKinds(kinds) };
+      return { url: resolved, entry: entry as Record<string, unknown> };
     } catch {
       continue;
     }

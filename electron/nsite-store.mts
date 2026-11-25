@@ -91,6 +91,8 @@ export interface NsiteAppInfo {
   themeColor: string | null;
   /** How the site opens `nostr:` links: a path with `%s` for the URI, and the kinds it shows. */
   nostr?: { path: string; kinds: number[] | null } | null;
+  /** How the site opens `bitcoin:` links: a path with `%s` for the URI. */
+  bitcoin?: { path: string } | null;
   /**
    * The app's web app manifest id as a path on the site (`/` for most), which
    * a website's `web-app-origin-association` names as `nsite://<host><id>`.
@@ -495,6 +497,7 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
       ? value.version
       : undefined;
   const nostr = parseNostrHandler(value.nostr);
+  const bitcoin = parseBitcoinHandler(value.bitcoin);
   const id = isScopePath(value.id) && !/[\s\\#]/.test(value.id) ? value.id : null;
   const scopeExtensions = Array.isArray(value.scopeExtensions)
     ? [...new Set(value.scopeExtensions.map(httpsOrigin).filter((origin) => origin !== null))].slice(
@@ -510,6 +513,7 @@ function parseAppInfo(raw: unknown): NsiteAppInfo | null {
     favicon,
     themeColor,
     nostr,
+    bitcoin,
     id,
     scopeExtensions,
     shortcuts: parseShortcuts(value.shortcuts),
@@ -569,6 +573,14 @@ function parseNostrHandler(raw: unknown): NsiteAppInfo['nostr'] {
     ? kinds.filter((k): k is number => Number.isInteger(k) && k >= 0 && k <= 65535).slice(0, 256)
     : [];
   return { path, kinds: valid.length > 0 ? valid : null };
+}
+
+function parseBitcoinHandler(raw: unknown): NsiteAppInfo['bitcoin'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const { path } = raw as Record<string, unknown>;
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
+  if (path.length > 2048 || !path.includes('%s') || /[\s\\]/.test(path)) return null;
+  return { path };
 }
 
 function parseIconData(value: unknown): string | null {
