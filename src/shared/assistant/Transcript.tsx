@@ -43,6 +43,7 @@ import {
   replyText,
   type AssistantMessage,
   type Block,
+  type Entry,
   type ReasoningPart,
   type Step,
   type ToolPart,
@@ -50,6 +51,7 @@ import {
   type UserMessage,
 } from '@/shared/assistant/turns';
 import { Markdown } from '@/shared/assistant/Markdown';
+import { dayBreaks, dayLabel, dayOf, fullTime, timeOfDay } from '@/shared/assistant/messageTime';
 import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
 import {
   modelKey,
@@ -88,6 +90,39 @@ function compacting(message: SessionMessage): boolean {
 /** The turn a prompt opens before the agent has written anything. */
 function emptyTurn(prompt: UserMessage): TurnEntry {
   return { kind: 'turn', id: `turn:${prompt.id}`, start: prompt.time.created, items: [] };
+}
+
+/** When an entry in the transcript began. */
+function entryTime(entry: Entry): number {
+  return entry.kind === 'turn' ? entry.start : entry.message.time.created;
+}
+
+/** "Yesterday", between the last message of one day and the first of the next. */
+function DayDivider({ at, today }: { at: number; today: number }) {
+  const label = dayLabel(at, today);
+  return (
+    <li className="flex items-center gap-3 text-xs font-medium text-muted-foreground" role="separator" aria-label={label}>
+      <span className="h-px flex-1 bg-border/60" aria-hidden />
+      <time dateTime={new Date(dayOf(at)).toISOString()} title={fullTime(at)}>
+        {label}
+      </time>
+      <span className="h-px flex-1 bg-border/60" aria-hidden />
+    </li>
+  );
+}
+
+/** "3:42 PM" beside a message's buttons, the full date on hover. */
+function MessageTime({ at, prefix }: { at: number; prefix?: string }) {
+  return (
+    <time
+      dateTime={new Date(at).toISOString()}
+      title={fullTime(at)}
+      className="inline-flex h-8 items-center px-2 text-xs tabular-nums text-muted-foreground"
+    >
+      {prefix && `${prefix} `}
+      {timeOfDay(at)}
+    </time>
+  );
 }
 
 /**
@@ -180,20 +215,25 @@ export const Transcript = memo(function Transcript({
   // One the agent has just taken can show up in both until the inbox refetches.
   const taken = new Set(messages.map((m) => m.id));
   const waiting = queued.filter((q) => !taken.has(q.id));
+  const [today] = useState(() => Date.now());
+  const breaks = dayBreaks(entries.map(entryTime), today);
   return (
     <TasksContext value={tasks}>
     <ol className="flex flex-col gap-8" aria-label="Conversation">
-      {entries.map((entry) => {
+      {entries.map((entry, index) => {
+        let item: ReactNode;
+        let key: string;
         if (entry.kind === 'user') {
-          return (
-            <li key={entry.message.id} className="group/user flex justify-end">
+          key = entry.message.id;
+          item = (
+            <li key={key} className="group/user flex justify-end">
               <UserBubble message={entry.message} onFork={onFork && (() => onFork(entry.message))} />
             </li>
           );
-        }
-        if (entry.kind === 'turn') {
-          return (
-            <li key={entry.id} className="group/turn">
+        } else if (entry.kind === 'turn') {
+          key = entry.id;
+          item = (
+            <li key={key} className="group/turn">
               <Turn
                 turn={entry}
                 working={running && entry === last}
@@ -203,9 +243,12 @@ export const Transcript = memo(function Transcript({
               />
             </li>
           );
+        } else {
+          key = entry.message.id;
+          const note = <Note message={entry.message} home={home} />;
+          item = note ? <li key={key}>{note}</li> : null;
         }
-        const note = <Note message={entry.message} home={home} />;
-        return note ? <li key={entry.message.id}>{note}</li> : null;
+        return breaks[index] ? [<DayDivider key={`day:${key}`} at={entryTime(entry)} today={today} />, item] : item;
       })}
       {running && last?.kind === 'user' && !workElsewhere && (
         <li key={`turn:${last.message.id}`} className="group/turn">
@@ -322,6 +365,7 @@ function UserBubble({ message, onFork }: { message: UserMessage; onFork?: () => 
         </ContextMenuContent>
       </ContextMenu>
       <div className="-mt-0.5 flex opacity-0 focus-within:opacity-100 group-hover/user:opacity-100">
+        <MessageTime at={message.time.created} />
         {onFork && (
           <button
             type="button"
@@ -451,7 +495,7 @@ function Turn({
     <div className="flex min-w-0 flex-col gap-4">
       {work.length > 0 ? (
         <Collapsible open={open} onOpenChange={setOpen}>
-          <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')}>
+          <CollapsibleTrigger className={cn(TRIGGER, 'max-w-full')} title={working ? undefined : `Finished ${fullTime(end)}`}>
             {summary}
             <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
           </CollapsibleTrigger>
@@ -461,7 +505,9 @@ function Turn({
         </Collapsible>
       ) : (
         ((working && !quiet) || (!working && outcome !== 'succeeded')) && (
-          <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">{summary}</p>
+          <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" title={working ? undefined : `Finished ${fullTime(end)}`}>
+            {summary}
+          </p>
         )
       )}
       {workErrors.map(render)}
@@ -490,6 +536,7 @@ function Turn({
         >
           <CopyButton text={reply} label="Copy reply" />
           <ReadAloudButton text={reply} id={turn.id} />
+          <MessageTime at={end} />
         </div>
       )}
     </div>
