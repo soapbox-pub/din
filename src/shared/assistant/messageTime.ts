@@ -1,15 +1,9 @@
 /** When messages in a conversation were sent, as the transcript shows it. */
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' });
 const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
 const thisYear = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 const otherYear = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
-
-/** "3:42 PM". */
-export function timeOfDay(at: number): string {
-  return clock.format(at);
-}
 
 /** "Tuesday, November 25, 2026 at 3:42 PM", for a tooltip. */
 export function fullTime(at: number): string {

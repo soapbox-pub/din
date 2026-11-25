@@ -51,10 +51,11 @@ import {
   type UserMessage,
 } from '@/shared/assistant/turns';
 import { Markdown } from '@/shared/assistant/Markdown';
-import { dayBreaks, dayLabel, dayOf, fullTime, timeOfDay } from '@/shared/assistant/messageTime';
+import { dayBreaks, dayLabel, dayOf, fullTime } from '@/shared/assistant/messageTime';
 import { PreviewOpenContext, previewsOf } from '@/shared/assistant/previews';
 import {
   modelKey,
+  relativeTime,
   tildify,
   toolTaskID,
   type PromptFile,
@@ -111,16 +112,29 @@ function DayDivider({ at, today }: { at: number; today: number }) {
   );
 }
 
-/** "3:42 PM" beside a message's buttons, the full date on hover. */
-function MessageTime({ at, prefix }: { at: number; prefix?: string }) {
+/** The current time, a minute at a time, for the transcript's relative times. */
+const NowContext = createContext(0);
+
+/** The current time, ticking each minute. */
+function useMinute(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/** "3h" beside a message's buttons, the full date and time on hover. */
+function MessageTime({ at }: { at: number }) {
+  const now = useContext(NowContext);
   return (
     <time
       dateTime={new Date(at).toISOString()}
       title={fullTime(at)}
       className="inline-flex h-8 items-center px-2 text-xs tabular-nums text-muted-foreground"
     >
-      {prefix && `${prefix} `}
-      {timeOfDay(at)}
+      {relativeTime(at, Math.max(now, at))}
     </time>
   );
 }
@@ -215,9 +229,10 @@ export const Transcript = memo(function Transcript({
   // One the agent has just taken can show up in both until the inbox refetches.
   const taken = new Set(messages.map((m) => m.id));
   const waiting = queued.filter((q) => !taken.has(q.id));
-  const [today] = useState(() => Date.now());
+  const today = useMinute();
   const breaks = dayBreaks(entries.map(entryTime), today);
   return (
+    <NowContext value={today}>
     <TasksContext value={tasks}>
     <ol className="flex flex-col gap-8" aria-label="Conversation">
       {entries.map((entry, index) => {
@@ -271,6 +286,7 @@ export const Transcript = memo(function Transcript({
       ))}
     </ol>
     </TasksContext>
+    </NowContext>
   );
 });
 
