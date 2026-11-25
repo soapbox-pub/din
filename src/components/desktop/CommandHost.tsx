@@ -1,14 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useInstalledApps } from '@/contexts/InstalledAppsContext';
 import { useWorkAreas } from '@/contexts/MonitorsContext';
 import { useWidgets } from '@/contexts/WidgetsContext';
@@ -24,20 +14,20 @@ import { useBitcoinLinks } from '@/hooks/useBitcoinLinks';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useOpenUrl } from '@/hooks/useOpenUrl';
 import { runCommandLine, runStructured, type CommandContext } from '@/lib/commands';
-import { getCommandBridge, parseCommandRequest } from '@/lib/commands/bridge';
+import { getCommandBridge, parseCommandRequest, type CommandRequest } from '@/lib/commands/bridge';
+import { addCommandQuestion, answerCommandQuestion, COMMAND_CONFIRM_APP_ID } from '@/lib/commandConfirmWindows';
 
-interface Asking {
-  title: string;
-  description: string;
-  action: string;
-  destructive?: boolean;
-  resolve: (ok: boolean) => void;
+/** What asked, as the user would have typed it: `din mail unsubscribe`. */
+function commandName(request: CommandRequest): string {
+  const words = 'argv' in request ? request.argv.filter((a) => !a.startsWith('-')).slice(0, 2) : request.path;
+  return ['din', ...words].join(' ');
 }
 
 /**
  * Runs the `din` command's commands (src/lib/commands/, from
  * electron/din-launch.mts) against the desktop as it is, and asks the user
- * on screen when one wants that.
+ * on screen when one wants that, in a window of its own (CommandConfirmWindow)
+ * rather than a dialog over the whole desktop.
  */
 export function CommandHost() {
   const { config, updateConfig } = useAppContext();
@@ -54,7 +44,6 @@ export function CommandHost() {
   const extensionKeys = useExtensionKeys();
   const nostrLinks = useNostrLinks();
   const bitcoinLinks = useBitcoinLinks();
-  const [asking, setAsking] = useState<Asking[]>([]);
 
   const live = useRef({ config, updateConfig, windows, active, actions, apps, widgets, desktopIcons, areas, openUrl, user, publish, upload, relays, extensionKeys, nostrLinks, bitcoinLinks });
   useLayoutEffect(() => {
@@ -88,7 +77,8 @@ export function CommandHost() {
         query: (filters) => live.current.relays.query(filters, { signal: AbortSignal.timeout(8000) }),
         openUrl: (url) => live.current.openUrl(url),
         confirm: (question) => new Promise<boolean>((resolve) => {
-          setAsking((queue) => [...queue, { ...question, resolve }]);
+          const id = addCommandQuestion({ ...question, command: commandName(request), fromAssistant: 'session' in request && !!request.session }, resolve);
+          if (!live.current.actions.open(COMMAND_CONFIRM_APP_ID, { request: id })) answerCommandQuestion(id, false);
         }),
         progress: (update) => void bridge.progress(request.id, update),
         cwd: request.cwd,
@@ -99,32 +89,5 @@ export function CommandHost() {
     });
   }, []);
 
-  const current = asking[0];
-  const settle = (ok: boolean) => {
-    if (!current) return;
-    current.resolve(ok);
-    setAsking((queue) => queue.slice(1));
-  };
-
-  return (
-    <AlertDialog open={!!current} onOpenChange={(open) => !open && settle(false)}>
-      {current && (
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{current.title}</AlertDialogTitle>
-            <AlertDialogDescription>{current.description}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => settle(false)}>Don’t Allow</AlertDialogCancel>
-            <AlertDialogAction
-              className={current.destructive ? 'bg-destructive text-white hover:bg-destructive/90' : undefined}
-              onClick={() => settle(true)}
-            >
-              {current.action}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      )}
-    </AlertDialog>
-  );
+  return null;
 }

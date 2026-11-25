@@ -11,6 +11,7 @@ import { ADD_PRINTER_APP_ID, APP_INFO_APP_ID, CONNECT_APP_APP_ID, FOLDER_APP_WIN
 import { dinManifest, dinManifests, manifestActions, manifestBitcoin, manifestIcon, manifestSize } from '@/lib/dinApps';
 import { FINGERPRINT_SETUP_APP_ID } from '@/lib/lock';
 import { PROGRAM_SIGNER_APP_ID } from '@/lib/programSignerWindows';
+import { COMMAND_CONFIRM_APP_ID } from '@/lib/commandConfirmWindows';
 
 const DinAppFrame = lazy(() =>
   import('@/components/desktop/DinAppFrame').then((m) => ({ default: m.DinAppFrame })),
@@ -46,6 +47,9 @@ const OpenWithWindow = lazy(() =>
 );
 const ProgramSignerWindow = lazy(() =>
   import('@/components/desktop/apps/ProgramSignerWindow').then((m) => ({ default: m.ProgramSignerWindow })),
+);
+const CommandConfirmWindow = lazy(() =>
+  import('@/components/desktop/apps/CommandConfirmWindow').then((m) => ({ default: m.CommandConfirmWindow })),
 );
 const FingerprintSetupWindow = lazy(() =>
   import('@/components/desktop/apps/FingerprintSetupWindow').then((m) => ({ default: m.FingerprintSetupWindow })),
@@ -459,6 +463,21 @@ export const APPS: readonly AppDefinition[] = [
     icon: '/icons/apps/settings.png',
     component: ProgramSignerWindow,
     defaultSize: { width: 420, height: 680 },
+    floating: true,
+    hidden: true,
+    instanceParam: 'request',
+    dockAs: 'settings',
+  },
+  {
+    // A `din` command asking the user first (ctx.confirm: deleting, letting a
+    // port through the firewall…), from the Assistant or a Terminal: a window
+    // per question, so the desktop stays usable while it waits. Hidden from
+    // the launcher; CommandHost opens it.
+    id: COMMAND_CONFIRM_APP_ID,
+    name: 'Allow?',
+    icon: '/icons/apps/settings.png',
+    component: CommandConfirmWindow,
+    defaultSize: { width: 440, height: 340 },
     floating: true,
     hidden: true,
     instanceParam: 'request',
