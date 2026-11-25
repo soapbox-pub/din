@@ -8,8 +8,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SegmentedControl } from '@/shared/appChrome';
-import { focusRing, roomyMenu } from '@/shared/appChromeStyles';
+import { SegmentedControl, ToolButton } from '@/shared/appChrome';
+import { focusRing, roomyMenu, toolIcon } from '@/shared/appChromeStyles';
 import { ProjectIcon } from '@/shared/assistant/ProjectIcon';
 import { useAssistantHost } from '@/shared/assistant/host';
 import {
@@ -35,8 +35,8 @@ import {
 import { cn } from '@/lib/utils';
 
 /*
- * The Assistant's pages for projects: the tiles a new tab offers, and a
- * project's own page, which a tile, the project's heading in the
+ * The Assistant's pages for projects: the recent ones a new tab offers, and a
+ * project's own page, which its name on a new tab, the project's heading in the
  * conversation list and `din assistant project` open.
  */
 
@@ -45,28 +45,23 @@ import { cn } from '@/lib/utils';
 // ---------------------------------------------------------------------------
 
 /** A project's icon as a clay tile: its favicon, or the first letter of its name. */
-export function ProjectTileIcon({ src, name, size = 'md' }: { src: string | undefined; name: string; size?: 'md' | 'lg' }) {
-  const box = size === 'lg' ? 'size-16 rounded-[20px]' : 'size-12 rounded-2xl';
+function ProjectTileIcon({ src, name }: { src: string | undefined; name: string }) {
   return (
-    <span aria-hidden className={cn('grid shrink-0 place-items-center bg-card clay', box)}>
+    <span aria-hidden className="grid size-16 shrink-0 place-items-center rounded-[20px] bg-card clay">
       <ProjectIcon
         src={src}
-        className={cn('rounded-md', size === 'lg' ? 'size-10' : 'size-7')}
-        fallback={
-          <span className={cn('font-semibold uppercase text-ink-accent', size === 'lg' ? 'text-2xl' : 'text-lg')}>
-            {name.replace(/^[^\p{L}\p{N}]+/u, '')[0] ?? name[0]}
-          </span>
-        }
+        className="size-10 rounded-md"
+        fallback={<span className="text-2xl font-semibold uppercase text-ink-accent">{name.replace(/^[^\p{L}\p{N}]+/u, '')[0] ?? name[0]}</span>}
       />
     </span>
   );
 }
 
 // ---------------------------------------------------------------------------
-// The new tab's tiles
+// The new tab's recent projects
 // ---------------------------------------------------------------------------
 
-/** What can be done with a project from its tile. */
+/** What can be done with a project from a new tab. */
 export interface ProjectActions {
   /** Show its page, in this tab or a new one. */
   onOpen: (directory: string, newTab?: boolean) => void;
@@ -74,22 +69,22 @@ export interface ProjectActions {
   onNew: (directory: string) => void;
 }
 
-/** The projects worked in lately, a row of tiles as the Web Browser's new tab has sites. */
-export function ProjectTiles({ folders, home, onOpen, onNew }: ProjectActions & { folders: string[]; home: string | undefined }) {
+/** The projects worked in lately, a quiet row of names under a new tab's composer. */
+export function RecentProjects({ folders, home, onOpen, onNew }: ProjectActions & { folders: string[]; home: string | undefined }) {
   const icons = useProjectIcons(folders);
   if (folders.length === 0) return null;
   return (
-    <ul aria-label="Recent projects" className="flex flex-wrap justify-center gap-2">
+    <ul aria-label="Recent projects" className="flex flex-wrap justify-center gap-1">
       {folders.map((folder) => (
-        <li key={folder} className="w-24">
-          <ProjectTile folder={folder} icon={icons.get(folder)} home={home} onOpen={onOpen} onNew={onNew} />
+        <li key={folder}>
+          <RecentProject folder={folder} icon={icons.get(folder)} home={home} onOpen={onOpen} onNew={onNew} />
         </li>
       ))}
     </ul>
   );
 }
 
-function ProjectTile({
+function RecentProject({
   folder,
   icon,
   home,
@@ -97,22 +92,22 @@ function ProjectTile({
   onNew,
 }: ProjectActions & { folder: string; icon: string | undefined; home: string | undefined }) {
   const { openPath, openApp } = useAssistantHost();
-  const name = directoryName(folder, home);
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
           type="button"
-          title={tildify(folder, home)}
+          title={`${tildify(folder, home)}\nShow the project`}
           onClick={() => onOpen(folder)}
           onAuxClick={(e) => e.button === 1 && onOpen(folder, true)}
           onMouseDown={(e) => e.button === 1 && e.preventDefault()}
-          className={cn('group flex w-full min-w-0 flex-col items-center gap-2 rounded-xl p-2 hover:bg-foreground/5', focusRing)}
+          className={cn(
+            'flex h-8 max-w-48 items-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+            focusRing,
+          )}
         >
-          <span className="motion-safe:transition-transform motion-safe:group-hover:scale-105">
-            <ProjectTileIcon src={icon} name={name} />
-          </span>
-          <span className="w-full truncate text-center text-[13px] text-foreground/80">{name}</span>
+          <ProjectIcon src={icon} />
+          <span className="truncate">{directoryName(folder, home)}</span>
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent className={cn('w-56', roomyMenu)}>
@@ -155,18 +150,27 @@ function ProjectMenuItems({
 // A project's page
 // ---------------------------------------------------------------------------
 
-/** The top of a project's page: its icon, name and folder. */
+/** The top of a project's page: its icon, name and folder, and its folder in Files or a Terminal. */
 export function ProjectHeading({ directory, home }: { directory: string; home: string | undefined }) {
   const icon = useProjectIcons([directory]).get(directory);
   const name = directoryName(directory, home);
+  const { openPath, openApp } = useAssistantHost();
   return (
     <div className="flex flex-col items-center gap-3 text-center">
-      <ProjectTileIcon src={icon} name={name} size="lg" />
+      <ProjectTileIcon src={icon} name={name} />
       <div className="min-w-0 max-w-full">
         <h1 className="truncate font-[family-name:var(--font-title)] text-4xl font-semibold tracking-tight">{name}</h1>
         <p className="mt-1 truncate text-sm text-muted-foreground" title={directory}>
           {tildify(directory, home)}
         </p>
+      </div>
+      <div className="flex items-center gap-1">
+        <ToolButton label="Open the folder" onClick={() => openPath(directory, 'directory')}>
+          <FolderOpen {...toolIcon} aria-hidden />
+        </ToolButton>
+        <ToolButton label="Open in Terminal" onClick={() => openApp('terminal', { cwd: directory })}>
+          <SquareTerminal {...toolIcon} aria-hidden />
+        </ToolButton>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactElement, type Ref } from 'react';
-import { ArrowDown, Check, ChevronDown, ChevronsUpDown, Folder, FolderOpen, Loader2, PanelLeft, PanelRightOpen, Plus, Redo2, Settings, SquarePen, SquareTerminal, Undo2 } from 'lucide-react';
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, PanelLeft, PanelRightOpen, Plus, Redo2, Settings, SquarePen, SquareTerminal, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
@@ -132,7 +132,7 @@ import { ContentPane, ToolButton } from '@/shared/appChrome';
 import { SIDEBAR_WIDTH, flushPane, focusRing } from '@/shared/appChromeStyles';
 import { ATTACHED_DIR, intentOf, type LaunchIntent } from './intents';
 import { GitBranchChip } from './GitPanel';
-import { ProjectHeading, ProjectOverview, ProjectTiles } from './ProjectPage';
+import { ProjectHeading, ProjectOverview, RecentProjects } from './ProjectPage';
 import { SidePanel, type SideTab } from './SidePanel';
 import { TERMINAL_ATTRIBUTE, TerminalPanel } from './TerminalPanel';
 import { PreviewOpenContext, useSessionPreviews, type Preview } from '@/shared/assistant/previews';
@@ -712,7 +712,7 @@ function AssistantWindow() {
     setListOpen(false);
   };
 
-  /** A project's page: a tile on a new tab, its heading in the list. */
+  /** A project's page: a recent one on a new tab, its heading in the list. */
   const openProject = (directory: string, behind = false) => {
     setState((prev) => showProject(prev, directory, behind));
     if (!behind) setListOpen(false);
@@ -1686,11 +1686,11 @@ function TranscriptSkeleton() {
 // ---------------------------------------------------------------------------
 
 /**
- * A new conversation's tab: which project it's for, chosen in the composer
- * or from the tiles of the projects worked in lately, which open a
- * project's page; or that page itself (`project`), with the project's
- * conversations and statistics under the composer. Both end with the
- * Terminal, a shell in the folder at the bottom of the tab.
+ * A new conversation's tab: the project it's for, chosen at the composer's
+ * top, the projects worked in lately under it (each opens its page), and
+ * the Terminal, a shell in the folder at the bottom of the tab; or a
+ * project's page (`project`), with the project's conversations and
+ * statistics under the composer.
  */
 function NewConversation({
   directory,
@@ -1782,7 +1782,7 @@ function NewConversation({
                 <div aria-hidden className="absolute inset-2 rounded-full bg-primary/25 blur-2xl motion-safe:animate-pulse" />
                 <img {...bundledIconProps('/icons/apps/assistant.png')} alt="" className="relative size-24 object-contain drop-shadow-sm" />
               </div>
-              <h1 className="font-[family-name:var(--font-title)] text-4xl font-semibold tracking-tight">Which project?</h1>
+              <h1 className="text-3xl font-semibold tracking-tight @xl/assistant:text-4xl">What can I help with?</h1>
             </div>
           )}
           {call?.active && <CallBar call={call} />}
@@ -1800,11 +1800,9 @@ function NewConversation({
             onCommand={(command, args, files) => (command === 'connect' ? onAddProvider() : begin(args, files, command))}
             header={
               !project && (
-                <div className="border-b border-foreground/[0.06] pb-1">
-                  <FolderPicker value={folder} home={home} onChange={choose} onOther={() => void chooseFolder()}>
-                    <ProjectField folder={folder} home={home} />
-                  </FolderPicker>
-                </div>
+                <FolderPicker value={folder} home={home} onChange={choose} onOther={() => void chooseFolder()}>
+                  <ProjectField folder={folder} home={home} />
+                </FolderPicker>
               )
             }
             toolbar={
@@ -1817,8 +1815,8 @@ function NewConversation({
             onCycleAgent={cycleAgent}
           />
           {!project && (
-            <ProjectTiles
-              folders={recentFolders}
+            <RecentProjects
+              folders={recentFolders.filter((f) => f !== folder).slice(0, RECENT_PROJECT_LIMIT)}
               home={home}
               onOpen={onOpenProject}
               onNew={choose}
@@ -1826,13 +1824,14 @@ function NewConversation({
           )}
         </div>
         {project && folder && <ProjectOverview directory={folder} home={home} onOpenSession={onOpenSession} />}
-        {/* Clear of the screen's bottom edge, where the pointer would bring up the Dock. */}
+        {/* Clear of the screen's bottom edge, where the pointer would bring up the Dock. A project's page has its own, at its top. */}
+        {!project && (
         <div className="flex shrink-0 justify-center pt-8 pb-12">
           <button
             type="button"
             onClick={onToggleTerminal}
             aria-pressed={terminalOpen}
-            title={`${terminalOpen ? 'Hide' : 'Show'} the terminal${folder ? ` in ${tildify(folder, home)}` : ''} (Ctrl+\`)`}
+            title={`${terminalOpen ? 'Hide' : 'Show'} the terminal${folder ? ` in ${tildify(folder, home)}` : ''} (Ctrl+\` or Ctrl+Shift+I)`}
             className={cn(
               'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground',
               focusRing,
@@ -1843,6 +1842,7 @@ function NewConversation({
             Terminal
           </button>
         </div>
+        )}
       </div>
     </div>
   );
@@ -1856,20 +1856,16 @@ function ProjectField({ folder, home, ...props }: ComponentProps<'button'> & { f
     <button
       type="button"
       {...props}
+      title={folder}
       aria-label={`Project: ${name}. Choose another`}
       className={cn(
-        'group flex h-12 w-full min-w-0 items-center gap-3 rounded-xl px-2 text-left hover:bg-foreground/5 aria-expanded:bg-foreground/5',
+        'flex h-8 w-fit max-w-full min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-sm font-medium text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground aria-expanded:bg-foreground/[0.07] aria-expanded:text-foreground',
         focusRing,
       )}
     >
-      <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-lg bg-background clay">
-        <ProjectIcon src={icon} className="size-5" fallback={<Folder className="size-4.5 text-ink-accent" strokeWidth={1.75} />} />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[15px] font-semibold leading-tight">{name}</span>
-        {folder && <span className="truncate text-xs text-muted-foreground">{tildify(folder, home)}</span>}
-      </span>
-      <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden />
+      <ProjectIcon src={icon} fallback={<Folder className="size-4.5 shrink-0" strokeWidth={1.75} aria-hidden />} className="size-4" />
+      <span className="truncate">{name}</span>
+      <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
     </button>
   );
 }
@@ -1945,6 +1941,9 @@ function useSettled<T extends { id: string }>(tasks: T[], ms: number): T[] {
   }, [ids, ms]);
   return useMemo(() => tasks.filter((task) => settled.has(task.id)), [tasks, settled]);
 }
+
+/** How many recent projects a new tab lists under its composer. */
+const RECENT_PROJECT_LIMIT = 6;
 
 /** How many recent folders the folder picker offers. */
 const RECENT_FOLDER_LIMIT = 8;
@@ -2050,7 +2049,7 @@ function FolderPicker({
       <PopoverTrigger asChild>
         {children}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 p-0">
+      <PopoverContent align="start" className="w-80 p-0">
         <Command>
           <CommandInput placeholder="Search projects and folders…" value={search} onValueChange={setSearch} className="h-9" />
           <CommandList className="max-h-80">

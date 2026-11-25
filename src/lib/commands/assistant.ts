@@ -254,7 +254,7 @@ export const assistantArea: Area = {
     command(
       'assistant',
       'project',
-      'Show a project’s page in the Assistant, as its heading in the conversation list and its tile on a new tab do, and print what the agent has done in it there: conversations, messages, steps, tokens, cost, days active and models (a worktree counts as its repository)',
+      'Show a project’s page in the Assistant, as its heading in the conversation list and its name under a new tab’s composer do, and print what the agent has done in it there: conversations, messages, steps, tokens, cost, days active and models (a worktree counts as its repository)',
       [
         { name: 'folder', type: 'path', positional: true, optional: true, help: 'The project’s folder (the current one if left out)' },
         { name: 'days', type: 'string', choices: ['30', '90', 'all'], help: 'How far back the statistics go: 30 (the default) or 90 days, or all' },
