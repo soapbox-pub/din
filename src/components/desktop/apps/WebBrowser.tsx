@@ -190,6 +190,14 @@ import {
 } from '@/components/desktop/apps/BrowserView';
 import { DevToolsPane } from '@/components/desktop/apps/DevToolsPane';
 import { PopupBlockedButton } from '@/components/desktop/apps/PopupBlockedButton';
+import { CommentsButton } from '@/components/desktop/apps/browserComments/CommentsButton';
+import { CommentsPane } from '@/components/desktop/apps/browserComments/CommentsPane';
+import {
+  canonicalPageUrl,
+  clearPageCommentDraft,
+  pageCommentDraft,
+  subscribePageCommentDrafts,
+} from '@/lib/pageComments';
 import { SiteLimitTimer } from '@/components/desktop/apps/SiteLimitTimer';
 import { SiteInfoButton } from '@/components/desktop/apps/SiteInfoButton';
 import { Host, Interstitial } from '@/components/desktop/apps/BrowserInterstitial';
@@ -624,6 +632,20 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
   const closedTabs = useRef<string[]>([]);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  // The comments pane beside the page, following the active tab. A Tor tab's
+  // page is never asked about: the relays would be reached outside Tor.
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const commentsPage = activeTab.tor ? null : canonicalPageUrl(activeTab.url);
+  // A comment `din browser comment` drafted for the page in front shows the
+  // pane with it in the composer, until it's posted or the pane is closed.
+  const commentDraft = useSyncExternalStore(subscribePageCommentDrafts, () =>
+    commentsPage !== null ? pageCommentDraft(commentsPage) : undefined,
+  );
+  const commentsShown = commentsOpen || commentDraft !== undefined;
+  const closeComments = useCallback(() => {
+    setCommentsOpen(false);
+    if (commentsPage !== null) clearPageCommentDraft(commentsPage);
+  }, [commentsPage]);
   useWindowTitle(activeTab.title ?? hostnameOf(activeTab.url) ?? (isPrivate ? 'Private window' : 'New tab'));
   // The onion service the page names, offered while there's a Tor to reach
   // it, and the nsite it names.
@@ -2271,6 +2293,15 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           </StatusPill>
         )}
 
+        {(commentsPage !== null || commentsShown) && (
+          <CommentsButton
+            page={commentsPage}
+            open={commentsShown}
+            countable={!isPrivate}
+            onToggle={() => (commentsShown ? closeComments() : setCommentsOpen(true))}
+          />
+        )}
+
         {/* One overflow menu gathers the browser's less-frequent *actions*:
             new/private windows, find-in-page, page source, developer tools,
             clearing data.
@@ -2423,6 +2454,23 @@ export function WebBrowser({ windowId, params }: AppComponentProps) {
           />
         )}
         </div>
+        {commentsShown && (
+          <CommentsPane
+            page={commentsPage}
+            reason={activeTab.tor ? 'tor' : 'not-web'}
+            title={activeTab.title ?? undefined}
+            draft={commentDraft}
+            onDraftPosted={() => {
+              // Kept open on what was just posted.
+              setCommentsOpen(true);
+              if (commentsPage !== null) clearPageCommentDraft(commentsPage);
+            }}
+            onClose={closeComments}
+            onOpenLink={(url) => {
+              if (isAllowedTabUrl(url)) openTab(url, true, null, activeId);
+            }}
+          />
+        )}
       </div>
 
 

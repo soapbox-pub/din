@@ -32,6 +32,7 @@ import { resolvePath } from './parse';
 import { CommandError, type Area, type CommandContext, type Param } from './types';
 import { bare, call, command, need, pick } from './util';
 import { bookmarkCommands } from './bookmarks';
+import { pageCommentCommands } from './pageComments';
 import { flatpakCommands } from './flatpaks';
 
 /**
@@ -628,9 +629,10 @@ function siteOrigin(site: string): string {
 
 export const browserArea: Area = {
   name: 'browser',
-  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), downloading a page’s video, the tabs making sound and muting them, site data, what each site may do, and the sites the user limited for their own sake',
+  summary: 'The Web Browser: its bookmarks (list, add, edit, move, remove, import and export bookmarks.html, the bookmarks bar), pages’ Nostr comments (read them, draft one, the toolbar’s counts), downloading a page’s video, the tabs making sound and muting them, site data, what each site may do, and the sites the user limited for their own sake',
   commands: [
     ...bookmarkCommands,
+    ...pageCommentCommands,
     command('browser', 'clear-site-data', 'Delete a site’s cookies and storage, as its site info’s Delete site data (asks on screen first)', [
       { name: 'site', type: 'string', positional: true, help: 'The site’s URL, e.g. https://example.com' },
     ], async (args, ctx) => {

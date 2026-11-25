@@ -18,6 +18,7 @@ import { useSiteLimitSettings } from '@/hooks/useSiteLimits';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useBookmarksBarShown } from '@/hooks/useBrowserBookmarks';
+import { useCommentCountsShown } from '@/hooks/usePageComments';
 import { PillButton, ToolButton } from '@/shared/appChrome';
 import { SettingsSubHeading } from '@/shared/settingsSection';
 import {
@@ -72,6 +73,7 @@ export function PreferencesPage(props: PreferencesProps) {
     onExportBookmarks,
   } = props;
   const [barShown, setBarShown] = useBookmarksBarShown();
+  const [countsShown, setCountsShown] = useCommentCountsShown();
 
   return (
     // Opaque: the surface underneath is a white about:blank.
@@ -121,6 +123,19 @@ export function PreferencesPage(props: PreferencesProps) {
               Export…
             </PillButton>
           </div>
+        </PreferencesSection>
+
+        <PreferencesSection
+          title="Comments"
+          description="What people say about a page on Nostr, in the pane its toolbar button opens. Opening it asks your relays about that page."
+        >
+          <SettingRow
+            htmlFor="prefs-comment-counts"
+            label="Show comment counts"
+            description="Count each page’s comments as it opens, which tells your relays every page you visit. Never in private windows or Tor tabs."
+          >
+            <Switch id="prefs-comment-counts" checked={countsShown} onCheckedChange={setCountsShown} />
+          </SettingRow>
         </PreferencesSection>
 
         <AdblockSection />
