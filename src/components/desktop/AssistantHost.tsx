@@ -7,7 +7,7 @@ import { AssistantUnavailable } from '@/shared/assistant/AssistantUnavailable';
 import { AssistantHostContext } from '@/shared/assistant/host';
 import { usePickingHost } from '@/components/desktop/assistant/usePickingHost';
 import { cn } from '@/lib/utils';
-import { Composer } from '@/shared/assistant/Composer';
+import { Composer, type ComposerHandle } from '@/shared/assistant/Composer';
 import { ModelPicker } from '@/shared/assistant/ModelPicker';
 import { useWindowActions, useWindowManager } from '@/contexts/WindowManagerContext';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -39,6 +39,7 @@ import {
 import {
   isAssistantPromptDictationHeld,
   onHoldAssistantPromptDictation,
+  onSendAssistantPrompt,
   onToggleAssistantPrompt,
 } from '@/lib/assistantPrompt';
 import { cancelDictation, elementTarget, getDictationState, startDictation } from '@/lib/dictation';
@@ -63,8 +64,10 @@ const SOURCE = { appId: ASSISTANT_APP_ID, name: 'Assistant' };
  *   Assistant is the window in front - and when a conversation started here
  *   finishes while the Assistant isn't open (when it is, it says so itself:
  *   src/apps/assistant), which goes once that conversation is in front.
- * - The prompt: Super+A anywhere opens a box to ask the assistant something;
- *   Enter starts a conversation and shows it in the Assistant window.
+ * - The prompt: Super+A (or the Copilot key) anywhere opens a box to ask the
+ *   assistant something; Enter starts a conversation and shows it in the
+ *   Assistant window. Held, either listens; the Copilot key sends what was
+ *   said when it comes up.
  */
 export const AssistantHost = memo(function AssistantHost() {
   const { config } = useAppContext();
@@ -300,12 +303,16 @@ const QuickPrompt = memo(function QuickPrompt() {
   const { open: openApp } = useWindowActions();
   const { toast } = useToast();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
   const { host, picking } = usePickingHost();
 
   useEffect(() => onToggleAssistantPrompt(() => setOpen((current) => !current)), []);
 
+  // The Copilot key let go after a hold: what was said goes, as Enter would.
+  useEffect(() => onSendAssistantPrompt(() => void composerRef.current?.send()), []);
+
   // Holding Super+A opens the prompt listening; the text lands in it when the
-  // key comes up, unsent.
+  // key comes up, unsent (the Copilot key's is sent, sendAssistantPrompt).
   const dictatePending = useRef(false);
   const dictatedInto = useRef<HTMLTextAreaElement | null>(null);
   const [holdNonce, setHoldNonce] = useState(0);
@@ -350,7 +357,7 @@ const QuickPrompt = memo(function QuickPrompt() {
       {
         onSuccess: (session) => {
           setOpen(false);
-          // Spoken (held Super+A, or the mic), it's answered aloud.
+          // Spoken (held Super+A or Copilot key, or the mic), it's answered aloud.
           const nonce = Date.now();
           openApp(ASSISTANT_APP_ID, { sessionID: session.id, directory: undefined, nonce, speakReply: spoken ? nonce : undefined });
         },
@@ -396,6 +403,7 @@ const QuickPrompt = memo(function QuickPrompt() {
                 <>
                   <AssistantHostContext value={host}>
                     <Composer
+                      ref={composerRef}
                       textareaRef={textareaRef}
                       secrets
                       busy={start.isPending}

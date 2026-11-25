@@ -24,6 +24,8 @@ const STOP_ESCAPE_MS = 1500;
 export interface ComposerHandle {
   /** Replace what's written with `text` and `files` (an undone message, back to edit). */
   fill: (text: string, files?: PromptAttachment[]) => void;
+  /** Send what's written, as Enter does (the Copilot key let go after dictating). */
+  send: () => Promise<void>;
 }
 
 /** Names of pictures, which are attached rather than written in as paths. */
@@ -255,21 +257,6 @@ export function Composer({
     return true;
   };
 
-  useImperativeHandle(handleRef, () => ({
-    fill: (value, attached = []) => {
-      // Files sent as their paths come back as attachments.
-      const sent = splitAttachedPaths(value);
-      setText(sent.text);
-      // Secrets come back without their values: the conversation has them already.
-      const named = [...sent.paths.map(attachmentOf), ...sent.secrets.map((name) => secretAttachment(name))];
-      setFiles([...attached, ...named.filter((f) => !attached.some((a) => a.uri === f.uri))]);
-      const textarea = ref.current;
-      if (!textarea) return;
-      textarea.focus();
-      requestAnimationFrame(() => textarea.setSelectionRange(textarea.value.length, textarea.value.length));
-    },
-  }));
-
   const recorder = useAudioRecorder(host.pauseMedia);
   const [canRecord, setCanRecord] = useState(false);
   useEffect(() => {
@@ -343,6 +330,24 @@ export function Composer({
   };
 
   const submit = () => send(text.trim());
+
+  useImperativeHandle(handleRef, () => ({
+    fill: (value, attached = []) => {
+      // Files sent as their paths come back as attachments.
+      const sent = splitAttachedPaths(value);
+      setText(sent.text);
+      // Secrets come back without their values: the conversation has them already.
+      const named = [...sent.paths.map(attachmentOf), ...sent.secrets.map((name) => secretAttachment(name))];
+      setFiles([...attached, ...named.filter((f) => !attached.some((a) => a.uri === f.uri))]);
+      const textarea = ref.current;
+      if (!textarea) return;
+      textarea.focus();
+      requestAnimationFrame(() => textarea.setSelectionRange(textarea.value.length, textarea.value.length));
+    },
+    // The field's own value: dictation may have just typed into it, before
+    // this render's `text` has caught up.
+    send: () => send((ref.current?.value ?? text).trim()),
+  }));
 
   const pick = (command: SlashCommand, run: boolean) => {
     if (run && command.instant) {

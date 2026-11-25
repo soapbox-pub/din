@@ -6330,9 +6330,9 @@ function claimGuestKey(
 /** A shell-level shortcut forwarded from a guest (see window.dinos.shellShortcuts). */
 type ShellShortcut =
   | { action: 'cycle-windows'; backward: boolean }
+  | { action: 'assistant'; send?: boolean }
   | {
       action:
-        | 'assistant'
         | 'assistant-released'
         | 'dictation'
         | 'system-monitor'
@@ -6398,6 +6398,10 @@ function shellShortcutForInput(input: Electron.Input): ShellShortcut | null {
   if (input.key === 'PrintScreen' && !input.alt && !input.control && !input.meta) {
     return { action: input.shift ? 'screenshot-area' : 'screenshot' };
   }
+  // The Copilot key: Shift+Super+F23 held together, by Microsoft's design.
+  // Super+A's prompt, a hold sending what was said. Its repeats are claimed
+  // too, so the page never sees F23.
+  if (input.key === 'F23') return { action: 'assistant', send: true };
   // Super+A: the assistant's prompt.
   if (input.meta && !input.alt && !input.control && !input.shift && input.key.toLowerCase() === 'a') {
     return { action: 'assistant' };
@@ -7398,7 +7402,8 @@ app.on('web-contents-created', (_event, contents) => {
   // forwarded too, so an Alt+Tab started in a guest commits the moment Alt
   // comes up.
   // Super+A's release is forwarded too, when it was pressed here: holding it
-  // dictates into the assistant's prompt until it comes up.
+  // dictates into the assistant's prompt until it comes up. So is the
+  // Copilot key's (F23's).
   if (contents.getType() === 'webview') {
     attachPageFullscreen(contents);
     let assistantKeyDown = false;
@@ -7419,6 +7424,11 @@ app.on('web-contents-created', (_event, contents) => {
       }
       if (input.key === 'Alt' && input.type === 'keyUp') {
         sendToShell('shortcut', { action: 'alt-released' } satisfies ShellShortcut);
+        return;
+      }
+      // The Copilot key came up: a hold ends, sending what was said.
+      if (input.key === 'F23') {
+        if (input.type === 'keyUp') sendToShell('shortcut', { action: 'assistant-released' } satisfies ShellShortcut);
         return;
       }
       if (input.key.toLowerCase() === 'a') {

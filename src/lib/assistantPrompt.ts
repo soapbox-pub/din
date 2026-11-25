@@ -1,7 +1,7 @@
 /**
  * Requests to open or close the assistant's prompt (the Super+A overlay in
- * AssistantHost) from elsewhere in the shell: the hotkey in DesktopHotkeys
- * and the menu-bar item. Kept in its own module so neither imports a
+ * AssistantHost) from elsewhere in the shell: the hotkeys in DesktopHotkeys
+ * (Super+A and the Copilot key) and the menu-bar item. Kept in its own module so neither imports a
  * non-component export from the other.
  */
 const listeners = new Set<() => void>();
@@ -35,6 +35,24 @@ export function holdAssistantPromptDictation(): void {
 /** Super+A came up. */
 export function releaseAssistantPromptDictation(): void {
   dictationHeld = false;
+}
+
+const sendListeners = new Set<() => void>();
+
+/**
+ * Send what's in the prompt, if it's open: the Copilot key came up after a
+ * hold, and what was said is typed in.
+ */
+export function sendAssistantPrompt(): void {
+  for (const listener of sendListeners) listener();
+}
+
+/** Subscribe to send requests. Returns an unsubscribe fn. */
+export function onSendAssistantPrompt(listener: () => void): () => void {
+  sendListeners.add(listener);
+  return () => {
+    sendListeners.delete(listener);
+  };
 }
 
 /**

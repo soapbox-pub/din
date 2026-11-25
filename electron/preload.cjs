@@ -3962,6 +3962,8 @@ expose('shellShortcuts', {
    *   { action: 'cycle-windows', backward }   (Alt+Tab / Alt+Shift+Tab)
    *   { action: 'wm', code, shift, ctrl, alt, repeat } (active Super shortcuts)
    *   { action: 'assistant' }                 (Super+A)
+   *   { action: 'assistant', send: true }     (the Copilot key, Shift+Super+F23)
+   *   { action: 'assistant-released' }        (Super+A's A, or the Copilot key, up)
    *   { action: 'system-monitor' }            (Ctrl+Shift+Escape)
    *   { action: 'security-options' }          (Ctrl+Alt+Delete)
    *   { action: 'super-key', down }           (Super pressed / released)

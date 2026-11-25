@@ -4,6 +4,7 @@ import { toggleAppsMenu } from '@/lib/appsMenu';
 import {
   holdAssistantPromptDictation,
   releaseAssistantPromptDictation,
+  sendAssistantPrompt,
   toggleAssistantPrompt,
 } from '@/lib/assistantPrompt';
 import { cancelDictation, finishDictation, getDictationState, isDictating, toggleDictation } from '@/lib/dictation';
@@ -41,10 +42,17 @@ function focusAreaFor(e: KeyboardEvent): FocusKey | null {
 
 let assistantHoldTimer: ReturnType<typeof setTimeout> | null = null;
 let assistantHeld = false;
+/** The key down is the Copilot key, whose hold sends what was said. */
+let assistantSends = false;
 
-/** Super+A went down: a tap or a hold, depending on when it comes up. */
-function assistantKeyDown(): void {
+/**
+ * Super+A or the Copilot key went down: a tap or a hold, depending on when
+ * it comes up. `send`: the Copilot key, which sends what was said when a
+ * hold ends, where Super+A leaves it in the prompt.
+ */
+function assistantKeyDown(send = false): void {
   if (assistantHoldTimer !== null || assistantHeld) return;
+  assistantSends = send;
   assistantHoldTimer = setTimeout(() => {
     assistantHoldTimer = null;
     assistantHeld = true;
@@ -52,7 +60,10 @@ function assistantKeyDown(): void {
   }, ASSISTANT_HOLD_MS);
 }
 
-/** Super+A came up (its A, or Super): toggle the prompt, or finish dictating. */
+/**
+ * Super+A came up (its A, or Super), or the Copilot key: toggle the prompt,
+ * or finish dictating (and, for the Copilot key, send it).
+ */
 function assistantKeyUp(): void {
   if (assistantHoldTimer !== null) {
     clearTimeout(assistantHoldTimer);
@@ -61,8 +72,21 @@ function assistantKeyUp(): void {
   } else if (assistantHeld) {
     assistantHeld = false;
     releaseAssistantPromptDictation();
-    if (getDictationState().held) void finishDictation();
+    // Only a hold that got as far as listening sends: one let go before the
+    // prompt opened leaves it open and empty.
+    if (getDictationState().held) {
+      const send = assistantSends;
+      void finishDictation().then(() => send && sendAssistantPrompt());
+    }
   }
+}
+
+/**
+ * The Copilot key: Shift+Super+F23, by Microsoft's design, held down
+ * together. Chromium names F23, and nothing else sends it.
+ */
+function isCopilotKey(e: KeyboardEvent): boolean {
+  return e.key === 'F23';
 }
 
 function isAssistantKeyPressed(): boolean {
@@ -83,7 +107,9 @@ function isAssistantKeyPressed(): boolean {
  *   Both are ignored while a capture session is already running.
  * - Super+A opens the assistant's prompt (AssistantHost), or closes it.
  *   Held, it opens the prompt listening, and what was said is typed into it
- *   (unsent) when the key comes up.
+ *   (unsent) when the key comes up. The Copilot key (Shift+Super+F23) does
+ *   the same, except that a hold sends what was said, and the reply is read
+ *   aloud, as holding the power button does on Android.
  * - Super+H dictates into whatever has focus (src/lib/dictation.ts), or
  *   finishes; Esc cancels.
  * - Ctrl+Shift+Escape opens the System Monitor, or brings it forward, as
@@ -259,6 +285,15 @@ export function DesktopHotkeys() {
           e.preventDefault();
           requestScreenshot(e.shiftKey ? 'area' : 'screen');
         }
+        return;
+      }
+
+      // The Copilot key: Super+A's prompt, a hold sending what was said. Its
+      // Shift and Super are down with it, so it's checked whatever they are.
+      if (isCopilotKey(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) assistantKeyDown(true);
         return;
       }
 
@@ -453,7 +488,7 @@ export function DesktopHotkeys() {
 
     const onKeyUp = (e: KeyboardEvent) => {
       if (!isAssistantKeyPressed()) return;
-      if (e.key.toLowerCase() === 'a' || e.key === 'Meta') assistantKeyUp();
+      if (e.key.toLowerCase() === 'a' || e.key === 'Meta' || isCopilotKey(e)) assistantKeyUp();
     };
 
     window.addEventListener('keydown', onKeyDown, true);
@@ -490,7 +525,7 @@ export function DesktopHotkeys() {
       // Alt+Tab from a guest is handled by the WindowSwitcher's own bridge
       // subscription.
       if (shortcut.action === 'assistant') {
-        assistantKeyDown();
+        assistantKeyDown(shortcut.send === true);
       } else if (shortcut.action === 'assistant-released') {
         assistantKeyUp();
       } else if (shortcut.action === 'super-key' && !shortcut.down) {

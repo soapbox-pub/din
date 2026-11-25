@@ -10,6 +10,9 @@
  *   - Alt+Tab / Alt+Shift+Tab -> { action: 'cycle-windows', backward }
  *   - Super+A                 -> { action: 'assistant' }, and when the A
  *                                comes up -> { action: 'assistant-released' }
+ *   - the Copilot key (Shift+Super+F23)
+ *                             -> { action: 'assistant', send: true }, and
+ *                                when it comes up -> { action: 'assistant-released' }
  *   - Super+H                 -> { action: 'dictation' }
  *   - Ctrl+Shift+Escape       -> { action: 'system-monitor' }
  *   - Ctrl+Alt+Delete         -> { action: 'security-options' }
@@ -68,12 +71,14 @@ export type ShellShortcut =
   | {
       /**
        * Super+A pressed inside a guest: a tap toggles the assistant's prompt,
-       * and holding it dictates into the prompt.
+       * and holding it dictates into the prompt. Or the Copilot key
+       * (Shift+Super+F23), with `send`: a hold sends what was said.
        */
       action: 'assistant';
+      send?: boolean;
     }
   | {
-      /** The A of a Super+A pressed inside a guest came up. */
+      /** The A of a Super+A pressed inside a guest came up, or the Copilot key. */
       action: 'assistant-released';
     }
   | {

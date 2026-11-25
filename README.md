@@ -950,7 +950,9 @@ apply to `opencode` in a terminal without a server restart. Run
 Super+H types what you say into whatever has the keyboard: a text field, a
 web page, the Terminal, or a native app (pasted, since the display only sends
 keys). Holding Super+A opens the assistant's prompt listening, and the
-prompt's mic button dictates into it. The shell records the microphone
+prompt's mic button dictates into it. A laptop's Copilot key (which sends
+Shift+Super+F23) is Super+A too, except that letting go of a hold sends what
+was said, and the reply is read aloud. The shell records the microphone
 (`src/lib/dictation.ts`) and whisper.cpp's server turns it into text on the
 GPU (`electron/dictation.mts`), started on first use and stopped after a few
 idle minutes. On DinOS the server and Whisper large-v3-turbo (about
