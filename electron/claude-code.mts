@@ -288,6 +288,31 @@ export interface ClaudeUsage {
 
 let usageCache: { at: number; usage: Promise<ClaudeUsage> } | null = null;
 
+/** Claude Code's version, for when it can't be asked: any recent one will do. */
+const FALLBACK_CLAUDE_VERSION = '2.1.317';
+let claudeVersion: { binary: string; mtime: number; version: Promise<string> } | null = null;
+
+/**
+ * The installed Claude Code's version, asked once per binary. The usage
+ * endpoint answers 429 to every User-Agent but `claude-code/<version>`.
+ */
+function installedClaudeVersion(): Promise<string> {
+  const binary = findClaude();
+  if (!binary) return Promise.resolve(FALLBACK_CLAUDE_VERSION);
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(binary).mtimeMs;
+  } catch {
+    // Asked anyway; it falls back if it can't run.
+  }
+  if (claudeVersion?.binary === binary && claudeVersion.mtime === mtime) return claudeVersion.version;
+  const version = capture(binary, ['--version'], process.env).then(
+    ({ stdout }) => /(\d+\.\d+\.\d+[\w.-]*)/.exec(stdout)?.[1] ?? FALLBACK_CLAUDE_VERSION,
+  );
+  claudeVersion = { binary, mtime, version };
+  return version;
+}
+
 function credentialsFile(): string {
   const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   return path.join(dir, '.credentials.json');
@@ -386,13 +411,15 @@ async function fetchUsage(): Promise<ClaudeUsage> {
   if (expiresAt !== null && expiresAt < Date.now()) {
     throw new Error('Claude Code’s sign-in has expired; it renews the next time the assistant uses Claude');
   }
+  const version = await installedClaudeVersion();
   const response = await fetch(USAGE_URL, {
-    headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': 'Din' },
+    headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': `claude-code/${version}` },
     signal: AbortSignal.timeout(15_000),
   });
   if (response.status === 401 || response.status === 403) {
     throw new Error('Anthropic didn’t accept Claude Code’s sign-in; sign in to Claude again');
   }
+  if (response.status === 429) throw new Error('Anthropic is asked about the plan’s usage too often; try again in a minute');
   if (!response.ok) throw new Error(`Anthropic couldn’t say how much of the plan is used (${response.status})`);
   const reply = (await response.json()) as unknown;
   if (!isObject(reply)) throw new Error('Anthropic’s answer about the plan’s usage couldn’t be read');
