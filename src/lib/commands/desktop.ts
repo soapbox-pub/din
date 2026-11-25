@@ -545,6 +545,14 @@ export const notificationsArea: Area = {
       await call(setAppNotifications(appFacts(app, ctx.apps), true));
       return { text: `${app.name}’s notifications are on` };
     }),
+    command('notifications', 'apps', 'The apps that notify, on or off, as Settings → Notifications lists them (websites’ and nsites’ are in din browser site-permissions)', [], (_args, ctx) => {
+      const { appsHeard, appsOff } = getNotificationState();
+      const rows = appsHeard
+        .map((id) => ctx.apps.getApp(id))
+        .filter((app): app is NonNullable<typeof app> => !!app && !notifiesBySite(appFacts(app, ctx.apps)))
+        .map((app) => ({ id: app.id, name: app.name, on: !appsOff.includes(app.id) }));
+      return { data: rows, text: rows.map((r) => `${r.id}\t${r.name}\t${r.on ? 'on' : 'off'}`).join('\n') || 'No app has notified' };
+    }),
     command('notifications', 'off-apps', 'The apps whose notifications are turned off (websites’ and nsites’ are in din browser site-permissions)', [], (_args, ctx) => {
       const rows = getNotificationState().appsOff.map((id) => ({ id, name: appRow(ctx, id) }));
       return { data: rows, text: rows.map((r) => `${r.id}\t${r.name}`).join('\n') || 'No app’s notifications are off' };

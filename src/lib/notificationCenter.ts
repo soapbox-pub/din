@@ -97,6 +97,13 @@ const MAX_POPUPS = 3;
 const MAX_HISTORY = 100;
 const DND_KEY = 'din.notifications.dnd';
 const OFF_KEY = 'din.notifications.off';
+const HEARD_KEY = 'din.notifications.apps';
+/**
+ * Built-in apps that notify (the desktop's hosts notify for Mail, Messages,
+ * Files and the System Monitor), listed in Settings → Notifications before
+ * they've said anything; any other app is listed once it has.
+ */
+const BUILT_IN_NOTIFIERS = ['mail', 'messages', 'assistant', 'terminal', 'file-browser', 'system-monitor'];
 
 interface State {
   notifications: DesktopNotification[];
@@ -105,6 +112,11 @@ interface State {
   doNotDisturb: boolean;
   /** Apps whose notifications are turned off, by app id (App Info's Notifications). */
   appsOff: readonly string[];
+  /**
+   * Apps that notify, by app id, for Settings → Notifications to switch:
+   * the built-in ones that do, and any other that has sent one.
+   */
+  appsHeard: readonly string[];
 }
 
 function loadDoNotDisturb(): boolean {
@@ -115,16 +127,31 @@ function loadDoNotDisturb(): boolean {
   }
 }
 
-function loadAppsOff(): string[] {
+function loadIds(key: string): string[] {
   try {
-    const list: unknown = JSON.parse(localStorage.getItem(OFF_KEY) ?? '[]');
+    const list: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
     return Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
   } catch {
     return [];
   }
 }
 
-let state: State = { notifications: [], popups: [], doNotDisturb: loadDoNotDisturb(), appsOff: loadAppsOff() };
+function saveIds(key: string, ids: readonly string[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Best-effort: it still applies for this session.
+  }
+}
+
+const initialAppsOff = loadIds(OFF_KEY);
+let state: State = {
+  notifications: [],
+  popups: [],
+  doNotDisturb: loadDoNotDisturb(),
+  appsOff: initialAppsOff,
+  appsHeard: [...new Set([...BUILT_IN_NOTIFIERS, ...loadIds(HEARD_KEY), ...initialAppsOff])],
+};
 const listeners = new Set<() => void>();
 let nextId = 1;
 
@@ -144,6 +171,11 @@ export function notify(input: NotifyInput): string {
   // An app whose notifications are off is never heard from, critical or not,
   // except what only the user can answer on screen (approving sudo).
   const appId = input.source.appId;
+  if (appId && !state.appsHeard.includes(appId)) {
+    const appsHeard = [...state.appsHeard, appId];
+    saveIds(HEARD_KEY, appsHeard.filter((id) => !BUILT_IN_NOTIFIERS.includes(id)));
+    setState({ ...state, appsHeard });
+  }
   if (appId && state.appsOff.includes(appId) && !input.onScreenOnly) {
     input.onClose?.('closed');
     return id;
@@ -295,16 +327,15 @@ export function setDoNotDisturb(on: boolean): void {
 export function setAppNotificationsOff(appId: string, off: boolean): void {
   if (state.appsOff.includes(appId) === off) return;
   const appsOff = off ? [...state.appsOff, appId] : state.appsOff.filter((id) => id !== appId);
-  try {
-    localStorage.setItem(OFF_KEY, JSON.stringify(appsOff));
-  } catch {
-    // Best-effort: it still applies for this session.
-  }
+  saveIds(OFF_KEY, appsOff);
+  const appsHeard = state.appsHeard.includes(appId) ? state.appsHeard : [...state.appsHeard, appId];
+  if (appsHeard !== state.appsHeard) saveIds(HEARD_KEY, appsHeard.filter((id) => !BUILT_IN_NOTIFIERS.includes(id)));
   const gone = off ? state.notifications.filter((n) => n.source.appId === appId && !n.onScreenOnly) : [];
   const ids = new Set(gone.map((n) => n.id));
   setState({
     ...state,
     appsOff,
+    appsHeard,
     notifications: state.notifications.filter((n) => !ids.has(n.id)),
     popups: state.popups.filter((p) => !ids.has(p)),
   });
