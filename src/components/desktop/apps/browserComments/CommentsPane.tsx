@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils';
 import { CommentBody } from './CommentBody';
 import { ago, displayNameOf } from './names';
 
-/** Replies shown under a comment before the rest wait behind "Show replies". */
+/** A thread with more replies than this shows its first, and the rest behind "Show N more replies". */
 const REPLIES_SHOWN = 2;
 
 /** Why a page can't be commented on from here. */
@@ -127,7 +127,7 @@ function ThreadSkeleton() {
     <div className="flex flex-col gap-5 px-4 py-4" aria-hidden>
       {[0, 1, 2].map((i) => (
         <div key={i} className="flex gap-3">
-          <Skeleton className="size-8 shrink-0 rounded-full" />
+          <Skeleton className="size-10 shrink-0 rounded-full" />
           <div className="flex-1 space-y-2">
             <Skeleton className="h-3 w-28" />
             <Skeleton className="h-3 w-full" />
@@ -221,11 +221,12 @@ function Thread({ page, thread, onOpen }: { page: string; thread: PageThread; on
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<NostrEvent | null>(null);
 
-  const comment = (c: NostrEvent, replyTo?: NostrEvent) => (
+  const comment = (c: NostrEvent, threaded: boolean, replyTo?: NostrEvent) => (
     <Comment
       key={c.id}
       page={page}
       comment={c}
+      threaded={threaded}
       replyTo={replyTo}
       likes={likesOf(c.id)}
       likesKey={queryKey}
@@ -234,41 +235,51 @@ function Thread({ page, thread, onOpen }: { page: string; thread: PageThread; on
     />
   );
 
+  // As Ditto threads them: no indent, a line down from each avatar to the
+  // next in the thread, and the last without one.
   return (
     <>
-      <ul className="flex flex-col gap-1">
+      <ul>
         {thread.top.map((top) => {
           const replies = thread.replies(top.id);
-          const open = expanded.has(top.id) || replies.length <= REPLIES_SHOWN;
+          const collapsed = !expanded.has(top.id) && replies.length > REPLIES_SHOWN;
+          const shown = collapsed ? replies.slice(0, 1) : replies;
+          const hidden = replies.length - shown.length;
           return (
             <li key={top.id}>
-              {comment(top)}
-              {replies.length > 0 && (
-                <ul aria-label={`Replies to ${top.id.slice(0, 8)}`}>
-                  {open ? (
-                    replies.map((r) => {
-                      const parent = thread.parent(r.id);
-                      return <li key={r.id}>{comment(r, parent && parent.id !== top.id ? parent : undefined)}</li>;
-                    })
-                  ) : (
-                    <li className="pl-15">
-                      <button
-                        type="button"
-                        onClick={() => setExpanded((s) => new Set(s).add(top.id))}
-                        className="rounded-full py-1 text-sm font-medium text-ink-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                      >
-                        Show {replies.length} replies
-                      </button>
-                    </li>
-                  )}
-                </ul>
-              )}
+              {comment(top, replies.length > 0)}
+              {shown.map((r, i) => {
+                const parent = thread.parent(r.id);
+                return comment(r, i < shown.length - 1 || hidden > 0, parent && parent.id !== top.id ? parent : undefined);
+              })}
+              {hidden > 0 && <ShowMoreReplies count={hidden} onClick={() => setExpanded((s) => new Set(s).add(top.id))} />}
             </li>
           );
         })}
       </ul>
       {deleting && <DeleteConfirm page={page} comment={deleting} onClose={() => setDeleting(null)} />}
     </>
+  );
+}
+
+/** The rest of a thread's replies, the line running on into fading dots (Ditto's ExpandThreadButton). */
+function ShowMoreReplies({ count, onClick }: { count: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full items-center gap-3 px-4 pt-0 pb-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <span aria-hidden className="flex w-10 shrink-0 flex-col items-center self-stretch">
+        <span className="mb-1 w-0.5 flex-1 bg-foreground/20" />
+        <span className="my-0.5 size-1.5 rounded-full bg-foreground/30" />
+        <span className="my-0.5 size-1.5 rounded-full bg-foreground/20" />
+        <span className="my-0.5 size-1.5 rounded-full bg-foreground/10" />
+      </span>
+      <span className="text-sm font-medium text-ink-accent group-hover:underline">
+        Show {count} more {count === 1 ? 'reply' : 'replies'}
+      </span>
+    </button>
   );
 }
 
@@ -328,13 +339,14 @@ function ReplyingTo({ pubkey, onOpen }: { pubkey: string; onOpen: (url: string) 
 }
 
 /**
- * One comment: a comment on the page with a 32px avatar, or a reply (with
- * `replyTo` when it answers another reply), indented so its 24px avatar
- * lines up with the text above.
+ * One comment in a thread, a comment on the page or a reply to one (with
+ * `replyTo` when it answers another reply), laid out as Ditto's threaded
+ * NoteCard: `threaded` draws the line down from its avatar to the next.
  */
 function Comment({
   page,
   comment,
+  threaded,
   replyTo,
   likes,
   likesKey,
@@ -343,6 +355,7 @@ function Comment({
 }: {
   page: string;
   comment: NostrEvent;
+  threaded: boolean;
   replyTo?: NostrEvent;
   likes: CommentLikes;
   likesKey: readonly unknown[];
@@ -355,7 +368,6 @@ function Comment({
   const { toast } = useToast();
   const like = useToggleCommentLike(likesKey);
   const [replying, setReplying] = useState(false);
-  const isReply = comment.tags.some(([n]) => n === 'e');
 
   const metadata = author.data?.metadata;
   const name = displayNameOf(metadata, comment.pubkey);
@@ -394,19 +406,22 @@ function Comment({
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <article className={cn('group flex gap-3 pr-4 pt-2', isReply ? 'pl-15' : 'pl-4')}>
-            <button
-              type="button"
-              onClick={() => onOpen(profile)}
-              aria-label={`${name}’s profile`}
-              className="h-fit shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              <Avatar className={isReply ? 'size-6' : 'size-8'} shape={getAvatarShape(metadata)}>
-                <AvatarImage src={picture} alt="" />
-                <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
-            </button>
-            <div className="min-w-0 flex-1">
+          <article className={cn('group flex gap-3 px-4 pt-3', !threaded && 'pb-3')}>
+            <div className="flex shrink-0 flex-col items-center">
+              <button
+                type="button"
+                onClick={() => onOpen(profile)}
+                aria-label={`${name}’s profile`}
+                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <Avatar className="size-10" shape={getAvatarShape(metadata)}>
+                  <AvatarImage src={picture} alt="" />
+                  <AvatarFallback className="text-xs">{name.charAt(0).toUpperCase()}</AvatarFallback>
+                </Avatar>
+              </button>
+              {threaded && <div aria-hidden className="mt-2 w-0.5 flex-1 rounded-full bg-foreground/20" />}
+            </div>
+            <div className={cn('min-w-0 flex-1', threaded && 'pb-3')}>
               <div className="flex min-w-0 items-baseline gap-1.5 text-sm">
                 <button
                   type="button"
@@ -453,6 +468,12 @@ function Comment({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+              {replying && (
+                // A text field keeps its own right-click menu.
+                <div onContextMenu={(e) => e.stopPropagation()}>
+                  <Composer page={page} parent={comment} onDone={() => setReplying(false)} />
+                </div>
+              )}
             </div>
           </article>
         </ContextMenuTrigger>
@@ -460,11 +481,6 @@ function Comment({
           <ContextMenuEntries entries={menu} />
         </ContextMenuContent>
       </ContextMenu>
-      {replying && (
-        <div className={cn('pr-4', isReply ? 'pl-24' : 'pl-15')}>
-          <Composer page={page} parent={comment} onDone={() => setReplying(false)} />
-        </div>
-      )}
     </>
   );
 }
