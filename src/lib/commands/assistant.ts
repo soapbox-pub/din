@@ -3,7 +3,7 @@ import { isRemovableSource, removeSourceWording, skillSourceDetail, skillSourceN
 import { connectClaudeProvider } from '@/lib/claudeProvider';
 import { connectShakespeareProvider, SHAKESPEARE_MONTHLY_LIMIT } from '@/lib/shakespeareProvider';
 import { getFsBridge } from '@/lib/fs';
-import { CATALOG, catalogEntry, describeHardware, describePull, describeSpeed, fitLocalModel, formatModelSize, getLocalModelsBridge, localModelTitle, rankLocalModels } from '@/lib/localModels';
+import { CATALOG, catalogEntry, describeHardware, describePull, describeSpeed, fitLocalModel, formatModelSize, getLocalModelsBridge, localModelTitle, pullProgress, rankLocalModels } from '@/lib/localModels';
 import { usageText } from '@/shared/assistant/claudeUsage';
 import { CommandError, type Area } from './types';
 import { call, command, need, pick } from './util';
@@ -240,14 +240,14 @@ export const assistantArea: Area = {
         return { data: { sessionID, terminal }, text: `The terminal is ${terminal === 'show' ? 'shown' : 'hidden'}` };
       },
     ),
-    command('assistant', 'models', 'The AI models on this computer (Ollama’s), and the ones Settings → Assistant recommends for it, best first', [], async () => {
+    command('assistant', 'models', 'The AI models on this computer (Ollama’s), the best one for it, and the others Settings → Assistant offers', [], async () => {
       const state = await ollama();
-      const { picks, others } = rankLocalModels(state);
+      const { best, others } = rankLocalModels(state);
       const installed = new Set(state.models.map((m) => m.name));
-      const line = (m: (typeof picks)[number]) =>
+      const line = (m: (typeof others)[number]) =>
         `${m.name}\t${m.title}\t${formatModelSize(m.size)}\t${m.fit.fit === 'good' ? describeSpeed(m.fit.speed) : m.fit.reason}${m.best ? '\tbest' : ''}${installed.has(m.name) ? '\tdownloaded' : ''}`;
       return {
-        data: { ...state, picks, others },
+        data: { ...state, best, others },
         text: [
           describeHardware(state),
           '',
@@ -257,8 +257,8 @@ export const assistantArea: Area = {
             : ['none']),
           ...state.pulls.map((p) => `${p.model}\t${describePull(p)}`),
           '',
-          'Recommended here:',
-          ...(picks.length ? picks.map(line) : ['none runs well here']),
+          'Best for this computer:',
+          ...(best ? [line(best)] : ['none runs well here']),
           '',
           'Others:',
           ...others.map(line),
@@ -268,7 +268,7 @@ export const assistantArea: Area = {
     command(
       'assistant',
       'download-model',
-      'Download a model for the assistant to run on this computer, as Download does in Settings → Assistant: a recommended one (din assistant models) or any in Ollama’s library',
+      'Download a model for the assistant to run on this computer, as Download does in Settings → Assistant: one Din offers (din assistant models) or any in Ollama’s library',
       [{ name: 'model', type: 'string', positional: true, help: 'Its name and tag ("qwen3.6:35b-a3b")' }],
       async (args, ctx) => {
         const name = modelName(args.string('model'));
@@ -276,19 +276,12 @@ export const assistantArea: Area = {
         const entry = catalogEntry(name);
         const fit = entry ? fitLocalModel(entry, state) : undefined;
         if (fit?.fit === 'unsupported') throw new CommandError(`${entry?.title ?? name} can’t run here: ${fit.reason}`);
-        if (entry && fit && fit.fit !== 'good') {
-          const ok = await ctx.confirm({
-            title: fit.fit === 'too-big' ? `${entry.title} is too big for this computer` : `${entry.title} will be slow here`,
-            description: `A command asked to download it (${formatModelSize(entry.size)}). ${fit.reason}.`,
-            action: 'Download Anyway',
-          });
-          if (!ok) throw new CommandError('You didn’t allow it');
-        }
         const bridge = localModels();
         const stop = bridge.onChanged((next) => {
           const pull = next.pulls.find((p) => p.model === name);
           if (!pull) return;
-          const percent = pull.total > 0 ? Math.floor((pull.completed / pull.total) * 100) : undefined;
+          const progress = pullProgress(pull);
+          const percent = progress !== null ? Math.floor(progress * 100) : undefined;
           ctx.progress?.(percent !== undefined ? { text: `${localModelTitle(name)}: ${describePull(pull)}`, percent } : { text: `${localModelTitle(name)}: ${describePull(pull)}` });
         });
         try {
@@ -296,7 +289,8 @@ export const assistantArea: Area = {
         } finally {
           stop();
         }
-        return { text: `${localModelTitle(name)} is downloaded: the assistant lists it as ollama/${name}` };
+        const note = fit && fit.fit !== 'good' ? ` (${fit.reason})` : '';
+        return { text: `${localModelTitle(name)} is downloaded: the assistant lists it as ollama/${name}${note}` };
       },
     ),
     command(

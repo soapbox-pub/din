@@ -970,10 +970,11 @@ while it's in use and for five minutes after. Din's server uses integrated
 GPUs, which Ollama otherwise skips, and gives each model a 32K context,
 room for the agent's instructions and tools. Settings → Assistant (and
 `din assistant models`) downloads, lists and removes models, into
-`~/.ollama/models`, recommending the best few for this computer from a
-short catalog (`src/lib/localModels.ts`), by what fits the GPU's memory
-(as Ollama reports it at start) and how fast it would write there, and
-warning about the rest. On DinOS Ollama's Vulkan build is the Local AI
+`~/.ollama/models`. Until one is downloaded it offers the best one for
+this computer from a short catalog (`src/lib/localModels.ts`), by what
+fits the GPU's memory (as Ollama reports it at start) and how fast it
+would write there; the rest are under Other models, with why they aren't
+the one. Nothing downloads by itself: the models are tens of gigabytes. On DinOS Ollama's Vulkan build is the Local AI
 models optional feature, which comes with the computer (`$DIN_OLLAMA`);
 elsewhere it's the system's `ollama`.
 

@@ -7,9 +7,9 @@
  * ask what suits a computer: CATALOG is a short list of ones that can work
  * as an agent (they call tools), from small to large, and fitLocalModel
  * says how each would run here, from what the GPU has (what Ollama found)
- * and the computer's memory. Settings → Assistant shows the best few that
- * run well (recommendLocalModels), the first marked best, and the rest
- * with a word about why not.
+ * and the computer's memory. Settings → Assistant offers the best one for
+ * this computer (rankLocalModels) until a model is downloaded, and the rest
+ * on request, with a word about why not.
  */
 
 export interface LocalGpu {
@@ -83,8 +83,6 @@ export interface CatalogModel {
   /** What people call it. */
   title: string;
   maker: string;
-  /** A line about what it is. */
-  blurb: string;
   /** Parameters, in billions. */
   parameters: number;
   /** Those working on each token, in billions: fewer than all in a mixture of experts. */
@@ -107,7 +105,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'gpt-oss:120b',
     title: 'gpt-oss 120B',
     maker: 'OpenAI',
-    blurb: 'OpenAI’s large open model: a strong agent, for computers with a lot of memory.',
     parameters: 117,
     active: 5.1,
     size: 65_369_819_443,
@@ -118,7 +115,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'qwen3.8:27b',
     title: 'Qwen3.8 27B',
     maker: 'Alibaba',
-    blurb: 'Qwen’s newest: the most capable here for coding and long tasks, and it sees images.',
     parameters: 27,
     active: 27,
     size: 17_741_871_939,
@@ -129,7 +125,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'qwen3.6:35b-a3b',
     title: 'Qwen3.6 35B-A3B',
     maker: 'Alibaba',
-    blurb: 'A mixture of experts that works only 3B of its 35B parameters at a time: fast, and good at agentic coding.',
     parameters: 35,
     active: 3,
     size: 22_621_314_161,
@@ -140,7 +135,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'inkling-2-mini:26b-a5b',
     title: 'Inkling 2 Mini',
     maker: 'Thinking Machines',
-    blurb: 'A 26B mixture of experts with 5B at work at a time, built to run on a laptop.',
     parameters: 26,
     active: 5.4,
     size: 18_269_758_110,
@@ -151,7 +145,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'flint:40b-a2b',
     title: 'Flint 40B',
     maker: 'Recursive',
-    blurb: 'A mixture of experts built for coding agents, with only 2B parameters at work at a time.',
     parameters: 40,
     active: 2,
     size: 22_863_095_573,
@@ -162,7 +155,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'nemotron-3.5-lightning:30b-a3b',
     title: 'Nemotron 3.5 Lightning',
     maker: 'NVIDIA',
-    blurb: 'A mixture of experts built for agents that run all day, with 3B parameters at work at a time.',
     parameters: 33,
     active: 3,
     size: 25_430_749_137,
@@ -173,7 +165,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'gemma4:26b',
     title: 'Gemma 4 26B',
     maker: 'Google',
-    blurb: 'A mixture of experts with 4B parameters at work at a time, good at reasoning and code, and it sees images.',
     parameters: 25.2,
     active: 3.8,
     size: 18_731_025_387,
@@ -184,7 +175,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'gpt-oss:20b',
     title: 'gpt-oss 20B',
     maker: 'OpenAI',
-    blurb: 'OpenAI’s smaller open model: a dependable agent that fits in 16 GB.',
     parameters: 21,
     active: 3.6,
     size: 13_793_441_427,
@@ -195,7 +185,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'mimo-v2.6:9b',
     title: 'MiMo V2.6 9B',
     maker: 'Xiaomi',
-    blurb: 'A small model for code and agents, for computers with 8 to 16 GB.',
     parameters: 9,
     active: 9,
     size: 6_550_810_853,
@@ -206,7 +195,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'qwen3.5:9b',
     title: 'Qwen3.5 9B',
     maker: 'Alibaba',
-    blurb: 'A small all-rounder that sees images, for computers with 8 to 16 GB.',
     parameters: 9,
     active: 9,
     size: 6_550_825_373,
@@ -217,7 +205,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'gemma4:e4b',
     title: 'Gemma 4 E4B',
     maker: 'Google',
-    blurb: 'Made for laptops and phones: small and quick, for computers with 8 to 16 GB.',
     parameters: 8,
     active: 4,
     size: 6_583_656_264,
@@ -228,7 +215,6 @@ export const CATALOG: CatalogModel[] = [
     name: 'qwen3.5:4b',
     title: 'Qwen3.5 4B',
     maker: 'Alibaba',
-    blurb: 'The smallest that still calls tools well enough to help, for computers with little memory.',
     parameters: 4,
     active: 4,
     size: 3_324_173_757,
@@ -322,26 +308,23 @@ export interface LocalModelPick extends CatalogModel {
   best: boolean;
 }
 
-/** How many models Settings recommends. */
-const PICKS = 3;
-
 /**
- * The catalog for this computer: the best few that run well first (the
- * first of them best), then the rest, slow ones before ones too big.
+ * The catalog for this computer: the best model for it, the most capable
+ * of those that run well (on the GPU before the processor), and the rest,
+ * those that run well first, then slow ones, ones too big, and ones this
+ * Ollama can't run.
  */
-export function rankLocalModels(hardware: Pick<LocalModelsState, 'gpu' | 'memory'> & { version?: string | null }): { picks: LocalModelPick[]; others: LocalModelPick[] } {
+export function rankLocalModels(hardware: Pick<LocalModelsState, 'gpu' | 'memory'> & { version?: string | null }): {
+  best: LocalModelPick | null;
+  others: LocalModelPick[];
+} {
   const all = CATALOG.map((model) => ({ ...model, fit: fitLocalModel(model, hardware), best: false }));
   const order: Record<LocalFit, number> = { good: 0, slow: 1, 'too-big': 2, unsupported: 3 };
-  // Among those that run well, a GPU's before the processor's, then the most capable.
-  const good = all
-    .filter((m) => m.fit.fit === 'good')
-    .sort((a, b) => (a.fit.where === b.fit.where ? b.quality - a.quality : a.fit.where === 'gpu' ? -1 : 1));
-  const picks = good.slice(0, PICKS);
-  if (picks[0]) picks[0].best = true;
-  const others = all
-    .filter((m) => !picks.includes(m))
-    .sort((a, b) => order[a.fit.fit] - order[b.fit.fit] || b.quality - a.quality);
-  return { picks, others };
+  const where = (m: LocalModelPick) => (m.fit.fit === 'good' && m.fit.where === 'gpu' ? 0 : 1);
+  all.sort((a, b) => order[a.fit.fit] - order[b.fit.fit] || where(a) - where(b) || b.quality - a.quality);
+  const best = all[0]?.fit.fit === 'good' ? all[0] : null;
+  if (best) best.best = true;
+  return { best, others: all.filter((m) => m !== best) };
 }
 
 /** "Fast", "Quick" or "Slow", for how many tokens a second it writes. */

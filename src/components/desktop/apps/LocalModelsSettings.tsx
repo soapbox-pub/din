@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { BrainCircuit, ChevronDown, CircleAlert, Copy, Download, Loader2, MoreHorizontal, Square, Trash2, TriangleAlert } from 'lucide-react';
+import { useState } from 'react';
+import { BrainCircuit, ChevronDown, CircleAlert, Copy, Download, Loader2, MoreHorizontal, Square, Trash2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useFeatures } from '@/hooks/useFeatures';
@@ -22,12 +21,8 @@ import { useLocalModels } from '@/hooks/useLocalModels';
 import { useToast } from '@/hooks/useToast';
 import { cleanFeaturesError, describeFeature, findFeature, formatFeatureSize, getFeaturesBridge } from '@/lib/features';
 import {
-  catalogEntry,
   cleanLocalModelsError,
-  describeHardware,
   describePull,
-  describeSpeed,
-  fitLocalModel,
   formatModelSize,
   getLocalModelsBridge,
   LOCAL_AI_FEATURE,
@@ -44,11 +39,12 @@ import { settingsEmpty, settingsGroup } from '@/shared/settingsChromeStyles';
 
 /**
  * Settings → Assistant → Models on this computer: Ollama (the `local-ai`
- * optional feature on DinOS), the models it has, and the ones worth
- * downloading here, best first, from what the GPU and memory allow
- * (src/lib/localModels.ts). The assistant lists whatever is downloaded
- * with its other models, through OpenCode's Ollama provider. `din
- * assistant models` and its siblings do the same from a command.
+ * optional feature on DinOS) and its models. Until one is downloaded, it
+ * offers the best for this computer (src/lib/localModels.ts); the rest of
+ * the catalog this Ollama can run is under Other models, each with a word
+ * about why it isn't the one. The assistant lists downloaded models with its others, through
+ * OpenCode's Ollama provider. `din assistant models` and its siblings do
+ * the same from a command.
  */
 export function LocalModelsSettings() {
   const bridge = getLocalModelsBridge();
@@ -81,14 +77,11 @@ export function LocalModelsSettings() {
     <div className="space-y-3">
       <div className="px-1">
         <h3 className="text-sm font-semibold text-foreground/90">Models on this computer</h3>
-        <p className="text-xs text-muted-foreground">
-          AI models that run here, with nothing sent anywhere, and that work offline. They’re slower and less capable than the
-          big providers’, and the best ones take a lot of memory.
-        </p>
+        <p className="text-xs text-muted-foreground">Private AI that runs here, even offline.</p>
       </div>
 
       {local.isLoading ? (
-        <Skeleton className="h-32 w-full rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
       ) : !state || !state.available ? (
         <NotInstalled />
       ) : !state.running ? (
@@ -106,9 +99,7 @@ export function LocalModelsSettings() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removing && localModelTitle(removing)}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              It’s deleted from this computer, and the assistant can’t use it until you download it again.
-            </AlertDialogDescription>
+            <AlertDialogDescription>The assistant can’t use it until you download it again.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -128,12 +119,9 @@ export function LocalModelsSettings() {
       <AlertDialog open={heavy !== null} onOpenChange={(open) => !open && setHeavy(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{heavy?.fit.fit === 'too-big' ? `${heavy.title} is too big for this computer` : `${heavy?.title} will be slow here`}</AlertDialogTitle>
+            <AlertDialogTitle>Download {heavy?.title}?</AlertDialogTitle>
             <AlertDialogDescription>
-              {heavy?.fit.fit === 'too-big'
-                ? `It needs about ${formatModelSize(heavy.fit.memory)} of memory to run, more than this computer can give it. It may not start at all, or make everything else slow while it runs.`
-                : `It would write only a few words a second here, so the assistant would take minutes to answer. A recommended model is faster.`}{' '}
-              The download is {heavy && formatModelSize(heavy.size)}.
+              {heavy?.fit.reason}. {heavy?.fit.fit === 'too-big' ? 'It may not start at all.' : 'The assistant would take minutes to answer.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -166,18 +154,11 @@ function NotInstalled() {
 
   return (
     <div className={cn(settingsGroup, 'flex items-center justify-between gap-4 px-4 py-3')}>
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-foreground/75 clay">
-          <BrainCircuit className="size-4.5" strokeWidth={1.75} aria-hidden />
-        </span>
-        <div className="min-w-0">
-          <p className="text-sm">Ollama isn’t installed</p>
-          <p className="text-xs text-muted-foreground">
-            {feature
-              ? `It runs the models. ${describeFeature(feature, features.data?.live)}.`
-              : 'It runs the models. Install it from ollama.com, and Din starts it and lists its models here.'}
-          </p>
-        </div>
+      <div className="min-w-0">
+        <p className="text-sm">Ollama isn’t installed</p>
+        <p className="text-xs text-muted-foreground">
+          {feature ? describeFeature(feature, features.data?.live) : 'Install it from ollama.com.'}
+        </p>
       </div>
       {canInstall && !feature.installed && !feature.busy && (
         <Button variant="outline" size="sm" className="shrink-0" onClick={install}>
@@ -188,6 +169,11 @@ function NotInstalled() {
       {feature?.busy && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
     </div>
   );
+}
+
+/** "qwen3.6" and "qwen3.6:latest" are the same model. */
+function normalize(name: string): string {
+  return name.includes(':') ? name : `${name}:latest`;
 }
 
 function Models({
@@ -203,98 +189,85 @@ function Models({
   onRemove: (name: string) => void;
   onOffer: (pick: LocalModelPick) => void;
 }) {
-  const { picks, others } = rankLocalModels(state);
+  const { best, others } = rankLocalModels(state);
   const installed = new Set(state.models.map((m) => normalize(m.name)));
   const pulling = new Map(state.pulls.map((p) => [normalize(p.model), p]));
-  const notHere = (m: LocalModelPick) => !installed.has(normalize(m.name));
-  const offeredPicks = picks.filter(notHere);
-  const offeredOthers = others.filter(notHere);
-  // Downloads that aren't one of the catalog's offers: "Other model…"'s.
-  const otherPulls = state.pulls.filter((p) => !installed.has(normalize(p.model)) && !picks.concat(others).some((m) => normalize(m.name) === normalize(p.model)));
+  const known = new Set([best, ...others].filter((m) => m !== null).map((m) => normalize(m.name)));
+  // The best is offered only until there's a model to use; after that it's one of the others.
+  const offerBest = best !== null && state.models.length === 0;
+  // Those this Ollama can't run aren't offered: they come once it's updated.
+  const rest = [...(best && !offerBest ? [best] : []), ...others].filter(
+    (m) => !installed.has(normalize(m.name)) && m.fit.fit !== 'unsupported',
+  );
+  // Downloads of models the catalog doesn't have (`ollama pull`, `din assistant download-model`).
+  const otherPulls = state.pulls.filter((p) => !installed.has(normalize(p.model)) && !known.has(normalize(p.model)));
 
   return (
     <>
-      <p className="px-1 text-xs text-muted-foreground">
-        {describeHardware(state)}
-      </p>
-
-      {(state.models.length > 0 || otherPulls.length > 0) && (
-        <>
-          <h4 className={subheading}>Downloaded · the assistant lists them under Ollama</h4>
-          <ul className={settingsGroup} aria-label="Downloaded models">
-            {state.models.map((model) => (
-              <InstalledRow
-                key={model.name}
-                model={model}
-                state={state}
-                best={picks[0] !== undefined && normalize(picks[0].name) === normalize(model.name)}
-                onRemove={() => onRemove(model.name)}
-              />
-            ))}
-            {otherPulls.map((pull) => (
-              <PullRow key={pull.model} pull={pull} onStop={() => onStop(pull.model)} onRetry={() => onDownload(pull.model)} />
-            ))}
-          </ul>
-        </>
-      )}
-
-      {offeredPicks.length > 0 ? (
-        <>
-          <h4 className={subheading}>Recommended for this computer</h4>
-          <ul className={settingsGroup} aria-label="Recommended for this computer">
-            {offeredPicks.map((pick) => (
-              <OfferRow key={pick.name} pick={pick} pull={pulling.get(normalize(pick.name))} onDownload={() => onOffer(pick)} onStop={() => onStop(pick.name)} />
-            ))}
-          </ul>
-        </>
+      {state.models.length > 0 || otherPulls.length > 0 || offerBest ? (
+        <ul className={settingsGroup} aria-label="Models on this computer">
+          {state.models.map((model) => (
+            <InstalledRow
+              key={model.name}
+              model={model}
+              best={best !== null && normalize(best.name) === normalize(model.name)}
+              onRemove={() => onRemove(model.name)}
+            />
+          ))}
+          {otherPulls.map((pull) => (
+            <PullRow key={pull.model} pull={pull} onStop={() => onStop(pull.model)} onRetry={() => onDownload(pull.model)} />
+          ))}
+          {offerBest && (
+            <OfferRow pick={best} pull={pulling.get(normalize(best.name))} onDownload={() => onOffer(best)} onStop={() => onStop(best.name)} />
+          )}
+        </ul>
       ) : (
-        picks.length === 0 && (
-          <div className={settingsGroup}>
-            <p className={settingsEmpty}>
-              None of the models Din knows runs well on this computer. A smaller one below still works, slowly.
-            </p>
-          </div>
-        )
+        <div className={settingsGroup}>
+          <p className={settingsEmpty}>None of the models Din knows runs well on this computer.</p>
+        </div>
       )}
 
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className="group text-muted-foreground">
-            <ChevronDown className="size-4.5 transition-transform group-data-[state=open]:rotate-180" strokeWidth={1.75} aria-hidden />
-            More models
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-3 pt-2">
-          {offeredOthers.length > 0 && (
+      {rest.length > 0 && (
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="group text-muted-foreground">
+              <ChevronDown className="size-4.5 transition-transform group-data-[state=open]:rotate-180" strokeWidth={1.75} aria-hidden />
+              Other models
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
             <ul className={settingsGroup} aria-label="Other models">
-              {offeredOthers.map((pick) => (
+              {rest.map((pick) => (
                 <OfferRow key={pick.name} pick={pick} pull={pulling.get(normalize(pick.name))} onDownload={() => onOffer(pick)} onStop={() => onStop(pick.name)} />
               ))}
             </ul>
-          )}
-          <OtherModel onDownload={onDownload} />
-        </CollapsibleContent>
-      </Collapsible>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </>
   );
 }
 
-const subheading = 'px-1 pt-1 text-xs font-semibold text-muted-foreground';
-
-/** "qwen3.6" and "qwen3.6:latest" are the same model. */
-function normalize(name: string): string {
-  return name.includes(':') ? name : `${name}:latest`;
+function ModelIcon({ installed }: { installed: boolean }) {
+  return (
+    <span
+      className={cn(
+        'flex size-9 shrink-0 items-center justify-center rounded-full',
+        installed ? 'bg-pigment text-primary-foreground clay-pigment' : 'bg-foreground/10 text-foreground/75 clay',
+      )}
+    >
+      <BrainCircuit className="size-4.5" strokeWidth={1.75} aria-hidden />
+    </span>
+  );
 }
 
-function InstalledRow({ model, state, best, onRemove }: { model: LocalModel; state: LocalModelsState; best: boolean; onRemove: () => void }) {
-  const entry = catalogEntry(model.name);
-  const fit = entry ? fitLocalModel(entry, state) : null;
-  const details = [
-    formatModelSize(model.size),
-    model.parameters,
-    model.loaded ? 'In memory now' : null,
-    fit && fit.fit !== 'good' ? fit.reason : null,
-  ].filter(Boolean);
+function BestBadge() {
+  return <span className="rounded-full bg-selected px-2 py-0.5 text-xs font-medium text-ink-accent">Best for this computer</span>;
+}
+
+function InstalledRow({ model, best, onRemove }: { model: LocalModel; best: boolean; onRemove: () => void }) {
+  const title = localModelTitle(model.name);
+  const details = [formatModelSize(model.size), model.loaded ? 'In use' : null, model.tools === false ? 'Can’t use tools' : null].filter(Boolean);
   const copy = () => void navigator.clipboard.writeText(`ollama/${model.name}`).catch(() => {});
 
   return (
@@ -302,25 +275,17 @@ function InstalledRow({ model, state, best, onRemove }: { model: LocalModel; sta
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="flex items-center gap-3 py-3 pr-2 pl-4">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-pigment text-primary-foreground clay-pigment">
-              <BrainCircuit className="size-4.5" strokeWidth={1.75} aria-hidden />
-            </span>
+            <ModelIcon installed />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-foreground" title={model.name}>
-                {localModelTitle(model.name)}
+                {title}
                 {best && <BestBadge />}
               </span>
               <span className="text-xs text-muted-foreground">{details.join(' · ')}</span>
-              {model.tools === false && (
-                <span className="flex items-start gap-1 text-xs text-warning">
-                  <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
-                  It can’t use tools, so the assistant can only chat with it.
-                </span>
-              )}
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label={`More for ${localModelTitle(model.name)}`}>
+                <Button variant="ghost" size="icon" aria-label={`More for ${title}`}>
                   <MoreHorizontal className="size-4.5" strokeWidth={1.75} aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
@@ -354,41 +319,39 @@ function InstalledRow({ model, state, best, onRemove }: { model: LocalModel; sta
   );
 }
 
+/** Why a model isn't the one, in a word or two. */
+function shortReason(pick: LocalModelPick): string | null {
+  switch (pick.fit.fit) {
+    case 'slow':
+      return 'Slow here';
+    case 'too-big':
+      return 'Too big for this computer';
+    default:
+      return null;
+  }
+}
+
 function OfferRow({ pick, pull, onDownload, onStop }: { pick: LocalModelPick; pull?: LocalPull; onDownload: () => void; onStop: () => void }) {
-  const good = pick.fit.fit === 'good';
-  const details = [
-    formatModelSize(pick.size),
-    pick.active < pick.parameters ? `${pick.parameters}B, ${pick.active}B at a time` : `${pick.parameters}B`,
-    good ? `${describeSpeed(pick.fit.speed)}${pick.fit.where === 'cpu' ? ' on the processor' : ''}` : null,
-  ].filter(Boolean);
+  const reason = shortReason(pick);
 
   return (
     <li className="flex items-center gap-3 py-3 pr-3 pl-4">
-      <span
-        className={cn(
-          'flex size-9 shrink-0 items-center justify-center rounded-full clay',
-          good ? 'bg-foreground/10 text-ink-accent' : 'bg-foreground/5 text-muted-foreground',
-        )}
-      >
-        <BrainCircuit className="size-4.5" strokeWidth={1.75} aria-hidden />
-      </span>
+      <ModelIcon installed={false} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-foreground">
           {pick.title}
-          <span className="text-xs font-normal text-muted-foreground">{pick.maker}</span>
           {pick.best && <BestBadge />}
         </span>
-        <span className="text-xs text-muted-foreground">{pick.blurb}</span>
-        <span className="text-xs text-muted-foreground">{details.join(' · ')}</span>
-        {!good && (
-          <span className="flex items-start gap-1 text-xs text-warning">
-            <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
-            {pick.fit.reason}
+        {pull ? (
+          <PullProgress pull={pull} size={pick.size} />
+        ) : (
+          <span className="text-xs text-muted-foreground" title={pick.fit.reason ?? undefined}>
+            {pick.maker} · {formatModelSize(pick.size)}
+            {reason && <span className="text-warning"> · {reason}</span>}
           </span>
         )}
-        {pull && <PullProgress pull={pull} size={pick.size} />}
       </div>
-      {pick.fit.fit === 'unsupported' ? null : pull && !pull.error ? (
+      {pull && !pull.error ? (
         <Button variant="outline" size="sm" className="shrink-0" onClick={onStop}>
           <Square className="size-3.5 fill-current" aria-hidden />
           Stop
@@ -403,16 +366,10 @@ function OfferRow({ pick, pull, onDownload, onStop }: { pick: LocalModelPick; pu
   );
 }
 
-function BestBadge() {
-  return <span className="rounded-full bg-selected px-2 py-0.5 text-xs font-medium text-ink-accent">Best for this computer</span>;
-}
-
 function PullRow({ pull, onStop, onRetry }: { pull: LocalPull; onStop: () => void; onRetry: () => void }) {
   return (
     <li className="flex items-center gap-3 py-3 pr-3 pl-4">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-foreground/75 clay">
-        <BrainCircuit className="size-4.5" strokeWidth={1.75} aria-hidden />
-      </span>
+      <ModelIcon installed={false} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-sm font-medium text-foreground">{localModelTitle(pull.model)}</span>
         <PullProgress pull={pull} />
@@ -429,8 +386,7 @@ function PullProgress({ pull, size }: { pull: LocalPull; size?: number }) {
   const progress = pullProgress(pull, size);
   if (pull.error) {
     return (
-      <span role="alert" className="flex items-start gap-1 text-xs text-destructive">
-        <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
+      <span role="alert" className="text-xs text-destructive">
         {pull.error}
       </span>
     );
@@ -447,44 +403,5 @@ function PullProgress({ pull, size }: { pull: LocalPull; size?: number }) {
         aria-label={`Downloading ${localModelTitle(pull.model)}`}
       />
     </>
-  );
-}
-
-/** Any model in Ollama's library, by its name. */
-function OtherModel({ onDownload }: { onDownload: (name: string) => void }) {
-  const [name, setName] = useState('');
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onDownload(trimmed);
-    setName('');
-  };
-  return (
-    <form onSubmit={submit} className={cn(settingsGroup, 'flex flex-col gap-2 px-4 py-3')}>
-      <label htmlFor="local-model-name" className="text-sm">
-        Another model
-      </label>
-      <p className="text-xs text-muted-foreground">
-        Any model in Ollama’s library, by its name and tag, as ollama.com/library shows it. The assistant needs one that can use
-        tools.
-      </p>
-      <div className="flex gap-2">
-        <Input
-          id="local-model-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="gemma4:12b"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          className="h-8 flex-1 font-mono text-sm"
-        />
-        <Button type="submit" variant="outline" size="sm" disabled={!name.trim()}>
-          <Download className="size-4.5" strokeWidth={1.75} aria-hidden />
-          Download
-        </Button>
-      </div>
-    </form>
   );
 }
