@@ -215,7 +215,7 @@ export const SECTIONS: SettingsSection[] = [
     group: 'Devices',
     name: 'Battery & Power',
     icon: BatteryFull,
-    search: ['Battery', 'Power mode', 'Power profile', 'power saver', 'balanced', 'performance', 'charging', 'energy'],
+    search: ['Battery', 'Power mode', 'Power profile', 'power saver', 'balanced', 'performance', 'charging', 'energy', 'Limit charging', 'charge limit', 'battery health', 'charger', 'charging slowly'],
   },
   {
     id: 'password',

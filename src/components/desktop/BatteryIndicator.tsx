@@ -6,34 +6,40 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { trayFooter, trayFooterButton, trayList, trayRuleBottom, trayTitle } from './trayPanel';
 import {
-  formatTimeRemaining,
+  chargeMark,
+  describePower,
+  isBatteryCritical,
   summarizePower,
   type BatteryInfo,
+  type ChargeMark,
 } from '@/lib/power';
-import { useBatteryStatus } from '@/hooks/usePower';
+import { useBatteryStatus, useChargeLimit } from '@/hooks/usePower';
 import { useWindowActions } from '@/contexts/WindowManagerContext';
 
-/** Bolt overlaid on the battery while charging, macOS style. */
+/** Bolt overlaid on the battery while plugged in, macOS style. */
 const BOLT_PATH = 'M13.1 1.9 L8.7 8.2 h2.8 l-1.5 4.4 l4.6 -6.4 h-2.8 Z';
 
 /**
  * Battery glyph, macOS style: an outlined body with a solid fill that scales
  * with the charge, and a bolt overlaid (knocked out of the body behind it)
- * while charging. Shared by the menu-bar item and Settings panel.
+ * while a charger's plugged in, only its outline for a slow one. Shared by
+ * the menu-bar item and Settings panel.
  */
 export function BatteryGlyph({
   percent,
-  charging,
+  mark,
   className,
 }: {
   percent: number | null;
-  charging: boolean;
+  /** The bolt over it: `chargeMark()` for the computer's, charging or not for a device's. */
+  mark: ChargeMark;
   className?: string;
 }) {
   const maskId = useId();
   const level = percent === null ? null : Math.min(100, Math.max(0, percent));
   // Interior runs x=2.5..20.5; keep a sliver visible even at 1%.
   const fillWidth = level === null || level === 0 ? 0 : Math.max(18 * (level / 100), 2);
+  const charging = mark !== null;
 
   return (
     <svg viewBox="0 0 26 16" fill="none" className={className} aria-hidden>
@@ -44,7 +50,7 @@ export function BatteryGlyph({
             d={BOLT_PATH}
             fill="black"
             stroke="black"
-            strokeWidth="1.5"
+            strokeWidth={mark === 'slow' ? 3 : 1.5}
             strokeLinejoin="round"
           />
         </mask>
@@ -72,44 +78,29 @@ export function BatteryGlyph({
           <rect x="2.5" y="4" width={fillWidth} height="8" rx="1.75" fill="currentColor" />
         )}
       </g>
-      {charging && <path d={BOLT_PATH} fill="currentColor" />}
+      {mark === 'charging' && <path d={BOLT_PATH} fill="currentColor" />}
+      {mark === 'slow' && (
+        <path d={BOLT_PATH} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+      )}
     </svg>
   );
 }
 
-/** True when the battery is low enough to warn about (and not charging). */
+/** True when a device's battery is low enough to show in red (and not charging). */
 function isCritical(percent: number | null, charging: boolean): boolean {
   return !charging && percent !== null && percent <= 15;
-}
-
-/** One line of secondary text describing charge/AC state. */
-function statusLine(
-  status: ReturnType<typeof summarizePower>,
-  acConnected: boolean,
-): string {
-  if (!status) return '';
-  if (status.status === 'full' || status.percent === 100) {
-    return acConnected ? 'Fully charged' : 'Full';
-  }
-  if (status.charging) {
-    return status.secondsRemaining !== null
-      ? `${formatTimeRemaining(status.secondsRemaining)} until full`
-      : 'Charging';
-  }
-  if (status.secondsRemaining !== null) {
-    return `${formatTimeRemaining(status.secondsRemaining)} remaining`;
-  }
-  return acConnected ? 'Plugged in' : 'On battery';
 }
 
 /** Popover content: big charge readout, per-battery breakdown, settings link. */
 export function BatteryPopoverBody() {
   const status = useBatteryStatus();
+  const limit = useChargeLimit();
   const { open } = useWindowActions();
 
   const data = status.data;
   const summary = data ? summarizePower(data) : null;
-  const critical = summary ? isCritical(summary.percent, summary.charging) : false;
+  const critical = isBatteryCritical(summary);
+  const mark = chargeMark(summary);
 
   return (
     <div className="flex flex-col">
@@ -126,7 +117,7 @@ export function BatteryPopoverBody() {
           <>
             <BatteryGlyph
               percent={summary.percent}
-              charging={summary.charging}
+              mark={mark}
               className={cn(
                 'size-6 shrink-0',
                 critical ? 'text-destructive' : 'text-foreground',
@@ -142,10 +133,10 @@ export function BatteryPopoverBody() {
                   critical ? 'text-destructive' : 'text-muted-foreground',
                 )}
               >
-                {statusLine(summary, data?.acConnected ?? false)}
+                {describePower(summary, limit.data)}
               </p>
             </div>
-            {data?.acConnected && (
+            {summary.pluggedIn && (
               <Plug className="ml-auto size-4 shrink-0 text-muted-foreground" aria-label="Plugged in" />
             )}
           </>
@@ -159,7 +150,7 @@ export function BatteryPopoverBody() {
           aria-label="Batteries"
         >
           {data.batteries.map((battery) => (
-            <BatteryRow key={battery.name} battery={battery} />
+            <BatteryRow key={battery.name} battery={battery} mark={mark} />
           ))}
         </ul>
       )}
@@ -167,7 +158,11 @@ export function BatteryPopoverBody() {
       {data && data.devices.length > 0 && (
         <ul className={trayList} aria-label="Devices">
           {data.devices.map((battery) => (
-            <BatteryRow key={battery.name} battery={battery} />
+            <BatteryRow
+              key={battery.name}
+              battery={battery}
+              mark={battery.status === 'charging' ? 'charging' : null}
+            />
           ))}
         </ul>
       )}
@@ -190,16 +185,15 @@ export function BatteryPopoverBody() {
 }
 
 /** Compact row for one battery: a pack of a multi-battery machine, or a device's. */
-function BatteryRow({ battery }: { battery: BatteryInfo }) {
-  const charging = battery.status === 'charging';
+function BatteryRow({ battery, mark }: { battery: BatteryInfo; mark: ChargeMark }) {
   return (
     <li className="flex items-center gap-3 rounded-lg px-2.5 py-2">
       <BatteryGlyph
         percent={battery.percent}
-        charging={charging}
+        mark={mark}
         className={cn(
           'size-4.5 shrink-0',
-          isCritical(battery.percent, charging) ? 'text-destructive' : 'text-muted-foreground',
+          isCritical(battery.percent, mark !== null) ? 'text-destructive' : 'text-muted-foreground',
         )}
       />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{battery.label}</span>

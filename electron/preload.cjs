@@ -1704,6 +1704,13 @@ expose('power', {
    */
   setChargeLimit: (on) => ipcRenderer.invoke('power:setChargeLimit', on),
 
+  /**
+   * Choose where the charge limit stops charging, 50-100%, on DinOS
+   * (`adjustable`). Resolves to its new state.
+   * @param {number} percent
+   */
+  setChargeLimitPercent: (percent) => ipcRenderer.invoke('power:setChargeLimitPercent', percent),
+
   /** Which of restart and shut down logind allows this session. */
   actions: () => ipcRenderer.invoke('power:actions'),
 

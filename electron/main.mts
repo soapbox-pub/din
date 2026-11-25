@@ -2273,6 +2273,59 @@ async function readBattery(dir: string, name: string): Promise<{
   return { name, percent, status, secondsRemaining };
 }
 
+/** A sysfs number with a unit (`5000mV`, `3000mA`, `100000mW`), or 0. */
+function pdValue(raw: string | null): number {
+  const n = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * The most power, in watts, the computer asks of a USB-C charger: the
+ * largest of its ports' USB PD sink capabilities, or null where the kernel
+ * doesn't list them (no UCSI or TCPM driver).
+ */
+async function usbSinkWatts(): Promise<number | null> {
+  const TYPEC_DIR = '/sys/class/typec';
+  let ports: string[];
+  try {
+    ports = (await fsp.readdir(TYPEC_DIR)).filter((name) => /^port\d+$/.test(name));
+  } catch {
+    return null;
+  }
+  let most = 0;
+  for (const port of ports) {
+    const caps = path.join(TYPEC_DIR, port, 'usb_power_delivery', 'sink-capabilities');
+    let entries: string[];
+    try {
+      entries = (await fsp.readdir(caps)).filter((name) => /^\d+:/.test(name));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const dir = path.join(caps, entry);
+      const [voltage, maxVoltage, current, maxCurrent, maxPower] = await Promise.all(
+        ['voltage', 'maximum_voltage', 'operational_current', 'maximum_current', 'maximum_power']
+          .map(async (name) => pdValue(await readPowerAttr(dir, name))),
+      );
+      const millivolts = maxVoltage || voltage;
+      const milliamps = maxCurrent || current;
+      const watts = maxPower ? maxPower / 1000 : (millivolts * milliamps) / 1e6;
+      most = Math.max(most, watts);
+    }
+  }
+  return most > 0 ? most : null;
+}
+
+/**
+ * Below this a charger is a slow one, in watts, as Windows says of one that
+ * gives less than the computer asks for. A laptop asks for the most it could
+ * draw (100W here), and charges fine on rather less, so it's well under that
+ * and never more than 45W; 30W where the computer doesn't say.
+ */
+function slowChargerWatts(sinkWatts: number | null): number {
+  return sinkWatts ? Math.min(45, sinkWatts * 0.6) : 30;
+}
+
 // Power profiles, via the net.hadess.PowerProfiles D-Bus API. The same
 // interface is served by power-profiles-daemon on most distros and by
 // tuned-ppd on Fedora, so one code path drives both. We speak to it over the
@@ -2353,10 +2406,19 @@ interface ChargeLimitState {
   end: number | null;
   /** Where charging starts again, in percent, or null if unknown. */
   start: number | null;
+  /** Whether where it stops can be chosen (DinOS's din-charge-limit, on a battery with thresholds). */
+  adjustable: boolean;
 }
 
+// DinOS's helper that chooses where the limit stops charging, which UPower
+// can't (os/din-charge-limit.sh), run through sudo.
+const CHARGE_LIMIT_HELPER = process.env.DIN_CHARGE_LIMIT;
+/** Where the limit may stop charging, in percent. */
+const CHARGE_LIMIT_MIN = 50;
+const CHARGE_LIMIT_MAX = 100;
+
 /** The UPower paths of the computer's own batteries that support a charge limit. */
-async function chargeLimitBatteries(): Promise<{ path: string; enabled: boolean; start: number; end: number }[]> {
+async function chargeLimitBatteries(): Promise<{ path: string; native: string; enabled: boolean; start: number; end: number }[]> {
   const out = await busctl(['--json=short', 'call', UPOWER_BUS, UPOWER_PATH, UPOWER_BUS, 'EnumerateDevices']);
   const reply: { data?: unknown[] } = JSON.parse(out);
   const paths = Array.isArray(reply.data?.[0]) ? (reply.data[0] as unknown[]) : [];
@@ -2368,15 +2430,21 @@ async function chargeLimitBatteries(): Promise<{ path: string; enabled: boolean;
         await busctl([
           '--json=short', 'get-property', UPOWER_BUS, devicePath, UPOWER_DEVICE,
           'Type', 'PowerSupply', 'ChargeThresholdSupported', 'ChargeThresholdEnabled',
-          'ChargeStartThreshold', 'ChargeEndThreshold',
+          'ChargeStartThreshold', 'ChargeEndThreshold', 'NativePath',
         ])
       )
         .trim()
         .split('\n')
         .map((line) => (JSON.parse(line) as { data: unknown }).data);
-      const [type, powerSupply, supported, enabled, start, end] = props;
+      const [type, powerSupply, supported, enabled, start, end, native] = props;
       if (type !== UPOWER_TYPE_BATTERY || powerSupply !== true || supported !== true) continue;
-      found.push({ path: devicePath, enabled: enabled === true, start: Number(start), end: Number(end) });
+      found.push({
+        path: devicePath,
+        native: typeof native === 'string' ? native : '',
+        enabled: enabled === true,
+        start: Number(start),
+        end: Number(end),
+      });
     } catch {
       // An older UPower without the threshold properties: not supported.
     }
@@ -2384,20 +2452,35 @@ async function chargeLimitBatteries(): Promise<{ path: string; enabled: boolean;
   return found;
 }
 
+/** Whether a battery's charge limit is a level the kernel takes, not just on and off (charge_types). */
+async function hasChargeThreshold(native: string): Promise<boolean> {
+  const name = path.basename(native);
+  if (!name) return false;
+  try {
+    await fsp.access(path.join(POWER_SUPPLY_DIR, name, 'charge_control_end_threshold'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readChargeLimit(): Promise<ChargeLimitState> {
+  const none = { available: false, enabled: false, end: null, start: null, adjustable: false };
   try {
     const batteries = await chargeLimitBatteries();
-    if (batteries.length === 0) return { available: false, enabled: false, end: null, start: null };
+    if (batteries.length === 0) return none;
     const first = batteries[0];
     const valid = (n: number) => (Number.isFinite(n) && n > 0 && n <= 100 ? n : null);
+    const adjustable = !!CHARGE_LIMIT_HELPER && (await Promise.all(batteries.map((b) => hasChargeThreshold(b.native)))).every(Boolean);
     return {
       available: true,
       enabled: batteries.every((b) => b.enabled),
       end: valid(first.end),
       start: valid(first.start),
+      adjustable,
     };
   } catch {
-    return { available: false, enabled: false, end: null, start: null };
+    return none;
   }
 }
 
@@ -2470,6 +2553,12 @@ function registerPowerHandlers(): void {
     const batteries = [];
     const devices = [];
     let acConnected = false;
+    // What the chargers plugged in give, in watts, where they say (a USB-C
+    // one, as its PD contract); a barrel charger's Mains supply doesn't.
+    let chargerWatts: number | null = null;
+    // A battery losing charge while plugged in that isn't meant to: its
+    // charger gives less than the computer uses.
+    let drainingOnCharger = false;
     for (const name of names.sort()) {
       const dir = path.join(POWER_SUPPLY_DIR, name);
       const type = await readPowerAttr(dir, 'type');
@@ -2480,16 +2569,48 @@ function registerPowerHandlers(): void {
           devices.push({ ...battery, label: (await readPowerAttr(dir, 'model_name')) || 'Device' });
         } else {
           batteries.push(battery);
+          if (battery.status === 'discharging') {
+            // Not when it's told to (charge_behaviour's force-discharge), or
+            // coming down to a charge limit set below where it was.
+            const [behaviour, start] = await Promise.all([
+              readPowerAttr(dir, 'charge_behaviour'),
+              readPowerAttr(dir, 'charge_control_start_threshold'),
+            ]);
+            const limitStart = Number.parseInt(start ?? '', 10);
+            const aboveLimit = Number.isFinite(limitStart) && limitStart > 0 && battery.percent !== null && battery.percent >= limitStart;
+            if (!behaviour?.includes('[force-discharge]') && !aboveLimit) drainingOnCharger = true;
+          }
         }
       } else if (type === 'Mains' || type === 'USB') {
         // Mains = AC adapter; a USB-C port online means USB-PD is supplying power.
-        if ((await readPowerAttr(dir, 'online')) === '1') acConnected = true;
+        if ((await readPowerAttr(dir, 'online')) === '1') {
+          acConnected = true;
+          if (type === 'USB') {
+            const [voltageMax, currentMax, voltageNow, currentNow] = await Promise.all(
+              ['voltage_max', 'current_max', 'voltage_now', 'current_now'].map(async (attr) => pdValue(await readPowerAttr(dir, attr))),
+            );
+            // µV × µA, in watts.
+            const watts = (voltageMax * currentMax || voltageNow * currentNow) / 1e12;
+            if (watts > 0) chargerWatts = Math.max(chargerWatts ?? 0, watts);
+          }
+        }
       }
+    }
+
+    let charger = null;
+    if (acConnected && batteries.length > 0) {
+      const weak = chargerWatts !== null && chargerWatts < slowChargerWatts(await usbSinkWatts());
+      charger = {
+        watts: chargerWatts === null ? null : Math.round(chargerWatts),
+        slow: weak || drainingOnCharger,
+        draining: drainingOnCharger,
+      };
     }
 
     return {
       available: batteries.length > 0,
       acConnected,
+      charger,
       batteries: batteries.map((battery, i) => ({
         ...battery,
         label: batteries.length > 1 ? `Battery ${i + 1}` : 'Battery',
@@ -2533,6 +2654,23 @@ function registerPowerHandlers(): void {
       await busctl(['call', UPOWER_BUS, battery.path, UPOWER_DEVICE, 'EnableChargeThreshold', 'b', on ? 'true' : 'false']);
     }
     return readChargeLimit();
+  });
+
+  ipcMain.handle('power:setChargeLimitPercent', async (event, percent) => {
+    assertShellSender(event);
+    if (typeof percent !== 'number' || !Number.isInteger(percent) || percent < CHARGE_LIMIT_MIN || percent > CHARGE_LIMIT_MAX) {
+      throw new Error(`The limit is from ${CHARGE_LIMIT_MIN}% to ${CHARGE_LIMIT_MAX}%`);
+    }
+    const limit = await readChargeLimit();
+    if (!limit.available) throw new Error('This computer’s battery has no charge limit');
+    if (!limit.adjustable || !CHARGE_LIMIT_HELPER) throw new Error('Where charging stops can only be chosen on DinOS');
+    // It restarts UPower, which can take a few seconds to find the battery again.
+    await tool('sudo', ['-n', CHARGE_LIMIT_HELPER, 'set', String(percent)], 30_000);
+    for (let tries = 0; ; tries++) {
+      const next = await readChargeLimit();
+      if (next.available || tries >= 10) return next;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
   });
 
   // Log out: quit cleanly. As a login session (scripts/session.mjs) that

@@ -112,19 +112,26 @@ import { useAirPlayState } from '@/hooks/useAirPlay';
 import { getAirPlayBridge } from '@/lib/airplay';
 import { AirPlayReceiverList } from '@/components/desktop/AirPlayIndicator';
 import {
+  CHARGE_LIMIT_MAX,
+  CHARGE_LIMIT_MIN,
+  CHARGE_LIMIT_STEP,
   chargeLimitPercent,
+  chargeMark,
   cleanPowerError,
+  describePower,
   describePowerProfile,
   formatTimeRemaining,
   getPowerBridge,
+  isBatteryCritical,
   summarizePower,
 } from '@/lib/power';
-import type { BatteryInfo, ChargeLimitStatus } from '@/lib/power';
+import type { BatteryInfo, ChargeLimitStatus, ChargeMark } from '@/lib/power';
 import {
   useBatteryStatus,
   useChargeLimit,
   usePowerProfiles,
   useSetChargeLimit,
+  useSetChargeLimitPercent,
   useSetPowerProfile,
 } from '@/hooks/usePower';
 import { BatteryGlyph } from '@/components/desktop/BatteryIndicator';
@@ -1573,25 +1580,32 @@ function GamePerformanceSwitch() {
 }
 
 /**
- * Stops charging short of full (UPower's charge threshold, usually 80%), as
- * phones and laptops offer to keep a battery that's mostly plugged in healthy
- * for longer. `din power limit` does the same.
+ * Stops charging short of full (UPower's charge threshold, 80% unless the
+ * user chooses otherwise), as phones and laptops offer to keep a battery
+ * that's mostly plugged in healthy for longer: a switch, and on DinOS a
+ * slider for where it stops. `din power limit` does the same.
  */
 function ChargeLimitSwitch({ limit }: { limit: ChargeLimitStatus }) {
   const set = useSetChargeLimit();
+  const setPercent = useSetChargeLimitPercent();
   const checked = set.isPending ? set.variables : limit.enabled;
-  const end = chargeLimitPercent(limit);
+  const saved = chargeLimitPercent(limit);
+  // Where the slider is while it's dragged, and until the new level is in.
+  const [dragging, setDragging] = useState<number | null>(null);
+  const end = dragging ?? (setPercent.isPending ? setPercent.variables : saved);
+  const start = end === saved ? limit.start : end - CHARGE_LIMIT_STEP;
+  const error = set.error ?? setPercent.error;
   return (
     <div className={cn(settingsCard, 'px-4 py-3')}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <Label htmlFor="charge-limit" className="cursor-pointer text-sm">
-            Limit charging to {end}%
+            Limit charging
           </Label>
           <p className="text-xs text-muted-foreground">
             Keeps the battery healthy for longer when the computer is mostly plugged in. Charging
             stops at {end}%
-            {limit.start !== null && limit.start < end ? ` and starts again below ${limit.start}%` : ''}.
+            {start !== null && start < end ? ` and starts again below ${start}%` : ''}.
           </p>
         </div>
         <Switch
@@ -1601,7 +1615,26 @@ function ChargeLimitSwitch({ limit }: { limit: ChargeLimitStatus }) {
           onCheckedChange={(on) => set.mutate(on)}
         />
       </div>
-      {set.isError && <p className="mt-2 text-sm text-destructive">{cleanPowerError(set.error)}</p>}
+      {limit.adjustable && (
+        <div className={cn('mt-3 flex items-center gap-3', !checked && 'opacity-50')}>
+          <Slider
+            aria-label="Stop charging at"
+            value={[end]}
+            min={CHARGE_LIMIT_MIN}
+            max={CHARGE_LIMIT_MAX - CHARGE_LIMIT_STEP}
+            step={CHARGE_LIMIT_STEP}
+            disabled={!checked || set.isPending || setPercent.isPending}
+            className="flex-1"
+            onValueChange={([v]) => setDragging(v)}
+            onValueCommit={([v]) => {
+              setDragging(null);
+              if (v !== saved) setPercent.mutate(v);
+            }}
+          />
+          <span className="w-10 text-right text-sm tabular-nums text-muted-foreground">{end}%</span>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-destructive">{cleanPowerError(error)}</p>}
     </div>
   );
 }
@@ -1615,11 +1648,8 @@ function BatteryPanel({
 }) {
   const data = status.data;
   const summary = data ? summarizePower(data) : null;
-  const critical =
-    summary !== null &&
-    !summary.charging &&
-    summary.percent !== null &&
-    summary.percent <= 15;
+  const critical = isBatteryCritical(summary);
+  const mark = chargeMark(summary);
 
   return (
     <>
@@ -1633,7 +1663,7 @@ function BatteryPanel({
             <div className={cn(settingsCard, 'flex items-center gap-4 p-4')}>
               <BatteryGlyph
                 percent={summary.percent}
-                charging={summary.charging}
+                mark={mark}
                 className={cn('size-9 shrink-0', critical ? 'text-destructive' : 'text-foreground')}
               />
               <div className="min-w-0 flex-1">
@@ -1641,13 +1671,13 @@ function BatteryPanel({
                   {summary.percent !== null ? `${summary.percent}%` : '—'}
                 </p>
                 <p className={cn('text-sm', critical ? 'text-destructive' : 'text-muted-foreground')}>
-                  {describeBattery(summary, data.acConnected, limit)}
+                  {describePower(summary, limit)}
                 </p>
               </div>
-              {data.acConnected && (
+              {summary.pluggedIn && (
                 <StatusPill>
                   <Plug className="size-3.5" aria-hidden />
-                  Plugged in
+                  {data.charger?.watts ? `${data.charger.watts} W charger` : 'Plugged in'}
                 </StatusPill>
               )}
             </div>
@@ -1655,7 +1685,7 @@ function BatteryPanel({
 
           <ul className={settingsGroup} aria-label="Batteries">
             {data.batteries.map((battery) => (
-              <BatteryDetailRow key={battery.name} battery={battery} />
+              <BatteryDetailRow key={battery.name} battery={battery} mark={mark} />
             ))}
           </ul>
 
@@ -1664,7 +1694,11 @@ function BatteryPanel({
               <h4 className="px-1 text-xs font-semibold text-muted-foreground">Devices</h4>
               <ul className={settingsGroup} aria-label="Devices">
                 {data.devices.map((battery) => (
-                  <BatteryDetailRow key={battery.name} battery={battery} />
+                  <BatteryDetailRow
+                    key={battery.name}
+                    battery={battery}
+                    mark={battery.status === 'charging' ? 'charging' : null}
+                  />
                 ))}
               </ul>
             </div>
@@ -1673,36 +1707,6 @@ function BatteryPanel({
       )}
     </>
   );
-}
-
-/** One-line description of the overall power state. */
-function describeBattery(
-  summary: NonNullable<ReturnType<typeof summarizePower>>,
-  acConnected: boolean,
-  limit?: ChargeLimitStatus,
-): string {
-  // Plugged in and resting near the limit: say why it isn't charging.
-  if (
-    limit?.enabled &&
-    acConnected &&
-    !summary.charging &&
-    summary.percent !== null &&
-    summary.percent >= (limit.start ?? chargeLimitPercent(limit)) - 1
-  ) {
-    return `Charge limited to ${chargeLimitPercent(limit)}% to protect the battery`;
-  }
-  if (summary.status === 'full' || summary.percent === 100) {
-    return acConnected ? 'Fully charged' : 'Full';
-  }
-  if (summary.charging) {
-    return summary.secondsRemaining !== null
-      ? `Charging · ${formatTimeRemaining(summary.secondsRemaining)} until full`
-      : 'Charging';
-  }
-  if (summary.secondsRemaining !== null) {
-    return `${formatTimeRemaining(summary.secondsRemaining)} remaining`;
-  }
-  return acConnected ? 'Plugged in, not charging' : 'On battery';
 }
 
 /** Per-battery status text for the detail rows. */
@@ -1725,8 +1729,8 @@ function batteryRowStatus(battery: BatteryInfo): string {
   }
 }
 
-function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
-  const charging = battery.status === 'charging';
+function BatteryDetailRow({ battery, mark }: { battery: BatteryInfo; mark: ChargeMark }) {
+  const charging = mark !== null;
   const critical = !charging && battery.percent !== null && battery.percent <= 15;
   const percent = battery.percent ?? 0;
 
@@ -1735,7 +1739,7 @@ function BatteryDetailRow({ battery }: { battery: BatteryInfo }) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden className={settingsTokenClass(charging)}>
-            <BatteryGlyph percent={battery.percent} charging={charging} />
+            <BatteryGlyph percent={battery.percent} mark={mark} />
           </span>
           <span className="truncate text-sm text-foreground">{battery.label}</span>
         </div>

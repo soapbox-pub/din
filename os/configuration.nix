@@ -324,6 +324,14 @@ let
     text = builtins.readFile ./din-keyboard.sh;
   };
 
+  # The privileged half of Settings → Battery's charge limit, which chooses
+  # where charging stops (see the script, and electron/main.mts).
+  din-charge-limit = pkgs.writeShellApplication {
+    name = "din-charge-limit";
+    runtimeInputs = with pkgs; [ coreutils systemd ];
+    text = builtins.readFile ./din-charge-limit.sh;
+  };
+
   # The privileged half of Settings → Date & Time, which sets the time zone
   # and the clock (see the script, and electron/datetime.mts).
   din-time = pkgs.writeShellApplication {
@@ -565,6 +573,7 @@ let
     export DIN_KEYBOARD=${din-keyboard}/bin/din-keyboard
     export DIN_BOOT_SCREEN=${din-boot-screen}/bin/din-boot-screen
     export DIN_TIME=${din-time}/bin/din-time
+    export DIN_CHARGE_LIMIT=${din-charge-limit}/bin/din-charge-limit
     export DIN_TOR=${din-tor}/bin/din-tor
     export DIN_WIFI=${din-wifi}/bin/din-wifi
     export DIN_HOTSPOT=${din-hotspot}/bin/din-hotspot
@@ -1048,6 +1057,9 @@ in
       "${din-keyboard}/bin/din-keyboard"
       "${din-boot-screen}/bin/din-boot-screen"
       "${din-time}/bin/din-time"
+      # Only where charging stops, which UPower lets the session switch on
+      # and off anyway.
+      "${din-charge-limit}/bin/din-charge-limit"
       "${din-tor}/bin/din-tor"
       "${din-wifi}/bin/din-wifi reset"
       "${din-hotspot}/bin/din-hotspot up"
@@ -1431,6 +1443,8 @@ in
     ACTION=="add", SUBSYSTEM=="leds", KERNEL=="*::micmute", RUN+="${pkgs.coreutils}/bin/chgrp video /sys/class/leds/%k/brightness"
     # Framework's LED Matrix modules (Framework Laptop 16): the user may drive them over USB serial, at /dev/din-led-matrix-<port>.
     ACTION=="add|change", SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0020", ENV{ID_PATH}=="?*", SYMLINK+="din-led-matrix-$env{ID_PATH}", RUN+="${pkgs.acl}/bin/setfacl -m u:din:rw $devnode"
+    # Where the battery's charge limit stops charging, chosen in Settings (os/din-charge-limit.sh), over its hwdb's: UPower reads CHARGE_LIMIT.
+    ACTION!="remove", SUBSYSTEM=="power_supply", ATTR{type}=="Battery", TEST=="/var/lib/din/charge-limit", IMPORT{file}="/var/lib/din/charge-limit"
   '';
 
   # Pairs the Apple accessory on /dev/%I over Bluetooth (os/din-apple-pair.py)

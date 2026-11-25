@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getPowerBridge, setChargeLimit } from '@/lib/power';
+import { getPowerBridge, setChargeLimit, setChargeLimitPercent } from '@/lib/power';
 import type { ChargeLimitStatus, PowerProfilesStatus, PowerStatus } from '@/lib/power';
 
 /**
@@ -64,6 +64,18 @@ export function useSetChargeLimit() {
   const queryClient = useQueryClient();
   return useMutation<ChargeLimitStatus, Error, boolean>({
     mutationFn: setChargeLimit,
+    onSuccess: (limit) => {
+      queryClient.setQueryData(['power', 'chargeLimit'], limit);
+      void queryClient.invalidateQueries({ queryKey: ['power', 'status'] });
+    },
+  });
+}
+
+/** Choose where the charge limit stops charging, priming the cache with the new state. */
+export function useSetChargeLimitPercent() {
+  const queryClient = useQueryClient();
+  return useMutation<ChargeLimitStatus, Error, number>({
+    mutationFn: setChargeLimitPercent,
     onSuccess: (limit) => {
       queryClient.setQueryData(['power', 'chargeLimit'], limit);
       void queryClient.invalidateQueries({ queryKey: ['power', 'status'] });

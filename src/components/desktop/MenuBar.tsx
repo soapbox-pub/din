@@ -76,7 +76,7 @@ import { useBatteryStatus } from '@/hooks/usePower';
 import { useAudioStatus } from '@/hooks/useAudio';
 import { useBrightnessStatus } from '@/hooks/useBrightness';
 import { getWifiBridge, isEthernetConnected } from '@/lib/wifi';
-import { getPowerBridge, summarizePower } from '@/lib/power';
+import { chargeMark, getPowerBridge, isBatteryCritical, summarizePower } from '@/lib/power';
 import { PowerDialog, type PowerAction } from '@/components/desktop/PowerDialog';
 import { getAudioBridge } from '@/lib/audio';
 import { getBrightnessBridge } from '@/lib/brightness';
@@ -808,7 +808,7 @@ export const VolumeMenuItem = memo(function VolumeMenuItem() {
 });
 
 /**
- * Battery status item: a macOS-style solid-fill glyph (bolt when charging);
+ * Battery status item: a macOS-style solid-fill glyph (a bolt while plugged in);
  * clicking opens a details popover. Renders nothing outside the Electron
  * shell or on machines with no battery (desktops, the VM), like the other
  * hardware indicators.
@@ -822,8 +822,17 @@ export const BatteryMenuItem = memo(function BatteryMenuItem() {
   const summary = summarizePower(status.data);
   if (!summary) return null;
 
-  const critical = !summary.charging && summary.percent !== null && summary.percent <= 15;
-  const label = `Battery ${summary.percent ?? '?'}%${summary.charging ? ', charging' : ''}`;
+  const critical = isBatteryCritical(summary);
+  const plug = summary.draining
+    ? ', plugged in, charger too weak'
+    : summary.slowCharging
+      ? ', plugged in, charging slowly'
+      : summary.charging
+        ? ', charging'
+        : summary.pluggedIn
+          ? ', plugged in'
+          : '';
+  const label = `Battery ${summary.percent ?? '?'}%${plug}`;
 
   return (
     <Popover>
@@ -841,7 +850,7 @@ export const BatteryMenuItem = memo(function BatteryMenuItem() {
           {/* size-* class opts out of the Button's [&_svg]:size-4 override. */}
           <BatteryGlyph
             percent={summary.percent}
-            charging={summary.charging}
+            mark={chargeMark(summary)}
             className="size-4 w-6.5"
           />
         </Button>

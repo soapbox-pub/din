@@ -12,7 +12,17 @@ import {
   type DisplayRotation,
 } from '@/lib/display';
 import { MAX_ZOOM, MIN_ZOOM, withDisplayZoom, zoomOf } from '@/lib/displayZoom';
-import { chargeLimitPercent, getPowerBridge, setChargeLimit, summarizePower, describePowerProfile } from '@/lib/power';
+import {
+  CHARGE_LIMIT_MAX,
+  CHARGE_LIMIT_MIN,
+  chargeLimitPercent,
+  describePower,
+  describePowerProfile,
+  getPowerBridge,
+  setChargeLimit,
+  setChargeLimitPercent,
+  summarizePower,
+} from '@/lib/power';
 import {
   LAYOUT_SWITCH_KEYS,
   MAX_KEYBOARD_LAYOUTS,
@@ -276,7 +286,8 @@ export const powerArea: Area = {
       return {
         data: { ...status, profiles, chargeLimit },
         text: [
-          status.available && summary ? `battery: ${summary.percent}%${status.acConnected ? ', plugged in' : ''}` : 'battery: none',
+          status.available && summary ? `battery: ${summary.percent}%, ${describePower(summary, chargeLimit).toLowerCase().replaceAll(' · ', ', ')}` : 'battery: none',
+          status.charger?.watts ? `charger: ${status.charger.watts} W${status.charger.slow ? ' (slow)' : ''}` : '',
           chargeLimit.available ? `charge limit: ${chargeLimit.enabled ? `on, ${chargeLimitPercent(chargeLimit)}%` : 'off'}` : '',
           ...status.devices.map((d) => `${d.label}: ${d.percent ?? '?'}%`),
           profiles.available ? `power mode: ${profiles.active} (of ${profiles.profiles.join(', ')})` : '',
@@ -293,9 +304,18 @@ export const powerArea: Area = {
       const next = await call(bridge.setProfile(wanted));
       return { text: describePowerProfile(next.active ?? wanted).label };
     }),
-    command('power', 'limit', 'Stop charging the battery at 80% to keep it healthy, or charge it full', [ON], async (args) => {
+    command('power', 'limit', 'Stop charging the battery short of full (80% unless chosen) to keep it healthy, or charge it full', [
+      ON,
+      {
+        name: 'percent', type: 'integer', optional: true,
+        help: `Where charging stops while it’s on, ${CHARGE_LIMIT_MIN} to ${CHARGE_LIMIT_MAX} (DinOS)`,
+      },
+    ], async (args) => {
       need(getPowerBridge(), 'The charge limit');
-      const next = await call(setChargeLimit(args.bool('on')));
+      const on = args.bool('on');
+      if (args.has('percent') && !on) throw new CommandError('--percent is where charging stops while the limit is on', 'usage');
+      let next = await call(setChargeLimit(on));
+      if (args.has('percent')) next = await call(setChargeLimitPercent(args.number('percent')));
       return { data: next, text: next.enabled ? `Charging stops at ${chargeLimitPercent(next)}%` : 'Charging to full' };
     }),
     command('power', 'restart', 'Restart the computer (asks on screen first)', [], async (_args, ctx) => {
