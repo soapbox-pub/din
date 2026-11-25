@@ -299,10 +299,10 @@ export interface PaneSession {
 /** How a session looks, besides Din's light or dark. */
 export interface PaneOptions {
   /**
-   * Clear cells always, over whatever the pane is painted (the Assistant's
-   * content pane), rather than only on glass.
+   * The palette's own background always, even on glass, for a terminal
+   * that isn't over the window's glass (the Assistant's, in its content pane).
    */
-  clear?: boolean;
+  solid?: boolean;
 }
 
 export const paneSessions = new Map<string, PaneSession>();
@@ -330,7 +330,7 @@ export function paneSession(
   let cwd = handover?.cwd ?? initialCwd;
   /** The command the pane's tab is named after. */
   let command: string | undefined = handover?.command ?? app?.name;
-  const theme = (dark: boolean) => terminalTheme(dark, currentSelection, options.clear || currentGlass);
+  const theme = (dark: boolean) => terminalTheme(dark, currentSelection, !options.solid && currentGlass);
 
   const term = new XTerm({
     cursorBlink: true,

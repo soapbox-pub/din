@@ -11,14 +11,14 @@ import {
 import { getPtyBridge } from '@/lib/pty';
 import { useDin, useWindowFocused } from '@/sdk/react';
 import { useAssistantHost } from '@/shared/assistant/host';
-import { paneNotifications, paneSession, useTerminalLook, type PaneHost, type PaneSession } from '@/shared/terminal/session';
+import { paneNotifications, paneSession, terminalTheme, useTerminalLook, type PaneHost, type PaneSession } from '@/shared/terminal/session';
 
 /**
  * The terminal under a conversation, across the bottom of the Assistant's
  * content pane: a shell in the conversation's folder, one for each tab.
  * Hiding it (Ctrl+`, the folder under the composer) leaves its shell
  * running, as switching tabs does; the shell ending, or Close Terminal,
- * puts it away for good. Its cells are clear, over the pane's own color.
+ * puts it away for good. It's the Terminal's own white or black, solid.
  */
 
 /** What marks a terminal's element, for the window's shortcuts to leave its keys to the shell. */
@@ -61,7 +61,9 @@ export function TerminalPanel({
   /** The content pane it's at the bottom of, for the most it may take. */
   container: React.RefObject<HTMLElement | null>;
 }) {
-  useTerminalLook();
+  const { dark, selection } = useTerminalLook();
+  // The Terminal's white or black, under its cells and around them.
+  const background = terminalTheme(dark, selection, false).background;
   const [height, setHeight] = useState(loadHeight);
   useEffect(() => (height === DEFAULT_HEIGHT ? localStorage.removeItem(HEIGHT_KEY) : localStorage.setItem(HEIGHT_KEY, String(height))), [height]);
   const clamp = (h: number) => Math.round(Math.max(MIN_HEIGHT, Math.min(h, (container.current?.clientHeight ?? 640) - KEEP_ABOVE)));
@@ -91,7 +93,7 @@ export function TerminalPanel({
   const shown = shownId !== null && terminals.some((t) => t.id === shownId);
   return (
     // Hidden ones stay mounted below it, out of sight, their shells running.
-    <div className="relative shrink-0" style={{ height: shown ? height : 0, maxHeight: `calc(100% - ${KEEP_ABOVE}px)` }}>
+    <div className="relative shrink-0" style={{ height: shown ? height : 0, maxHeight: `calc(100% - ${KEEP_ABOVE}px)`, backgroundColor: background }}>
       {shown && (
         <div
           role="separator"
@@ -167,7 +169,7 @@ const AssistantTerminal = memo(function AssistantTerminal({
   useEffect(() => {
     const container = containerRef.current;
     if (!bridge || !container) return;
-    const session = paneSession(din, bridge, paneId, directory.current, undefined, undefined, { clear: true });
+    const session = paneSession(din, bridge, paneId, directory.current, undefined, undefined, { solid: true });
     sessionRef.current = session;
     termRef.current = session.term;
     fitRef.current = session.fit;
@@ -210,7 +212,7 @@ const AssistantTerminal = memo(function AssistantTerminal({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div {...{ [TERMINAL_ATTRIBUTE]: '' }} className="h-full w-full">
-          {/* xterm.css paints its viewport black; clear, so the pane shows through. */}
+          {/* xterm.css paints its viewport black; clear, so the panel's white or black shows around the cells. */}
           <div ref={containerRef} className="h-full w-full pt-2 pl-4 [&_.xterm-viewport]:bg-transparent!" />
         </div>
       </ContextMenuTrigger>
