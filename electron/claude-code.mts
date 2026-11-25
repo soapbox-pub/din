@@ -273,6 +273,8 @@ export interface ClaudeUsageLimit {
   resetsAt: string | null;
   /** Anthropic's say on how close it is: "normal", "warning", "critical"… */
   severity: string | null;
+  /** Anthropic's headline pick (`is_active`): the one limit to show where there's room for one. */
+  active: boolean;
 }
 
 /** The Claude plan's usage, as Claude Code's /usage shows it. */
@@ -365,7 +367,7 @@ function parseLimits(reply: Json): ClaudeUsageLimit[] {
     return reply.limits.filter(isObject).flatMap((limit) => {
       const percent = num(limit.percent);
       if (percent === null) return [];
-      return [{ label: limitLabel(limit), percent, resetsAt: str(limit.resets_at), severity: str(limit.severity) }];
+      return [{ label: limitLabel(limit), percent, resetsAt: str(limit.resets_at), severity: str(limit.severity), active: limit.is_active === true }];
     });
   }
   const windows: [string, string][] = [
@@ -374,12 +376,13 @@ function parseLimits(reply: Json): ClaudeUsageLimit[] {
     ['seven_day_opus', 'This week, Opus'],
     ['seven_day_sonnet', 'This week, Sonnet'],
   ];
+  // These say nothing of a headline, so the first (the session's, else the week's) is it.
   return windows.flatMap(([key, label]) => {
     const window = reply[key];
     const percent = isObject(window) ? num(window.utilization) : null;
     if (!isObject(window) || percent === null) return [];
-    return [{ label, percent, resetsAt: str(window.resets_at), severity: null }];
-  });
+    return [{ label, percent, resetsAt: str(window.resets_at), severity: null, active: false }];
+  }).map((limit, index) => (index === 0 ? { ...limit, active: true } : limit));
 }
 
 /** An amount as `spend` has it: { amount_minor, currency, exponent }. */

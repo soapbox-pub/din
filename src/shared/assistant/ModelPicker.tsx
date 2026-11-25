@@ -179,7 +179,7 @@ export function ModelPicker({
               </CommandGroup>
             </CommandList>
           </Command>
-          {selected?.providerID === CLAUDE_PROVIDER && <ClaudeUsageBars className="border-t border-border/70 px-3 py-3" />}
+          {selected?.providerID === CLAUDE_PROVIDER && <ClaudeUsageBars headline className="border-t border-border/70 px-3 py-3" />}
         </PopoverContent>
       </Popover>
     </>

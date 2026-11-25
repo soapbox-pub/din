@@ -37,12 +37,24 @@ function LimitBar({ limit }: { limit: ClaudeUsageLimit }) {
 /**
  * The Claude plan's usage (claudeUsage.ts): a bar for each of its limits,
  * with when it resets, and any extra usage past them. Shown while Claude
- * is connected.
+ * is connected. `headline` shows only the limit Anthropic picks for a
+ * single meter (its `is_active`), for where there's little room.
  */
-export function ClaudeUsageBars({ className, refreshable = true }: { className?: string; refreshable?: boolean }) {
+export function ClaudeUsageBars({
+  className,
+  refreshable = true,
+  headline = false,
+}: {
+  className?: string;
+  refreshable?: boolean;
+  headline?: boolean;
+}) {
   const { data, error, isLoading, isFetching } = useClaudeUsage(true);
   const queryClient = useQueryClient();
   if (!getAssistantBridge()) return null;
+  const all = data?.limits ?? [];
+  const picked = all.filter((limit) => limit.active);
+  const limits = headline ? (picked.length > 0 ? picked : all.slice(0, 1)) : all;
 
   const refresh = async () => {
     const bridge = getAssistantBridge();
@@ -75,12 +87,12 @@ export function ClaudeUsageBars({ className, refreshable = true }: { className?:
         </div>
       ) : error && !data ? (
         <p className="text-xs text-muted-foreground">{cleanAssistantError(error)}</p>
-      ) : data && data.limits.length === 0 ? (
+      ) : data && limits.length === 0 ? (
         <p className="text-xs text-muted-foreground">Anthropic reports no limits for this plan.</p>
       ) : (
         data && (
           <>
-            {data.limits.map((limit) => (
+            {limits.map((limit) => (
               <LimitBar key={limit.label} limit={limit} />
             ))}
             {data.extra && (

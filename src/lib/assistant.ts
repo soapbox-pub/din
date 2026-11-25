@@ -57,6 +57,8 @@ export interface ClaudeUsageLimit {
   resetsAt: string | null;
   /** Anthropic's say on how close it is: "normal", "warning", "critical"… */
   severity: string | null;
+  /** Anthropic's headline pick: the one limit to show where there's room for one. */
+  active: boolean;
 }
 
 /** The Claude plan's usage, as Claude Code's /usage shows it. */
