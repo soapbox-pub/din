@@ -103,7 +103,7 @@ import { saveWindowState, wasRestored, windowStateOf } from '@/lib/windowSession
 import { appLaunchParams } from '@/lib/appLaunchPolicy';
 import type { AssistantSettings, DinManifest, FrameStyle, MenuItem, Menu, Permission, Rect, WindowChrome } from '@/sdk/din';
 import type { FromApp, HandleData, Hello, LaunchData, MediaReport, SpeechErrorCode, Method, Push, Requests, WindowState } from '@/sdk/protocol';
-import type { WindowState as DesktopWindow } from '@/hooks/useWindows';
+import { windowRect, type WindowState as DesktopWindow } from '@/hooks/useWindows';
 
 /** How long an app may take to answer a close request before it's offered for force quitting. */
 const CLOSE_ANSWER_MS = 5000;
@@ -268,7 +268,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
   // ---- what the app sees of its window ----
   const win = frame?.win;
   const windowState = useCallback((w: DesktopWindow | undefined): WindowState => {
-    const bounds: Rect = w ? { x: w.x, y: w.y, width: w.width, height: w.height } : { x: 0, y: 0, width: 0, height: 0 };
+    const bounds: Rect = w && areas.length ? windowRect(w, areas) : { x: 0, y: 0, width: w?.width ?? 0, height: w?.height ?? 0 };
     const area = areas.length > 0 ? areaFor(areas, bounds) : null;
     return {
       id: windowId,
