@@ -2221,7 +2221,7 @@ const vms = {};
 for (const method of [
   'status', 'list', 'create', 'install', 'retryInstall', 'cancelInstall', 'update', 'remove', 'start', 'shutdown',
   'forceStop', 'pause', 'resume', 'reset', 'setCdrom', 'resizeDisk', 'snapshots', 'takeSnapshot', 'restoreSnapshot',
-  'deleteSnapshot',
+  'deleteSnapshot', 'screenshot', 'pressKeys', 'typeText', 'pointer', 'ssh',
 ]) {
   vms[method] = (...args) => ipcRenderer.invoke(`vms:${method}`, ...args);
 }

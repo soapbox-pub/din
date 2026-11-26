@@ -9,12 +9,16 @@
 // they run: `din apps run` (an app from a folder or a dev server, its
 // console printed here) and `din widgets add-folder`.
 //
+// And `din vms ssh`, whose command line the desktop gives and which runs
+// ssh here, on this terminal.
+//
 // Run by Electron's own binary as Node (ELECTRON_RUN_AS_NODE=1, see
 // os/configuration.nix), so it needs nothing else installed; in
 // development, `node electron/din-cli.mts`. Node's builtins only.
 //
 // Exit codes: 0 done, 1 failed, 2 used wrongly.
 
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -192,6 +196,32 @@ async function widgetsAddFolder(argv: string[]): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// din vms ssh
+// ---------------------------------------------------------------------------
+
+/** The desktop's `vms ssh` says how to sign in (its data's argv), and ssh runs here with this terminal. */
+async function vmsSsh(argv: string[]): Promise<number> {
+  let data: unknown = null;
+  const code = await request({ command: argv, cwd: process.cwd(), session: process.env.OPENCODE_SESSION_ID }, (message) => {
+    if (message.type !== 'answer') return;
+    if (message.ok !== true) {
+      process.stderr.write(`din: ${String(message.error ?? 'failed')}\n`);
+      return message.usage === true ? 2 : 1;
+    }
+    data = message.data;
+    return 0;
+  });
+  if (code !== 0) return code;
+  const command = (data as { argv?: unknown } | null)?.argv;
+  if (!Array.isArray(command) || command[0] !== 'ssh' || !command.every((a) => typeof a === 'string')) return fail('Din didn’t say how to sign in');
+  return new Promise((resolve) => {
+    const child = spawn('ssh', command.slice(1) as string[], { stdio: 'inherit' });
+    child.once('error', (error) => fail(`can’t run ssh: ${error.message}`));
+    child.once('exit', (status, signal) => resolve(status ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Everything else: the desktop's
 // ---------------------------------------------------------------------------
 
@@ -251,6 +281,8 @@ async function main(): Promise<number> {
 
   if (argv[0] === 'apps' && argv[1] === 'run') return appsRun(argv.slice(2), color);
   if (argv[0] === 'widgets' && argv[1] === 'add-folder') return widgetsAddFolder(argv.slice(2));
+  const helpAsked = argv.slice(0, end).some((a) => a === '--help' || a === '-h');
+  if (argv[0] === 'vms' && argv[1] === 'ssh' && !json && !helpAsked) return vmsSsh(argv);
 
   // The Assistant's conversation, if it ran this, for sudo to ask there.
   const progress = progressLine();

@@ -41,10 +41,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { ipcMain } from 'electron';
+import { ipcMain, nativeImage } from 'electron';
 import { trash } from './files.mts';
 import { canInstall } from './system-packages.mts';
 import {
+  account,
   download,
   forgetPartial,
   installer,
@@ -71,6 +72,9 @@ import {
 } from './vm-installers.mts';
 import type {
   NewVm,
+  VmPointerAction,
+  VmScreenshot,
+  VmSsh,
   VmConfig,
   VmInfo,
   VmInstall,
@@ -294,6 +298,11 @@ interface StoredConfig extends VmConfig {
   install?: StoredInstall;
   /** macOS: the TSC's rate it was first started with, which QEMU needs to save it running (it tells macOS the TSC is invariant). */
   tscHz?: number;
+  /**
+   * The account Din signs in to over SSH with the machine's own key (sshKeyPath), set
+   * up by Din's installer: Remote Login on, the key in its authorized_keys.
+   */
+  ssh?: { user: string };
 }
 
 const dirOf = (id: string) => path.join(VMS_DIR, id);
@@ -323,6 +332,10 @@ const openCoreDir = (id: string) => path.join(dirOf(id), 'opencore');
 /** macOS's boot loader for starting Din's recovery image again, to finish setting it up. */
 const recoveryOpenCoreDir = (id: string) => path.join(installDir(id), 'opencore');
 const runDir = (config: StoredConfig) => path.join(RUN_ROOT, config.uuid);
+/** The machine's SSH key, which only Din (and `din vms ssh`) uses; its .pub is in the guest. */
+const sshDir = (id: string) => path.join(dirOf(id), 'ssh');
+const sshKeyPath = (id: string) => path.join(sshDir(id), 'id_ed25519');
+const SSH_USER = /^[a-z_][a-z0-9_-]{0,31}$/;
 
 function requireId(id: unknown): string {
   if (typeof id !== 'string' || !VM_NAME.test(id) || !fs.existsSync(configPath(id))) throw new Error('No such virtual machine.');
@@ -336,6 +349,7 @@ async function readConfig(id: string): Promise<StoredConfig> {
   config.uuid = typeof raw.uuid === 'string' && /^[0-9a-f-]{36}$/.test(raw.uuid) ? raw.uuid : randomUUID();
   config.created = typeof raw.created === 'number' ? raw.created : Date.now();
   if (typeof raw.tscHz === 'number' && Number.isInteger(raw.tscHz) && raw.tscHz > 0) config.tscHz = raw.tscHz;
+  if (typeof raw.ssh?.user === 'string' && SSH_USER.test(raw.ssh.user)) config.ssh = { user: raw.ssh.user };
   const install = cleanInstall(raw.install);
   if (install) config.install = install;
   if (config.uuid !== raw.uuid) await writeConfig(id, config);
@@ -1202,11 +1216,12 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       m.stopTpm = tpm.stop;
       await waitForSocket(path.join(rundir, 'swtpm.sock'), Date.now() + 5000);
     }
+    const launched = await withSshForward(id, config, rundir);
     qemuProcess =
       graphics === 'gpu' && t.reims
         ? // Its display's window is Din's console, over VNC: none of the library's own.
-          await launch(unit, [t.reims.qemu, ...qemuArgs(id, config, rundir, loadvm, t.reims.rom)], logPath(id), { REIMS_VGPU_WINDOW: '0' })
-        : await launch(unit, [qemu, ...qemuArgs(id, config, rundir, loadvm, null)], logPath(id));
+          await launch(unit, [t.reims.qemu, ...qemuArgs(id, launched, rundir, loadvm, t.reims.rom)], logPath(id), { REIMS_VGPU_WINDOW: '0' })
+        : await launch(unit, [qemu, ...qemuArgs(id, launched, rundir, loadvm, null)], logPath(id));
     const qmp = await Qmp.connect(path.join(rundir, 'qmp.sock'), Date.now() + START_TIMEOUT_MS, qemuProcess.alive);
     if (!qmp) throw new Error((await logTail(id)) || 'It didn’t start.');
     try {
@@ -1225,6 +1240,84 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
     }
     throw error instanceof Error ? error : new Error(String(error));
   }
+}
+
+// ---------------------------------------------------------------------------
+// SSH
+// ---------------------------------------------------------------------------
+
+/** The user's own forward to the machine's port 22, if it has one. */
+const userSshForward = (config: VmConfig) => config.forwards.find((f) => f.protocol === 'tcp' && f.guest === 22) ?? null;
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * The machine's config as QEMU starts it: with a forward from a free port on
+ * 127.0.0.1 to its port 22, kept in its run directory for sshInfo, where Din
+ * can sign in to it (its installer set that up) and the user hasn't
+ * forwarded one there. Not in its settings: the port's picked anew each start.
+ */
+async function withSshForward(id: string, config: StoredConfig, rundir: string): Promise<StoredConfig> {
+  if (!config.ssh || !config.network || userSshForward(config) || !fs.existsSync(sshKeyPath(id))) return config;
+  const port = await freePort();
+  await fsp.writeFile(path.join(rundir, 'ssh.port'), String(port));
+  return { ...config, forwards: [...config.forwards, { protocol: 'tcp', host: port, guest: 22 }] };
+}
+
+/**
+ * The machine's SSH key, made if it hasn't one: its public half, for the
+ * installer to put in the guest, or null where there's no ssh-keygen.
+ */
+async function ensureSshKey(id: string): Promise<string | null> {
+  const key = sshKeyPath(id);
+  if (!fs.existsSync(key)) {
+    const keygen = which('ssh-keygen');
+    if (!keygen) {
+      console.warn(`vms: ${id} gets no SSH key: ssh-keygen isn't installed`);
+      return null;
+    }
+    await fsp.mkdir(sshDir(id), { recursive: true, mode: 0o700 });
+    await fsp.rm(`${key}.pub`, { force: true });
+    await run(keygen, ['-q', '-t', 'ed25519', '-N', '', '-C', 'din', '-f', key]);
+  }
+  const pub = (await fsp.readFile(`${key}.pub`, 'utf8')).trim();
+  if (!/^ssh-ed25519 [A-Za-z0-9+/=]+( [\w@.-]*)?$/.test(pub)) throw new Error('The machine’s SSH key isn’t one Din made.');
+  return pub;
+}
+
+/** How to sign in to a running machine over SSH, as `din vms ssh` does. */
+async function sshInfo(id: string): Promise<VmSsh> {
+  const config = await readConfig(id);
+  const key = sshKeyPath(id);
+  if (!config.ssh || !fs.existsSync(key)) {
+    throw new Error(`Din didn’t set “${id}” up for SSH. Machines Din installs macOS, Ubuntu or Fedora on are; for another, put a key Din can use at ${key} and add "ssh": { "user": "…" } to its vm.json.`);
+  }
+  const m = machines.get(id);
+  if (!m || m.state === 'stopped' || m.state === 'starting') throw new Error('It isn’t running: start it first.');
+  const own = userSshForward(m.config);
+  let port = own?.host ?? 0;
+  if (!own) port = Number.parseInt(await fsp.readFile(path.join(m.rundir, 'ssh.port'), 'utf8').catch(() => ''), 10) || 0;
+  if (!port) throw new Error('It was started before it had a way in over SSH: restart it.');
+  const knownHosts = path.join(sshDir(id), 'known_hosts');
+  const argv = [
+    'ssh', '-i', key, '-p', String(port),
+    '-o', 'IdentitiesOnly=yes',
+    // One host key for the machine, whichever port it's on this time, taken the first time it's seen.
+    '-o', `HostKeyAlias=din-vm-${config.uuid}`, '-o', `UserKnownHostsFile=${knownHosts}`, '-o', 'StrictHostKeyChecking=accept-new',
+    // Din's key or nothing: never a password prompt for a script to hang on.
+    '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
+    `${config.ssh.user}@127.0.0.1`,
+  ];
+  return { host: '127.0.0.1', port, user: config.ssh.user, key, knownHosts, argv };
 }
 
 async function shutdown(id: string): Promise<void> {
@@ -1359,13 +1452,23 @@ async function runInstall(id: string): Promise<void> {
     live.phase = 'verifying';
     changed();
     let boot: InstallBoot;
+    // A way in over SSH with a key only Din has, for `din vms ssh`: not on
+    // Windows, whose OpenSSH server is a download of its own.
+    const sshKey = stored.installer === 'windows' ? null : await ensureSshKey(id).catch((error) => {
+      console.warn(`vms: ${id} gets no SSH key`, error);
+      return null;
+    });
     if (stored.installer === 'macos') {
       await prepareOpenCore(openCoreDir(id), config.uuid, live.abort.signal);
-      boot = await prepareMacos(iso, installDir(id));
+      boot = await prepareMacos(iso, installDir(id), sshKey);
     } else if (stored.installer === 'windows') {
       boot = await prepareWindows(iso, installDir(id));
     } else {
-      boot = await prepareLinux(stored.installer, iso, installDir(id));
+      boot = await prepareLinux(stored.installer, iso, installDir(id), sshKey);
+    }
+    if (sshKey) {
+      const latest = await readConfig(id);
+      await writeConfig(id, { ...latest, ssh: { user: account().username } });
     }
     if (live.abort.signal.aborted) return;
     config = await readConfig(id);
@@ -1671,14 +1774,171 @@ async function sendKeys(m: Machine, keys: string[]): Promise<void> {
   await m.qmp?.execute('send-key', { keys: keys.map((data) => ({ type: 'qcode', data })) }).catch(() => {});
 }
 
-const QCODES: Record<string, string> = { ' ': 'spc', '\n': 'ret', '/': 'slash', '.': 'dot', '-': 'minus' };
+/** The keys a character is on a US keyboard (QEMU's qcodes), or null for one it hasn't. */
+function charKeys(char: string): string[] | null {
+  if (/^[a-z0-9]$/.test(char)) return [char];
+  if (/^[A-Z]$/.test(char)) return ['shift', char.toLowerCase()];
+  if (US_KEYS[char]) return [US_KEYS[char]];
+  if (US_SHIFTED[char]) return ['shift', US_SHIFTED[char]];
+  return null;
+}
+const US_KEYS: Record<string, string> = {
+  ' ': 'spc', '\n': 'ret', '\t': 'tab', '-': 'minus', '=': 'equal', '[': 'bracket_left', ']': 'bracket_right', '\\': 'backslash',
+  ';': 'semicolon', "'": 'apostrophe', '`': 'grave_accent', ',': 'comma', '.': 'dot', '/': 'slash',
+};
+const US_SHIFTED: Record<string, string> = {
+  '!': '1', '@': '2', '#': '3', $: '4', '%': '5', '^': '6', '&': '7', '*': '8', '(': '9', ')': '0',
+  _: 'minus', '+': 'equal', '{': 'bracket_left', '}': 'bracket_right', '|': 'backslash', ':': 'semicolon', '"': 'apostrophe',
+  '~': 'grave_accent', '<': 'comma', '>': 'dot', '?': 'slash',
+};
 
 /** Type plain ASCII on a US keyboard, as macOS starts with. */
-async function typeText(m: Machine, text: string): Promise<void> {
+async function typeText(m: Machine, text: string, holdMs?: number): Promise<void> {
   for (const char of text) {
-    const lower = char.toLowerCase();
-    await sendKeys(m, [...(char !== lower ? ['shift'] : []), QCODES[lower] ?? lower]);
-    await new Promise((r) => setTimeout(r, 40));
+    const keys = charKeys(char);
+    if (!keys) continue;
+    if (holdMs === undefined) await sendKeys(m, keys);
+    else await m.qmp?.execute('send-key', { keys: keys.map((data) => ({ type: 'qcode', data })), 'hold-time': holdMs }).catch(() => {});
+    await new Promise((r) => setTimeout(r, holdMs === undefined ? 40 : holdMs + 15));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seeing and driving a machine (`din vms shot|key|type|click|…`): its screen
+// and its keyboard and tablet, through QMP, as a person at its window has
+// them. Points are the screenshot's pixels.
+// ---------------------------------------------------------------------------
+
+/** A running machine, as the screen and input need it. */
+function onScreen(id: string): Machine {
+  const m = machine(id);
+  if (m.state !== 'running' && m.state !== 'paused') throw new Error('It isn’t running: start it first.');
+  return m;
+}
+
+async function screenNow(m: Machine): Promise<Screen> {
+  const screen = await screenshot(m, path.join(m.rundir, `screen-${randomUUID()}.ppm`));
+  if (!screen || screen.width === 0) throw new Error('Its screen couldn’t be read.');
+  return screen;
+}
+
+/** Its screen as a PNG in `file` (default: one for the machine in the temporary folder). */
+async function screenshotPng(id: string, file: unknown): Promise<VmScreenshot> {
+  const m = onScreen(id);
+  const screen = await screenNow(m);
+  const { width, height, pixels } = screen;
+  const bgra = Buffer.alloc(width * height * 4);
+  for (let i = 0, o = 0; o < bgra.length; i += 3, o += 4) {
+    bgra[o] = pixels[i + 2];
+    bgra[o + 1] = pixels[i + 1];
+    bgra[o + 2] = pixels[i];
+    bgra[o + 3] = 255;
+  }
+  const out = typeof file === 'string' && path.isAbsolute(file) ? file : path.join(os.tmpdir(), `din-vm-${m.config.uuid}.png`);
+  await fsp.writeFile(out, nativeImage.createFromBitmap(bgra, { width, height }).toPNG());
+  return { path: out, width, height };
+}
+
+const KEY_NAMES: Record<string, string> = {
+  cmd: 'meta_l', command: 'meta_l', super: 'meta_l', win: 'meta_l', windows: 'meta_l', meta: 'meta_l',
+  ctrl: 'ctrl', control: 'ctrl', alt: 'alt', option: 'alt', opt: 'alt', shift: 'shift',
+  return: 'ret', enter: 'ret', esc: 'esc', escape: 'esc', tab: 'tab', space: 'spc', backspace: 'backspace',
+  delete: 'delete', del: 'delete', up: 'up', down: 'down', left: 'left', right: 'right', home: 'home', end: 'end',
+  pageup: 'pgup', pagedown: 'pgdn', insert: 'insert', capslock: 'caps_lock', menu: 'menu', plus: 'equal',
+};
+
+/** A combination ("cmd+shift+g", "return", "f5") as the qcodes held down together. */
+function comboKeys(combo: string): string[] {
+  const keys: string[] = [];
+  for (const part of combo.split('+')) {
+    const name = part.toLowerCase();
+    const named = KEY_NAMES[name] ?? (/^f([1-9]|1[0-2])$/.test(name) ? name : null);
+    const these = named ? [named] : part.length === 1 ? charKeys(part) : null;
+    if (!these) throw new Error(`Din doesn’t know the key “${part}”.`);
+    for (const key of these) if (!keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/** Press each combination in turn. */
+async function pressKeys(id: string, combos: unknown): Promise<void> {
+  const m = onScreen(id);
+  if (!Array.isArray(combos) || combos.length === 0 || !combos.every((c) => typeof c === 'string' && c)) throw new Error('Say which keys to press.');
+  const keys = combos.map((combo: string) => comboKeys(combo));
+  for (const combo of keys) {
+    await m.qmp!.execute('send-key', { keys: combo.map((data) => ({ type: 'qcode', data })), 'hold-time': 60 });
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
+/** Type text on its US keyboard. */
+async function typeInto(id: string, text: unknown): Promise<void> {
+  const m = onScreen(id);
+  if (typeof text !== 'string' || !text) throw new Error('Say what to type.');
+  const missing = [...new Set([...text].filter((c) => !charKeys(c)))];
+  if (missing.length) throw new Error(`There’s no key for ${missing.map((c) => `“${c}”`).join(' ')} on a US keyboard: type ASCII alone, or paste the rest over SSH.`);
+  await typeText(m, text, 25);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Move, click, drag or scroll with its tablet. */
+async function pointer(id: string, input: unknown): Promise<void> {
+  const m = onScreen(id);
+  const a = (input ?? {}) as Partial<VmPointerAction>;
+  const screen = await screenNow(m);
+  const coord = (value: unknown, size: number) => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= size) {
+      throw new Error(`Points are on its ${screen.width}×${screen.height} screen, as its screenshot has it.`);
+    }
+    return Math.round((value * 0x7fff) / Math.max(1, size - 1));
+  };
+  const send = (events: unknown[]) => m.qmp!.execute('input-send-event', { events });
+  const to = (x: unknown, y: unknown) =>
+    send([
+      { type: 'abs', data: { axis: 'x', value: coord(x, screen.width) } },
+      { type: 'abs', data: { axis: 'y', value: coord(y, screen.height) } },
+    ]);
+  const button = (name: string, down: boolean) => send([{ type: 'btn', data: { button: name, down } }]);
+  const which = a.button === 'right' || a.button === 'middle' ? a.button : 'left';
+
+  if (a.kind === 'move') {
+    await to(a.x, a.y);
+  } else if (a.kind === 'click') {
+    const count = Number.isInteger(a.count) && a.count! > 0 && a.count! <= 3 ? a.count! : 1;
+    await to(a.x, a.y);
+    await sleep(60);
+    for (let i = 0; i < count; i++) {
+      await button(which, true);
+      await sleep(50);
+      await button(which, false);
+      await sleep(80);
+    }
+  } else if (a.kind === 'drag') {
+    const [x0, y0] = [coord(a.x, screen.width), coord(a.y, screen.height)];
+    const [x1, y1] = [coord(a.toX, screen.width), coord(a.toY, screen.height)];
+    const at = (x: number, y: number) => send([{ type: 'abs', data: { axis: 'x', value: x } }, { type: 'abs', data: { axis: 'y', value: y } }]);
+    await at(x0, y0);
+    await sleep(100);
+    await button(which, true);
+    await sleep(150);
+    for (let i = 1; i <= 20; i++) {
+      await at(Math.round(x0 + ((x1 - x0) * i) / 20), Math.round(y0 + ((y1 - y0) * i) / 20));
+      await sleep(20);
+    }
+    await sleep(150);
+    await button(which, false);
+  } else if (a.kind === 'scroll') {
+    const amount = typeof a.amount === 'number' && Number.isInteger(a.amount) ? Math.max(-100, Math.min(100, a.amount)) : 0;
+    if (!amount) throw new Error('Say how far to scroll.');
+    await to(a.x, a.y);
+    for (let i = 0; i < Math.abs(amount); i++) {
+      await button(amount > 0 ? 'wheel-down' : 'wheel-up', true);
+      await button(amount > 0 ? 'wheel-down' : 'wheel-up', false);
+      await sleep(30);
+    }
+  } else {
+    throw new Error('Say whether to move, click, drag or scroll.');
   }
 }
 
@@ -1903,6 +2163,12 @@ export function registerVmsHandlers(options: Deps): void {
   handleVm('vms:takeSnapshot', (id, name) => takeSnapshot(id, name));
   handleVm('vms:restoreSnapshot', (id, name) => restoreSnapshot(id, name));
   handleVm('vms:deleteSnapshot', (id, name) => deleteSnapshot(id, name));
+  // For `din vms`, the desktop's alone: not in the app's bridge (din-apps.mts).
+  handleVm('vms:screenshot', (id, file) => screenshotPng(id, file));
+  handleVm('vms:pressKeys', (id, combos) => pressKeys(id, combos));
+  handleVm('vms:typeText', (id, text) => typeInto(id, text));
+  handleVm('vms:pointer', (id, input) => pointer(id, input));
+  handleVm('vms:ssh', (id) => sshInfo(id));
 
   ipcMain.handle('vms:openDisplay', async (event, id: unknown) => {
     assertShellSender(event);

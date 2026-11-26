@@ -1872,7 +1872,8 @@ in
   '';
   # Its skills for every session on the computer, from OpenCode's system
   # directory: making apps and widgets, editing Studio's recordings,
-  # publishing a site as an nsite with ngit, and changing DinOS. They point at
+  # publishing a site as an nsite with ngit, changing DinOS, and making and
+  # driving virtual machines. They point at
   # Din's docs and API types, which come along in /etc/din.
   environment.etc."opencode/skills".source = ./opencode/skills;
   # And Din's plugin (opencode/plugins/din): `preview`, which shows a page or a file
@@ -1885,6 +1886,15 @@ in
   # provider, which finds Din's Ollama server by itself, told how much
   # context that server gives each model.
   environment.etc."opencode/plugins".source = ./opencode/plugins;
+  # And what every session is told about this computer (opencode/dinos.md):
+  # the `din` command, and the `vms` skill for another OS. OpenCode reads no
+  # AGENTS.md from its system directory, but its system config's
+  # `instructions` add to the user's own config's, after their AGENTS.md.
+  environment.etc."opencode/dinos.md".source = ./opencode/dinos.md;
+  environment.etc."opencode/opencode.json".text = builtins.toJSON {
+    "$schema" = "https://opencode.ai/config.json";
+    instructions = [ "/etc/opencode/dinos.md" ];
+  };
   environment.etc."din/docs".source = din-root + "/docs";
   # The optional features Settings offers (above, and electron/features.mts).
   environment.etc."dinos/features.json".source = featuresManifest;

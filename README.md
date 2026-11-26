@@ -835,6 +835,17 @@ running spice-vdagent; sound goes through PipeWire. Snapshots are qcow2's
 own: taken while running, they keep memory too and come back running, but
 not a Mac on the GPU, whose device QEMU can't save running.
 
+What a person does at a machine's window, `din vms` does through QEMU's
+monitor, so the Assistant and scripts can too: its screen as a PNG
+(`screendump`), its keys and its tablet (`send-key`, `input-send-event`), in
+the screenshot's pixels (`docs/din-command.md`). Installing macOS, Ubuntu or
+Fedora also gives the machine an SSH key of its own (`~/VMs/<name>/ssh/`,
+made with `ssh-keygen`), its public half in the account's `authorized_keys`,
+and its SSH server on (on a Mac, Remote Login, in launchd's overrides, from
+the finishing script in Recovery). Each start forwards a free port on
+127.0.0.1 to its 22, unless the user forwards one there themselves, and
+`din vms ssh` signs in with the key.
+
 DinOS passes QEMU, swtpm and OVMF to Din as `DIN_QEMU`, `DIN_QEMU_IMG`,
 `DIN_SWTPM` and `DIN_OVMF`, and reims-vgpu's QEMU as `DIN_QEMU_REIMS`, which are there once the Virtual machines
 optional feature is installed (below); elsewhere Din looks on PATH and in the usual

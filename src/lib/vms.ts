@@ -189,8 +189,57 @@ export interface VmsBridge {
   onChanged(callback: (vms: VmInfo[]) => void): () => void;
 }
 
-/** What the desktop has of it (`window.dinos.vms`), for the `din vms` commands: all but the screens. */
-export type VmsDesktopBridge = Omit<VmsBridge, 'openDisplay' | 'displayWrite' | 'closeDisplay' | 'onDisplayData' | 'onDisplayClosed'>;
+/** A screenshot of a machine, saved as a PNG. */
+export interface VmScreenshot {
+  path: string;
+  /** Its size, in the pixels pointer actions take. */
+  width: number;
+  height: number;
+}
+
+/** Something done with a machine's pointer (its USB tablet), at a point of its screenshot. */
+export interface VmPointerAction {
+  kind: 'move' | 'click' | 'drag' | 'scroll';
+  x: number;
+  y: number;
+  /** click and drag: left unless said. */
+  button?: 'left' | 'right' | 'middle';
+  /** click: 2 for a double click. */
+  count?: number;
+  /** drag: where to let go. */
+  toX?: number;
+  toY?: number;
+  /** scroll: notches of the wheel, down when positive, up when negative. */
+  amount?: number;
+}
+
+/** How to sign in to a running machine over SSH: with its own key, to a port on 127.0.0.1 forwarded to its 22. */
+export interface VmSsh {
+  host: string;
+  port: number;
+  user: string;
+  /** The machine's private key, which only Din made and holds. */
+  key: string;
+  knownHosts: string;
+  /** The whole `ssh` command line, without a command to run there. */
+  argv: string[];
+}
+
+/**
+ * What the desktop has of it (`window.dinos.vms`), for the `din vms` commands: all but the
+ * screens, and seeing and driving a machine as a person at its window would (`din vms shot`, `key`, …).
+ */
+export type VmsDesktopBridge = Omit<VmsBridge, 'openDisplay' | 'displayWrite' | 'closeDisplay' | 'onDisplayData' | 'onDisplayClosed'> & {
+  /** Its screen now, as a PNG in `file` (default: one for the machine in the temporary folder). */
+  screenshot(id: string, file?: string): Promise<VmScreenshot>;
+  /** Press key combinations in turn ("cmd+space", "return"). */
+  pressKeys(id: string, combos: string[]): Promise<void>;
+  /** Type ASCII text on its US keyboard. */
+  typeText(id: string, text: string): Promise<void>;
+  pointer(id: string, action: VmPointerAction): Promise<void>;
+  /** How to sign in to it over SSH, where Din set that up. */
+  ssh(id: string): Promise<VmSsh>;
+};
 
 declare global {
   interface Dinos {

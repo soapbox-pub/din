@@ -722,7 +722,7 @@ export interface InstallBoot {
 // again so the account has none (the system logs in by itself).
 const THROWAWAY_HASH = '$6$l5AbEpqWSTP4vD.R$MY6amhOJ1FS1V50TEKoekDxAH3wF5RyhozQiJd1LFlLDZg9PBGgvsmGIcd12ox5OG8GbxU6hN4mihOufh4mUD/';
 
-function ubuntuUserData(): string {
+function ubuntuUserData(sshKey: string | null): string {
   const { username, fullName } = account();
   const { lang, timezone } = locale();
   // Quoted (JSON's strings are YAML's), so nothing in them reads as YAML.
@@ -755,13 +755,19 @@ autoinstall:
     install: false
   packages:
     - spice-vdagent
-  late-commands:
+${sshKey ? `  # Din's way in (din vms ssh), with its key alone.
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - ${JSON.stringify(sshKey)}
+` : ''}  late-commands:
 ${lateCommands.map((c) => `    - ${JSON.stringify(c)}`).join('\n')}
   shutdown: poweroff
 `;
 }
 
-function fedoraKickstart(release: number): string {
+function fedoraKickstart(release: number, sshKey: string | null): string {
   const { username, fullName } = account();
   const { lang, timezone } = locale();
   return `# Din's hands-free install of Fedora Workstation.
@@ -779,11 +785,15 @@ bootloader
 rootpw --lock
 user --name=${username} --gecos="${fullName.replace(/"/g, '')}" --groups=wheel --iscrypted --password=${THROWAWAY_HASH}
 firstboot --disable
-poweroff
+${sshKey ? `# Din's way in (din vms ssh), with its key alone.
+services --enabled=sshd
+sshkey --username=${username} "${sshKey}"
+` : ''}poweroff
 
 %packages
 @^workstation-product-environment
 spice-vdagent
+openssh-server
 %end
 
 %post
@@ -812,7 +822,7 @@ const labelArg = (label: string) => label.replace(/ /g, '\\x20');
  * Get a Linux installer ready to run by itself: its kernel and initrd out of
  * the disc image into `dir`, and its answer file in `dir`/seed.
  */
-export async function prepareLinux(installerId: VmInstallerId, iso: string, dir: string): Promise<InstallBoot> {
+export async function prepareLinux(installerId: VmInstallerId, iso: string, dir: string, sshKey: string | null = null): Promise<InstallBoot> {
   const disc = await openIso(iso);
   try {
     const paths =
@@ -827,7 +837,7 @@ export async function prepareLinux(installerId: VmInstallerId, iso: string, dir:
     await fsp.writeFile(path.join(dir, 'vmlinuz'), kernel);
     await fsp.writeFile(path.join(dir, 'initrd'), initrd);
     if (installerId === 'ubuntu') {
-      await fsp.writeFile(path.join(seedDir, 'user-data'), ubuntuUserData());
+      await fsp.writeFile(path.join(seedDir, 'user-data'), ubuntuUserData(sshKey));
       await fsp.writeFile(path.join(seedDir, 'meta-data'), '');
       return {
         kernel: path.join(dir, 'vmlinuz'),
@@ -839,7 +849,7 @@ export async function prepareLinux(installerId: VmInstallerId, iso: string, dir:
     }
     const release = Number(/(\d+)/.exec(disc.label.replace(/x86_64/, ''))?.[1]) || Number(/-(\d+)-/.exec(path.basename(iso))?.[1]);
     if (!release) throw new Error('Din couldn’t tell which Fedora that disc image is.');
-    await fsp.writeFile(path.join(seedDir, 'ks.cfg'), fedoraKickstart(release));
+    await fsp.writeFile(path.join(seedDir, 'ks.cfg'), fedoraKickstart(release, sshKey));
     return {
       kernel: path.join(dir, 'vmlinuz'),
       initrd: path.join(dir, 'initrd'),
@@ -1252,8 +1262,11 @@ export const MACOS_FINISH_COMMAND = 'diskutil mount DINSETUP\nsh /Volumes/DINSET
  * sleeping machine looks frozen, and its disk doesn't come back from it);
  * and QEMU's USB keyboard known as an ANSI one, so Keyboard Setup Assistant
  * doesn't ask.
+ *
+ * And with `sshKey`, Remote Login on for that key alone (`din vms ssh`): its
+ * sshd enabled in launchd's overrides, as System Settings' switch does.
  */
-function macosFinishScript(): string {
+function macosFinishScript(sshKey: string | null): string {
   const { username, fullName } = account();
   const { lang, timezone } = locale();
   const appleLocale = lang.replace(/\..*$/, '');
@@ -1324,6 +1337,18 @@ seen="$seen<key>LastPrivacyBundleVersion</key><integer>2</integer><key>InitialAc
 plist "$home/Library/Preferences/com.apple.SetupAssistant.plist" "$seen"
 plist "$home/Library/Preferences/com.apple.universalaccess.plist" '<key>reduceTransparency</key><true/>'
 plist "$home/Library/Preferences/.GlobalPreferences.plist" '<key>AppleLocale</key><string>${appleLocale}</string><key>Country</key><string>${country}</string>'
+KEY='${sshKey ?? ''}'
+if [ -n "$KEY" ]; then
+  mkdir -p "$home/.ssh"
+  echo "$KEY" > "$home/.ssh/authorized_keys"
+  chmod 700 "$home/.ssh"
+  chmod 600 "$home/.ssh/authorized_keys"
+  overrides="$data/private/var/db/com.apple.xpc.launchd"
+  mkdir -p "$overrides"
+  [ -f "$overrides/disabled.plist" ] || plist "$overrides/disabled.plist" ''
+  /usr/libexec/PlistBuddy -c "Delete :com.openssh.sshd" "$overrides/disabled.plist" >/dev/null 2>&1
+  /usr/libexec/PlistBuddy -c "Add :com.openssh.sshd bool false" "$overrides/disabled.plist"
+fi
 chown -R 501:20 "$home"
 
 # Setup Assistant done. The licence was agreed to for Apple's installer
@@ -1356,12 +1381,12 @@ shutdown -h now
 }
 
 /** Get macOS ready to install by itself: its recovery image, and the scripts in `dir`/seed. */
-export async function prepareMacos(image: string, dir: string): Promise<InstallBoot> {
+export async function prepareMacos(image: string, dir: string, sshKey: string | null = null): Promise<InstallBoot> {
   const seedDir = path.join(dir, 'seed');
   await fsp.rm(dir, { recursive: true, force: true });
   await fsp.mkdir(seedDir, { recursive: true });
   await fsp.writeFile(path.join(seedDir, 'install.sh'), macosInstallScript());
-  await fsp.writeFile(path.join(seedDir, 'finish.sh'), macosFinishScript());
+  await fsp.writeFile(path.join(seedDir, 'finish.sh'), macosFinishScript(sshKey));
   return { seedDir, seedLabel: 'DINSETUP', disk: image };
 }
 

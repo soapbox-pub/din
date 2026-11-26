@@ -64,7 +64,7 @@ a missing or bad argument).
 | `drive` | Din Drive, the encrypted drive at ~/Drive, as Settings → Drive shows it: whether it's set up and in sync, setting it up (finding the account's drive or creating one), and its trash: list, restore, and empty it (asking on screen first) |
 | `studio` | Studio: its projects in ~/Videos/Studio (list, show, start, rename) and their takes and clips (list, arrange: in or left out, order, the part to use, a note; bring files in as clips), recording into one (start, stop, mark a highlight or a retake), transcribing a take again, and going live (asks on screen first) or ending the stream |
 | `camera` | Camera: the photos and videos in ~/Pictures/Camera (list), its effects (list), and taking a photo or four as one picture, or recording a video (start, stop), with an effect and with or without the countdown, printing where it was saved |
-| `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them |
+| `vms` | Virtual machines: list them, install Windows, macOS, Ubuntu or Fedora on a new one (downloaded and set up by itself, as the Virtual Machines app's gallery does), start and stop them, change their memory, processors and graphics, forward ports to them, take, restore and delete snapshots, move one to the Trash (restoring, deleting and removing ask on screen first); and see and drive one as a person at its window would (`shot`, `key`, `type`, `click`, `move`, `drag`, `scroll`), or over SSH with Din's key for it (`ssh`; below) |
 | `games` | Games in `~/roms`: the systems and games, play one full screen (where it was left, or from the start), quit it, favorites, start one over |
 | `torrents` | Torrents: the transfers (`din torrents list`, `show`), adding a magnet link or .torrent file (`add … --to ~/Videos`), pausing, resuming, checking, moving and removing them (`remove … --trash` asks on screen first), Turtle speed, and its settings (`din torrents set download-limit 500`) |
 | `flasher` | USB Flasher: the USB drives and memory cards plugged in, and erasing one and writing a disk image (an ISO or .img, compressed or not) or DinOS to it (`din flasher write dinos /dev/sdb`, asks on screen first), checked and ejected; stopping it |
@@ -130,6 +130,35 @@ On DinOS the client runs on Din's own Electron as Node
 new Settings section, without one fails `commands.test.ts`: every Settings
 section names its area in `SECTION_AREAS` (or why it has none), and every
 `AppConfig` field is a `settings` key or in `CONFIG_FIELDS_ELSEWHERE`.
+
+## Driving a virtual machine: `din vms`
+
+A running machine can be seen and driven as a person at its window would:
+its screen and its keyboard and tablet, through QEMU's monitor (whatever
+it runs, from its firmware's menus on).
+
+```sh
+din vms shot macOS                 # its screen as a PNG; prints where, and its size
+din vms click macOS 640 400        # a point of that screenshot; --button right, --double
+din vms type macOS 'hello world'   # its US keyboard: ASCII, \n is return
+din vms key macOS cmd+space return # combinations in turn (cmd is a PC's Windows key)
+din vms drag macOS 100 100 400 300
+din vms scroll macOS 960 600 5     # notches: down positive, up negative
+```
+
+Machines Din installs macOS, Ubuntu or Fedora on can also be reached over
+SSH: the installer makes a key for the machine, kept in its folder
+(`~/VMs/<name>/ssh/`) and known to no one else, puts its public half in the
+account's `authorized_keys` and turns the SSH server on (Remote Login, on a
+Mac), and each start forwards a free port on 127.0.0.1 to the machine's 22.
+`din vms ssh` signs in with it, from a terminal by running `ssh` itself
+(the din client, like `din apps run`); elsewhere, or with `--json`, it gives
+the command line.
+
+```sh
+din vms ssh macOS                        # a shell there
+din vms ssh macOS -- xcodebuild -version # a command there (after --)
+```
 
 ## Running your own app: `din apps run`
 
