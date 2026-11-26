@@ -1660,15 +1660,26 @@ async function installerRestarted(id: string, m: Machine): Promise<void> {
  * Once Setup Assistant shows, macOS is on the disk: start the machine
  * again in Din's recovery image to set it up in Setup Assistant's place
  * (vm-installers' macosFinishScript). Seen twice, ten seconds apart, so a
- * frame on its way somewhere else isn't taken for it.
+ * frame on its way somewhere else isn't taken for it. The pointer is
+ * nudged before each look, as macOS turns the display off after a few
+ * idle minutes, Setup Assistant's too, and a black screen hides it.
  */
 async function awaitSetupAssistant(id: string, m: Machine): Promise<void> {
   const file = path.join(m.rundir, 'screen.ppm');
   const live = () => !!m.qmp && !m.qmp.closed && machines.get(id) === m && m.config.install?.step === 'apple';
   let seen = 0;
+  let nudge = 0;
   while (live()) {
     await new Promise((r) => setTimeout(r, 10_000));
     if (!live() || m.state !== 'running') continue;
+    // Off to the right, clear of Setup Assistant's card, so nothing shows a tooltip.
+    await m.qmp!.execute('input-send-event', {
+      events: [
+        { type: 'abs', data: { axis: 'x', value: Math.round(0x7fff * 0.93) } },
+        { type: 'abs', data: { axis: 'y', value: Math.round(0x7fff * (0.5 + 0.01 * (nudge++ % 2))) } },
+      ],
+    }).catch(() => {});
+    await sleep(1000);
     const screen = await screenshot(m, file);
     seen = screen && setupAssistantShowing(screen) ? seen + 1 : 0;
     if (seen < 2 || finishing.has(id)) continue;
@@ -1744,17 +1755,21 @@ function greyShare(screen: Screen, x0: number, x1: number, y0: number, y1: numbe
 }
 
 /**
- * Whether Setup Assistant is showing: a light card in the middle of a
- * light grey screen, with a darker grey band along its foot for its
- * buttons, on every page (dimmed under a sheet, too). The installer's
- * screens before it are black, or the Apple logo on grey with nothing
- * around it.
+ * Whether Setup Assistant is showing. On VGA it's a light card in the
+ * middle of a light grey screen, with a darker grey band along its foot
+ * for its buttons, on every page (dimmed under a sheet, too). On the GPU
+ * it's a white card over the wallpaper, which is anything but grey. The
+ * installer's screens before it are one color with the Apple logo in the
+ * middle, black or grey.
  */
 function setupAssistantShowing(screen: Screen): boolean {
   const sides = Math.min(greyShare(screen, 0.015, 0.17, 0.3, 0.7, 205, 245), greyShare(screen, 0.83, 0.985, 0.3, 0.7, 205, 245));
   const card = greyShare(screen, 0.2, 0.8, 0.19, 0.75, 185, 255);
   const foot = greyShare(screen, 0.23, 0.68, 0.81, 0.86, 90, 175);
-  return sides > 0.9 && card > 0.6 && foot > 0.6;
+  if (sides > 0.9 && card > 0.6 && foot > 0.6) return true;
+  const white = greyShare(screen, 0.34, 0.66, 0.26, 0.74, 225, 255);
+  const plain = Math.max(greyShare(screen, 0.015, 0.17, 0.3, 0.7, 0, 255), greyShare(screen, 0.83, 0.985, 0.3, 0.7, 0, 255));
+  return white > 0.7 && plain < 0.5;
 }
 
 /** Whether a window appeared between two screenshots: a good part of the screen changed. */
