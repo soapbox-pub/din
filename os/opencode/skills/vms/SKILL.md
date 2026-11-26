@@ -78,7 +78,8 @@ din vms type macOS 'hello world'           # ASCII on a US keyboard; \n is retur
 din vms key macOS cmd+space return         # combinations, one after another
 ```
 
-- Points are pixels of the screenshot (1920×1200 for a Mac on the GPU,
+- Points are pixels of the screenshot, whose size `shot` prints (the
+  guest picks its resolution: 1920×1080 or so for a Mac on the GPU,
   1280×800 on VGA). Take a new shot after each action that changes the
   screen, and look before you click. Things take a moment to appear.
 - Keys: `cmd` (the Windows key on a PC), `ctrl`, `alt` (Option), `shift`,
