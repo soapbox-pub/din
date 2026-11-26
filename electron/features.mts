@@ -7,7 +7,9 @@
 // are, none of which is in the system. Installing one downloads each part
 // as the user, through the Nix daemon - a package from the binary cache, a
 // plain download (the Whisper model, or the .NET runtime's zips, unpacked)
-// from its URL, checked against its hash - with a link at DIN_FEATURES_DIR/<id>/<part>: the links are both
+// from its URL, checked against its hash, or one of Din's own builds from
+// Blossom (os/din-artifacts.json: its NAR, and its narinfo signed with Din's
+// key) - with a link at DIN_FEATURES_DIR/<id>/<part>: the links are both
 // what keeps them from being collected and where everything that uses them
 // looks (the launcher's PATH and DIN_* variables), so it works as soon as
 // they're there. Removing one takes its links away and deletes what only
@@ -41,7 +43,9 @@
 // Runs as TypeScript directly via Node's native type stripping - erasable
 // syntax only, like the rest of electron/.
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { ipcMain, net } from 'electron';
@@ -64,7 +68,10 @@ const STORE_PATH = /^\/nix\/store\/[0-9a-z]{32}-[^/]+$/;
 /**
  * A part: a package in the binary cache, or a plain download (`url`, its
  * `name` and `hash`), which with `unpack` is an archive unpacked in the
- * store (the .NET runtime).
+ * store (the .NET runtime), or a package Din builds itself (`nar`, from
+ * os/din-artifacts.json: reims-vgpu's QEMU), whose NAR is on Blossom by
+ * its SHA-256 and whose narinfo, signed with Din's key, came with the
+ * system.
  */
 interface Part {
   path: string;
@@ -72,6 +79,17 @@ interface Part {
   name?: string;
   hash?: string;
   unpack?: boolean;
+  nar?: Artifact;
+}
+
+/** One of Din's own builds, as os/din-artifacts.json has it. */
+interface Artifact {
+  /** The xz-compressed NAR's SHA-256, in hex: its name on Blossom. */
+  sha256: string;
+  /** Where to get it, tried in order. */
+  urls: string[];
+  /** The path's narinfo, signed with Din's key (din-cache-1), which Nix checks it against. */
+  narinfo: string;
 }
 
 interface ManifestEntry {
@@ -171,7 +189,15 @@ function readParts(raw: unknown): Record<string, Part> | null {
   for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
     const v = value as Partial<Part> | null;
     if (!/^[a-z][a-z0-9-]*$/.test(name) || !v || typeof v.path !== 'string' || !STORE_PATH.test(v.path)) return null;
-    if (v.url === undefined) {
+    const nar = v.nar as Partial<Artifact> | undefined;
+    if (nar !== undefined) {
+      if (
+        typeof nar.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(nar.sha256) ||
+        !Array.isArray(nar.urls) || !nar.urls.every((u) => typeof u === 'string' && /^https:\/\//.test(u)) ||
+        typeof nar.narinfo !== 'string' || !nar.narinfo.startsWith(`StorePath: ${v.path}\n`)
+      ) return null;
+      parts[name] = { path: v.path, nar: { sha256: nar.sha256, urls: nar.urls, narinfo: nar.narinfo } };
+    } else if (v.url === undefined) {
       parts[name] = { path: v.path };
     } else if (typeof v.url === 'string' && /^https:\/\//.test(v.url) && typeof v.name === 'string' && typeof v.hash === 'string') {
       parts[name] = { path: v.path, url: v.url, name: v.name, hash: v.hash, unpack: v.unpack === true };
@@ -453,9 +479,12 @@ async function fetchParts(id: string, entry: ManifestEntry): Promise<void> {
   if (fs.lstatSync(folder, { throwIfNoEntry: false })?.isSymbolicLink()) fs.rmSync(folder);
   fs.mkdirSync(folder, { recursive: true });
   const missing = Object.entries(entry.parts).filter(([name, part]) => target(path.join(folder, name)) !== part.path);
-  const packages = missing.filter(([, part]) => part.url === undefined);
+  const packages = missing.filter(([, part]) => part.url === undefined && part.nar === undefined);
   if (packages.length > 0) {
     await nixWithProgress(id, ['build', '--no-link', ...packages.map(([, part]) => part.path)], failed);
+  }
+  for (const [, part] of missing) {
+    if (part.nar) await fetchArtifact(id, part.path, part.nar, failed);
   }
   for (const [, part] of missing.filter(([, p]) => p.url !== undefined)) {
     const out = await nixWithProgress(id, ['store', 'prefetch-file', '--json', ...(part.unpack ? ['--unpack'] : []), '--name', part.name ?? '', '--expected-hash', part.hash ?? '', part.url ?? ''], failed);
@@ -477,6 +506,70 @@ async function fetchParts(id: string, entry: ManifestEntry): Promise<void> {
     if (!Object.hasOwn(entry.parts, name)) fs.rmSync(path.join(folder, name), { force: true });
   }
   if (!isCurrent(id, entry)) throw new Error(failed);
+}
+
+/**
+ * One of Din's own builds into the store: what it refers to from the binary
+ * cache, then its NAR from Blossom, checked against its SHA-256, copied in
+ * from a folder made a binary cache of it and its narinfo, which Nix
+ * checks against Din's key (trusted-public-keys, configuration.nix).
+ */
+async function fetchArtifact(id: string, storePath: string, artifact: Artifact, failed: string): Promise<void> {
+  if (await run('nix', ['path-info', storePath]).then(() => true, () => false)) return;
+  const references = (/^References: (.*)$/m.exec(artifact.narinfo)?.[1] ?? '')
+    .split(' ')
+    .filter((r) => r && `/nix/store/${r}` !== storePath)
+    .map((r) => `/nix/store/${r}`);
+  if (references.some((r) => !STORE_PATH.test(r))) throw new Error(`${failed}: its narinfo isn’t one Din can read`);
+  if (references.length > 0) await nixWithProgress(id, ['build', '--no-link', ...references], failed);
+  const url = /^URL: (nar\/[0-9a-z]+\.nar\.xz)$/m.exec(artifact.narinfo)?.[1];
+  if (!url) throw new Error(`${failed}: its narinfo isn’t one Din can read`);
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'din-artifact-'));
+  try {
+    fs.mkdirSync(path.join(cache, 'nar'));
+    fs.writeFileSync(path.join(cache, 'nix-cache-info'), 'StoreDir: /nix/store\n');
+    fs.writeFileSync(path.join(cache, `${path.basename(storePath).slice(0, 32)}.narinfo`), artifact.narinfo.replace(/\n?$/, '\n'));
+    let lastError = '';
+    for (const from of artifact.urls) {
+      try {
+        await download(id, from, path.join(cache, url), artifact.sha256);
+        lastError = '';
+        break;
+      } catch (error) {
+        lastError = (error as Error).message;
+      }
+    }
+    if (lastError) throw new Error(`${failed}: ${lastError}`);
+    // Alone: what it refers to is in the store already (above).
+    await run('nix', ['copy', '--no-recursive', '--from', `file://${cache}`, storePath]);
+  } finally {
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+}
+
+/** A file from `url` into `file`, which has to have the SHA-256 `sha256`, with its progress as the feature's. */
+async function download(id: string, url: string, file: string, sha256: string): Promise<void> {
+  const response = await net.fetch(url);
+  if (!response.ok || !response.body) throw new Error(`${new URL(url).host} answered ${response.status}`);
+  const total = Number(response.headers.get('content-length')) || 0;
+  const hash = createHash('sha256');
+  const out = fs.createWriteStream(file);
+  let done = 0;
+  try {
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      hash.update(chunk);
+      done += chunk.length;
+      if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()));
+      const state = busy.get(id);
+      if (state && total) {
+        state.progress = done / total;
+        notify();
+      }
+    }
+  } finally {
+    await new Promise<void>((r) => out.end(() => r()));
+  }
+  if (hash.digest('hex') !== sha256) throw new Error(`what ${new URL(url).host} sent isn’t the file Din expects`);
 }
 
 /**

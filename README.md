@@ -1042,16 +1042,20 @@ image); installing one downloads each part as the user through the Nix
 daemon (`electron/features.mts`) from the binary cache, which has
 everything nixpkgs builds, into `~/.local/state/din/features/<id>/<part>`,
 a GC root. What Din builds itself (reims-vgpu's QEMU, in Virtual machines)
-comes from Din's own binary cache: a Nix cache that's a static site on
-Nostr, Team Soapbox's `din-cache` nsite, which DinOS has Nix substitute
-from after nixpkgs' and trusts by its key (`dinCache` in
-`os/configuration.nix`, `din-cache-1:…`). `scripts/din-cache-push.sh
-<commit>` builds those parts (`system.build.din-cache-parts`), signs them
-with the key (`~/.config/din/nix-cache.sec` on the machine that pushes),
-adds each, alone, to the cache's folder (`/nix-cache-info/index.html`, since
-an nsite's files need extensions and gateways serve `index.html` for a path
-with none) and publishes it. The release checks every part is in one cache or
-the other (`scripts/dinos-release.sh`). A part that's a plain download, the Whisper
+no binary cache has, so it's one of Din's artifacts: `os/din-artifacts.json`
+lists each by its store path, with its NAR, xz-compressed, on Blossom by its
+SHA-256, and its narinfo, signed with Din's key (`din-cache-1`, which DinOS
+trusts). Installing one fetches what it refers to from the binary cache, then
+its NAR from Blossom, checks the hash, and copies it into the store from a
+scratch folder made a binary cache of it and its narinfo, where Nix checks
+the signature. `scripts/din-artifacts.sh [<commit>]` builds them
+(`system.build.din-artifacts`), signs them with the key
+(`~/.config/din/nix-cache.sec` on the machine that makes them), writes the
+NARs into `~/.local/share/din/artifacts` and rewrites the list; the NARs go
+up to Blossom by hand before the list is pushed, and again whenever a part's
+path changes (its build, or the nixpkgs it's built with). The release checks
+every part is in the binary cache or in the list, its NAR on Blossom
+(`scripts/dinos-release.sh`). A part that's a plain download, the Whisper
 model, gives its URL and hash and lands where `fetchurl` would put it.
 Everything that uses a feature looks at its parts' links (the launcher's
 PATH and `DIN_*` variables, nix-ld's library path; `docker` is a small

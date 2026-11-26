@@ -1,0 +1,10 @@
+{
+  "/nix/store/jxw79rflgrijnlb9fbs7qda3kp176g0q-qemu-reims-vgpu-0-unstable-f1c518d31": {
+    "narinfo": "StorePath: /nix/store/jxw79rflgrijnlb9fbs7qda3kp176g0q-qemu-reims-vgpu-0-unstable-f1c518d31\nURL: nar/131pj3325fzlg43kcxkz12lay5pzlvssn29bsd176qk2rgy7v23b.nar.xz\nCompression: xz\nFileHash: sha256:131pj3325fzlg43kcxkz12lay5pzlvssn29bsd176qk2rgy7v23b\nFileSize: 16589384\nNarHash: sha256:0pz59bv6m122jh2j95pm3qw3rw8rlr6qn42a8ffb3qksc0j15v4x\nNarSize: 83200608\nReferences: 0ba5kj6r0zhfwd84l5vzccqvx7amlq2c-gcc-15.3.0-lib 2llb0qaa9lbwli6i0350vy3j4jkhmbmg-libseccomp-2.6.1-lib 7348w7xcmpri6ajymnp136w2hkz1mdwx-zstd-1.5.7 7f1481w1vmi4xi5hks4mg5agz5ad31sn-libusb-1.0.29 7l6pvfar2zy3ck1ns7i49g4fmni3wly1-liburing-2.14 7nqadb6qkhhx12ikwih42jh01n4hvr21-libjpeg-turbo-3.1.4 975fzn3zr607vcx1s8yasdxmwraqj1dh-vulkan-loader-1.4.341.0 awa22ms22hc3w5drqc35i2yqjq8gz3d8-pixman-0.46.4 c2z71j2hk24zw1nxdwz12bf2597qcwd7-libpng-apng-1.6.59 c64nyas3p5zmnsqvzhlsjvvhbl8151qw-glib-2.88.3 ddfagd4llkbv8p3cblpa3bxvn6l538yl-systemd-minimal-libs-260.5 dphsh3jff8w6n9p3xbfmkia5krqwv52f-glibc-2.42-103 gj2r8wzan9lkqrrpxwdf87g44wbwclsk-alsa-lib-1.2.15.3 hn42aqkzdhcnyxfbg3yjzmbsbi1c5py7-pipewire-1.6.6 jxw79rflgrijnlb9fbs7qda3kp176g0q-qemu-reims-vgpu-0-unstable-f1c518d31 nbv2zi503h2hjz51qbg44vzs270ffrri-gnutls-3.8.13 nscy9i4lgfpzi6hc7sq95k1nmh5xhsi8-libpulseaudio-17.0 qyasj7qfiz6bk0flixpfn3yjsw6ljwxq-libaio-0.3.113 v51gziadpqrbbw8rzx7blz3x0rg9794z-dtc-1.7.2 x8zpwjykvajjkryif2qfndw1xkhp37dq-libslirp-4.9.3 xssy1p5g9zhwx5vwbhz4rczzfxaj3g4h-spice-0.16.0 ybxzbyn4a22l7imwsi17icrsgqbx0m25-libva-2.23.0\nDeriver: izla4i3vd810gih09ff88rv1kc8icsa9-qemu-reims-vgpu-0-unstable-f1c518d31.drv\nSig: din-cache-1:52HO6nAUObTvNZH96TiciObVZxC6D4Vco7B3BAoEQxCHOcb1crlWDVorMH71flMA462c38rF1qKlkHvxr2hTAQ==\n",
+    "sha256": "6b887dfccb62627342d32b09abf5a6ff16afa8087f76360779f4bb22c690378c",
+    "urls": [
+      "https://blossom.ditto.pub/6b887dfccb62627342d32b09abf5a6ff16afa8087f76360779f4bb22c690378c",
+      "https://blossom.primal.net/6b887dfccb62627342d32b09abf5a6ff16afa8087f76360779f4bb22c690378c"
+    ]
+  }
+}

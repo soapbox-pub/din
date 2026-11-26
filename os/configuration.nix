@@ -16,14 +16,16 @@ let
   # use (os/desktop-module.nix).
   inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened din-polkit-agent din-gpu-priority;
   # QEMU with reims-vgpu's GPU, for macOS virtual machines (the vms feature,
-  # below). Din's binary cache has it (dinCache), since nixpkgs' doesn't.
+  # below). nixpkgs' cache doesn't have it: it's one of Din's artifacts.
   qemu-reims = import ./reims-vgpu.nix { inherit pkgs lib; };
-  # Team Soapbox's `din-cache` nsite (its pubkey in base36, then the name),
-  # through nsite.lol.
-  dinCache = {
-    url = "https://2zrgjemvgxppn2jwgm61w6yrqqlcmm8njvhby68a9cj7ooo5phdin-cache.nsite.lol";
-    publicKey = "din-cache-1:TWZGgwTizKFYCVI6mQBgcrIMQqLEtX6MUer1D8pdoXk=";
-  };
+  # Din's artifacts: optional features' parts Din builds itself, which no
+  # binary cache has. din-artifacts.json lists each by its store path: its
+  # NAR, xz-compressed, on Blossom by its SHA-256, and its narinfo, signed
+  # with Din's key, which installing it checks it against (the key is
+  # trusted below). scripts/din-artifacts.sh makes them and writes the list;
+  # their files go up to Blossom before the list that names them is pushed.
+  dinArtifacts = builtins.fromJSON (builtins.readFile ./din-artifacts.json);
+  dinArtifactsKey = "din-cache-1:TWZGgwTizKFYCVI6mQBgcrIMQqLEtX6MUer1D8pdoXk=";
 
   # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
   # from its repository (the flake's `deckmon` input). It captures the screen
@@ -150,7 +152,7 @@ let
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
     # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows;
     # and reims-vgpu's QEMU, which draws a Mac on this computer's GPU
-    # (reims-vgpu.nix), from Din's binary cache.
+    # (reims-vgpu.nix), one of Din's artifacts.
     vms = {
       title = "Virtual machines";
       description = "QEMU, for the Virtual Machines app: Windows, macOS and Linux in a window.";
@@ -274,7 +276,8 @@ let
       size = f.size * 1000 * 1000;
       default = f.default or false;
       parts = lib.mapAttrs (name: part: { path = partPath part; }
-        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; unpack = part.unpack or false; }) f.parts;
+        // lib.optionalAttrs (isDownload part) { inherit (part) name url hash; unpack = part.unpack or false; }
+        // lib.optionalAttrs (dinArtifacts ? ${partPath part}) { nar = dinArtifacts.${partPath part}; }) f.parts;
     })
     dinFeatures));
   # Their programs, for PATH: whatever isn't installed is a folder that
@@ -1677,17 +1680,12 @@ in
   # daemon options that run code as root, which would get around sudo's
   # password.
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
-  # Din's binary cache, for what Din builds that nixpkgs' cache doesn't
-  # have: an optional feature's parts (reims-vgpu's QEMU, in the vms
-  # feature), which install by downloading like any other. It's a static
-  # site on Nostr (an nsite of Team Soapbox's), filled and published by
-  # scripts/din-cache-push.sh, and signed with its own key. Nix asks it
-  # after nixpkgs' cache (its priority, in its nix-cache-info).
-  nix.settings.extra-substituters = [ dinCache.url ];
-  nix.settings.extra-trusted-public-keys = [ dinCache.publicKey ];
-  # What scripts/din-cache-push.sh builds and pushes: the feature parts
-  # nixpkgs' cache doesn't have.
-  system.build.din-cache-parts = { inherit qemu-reims; };
+  # Din's artifacts (dinArtifacts, above) come into the store signed with
+  # Din's key, which Nix takes them on.
+  nix.settings.extra-trusted-public-keys = [ dinArtifactsKey ];
+  # What scripts/din-artifacts.sh builds: the feature parts no binary cache
+  # has.
+  system.build.din-artifacts = { inherit qemu-reims; };
 
   # Root shares the disk with home (os/din-install.sh), or on systems
   # installed before Btrfs is a fixed-size volume, so the Nix store mustn't

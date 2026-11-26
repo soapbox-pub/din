@@ -935,6 +935,36 @@ update_features() {
           path=$(jq -r --arg n "$name" ".[\$n].path" <<<"$parts")
           [[ $(readlink "$dir/$name" || true) != "$path" ]] || continue
           url=$(jq -r --arg n "$name" ".[\$n].url // empty" <<<"$parts")
+          nar=$(jq -c --arg n "$name" ".[\$n].nar // empty" <<<"$parts")
+          if [[ -n $nar ]] && ! nix path-info "$path" >/dev/null 2>&1; then
+            # One of the artifacts Din builds (features.mts, fetchArtifact):
+            # what it refers to from the binary cache, its NAR from Blossom
+            # checked against its SHA-256, copied in from a folder made a
+            # binary cache of it and its narinfo, signed with the key Din
+            # trusts for them.
+            narinfo=$(jq -r .narinfo <<<"$nar")
+            refs=()
+            for ref in $(sed -n "s/^References: //p" <<<"$narinfo"); do
+              [[ /nix/store/$ref == "$path" ]] || refs+=("/nix/store/$ref")
+            done
+            ((${#refs[@]} == 0)) || nix build --no-link "${refs[@]}"
+            cache=$(mktemp -d)
+            trap "rm -rf \"$cache\"" EXIT
+            mkdir "$cache/nar"
+            echo "StoreDir: /nix/store" >"$cache/nix-cache-info"
+            printf "%s\n" "$narinfo" >"$cache/$(basename "$path" | cut -c1-32).narinfo"
+            file=$cache/$(sed -n "s/^URL: //p" <<<"$narinfo")
+            sha256=$(jq -r .sha256 <<<"$nar")
+            got=
+            for from in $(jq -r ".urls[]" <<<"$nar"); do
+              curl -fsSL -o "$file" "$from" || continue
+              got=$(sha256sum "$file" | cut -d" " -f1)
+              [[ $got == "$sha256" ]] && break
+            done
+            [[ $got == "$sha256" ]] || { echo "No Blossom server had $path" >&2; exit 1; }
+            nix copy --no-recursive --from "file://$cache" "$path"
+            rm -rf "$cache"
+          fi
           if [[ -n $url ]]; then
             unpack=()
             [[ $(jq -r --arg n "$name" ".[\$n].unpack // false" <<<"$parts") != true ]] || unpack=(--unpack)
