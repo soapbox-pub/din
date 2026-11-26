@@ -1603,10 +1603,19 @@ async function typeInRecovery(m: Machine, command: string, begun: () => Promise<
     last = before;
     if (!before || !settled) continue;
     await sendKeys(m, ['shift', 'meta_l', 't']);
-    await sleep(3000);
-    const after = await screenshot(m, file);
+    // Terminal can take a while to open the first time (well over 3 s on
+    // the GPU), and pressing the keys again once it's in front only shows
+    // or hides its tab bar, so wait for its window as long as it takes.
+    let after: Screen | null = null;
+    for (let waited = 0; waited < 30_000 && live(); waited += 2000) {
+      await sleep(2000);
+      after = await screenshot(m, file);
+      if (after && windowOpened(before, after)) break;
+    }
     last = after;
     if (!after || !windowOpened(before, after)) continue;
+    // And settled, so the first keys aren't typed while it's still drawing.
+    await sleep(1500);
     await typeText(m, `${command}\n`);
     // The script says it's begun at once; the disk fills within a minute or two.
     await sleep(45_000);

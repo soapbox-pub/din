@@ -1375,6 +1375,9 @@ g="$data/Library/Preferences/.GlobalPreferences.plist"
 /usr/libexec/PlistBuddy -c "Add :AppleLocale string ${appleLocale}" -c "Add :Country string ${country}" "$g"
 
 say ${MACOS_FINISHED}
+# say writes to the serial port in the background; shutting down at once
+# can end it before it's written, and Din would never know it finished.
+sleep 3
 sync
 shutdown -h now
 `;
