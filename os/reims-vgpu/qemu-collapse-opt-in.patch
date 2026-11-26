@@ -1,0 +1,43 @@
+From 9b887cfccef5b9c97ff0c3853d107b2fc6230eaa Mon Sep 17 00:00:00 2001
+From: Alex Gleason <alex@alexgleason.me>
+Date: Wed, 25 Nov 2026 18:40:08 -0600
+Subject: [PATCH] :bug: Collapse guest RAM into huge pages only where asked
+
+On a Radeon 890M host (RADV, Mesa 26.1.8, Linux 6.18.59), a macOS 26.7.2
+guest on reims-graphics-pci over collapsed RAM panicked 80 to 154 s into
+every boot, its kernel's memory overwritten: pmap's pv lists, an rw lock,
+a ledger, IOKit matching. With the same memfd preallocated and the
+collapse skipped, it ran clean for 11 minutes, then 9 more at 8 vCPUs
+and 12 GiB, with apps opening throughout. With plain VGA in the device's
+place, collapsed RAM ran clean too: the panics need both.
+
+Skip the collapse unless QEMU_HOSTMEM_COLLAPSE=1, until where it goes wrong
+(the import of udmabufs over large shmem folios, or KVM's 2 MiB maps beside
+it) is found. reims-vgpu#185 has the bisect.
+---
+ backends/hostmem.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/backends/hostmem.c b/backends/hostmem.c
+index d5fa574..61f6850 100644
+--- a/backends/hostmem.c
++++ b/backends/hostmem.c
+@@ -364,6 +364,15 @@ static void host_memory_backend_collapse(HostMemoryBackend *backend,
+     int64_t t0;
+     int err = 0;
+ 
++    /*
++     * Off unless QEMU_HOSTMEM_COLLAPSE=1: on a Radeon 890M (RADV, Linux
++     * 6.18) a macOS guest on reims-graphics-pci over collapsed RAM panicked
++     * one to three minutes into every boot with its kernel's memory
++     * overwritten (page tables, locks, ledgers), and ran clean without it.
++     */
++    if (g_strcmp0(g_getenv("QEMU_HOSTMEM_COLLAPSE"), "1") != 0) {
++        return;
++    }
+     /* A 2 MiB page is a huge page only over 4 KiB base pages. */
+     if (!backend->prealloc || !backend->share ||
+         (async && backend->prealloc_context) ||
+-- 
+2.54.0
+

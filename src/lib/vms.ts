@@ -39,6 +39,12 @@ export interface VmConfig {
   forwards: VmPortForward[];
   /** Sound through this computer's speakers and microphone. */
   audio: boolean;
+  /**
+   * macOS only: drawn on this computer's GPU (reims-vgpu's virtual GPU,
+   * which turns the Mac's Metal into Vulkan), not on the machine's CPU.
+   * Where the GPU can't be used (`VmsStatus.gpuProblem`), it starts on QEMU's VGA.
+   */
+  gpu: boolean;
 }
 
 /** The systems Din fetches and installs by itself. */
@@ -98,6 +104,8 @@ export interface VmInfo {
   error: string | null;
   /** Set while Din is installing its system; null once it's done. */
   install: VmInstall | null;
+  /** While it runs: drawn on this computer's GPU ('gpu') or on QEMU's VGA ('vga'); null when off. */
+  graphics: 'gpu' | 'vga' | null;
 }
 
 export interface VmSnapshot {
@@ -123,6 +131,8 @@ export interface VmsStatus {
   secureBoot: boolean;
   /** swtpm was found. */
   tpm: boolean;
+  /** Why a Mac can't be drawn on this computer's GPU, as the user should hear it; null when it can. */
+  gpuProblem: string | null;
   /** Where machines are kept (~/VMs). */
   dir: string;
   /** The systems Din can install by itself (`install`). */
@@ -201,23 +211,23 @@ export function vmDefaults(os: VmOs): Omit<NewVm, 'name' | 'cdrom'> {
     case 'windows':
       return {
         os, system: null, memoryMiB: 8192, cpus: 4, diskGiB: 80, firmware: 'uefi', secureBoot: true, tpm: true,
-        network: true, forwards: [], audio: true,
+        network: true, forwards: [], audio: true, gpu: false,
       };
     case 'macos':
       // No sound: macOS has no driver for QEMU's sound card.
       return {
         os, system: null, memoryMiB: 8192, cpus: 4, diskGiB: 128, firmware: 'uefi', secureBoot: false, tpm: false,
-        network: true, forwards: [], audio: false,
+        network: true, forwards: [], audio: false, gpu: true,
       };
     case 'linux':
       return {
         os, system: null, memoryMiB: 4096, cpus: 2, diskGiB: 40, firmware: 'uefi', secureBoot: false, tpm: false,
-        network: true, forwards: [], audio: true,
+        network: true, forwards: [], audio: true, gpu: false,
       };
     default:
       return {
         os, system: null, memoryMiB: 2048, cpus: 2, diskGiB: 20, firmware: 'bios', secureBoot: false, tpm: false,
-        network: true, forwards: [], audio: true,
+        network: true, forwards: [], audio: true, gpu: false,
       };
   }
 }

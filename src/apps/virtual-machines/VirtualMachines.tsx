@@ -568,6 +568,7 @@ function Details({ vm, working, onAction, onError }: { vm: VmInfo; working: bool
           <Spec label="Firmware" value={firmware} />
           <Spec label="Network" value={network} />
           <Spec label="Sound" value={config.audio ? 'On' : 'Off'} />
+          {config.os === 'macos' && <Spec label="Graphics" value={config.gpu ? 'This computer’s GPU' : 'QEMU’s display'} />}
         </dl>
 
         <CdromField

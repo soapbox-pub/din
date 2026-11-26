@@ -15,6 +15,15 @@ let
   # (os/packages.nix), shared with the desktop module other NixOS systems
   # use (os/desktop-module.nix).
   inherit (import ./packages.nix { inherit pkgs lib din electron; }) din-app din-compositor din-fd electron-hardened din-polkit-agent din-gpu-priority;
+  # QEMU with reims-vgpu's GPU, for macOS virtual machines (the vms feature,
+  # below). Din's binary cache has it (dinCache), since nixpkgs' doesn't.
+  qemu-reims = import ./reims-vgpu.nix { inherit pkgs lib; };
+  # Team Soapbox's `din-cache` nsite (its pubkey in base36, then the name),
+  # through nsite.lol.
+  dinCache = {
+    url = "https://2zrgjemvgxppn2jwgm61w6yrqqlcmm8njvhby68a9cj7ooo5phdin-cache.nsite.lol";
+    publicKey = "din-cache-1:TWZGgwTizKFYCVI6mQBgcrIMQqLEtX6MUer1D8pdoXk=";
+  };
 
   # deckmon, the AirPlay sender behind screen sharing (electron/airplay.mts),
   # from its repository (the flake's `deckmon` input). It captures the screen
@@ -139,12 +148,14 @@ let
       };
     };
     # Virtual machines (electron/vms.mts): QEMU, swtpm for their TPMs, and
-    # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows.
+    # OVMF with Microsoft's Secure Boot keys (OVMF_VARS.ms.fd), for Windows;
+    # and reims-vgpu's QEMU, which draws a Mac on this computer's GPU
+    # (reims-vgpu.nix), from Din's binary cache.
     vms = {
       title = "Virtual machines";
       description = "QEMU, for the Virtual Machines app: Windows, macOS and Linux in a window.";
-      size = 470;
-      parts = { qemu = pkgs.qemu_kvm; swtpm = pkgs.swtpm; ovmf = pkgs.OVMFFull.fd; };
+      size = 560;
+      parts = { qemu = pkgs.qemu_kvm; qemu-reims = qemu-reims; swtpm = pkgs.swtpm; ovmf = pkgs.OVMFFull.fd; };
     };
     # The Games app's emulators (electron/games.mts, game-systems.mts):
     # RetroArch, its menu's assets, its controller profiles, the cores' info
@@ -654,6 +665,8 @@ let
     export DIN_QEMU_IMG=${featurePart "vms" "qemu"}/bin/qemu-img
     export DIN_SWTPM=${featurePart "vms" "swtpm"}/bin/swtpm
     export DIN_OVMF=${featurePart "vms" "ovmf"}/FV
+    # And a Mac's, on this computer's GPU.
+    export DIN_QEMU_REIMS=${featurePart "vms" "qemu-reims"}/bin/qemu-system-x86_64
     # Games (electron/games.mts): RetroArch and a part per core, found by
     # their names in the feature's folder.
     export DIN_GAMES=${featuresDir}/games
@@ -1664,6 +1677,17 @@ in
   # daemon options that run code as root, which would get around sudo's
   # password.
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  # Din's binary cache, for what Din builds that nixpkgs' cache doesn't
+  # have: an optional feature's parts (reims-vgpu's QEMU, in the vms
+  # feature), which install by downloading like any other. It's a static
+  # site on Nostr (an nsite of Team Soapbox's), filled and published by
+  # scripts/din-cache-push.sh, and signed with its own key. Nix asks it
+  # after nixpkgs' cache (its priority, in its nix-cache-info).
+  nix.settings.extra-substituters = [ dinCache.url ];
+  nix.settings.extra-trusted-public-keys = [ dinCache.publicKey ];
+  # What scripts/din-cache-push.sh builds and pushes: the feature parts
+  # nixpkgs' cache doesn't have.
+  system.build.din-cache-parts = { inherit qemu-reims; };
 
   # Root shares the disk with home (os/din-install.sh), or on systems
   # installed before Btrfs is a fixed-size volume, so the Nix store mustn't

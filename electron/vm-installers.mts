@@ -301,6 +301,12 @@ export const MACOS_MODEL = 'iMac20,1';
  * Setup Assistant took about 2 s to show instead of 0.3 s.
  */
 export const MACOS_SCREEN = { width: 1280, height: 800 };
+/**
+ * The screen a Mac on reims-vgpu's GPU gets (vms.mts): its device draws
+ * Metal on this computer's GPU, so the pixels cost the guest nothing, and
+ * the console's VNC scales it to the window.
+ */
+export const MACOS_GPU_SCREEN = { width: 1920, height: 1200 };
 
 /** Apple's key for the chunklists that come with recovery images (the EFI ROM's). */
 const CHUNKLIST_KEY = createPublicKey({
@@ -1066,19 +1072,95 @@ const openCoreBoot = (dir: string) => path.join(dir, 'EFI', 'OC', 'OpenCore.efi'
 
 export const openCoreReady = (dir: string) => fs.existsSync(openCoreBoot(dir));
 
-const MACOS_RESOLUTION = `${MACOS_SCREEN.width}x${MACOS_SCREEN.height}@32`;
+const resolution = (screen: { width: number; height: number }) => `${screen.width}x${screen.height}@32`;
+const MACOS_RESOLUTION = resolution(MACOS_SCREEN);
+
+/** One of reims-vgpu's kexts, as its set.toml lists it for OpenCore's Kernel > Add. */
+interface ReimsKext {
+  BundlePath: string;
+  ExecutablePath: string;
+  PlistPath: string;
+  MinKernel: string;
+  MaxKernel: string;
+  Comment: string;
+}
 
 /**
- * Bring an existing boot loader's screen to `MACOS_SCREEN`, for machines
- * made when it was another size (QEMU's VGA offers the new one, and OpenCore
- * would still pick the old).
+ * reims-vgpu's kexts for the guest (`kexts`, its guest/prebuilt: the
+ * bundles and set.toml, which lists them in the order OpenCore loads them).
  */
-export async function syncOpenCoreScreen(dir: string): Promise<void> {
+async function reimsKexts(kexts: string): Promise<{ set: string; list: ReimsKext[] }> {
+  const set = await fsp.readFile(path.join(kexts, 'set.toml'), 'utf8');
+  const list = set
+    .split(/^\[\[kext\]\]\s*$/m)
+    .slice(1)
+    .map((block) => {
+      const value = (key: string) => new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*$`, 'm').exec(block)?.[1] ?? '';
+      return {
+        BundlePath: value('BundlePath'),
+        ExecutablePath: value('ExecutablePath'),
+        PlistPath: value('PlistPath'),
+        MinKernel: value('MinKernel'),
+        MaxKernel: value('MaxKernel'),
+        Comment: value('Comment'),
+      };
+    });
+  if (!list.length || list.some((k) => !/^[\w.-]+\.kext$/.test(k.BundlePath))) throw new Error('reims-vgpu’s kexts aren’t laid out as Din expected.');
+  return { set, list };
+}
+
+/** Where reims-vgpu's kexts go in a boot loader, and the set.toml they came with. */
+const OPENCORE_KEXTS = (dir: string) => path.join(dir, 'EFI', 'OC', 'Kexts');
+const REIMS_SET = 'reims-vgpu-set.toml';
+
+/**
+ * Bring an existing boot loader up to how the machine starts now: its
+ * screen the one its display offers (`MACOS_SCREEN` on QEMU's VGA,
+ * `MACOS_GPU_SCREEN` on reims-vgpu's GPU), and, where reims-vgpu is here
+ * (`kexts`, its guest/prebuilt), its kexts, which drive its GPU and
+ * stay idle without it. Machines made before either get them at their next
+ * start; a newer reims-vgpu's kexts replace the old.
+ */
+export async function syncOpenCore(dir: string, options: { gpu: boolean; kexts: string | null }): Promise<void> {
   const file = path.join(dir, 'EFI', 'OC', 'config.plist');
   const config = parsePlist(await fsp.readFile(file, 'utf8')) as Record<string, PlistDict>;
+  let changed = false;
   const output = config.UEFI?.Output as PlistDict | undefined;
-  if (!output || output.Resolution === MACOS_RESOLUTION) return;
-  output.Resolution = MACOS_RESOLUTION;
+  const wanted = resolution(options.gpu ? MACOS_GPU_SCREEN : MACOS_SCREEN);
+  if (output && output.Resolution !== wanted) {
+    output.Resolution = wanted;
+    changed = true;
+  }
+  if (options.kexts) {
+    const { set, list } = await reimsKexts(options.kexts);
+    const target = OPENCORE_KEXTS(dir);
+    const current = await fsp.readFile(path.join(target, REIMS_SET), 'utf8').catch(() => null);
+    if (current !== set) {
+      await fsp.rm(target, { recursive: true, force: true });
+      await fsp.mkdir(target, { recursive: true });
+      for (const kext of list) {
+        // From the Nix store, read-only: a copy that can be replaced next time.
+        const copy = path.join(target, kext.BundlePath);
+        await fsp.cp(path.join(options.kexts, kext.BundlePath), copy, { recursive: true });
+        for (const entry of [copy, ...(await fsp.readdir(copy, { recursive: true })).map((p) => path.join(copy, p))]) {
+          const { mode } = await fsp.stat(entry);
+          await fsp.chmod(entry, mode | 0o200);
+        }
+      }
+      await fsp.writeFile(path.join(target, REIMS_SET), set);
+    }
+    const kernel = config.Kernel as PlistDict;
+    const others = ((kernel.Add as Plist[] | undefined) ?? []).filter((e) => !list.some((k) => (e as PlistDict).BundlePath === k.BundlePath));
+    const add = [
+      ...list.map((k) => ({ Arch: 'x86_64', BundlePath: k.BundlePath, Comment: k.Comment, Enabled: true, ExecutablePath: k.ExecutablePath, MaxKernel: k.MaxKernel, MinKernel: k.MinKernel, PlistPath: k.PlistPath })),
+      ...others,
+    ];
+    if (writePlist(add) !== writePlist(kernel.Add ?? [])) {
+      kernel.Add = add;
+      changed = true;
+    }
+  }
+  if (!changed) return;
   await fsp.writeFile(`${file}.tmp`, writePlist(config));
   await fsp.rename(`${file}.tmp`, file);
 }

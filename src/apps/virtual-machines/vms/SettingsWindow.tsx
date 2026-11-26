@@ -143,6 +143,18 @@ export function SettingsWindow({ vm, status }: { vm: VmInfo; status: VmsStatus }
               />
               <SwitchRow label="TPM 2.0" checked={config.tpm} onChange={(tpm) => patch({ tpm })} disabled={!status.tpm} />
               <SwitchRow label="Sound" checked={config.audio} onChange={(audio) => patch({ audio })} />
+              {config.os === 'macos' && (
+                <SwitchRow
+                  label="Graphics acceleration"
+                  description={
+                    status.gpuProblem
+                      ? `It starts on QEMU’s display for now: ${status.gpuProblem}`
+                      : 'Drawn on this computer’s GPU, not on the machine’s processors. Off, it can be saved while it runs.'
+                  }
+                  checked={config.gpu}
+                  onChange={(gpu) => patch({ gpu })}
+                />
+              )}
 
               <SettingsSubHeading>Storage</SettingsSubHeading>
               <CdromField

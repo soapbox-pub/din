@@ -64,6 +64,24 @@ export const vmsArea: Area = {
         await call(args.optBool('force') ? vms().forceStop(vm.id) : vms().shutdown(vm.id));
       },
     ),
+    command(
+      'vms',
+      'set',
+      'Change a machine’s settings, as its Settings window does; hardware changes take effect when it next starts',
+      [
+        MACHINE,
+        { name: 'gpu', type: 'string', optional: true, choices: ['on', 'off'], help: 'macOS: drawn on this computer’s GPU, or on QEMU’s display' },
+      ],
+      async (args) => {
+        const vm = await machine(args.string('machine'));
+        const gpu = args.optString('gpu');
+        if (gpu === undefined) throw new CommandError('Say what to change: --gpu on or off');
+        if (vm.config.os !== 'macos') throw new CommandError('Graphics acceleration is for macOS machines');
+        const saved = await call(vms().update(vm.id, { gpu: gpu === 'on' }));
+        const pending = saved.state !== 'stopped' ? ', from its next start' : '';
+        return { data: saved, text: `${saved.config.name} is drawn on ${saved.config.gpu ? 'this computer’s GPU' : 'QEMU’s display'}${pending}` };
+      },
+    ),
     command('vms', 'cancel-install', 'Stop installing a machine’s system and throw the machine away', [MACHINE], async (args, ctx) => {
       const vm = await machine(args.string('machine'));
       const ok = await ctx.confirm({

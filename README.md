@@ -819,15 +819,24 @@ for: UEFI with Secure Boot and Microsoft's keys (OVMF's `OVMF_VARS.ms.fd`), a
 TPM 2.0 (swtpm), a SATA disk, an e1000e network card and Hyper-V
 enlightenments. macOS gets an Intel CPU model (on AMD hosts too, with the
 TSC's rate given so it can still be saved running), QEMU's Apple SMC, USB
-input and a SATA SSD, and no sound (it has no driver for QEMU's); its
-screen is 1280×800, since it has no driver for QEMU's display and draws
-every pixel on the CPU. Linux gets virtio, and its screen follows the window's size.
-The clipboard is shared with guests running spice-vdagent; sound goes through
-PipeWire. Snapshots are qcow2's own: taken while running, they keep memory
-too and come back running.
+input and a SATA SSD, and no sound (it has no driver for QEMU's). Where it
+can, a Mac is drawn on this computer's GPU: [reims-vgpu](https://github.com/steelbrain/reims-vgpu)'s
+virtual GPU (`os/reims-vgpu.nix`, its QEMU fork built with its library, which
+turns the Mac's Metal into Vulkan) gets a 1920×1200 screen, with the guest's
+RAM a shared memfd its GPU uses in place, through `/dev/udmabuf`, and its
+kexts in the machine's OpenCore, which Din adds at each start (SIP stays
+on). Its Settings' Graphics acceleration (`din vms set <machine> --gpu`)
+turns it off; it's off by itself where the GPU can't be used (no reims QEMU,
+no render node, no `/dev/udmabuf`, Linux before 6.13), and for a snapshot
+saved running, which comes back on VGA, where it was saved. On QEMU's VGA it
+draws every pixel on the CPU, at 1280×800. Linux gets virtio, and its
+screen follows the window's size. The clipboard is shared with guests
+running spice-vdagent; sound goes through PipeWire. Snapshots are qcow2's
+own: taken while running, they keep memory too and come back running, but
+not a Mac on the GPU, whose device QEMU can't save running.
 
 DinOS passes QEMU, swtpm and OVMF to Din as `DIN_QEMU`, `DIN_QEMU_IMG`,
-`DIN_SWTPM` and `DIN_OVMF`, which are there once the Virtual machines
+`DIN_SWTPM` and `DIN_OVMF`, and reims-vgpu's QEMU as `DIN_QEMU_REIMS`, which are there once the Virtual machines
 optional feature is installed (below); elsewhere Din looks on PATH and in the usual
 OVMF folders (`/usr/share/OVMF`, `/usr/share/edk2/ovmf`, …), and needs
 `/dev/kvm` to be read-writable by the user.
@@ -1032,8 +1041,17 @@ them, nor how they're built, is in the system (and so not on the disk
 image); installing one downloads each part as the user through the Nix
 daemon (`electron/features.mts`) from the binary cache, which has
 everything nixpkgs builds, into `~/.local/state/din/features/<id>/<part>`,
-a GC root. The release checks every part is there
-(`scripts/dinos-release.sh`). A part that's a plain download, the Whisper
+a GC root. What Din builds itself (reims-vgpu's QEMU, in Virtual machines)
+comes from Din's own binary cache: a Nix cache that's a static site on
+Nostr, Team Soapbox's `din-cache` nsite, which DinOS has Nix substitute
+from after nixpkgs' and trusts by its key (`dinCache` in
+`os/configuration.nix`, `din-cache-1:…`). `scripts/din-cache-push.sh
+<commit>` builds those parts (`system.build.din-cache-parts`), signs them
+with the key (`~/.config/din/nix-cache.sec` on the machine that pushes),
+adds each, alone, to the cache's folder (`/nix-cache-info/index.html`, since
+an nsite's files need extensions and gateways serve `index.html` for a path
+with none) and publishes it. The release checks every part is in one cache or
+the other (`scripts/dinos-release.sh`). A part that's a plain download, the Whisper
 model, gives its URL and hash and lands where `fetchurl` would put it.
 Everything that uses a feature looks at its parts' links (the launcher's
 PATH and `DIN_*` variables, nix-ld's library path; `docker` is a small

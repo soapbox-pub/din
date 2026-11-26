@@ -57,17 +57,21 @@ git -C "$repo" worktree add --quiet --detach "$worktree" "$commit"
   die "$tag's os/version isn't $version."
 
 # Installing an optional feature downloads its packages from the binary
-# cache, by the paths this system names (os/configuration.nix), and can't
-# build one that isn't there: every one has to be.
-echo "Checking the optional features are in the binary cache..."
+# caches, nixpkgs' or Din's own (dinCache in os/configuration.nix, for what
+# Din builds itself), by the paths this system names, and can't build one
+# that isn't there: every one has to be.
+echo "Checking the optional features are in the binary caches..."
 features=$(nix build --no-link --print-out-paths \
   "$worktree/os#nixosConfigurations.dinos.config.environment.etc.\"dinos/features.json\".source")
+din_cache=$(nix eval --raw "$worktree/os#nixosConfigurations.dinos.config.nix.settings.extra-substituters" --apply builtins.head)
 missing=()
 for path in $(jq -r '.[].parts[] | select(.url == null) | .path' "$features"); do
-  nix path-info --store https://cache.nixos.org "$path" >/dev/null 2>&1 || missing+=("${path#/nix/store/}")
+  nix path-info --store https://cache.nixos.org "$path" >/dev/null 2>&1 ||
+    curl -fsS -o /dev/null "$din_cache/$(basename "$path" | cut -d- -f1).narinfo" 2>/dev/null ||
+    missing+=("${path#/nix/store/}")
 done
 ((${#missing[@]} == 0)) ||
-  die "Not in the binary cache, so no computer could install them: ${missing[*]}"
+  die "Not in the binary caches, so no computer could install them (scripts/din-cache-push.sh $commit puts Din's own there): ${missing[*]}"
 
 echo "Building DinOS $version ($commit)..."
 image=$(nix build --no-link --print-out-paths "$worktree/os#image")

@@ -21,8 +21,12 @@
 // OVMF_VARS.ms.fd). Linux gets virtio, and the screen follows the window's
 // size. macOS gets what a Mac would have: an Intel CPU (whatever the host's
 // is), Apple's SMC (QEMU's applesmc), USB input, and OpenCore to start it
-// from a FAT drive QEMU makes of opencore/. The clipboard is shared over
-// QEMU's vdagent wherever the guest runs spice-vdagent.
+// from a FAT drive QEMU makes of opencore/. Where it can, a Mac is drawn on
+// this computer's GPU: reims-vgpu's virtual GPU (os/reims-vgpu.nix, its own
+// QEMU, DIN_QEMU_REIMS) turns its Metal into Vulkan, through kexts its
+// OpenCore loads; elsewhere it gets QEMU's VGA, which it draws on the CPU.
+// The clipboard is shared over QEMU's vdagent wherever the guest runs
+// spice-vdagent.
 //
 // Snapshots are qcow2's internal ones: savevm/loadvm while running (which
 // keep memory too), qemu-img while off. Types are src/lib/vms.ts. Runs as
@@ -51,6 +55,7 @@ import {
   MACOS_FINISH_COMMAND,
   MACOS_FINISHED,
   MACOS_FINISHING,
+  MACOS_GPU_SCREEN,
   MACOS_SCREEN,
   MACOS_STARTED,
   openCoreReady,
@@ -60,7 +65,7 @@ import {
   prepareRecoveryOpenCore,
   prepareWindows,
   pruneDownloads,
-  syncOpenCoreScreen,
+  syncOpenCore,
   WINDOWS_READY,
   type InstallBoot,
 } from './vm-installers.mts';
@@ -117,6 +122,47 @@ interface Tools {
   swtpm: string | null;
   firmware: Firmware | null;
   kvm: boolean;
+  /**
+   * QEMU with reims-vgpu's GPU (DIN_QEMU_REIMS, os/reims-vgpu.nix), for
+   * macOS, and beside it its option ROM and the guest's kexts.
+   */
+  reims: { qemu: string; rom: string; kexts: string } | null;
+}
+
+/** reims-vgpu's QEMU and its share/reims-vgpu, as os/reims-vgpu.nix lays them out. */
+function findReims(): Tools['reims'] {
+  const qemu = existing(process.env.DIN_QEMU_REIMS);
+  if (!qemu) return null;
+  const share = path.join(path.dirname(path.dirname(fs.realpathSync(qemu))), 'share', 'reims-vgpu');
+  const rom = existing(path.join(share, 'ReimsGraphics.rom'));
+  const kexts = existing(path.join(share, 'kexts', 'set.toml')) ? path.join(share, 'kexts') : null;
+  return rom && kexts ? { qemu, rom, kexts } : null;
+}
+
+/**
+ * Why a Mac can't be drawn on this computer's GPU now, or null: reims-vgpu
+ * needs its QEMU, a GPU with a render node, /dev/udmabuf (through which the
+ * GPU uses the guest's own memory; systemd gives it to the seat's user),
+ * and Linux 6.13 or later, before which KVM can't map the GPU's memory
+ * into the guest and it hangs at boot.
+ */
+function gpuProblem(t: Tools): string | null {
+  if (!t.reims) return 'Din’s GPU for Macs isn’t installed: update the Virtual machines feature in Settings → Optional Features.';
+  const [major, minor] = os.release().split('.').map((n) => Number.parseInt(n, 10));
+  if (major < 6 || (major === 6 && minor < 13)) return `It needs Linux 6.13 or later, and this computer runs ${os.release()}.`;
+  let renderNode = false;
+  try {
+    renderNode = fs.readdirSync('/dev/dri').some((n) => n.startsWith('renderD'));
+  } catch {
+    // No DRM devices at all.
+  }
+  if (!renderNode) return 'This computer has no GPU Din can use for it.';
+  try {
+    fs.accessSync('/dev/udmabuf', fs.constants.R_OK | fs.constants.W_OK);
+  } catch {
+    return '/dev/udmabuf isn’t yours to open: load the udmabuf module, and give the seat’s user access to it.';
+  }
+  return null;
 }
 
 function which(command: string): string | null {
@@ -175,6 +221,7 @@ function getTools(): Tools {
     swtpm: existing(process.env.DIN_SWTPM) ?? which('swtpm'),
     firmware: findFirmware(),
     kvm,
+    reims: findReims(),
   };
   // Found once; missing things are looked for again, in case they're installed meanwhile.
   if (found.qemu && found.qemuImg && found.swtpm && found.firmware && found.kvm) tools = found;
@@ -192,6 +239,7 @@ function status(): VmsStatus {
     optionalFeature: (!t.qemu || !t.qemuImg) && (Boolean(process.env.DIN_FEATURES) || canInstall('vms')),
     secureBoot: !!t.firmware?.varsMs,
     tpm: !!t.swtpm,
+    gpuProblem: gpuProblem(t),
     dir: VMS_DIR,
     hostMemoryMiB: Math.floor(os.totalmem() / 1024 / 1024),
     hostCpus: os.availableParallelism(),
@@ -362,6 +410,8 @@ function cleanConfig(input: Partial<VmConfig>, base: Pick<VmConfig, 'name' | 'os
     network: pick('network') !== false,
     forwards: cleanForwards(pick('forwards')),
     audio: pick('audio') !== false,
+    // On for a Mac unless turned off, machines from before it was a setting among them.
+    gpu: osValue === 'macos' && pick('gpu') !== false,
   };
 }
 
@@ -413,6 +463,7 @@ async function info(id: string): Promise<VmInfo> {
     changesPending: !!running && JSON.stringify(hardware(running.config)) !== JSON.stringify(hardware(config)),
     error: errors.get(id) ?? null,
     install: installInfo(id, config, used),
+    graphics: running?.graphics ?? null,
   };
 }
 
@@ -614,21 +665,34 @@ const macosCpu = (tscHz: number) => `Skylake-Client,-hle,-rtm,-pcid,kvm=on,vendo
 /** What a Mac's SMC answers when macOS asks for its key; macOS won't start without it. */
 const APPLE_SMC_KEY = 'ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc';
 
-function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: string | null): string[] {
+/**
+ * QEMU's command line for a machine. `gpuRom`, reims-vgpu's option ROM, puts
+ * a Mac on this computer's GPU (reims-vgpu's QEMU, which `start` runs then).
+ */
+function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: string | null, gpuRom: string | null): string[] {
   const t = getTools();
   const devices = DEVICES[config.os];
   const windows = config.os === 'windows';
   const mac = config.os === 'macos';
+  const gpu = mac && gpuRom !== null;
+  // On the GPU, the guest's RAM is a shared memfd, whose pages the GPU uses
+  // in place (an IOSurface's, through /dev/udmabuf), allocated whole as it
+  // starts; and at most 1 GiB of it below 4 GiB, where macOS lays out every
+  // 64-bit BAR, the device's 1 GiB region among them.
+  const machine = `q35,accel=kvm${config.firmware === 'uefi' ? ',smm=on' : ''}${gpu ? ',memory-backend=ram,max-ram-below-4g=1G' : ''}`;
   const args = [
     '-name', opt(config.name),
     '-uuid', config.uuid,
-    '-machine', `q35,accel=kvm${config.firmware === 'uefi' ? ',smm=on' : ''}`,
+    '-machine', machine,
     '-cpu', windows ? 'host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_vpindex,hv_runtime,hv_synic,hv_stimer,hv_time,hv_frequencies' : mac ? macosCpu(config.tscHz ?? 0) : 'host',
     '-smp', mac ? `${config.cpus},sockets=1,cores=${config.cpus},threads=1` : String(config.cpus),
     '-m', `${config.memoryMiB}M`,
     '-nodefaults',
     '-no-user-config',
   ];
+  if (gpu) {
+    args.push('-object', `memory-backend-memfd,id=ram,size=${config.memoryMiB}M,share=on,prealloc=on,prealloc-threads=${Math.min(config.cpus, 8)}`);
+  }
   if (mac) {
     args.push(
       '-device', `isa-applesmc,osk=${APPLE_SMC_KEY}`, '-smbios', 'type=2',
@@ -673,7 +737,10 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
     args.push('-netdev', `user,id=net0${forwards}`, '-device', `${devices.nic},netdev=net0`);
   }
   args.push(
-    '-device', devices.vga,
+    '-device',
+    gpu
+      ? `reims-graphics-pci,id=gfx,romfile=${opt(gpuRom)},resolution=${MACOS_GPU_SCREEN.width}x${MACOS_GPU_SCREEN.height}`
+      : devices.vga,
     // Ports enough for every USB device without a hub, behind which macOS sometimes misses the tablet.
     '-device', `qemu-xhci,id=xhci${mac ? ',p2=8,p3=8' : ''}`,
     '-device', 'usb-tablet,bus=xhci.0',
@@ -703,8 +770,10 @@ function qemuArgs(id: string, config: StoredConfig, rundir: string, loadvm: stri
       '-device', 'virtserialport,chardev=vdagent,name=com.redhat.spice.0',
     );
   }
+  // No balloon on the GPU: the GPU keeps views of the guest's pages, which
+  // must stay its RAM.
+  if (!gpu) args.push('-device', 'virtio-balloon-pci');
   args.push(
-    '-device', 'virtio-balloon-pci',
     '-object', 'rng-random,id=rng0,filename=/dev/urandom',
     '-device', 'virtio-rng-pci,rng=rng0',
   );
@@ -868,6 +937,8 @@ interface Machine {
   stopping: boolean;
   /** Its power button was pressed, so its turning off isn't an installer finishing. */
   poweredDown: boolean;
+  /** Drawn on this computer's GPU (reims-vgpu's device) or on QEMU's VGA. */
+  graphics: 'gpu' | 'vga';
   exited: Promise<void>;
   markExited: () => void;
 }
@@ -897,10 +968,10 @@ function alive(pid: number): boolean {
   }
 }
 
-function newMachine(config: StoredConfig, rundir: string): Machine {
+function newMachine(config: StoredConfig, rundir: string, graphics: Machine['graphics'] = 'vga'): Machine {
   let markExited!: () => void;
   const exited = new Promise<void>((r) => (markExited = r));
-  return { config, state: 'starting', qmp: null, pid: null, stopTpm: null, rundir, stopping: false, poweredDown: false, exited, markExited };
+  return { config, state: 'starting', qmp: null, pid: null, stopTpm: null, rundir, stopping: false, poweredDown: false, graphics, exited, markExited };
 }
 
 interface Launched {
@@ -913,9 +984,10 @@ interface Launched {
  * user's systemd (din-vm-<uuid>), so it inherits none of Electron's file
  * descriptors (its listening sockets among them) and lives in a cgroup of
  * its own, outliving a restart of Din's. Where there's no systemd user
- * manager, as a detached child. Its output goes to the end of `log`.
+ * manager, as a detached child. Its output goes to the end of `log`, and
+ * `env` adds to the environment it gets.
  */
-async function launch(unit: string, argv: string[], log: string): Promise<Launched> {
+async function launch(unit: string, argv: string[], log: string, env: Record<string, string> = {}): Promise<Launched> {
   const systemdRun = which('systemd-run');
   const systemctl = which('systemctl');
   if (systemdRun && systemctl) {
@@ -930,6 +1002,7 @@ async function launch(unit: string, argv: string[], log: string): Promise<Launch
       await run(systemdRun, [
         '--user', '--collect', '--quiet', '--unit', unit,
         '-p', `StandardOutput=append:${log}`, '-p', 'StandardError=inherit',
+        ...Object.entries(env).map(([k, v]) => `--setenv=${k}=${v}`),
         '--', ...argv,
       ]);
       return {
@@ -945,7 +1018,7 @@ async function launch(unit: string, argv: string[], log: string): Promise<Launch
     }
   }
   const fd = fs.openSync(log, 'a');
-  const child = spawn(argv[0], argv.slice(1), { detached: true, stdio: ['ignore', fd, fd] });
+  const child = spawn(argv[0], argv.slice(1), { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, ...env } });
   fs.closeSync(fd);
   child.unref();
   let done = false;
@@ -1024,7 +1097,8 @@ async function rediscover(): Promise<void> {
       continue;
     }
     if (!Number.isInteger(pid) || !alive(pid)) continue;
-    const m = newMachine(config, rundir);
+    const cmdline = await fsp.readFile(`/proc/${pid}/cmdline`, 'latin1').catch(() => '');
+    const m = newMachine(config, rundir, cmdline.includes('reims-graphics-pci') ? 'gpu' : 'vga');
     m.pid = pid;
     machines.set(id, m);
     try {
@@ -1091,7 +1165,13 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
   await fsp.mkdir(rundir, { recursive: true, mode: 0o700 });
   errors.delete(id);
 
-  const m = newMachine(config, rundir);
+  // A Mac on this computer's GPU where it can be: not from a snapshot saved
+  // running, which was saved on QEMU's VGA (the GPU's device can't be
+  // saved running), and comes back as it was saved.
+  const gpuError = config.os === 'macos' && config.gpu ? gpuProblem(t) : null;
+  const graphics = config.os === 'macos' && config.gpu && !gpuError && !loadvm ? 'gpu' : 'vga';
+  if (gpuError) console.warn(`vms: ${id} starts on QEMU's VGA: ${gpuError}`);
+  const m = newMachine(config, rundir, graphics);
   machines.set(id, m);
   changed();
   await fsp.writeFile(logPath(id), '');
@@ -1106,7 +1186,7 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       }
       // A machine made by hand gets its boot loader the first time it starts.
       if (!openCoreReady(openCoreDir(id))) await prepareOpenCore(openCoreDir(id), config.uuid, AbortSignal.timeout(5 * 60_000));
-      else await syncOpenCoreScreen(openCoreDir(id));
+      await syncOpenCore(openCoreDir(id), { gpu: graphics === 'gpu', kexts: t.reims?.kexts ?? null });
       if (config.install?.step === 'finish') await prepareRecoveryOpenCore(openCoreDir(id), recoveryOpenCoreDir(id));
     }
     if (config.tpm) {
@@ -1122,7 +1202,11 @@ async function start(id: string, loadvm: string | null = null): Promise<void> {
       m.stopTpm = tpm.stop;
       await waitForSocket(path.join(rundir, 'swtpm.sock'), Date.now() + 5000);
     }
-    qemuProcess = await launch(unit, [qemu, ...qemuArgs(id, config, rundir, loadvm)], logPath(id));
+    qemuProcess =
+      graphics === 'gpu' && t.reims
+        ? // Its display's window is Din's console, over VNC: none of the library's own.
+          await launch(unit, [t.reims.qemu, ...qemuArgs(id, config, rundir, loadvm, t.reims.rom)], logPath(id), { REIMS_VGPU_WINDOW: '0' })
+        : await launch(unit, [qemu, ...qemuArgs(id, config, rundir, loadvm, null)], logPath(id));
     const qmp = await Qmp.connect(path.join(rundir, 'qmp.sock'), Date.now() + START_TIMEOUT_MS, qemuProcess.alive);
     if (!qmp) throw new Error((await logTail(id)) || 'It didn’t start.');
     try {
@@ -1238,6 +1322,8 @@ async function install(which: unknown, options: unknown): Promise<VmInfo> {
     forwards: [],
     // macOS has no driver for QEMU's sound card.
     audio: hw.os !== 'macos',
+    // A Mac draws on this computer's GPU where it can (qemuArgs).
+    gpu: hw.os === 'macos',
   } satisfies NewVm);
   const config = await readConfig(created.id);
   config.install = { installer: which as VmInstallerId, label: info.name, step: 'download', iso, download: null, boot: null, error: null };
@@ -1680,6 +1766,8 @@ async function takeSnapshot(id: string, name: unknown): Promise<void> {
   const m = machines.get(id);
   if (m) {
     if (!m.qmp || m.state === 'starting' || m.state === 'stopping') throw new Error('Wait until it’s running.');
+    // reims-vgpu's device holds the GPU's state, which QEMU can't save.
+    if (m.graphics === 'gpu') throw new Error('A Mac on this computer’s GPU can’t be saved while it runs: turn it off to take a snapshot.');
     await m.qmp.human(`savevm "${tag}"`);
   } else {
     for (const image of await snapshotImages(id)) await qemuImg('snapshot', '-c', tag, image);
@@ -1693,9 +1781,13 @@ async function restoreSnapshot(id: string, name: unknown): Promise<void> {
   if (!snapshot) throw new Error('No such snapshot.');
   const m = machines.get(id);
   if (snapshot.stateBytes > 0) {
-    // Taken running: it comes back running.
-    if (m?.qmp && m.state !== 'starting') await m.qmp.human(`loadvm "${tag}"`);
-    else await start(id, tag);
+    // Taken running: it comes back running, on QEMU's VGA, where it was
+    // saved (start), so one on the GPU starts again for it.
+    if (m?.qmp && m.state !== 'starting' && m.graphics === 'vga') await m.qmp.human(`loadvm "${tag}"`);
+    else {
+      if (m) await forceStop(id);
+      await start(id, tag);
+    }
   } else {
     // Taken off: it's turned off, and its disks go back.
     if (m) await forceStop(id);
