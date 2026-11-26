@@ -121,3 +121,56 @@ A Mac VM can run Xcode, so iOS and Mac apps can be built here:
    use `xcrun simctl` for the Simulator (`simctl io booted screenshot` for
    its screen). Signing for a device needs the user's team and
    certificates.
+
+The Mac is an Intel Mac: macOS 26 is the last for Intel, and Homebrew no
+longer supports it (use MacPorts, in `/opt/local`). Xcode 26.x has a
+Universal download (`Xcode_26.x_Universal.xip`); the plain one is Apple
+silicon only and fails with "Bad CPU type". Put `PATH` in `~/.zshenv` so
+`din vms ssh` commands get it. macOS keeps SSH out of `~/Downloads`,
+`~/Documents` and `~/Desktop`, and out of app bundles it didn't make, until
+someone allows it at the Mac's window.
+
+### The App Store's newest iOS SDK
+
+Xcode 27 runs only on Apple silicon, but from April 2027 App Store Connect
+takes only builds made with the iOS 27 SDK (ITMS-90725). An SDK is only
+data, so the Mac can build with it anyway: `ios-sdk-setup.sh`, beside this
+file, takes the iOS SDK out of the newer Xcode's `.xip` and builds with it
+through the installed Xcode 26 and swift.org's Universal toolchain of the
+Swift that built the SDK. Apple's validation and processing take the
+result as an iOS 27.2 SDK build (tested with Ditto, uploaded to App Store
+Connect from a Mac VM, November 2026).
+
+1. Download the newer Xcode's `.xip` in the Mac's Safari (the user signs
+   in to developer.apple.com there). Its URL is on
+   [xcodereleases.com](https://xcodereleases.com/data.json).
+2. Copy the script in and run it, with the `.xip` (or the Xcode.app it
+   expands to). It takes about 15 minutes, mostly Gatekeeper's check of
+   the new Xcode copy, and asks for sudo once (no password on Din's Macs):
+
+   ```sh
+   din vms ssh macOS -- 'mkdir -p ~/bin && cat > ~/bin/ios-sdk-setup && chmod 755 ~/bin/ios-sdk-setup' \
+     < /etc/opencode/skills/vms/ios-sdk-setup.sh
+   din vms ssh macOS -- 'ios-sdk-setup ~/Downloads/Xcode_27.2.xip'
+   ```
+
+3. Build with the copy of Xcode it makes and its toolchain:
+
+   ```sh
+   export DEVELOPER_DIR=~/Xcodes/Xcode-ios27.2.app/Contents/Developer
+   xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+     -sdk iphoneos27.2 -toolchain pub.din.ios27.2 \
+     -destination generic/platform=iOS -archivePath /tmp/App.xcarchive archive
+   ```
+
+   Export and upload as usual (`xcodebuild -exportArchive`, `xcrun altool
+   --upload-app`). Check that `vtool -show-build` on the app's binary
+   says `sdk 27.2`.
+
+- It builds for devices only: there's no iOS 27 Simulator on Intel, so
+  test in the iOS 26 Simulator or on a phone.
+- An app built with the iOS 27 SDK must use the UIScene life cycle, or it
+  won't launch on iOS 27 (TN3187); for a Capacitor app that's Capacitor
+  8.5 and `npx cap migrate`.
+- Its Info.plist still says `DTXcode` 2660 (Xcode 26.6); App Store Connect
+  accepted that.
