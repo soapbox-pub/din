@@ -322,7 +322,7 @@ export function DinAppFrame({ appId, manifest, windowId, params }: Props) {
     enabled: live.current.config.assistantEnabled !== false,
     directory: live.current.config.assistantDirectory ?? '',
     colorfulReplies: live.current.config.assistantColorfulReplies !== false,
-    speakReplies: live.current.config.assistantSpeakReplies ?? 'dictated',
+    speakReplies: live.current.config.assistantSpeakReplies ?? 'never',
     model: readStoredModel(),
   });
 

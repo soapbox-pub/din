@@ -59,7 +59,7 @@ export function DesktopAssistantHost({ children }: { children: ReactNode }) {
     (): AssistantHost => ({
       directory: config.assistantDirectory,
       colorfulReplies: config.assistantColorfulReplies,
-      speakReplies: config.assistantSpeakReplies ?? 'dictated',
+      speakReplies: config.assistantSpeakReplies ?? 'never',
       setEnabled,
       openApp: (appId, params) => open(appId, params),
       openUrl,

@@ -287,7 +287,7 @@ function VoiceSettings() {
           </div>
         </div>
         <Select
-          value={config.assistantSpeakReplies ?? 'dictated'}
+          value={config.assistantSpeakReplies ?? 'never'}
           onValueChange={(value) => updateConfig((current) => ({ ...current, assistantSpeakReplies: value as AssistantSpeakReplies }))}
         >
           <SelectTrigger id="assistant-speak-replies" size="sm" className="w-40 shrink-0">

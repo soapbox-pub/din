@@ -103,7 +103,7 @@ export function TestApp({ children }: TestAppProps) {
     assistantEnabled: true,
     assistantDirectory: '',
     assistantColorfulReplies: true,
-    assistantSpeakReplies: 'dictated',
+    assistantSpeakReplies: 'never',
     speechVoice: '',
   };
 

@@ -308,7 +308,7 @@ const NO_STATE: WindowState = {
   id: '', focused: false, visible: true, minimized: false, maximized: false, snapped: null, fullscreen: false,
   bounds: NO_RECT, workArea: NO_RECT,
 };
-const NO_ASSISTANT: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, speakReplies: 'dictated', model: null };
+const NO_ASSISTANT: AssistantSettings = { enabled: false, directory: '', colorfulReplies: true, speakReplies: 'never', model: null };
 
 /** Define window.din, talking to the desktop over this transport. Once per document. */
 export function installDin(transport: Transport): void {

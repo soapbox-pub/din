@@ -121,7 +121,7 @@ const defaultConfig: AppConfig = {
   assistantEnabled: true,
   assistantDirectory: '',
   assistantColorfulReplies: true,
-  assistantSpeakReplies: 'dictated',
+  assistantSpeakReplies: 'never',
   speechVoice: '',
 };
 
