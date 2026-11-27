@@ -2876,6 +2876,10 @@ function outgoing(v: unknown): OutgoingMessage {
   };
 }
 
+function crlf(s: string): string {
+  return s.replace(/\r?\n|\r/g, '\r\n');
+}
+
 function composer(a: StoredAccount, m: OutgoingMessage, messageId: string): MailComposer {
   return new (loadedLibs().MailComposer)({
     messageId,
@@ -2884,8 +2888,10 @@ function composer(a: StoredAccount, m: OutgoingMessage, messageId: string): Mail
     cc: m.cc,
     bcc: m.bcc,
     subject: m.subject,
-    text: m.text,
-    html: m.html || undefined,
+    // MailComposer keeps a 7bit body's bare LFs; SMTP fixes them on the wire,
+    // but an IMAP APPEND of the same bytes (Sent, Drafts) is refused for them.
+    text: crlf(m.text),
+    html: m.html ? crlf(m.html) : undefined,
     attachments: m.attachments.map((x) => ({ filename: x.filename, contentType: x.contentType, content: Buffer.from(x.content) })),
     inReplyTo: m.inReplyTo || undefined,
     references: m.references?.length ? m.references : undefined,
