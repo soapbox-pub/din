@@ -38,6 +38,7 @@ import { app, ipcMain, utilityProcess, webContents } from 'electron';
 import type { FiltersEngine, Request } from '@ghostery/adblocker';
 import { parse as parseDomain } from 'tldts-experimental';
 import { stripTrackingParams } from './tracking-params.mts';
+import { referrerForFrame } from './youtube-embed.mts';
 
 const require = createRequire(import.meta.url);
 
@@ -540,6 +541,9 @@ export function setupAdblock(options: {
   ipcMain.handle('adblock-ext:settings', (event) => {
     if (!isExtensionSender(event)) throw new Error('adblock: unauthorized sender');
     return settings;
+  });
+  ipcMain.on('adblock-ext:embedReferrer', (event, frameId: unknown) => {
+    event.returnValue = isExtensionSender(event) ? referrerForFrame(frameId) : null;
   });
   ipcMain.handle('adblock-ext:engine', (event) => {
     if (!isExtensionSender(event)) throw new Error('adblock: unauthorized sender');

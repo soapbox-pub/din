@@ -38,6 +38,15 @@ if (location.origin === EXTENSION_ORIGIN) {
     reportDocument: (url, coop, onionLocation, nsiteLocation) =>
       ipcRenderer.send('adblock-ext:document', url, coop, onionLocation, nsiteLocation),
 
+    /**
+     * The Referer for a YouTube embed framed by an installed nsite or a Din
+     * app (electron/youtube-embed.mts), or null. Synchronous, for a blocking
+     * webRequest listener.
+     * @param {number} frameId the embed's frame (its FrameTreeNode id)
+     * @returns {string | null}
+     */
+    embedReferrer: (frameId) => ipcRenderer.sendSync('adblock-ext:embedReferrer', frameId),
+
     /** @param {(settings: { enabled: boolean, allowlist: string[] }) => void} callback */
     onSettings: (callback) => {
       ipcRenderer.on('adblock-ext:settings', (_event, settings) => callback(settings));

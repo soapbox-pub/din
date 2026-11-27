@@ -38,6 +38,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { app, ipcMain } from 'electron';
 import { addNavigationClientHints } from './client-hints.mts';
+import { addYouTubeEmbedReferrer } from './youtube-embed.mts';
 import { setTorSocksPort } from './network.mts';
 import { isPlainOnionHost, markTlsOnionHost, tlsOnionHosts, watchTlsOnionHosts } from './onion-proxy.mts';
 import { CommandError, runCommand } from './system.mts';
@@ -715,10 +716,12 @@ export function onionRequest(details: Electron.OnBeforeRequestListenerDetails): 
  */
 export function secureOnionSites(s: Electron.Session): void {
   // The session's one onBeforeSendHeaders listener, so it also gives every
-  // page and frame the client hints Electron leaves off (client-hints.mts).
+  // page and frame the client hints Electron leaves off (client-hints.mts),
+  // and Din pages' YouTube embeds their Referer (youtube-embed.mts).
   s.webRequest.onBeforeSendHeaders({ urls: ['https://*/*', 'wss://*.onion/*'] }, (details, callback) => {
     const headers = details.requestHeaders;
     addNavigationClientHints(details, headers);
+    addYouTubeEmbedReferrer(details, headers);
     let host: string;
     try {
       const url = new URL(details.url);

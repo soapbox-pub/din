@@ -173,6 +173,36 @@ if (clientHints) {
   );
 }
 
+// A YouTube embed framed by an installed nsite or a Din app gets that page's
+// origin as its Referer: Chromium sends none from those schemes, and YouTube's
+// player refuses to play without one (error 153). See
+// electron/youtube-embed.mts, which does the same for the in-memory sessions
+// and names the page here: Chromium leaves the initiator off requests from
+// schemes this extension has no permission for, so a missing one is the sign
+// to ask. Referer can only be changed with extraHeaders.
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    if (details.initiator !== undefined) return {};
+    const headers = details.requestHeaders ?? [];
+    if (headers.some((h) => h.name.toLowerCase() === 'referer' && /^https?:/i.test(h.value ?? ''))) return {};
+    const referrer = dinAdblock.embedReferrer(details.frameId);
+    if (!referrer) return {};
+    return {
+      requestHeaders: [...headers.filter((h) => h.name.toLowerCase() !== 'referer'), { name: 'Referer', value: referrer }],
+    };
+  },
+  {
+    urls: [
+      'https://www.youtube.com/embed/*',
+      'https://youtube.com/embed/*',
+      'https://www.youtube-nocookie.com/embed/*',
+      'https://youtube-nocookie.com/embed/*',
+    ],
+    types: ['sub_frame'],
+  },
+  ['blocking', 'requestHeaders', 'extraHeaders'],
+);
+
 // Every top-level response's COOP goes to the pop-up blocker (popups.mts),
 // and its Onion-Location and Nsite-Location to the address bar
 // (site-locations.mts), blocking on or off: a session.webRequest listener

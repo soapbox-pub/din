@@ -20,6 +20,8 @@
 // would switch every extension's chrome.webRequest off; the in-memory
 // sessions' (private windows', Tor's) from here.
 
+import { addYouTubeEmbedReferrer } from './youtube-embed.mts';
+
 /** The GREASE brand Chromium lists for a major version, and its version. */
 function greaseBrand(seed: number): { brand: string; version: string } {
   // components/embedder_support/user_agent_utils.cc, GetGreasedUserAgentBrandVersion.
@@ -79,13 +81,15 @@ export function addNavigationClientHints(
 }
 
 /**
- * Sends the client hints with a session's navigations. The session's one
+ * Sends the client hints with a session's navigations, and a Referer with
+ * its Din pages' YouTube embeds (youtube-embed.mts). The session's one
  * onBeforeSendHeaders listener; a session that needs another (Tor's) calls
- * addNavigationClientHints from its own instead.
+ * addNavigationClientHints and addYouTubeEmbedReferrer from its own instead.
  */
 export function sendNavigationClientHints(s: Electron.Session): void {
   s.webRequest.onBeforeSendHeaders({ urls: ['https://*/*'] }, (details, callback) => {
     addNavigationClientHints(details, details.requestHeaders);
+    addYouTubeEmbedReferrer(details, details.requestHeaders);
     callback({ requestHeaders: details.requestHeaders });
   });
 }
