@@ -12,7 +12,12 @@
 //     big attachments), up to BODY_BYTES in all, the least recently opened
 //     going first;
 //   - for the inbox's messages Subscriptions has looked at, what their
-//     List-Unsubscribe headers say (or that they have none).
+//     List-Unsubscribe headers say (or that they have none);
+//   - the search index: each message's subject, sender, recipients and the
+//     start of its text, in a contentless FTS5 table (the words only, not
+//     the text, so it's small), by a row in `indexed` for its mailbox and
+//     uid. Mail searches it instead of the server once a mailbox is in it
+//     (electron/mail-search.mts).
 //
 // A mailbox whose UIDVALIDITY changes has its uids renumbered, so what's
 // kept of it is thrown away.
@@ -65,7 +70,19 @@ CREATE TABLE IF NOT EXISTS mailbox (path TEXT PRIMARY KEY, validity TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS message (path TEXT NOT NULL, uid INTEGER NOT NULL, summary TEXT NOT NULL, previewed INTEGER NOT NULL, PRIMARY KEY (path, uid));
 CREATE TABLE IF NOT EXISTS body (path TEXT NOT NULL, uid INTEGER NOT NULL, raw BLOB NOT NULL, opened INTEGER NOT NULL, PRIMARY KEY (path, uid));
 CREATE TABLE IF NOT EXISTS list (path TEXT NOT NULL, uid INTEGER NOT NULL, header TEXT, PRIMARY KEY (path, uid));
+CREATE TABLE IF NOT EXISTS indexed (id INTEGER PRIMARY KEY, path TEXT NOT NULL, uid INTEGER NOT NULL, UNIQUE (path, uid));
+CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(subject, sender, recipients, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2');
 `;
+
+/** What a message is found by. */
+export interface IndexEntry {
+  uid: number;
+  subject: string;
+  /** Names and addresses. */
+  sender: string;
+  recipients: string;
+  body: string;
+}
 
 function packUids(uids: number[]): Uint8Array {
   return new Uint8Array(Uint32Array.from(uids).buffer);
@@ -174,7 +191,8 @@ export class MailStore {
 
   forget(path: string): void {
     this.transaction(() => {
-      for (const table of ['mailbox', 'message', 'body', 'list']) this.db.prepare(`DELETE FROM ${table} WHERE path = ?`).run(path);
+      this.db.prepare('DELETE FROM search WHERE rowid IN (SELECT id FROM indexed WHERE path = ?)').run(path);
+      for (const table of ['mailbox', 'message', 'body', 'list', 'indexed']) this.db.prepare(`DELETE FROM ${table} WHERE path = ?`).run(path);
     });
   }
 
@@ -308,6 +326,8 @@ export class MailStore {
         this.db.prepare(`DELETE FROM message WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
         this.db.prepare(`DELETE FROM body WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
         this.db.prepare(`DELETE FROM list WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
+        this.db.prepare(`DELETE FROM search WHERE rowid IN (SELECT id FROM indexed WHERE path = ? AND uid IN (${placeholders(some.length)}))`).run(...args);
+        this.db.prepare(`DELETE FROM indexed WHERE path = ? AND uid IN (${placeholders(some.length)})`).run(...args);
       }
       const box = this.box(path);
       if (box) this.setBox(path, { ...box, uids: box.uids.filter((u) => !gone.has(u)) });
@@ -363,5 +383,50 @@ export class MailStore {
       over -= r.size;
     }
     for (const some of chunks(drop)) this.db.prepare(`DELETE FROM body WHERE rowid IN (${placeholders(some.length)})`).run(...some);
+  }
+
+  /** The uids of a mailbox's messages in the search index. */
+  indexedUids(path: string): Set<number> {
+    return new Set((this.db.prepare('SELECT uid FROM indexed WHERE path = ?').all(path) as { uid: number }[]).map((r) => r.uid));
+  }
+
+  /** Which of these uids are in the search index. */
+  indexedAmong(path: string, uids: number[]): Set<number> {
+    const out = new Set<number>();
+    for (const some of chunks(uids)) {
+      const rows = this.db.prepare(`SELECT uid FROM indexed WHERE path = ? AND uid IN (${placeholders(some.length)})`).all(path, ...some) as { uid: number }[];
+      for (const r of rows) out.add(r.uid);
+    }
+    return out;
+  }
+
+  /** Put these messages in the search index, or their words again. */
+  putIndex(path: string, list: IndexEntry[]): void {
+    if (!list.length) return;
+    const find = this.db.prepare('SELECT id FROM indexed WHERE path = ? AND uid = ?');
+    const add = this.db.prepare('INSERT INTO indexed (path, uid) VALUES (?, ?)');
+    const drop = this.db.prepare('DELETE FROM search WHERE rowid = ?');
+    const put = this.db.prepare('INSERT INTO search (rowid, subject, sender, recipients, body) VALUES (?, ?, ?, ?, ?)');
+    this.transaction(() => {
+      for (const e of list) {
+        const row = find.get(path, e.uid) as { id: number } | undefined;
+        let id: number;
+        if (row) {
+          id = row.id;
+          drop.run(id);
+        } else {
+          id = Number(add.run(path, e.uid).lastInsertRowid);
+        }
+        put.run(id, e.subject, e.sender, e.recipients, e.body);
+      }
+    });
+  }
+
+  /** The uids in a mailbox an FTS5 query (electron/mail-search.mts) finds, newest first. */
+  search(path: string, match: string): number[] {
+    const rows = this.db
+      .prepare('SELECT indexed.uid AS uid FROM search JOIN indexed ON indexed.id = search.rowid WHERE search MATCH ? AND indexed.path = ? ORDER BY indexed.uid DESC')
+      .all(match, path) as { uid: number }[];
+    return rows.map((r) => r.uid);
   }
 }

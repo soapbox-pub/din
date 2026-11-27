@@ -27,6 +27,14 @@
 // server, is pushed as `mail:changed` ({ accountId, path }) to the apps
 // granted `mail`, once the copy has it.
 //
+// Searches are answered from a search index in the stored copy
+// (electron/mail-search.mts), not the server, which is slow at it. A minute
+// after Din starts, and every hour, each account's mailboxes (not Junk or
+// the Trash, nor Gmail's labels) are looked through on a connection of
+// their own for mail not in it yet, newest first, fetching its summary and
+// the start of its text (INDEX_BYTES); new mail goes in as it's synced.
+// A mailbox the index doesn't have yet is searched on the server meanwhile.
+//
 // Sending is nodemailer over the account's SMTP server, with a copy
 // appended to Sent (except where the server keeps one itself: Gmail,
 // Outlook). Messages are parsed with mailparser, which also turns cid:
@@ -90,7 +98,8 @@ import type { ImapFlow, FetchMessageObject, FetchQueryObject, ListResponse, Mess
 import type { createTransport } from 'nodemailer';
 import type MailComposer from 'nodemailer/lib/mail-composer';
 import type { simpleParser, AddressObject, ParsedMail } from 'mailparser';
-import { MailStore, type Flags, type ListHeader } from './mail-store.mts';
+import { MailStore, type Flags, type IndexEntry, type ListHeader } from './mail-store.mts';
+import { ftsQuery } from './mail-search.mts';
 import { avatar, avatarLookups, setAvatarLookups } from './mail-avatars.mts';
 import { headerFields, httpsLink, LIST_HEADERS, listHeader, listKey, mailtoLink, methodOf, parseUnsubscribeMailto, postOneClick, senderVouched, webLink } from './mail-lists.mts';
 import { CATEGORIES, CATEGORY_HEADERS, GMAIL_PRIMARY, SORTER_VERSION, categorize, isAutomatedAddress, isCategory } from './mail-categories.mts';
@@ -1116,7 +1125,22 @@ function decodeQuotedPrintable(raw: string): Buffer {
   return Buffer.from(bytes);
 }
 
-const ENTITIES: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", zwnj: '', zwj: '', shy: '' };
+const ENTITIES: Record<string, string> = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", zwnj: '', zwj: '', shy: '',
+  szlig: '\u00df', aelig: '\u00e6', AElig: '\u00c6', oslash: '\u00f8', Oslash: '\u00d8', eth: '\u00f0', ETH: '\u00d0', thorn: '\u00fe', THORN: '\u00de', oelig: '\u0153', OElig: '\u0152',
+  ndash: '\u2013', mdash: '\u2014', hellip: '\u2026', lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d', laquo: '\u00ab', raquo: '\u00bb',
+  bull: '\u2022', middot: '\u00b7', euro: '\u20ac', pound: '\u00a3', yen: '\u00a5', cent: '\u00a2', copy: '\u00a9', reg: '\u00ae', trade: '\u2122', deg: '\u00b0', times: '\u00d7', iexcl: '\u00a1', iquest: '\u00bf',
+};
+
+/** The accents of HTML's named letters (&eacute;, &Uuml;, &ccedil;…), as combining marks. */
+const ACCENTS: Record<string, string> = { acute: '\u0301', grave: '\u0300', circ: '\u0302', uml: '\u0308', tilde: '\u0303', ring: '\u030a', cedil: '\u0327', caron: '\u030c' };
+
+function entity(name: string): string | undefined {
+  if (Object.hasOwn(ENTITIES, name)) return ENTITIES[name];
+  const m = /^([a-zA-Z])(acute|grave|circ|uml|tilde|ring|cedil|caron)$/.exec(name);
+  if (m) return (m[1] + ACCENTS[m[2]]).normalize('NFC');
+  return Object.hasOwn(ENTITIES, name.toLowerCase()) ? ENTITIES[name.toLowerCase()] : undefined;
+}
 
 function htmlToText(html: string): string {
   return html
@@ -1128,7 +1152,7 @@ function htmlToText(html: string): string {
         const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
         return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
       }
-      return ENTITIES[e.toLowerCase()] ?? m;
+      return entity(e) ?? m;
     });
 }
 
@@ -1158,10 +1182,6 @@ function partText(part: MessageStructureObject, raw: Buffer): string {
     .replace(/\s(On\s.{4,120}?\swrote:|-{2,}\s*Original Message\s*-{2,}|Begin forwarded message:).*$/i, '')
     .replace(/\uFFFD+$/, '')
     .trim();
-}
-
-function previewText(part: MessageStructureObject, raw: Buffer): string {
-  return partText(part, raw).slice(0, PREVIEW_CHARS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1240,8 +1260,12 @@ async function gmailCategories(client: ImapFlow, uids: number[]): Promise<Map<nu
   return out;
 }
 
-/** Fetch and keep the summaries of these messages, with previews for those that have none yet. */
-async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: string, uids: number[]): Promise<boolean> {
+/**
+ * Fetch and keep the summaries of these messages, with previews for those
+ * that have none yet; with `index`, more of their text too, put in the
+ * search index. True when a summary or preview changed.
+ */
+async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: string, uids: number[], index = false): Promise<boolean> {
   if (!uids.length) return false;
   const fetched: FetchMessageObject[] = [];
   for await (const m of client.fetch(uidRanges(uids), { ...SUMMARY_FIELDS }, { uid: true })) {
@@ -1254,16 +1278,24 @@ async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: strin
     const categories = await gmailCategories(client, summaries.map((s) => s.uid));
     for (const s of summaries) s.category = categories.get(s.uid);
   }
-  const changed = store.putSummaries(mailbox, summaries);
+  let changed = store.putSummaries(mailbox, summaries);
+  const byUid = new Map(summaries.map((s) => [s.uid, s]));
+  const entries: IndexEntry[] = [];
 
-  // Previews, a few KB of each message's text, fetched together for messages whose text is the same part.
+  // Previews, a few KB of each message's text (more to index it), fetched together for messages whose text is the same part.
   const kept = store.summaries(mailbox, fetched.map((m) => m.uid));
   const want = new Map<string, { part: MessageStructureObject; uids: number[] }>();
   for (const m of fetched) {
-    if (kept.get(m.uid)?.previewed) continue;
+    const previewed = kept.get(m.uid)?.previewed;
+    if (previewed && !index) continue;
     const part = previewPart(m.bodyStructure);
     if (!part) {
-      store.setPreview(mailbox, m.uid, null);
+      if (!previewed) {
+        store.setPreview(mailbox, m.uid, null);
+        changed = true;
+      }
+      const s = byUid.get(m.uid);
+      if (index && s) entries.push(indexEntry(s, ''));
       continue;
     }
     const id = part.part ?? '1';
@@ -1274,15 +1306,22 @@ async function fetchSummaries(client: ImapFlow, store: MailStore, mailbox: strin
   }
   for (const { part, uids: some } of want.values()) {
     try {
-      for await (const m of client.fetch(uidRanges(some), { uid: true, bodyParts: [{ key: part.part ?? '1', maxLength: PREVIEW_BYTES }] }, { uid: true })) {
+      for await (const m of client.fetch(uidRanges(some), { uid: true, bodyParts: [{ key: part.part ?? '1', maxLength: index ? INDEX_BYTES : PREVIEW_BYTES }] }, { uid: true })) {
         const raw = m.bodyParts ? [...m.bodyParts.values()][0] : undefined;
-        store.setPreview(mailbox, m.uid, raw ? previewText(part, raw) : null);
+        const words = raw ? partText(part, raw) : '';
+        if (!kept.get(m.uid)?.previewed) {
+          store.setPreview(mailbox, m.uid, raw ? words.slice(0, PREVIEW_CHARS) : null);
+          changed = true;
+        }
+        const s = byUid.get(m.uid);
+        if (index && s) entries.push(indexEntry(s, words.slice(0, INDEX_CHARS)));
       }
     } catch {
-      // Previews are a nicety; the list still shows.
+      // Previews are a nicety; the list still shows. What isn't indexed is indexed next time.
     }
   }
-  return changed || want.size > 0;
+  store.putIndex(mailbox, entries);
+  return changed;
 }
 
 /** A uid set in IMAP's shorthand: 1:5,7,9:12. */
@@ -1369,7 +1408,12 @@ async function sync(a: StoredAccount, mailbox: string): Promise<void> {
     const newest = uids.slice(0, isInbox(mailbox) ? RESORTED : PAGE);
     const have = store.summaries(mailbox, newest);
     const again = newest.filter((u, i) => (have.has(u) || i < PAGE) && stale(have.get(u)?.summary, mailbox));
-    if (await fetchSummaries(client, store, mailbox, again)) dirty = true;
+    // New mail (the newest page, as much of it as isn't yet) goes in the search index as it comes.
+    const top = uids.slice(0, PAGE);
+    const inIndex = store.indexedAmong(mailbox, top);
+    const toIndex = new Set(top.filter((u) => !inIndex.has(u)));
+    if (await fetchSummaries(client, store, mailbox, again.filter((u) => !toIndex.has(u)))) dirty = true;
+    if (await fetchSummaries(client, store, mailbox, [...toIndex], true)) dirty = true;
   }, false);
   if (isInbox(mailbox)) void lookForCorrespondents(a).catch(() => {});
   if (newestNow !== null) inboxNewest.set(a.id, newestNow);
@@ -1484,8 +1528,9 @@ function summary(m: FetchMessageObject, gmail: boolean): MessageSummary {
 /**
  * A page of a mailbox's messages. Straight from the stored copy when it
  * has the whole page (syncing behind it when it's old); otherwise from the
- * server, keeping what comes back. Searches and filters ask the server,
- * and settle for the stored copy when it can't be reached.
+ * server, keeping what comes back. Searches are answered from the search
+ * index once it has the mailbox, and ask the server until then; filters
+ * ask the server. Both settle for the stored copy when it can't be reached.
  */
 async function messages(a: StoredAccount, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string, category: MailCategory | null): Promise<MessagePage> {
   const store = storeOf(a);
@@ -1501,6 +1546,10 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
       throw error;
     }
   }
+  if (query) {
+    const found = await searchPage(a, store, mailbox, before, limit, query, filter, label);
+    if (found) return found;
+  }
   if (!query && !filter && !label) {
     const local = storedPage(store, mailbox, before, limit);
     if (local) {
@@ -1511,7 +1560,8 @@ async function messages(a: StoredAccount, mailbox: string, before: number | unde
   try {
     return await serverPage(a, store, mailbox, before, limit, query, filter, label);
   } catch (error) {
-    const local = query ? null : storedPage(store, mailbox, before, limit, filter, true, label);
+    // Offline, a search settles for what's in the index.
+    const local = query ? await searchPage(a, store, mailbox, before, limit, query, filter, label, true) : storedPage(store, mailbox, before, limit, filter, true, label);
     if (local) return local;
     throw error;
   }
@@ -1615,6 +1665,208 @@ async function tabPage(a: StoredAccount, store: MailStore, mailbox: string, befo
   }
   const last = older[Math.min(looked, older.length) - 1];
   return { messages: byDate(out), total: out.length, more: looked < older.length, next: last };
+}
+
+// ---------------------------------------------------------------------------
+// The search index
+// ---------------------------------------------------------------------------
+
+/** How much of a message's text is fetched for the search index, and how much of that is kept. */
+const INDEX_BYTES = 32 * 1024;
+const INDEX_CHARS = 16_000;
+/** Messages indexed in one go. */
+const INDEX_CHUNK = 100;
+/** A search in a mailbox the index is missing at most this many of indexes them there and then, and answers from it. */
+const INDEX_NOW_MAX = 200;
+/** How often an account's mailboxes are looked through for mail not in the index. */
+const INDEX_EVERY_MS = 60 * 60_000;
+/** After one that couldn't finish (offline), how soon it tries again. */
+const INDEX_RETRY_MS = 10 * 60_000;
+
+function indexEntry(s: MessageSummary, body: string): IndexEntry {
+  const people = (list: MailAddress[]) => list.map((x) => `${x.name} ${x.address}`).join(' ');
+  return { uid: s.uid, subject: s.subject, sender: people(s.from), recipients: people([...s.to, ...s.cc]), body };
+}
+
+interface Indexer {
+  /** A pass is waiting its turn. */
+  queued: boolean;
+  /** Mailboxes searched before they were indexed, to index first, whatever they are. */
+  wanted: Set<string>;
+  /** When every mailbox was last looked through. */
+  last: number;
+}
+
+const indexers = new Map<string, Indexer>();
+/** The connections indexing has open, closed when Din quits. */
+const indexClients = new Set<ImapFlow>();
+/** One account indexes at a time. */
+let indexing: Promise<void> = Promise.resolve();
+/** Mailboxes being indexed now for a search, by account and path. */
+const indexingNow = new Map<string, Promise<void>>();
+
+/** Index an account's mail not indexed yet, soon: `mailbox` first, and every mailbox when they're due. */
+function scheduleIndex(a: StoredAccount, mailbox?: string): void {
+  let ix = indexers.get(a.id);
+  if (!ix) indexers.set(a.id, (ix = { queued: false, wanted: new Set(), last: 0 }));
+  if (mailbox) ix.wanted.add(mailbox);
+  if (ix.queued) return;
+  const state = ix;
+  state.queued = true;
+  indexing = indexing
+    .then(() => {
+      state.queued = false;
+      return indexAccount(a, state);
+    })
+    .catch((error: unknown) => console.error('mail: index:', error instanceof Error ? error.message : error));
+}
+
+function indexAll(): void {
+  for (const a of accounts) scheduleIndex(a);
+}
+
+/**
+ * The mailboxes a pass indexes, in turn: the inbox, Sent, Archive (Gmail's
+ * All Mail), Drafts, then the rest. Not Junk or the Trash, and on Gmail,
+ * where a label is a mailbox holding the same mail as All Mail, not the
+ * labels either; any of those is indexed once it's searched.
+ */
+function indexedMailboxes(list: MailboxInfo[], gmail: boolean): string[] {
+  const rank: Partial<Record<SpecialMailbox, number>> = { inbox: 0, sent: 1, archive: 2, all: 2, drafts: 3 };
+  return list
+    .filter((m) => m.selectable && m.special !== 'junk' && m.special !== 'trash' && (!gmail || (m.special && m.special in rank)))
+    .sort((x, y) => (rank[x.special!] ?? 9) - (rank[y.special!] ?? 9) || x.path.localeCompare(y.path))
+    .map((m) => m.path);
+}
+
+/**
+ * Index what of an account's mail isn't yet, newest first, on a connection
+ * of its own, so the app's reads don't wait behind it. Read-only: it only
+ * fetches, with BODY.PEEK.
+ */
+async function indexAccount(a: StoredAccount, ix: Indexer): Promise<void> {
+  if (!accounts.includes(a)) return;
+  const store = storeOf(a);
+  const due = Date.now() - ix.last > INDEX_EVERY_MS;
+  const listed = storedMailboxes(a);
+  const all = due && listed ? indexedMailboxes(listed, store.getMeta('labelKind') === 'gmail') : [];
+  const order = [...new Set([...ix.wanted, ...all])];
+  ix.wanted.clear();
+  // Not listed yet: once Mail lists them.
+  if (!order.length) return;
+  if (due && listed) ix.last = Date.now();
+  let password: string;
+  try {
+    password = unseal(a.password);
+  } catch {
+    return;
+  }
+  await mailLibs();
+  const client = imapClient(a.imap, password);
+  client.on('error', () => {});
+  indexClients.add(client);
+  const current = () => accounts.includes(a) && stores.get(a.id) === store;
+  try {
+    await client.connect();
+    for (const mailbox of order) {
+      if (!current()) return;
+      await indexMailbox(a, store, client, mailbox, current);
+    }
+  } catch (error) {
+    // Offline, or the server's busy: again a little later.
+    console.error('mail: index:', error instanceof Error ? error.message : error);
+    if (due) ix.last = Date.now() - INDEX_EVERY_MS + INDEX_RETRY_MS;
+  } finally {
+    indexClients.delete(client);
+    void client.logout().catch(() => client.close());
+  }
+}
+
+async function indexMailbox(a: StoredAccount, store: MailStore, client: ImapFlow, mailbox: string, current: () => boolean): Promise<void> {
+  let lock;
+  try {
+    lock = await client.getMailboxLock(mailbox, { readOnly: true });
+  } catch {
+    // Gone since it was listed.
+    return;
+  }
+  try {
+    const box = client.mailbox;
+    if (!box || !box.exists) return;
+    const validity = String(box.uidValidity);
+    checkValidity(a, store, mailbox, validity);
+    const uids = ((await client.search({ all: true }, { uid: true })) || []).sort((x, y) => y - x);
+    // A mailbox Mail hasn't opened yet: its uids, for the next read to sync from.
+    if (!store.box(mailbox)) store.setBox(mailbox, { validity, modseq: null, uids, synced: 0 });
+    const have = store.indexedUids(mailbox);
+    const missing = uids.filter((u) => !have.has(u));
+    for (let i = 0; i < missing.length; i += INDEX_CHUNK) {
+      if (!current()) return;
+      await fetchSummaries(client, store, mailbox, missing.slice(i, i + INDEX_CHUNK), true);
+      // Out of the way of the rest of Din's network.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  } finally {
+    lock.release();
+  }
+}
+
+/**
+ * A page of what a search finds, from the search index: when it has the
+ * whole mailbox, or misses only a little of it (new mail), which it
+ * indexes first. Else null, for the server to answer, while the mailbox is
+ * indexed behind it; `partial` (the server can't be reached) settles for
+ * what's indexed.
+ */
+async function searchPage(a: StoredAccount, store: MailStore, mailbox: string, before: number | undefined, limit: number, query: string, filter: MessageFilter, label: string, partial = false): Promise<MessagePage | null> {
+  const match = ftsQuery(query, store.getMeta('labelKind') === 'gmail');
+  if (!match) return null;
+  if (!partial) {
+    const box = store.box(mailbox);
+    if (!box) {
+      scheduleIndex(a, mailbox);
+      return null;
+    }
+    const have = store.indexedUids(mailbox);
+    const missing = box.uids.filter((u) => !have.has(u));
+    if (missing.length > INDEX_NOW_MAX) {
+      scheduleIndex(a, mailbox);
+      return null;
+    }
+    if (missing.length) {
+      const key = `${a.id}\0${mailbox}`;
+      let now = indexingNow.get(key);
+      if (!now) {
+        now = inMailbox(a, mailbox, async (client) => {
+          if (client.mailbox && checkValidity(a, store, mailbox, String(client.mailbox.uidValidity))) return;
+          await fetchSummaries(client, store, mailbox, missing, true);
+        }).finally(() => indexingNow.delete(key));
+        indexingNow.set(key, now);
+      }
+      try {
+        await now;
+      } catch {
+        // Offline: what's indexed.
+      }
+      if (!store.box(mailbox)) return null;
+    }
+    if (Date.now() - box.synced > SYNC_AFTER_MS) scheduleSync(a, mailbox, 0);
+  }
+  const found = store.search(mailbox, match);
+  let older = before ? found.filter((u) => u < before) : found;
+  let total = found.length;
+  if (filter || label) {
+    const kept = store.summaries(mailbox, found);
+    const keep = (u: number) => {
+      const s = kept.get(u)?.summary;
+      return !!s && (filter === 'unread' ? !s.seen : filter === 'flagged' ? s.flagged : true) && (!label || !!s.labels?.includes(label));
+    };
+    total = found.filter(keep).length;
+    older = older.filter(keep);
+  }
+  const page = older.slice(0, limit);
+  const kept = store.summaries(mailbox, page);
+  return { messages: byDate(page.flatMap((u) => kept.get(u)?.summary ?? [])), total, more: older.length > page.length };
 }
 
 async function wholeMessage(client: ImapFlow, uid: number): Promise<Buffer> {
@@ -3159,11 +3411,14 @@ export function registerMailHandlers(options: Deps): void {
     return unsubscribeMessage(account(id), mailboxArg(mailbox), uid as number);
   });
 
-  // A moment after Din starts, out of its way.
+  // A moment after Din starts, out of its way; the search index a while after that, and now and then.
   setTimeout(watchAll, 5000).unref();
+  setTimeout(indexAll, 60_000).unref();
+  setInterval(indexAll, INDEX_RETRY_MS).unref();
   powerMonitor.on('resume', () => setTimeout(rewatchAll, 3000).unref());
 
   app.on('will-quit', () => {
     for (const id of [...sessions.keys()]) closeSession(id);
+    for (const client of indexClients) client.close();
   });
 }
